@@ -1,0 +1,108 @@
+### 设置全局变量
+@baseUrl = http://127.0.0.1:8000/api
+#################################################################
+# 阶段一: 安装与配置 (Setup)
+#################################################################
+### [Test 1] 创建一个新的 AI 服务商
+# 捕获其 ID 用于后续步骤
+POST {{baseUrl}}/providers/
+Content-Type: application/json
+
+{
+  "name": "Test Provider for Cleanup",
+  "apiHost": "https://api.siliconflow.cn/v1",
+  "apiKey": "sk-znwdeklerxjqnjfqqzjsahaknrrjbzywuzzxhazibmfqgkii"
+}
+
+> {%
+    client.global.set("providerId", response.body.id);
+    client.log("Captured providerId: " + client.global.get("providerId"));
+%}
+
+### [Test 2] 为服务商添加一个模型
+# 捕获其 ID 用于后续步骤
+POST {{baseUrl}}/models/
+Content-Type: application/json
+
+{
+  "modelId": "deepseek-ai/DeepSeek-V3",
+  "name": "deepseek-ai/DeepSeek-V3",
+  "providerId": "{{providerId}}"
+}
+
+> {%
+    client.global.set("model_uid", response.body.id);
+    client.log("Captured model_uid: " + client.global.get("model_uid"));
+%}
+
+### [Test 3] 创建一个新的聊天会话
+# 捕获其 ID 用于后续步骤
+POST {{baseUrl}}/chats/
+Content-Type: application/json
+
+{
+  "name": "Comprehensive Test Chat",
+  "aiModelId": "{{model_uid}}"
+}
+
+> {%
+    client.global.set("chatId", response.body.id);
+    client.log("Captured chatId: " + client.global.get("chatId"));
+%}
+#################################################################
+# 阶段二: 核心功能与接口覆盖测试 (Core Tests)
+#################################################################
+
+### [Test 4] 获取所有服务商列表 (覆盖 GET /providers/)
+# 期望: 列表中应包含 "Test Provider for Cleanup"
+GET {{baseUrl}}/providers/
+
+### [Test 5] 获取所有会话列表 (覆盖 GET /chats/)
+# 期望: 列表中应包含 "Comprehensive Test Chat"
+GET {{baseUrl}}/chats/
+
+
+### [Test 7.0] 新增：核心非流式生成功能测试
+# 期望：返回一个完整的 JSON 对象，包含 AI 的回复内容和消息 ID
+POST {{baseUrl}}/chats/{{chatId}}/generate-non-stream
+Content-Type: application/json
+
+{
+  "content": "hello啊。"
+}
+### [Test 7.5] 新增：核心非流式生成功能测试
+# 期望：返回一个完整的 JSON 对象，包含 AI 的回复内容和消息 ID
+POST {{baseUrl}}/chats/{{chatId}}/generate
+Content-Type: application/json
+
+{
+  "content": "曼波 曼波 马自立曼波"
+}
+
+
+### PAUSE
+
+
+### [Test 8] 获取会话的完整历史记录 (覆盖 GET /chats/{chat_id})
+GET {{baseUrl}}/chats/{{chatId}}
+
+### [Test 9] 删除聊天会话
+DELETE {{baseUrl}}/chats/{{chatId}}
+
+### [Test 10] 验证聊天会话已被删除
+# 期望: 返回 404 Not Found
+GET {{baseUrl}}/chats/{{chatId}}
+
+### [Test 11] 删除AI服务商 (这将级联删除其下的AI模型)
+DELETE {{baseUrl}}/providers/{{providerId}}
+
+### [Test 12] 验证AI服务商已被删除
+# 期望: 返回 404 Not Found
+GET {{baseUrl}}/providers/
+# 在响应的 JSON 数组中，不应再找到 id 为 "test-provider-cleanup" 的对象
+
+
+### [Test 13] (可选) 验证AI模型也已被级联删除
+# 这是一个好习惯，确保级联删除按预期工作
+# 期望: 返回 404 Not Found
+DELETE {{baseUrl}}/models/{{model_uid}}
