@@ -63,8 +63,6 @@ export const useChatStore = defineStore('chat', {
       try {
         const newChat = await createChat(chatData);
         this.chatList.unshift(newChat);
-        // 创建后不自动选择，而是让 ChatList 组件处理跳转和选择
-        // await this.selectChat(newChat.id);
         return newChat;
       } catch (error) {
         console.error('Failed to create new chat:', error);
@@ -85,14 +83,10 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    /**
-     * 发送消息并处理流式响应
-     */
     async sendMessage(content: string) {
       if (!this.currentChatId) return;
       const chatId = this.currentChatId;
 
-      // 1. 立即在UI上显示用户消息
       const userMessage: Message = {
         id: `temp-user-${Date.now()}`,
         chatId: chatId,
@@ -102,17 +96,18 @@ export const useChatStore = defineStore('chat', {
       };
       this.currentChatMessages.push(userMessage);
 
-      // 2. 创建一个空的助手消息占位符，用于接收流式内容
+      // 【关键修复点 1】: 创建一个唯一的临时ID，用于后续在数组中查找
+      const assistantMessageId = `temp-assistant-${Date.now()}`;
       const assistantMessage: Message = {
-        id: `temp-assistant-${Date.now()}`,
+        id: assistantMessageId,
         chatId: chatId,
         role: 'assistant',
-        content: '...', // 初始显示加载状态
+        content: '...',
         createdAt: new Date().toISOString(),
       };
       this.currentChatMessages.push(assistantMessage);
-      let isFirstChunk = true;
 
+      let isFirstChunk = true;
       this.isGenerating = true;
 
       const apiUrl = `/api/chats/${chatId}/generate`;
@@ -121,31 +116,45 @@ export const useChatStore = defineStore('chat', {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content }),
         onmessage: (event) => {
-          if (isFirstChunk) {
-            assistantMessage.content = ''; // 收到第一个数据块时，清空 '...'
-            isFirstChunk = false;
-          }
-          // 【重要更正】: 后端发送的是JSON编码的字符串，需要解析
-          assistantMessage.content += JSON.parse(event.data);
-        },
-        onclose: async () => {
-          // 流结束时，重新从后端获取最新的消息列表，确保数据最终一致
-          this.isGenerating = false;
-          try {
-            const chatWithMessages = await getChatWithMessages(chatId);
-            // 仅当用户仍在当前会话时才更新消息列表
-            if (this.currentChatId === chatId) {
-              this.currentChatMessages = chatWithMessages.messages;
+          // 【关键修复点 2】: 每次收到消息时，都从 store 的 state 中重新查找消息对象
+          const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessageId);
+
+          if (messageToUpdate) {
+            if (isFirstChunk) {
+              messageToUpdate.content = ''; // 清空 '...'
+              isFirstChunk = false;
             }
-          } catch (error) {
-            console.error(`Failed to refresh messages for chat ${chatId}:`, error);
+            try {
+              const chunk = JSON.parse(event.data);
+              if (typeof chunk === 'string') {
+                // 【关键修复点 3】: 直接修改从 state 中找到的那个响应式对象的属性
+                messageToUpdate.content += chunk;
+              }
+            } catch (e) {
+              console.error("Failed to parse SSE data chunk:", event.data, e);
+            }
           }
+        },
+        onclose: () => {
+          this.isGenerating = false;
+          console.log('SSE Stream closed.');
+          // 【可选但推荐】流结束后，发起一次“静默”刷新，以获取后端生成的消息ID和确切时间
+          // 这不会打断用户体验，但能保证数据最终一致性
+          getChatWithMessages(chatId).then(chat => {
+            if (this.currentChatId === chatId) {
+              this.currentChatMessages = chat.messages;
+            }
+          }).catch(error => {
+            console.error(`Failed to silently refresh messages for chat ${chatId}:`, error);
+          });
         },
         onerror: (err) => {
-          console.error('EventSource failed:', err);
-          assistantMessage.content += '\n\n**抱歉，请求出错，请检查网络或联系管理员。**';
           this.isGenerating = false;
-          // 必须 re-throw 错误，否则 onclose 仍然会被调用
+          const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessageId);
+          if (messageToUpdate) {
+            messageToUpdate.content += '\n\n**抱歉，请求出错，请检查网络或联系管理员。**';
+          }
+          console.error('EventSource failed:', err);
           throw err;
         },
       });
