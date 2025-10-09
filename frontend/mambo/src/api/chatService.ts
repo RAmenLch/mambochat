@@ -1,5 +1,5 @@
 import apiClient from './index';
-import type { Chat, ChatCreate, ChatWithMessages } from './types';
+import type { Chat, ChatCreate, ChatWithMessages, ChatUpdate } from './types';
 
 /**
  * 获取会话列表
@@ -19,8 +19,19 @@ export const createChat = (chatData: ChatCreate): Promise<Chat> => {
  * 获取单个会话及其所有消息
  */
 export const getChatWithMessages = (chatId: string): Promise<ChatWithMessages> => {
-  return apiClient.get(`/chats/${chatId}`).then(res => res.data);
+  // --- 核心修复：将 API 路径从 /chats/{id} 修改为 /chats/{id}/messages ---
+  return apiClient.get(`/chats/${chatId}/messages`).then(res => res.data);
 };
+
+/**
+ * 更新会话设置
+ * @param chatId 要更新的会话ID
+ * @param settings 包含更新字段的对象
+ */
+export const updateChatSettings = (chatId: string, settings: ChatUpdate): Promise<Chat> => {
+  return apiClient.put(`/chats/${chatId}`, settings).then(res => res.data);
+};
+
 
 /**
  * 删除会话
