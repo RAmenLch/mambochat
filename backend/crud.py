@@ -3,6 +3,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload, joinedload
+from sqlalchemy import func
 from typing import List, Optional
 import json
 
@@ -21,7 +22,7 @@ async def get_providers(db: AsyncSession, skip: int = 0, limit: int = 100) -> Li
     """获取AI服务提供商列表（包含其下的模型）"""
     result = await db.execute(
         select(models.AIProvider)
-        .options(selectinload(models.AIProvider.models))  # 预加载关联的 models
+        .options(selectinload(models.AIProvider.models))
         .offset(skip)
         .limit(limit)
     )
@@ -30,7 +31,6 @@ async def get_providers(db: AsyncSession, skip: int = 0, limit: int = 100) -> Li
 
 async def create_provider(db: AsyncSession, provider: schemas.AIProviderCreate) -> models.AIProvider:
     """创建一个新的AI服务提供商"""
-    # 如果用户没有提供id，则自动生成
     provider_id = provider.id if provider.id else models.generate_uuid()
     db_provider = models.AIProvider(
         id=provider_id,
@@ -101,10 +101,10 @@ async def get_chat(db: AsyncSession, chat_id: str) -> Optional[models.Chat]:
 
 
 async def get_chats(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[models.Chat]:
-    """获取聊天会话列表（按创建时间降序）"""
+    """获取会话和文件夹列表（按排序权重升序）"""
     result = await db.execute(
         select(models.Chat)
-        .order_by(models.Chat.createdAt.desc())
+        .order_by(models.Chat.sortOrder.asc())
         .offset(skip)
         .limit(limit)
     )
@@ -112,7 +112,7 @@ async def get_chats(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[m
 
 
 async def create_chat(db: AsyncSession, chat: schemas.ChatCreate) -> models.Chat:
-    """创建一个新的聊天会话"""
+    """创建一个新的聊天会话或文件夹"""
     chat_data = chat.model_dump()
     if chat_data.get("modelParameters") is not None:
         chat_data["modelParameters"] = json.dumps(chat_data["modelParameters"])
@@ -125,7 +125,7 @@ async def create_chat(db: AsyncSession, chat: schemas.ChatCreate) -> models.Chat
 
 
 async def update_chat(db: AsyncSession, chat_id: str, chat_update: schemas.ChatUpdate) -> Optional[models.Chat]:
-    """更新会话的配置信息"""
+    """更新会话或文件夹的配置信息"""
     db_chat = await get_chat(db, chat_id=chat_id)
     if not db_chat:
         return None
@@ -144,12 +144,41 @@ async def update_chat(db: AsyncSession, chat_id: str, chat_update: schemas.ChatU
 
 
 async def delete_chat(db: AsyncSession, chat_id: str) -> Optional[models.Chat]:
-    """删除一个聊天会话"""
+    """删除一个聊天会话或文件夹"""
     db_chat = await get_chat(db, chat_id=chat_id)
     if db_chat:
         await db.delete(db_chat)
         await db.commit()
     return db_chat
+
+
+async def touch_chat(db: AsyncSession, chat_id: str) -> Optional[models.Chat]:
+    """更新会话的 lastOpenedAt 时间戳"""
+    db_chat = await get_chat(db, chat_id=chat_id)
+    if db_chat:
+        db_chat.lastOpenedAt = func.now()
+        await db.commit()
+        await db.refresh(db_chat)
+    return db_chat
+
+
+async def batch_update_chats_order(db: AsyncSession, updates: List[schemas.ChatReorderItem]) -> bool:
+    """批量更新会话和文件夹的顺序与层级"""
+    if not updates:
+        return True
+
+    chat_ids = [item.id for item in updates]
+    result = await db.execute(select(models.Chat).filter(models.Chat.id.in_(chat_ids)))
+    chats_map = {chat.id: chat for chat in result.scalars().all()}
+
+    for update_item in updates:
+        chat_to_update = chats_map.get(update_item.id)
+        if chat_to_update:
+            chat_to_update.parentId = update_item.parentId
+            chat_to_update.sortOrder = update_item.sortOrder
+
+    await db.commit()
+    return True
 
 
 # --- Message CRUD ---
@@ -213,4 +242,3 @@ async def delete_last_assistant_message(db: AsyncSession, chat_id: str) -> Optio
         await db.commit()
 
     return last_message
-

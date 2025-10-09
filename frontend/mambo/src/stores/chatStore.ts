@@ -7,18 +7,17 @@ import {
   getChatWithMessages,
   deleteChat,
   updateChatSettings,
+  reorderChats, // 新增导入
 } from '@/api/chatService';
-import type { Chat, Message, ChatCreate, ChatUpdate } from '@/api/types';
+import type { Chat, Message, ChatCreate, ChatUpdate, ChatReorderItem } from '@/api/types';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import apiClient from '@/api';
 
-// 临时模拟 API 函数，你应该在 chatService.ts 中正式实现它们
+// 临时模拟 API 函数
 const generateResponseNonStream = (chatId: string, content: string): Promise<Message> => {
     return apiClient.post(`/chats/${chatId}/generate-non-stream`, { content }).then(res => res.data);
 };
-// 注意: 你需要在后端为非流式重新生成创建一个新接口
 const regenerateResponseNonStream = (chatId: string, content: string): Promise<Message> => {
-    // 假设后端创建了一个名为 /regenerate-non-stream 的新接口
     return apiClient.post(`/chats/${chatId}/regenerate-non-stream`, { content }).then(res => res.data);
 };
 
@@ -31,6 +30,8 @@ interface ChatState {
   isChatHistoryLoading: boolean;
   isGenerating: boolean;
   currentRequestController: AbortController | null;
+  // --- 新增状态，用于缓存各会话的输入草稿 ---
+  userInputCache: Record<string, string>;
 }
 
 export const useChatStore = defineStore('chat', {
@@ -42,11 +43,15 @@ export const useChatStore = defineStore('chat', {
     isChatHistoryLoading: false,
     isGenerating: false,
     currentRequestController: null,
+    userInputCache: {},
   }),
 
   getters: {
     currentChat: (state): Chat | null => {
-      return state.chatList.find(chat => chat.id === state.currentChatId) || null;
+      if (!state.currentChatId) return null;
+      const chat = state.chatList.find(chat => chat.id === state.currentChatId);
+      // 确保返回的是会话而不是文件夹
+      return chat?.itemType === 'chat' ? chat : null;
     }
   },
 
@@ -54,10 +59,8 @@ export const useChatStore = defineStore('chat', {
     async fetchChatList() {
       this.isChatListLoading = true;
       try {
-        const chats = await getChats();
-        this.chatList = chats.sort((a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        );
+        // 后端已按 sortOrder 排序，前端直接使用
+        this.chatList = await getChats();
       } catch (error) {
         console.error('Failed to fetch chat list:', error);
       } finally {
@@ -70,15 +73,23 @@ export const useChatStore = defineStore('chat', {
       if (this.isGenerating) {
         this.stopGeneration();
       }
+
+      const selectedItem = this.chatList.find(item => item.id === chatId);
+      // 如果选择的是文件夹，则不加载消息
+      if (!selectedItem || selectedItem.itemType === 'folder') {
+        this.currentChatId = chatId;
+        this.currentChatMessages = [];
+        return;
+      }
+
       this.currentChatId = chatId;
       this.isChatHistoryLoading = true;
       this.currentChatMessages = [];
+
       try {
         const chatWithMessages = await getChatWithMessages(chatId);
-        // 更新 chatList 中的会话信息，因为它可能包含更新后的模型参数等
         const chatIndex = this.chatList.findIndex(c => c.id === chatId);
         if (chatIndex !== -1) {
-          // 只更新 chat 级别的属性，不替换 messages 数组的引用
           const { messages, ...chatDetails } = chatWithMessages;
           this.chatList[chatIndex] = { ...this.chatList[chatIndex], ...chatDetails };
         }
@@ -91,13 +102,13 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    async createNewChat(chatData: ChatCreate): Promise<Chat | null> {
+    async createNewItem(itemData: ChatCreate): Promise<Chat | null> {
       try {
-        const newChat = await createChat(chatData);
-        this.chatList.unshift(newChat);
-        return newChat;
+        const newItem = await createChat(itemData);
+        this.chatList.push(newItem); // 直接添加到列表末尾
+        return newItem;
       } catch (error) {
-        console.error('Failed to create new chat:', error);
+        console.error('Failed to create new item:', error);
         return null;
       }
     },
@@ -115,43 +126,78 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    async deleteSelectedChat() {
-      if (!this.currentChatId) return;
-      const chatIdToDelete = this.currentChatId;
+    async deleteItem(itemId: string) {
+        const itemToDelete = this.chatList.find(c => c.id === itemId);
+        if (!itemToDelete) return;
+
+        try {
+            await deleteChat(itemId);
+
+            const idsToRemove = new Set<string>([itemId]);
+            // 如果是文件夹，递归查找所有子项以从本地状态中一并移除
+            if (itemToDelete.itemType === 'folder') {
+                const findChildren = (parentId: string) => {
+                    this.chatList.forEach(item => {
+                        if (item.parentId === parentId) {
+                            idsToRemove.add(item.id);
+                            findChildren(item.id);
+                        }
+                    });
+                };
+                findChildren(itemId);
+            }
+
+            this.chatList = this.chatList.filter(c => !idsToRemove.has(c.id));
+
+            // 如果删除的是当前选中的项，则清空选择
+            if (this.currentChatId && idsToRemove.has(this.currentChatId)) {
+                this.currentChatId = null;
+                this.currentChatMessages = [];
+            }
+        } catch (error) {
+            console.error(`Failed to delete item ${itemId}:`, error);
+        }
+    },
+
+    async reorderChatItems(updates: ChatReorderItem[]) {
+      // 乐观更新UI
+      updates.forEach(update => {
+        const item = this.chatList.find(c => c.id === update.id);
+        if (item) {
+          item.parentId = update.parentId;
+          item.sortOrder = update.sortOrder;
+        }
+      });
+
       try {
-        await deleteChat(chatIdToDelete);
-        this.chatList = this.chatList.filter(c => c.id !== chatIdToDelete);
-        this.currentChatId = null;
-        this.currentChatMessages = [];
+        await reorderChats(updates);
       } catch (error) {
-        console.error(`Failed to delete chat ${chatIdToDelete}:`, error);
+        console.error('Failed to reorder items:', error);
+        // 如果失败，重新从服务器获取列表以恢复状态
+        await this.fetchChatList();
+      }
+    },
+
+    saveDraft(content: string) {
+      if (this.currentChatId) {
+        this.userInputCache[this.currentChatId] = content;
       }
     },
 
     async sendMessage(content: string) {
       if (!this.currentChatId || !this.currentChat || this.isGenerating) return;
 
+      // 发送后清空草稿
+      delete this.userInputCache[this.currentChatId];
+
       const chatId = this.currentChatId;
       const useStream = this.currentChat.modelParameters?.stream ?? true;
 
-      const userMessage: Message = {
-        id: `temp-user-${Date.now()}`,
-        chatId: chatId,
-        role: 'user',
-        content: content,
-        createdAt: new Date().toISOString(),
-      };
+      const userMessage: Message = { id: `temp-user-${Date.now()}`, chatId, role: 'user', content, createdAt: new Date().toISOString() };
       this.currentChatMessages.push(userMessage);
 
-      // AI占位消息
       const assistantMessagePlaceholderId = `temp-assistant-${Date.now()}`;
-      const assistantMessagePlaceholder: Message = {
-        id: assistantMessagePlaceholderId,
-        chatId: chatId,
-        role: 'assistant',
-        content: '...', // 初始显示为 "正在输入"
-        createdAt: new Date().toISOString(),
-      };
+      const assistantMessagePlaceholder: Message = { id: assistantMessagePlaceholderId, chatId, role: 'assistant', content: '...', createdAt: new Date().toISOString() };
       this.currentChatMessages.push(assistantMessagePlaceholder);
 
       this.isGenerating = true;
@@ -166,61 +212,37 @@ export const useChatStore = defineStore('chat', {
           onmessage: (event) => {
             const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessagePlaceholderId);
             if (messageToUpdate) {
-              if (messageToUpdate.content === '...') {
-                messageToUpdate.content = '';
-              }
+              if (messageToUpdate.content === '...') messageToUpdate.content = '';
               try {
-                const chunk = JSON.parse(event.data);
-                messageToUpdate.content += chunk;
+                messageToUpdate.content += JSON.parse(event.data);
               } catch (e) { console.error("Failed to parse SSE data chunk:", event.data, e); }
             }
           },
           onclose: () => {
-            // 流正常关闭，同步最终数据
-            getChatWithMessages(chatId).then(chat => {
-              if (this.currentChatId === chatId) {
-                this.currentChatMessages = chat.messages;
-              }
-            });
+            getChatWithMessages(chatId).then(chat => { if (this.currentChatId === chatId) this.currentChatMessages = chat.messages; });
             this.isGenerating = false;
             this.currentRequestController = null;
           },
           onerror: (err) => {
             this.isGenerating = false;
             this.currentRequestController = null;
-            // 如果是用户主动取消，则静默处理并同步部分内容
             if (err.name === 'AbortError') {
-              console.log('Stream generation aborted by user.');
-              getChatWithMessages(chatId).then(chat => {
-                if (this.currentChatId === chatId) {
-                  this.currentChatMessages = chat.messages;
-                }
-              });
+              getChatWithMessages(chatId).then(chat => { if (this.currentChatId === chatId) this.currentChatMessages = chat.messages; });
             } else {
-              // 其他错误，显示错误信息
                const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessagePlaceholderId);
-               if (messageToUpdate) {
-                  messageToUpdate.content += '\n\n**抱歉，请求出错。**';
-               }
+               if (messageToUpdate) messageToUpdate.content += '\n\n**抱歉，请求出错。**';
                console.error("SSE error:", err);
             }
           },
         });
-
       } else {
-        // ... 非流式逻辑 ...
         try {
           const finalMessage = await generateResponseNonStream(chatId, content);
           const messageIndex = this.currentChatMessages.findIndex(m => m.id === assistantMessagePlaceholderId);
-          if (messageIndex !== -1) {
-            this.currentChatMessages[messageIndex] = finalMessage;
-          }
+          if (messageIndex !== -1) this.currentChatMessages[messageIndex] = finalMessage;
         } catch (error: any) {
           const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessagePlaceholderId);
-          if (messageToUpdate) {
-            messageToUpdate.content = `**请求失败**: ${error.response?.data?.detail || error.message}`;
-          }
-          console.error('Non-stream generation failed:', error);
+          if (messageToUpdate) messageToUpdate.content = `**请求失败**: ${error.response?.data?.detail || error.message}`;
         } finally {
           this.isGenerating = false;
         }
@@ -232,23 +254,13 @@ export const useChatStore = defineStore('chat', {
 
         const chatId = this.currentChatId;
         const useStream = this.currentChat.modelParameters?.stream ?? true;
-
         const lastUserMessage = [...this.currentChatMessages].reverse().find(m => m.role === 'user');
         if (!lastUserMessage) return;
 
-        // 移除旧的 assistant 回复
-        if (this.currentChatMessages[this.currentChatMessages.length - 1].role === 'assistant') {
-          this.currentChatMessages.pop();
-        }
+        if (this.currentChatMessages[this.currentChatMessages.length - 1].role === 'assistant') this.currentChatMessages.pop();
 
         const assistantMessagePlaceholderId = `temp-assistant-${Date.now()}`;
-        const assistantMessagePlaceholder: Message = {
-          id: assistantMessagePlaceholderId,
-          chatId: chatId,
-          role: 'assistant',
-          content: '...',
-          createdAt: new Date().toISOString(),
-        };
+        const assistantMessagePlaceholder: Message = { id: assistantMessagePlaceholderId, chatId, role: 'assistant', content: '...', createdAt: new Date().toISOString() };
         this.currentChatMessages.push(assistantMessagePlaceholder);
 
         this.isGenerating = true;
@@ -263,21 +275,14 @@ export const useChatStore = defineStore('chat', {
             onmessage: (event) => {
               const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessagePlaceholderId);
               if (messageToUpdate) {
-                if (messageToUpdate.content === '...') {
-                  messageToUpdate.content = '';
-                }
+                if (messageToUpdate.content === '...') messageToUpdate.content = '';
                 try {
-                  const chunk = JSON.parse(event.data);
-                  messageToUpdate.content += chunk;
+                  messageToUpdate.content += JSON.parse(event.data);
                 } catch (e) { console.error("Failed to parse SSE data chunk:", event.data, e); }
               }
             },
             onclose: () => {
-              getChatWithMessages(chatId).then(chat => {
-                if (this.currentChatId === chatId) {
-                  this.currentChatMessages = chat.messages;
-                }
-              });
+              getChatWithMessages(chatId).then(chat => { if (this.currentChatId === chatId) this.currentChatMessages = chat.messages; });
               this.isGenerating = false;
               this.currentRequestController = null;
             },
@@ -285,35 +290,21 @@ export const useChatStore = defineStore('chat', {
               this.isGenerating = false;
               this.currentRequestController = null;
               if (err.name === 'AbortError') {
-                console.log('Stream regeneration aborted by user.');
-                getChatWithMessages(chatId).then(chat => {
-                  if (this.currentChatId === chatId) {
-                    this.currentChatMessages = chat.messages;
-                  }
-                });
+                getChatWithMessages(chatId).then(chat => { if (this.currentChatId === chatId) this.currentChatMessages = chat.messages; });
               } else {
                 const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessagePlaceholderId);
-                if (messageToUpdate) {
-                  messageToUpdate.content += '\n\n**抱歉，重新生成时出错。**';
-                }
-                console.error("SSE error on regenerate:", err);
+                if (messageToUpdate) messageToUpdate.content += '\n\n**抱歉，重新生成时出错。**';
               }
             },
           });
         } else {
-            // ... 非流式逻辑 ...
             try {
               const finalMessage = await regenerateResponseNonStream(chatId, lastUserMessage.content);
               const messageIndex = this.currentChatMessages.findIndex(m => m.id === assistantMessagePlaceholderId);
-              if (messageIndex !== -1) {
-                this.currentChatMessages[messageIndex] = finalMessage;
-              }
+              if (messageIndex !== -1) this.currentChatMessages[messageIndex] = finalMessage;
             } catch (error: any) {
               const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessagePlaceholderId);
-              if (messageToUpdate) {
-                messageToUpdate.content = `**请求失败**: ${error.response?.data?.detail || error.message}`;
-              }
-              console.error('Non-stream regeneration failed:', error);
+              if (messageToUpdate) messageToUpdate.content = `**请求失败**: ${error.response?.data?.detail || error.message}`;
             } finally {
               this.isGenerating = false;
             }
@@ -323,7 +314,6 @@ export const useChatStore = defineStore('chat', {
     stopGeneration() {
       if (this.currentRequestController) {
         this.currentRequestController.abort();
-        // --- 核心修复: 立即重置状态以快速更新UI ---
         this.isGenerating = false;
         this.currentRequestController = null;
       }
