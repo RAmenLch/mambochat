@@ -1,7 +1,27 @@
+// frontend/mambo/src/stores/chatStore.ts
+
 import { defineStore } from 'pinia';
-import { getChats, createChat, getChatWithMessages, deleteChat } from '@/api/chatService';
-import type { Chat, Message, ChatCreate } from '@/api/types';
+import {
+  getChats,
+  createChat,
+  getChatWithMessages,
+  deleteChat,
+  updateChatSettings,
+} from '@/api/chatService';
+import type { Chat, Message, ChatCreate, ChatUpdate } from '@/api/types';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
+import apiClient from '@/api';
+
+// 临时模拟 API 函数，你应该在 chatService.ts 中正式实现它们
+const generateResponseNonStream = (chatId: string, content: string): Promise<Message> => {
+    return apiClient.post(`/chats/${chatId}/generate-non-stream`, { content }).then(res => res.data);
+};
+// 注意: 你需要在后端为非流式重新生成创建一个新接口
+const regenerateResponseNonStream = (chatId: string, content: string): Promise<Message> => {
+    // 假设后端创建了一个名为 /regenerate-non-stream 的新接口
+    return apiClient.post(`/chats/${chatId}/regenerate-non-stream`, { content }).then(res => res.data);
+};
+
 
 interface ChatState {
   chatList: Chat[];
@@ -10,6 +30,7 @@ interface ChatState {
   isChatListLoading: boolean;
   isChatHistoryLoading: boolean;
   isGenerating: boolean;
+  currentRequestController: AbortController | null;
 }
 
 export const useChatStore = defineStore('chat', {
@@ -20,6 +41,7 @@ export const useChatStore = defineStore('chat', {
     isChatListLoading: false,
     isChatHistoryLoading: false,
     isGenerating: false,
+    currentRequestController: null,
   }),
 
   getters: {
@@ -45,11 +67,21 @@ export const useChatStore = defineStore('chat', {
 
     async selectChat(chatId: string) {
       if (this.currentChatId === chatId) return;
+      if (this.isGenerating) {
+        this.stopGeneration();
+      }
       this.currentChatId = chatId;
       this.isChatHistoryLoading = true;
       this.currentChatMessages = [];
       try {
         const chatWithMessages = await getChatWithMessages(chatId);
+        // 更新 chatList 中的会话信息，因为它可能包含更新后的模型参数等
+        const chatIndex = this.chatList.findIndex(c => c.id === chatId);
+        if (chatIndex !== -1) {
+          // 只更新 chat 级别的属性，不替换 messages 数组的引用
+          const { messages, ...chatDetails } = chatWithMessages;
+          this.chatList[chatIndex] = { ...this.chatList[chatIndex], ...chatDetails };
+        }
         this.currentChatMessages = chatWithMessages.messages;
       } catch (error) {
         console.error(`Failed to fetch messages for chat ${chatId}:`, error);
@@ -70,6 +102,19 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
+    async updateChatSettings(settings: ChatUpdate) {
+      if (!this.currentChatId) return;
+      try {
+        const updatedChat = await updateChatSettings(this.currentChatId, settings);
+        const index = this.chatList.findIndex(c => c.id === this.currentChatId);
+        if (index !== -1) {
+          this.chatList[index] = updatedChat;
+        }
+      } catch (error) {
+        console.error('Failed to update chat settings:', error);
+      }
+    },
+
     async deleteSelectedChat() {
       if (!this.currentChatId) return;
       const chatIdToDelete = this.currentChatId;
@@ -84,8 +129,10 @@ export const useChatStore = defineStore('chat', {
     },
 
     async sendMessage(content: string) {
-      if (!this.currentChatId) return;
+      if (!this.currentChatId || !this.currentChat || this.isGenerating) return;
+
       const chatId = this.currentChatId;
+      const useStream = this.currentChat.modelParameters?.stream ?? true;
 
       const userMessage: Message = {
         id: `temp-user-${Date.now()}`,
@@ -96,68 +143,190 @@ export const useChatStore = defineStore('chat', {
       };
       this.currentChatMessages.push(userMessage);
 
-      // 【关键修复点 1】: 创建一个唯一的临时ID，用于后续在数组中查找
-      const assistantMessageId = `temp-assistant-${Date.now()}`;
-      const assistantMessage: Message = {
-        id: assistantMessageId,
+      // AI占位消息
+      const assistantMessagePlaceholderId = `temp-assistant-${Date.now()}`;
+      const assistantMessagePlaceholder: Message = {
+        id: assistantMessagePlaceholderId,
         chatId: chatId,
         role: 'assistant',
-        content: '...',
+        content: '...', // 初始显示为 "正在输入"
         createdAt: new Date().toISOString(),
       };
-      this.currentChatMessages.push(assistantMessage);
+      this.currentChatMessages.push(assistantMessagePlaceholder);
 
-      let isFirstChunk = true;
       this.isGenerating = true;
 
-      const apiUrl = `/api/chats/${chatId}/generate`;
-      await fetchEventSource(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
-        onmessage: (event) => {
-          // 【关键修复点 2】: 每次收到消息时，都从 store 的 state 中重新查找消息对象
-          const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessageId);
-
-          if (messageToUpdate) {
-            if (isFirstChunk) {
-              messageToUpdate.content = ''; // 清空 '...'
-              isFirstChunk = false;
-            }
-            try {
-              const chunk = JSON.parse(event.data);
-              if (typeof chunk === 'string') {
-                // 【关键修复点 3】: 直接修改从 state 中找到的那个响应式对象的属性
-                messageToUpdate.content += chunk;
+      if (useStream) {
+        this.currentRequestController = new AbortController();
+        await fetchEventSource(`/api/chats/${chatId}/generate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content }),
+          signal: this.currentRequestController.signal,
+          onmessage: (event) => {
+            const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessagePlaceholderId);
+            if (messageToUpdate) {
+              if (messageToUpdate.content === '...') {
+                messageToUpdate.content = '';
               }
-            } catch (e) {
-              console.error("Failed to parse SSE data chunk:", event.data, e);
+              try {
+                const chunk = JSON.parse(event.data);
+                messageToUpdate.content += chunk;
+              } catch (e) { console.error("Failed to parse SSE data chunk:", event.data, e); }
             }
+          },
+          onclose: () => {
+            // 流正常关闭，同步最终数据
+            getChatWithMessages(chatId).then(chat => {
+              if (this.currentChatId === chatId) {
+                this.currentChatMessages = chat.messages;
+              }
+            });
+            this.isGenerating = false;
+            this.currentRequestController = null;
+          },
+          onerror: (err) => {
+            this.isGenerating = false;
+            this.currentRequestController = null;
+            // 如果是用户主动取消，则静默处理并同步部分内容
+            if (err.name === 'AbortError') {
+              console.log('Stream generation aborted by user.');
+              getChatWithMessages(chatId).then(chat => {
+                if (this.currentChatId === chatId) {
+                  this.currentChatMessages = chat.messages;
+                }
+              });
+            } else {
+              // 其他错误，显示错误信息
+               const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessagePlaceholderId);
+               if (messageToUpdate) {
+                  messageToUpdate.content += '\n\n**抱歉，请求出错。**';
+               }
+               console.error("SSE error:", err);
+            }
+          },
+        });
+
+      } else {
+        // ... 非流式逻辑 ...
+        try {
+          const finalMessage = await generateResponseNonStream(chatId, content);
+          const messageIndex = this.currentChatMessages.findIndex(m => m.id === assistantMessagePlaceholderId);
+          if (messageIndex !== -1) {
+            this.currentChatMessages[messageIndex] = finalMessage;
           }
-        },
-        onclose: () => {
-          this.isGenerating = false;
-          console.log('SSE Stream closed.');
-          // 【可选但推荐】流结束后，发起一次“静默”刷新，以获取后端生成的消息ID和确切时间
-          // 这不会打断用户体验，但能保证数据最终一致性
-          getChatWithMessages(chatId).then(chat => {
-            if (this.currentChatId === chatId) {
-              this.currentChatMessages = chat.messages;
-            }
-          }).catch(error => {
-            console.error(`Failed to silently refresh messages for chat ${chatId}:`, error);
-          });
-        },
-        onerror: (err) => {
-          this.isGenerating = false;
-          const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessageId);
+        } catch (error: any) {
+          const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessagePlaceholderId);
           if (messageToUpdate) {
-            messageToUpdate.content += '\n\n**抱歉，请求出错，请检查网络或联系管理员。**';
+            messageToUpdate.content = `**请求失败**: ${error.response?.data?.detail || error.message}`;
           }
-          console.error('EventSource failed:', err);
-          throw err;
-        },
-      });
+          console.error('Non-stream generation failed:', error);
+        } finally {
+          this.isGenerating = false;
+        }
+      }
+    },
+
+    async regenerateLastResponse() {
+        if (!this.currentChatId || !this.currentChat || this.isGenerating || this.currentChatMessages.length < 1) return;
+
+        const chatId = this.currentChatId;
+        const useStream = this.currentChat.modelParameters?.stream ?? true;
+
+        const lastUserMessage = [...this.currentChatMessages].reverse().find(m => m.role === 'user');
+        if (!lastUserMessage) return;
+
+        // 移除旧的 assistant 回复
+        if (this.currentChatMessages[this.currentChatMessages.length - 1].role === 'assistant') {
+          this.currentChatMessages.pop();
+        }
+
+        const assistantMessagePlaceholderId = `temp-assistant-${Date.now()}`;
+        const assistantMessagePlaceholder: Message = {
+          id: assistantMessagePlaceholderId,
+          chatId: chatId,
+          role: 'assistant',
+          content: '...',
+          createdAt: new Date().toISOString(),
+        };
+        this.currentChatMessages.push(assistantMessagePlaceholder);
+
+        this.isGenerating = true;
+
+        if (useStream) {
+          this.currentRequestController = new AbortController();
+          await fetchEventSource(`/api/chats/${chatId}/regenerate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: lastUserMessage.content }),
+            signal: this.currentRequestController.signal,
+            onmessage: (event) => {
+              const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessagePlaceholderId);
+              if (messageToUpdate) {
+                if (messageToUpdate.content === '...') {
+                  messageToUpdate.content = '';
+                }
+                try {
+                  const chunk = JSON.parse(event.data);
+                  messageToUpdate.content += chunk;
+                } catch (e) { console.error("Failed to parse SSE data chunk:", event.data, e); }
+              }
+            },
+            onclose: () => {
+              getChatWithMessages(chatId).then(chat => {
+                if (this.currentChatId === chatId) {
+                  this.currentChatMessages = chat.messages;
+                }
+              });
+              this.isGenerating = false;
+              this.currentRequestController = null;
+            },
+            onerror: (err) => {
+              this.isGenerating = false;
+              this.currentRequestController = null;
+              if (err.name === 'AbortError') {
+                console.log('Stream regeneration aborted by user.');
+                getChatWithMessages(chatId).then(chat => {
+                  if (this.currentChatId === chatId) {
+                    this.currentChatMessages = chat.messages;
+                  }
+                });
+              } else {
+                const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessagePlaceholderId);
+                if (messageToUpdate) {
+                  messageToUpdate.content += '\n\n**抱歉，重新生成时出错。**';
+                }
+                console.error("SSE error on regenerate:", err);
+              }
+            },
+          });
+        } else {
+            // ... 非流式逻辑 ...
+            try {
+              const finalMessage = await regenerateResponseNonStream(chatId, lastUserMessage.content);
+              const messageIndex = this.currentChatMessages.findIndex(m => m.id === assistantMessagePlaceholderId);
+              if (messageIndex !== -1) {
+                this.currentChatMessages[messageIndex] = finalMessage;
+              }
+            } catch (error: any) {
+              const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessagePlaceholderId);
+              if (messageToUpdate) {
+                messageToUpdate.content = `**请求失败**: ${error.response?.data?.detail || error.message}`;
+              }
+              console.error('Non-stream regeneration failed:', error);
+            } finally {
+              this.isGenerating = false;
+            }
+        }
+    },
+
+    stopGeneration() {
+      if (this.currentRequestController) {
+        this.currentRequestController.abort();
+        // --- 核心修复: 立即重置状态以快速更新UI ---
+        this.isGenerating = false;
+        this.currentRequestController = null;
+      }
     }
   }
 });

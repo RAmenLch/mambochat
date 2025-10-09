@@ -5,27 +5,38 @@
       <el-empty description="请从左侧选择或新建一个会话开始聊天" />
     </div>
 
-    <!-- 当选中会-话后，显示聊天界面 -->
+    <!-- 当选中会话后，显示聊天界面 -->
     <template v-else>
       <!-- 1. 顶部标题栏 -->
       <div class="chat-window-header">
         <h3 class="chat-title">{{ currentChat.name }}</h3>
+        <el-button
+          :icon="Setting"
+          circle
+          title="会话设置"
+          @click="openSettingsDrawer"
+        />
       </div>
 
       <!-- 2. 消息列表区域 -->
-      <el-scrollbar ref="scrollbarRef" class="message-list-scrollbar" v-loading="isChatHistoryLoading">
+      <el-scrollbar
+        ref="scrollbarRef"
+        class="message-list-scrollbar"
+        v-loading="isChatHistoryLoading"
+      >
         <div class="message-list-wrapper">
           <MessageItem
-            v-for="message in currentChatMessages"
+            v-for="(message, index) in currentChatMessages"
             :key="message.id"
             :message="message"
+            :is-last-message="index === currentChatMessages.length - 1"
+            :is-generating="isGenerating"
           />
         </div>
       </el-scrollbar>
 
       <!-- 3. 底部输入区域 -->
       <div class="chat-input-area">
-        <!-- 【修复】: 将注释移到标签外部 -->
         <el-input
           ref="inputRef"
           v-model="userInput"
@@ -37,42 +48,209 @@
           @keydown.enter.prevent="handleEnterKey"
         />
         <el-button
+          v-if="!isGenerating"
           type="primary"
-          class="send-button"
-          :disabled="isGenerating || userInput.trim() === ''"
+          class="action-button"
+          :disabled="userInput.trim() === ''"
           @click="handleSendMessage"
         >
           <el-icon><Promotion /></el-icon>
         </el-button>
+        <el-button
+          v-else
+          type="warning"
+          class="action-button"
+          @click="chatStore.stopGeneration()"
+        >
+          <el-icon><VideoPause /></el-icon>
+        </el-button>
       </div>
     </template>
+
+    <!-- 会话设置抽屉 -->
+    <el-drawer
+      v-model="settingsDrawerVisible"
+      title="会话设置"
+      direction="rtl"
+      size="450px"
+    >
+      <div class="drawer-content">
+        <el-form :model="chatSettingsForm" label-position="top">
+          <!-- --- 新增: 会话名称 --- -->
+          <el-form-item label="会话名称">
+            <el-input
+              v-model="chatSettingsForm.name"
+              placeholder="请输入会话名称"
+            />
+          </el-form-item>
+
+          <el-form-item label="AI 模型">
+            <el-select
+              v-model="chatSettingsForm.aiModelId"
+              placeholder="请选择一个AI模型"
+              style="width: 100%"
+            >
+              <el-option-group
+                v-for="group in groupedModels"
+                :key="group.label"
+                :label="group.label"
+              >
+                <el-option
+                  v-for="item in group.options"
+                  :key="item.id"
+                  :label="item.name"
+                  :value="item.id"
+                />
+              </el-option-group>
+            </el-select>
+          </el-form-item>
+          <el-form-item label="System Prompt (系统提示词)">
+            <el-input
+              v-model="chatSettingsForm.systemPrompt"
+              type="textarea"
+              :rows="8"
+              placeholder="定义AI的角色和行为"
+            />
+          </el-form-item>
+          <el-divider>模型参数</el-divider>
+          <el-form-item label="Temperature (温度)">
+            <el-slider
+              v-model="chatSettingsForm.modelParameters.temperature"
+              :min="0"
+              :max="2"
+              :step="0.1"
+              show-input
+            />
+          </el-form-item>
+          <!-- --- 新增: Top P --- -->
+          <el-form-item label="Top P">
+            <el-slider
+              v-model="chatSettingsForm.modelParameters.top_p"
+              :min="0"
+              :max="1"
+              :step="0.01"
+              show-input
+            />
+          </el-form-item>
+          <!-- --- 新增: 是否使用流式对话 --- -->
+          <el-form-item label="流式对话 (Stream)">
+             <el-switch v-model="chatSettingsForm.modelParameters.stream" />
+             <el-tooltip
+                class="box-item"
+                effect="dark"
+                content="关闭后, AI将一次性返回完整回复, 可能会增加等待时间。"
+                placement="top"
+              >
+                <el-icon style="margin-left: 8px; color: #909399;"><QuestionFilled /></el-icon>
+              </el-tooltip>
+          </el-form-item>
+        </el-form>
+      </div>
+      <template #footer>
+        <div style="flex: auto">
+          <el-button @click="settingsDrawerVisible = false">取消</el-button>
+          <el-button type="primary" @click="handleSaveSettings"
+            >保存</el-button
+          >
+        </div>
+      </template>
+    </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue';
+import { ref, watch, nextTick, reactive, computed } from 'vue';
 import { useChatStore } from '@/stores/chatStore';
+import { useProviderStore } from '@/stores/providerStore';
 import { storeToRefs } from 'pinia';
-import { ElScrollbar, ElInput } from 'element-plus';
-import { Promotion } from '@element-plus/icons-vue';
+import { ElScrollbar, ElInput, ElMessage } from 'element-plus';
+import { Promotion, Setting, VideoPause, QuestionFilled } from '@element-plus/icons-vue';
 import MessageItem from './MessageItem.vue';
+import type { ChatUpdate } from '@/api/types';
+
+// 定义表单数据的完整类型
+interface ChatSettingsForm extends ChatUpdate {
+  name: string | null;
+  modelParameters: {
+    temperature: number;
+    top_p: number;
+    stream: boolean;
+  };
+}
 
 const chatStore = useChatStore();
+const providerStore = useProviderStore();
+
 const {
   currentChat,
   currentChatMessages,
   isChatHistoryLoading,
-  isGenerating
+  isGenerating,
 } = storeToRefs(chatStore);
+const { providers } = storeToRefs(providerStore);
 
 const userInput = ref('');
 const scrollbarRef = ref<InstanceType<typeof ElScrollbar>>();
 const inputRef = ref<InstanceType<typeof ElInput>>();
 
+// --- 会话设置抽屉逻辑 ---
+const settingsDrawerVisible = ref(false);
+const chatSettingsForm = reactive<ChatSettingsForm>({
+  name: '',
+  aiModelId: null,
+  systemPrompt: null,
+  modelParameters: {
+    temperature: 0.7, // 默认值
+    top_p: 0.9,       // 默认值
+    stream: true,     // 默认值
+  },
+});
+
+const groupedModels = computed(() => {
+  return providers.value.map(provider => ({
+    label: provider.name,
+    options: provider.models,
+  }));
+});
+
+const openSettingsDrawer = () => {
+  if (!currentChat.value) return;
+  // 从当前会话加载数据到表单
+  chatSettingsForm.name = currentChat.value.name;
+  chatSettingsForm.aiModelId = currentChat.value.aiModelId;
+  chatSettingsForm.systemPrompt = currentChat.value.systemPrompt;
+
+  // 安全地处理 modelParameters, 为新字段提供默认值
+  const params = currentChat.value.modelParameters;
+  chatSettingsForm.modelParameters.temperature = params?.temperature ?? 0.7;
+  chatSettingsForm.modelParameters.top_p = params?.top_p ?? 0.9;
+  chatSettingsForm.modelParameters.stream = params?.stream ?? true; // 默认开启流式
+
+  settingsDrawerVisible.value = true;
+};
+
+const handleSaveSettings = async () => {
+  if (!chatSettingsForm.name?.trim()) {
+      ElMessage.warning('会话名称不能为空');
+      return;
+  }
+  await chatStore.updateChatSettings({
+    name: chatSettingsForm.name,
+    aiModelId: chatSettingsForm.aiModelId,
+    systemPrompt: chatSettingsForm.systemPrompt,
+    modelParameters: chatSettingsForm.modelParameters,
+  });
+  settingsDrawerVisible.value = false;
+  ElMessage.success('设置已保存');
+};
+
+
+// --- 消息发送逻辑 ---
 const handleSendMessage = async () => {
   if (userInput.value.trim() === '' || isGenerating.value) return;
   const content = userInput.value;
   userInput.value = '';
+  // 注意: chatStore.sendMessage 内部需要根据 stream 配置决定调用哪个API
   await chatStore.sendMessage(content);
 };
 
@@ -110,7 +288,6 @@ watch(
 </script>
 
 <style scoped>
-/* (样式部分保持不变) */
 .chat-window-container {
   height: 100%;
   display: flex;
@@ -155,9 +332,15 @@ watch(
 .chat-input-area .el-textarea {
   margin-right: 10px;
 }
-.send-button {
+.action-button {
   height: 54px;
   width: 54px;
   font-size: 20px;
+}
+.drawer-content {
+  padding: 0 20px;
+}
+.el-form-item .el-switch {
+  margin-right: 8px;
 }
 </style>
