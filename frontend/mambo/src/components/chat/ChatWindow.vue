@@ -76,14 +76,12 @@
     >
       <div class="drawer-content">
         <el-form :model="chatSettingsForm" label-position="top">
-          <!-- --- 新增: 会话名称 --- -->
           <el-form-item label="会话名称">
             <el-input
               v-model="chatSettingsForm.name"
               placeholder="请输入会话名称"
             />
           </el-form-item>
-
           <el-form-item label="AI 模型">
             <el-select
               v-model="chatSettingsForm.aiModelId"
@@ -122,7 +120,6 @@
               show-input
             />
           </el-form-item>
-          <!-- --- 新增: Top P --- -->
           <el-form-item label="Top P">
             <el-slider
               v-model="chatSettingsForm.modelParameters.top_p"
@@ -132,7 +129,6 @@
               show-input
             />
           </el-form-item>
-          <!-- --- 新增: 是否使用流式对话 --- -->
           <el-form-item label="流式对话 (Stream)">
              <el-switch v-model="chatSettingsForm.modelParameters.stream" />
              <el-tooltip
@@ -168,7 +164,6 @@ import { Promotion, Setting, VideoPause, QuestionFilled } from '@element-plus/ic
 import MessageItem from './MessageItem.vue';
 import type { ChatUpdate } from '@/api/types';
 
-// 定义表单数据的完整类型
 interface ChatSettingsForm extends ChatUpdate {
   name: string | null;
   modelParameters: {
@@ -183,56 +178,54 @@ const providerStore = useProviderStore();
 
 const {
   currentChat,
+  currentChatId,
   currentChatMessages,
   isChatHistoryLoading,
   isGenerating,
+  userInputCache,
 } = storeToRefs(chatStore);
 const { providers } = storeToRefs(providerStore);
 
-const userInput = ref('');
 const scrollbarRef = ref<InstanceType<typeof ElScrollbar>>();
 const inputRef = ref<InstanceType<typeof ElInput>>();
 
-// --- 会话设置抽屉逻辑 ---
+// --- Input Caching Logic ---
+const userInput = computed({
+  get: () => currentChatId.value ? (userInputCache.value[currentChatId.value] || '') : '',
+  set: (value) => {
+    if (currentChatId.value) {
+      chatStore.saveDraft(value);
+    }
+  }
+});
+
+// --- Settings Drawer Logic ---
 const settingsDrawerVisible = ref(false);
 const chatSettingsForm = reactive<ChatSettingsForm>({
   name: '',
   aiModelId: null,
   systemPrompt: null,
-  modelParameters: {
-    temperature: 0.7, // 默认值
-    top_p: 0.9,       // 默认值
-    stream: true,     // 默认值
-  },
+  modelParameters: { temperature: 0.7, top_p: 0.9, stream: true },
 });
 
-const groupedModels = computed(() => {
-  return providers.value.map(provider => ({
-    label: provider.name,
-    options: provider.models,
-  }));
-});
+const groupedModels = computed(() => providers.value.map(p => ({ label: p.name, options: p.models })));
 
 const openSettingsDrawer = () => {
   if (!currentChat.value) return;
-  // 从当前会话加载数据到表单
   chatSettingsForm.name = currentChat.value.name;
   chatSettingsForm.aiModelId = currentChat.value.aiModelId;
   chatSettingsForm.systemPrompt = currentChat.value.systemPrompt;
-
-  // 安全地处理 modelParameters, 为新字段提供默认值
   const params = currentChat.value.modelParameters;
   chatSettingsForm.modelParameters.temperature = params?.temperature ?? 0.7;
   chatSettingsForm.modelParameters.top_p = params?.top_p ?? 0.9;
-  chatSettingsForm.modelParameters.stream = params?.stream ?? true; // 默认开启流式
-
+  chatSettingsForm.modelParameters.stream = params?.stream ?? true;
   settingsDrawerVisible.value = true;
 };
 
 const handleSaveSettings = async () => {
   if (!chatSettingsForm.name?.trim()) {
-      ElMessage.warning('会话名称不能为空');
-      return;
+    ElMessage.warning('会话名称不能为空');
+    return;
   }
   await chatStore.updateChatSettings({
     name: chatSettingsForm.name,
@@ -244,32 +237,27 @@ const handleSaveSettings = async () => {
   ElMessage.success('设置已保存');
 };
 
-
-// --- 消息发送逻辑 ---
+// --- Message Sending Logic ---
 const handleSendMessage = async () => {
   if (userInput.value.trim() === '' || isGenerating.value) return;
   const content = userInput.value;
-  userInput.value = '';
-  // 注意: chatStore.sendMessage 内部需要根据 stream 配置决定调用哪个API
+  // The store action will handle clearing the cache, so we don't clear it here.
   await chatStore.sendMessage(content);
 };
 
 const handleEnterKey = (event: KeyboardEvent) => {
-  if (event.shiftKey) {
-    return;
-  }
+  if (event.shiftKey) return;
   handleSendMessage();
 };
 
+// --- Auto-Scrolling and Focus ---
 const scrollToBottom = () => {
   nextTick(() => {
     scrollbarRef.value?.setScrollTop(scrollbarRef.value.wrapRef!.scrollHeight);
   });
 };
 
-watch(currentChatMessages, () => {
-  scrollToBottom();
-}, { deep: true });
+watch(currentChatMessages, scrollToBottom, { deep: true });
 
 watch(
   () => currentChat.value?.id,

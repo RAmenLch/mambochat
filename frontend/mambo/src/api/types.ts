@@ -1,6 +1,7 @@
 // frontend/mambo/src/api/types.ts
 
 export type MessageRole = 'user' | 'assistant' | 'system';
+export type ChatItemType = 'chat' | 'folder';
 
 export interface Message {
   id: string;
@@ -32,28 +33,44 @@ export interface Chat {
   name: string;
   createdAt: string;
   systemPrompt: string | null;
-  // --- 改动 1: 与后端 schema 同步，将类型从 string 改为对象 ---
   modelParameters: Record<string, any> | null;
   aiModelId: string | null;
+  // --- 新增字段，用于支持文件夹、排序和最近会话 ---
+  itemType: ChatItemType;
+  parentId: string | null;
+  sortOrder: number;
+  lastOpenedAt: string | null; // ISO 8601 date string
 }
 
 export interface ChatCreate {
   name: string;
   systemPrompt?: string | null;
-  // --- 改动 2: 与后端 schema 同步 ---
   modelParameters?: Record<string, any> | null;
   aiModelId?: string | null;
+  // --- 新增字段 ---
+  itemType?: ChatItemType;
+  parentId?: string | null;
+  sortOrder?: number;
 }
 
-// --- 新增 1: 用于更新会话配置的类型 ---
 export interface ChatUpdate {
-  name?: string | null; // <--- 新增此行
+  name?: string | null;
   aiModelId?: string | null;
   systemPrompt?: string | null;
   modelParameters?: Record<string, any> | null;
+  // --- 新增字段 ---
+  parentId?: string | null;
+  sortOrder?: number;
 }
 
 
 export interface ChatWithMessages extends Chat {
   messages: Message[];
+}
+
+// --- 新增类型: 用于批量更新排序和层级关系 ---
+export interface ChatReorderItem {
+  id: string;
+  parentId: string | null;
+  sortOrder: number;
 }

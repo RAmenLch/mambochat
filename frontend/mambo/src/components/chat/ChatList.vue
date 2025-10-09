@@ -2,29 +2,80 @@
   <div class="chat-list-container">
     <!-- 顶部操作区 -->
     <div class="header">
-      <el-button type="primary" :icon="Plus" @click="openNewChatDialog" class="new-chat-btn">
+      <el-button type="primary" :icon="Plus" @click="openNewChatDialog(null)" class="action-btn">
         新建会话
+      </el-button>
+      <el-button :icon="FolderAdd" @click="handleNewFolder(null)" class="action-btn">
+        新建文件夹
       </el-button>
     </div>
 
     <el-divider />
 
-    <!-- 会话列表 -->
+    <!-- 会话列表树 -->
     <el-scrollbar class="chat-list-scrollbar">
       <div v-if="isChatListLoading" class="loading-container">
         <el-skeleton :rows="5" animated />
       </div>
-      <div v-else-if="chatList.length > 0" class="list-wrapper">
-        <div
-          v-for="chat in chatList"
-          :key="chat.id"
-          class="chat-item"
-          :class="{ 'is-active': chat.id === currentChatId }"
-          @click="handleSelectChat(chat.id)"
-        >
-          <span class="chat-name">{{ chat.name }}</span>
-        </div>
-      </div>
+      <el-tree
+        v-else-if="treeData.length > 0"
+        ref="treeRef"
+        :data="treeData"
+        node-key="id"
+        :current-node-key="currentChatId"
+        highlight-current
+        default-expand-all
+        :expand-on-click-node="false"
+        draggable
+        :allow-drop="allowDrop"
+        @node-click="handleNodeClick"
+        @node-drop="handleNodeDrop"
+        class="chat-tree"
+        :props="{ label: 'name', children: 'children' }"
+      >
+        <template #default="{ node, data }">
+          <span class="custom-tree-node">
+            <el-icon class="node-icon">
+              <Folder v-if="data.itemType === 'folder'" />
+              <ChatDotRound v-else />
+            </el-icon>
+
+            <!-- 修复和增强：使用 ElTooltip 包裹名称标签 -->
+            <el-tooltip
+              :content="node.label"
+              placement="top"
+              :show-after="500"
+              effect="dark"
+              :disabled="!node.label || node.label.length < 15"
+            >
+              <span class="node-label">{{ node.label }}</span>
+            </el-tooltip>
+
+            <el-dropdown trigger="click" @command="handleCommand($event, data)" class="node-actions">
+               <el-icon class="more-icon"><MoreFilled /></el-icon>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <template v-if="data.itemType === 'folder'">
+                    <el-dropdown-item command="newChatInFolder">
+                      <el-icon><Plus /></el-icon>新建会话
+                    </el-dropdown-item>
+                     <el-dropdown-item command="newFolderInFolder">
+                      <el-icon><FolderAdd /></el-icon>新建文件夹
+                    </el-dropdown-item>
+                  </template>
+
+                  <el-dropdown-item command="rename" :divided="data.itemType === 'folder'">
+                    <el-icon><EditPen /></el-icon>重命名
+                  </el-dropdown-item>
+                  <el-dropdown-item command="delete" class="delete-item">
+                    <el-icon><Delete /></el-icon>删除
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </span>
+        </template>
+      </el-tree>
       <el-empty v-else description="暂无会话" />
     </el-scrollbar>
 
@@ -32,17 +83,17 @@
 
     <!-- 底部操作区 -->
     <div class="footer">
-       <el-button
-        type="danger"
-        :icon="Delete"
-        @click="handleDeleteChat"
-        :disabled="!currentChatId"
-        plain
-      >
-        删除当前会话
-      </el-button>
       <el-button :icon="Setting" circle @click="goToSettings" />
     </div>
+
+    <!-- 新建/重命名 弹窗 -->
+    <el-dialog v-model="itemDialogVisible" :title="dialogTitle" width="400px">
+       <el-input v-model="itemNameInput" placeholder="请输入名称" @keyup.enter="handleConfirmItemName" />
+      <template #footer>
+        <el-button @click="itemDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleConfirmItemName">确认</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 新建会话弹窗 -->
     <el-dialog v-model="newChatDialogVisible" title="新建会话" width="400px">
@@ -52,17 +103,8 @@
         </el-form-item>
         <el-form-item label="选择模型" prop="modelId">
           <el-select v-model="newChatForm.modelId" placeholder="请选择一个AI模型" style="width: 100%;">
-            <el-option-group
-              v-for="group in groupedModels"
-              :key="group.label"
-              :label="group.label"
-            >
-              <el-option
-                v-for="item in group.options"
-                :key="item.id"
-                :label="item.name"
-                :value="item.id"
-              />
+            <el-option-group v-for="group in groupedModels" :key="group.label" :label="group.label">
+              <el-option v-for="item in group.options" :key="item.id" :label="item.name" :value="item.id" />
             </el-option-group>
           </el-select>
         </el-form-item>
@@ -76,82 +118,197 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed } from 'vue';
+import { ref, reactive, onMounted, computed, nextTick } from 'vue';
 import { useChatStore } from '@/stores/chatStore';
 import { useProviderStore } from '@/stores/providerStore';
 import { storeToRefs } from 'pinia';
-import { useRouter, useRoute } from 'vue-router';
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus';
-import { Plus, Delete, Setting } from '@element-plus/icons-vue';
+import { useRouter } from 'vue-router';
+import { ElMessage, ElMessageBox, ElTree } from 'element-plus';
+import type { FormInstance, FormRules } from 'element-plus';
+import type { NodeDropType } from 'element-plus/es/components/tree/src/tree.type';
+import type { Chat, ChatReorderItem } from '@/api/types';
+import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, MoreFilled, EditPen } from '@element-plus/icons-vue';
 
-// -- 初始化 Store 和 Router --
+// -- Stores & Router --
 const chatStore = useChatStore();
 const providerStore = useProviderStore();
 const router = useRouter();
-const route = useRoute();
 
-// -- 从 Store 中获取响应式状态 --
 const { chatList, currentChatId, isChatListLoading } = storeToRefs(chatStore);
 const { providers } = storeToRefs(providerStore);
+const treeRef = ref<InstanceType<typeof ElTree>>();
 
-// -- 组件挂载时加载数据 --
+// -- Data Transformation (Flat to Tree) --
+const treeData = computed(() => {
+  const list = JSON.parse(JSON.stringify(chatList.value)) as (Chat & { children?: Chat[] })[];
+  const map: Record<string, Chat & { children?: Chat[] }> = {};
+  list.forEach(item => (map[item.id] = item));
+
+  const tree: (Chat & { children?: Chat[] })[] = [];
+  list.forEach(item => {
+    if (item.parentId && map[item.parentId]) {
+      (map[item.parentId].children = map[item.parentId].children || []).push(item);
+    } else {
+      tree.push(item);
+    }
+  });
+
+  const sortNodes = (nodes: (Chat & { children?: Chat[] })[]) => {
+    nodes.sort((a, b) => a.sortOrder - b.sortOrder);
+    nodes.forEach(node => {
+      if (node.children) {
+        sortNodes(node.children);
+      }
+    });
+  };
+  sortNodes(tree);
+
+  return tree;
+});
+
+// -- Lifecycle --
 onMounted(async () => {
   await chatStore.fetchChatList();
-  await providerStore.fetchProviders(); // 为新建会话弹窗准备模型数据
+  await providerStore.fetchProviders();
 
-  // 关键：处理直接通过 URL 访问特定会话的场景
-  const chatIdFromUrl = route.params.chatId as string;
-  if (chatIdFromUrl && chatList.value.some(c => c.id === chatIdFromUrl)) {
-    await chatStore.selectChat(chatIdFromUrl);
-  }
-});
-
-// -- 会话操作 --
-const handleSelectChat = async (chatId: string) => {
-  await chatStore.selectChat(chatId);
-  // 同步 URL，方便用户刷新和分享
-  router.push(`/chat/${chatId}`);
-};
-
-const handleDeleteChat = async () => {
-  if (!currentChatId.value) return;
-  try {
-    await ElMessageBox.confirm('确定要删除当前会话吗？此操作不可恢复。', '警告', {
-      confirmButtonText: '确定删除',
-      cancelButtonText: '取消',
-      type: 'warning',
-    });
-    await chatStore.deleteSelectedChat();
-    ElMessage.success('删除成功');
-    router.push('/chat'); // 删除后返回基础聊天页
-  } catch (error) {
-    if (error !== 'cancel') {
-      ElMessage.error('删除失败');
+  if (chatList.value.length > 0) {
+    let lastOpenedChat: Chat | null = null;
+    for (const chat of chatList.value) {
+      if (chat.itemType === 'chat' && chat.lastOpenedAt) {
+        if (!lastOpenedChat || new Date(chat.lastOpenedAt) > new Date(lastOpenedChat.lastOpenedAt!)) {
+          lastOpenedChat = chat;
+        }
+      }
+    }
+    if (lastOpenedChat) {
+      await handleSelectChat(lastOpenedChat.id);
     }
   }
+});
+
+// -- Tree Operations --
+const handleNodeClick = async (data: Chat) => {
+  await handleSelectChat(data.id);
 };
 
-// -- 新建会话弹窗逻辑 --
+const handleSelectChat = async (chatId: string) => {
+  await chatStore.selectChat(chatId);
+  if (chatStore.currentChat) {
+    router.push(`/chat/${chatId}`);
+  }
+};
+
+const allowDrop = (draggingNode: any, dropNode: any, type: NodeDropType) => {
+  if (dropNode.data.itemType === 'chat' && type === 'inner') {
+    return false;
+  }
+  return true;
+};
+
+const handleNodeDrop = async (draggingNode: any, dropNode: any, dropType: NodeDropType) => {
+  const updates: ChatReorderItem[] = [];
+  let parentId: string | null = null;
+  let siblings: any[] = [];
+
+  if (dropType === 'inner') {
+    parentId = dropNode.data.id;
+    siblings = dropNode.childNodes || [];
+  } else {
+    parentId = dropNode.data.parentId;
+    siblings = dropNode.parent.childNodes || [];
+  }
+
+  siblings.forEach((node, index) => {
+    updates.push({ id: node.data.id, parentId: parentId, sortOrder: index });
+  });
+
+  await chatStore.reorderChatItems(updates);
+};
+
+// -- Context Menu & Item Operations --
+const itemDialogVisible = ref(false);
+const dialogTitle = ref('');
+const itemNameInput = ref('');
+const currentOperatingItem = ref<Chat | null>(null);
+const currentParentId = ref<string | null>(null);
+
+const handleCommand = (command: string, data: Chat) => {
+  currentOperatingItem.value = data;
+  if (command === 'rename') {
+    handleRename(data);
+  } else if (command === 'delete') {
+    handleDelete(data);
+  } else if (command === 'newChatInFolder') {
+    openNewChatDialog(data.id);
+  } else if (command === 'newFolderInFolder') {
+    handleNewFolder(data.id);
+  }
+};
+
+const handleRename = (data: Chat) => {
+  currentOperatingItem.value = data;
+  dialogTitle.value = '重命名';
+  itemNameInput.value = data.name;
+  itemDialogVisible.value = true;
+};
+
+const handleDelete = (data: Chat) => {
+  ElMessageBox.confirm(`确定要删除 "${data.name}" 吗？此操作不可恢复。`, '警告', {
+    confirmButtonText: '确定删除',
+    cancelButtonText: '取消',
+    type: 'warning',
+  }).then(async () => {
+    await chatStore.deleteItem(data.id);
+    ElMessage.success('删除成功');
+  }).catch(() => {});
+};
+
+const handleNewFolder = (parentId: string | null) => {
+  currentOperatingItem.value = null;
+  currentParentId.value = parentId;
+  dialogTitle.value = '新建文件夹';
+  itemNameInput.value = '新的文件夹';
+  itemDialogVisible.value = true;
+};
+
+const handleConfirmItemName = async () => {
+  if (!itemNameInput.value.trim()) {
+    ElMessage.warning('名称不能为空');
+    return;
+  }
+
+  if (currentOperatingItem.value) { // Rename
+    await chatStore.updateChatSettings({ name: itemNameInput.value });
+  } else { // New Folder
+    const parentId = currentParentId.value;
+    const sortOrder = chatList.value.filter(item => item.parentId === parentId).length;
+    await chatStore.createNewItem({
+      name: itemNameInput.value,
+      itemType: 'folder',
+      parentId: parentId,
+      sortOrder: sortOrder,
+    });
+    if (parentId && treeRef.value) {
+      const parentNode = treeRef.value.getNode(parentId);
+      if (parentNode) parentNode.expanded = true;
+    }
+  }
+  itemDialogVisible.value = false;
+};
+
+// -- New Chat Dialog --
 const newChatDialogVisible = ref(false);
 const formRef = ref<FormInstance>();
-const newChatForm = reactive({
-  name: '新的会话',
-  modelId: '',
-});
+const newChatForm = reactive({ name: '新的会话', modelId: '' });
 const formRules = reactive<FormRules>({
   name: [{ required: true, message: '请输入会话名称', trigger: 'blur' }],
   modelId: [{ required: true, message: '请选择一个模型', trigger: 'change' }],
 });
 
-// 将模型按服务商分组，用于优化 el-select 的显示
-const groupedModels = computed(() => {
-  return providers.value.map(provider => ({
-    label: provider.name,
-    options: provider.models,
-  }));
-});
+const groupedModels = computed(() => providers.value.map(p => ({ label: p.name, options: p.models })));
 
-const openNewChatDialog = () => {
+const openNewChatDialog = (parentId: string | null) => {
+  currentParentId.value = parentId;
   newChatForm.name = '新的会话';
   newChatForm.modelId = '';
   formRef.value?.clearValidate();
@@ -162,14 +319,24 @@ const handleCreateChat = async () => {
   if (!formRef.value) return;
   await formRef.value.validate(async (valid) => {
     if (valid) {
-      const newChat = await chatStore.createNewChat({
+      const parentId = currentParentId.value;
+      const sortOrder = chatList.value.filter(item => item.parentId === parentId).length;
+      const newChat = await chatStore.createNewItem({
         name: newChatForm.name,
         aiModelId: newChatForm.modelId,
+        itemType: 'chat',
+        parentId: parentId,
+        sortOrder: sortOrder,
       });
       if (newChat) {
         ElMessage.success('创建成功');
         newChatDialogVisible.value = false;
-        router.push(`/chat/${newChat.id}`); // 创建成功后，自动跳转到新会话
+        if (parentId && treeRef.value) {
+            const parentNode = treeRef.value.getNode(parentId);
+            if (parentNode) parentNode.expanded = true;
+        }
+        await nextTick();
+        await handleSelectChat(newChat.id);
       } else {
         ElMessage.error('创建失败');
       }
@@ -177,11 +344,27 @@ const handleCreateChat = async () => {
   });
 };
 
-// -- 导航 --
-const goToSettings = () => {
-  router.push('/settings');
-};
+// -- Navigation --
+const goToSettings = () => router.push('/settings');
 </script>
+
+<style>
+.chat-tree {
+  background-color: transparent;
+}
+.chat-tree .el-tree-node__content {
+  height: 40px;
+  border-radius: 6px;
+  margin: 0 4px 4px 4px;
+}
+.chat-tree .el-tree-node.is-current > .el-tree-node__content {
+    background-color: var(--el-color-primary-light-9);
+    border: 1px solid var(--el-color-primary-light-7);
+}
+.chat-tree .el-tree-node__content:hover {
+    background-color: var(--color-background-mute);
+}
+</style>
 
 <style scoped>
 .chat-list-container {
@@ -193,48 +376,70 @@ const goToSettings = () => {
 }
 .header {
   flex-shrink: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
-.new-chat-btn {
+.action-btn {
   width: 100%;
+  margin: 0;
 }
 .el-divider {
   margin: 12px 0;
   flex-shrink: 0;
 }
 .chat-list-scrollbar {
-  flex-grow: 1; /* 占据所有剩余空间 */
+  flex-grow: 1;
 }
 .loading-container {
   padding: 0 10px;
 }
-.chat-item {
+.custom-tree-node {
+  flex: 1;
   display: flex;
   align-items: center;
-  padding: 10px 12px;
-  margin-bottom: 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-  border: 1px solid transparent;
+  justify-content: space-between;
+  font-size: 14px;
+  padding-right: 8px;
+  /* 确保容器本身也能被截断 */
+  overflow: hidden;
 }
-.chat-item:hover {
-  background-color: var(--color-background-mute);
+.node-icon {
+  margin-right: 8px;
+  font-size: 16px;
 }
-.chat-item.is-active {
-  background-color: var(--el-color-primary-light-9);
-  border-color: var(--el-color-primary-light-7);
-}
-.chat-name {
+.node-label {
   flex-grow: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 14px;
+  /* 修复：允许flex item收缩的关键 */
+  min-width: 0;
+  /* 修复：增加与右侧按钮的间距 */
+  margin-right: 8px;
+}
+.node-actions {
+  /* 确保按钮不会被挤压 */
+  flex-shrink: 0;
+  display: none;
+}
+.el-tree-node__content:hover .node-actions {
+  display: inline-flex;
+}
+.more-icon {
+  padding: 4px;
+  border-radius: 50%;
+}
+.more-icon:hover {
+  background-color: var(--el-color-info-light-8);
+}
+.delete-item {
+  color: var(--el-color-danger);
 }
 .footer {
   flex-shrink: 0;
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
 }
 </style>
