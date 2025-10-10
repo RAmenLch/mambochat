@@ -9,6 +9,7 @@ export interface Message {
   createdAt: string; // ISO 8601 date string
   role: MessageRole;
   chatId: string;
+  sortOrder: number;
 }
 
 export interface MessageUpdate {
@@ -34,11 +35,11 @@ export interface AIProviderWithModels extends AIProvider {
 }
 
 export interface Chat {
-  id: string;
+  id:string;
   name: string;
   createdAt: string;
   systemPrompt: string | null;
-  modelParameters: Record<string, any> | null;
+  modelParameters: Record<string, string | number | boolean> | null;
   aiModelId: string | null;
   // --- 新增字段，用于支持文件夹、排序和最近会话 ---
   itemType: ChatItemType;
@@ -50,7 +51,7 @@ export interface Chat {
 export interface ChatCreate {
   name: string;
   systemPrompt?: string | null;
-  modelParameters?: Record<string, any> | null;
+  modelParameters?: Record<string, string | number | boolean> | null;
   aiModelId?: string | null;
   // --- 新增字段 ---
   itemType?: ChatItemType;
@@ -62,7 +63,7 @@ export interface ChatUpdate {
   name?: string | null;
   aiModelId?: string | null;
   systemPrompt?: string | null;
-  modelParameters?: Record<string, any> | null;
+  modelParameters?: Record<string, string | number | boolean> | null;
   // --- 新增字段 ---
   parentId?: string | null;
   sortOrder?: number;

@@ -73,6 +73,7 @@ class Message(Base):
     createdAt = Column(DateTime, nullable=False, default=func.now())
     role = Column(String(20), nullable=False)  # 'user', 'assistant', 'system'
     chatId = Column(String(36), ForeignKey("Chat.id"), nullable=False)
+    sortOrder = Column(Integer, nullable=False)
 
     # 关系：反向引用到 Chat
     chat = relationship("Chat", back_populates="messages")
