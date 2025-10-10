@@ -42,6 +42,13 @@ export const deleteChat = (itemId: string): Promise<Chat> => {
 };
 
 /**
+ * 复制会话
+ */
+export const duplicateChat = (chatId: string): Promise<Chat> => {
+  return apiClient.post(`/chats/${chatId}/duplicate`).then(res => res.data);
+};
+
+/**
  * 批量更新会话和文件夹的排序与层级
  * @param updates 包含更新信息的项目数组
  */

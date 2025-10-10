@@ -13,6 +13,7 @@ import {
   regenerateResponseNonStream,
   updateMessage,
   deleteMessage,
+  duplicateChat,
 } from '@/api/chatService';
 import type { Chat, Message, ChatCreate, ChatUpdate, ChatReorderItem } from '@/api/types';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
@@ -25,7 +26,6 @@ interface ChatState {
   isChatHistoryLoading: boolean;
   isGenerating: boolean;
   currentRequestController: AbortController | null;
-  // --- 新增状态，用于缓存各会话的输入草稿 ---
   userInputCache: Record<string, string>;
 }
 
@@ -45,7 +45,6 @@ export const useChatStore = defineStore('chat', {
     currentChat: (state): Chat | null => {
       if (!state.currentChatId) return null;
       const chat = state.chatList.find(chat => chat.id === state.currentChatId);
-      // 确保返回的是会话而不是文件夹
       return chat?.itemType === 'chat' ? chat : null;
     }
   },
@@ -88,7 +87,6 @@ export const useChatStore = defineStore('chat', {
           this.chatList[chatIndex] = { ...this.chatList[chatIndex], ...chatDetails };
           this.currentChatMessages = newMessages.sort((a, b) => a.sortOrder - b.sortOrder);
         } else {
-          // 如果 chatList 中没有，也直接加载消息
           this.currentChatMessages = chatWithMessages.messages.sort((a, b) => a.sortOrder - b.sortOrder);
         }
       } catch (error) {
@@ -166,6 +164,17 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
+    async duplicateChat(itemId: string) {
+      try {
+        const newChat = await duplicateChat(itemId);
+        this.chatList.push(newChat);
+        await this.selectChat(newChat.id);
+      } catch (error) {
+        console.error(`Failed to duplicate chat ${itemId}:`, error);
+        ElMessage.error('复制会话失败');
+      }
+    },
+
     // --- 消息操作 ---
     async editMessage(payload: { messageId: string, content: string, resend?: boolean }) {
       if (!this.currentChatId) return;
@@ -173,20 +182,19 @@ export const useChatStore = defineStore('chat', {
       const messageIndex = this.currentChatMessages.findIndex(m => m.id === messageId);
       if (messageIndex === -1) return;
 
-      // 乐观更新UI
       const originalContent = this.currentChatMessages[messageIndex].content;
       this.currentChatMessages[messageIndex].content = content;
 
-      if (!resend) { // 仅保存
+      if (!resend) {
         try {
           await updateMessage(messageId, { content });
         } catch (error) {
           console.error('Failed to update message:', error);
-          this.currentChatMessages[messageIndex].content = originalContent; // 失败时回滚
+          this.currentChatMessages[messageIndex].content = originalContent;
           ElMessage.error('编辑消息失败');
         }
-      } else { // 保存并重新发送
-        this.currentChatMessages.splice(messageIndex + 1); // 删除后续所有消息
+      } else {
+        this.currentChatMessages.splice(messageIndex + 1);
         this._startStreamGeneration(`/api/messages/${messageId}`, 'PUT', { content, resend: true });
       }
     },
@@ -195,13 +203,12 @@ export const useChatStore = defineStore('chat', {
       const messageIndex = this.currentChatMessages.findIndex(m => m.id === messageId);
       if (messageIndex === -1) return;
 
-      // 乐观删除
       const deletedMessage = this.currentChatMessages.splice(messageIndex, 1)[0];
       try {
         await deleteMessage(messageId);
       } catch (error) {
         console.error('Failed to delete message:', error);
-        this.currentChatMessages.splice(messageIndex, 0, deletedMessage); // 失败时回滚
+        this.currentChatMessages.splice(messageIndex, 0, deletedMessage);
         ElMessage.error('删除消息失败');
       }
     },
@@ -229,44 +236,20 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    async regenerateLastResponse() {
-      if (!this.currentChat || this.isGenerating || this.currentChatMessages.length < 1) return;
-      const lastUserMessage = [...this.currentChatMessages].reverse().find(m => m.role === 'user');
-      if (!lastUserMessage) return;
-
-      if (this.currentChatMessages[this.currentChatMessages.length - 1].role === 'assistant') {
-        this.currentChatMessages.pop();
-      }
-
-      const useStream = this.currentChat.modelParameters?.stream ?? true;
-      if (useStream) {
-        this._startStreamGeneration(`/api/chats/${this.currentChatId}/regenerate`, 'POST', { content: lastUserMessage.content });
-      } else {
-        this._startNonStreamGeneration(lastUserMessage.content, regenerateResponseNonStream);
-      }
-    },
-
     async regenerateFrom(messageId: string) {
       if (!this.currentChatId || this.isGenerating) return;
       const messageIndex = this.currentChatMessages.findIndex(m => m.id === messageId);
       if (messageIndex === -1) return;
 
       const targetMessage = this.currentChatMessages[messageIndex];
-      const historySlice = this.currentChatMessages.slice(0, messageIndex + 1);
-      const lastUserMessage = [...historySlice].reverse().find(m => m.role === 'user');
-      if (!lastUserMessage) {
-        ElMessage.warning('无法找到用于重新生成的用户输入');
-        return;
-      }
 
-      // 乐观UI更新
       if (targetMessage.role === 'assistant') {
         this.currentChatMessages.splice(messageIndex);
       } else {
         this.currentChatMessages.splice(messageIndex + 1);
       }
 
-      this._startStreamGeneration(`/api/chats/${this.currentChatId}/regenerate-from/${messageId}`, 'POST', { content: lastUserMessage.content });
+      this._startStreamGeneration(`/api/chats/${this.currentChatId}/regenerate-from/${messageId}`, 'POST', {});
     },
 
     stopGeneration() {
@@ -336,10 +319,9 @@ export const useChatStore = defineStore('chat', {
         const messageIndex = this.currentChatMessages.findIndex(m => m.id === assistantMessagePlaceholderId);
         if (messageIndex !== -1) {
           this.currentChatMessages[messageIndex] = finalMessage;
-        } else { // 如果占位符被意外移除，则追加
+        } else {
           this.currentChatMessages.push(finalMessage);
         }
-        // 非流式请求也需要刷新用户消息的ID
         const userMessageIndex = this.currentChatMessages.findIndex(m => m.role === 'user' && m.id.startsWith('temp-user'));
         if(userMessageIndex !== -1) {
           getChatWithMessages(chatId).then(chat => { if (this.currentChatId === chatId) this.currentChatMessages = chat.messages.sort((a, b) => a.sortOrder - b.sortOrder); });
@@ -350,7 +332,6 @@ export const useChatStore = defineStore('chat', {
         if (error instanceof Error) {
           errorMessage = error.message;
         }
-        // 假设是 axios 类型的错误结构
         if (typeof error === 'object' && error !== null && 'response' in error) {
             const errResponse = error.response as { data?: { detail?: string } };
             if(errResponse.data?.detail) {

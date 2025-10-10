@@ -181,6 +181,50 @@ async def batch_update_chats_order(db: AsyncSession, updates: List[schemas.ChatR
     return True
 
 
+async def duplicate_chat(db: AsyncSession, chat_id: str) -> Optional[models.Chat]:
+    """复制一个现有会话及其所有消息来创建一个新会话"""
+    original_chat = await get_chat(db, chat_id=chat_id)
+    if not original_chat or original_chat.itemType != 'chat':
+        return None
+
+    # 计算新会话的排序值，放在同一层级的末尾
+    max_sort_order_result = await db.execute(
+        select(func.max(models.Chat.sortOrder))
+        .filter(models.Chat.parentId == original_chat.parentId)
+    )
+    max_sort_order = max_sort_order_result.scalar_one_or_none()
+    new_sort_order = (max_sort_order or 0) + 1
+
+    # 1. 创建新会话的配置
+    new_chat_data = schemas.ChatCreate(
+        name=f"{original_chat.name} (副本)",
+        systemPrompt=original_chat.systemPrompt,
+        modelParameters=json.loads(original_chat.modelParameters) if original_chat.modelParameters else None,
+        aiModelId=original_chat.aiModelId,
+        itemType='chat',
+        parentId=original_chat.parentId,
+        sortOrder=new_sort_order
+    )
+    new_chat = await create_chat(db, chat=new_chat_data)
+
+    # 2. 复制原会话的所有消息到新会话
+    if original_chat.messages:
+        new_messages = [
+            models.Message(
+                content=msg.content,
+                role=msg.role,
+                sortOrder=msg.sortOrder,
+                chatId=new_chat.id  # 关联到新创建的会话ID
+            )
+            for msg in original_chat.messages
+        ]
+        db.add_all(new_messages)
+        await db.commit()
+        await db.refresh(new_chat, ['messages']) # 刷新关系，以便返回对象包含消息
+
+    return new_chat
+
+
 # --- Message CRUD ---
 
 async def get_message(db: AsyncSession, message_id: str) -> Optional[models.Message]:
