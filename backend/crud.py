@@ -3,7 +3,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload, joinedload
-from sqlalchemy import func
+from sqlalchemy import func, delete
 from typing import List, Optional
 import json
 
@@ -189,13 +189,15 @@ async def get_message(db: AsyncSession, message_id: str) -> Optional[models.Mess
     return result.scalars().first()
 
 
-async def update_message(db: AsyncSession, message_id: str, message_update: schemas.MessageUpdate) -> Optional[models.Message]:
+async def update_message(db: AsyncSession, message_id: str, message_update: schemas.MessageUpdate) -> Optional[
+    models.Message]:
     """更新一条已存在消息的内容"""
     db_message = await get_message(db, message_id=message_id)
     if not db_message:
         return None
-
-    db_message.content = message_update.content
+    # 仅更新 content，resend 逻辑在 router 层处理
+    update_data = message_update.model_dump(exclude_unset=True)
+    db_message.content = update_data['content']
     await db.commit()
     await db.refresh(db_message)
     return db_message
@@ -226,6 +228,34 @@ async def create_message(db: AsyncSession, message: schemas.MessageCreate, chat_
     return db_message
 
 
+async def delete_message(db: AsyncSession, message_id: str) -> Optional[models.Message]:
+    """通过ID删除单条消息"""
+    db_message = await get_message(db, message_id)
+    if db_message:
+        await db.delete(db_message)
+        await db.commit()
+    return db_message
+
+
+async def delete_messages_after(db: AsyncSession, chat_id: str, message_id: str, include_self: bool = False):
+    """删除指定会话中某条消息之后的所有消息"""
+    ref_message = await get_message(db, message_id=message_id)
+    if not ref_message:
+        return 0
+
+    query = delete(models.Message).where(models.Message.chatId == chat_id)
+
+    if include_self:
+        query = query.where(models.Message.createdAt >= ref_message.createdAt)
+    else:
+        query = query.where(models.Message.createdAt > ref_message.createdAt)
+
+    result = await db.execute(query)
+    await db.commit()
+
+    return result.rowcount
+
+
 async def delete_last_assistant_message(db: AsyncSession, chat_id: str) -> Optional[models.Message]:
     """删除指定会话中最新的一条 'assistant' 消息"""
     result = await db.execute(
@@ -242,3 +272,4 @@ async def delete_last_assistant_message(db: AsyncSession, chat_id: str) -> Optio
         await db.commit()
 
     return last_message
+

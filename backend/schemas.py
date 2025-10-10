@@ -26,7 +26,9 @@ class MessageCreate(MessageBase):
 
 
 class MessageUpdate(BaseModel):
+    """用于更新消息内容，可选择是否重新触发生成"""
     content: str
+    resend: Optional[bool] = Field(False, description="仅对用户消息有效。若为true，更新内容后将删除此消息之后的所有对话并重新生成AI回答。")
 
 
 class Message(MessageBase):
@@ -142,3 +144,4 @@ class ChatReorderItem(BaseModel):
 
 class GenerateRequest(BaseModel):
     content: str
+

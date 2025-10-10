@@ -127,6 +127,77 @@ async def create_message_for_chat(
     return await crud.create_message(db=db, message=message, chat_id=chat_id)
 
 
+@router.put("/messages/{message_id}", summary="更新消息内容")
+async def update_message_content(
+        message_id: str,
+        message_update: schemas.MessageUpdate
+):
+    """
+    更新指定消息的内容。
+    如果 `resend` 为 true（仅限用户消息），则更新内容后，删除后续所有消息并重新生成AI回答。
+    """
+    async with AsyncSessionLocal() as db:
+        db_message = await crud.get_message(db, message_id=message_id)
+        if not db_message:
+            raise HTTPException(status_code=404, detail="Message not found")
+
+        updated_message = await crud.update_message(db, message_id=message_id, message_update=message_update)
+
+        if not message_update.resend:
+            return updated_message
+
+        # "保存并发送"逻辑
+        if db_message.role != schemas.MessageRole.USER:
+            raise HTTPException(status_code=400, detail="Resend is only applicable to user messages.")
+
+        await crud.delete_messages_after(db, chat_id=db_message.chatId, message_id=message_id, include_self=False)
+
+    # 重新生成需要使用新的会话，因此不能在上面的 with 块内
+    # 使用更新后的用户消息内容作为重新生成的上下文
+    request = schemas.GenerateRequest(content=updated_message.content)
+    return StreamingResponse(
+        llm_service.generate_chat_response(db_message.chatId, request, save_user_message=False),
+        media_type="text/event-stream"
+    )
+
+
+@router.delete("/messages/{message_id}", response_model=schemas.Message, summary="删除单条消息")
+async def delete_single_message(message_id: str, db: AsyncSession = Depends(get_db)):
+    db_message = await crud.delete_message(db, message_id=message_id)
+    if db_message is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return db_message
+
+
+@router.post(
+    "/chats/{chat_id}/regenerate-from/{message_id}",
+    summary="从指定消息开始重新回答 (流式)",
+    response_description="一个包含新AI回复文本块的Server-Sent Events (SSE)流"
+)
+async def regenerate_from_message(
+        chat_id: str,
+        message_id: str,
+        request: schemas.GenerateRequest,
+):
+    """
+    根据指定消息，删除其后的对话历史，并重新生成AI回答。
+    - 如果指定的是AI消息，则删除此消息及之后所有消息。
+    - 如果指定的是用户消息，则删除此消息之后的所有消息。
+    """
+    async with AsyncSessionLocal() as db:
+        db_message = await crud.get_message(db, message_id=message_id)
+        if not db_message or db_message.chatId != chat_id:
+            raise HTTPException(status_code=404, detail="Message not found in the specified chat.")
+
+        include_self = (db_message.role == schemas.MessageRole.ASSISTANT)
+        await crud.delete_messages_after(db, chat_id=chat_id, message_id=message_id, include_self=include_self)
+
+    return StreamingResponse(
+        llm_service.generate_chat_response(chat_id, request, save_user_message=False),
+        media_type="text/event-stream"
+    )
+
+
 @router.post(
     "/chats/{chat_id}/generate",
     summary="生成AI回复 (流式)",
@@ -196,4 +267,37 @@ async def generate_response_non_stream(
     if db_chat.itemType != 'chat':
         raise HTTPException(status_code=400, detail="Cannot generate response for a folder.")
     assistant_message = await llm_service.generate_chat_response_non_stream(chat_id, request, db)
+    return assistant_message
+
+
+@router.post(
+    "/chats/{chat_id}/regenerate-non-stream",
+    response_model=schemas.Message,
+    summary="重新生成AI回复 (非流式)",
+    response_description="一个包含新AI回复的消息JSON对象"
+)
+async def regenerate_response_non_stream(
+        chat_id: str,
+        request: schemas.GenerateRequest,
+        db: AsyncSession = Depends(get_db)
+):
+    """
+    删除最后一条AI的回复，并根据相同的用户输入重新生成一次（非流式）。
+    """
+    db_chat = await crud.get_chat(db, chat_id=chat_id)
+    if not db_chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    if db_chat.itemType != 'chat':
+        raise HTTPException(status_code=400, detail="Cannot regenerate response for a folder.")
+
+    await crud.delete_last_assistant_message(db, chat_id=chat_id)
+
+    # 调用非流式生成服务，并且不保存新的用户消息
+    # 这需要 llm_service.generate_chat_response_non_stream 支持 save_user_message 参数
+    assistant_message = await llm_service.generate_chat_response_non_stream(
+        chat_id,
+        request,
+        db,
+        save_user_message=False
+    )
     return assistant_message

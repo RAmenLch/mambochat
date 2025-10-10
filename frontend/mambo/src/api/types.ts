@@ -11,6 +11,11 @@ export interface Message {
   chatId: string;
 }
 
+export interface MessageUpdate {
+  content: string;
+  resend?: boolean;
+}
+
 export interface AIModel {
   id: string;
   modelId: string;

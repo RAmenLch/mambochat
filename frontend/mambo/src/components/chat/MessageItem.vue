@@ -1,5 +1,10 @@
 <template>
-  <div class="message-item-container" :class="roleClass">
+  <div
+    class="message-item-container"
+    :class="roleClass"
+    @mouseenter="showActions = true"
+    @mouseleave="showActions = false"
+  >
     <!-- 头像 -->
     <div class="message-avatar">
       <el-avatar>
@@ -13,30 +18,101 @@
       <!-- 消息内容 -->
       <div class="message-content" v-html="renderedContent"></div>
 
-      <!-- 操作按钮区域 -->
-      <div class="message-actions">
-        <el-button
-          v-if="
-            message.role === 'assistant' && isLastMessage && !isGenerating
-          "
-          :icon="Refresh"
-          circle
-          size="small"
-          title="重新生成"
-          @click="chatStore.regenerateLastResponse()"
-        />
+      <!-- 悬浮操作菜单 -->
+      <div
+        class="message-actions"
+        :class="{ 'is-visible': showActions && !isGeneratingPlaceholder }"
+      >
+        <!-- AI消息: 重新回答 -->
+        <el-tooltip content="重新回答" placement="top" :show-after="500">
+          <el-button
+            v-if="message.role === 'assistant'"
+            :icon="Refresh"
+            circle
+            size="small"
+            @click="handleRegenerate"
+          />
+        </el-tooltip>
+        <!-- 用户消息: 在下方重新回答 -->
+        <el-tooltip content="在下方重新回答" placement="top" :show-after="500">
+          <el-button
+            v-if="message.role === 'user'"
+            :icon="RefreshLeft"
+            circle
+            size="small"
+            @click="handleRegenerate"
+          />
+        </el-tooltip>
+
+        <!-- 编辑 -->
+        <el-tooltip content="编辑" placement="top" :show-after="500">
+          <el-button :icon="Edit" circle size="small" @click="openEditDialog" />
+        </el-tooltip>
+
+        <!-- 复制 -->
+        <el-tooltip content="复制" placement="top" :show-after="500">
+          <el-button
+            :icon="CopyDocument"
+            circle
+            size="small"
+            @click="handleCopy"
+          />
+        </el-tooltip>
+
+        <!-- 删除 -->
+        <el-tooltip content="删除" placement="top" :show-after="500">
+          <el-button
+            :icon="Delete"
+            circle
+            size="small"
+            type="danger"
+            plain
+            @click="handleDelete"
+          />
+        </el-tooltip>
       </div>
     </div>
   </div>
+
+  <!-- 编辑消息弹窗 -->
+  <el-dialog v-model="editDialogVisible" title="编辑消息" width="650px">
+    <el-input
+      v-model="editingContent"
+      type="textarea"
+      :rows="12"
+      resize="none"
+      placeholder="消息内容不能为空"
+    />
+    <template #footer>
+      <span class="dialog-footer">
+        <el-button @click="editDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleSaveEdit">保存</el-button>
+        <el-button
+          v-if="editingMessage?.role === 'user'"
+          type="success"
+          @click="handleSaveAndSend"
+        >
+          保存并发送
+        </el-button>
+      </span>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref, shallowRef } from 'vue';
 import type { Message } from '@/api/types';
-import { User, Cpu, Refresh } from '@element-plus/icons-vue';
 import { useChatStore } from '@/stores/chatStore';
-
-// 引入 markdown-it 和 highlight.js
+import { ElMessage, ElMessageBox } from 'element-plus';
+import {
+  User,
+  Cpu,
+  Refresh,
+  RefreshLeft,
+  Edit,
+  CopyDocument,
+  Delete,
+} from '@element-plus/icons-vue';
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
 
@@ -48,8 +124,79 @@ const props = defineProps<{
 }>();
 
 const chatStore = useChatStore();
+const showActions = ref(false);
 
-// -- Markdown 渲染逻辑 --
+// --- 编辑弹窗状态 ---
+const editDialogVisible = ref(false);
+const editingContent = ref('');
+const editingMessage = shallowRef<Message | null>(null);
+
+// --- 业务逻辑 ---
+const isGeneratingPlaceholder = computed(
+  () => props.isGenerating && props.isLastMessage
+);
+
+const handleRegenerate = () => {
+  chatStore.regenerateFrom(props.message.id);
+};
+
+const openEditDialog = () => {
+  editingMessage.value = props.message;
+  editingContent.value = props.message.content;
+  editDialogVisible.value = true;
+};
+
+const handleSaveEdit = () => {
+  if (editingContent.value.trim() === '') {
+    ElMessage.warning('内容不能为空');
+    return;
+  }
+  chatStore.editMessage({
+    messageId: editingMessage.value!.id,
+    content: editingContent.value,
+    resend: false,
+  });
+  editDialogVisible.value = false;
+};
+
+const handleSaveAndSend = () => {
+  if (editingContent.value.trim() === '') {
+    ElMessage.warning('内容不能为空');
+    return;
+  }
+  chatStore.editMessage({
+    messageId: editingMessage.value!.id,
+    content: editingContent.value,
+    resend: true,
+  });
+  editDialogVisible.value = false;
+};
+
+const handleCopy = () => {
+  navigator.clipboard
+    .writeText(props.message.content)
+    .then(() => {
+      ElMessage.success('已复制到剪贴板');
+    })
+    .catch((err) => {
+      ElMessage.error('复制失败');
+      console.error('Could not copy text: ', err);
+    });
+};
+
+const handleDelete = () => {
+  ElMessageBox.confirm('确定要删除这条消息吗？', '确认删除', {
+    confirmButtonText: '删除',
+    cancelButtonText: '取消',
+    type: 'warning',
+  })
+    .then(() => {
+      chatStore.deleteMessage(props.message.id);
+    })
+    .catch(() => {});
+};
+
+// --- 渲染逻辑 ---
 const md = new MarkdownIt({
   highlight: (str, lang) => {
     if (lang && hljs.getLanguage(lang)) {
@@ -68,14 +215,12 @@ const md = new MarkdownIt({
 });
 
 const renderedContent = computed(() => {
-  // 当内容为空或只有占位符时，显示一个加载动画或特定样式，以改善体验
-  if (props.isGenerating && props.isLastMessage && props.message.content === '...') {
+  if (isGeneratingPlaceholder.value && props.message.content === '...') {
     return '<div class="typing-indicator"><span></span><span></span><span></span></div>';
   }
   return md.render(props.message.content);
 });
 
-// -- 动态样式 --
 const roleClass = computed(() => ({
   'is-user': props.message.role === 'user',
   'is-assistant': props.message.role === 'assistant',
@@ -83,7 +228,6 @@ const roleClass = computed(() => ({
 </script>
 
 <style>
-/* 确保 highlight.js 的样式能正确应用 */
 @import 'highlight.js/styles/github-dark.css';
 
 .hljs {
@@ -97,7 +241,6 @@ const roleClass = computed(() => ({
 <style scoped>
 .message-item-container {
   display: flex;
-  /* --- 核心修复: 顶部对齐头像和消息内容 --- */
   align-items: flex-start;
   margin-bottom: 20px;
   max-width: 90%;
@@ -106,14 +249,14 @@ const roleClass = computed(() => ({
 .message-avatar {
   flex-shrink: 0;
   margin-right: 12px;
-  /* 稍微将头像向下移动一点，使其与文本的第一行更对齐 */
   margin-top: 2px;
 }
 
 .message-body {
   display: flex;
-  align-items: center; /* 垂直居中内容和按钮 */
-  gap: 8px; /* 内容和按钮之间的间距 */
+  flex-direction: column;
+  /* 关键修改: 移除 gap，使用 margin-top 代替，确保不可见时无间距 */
+  min-width: 80px;
 }
 
 .message-content {
@@ -123,18 +266,26 @@ const roleClass = computed(() => ({
   word-break: break-word;
   line-height: 1.7;
   color: var(--color-text);
+  min-height: 40px;
 }
 
 .message-actions {
-  flex-shrink: 0;
-  opacity: 0; /* 默认隐藏 */
-  transition: opacity 0.2s ease;
+  display: flex;
+  gap: 4px;
+  margin-top: 4px; /* 关键修改: 替代 gap，仅在可见时有意义 */
+
+  /* 关键修改: 默认不可见，但占位 */
+  opacity: 0;
+  visibility: hidden;
+  height: 24px; /* 关键修改: 预留固定高度 (el-button small size) */
+  transition: opacity 0.2s, visibility 0.2s;
+}
+/* 关键修改: 悬停时可见 */
+.message-actions.is-visible {
+  opacity: 1;
+  visibility: visible;
 }
 
-/* 鼠标悬停在整个消息体上时显示操作按钮 */
-.message-body:hover .message-actions {
-  opacity: 1;
-}
 
 /* -- 用户消息样式 -- */
 .is-user {
@@ -145,35 +296,26 @@ const roleClass = computed(() => ({
   margin-right: 0;
   margin-left: 12px;
 }
-.is-user .message-body {
-  flex-direction: row-reverse;
-}
 .is-user .message-content {
   background-color: var(--el-color-primary-light-9);
   color: var(--el-color-primary-dark-2);
 }
 
-/* -- 深度选择器样式，用于渲染 v-html 中的内容 -- */
-.message-content :deep(p) {
-  margin: 0 0 0.5em;
+.is-user .message-body {
+  align-items: flex-start;
 }
-.message-content :deep(p:last-child) {
-  margin-bottom: 0;
+.is-assistant .message-body {
+  align-items: flex-end;
 }
-.message-content :deep(ul),
-.message-content :deep(ol) {
-  padding-inline-start: 25px;
-}
-.message-content :deep(pre) {
-  margin: 1em 0;
-}
-.message-content :deep(code) {
-  font-family: 'Courier New', Courier, monospace;
-}
-.message-content :deep(pre > code) {
-  padding: 0;
-  background-color: transparent;
-}
+
+
+/* -- v-html 内容样式 -- */
+.message-content :deep(p) { margin: 0 0 0.5em; }
+.message-content :deep(p:last-child) { margin-bottom: 0; }
+.message-content :deep(ul), .message-content :deep(ol) { padding-inline-start: 25px; }
+.message-content :deep(pre) { margin: 1em 0; }
+.message-content :deep(code) { font-family: 'Courier New', Courier, monospace; }
+.message-content :deep(pre > code) { padding: 0; background-color: transparent; }
 .message-content :deep(:not(pre) > code) {
   background-color: rgba(0, 0, 0, 0.08);
   padding: 0.2em 0.4em;
@@ -181,33 +323,13 @@ const roleClass = computed(() => ({
   font-size: 0.9em;
 }
 
-/* AI 正在输入时的打字动画 */
-.message-content :deep(.typing-indicator) {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 24px; /* 与单行文本高度接近 */
-}
+/* -- 打字动画 -- */
+.message-content :deep(.typing-indicator) { display: flex; align-items: center; justify-content: center; height: 24px; }
 .message-content :deep(.typing-indicator span) {
-  height: 8px;
-  width: 8px;
-  border-radius: 50%;
-  background-color: #909399;
-  margin: 0 3px;
+  height: 8px; width: 8px; border-radius: 50%; background-color: #909399; margin: 0 3px;
   animation: bounce 1.4s infinite ease-in-out both;
 }
-.message-content :deep(.typing-indicator span:nth-of-type(1)) {
-  animation-delay: -0.32s;
-}
-.message-content :deep(.typing-indicator span:nth-of-type(2)) {
-  animation-delay: -0.16s;
-}
-@keyframes bounce {
-  0%, 80%, 100% {
-    transform: scale(0);
-  }
-  40% {
-    transform: scale(1);
-  }
-}
+.message-content :deep(.typing-indicator span:nth-of-type(1)) { animation-delay: -0.32s; }
+.message-content :deep(.typing-indicator span:nth-of-type(2)) { animation-delay: -0.16s; }
+@keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
 </style>

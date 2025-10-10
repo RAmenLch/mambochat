@@ -2,7 +2,7 @@
 
 import httpx
 import json
-import asyncio  # <-- 新增导入
+import asyncio
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import AsyncGenerator, List, Tuple, Dict, Any
@@ -114,7 +114,8 @@ async def generate_chat_response(
                             except json.JSONDecodeError:
                                 continue
         except httpx.HTTPStatusError as e:
-            error_details = e.response.text
+            error_body = await e.response.aread()
+            error_details = error_body.decode()
             error_msg = f'\n\n**错误: {error_details}**'
             full_response_content += error_msg
             yield f"data: {json.dumps(error_msg)}\n\n"
@@ -159,16 +160,19 @@ async def generate_chat_response(
 async def generate_chat_response_non_stream(
         chat_id: str,
         request: schemas.GenerateRequest,
-        db: AsyncSession
+        db: AsyncSession,
+        save_user_message: bool = True
 ) -> models.Message:
     """
     处理聊天请求，调用外部LLM API并以非流式一次性返回响应。
     """
-    await crud.create_message(
-        db,
-        message=schemas.MessageCreate(content=request.content, role=schemas.MessageRole.USER),
-        chat_id=chat_id
-    )
+    if save_user_message:
+        await crud.create_message(
+            db,
+            message=schemas.MessageCreate(content=request.content, role=schemas.MessageRole.USER),
+            chat_id=chat_id
+        )
+
     db_chat = await crud.get_chat(db, chat_id=chat_id)
     if not db_chat:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
@@ -204,3 +208,4 @@ async def generate_chat_response_non_stream(
         return assistant_message
     raise HTTPException(status_code=status.HTTP_5_00_INTERNAL_SERVER_ERROR,
                         detail="LLM provider returned an empty response.")
+
