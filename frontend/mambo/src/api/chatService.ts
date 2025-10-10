@@ -1,5 +1,7 @@
+// frontend/mambo/src/api/chatService.ts
+
 import apiClient from './index';
-import type { Chat, ChatCreate, ChatWithMessages, ChatUpdate, ChatReorderItem } from './types';
+import type { Chat, ChatCreate, ChatWithMessages, ChatUpdate, ChatReorderItem, Message, MessageUpdate } from './types';
 
 /**
  * 获取会话和文件夹列表
@@ -46,3 +48,39 @@ export const deleteChat = (itemId: string): Promise<Chat> => {
 export const reorderChats = (updates: ChatReorderItem[]): Promise<{ message: string }> => {
   return apiClient.post('/chats/reorder', updates).then(res => res.data);
 }
+
+/**
+ * 更新单条消息的内容 (不支持重新发送生成)。
+ * "保存并发送"的流式响应由 store 层直接处理。
+ * @param messageId 消息ID
+ * @param data 包含新内容的对象
+ */
+export const updateMessage = (messageId: string, data: MessageUpdate): Promise<Message> => {
+  return apiClient.put(`/messages/${messageId}`, data).then(res => res.data);
+};
+
+/**
+ * 删除单条消息
+ * @param messageId 消息ID
+ */
+export const deleteMessage = (messageId: string): Promise<Message> => {
+  return apiClient.delete(`/messages/${messageId}`).then(res => res.data);
+};
+
+/**
+ * 生成AI回复 (非流式)
+ * @param chatId 会话ID
+ * @param content 用户输入内容
+ */
+export const generateResponseNonStream = (chatId: string, content: string): Promise<Message> => {
+    return apiClient.post(`/chats/${chatId}/generate-non-stream`, { content }).then(res => res.data);
+};
+
+/**
+ * 重新生成AI回复 (非流式)
+ * @param chatId 会话ID
+ * @param content 对应的用户输入内容
+ */
+export const regenerateResponseNonStream = (chatId: string, content: string): Promise<Message> => {
+    return apiClient.post(`/chats/${chatId}/regenerate-non-stream`, { content }).then(res => res.data);
+};

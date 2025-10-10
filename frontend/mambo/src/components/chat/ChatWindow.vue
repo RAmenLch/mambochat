@@ -45,7 +45,7 @@
           resize="none"
           placeholder="输入消息... (Shift + Enter 换行)"
           :disabled="isGenerating"
-          @keydown.enter.prevent="handleEnterKey"
+          @keydown.enter="handleEnterKey"
         />
         <el-button
           v-if="!isGenerating"
@@ -245,8 +245,16 @@ const handleSendMessage = async () => {
   await chatStore.sendMessage(content);
 };
 
-const handleEnterKey = (event: KeyboardEvent) => {
-  if (event.shiftKey) return;
+const handleEnterKey = (event: Event) => {
+  // 使用类型守卫确保事件是 KeyboardEvent
+  if (!(event instanceof KeyboardEvent)) return;
+
+  if (event.shiftKey) {
+    // 当 Shift 被按下时，允许默认的换行行为
+    return;
+  }
+  // 否则，阻止默认的换行行为，并发送消息
+  event.preventDefault();
   handleSendMessage();
 };
 
