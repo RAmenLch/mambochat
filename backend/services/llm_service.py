@@ -65,11 +65,13 @@ async def generate_chat_response(
     """
     async with AsyncSessionLocal() as db:
         if save_user_message:
+            # 用户消息现在也需要 sortOrder，由 crud.create_message 自动处理
             await crud.create_message(
                 db,
                 message=schemas.MessageCreate(content=request.content, role=schemas.MessageRole.USER),
                 chat_id=chat_id
             )
+        # 助手消息占位符
         assistant_message = await crud.create_message(
             db,
             message=schemas.MessageCreate(content="", role=schemas.MessageRole.ASSISTANT),
@@ -114,8 +116,14 @@ async def generate_chat_response(
                             except json.JSONDecodeError:
                                 continue
         except httpx.HTTPStatusError as e:
-            error_body = await e.response.aread()
-            error_details = error_body.decode()
+            # --- 核心修复：增加对 StreamClosed 异常的健壮处理 ---
+            error_details = ""
+            try:
+                error_body = await e.response.aread()
+                error_details = error_body.decode()
+            except httpx.StreamClosed:
+                error_details = f"HTTP {e.response.status_code} {e.response.reason_phrase}. (无法读取响应体，流已关闭)"
+
             error_msg = f'\n\n**错误: {error_details}**'
             full_response_content += error_msg
             yield f"data: {json.dumps(error_msg)}\n\n"
@@ -130,12 +138,11 @@ async def generate_chat_response(
                 full_response_content += error_msg
                 yield f"data: {json.dumps(error_msg)}\n\n"
             else:
-                raise  # 重新抛出 CancelledError 以便 finally 块可以处理
+                raise
     finally:
         if assistant_message and full_response_content.strip():
             print(f"Saving content for message {assistant_message.id}. Content length: {len(full_response_content)}")
 
-            # --- 核心修复: 使用 asyncio.shield 保护最终的数据库更新操作 ---
             async def update_task():
                 async with AsyncSessionLocal() as final_db:
                     await crud.update_message(
@@ -146,11 +153,8 @@ async def generate_chat_response(
                     print(f"Successfully saved content for message {assistant_message.id}.")
 
             try:
-                # 即使此处的 await 被取消，update_task() 也会继续在后台运行完成
                 await asyncio.shield(update_task())
             except asyncio.CancelledError:
-                # 这是预期的行为，当客户端断开连接时，shield会抛出此异常
-                # 但后台任务仍在运行，我们只需等待它完成即可
                 print("Request cancelled, shielded update task is running in the background.")
                 pass
         else:
@@ -208,4 +212,3 @@ async def generate_chat_response_non_stream(
         return assistant_message
     raise HTTPException(status_code=status.HTTP_5_00_INTERNAL_SERVER_ERROR,
                         detail="LLM provider returned an empty response.")
-

@@ -35,6 +35,7 @@ class Message(MessageBase):
     id: str
     createdAt: datetime
     chatId: str
+    sortOrder: int
 
     class Config:
         from_attributes = True

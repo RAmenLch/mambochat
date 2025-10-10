@@ -14,7 +14,7 @@ import {
   updateMessage,
   deleteMessage,
 } from '@/api/chatService';
-import type { Chat, Message, ChatCreate, ChatUpdate, ChatReorderItem, MessageUpdate } from '@/api/types';
+import type { Chat, Message, ChatCreate, ChatUpdate, ChatReorderItem } from '@/api/types';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 
 interface ChatState {
@@ -84,10 +84,13 @@ export const useChatStore = defineStore('chat', {
         const chatWithMessages = await getChatWithMessages(chatId);
         const chatIndex = this.chatList.findIndex(c => c.id === chatId);
         if (chatIndex !== -1) {
-          const { messages, ...chatDetails } = chatWithMessages;
+          const { messages: newMessages, ...chatDetails } = chatWithMessages;
           this.chatList[chatIndex] = { ...this.chatList[chatIndex], ...chatDetails };
+          this.currentChatMessages = newMessages.sort((a, b) => a.sortOrder - b.sortOrder);
+        } else {
+          // 如果 chatList 中没有，也直接加载消息
+          this.currentChatMessages = chatWithMessages.messages.sort((a, b) => a.sortOrder - b.sortOrder);
         }
-        this.currentChatMessages = chatWithMessages.messages;
       } catch (error) {
         console.error(`Failed to fetch messages for chat ${chatId}:`, error);
         this.currentChatId = null;
@@ -215,7 +218,7 @@ export const useChatStore = defineStore('chat', {
 
       delete this.userInputCache[this.currentChatId];
 
-      const userMessage: Message = { id: `temp-user-${Date.now()}`, chatId: this.currentChatId, role: 'user', content, createdAt: new Date().toISOString() };
+      const userMessage: Message = { id: `temp-user-${Date.now()}`, chatId: this.currentChatId, role: 'user', content, createdAt: new Date().toISOString(), sortOrder: 99999 };
       this.currentChatMessages.push(userMessage);
 
       const useStream = this.currentChat.modelParameters?.stream ?? true;
@@ -257,7 +260,6 @@ export const useChatStore = defineStore('chat', {
       }
 
       // 乐观UI更新
-      const messagesToRemoveCount = this.currentChatMessages.length - (messageIndex + 1);
       if (targetMessage.role === 'assistant') {
         this.currentChatMessages.splice(messageIndex);
       } else {
@@ -281,7 +283,7 @@ export const useChatStore = defineStore('chat', {
       const chatId = this.currentChatId;
 
       const assistantMessagePlaceholderId = `temp-assistant-${Date.now()}`;
-      const assistantMessagePlaceholder: Message = { id: assistantMessagePlaceholderId, chatId, role: 'assistant', content: '...', createdAt: new Date().toISOString() };
+      const assistantMessagePlaceholder: Message = { id: assistantMessagePlaceholderId, chatId, role: 'assistant', content: '...', createdAt: new Date().toISOString(), sortOrder: 99999 };
       this.currentChatMessages.push(assistantMessagePlaceholder);
 
       this.isGenerating = true;
@@ -302,7 +304,7 @@ export const useChatStore = defineStore('chat', {
           }
         },
         onclose: () => {
-          getChatWithMessages(chatId).then(chat => { if (this.currentChatId === chatId) this.currentChatMessages = chat.messages; });
+          getChatWithMessages(chatId).then(chat => { if (this.currentChatId === chatId) this.currentChatMessages = chat.messages.sort((a, b) => a.sortOrder - b.sortOrder); });
           this.isGenerating = false;
           this.currentRequestController = null;
         },
@@ -310,7 +312,7 @@ export const useChatStore = defineStore('chat', {
           this.isGenerating = false;
           this.currentRequestController = null;
           if (err.name === 'AbortError') {
-            getChatWithMessages(chatId).then(chat => { if (this.currentChatId === chatId) this.currentChatMessages = chat.messages; });
+            getChatWithMessages(chatId).then(chat => { if (this.currentChatId === chatId) this.currentChatMessages = chat.messages.sort((a, b) => a.sortOrder - b.sortOrder); });
           } else {
              const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessagePlaceholderId);
              if (messageToUpdate) messageToUpdate.content += '\n\n**抱歉，请求出错。**';
@@ -325,7 +327,7 @@ export const useChatStore = defineStore('chat', {
       const chatId = this.currentChatId;
 
       const assistantMessagePlaceholderId = `temp-assistant-${Date.now()}`;
-      const assistantMessagePlaceholder: Message = { id: assistantMessagePlaceholderId, chatId, role: 'assistant', content: '...', createdAt: new Date().toISOString() };
+      const assistantMessagePlaceholder: Message = { id: assistantMessagePlaceholderId, chatId, role: 'assistant', content: '...', createdAt: new Date().toISOString(), sortOrder: 99999 };
       this.currentChatMessages.push(assistantMessagePlaceholder);
       this.isGenerating = true;
 
@@ -340,12 +342,24 @@ export const useChatStore = defineStore('chat', {
         // 非流式请求也需要刷新用户消息的ID
         const userMessageIndex = this.currentChatMessages.findIndex(m => m.role === 'user' && m.id.startsWith('temp-user'));
         if(userMessageIndex !== -1) {
-          getChatWithMessages(chatId).then(chat => { if (this.currentChatId === chatId) this.currentChatMessages = chat.messages; });
+          getChatWithMessages(chatId).then(chat => { if (this.currentChatId === chatId) this.currentChatMessages = chat.messages.sort((a, b) => a.sortOrder - b.sortOrder); });
         }
 
-      } catch (error: any) {
+      } catch (error: unknown) {
+        let errorMessage = '请求失败';
+        if (error instanceof Error) {
+          errorMessage = error.message;
+        }
+        // 假设是 axios 类型的错误结构
+        if (typeof error === 'object' && error !== null && 'response' in error) {
+            const errResponse = error.response as { data?: { detail?: string } };
+            if(errResponse.data?.detail) {
+                errorMessage = errResponse.data.detail;
+            }
+        }
+
         const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessagePlaceholderId);
-        if (messageToUpdate) messageToUpdate.content = `**请求失败**: ${error.response?.data?.detail || error.message}`;
+        if (messageToUpdate) messageToUpdate.content = `**${errorMessage}**`;
       } finally {
         this.isGenerating = false;
       }

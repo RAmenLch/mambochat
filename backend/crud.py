@@ -209,7 +209,7 @@ async def get_messages_by_chat(db: AsyncSession, chat_id: str, skip: int = 0, li
     result = await db.execute(
         select(models.Message)
         .filter(models.Message.chatId == chat_id)
-        .order_by(models.Message.createdAt.asc())
+        .order_by(models.Message.sortOrder.asc())
         .offset(skip)
         .limit(limit)
     )
@@ -218,9 +218,19 @@ async def get_messages_by_chat(db: AsyncSession, chat_id: str, skip: int = 0, li
 
 async def create_message(db: AsyncSession, message: schemas.MessageCreate, chat_id: str) -> models.Message:
     """在指定会话中创建一条新消息"""
+    # 获取当前会话中最大的 sortOrder
+    max_sort_order_result = await db.execute(
+        select(func.max(models.Message.sortOrder))
+        .filter(models.Message.chatId == chat_id)
+    )
+    max_sort_order = max_sort_order_result.scalar_one_or_none()
+
+    new_sort_order = (max_sort_order or 0) + 1
+
     db_message = models.Message(
         **message.model_dump(),
-        chatId=chat_id
+        chatId=chat_id,
+        sortOrder=new_sort_order
     )
     db.add(db_message)
     await db.commit()
@@ -246,9 +256,9 @@ async def delete_messages_after(db: AsyncSession, chat_id: str, message_id: str,
     query = delete(models.Message).where(models.Message.chatId == chat_id)
 
     if include_self:
-        query = query.where(models.Message.createdAt >= ref_message.createdAt)
+        query = query.where(models.Message.sortOrder >= ref_message.sortOrder)
     else:
-        query = query.where(models.Message.createdAt > ref_message.createdAt)
+        query = query.where(models.Message.sortOrder > ref_message.sortOrder)
 
     result = await db.execute(query)
     await db.commit()
@@ -262,7 +272,7 @@ async def delete_last_assistant_message(db: AsyncSession, chat_id: str) -> Optio
         select(models.Message)
         .filter(models.Message.chatId == chat_id)
         .filter(models.Message.role == schemas.MessageRole.ASSISTANT)
-        .order_by(models.Message.createdAt.desc())
+        .order_by(models.Message.sortOrder.desc())
         .limit(1)
     )
     last_message = result.scalars().first()
@@ -272,4 +282,3 @@ async def delete_last_assistant_message(db: AsyncSession, chat_id: str) -> Optio
         await db.commit()
 
     return last_message
-
