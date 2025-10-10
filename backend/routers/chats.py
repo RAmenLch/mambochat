@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 
 from ..services import llm_service
 from .. import crud, schemas
-from ..database import get_db, AsyncSessionLocal
+from ..database import get_db
 
 router = APIRouter()
 
@@ -108,6 +108,22 @@ async def delete_chat(chat_id: str, db: AsyncSession = Depends(get_db)):
     return db_chat
 
 
+@router.post(
+    "/chats/{chat_id}/duplicate",
+    response_model=schemas.Chat,
+    status_code=status.HTTP_201_CREATED,
+    summary="复制会话"
+)
+async def duplicate_chat_endpoint(chat_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    根据给定的会话ID，创建一个配置相同的新会话。
+    """
+    new_chat = await crud.duplicate_chat(db, chat_id=chat_id)
+    if not new_chat:
+        raise HTTPException(status_code=404, detail="Source chat not found or is a folder")
+    return new_chat
+
+
 # --- Message and Generation Routes ---
 
 @router.post(
@@ -130,30 +146,28 @@ async def create_message_for_chat(
 @router.put("/messages/{message_id}", summary="更新消息内容")
 async def update_message_content(
         message_id: str,
-        message_update: schemas.MessageUpdate
+        message_update: schemas.MessageUpdate,
+        db: AsyncSession = Depends(get_db)
 ):
     """
     更新指定消息的内容。
     如果 `resend` 为 true（仅限用户消息），则更新内容后，删除后续所有消息并重新生成AI回答。
     """
-    async with AsyncSessionLocal() as db:
-        db_message = await crud.get_message(db, message_id=message_id)
-        if not db_message:
-            raise HTTPException(status_code=404, detail="Message not found")
+    db_message = await crud.get_message(db, message_id=message_id)
+    if not db_message:
+        raise HTTPException(status_code=404, detail="Message not found")
 
-        updated_message = await crud.update_message(db, message_id=message_id, message_update=message_update)
+    updated_message = await crud.update_message(db, message_id=message_id, message_update=message_update)
 
-        if not message_update.resend:
-            return updated_message
+    if not message_update.resend:
+        return updated_message
 
-        # "保存并发送"逻辑
-        if db_message.role != schemas.MessageRole.USER:
-            raise HTTPException(status_code=400, detail="Resend is only applicable to user messages.")
+    # "保存并发送"逻辑
+    if db_message.role != schemas.MessageRole.USER:
+        raise HTTPException(status_code=400, detail="Resend is only applicable to user messages.")
 
-        await crud.delete_messages_after(db, chat_id=db_message.chatId, message_id=message_id, include_self=False)
+    await crud.delete_messages_after(db, chat_id=db_message.chatId, message_id=message_id, include_self=False)
 
-    # 重新生成需要使用新的会话，因此不能在上面的 with 块内
-    # 使用更新后的用户消息内容作为重新生成的上下文
     request = schemas.GenerateRequest(content=updated_message.content)
     return StreamingResponse(
         llm_service.generate_chat_response(db_message.chatId, request, save_user_message=False),
@@ -177,23 +191,31 @@ async def delete_single_message(message_id: str, db: AsyncSession = Depends(get_
 async def regenerate_from_message(
         chat_id: str,
         message_id: str,
-        request: schemas.GenerateRequest,
+        db: AsyncSession = Depends(get_db)
 ):
     """
     根据指定消息，删除其后的对话历史，并重新生成AI回答。
     - 如果指定的是AI消息，则删除此消息及之后所有消息。
     - 如果指定的是用户消息，则删除此消息之后的所有消息。
     """
-    async with AsyncSessionLocal() as db:
-        db_message = await crud.get_message(db, message_id=message_id)
-        if not db_message or db_message.chatId != chat_id:
-            raise HTTPException(status_code=404, detail="Message not found in the specified chat.")
+    db_message = await crud.get_message(db, message_id=message_id)
+    if not db_message or db_message.chatId != chat_id:
+        raise HTTPException(status_code=404, detail="Message not found in the specified chat.")
 
-        include_self = (db_message.role == schemas.MessageRole.ASSISTANT)
-        await crud.delete_messages_after(db, chat_id=chat_id, message_id=message_id, include_self=include_self)
+    include_self = (db_message.role == schemas.MessageRole.ASSISTANT)
+    await crud.delete_messages_after(db, chat_id=chat_id, message_id=message_id, include_self=include_self)
+
+    # 自动查找上下文并构建请求
+    remaining_messages = await crud.get_messages_by_chat(db, chat_id=chat_id)
+    if not remaining_messages:
+        raise HTTPException(status_code=400, detail="Cannot regenerate from an empty history.")
+
+    # 此时，最后一条消息应为触发重新生成的用户消息
+    last_user_content = remaining_messages[-1].content
+    internal_request = schemas.GenerateRequest(content=last_user_content)
 
     return StreamingResponse(
-        llm_service.generate_chat_response(chat_id, request, save_user_message=False),
+        llm_service.generate_chat_response(chat_id, internal_request, save_user_message=False),
         media_type="text/event-stream"
     )
 
@@ -206,16 +228,16 @@ async def regenerate_from_message(
 async def generate_response(
         chat_id: str,
         request: schemas.GenerateRequest,
+        db: AsyncSession = Depends(get_db)
 ):
     """
     接收用户消息，调用后端LLM服务，并以流式方式返回AI的响应。
     """
-    async with AsyncSessionLocal() as db:
-        db_chat = await crud.get_chat(db, chat_id=chat_id)
-        if not db_chat:
-            raise HTTPException(status_code=404, detail="Chat not found")
-        if db_chat.itemType != 'chat':
-            raise HTTPException(status_code=400, detail="Cannot generate response for a folder.")
+    db_chat = await crud.get_chat(db, chat_id=chat_id)
+    if not db_chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    if db_chat.itemType != 'chat':
+        raise HTTPException(status_code=400, detail="Cannot generate response for a folder.")
 
     return StreamingResponse(
         llm_service.generate_chat_response(chat_id, request),
@@ -231,18 +253,18 @@ async def generate_response(
 async def regenerate_response(
         chat_id: str,
         request: schemas.GenerateRequest,
+        db: AsyncSession = Depends(get_db)
 ):
     """
     删除最后一条AI的回复，并根据相同的用户输入重新生成一次。
     """
-    async with AsyncSessionLocal() as db:
-        db_chat = await crud.get_chat(db, chat_id=chat_id)
-        if not db_chat:
-            raise HTTPException(status_code=404, detail="Chat not found")
-        if db_chat.itemType != 'chat':
-            raise HTTPException(status_code=400, detail="Cannot regenerate response for a folder.")
+    db_chat = await crud.get_chat(db, chat_id=chat_id)
+    if not db_chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    if db_chat.itemType != 'chat':
+        raise HTTPException(status_code=400, detail="Cannot regenerate response for a folder.")
 
-        await crud.delete_last_assistant_message(db, chat_id=chat_id)
+    await crud.delete_last_assistant_message(db, chat_id=chat_id)
 
     return StreamingResponse(
         llm_service.generate_chat_response(chat_id, request, save_user_message=False),
@@ -292,8 +314,6 @@ async def regenerate_response_non_stream(
 
     await crud.delete_last_assistant_message(db, chat_id=chat_id)
 
-    # 调用非流式生成服务，并且不保存新的用户消息
-    # 这需要 llm_service.generate_chat_response_non_stream 支持 save_user_message 参数
     assistant_message = await llm_service.generate_chat_response_non_stream(
         chat_id,
         request,
@@ -301,3 +321,4 @@ async def regenerate_response_non_stream(
         save_user_message=False
     )
     return assistant_message
+

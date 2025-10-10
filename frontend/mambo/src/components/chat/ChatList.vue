@@ -40,7 +40,6 @@
               <ChatDotRound v-else />
             </el-icon>
 
-            <!-- 修复和增强：使用 ElTooltip 包裹名称标签 -->
             <el-tooltip
               :content="node.label"
               placement="top"
@@ -66,6 +65,9 @@
 
                   <el-dropdown-item command="rename" :divided="data.itemType === 'folder'">
                     <el-icon><EditPen /></el-icon>重命名
+                  </el-dropdown-item>
+                  <el-dropdown-item v-if="data.itemType === 'chat'" command="duplicate">
+                    <el-icon><CopyDocument /></el-icon>复制会话
                   </el-dropdown-item>
                   <el-dropdown-item command="delete" class="delete-item">
                     <el-icon><Delete /></el-icon>删除
@@ -127,7 +129,7 @@ import { ElMessage, ElMessageBox, ElTree } from 'element-plus';
 import type { FormInstance, FormRules } from 'element-plus';
 import type { NodeDropType } from 'element-plus/es/components/tree/src/tree.type';
 import type { Chat, ChatReorderItem } from '@/api/types';
-import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, MoreFilled, EditPen } from '@element-plus/icons-vue';
+import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, MoreFilled, EditPen, CopyDocument } from '@element-plus/icons-vue';
 
 // -- Stores & Router --
 const chatStore = useChatStore();
@@ -238,6 +240,8 @@ const handleCommand = (command: string, data: Chat) => {
     handleRename(data);
   } else if (command === 'delete') {
     handleDelete(data);
+  } else if (command === 'duplicate') {
+    chatStore.duplicateChat(data.id);
   } else if (command === 'newChatInFolder') {
     openNewChatDialog(data.id);
   } else if (command === 'newFolderInFolder') {
@@ -401,7 +405,6 @@ const goToSettings = () => router.push('/settings');
   justify-content: space-between;
   font-size: 14px;
   padding-right: 8px;
-  /* 确保容器本身也能被截断 */
   overflow: hidden;
 }
 .node-icon {
@@ -413,13 +416,10 @@ const goToSettings = () => router.push('/settings');
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  /* 修复：允许flex item收缩的关键 */
   min-width: 0;
-  /* 修复：增加与右侧按钮的间距 */
   margin-right: 8px;
 }
 .node-actions {
-  /* 确保按钮不会被挤压 */
   flex-shrink: 0;
   display: none;
 }
