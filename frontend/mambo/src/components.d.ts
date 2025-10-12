@@ -11,6 +11,7 @@ declare module 'vue' {
     ChatList: typeof import('./components/chat/ChatList.vue')['default']
     ChatToolbar: typeof import('./components/chat/ChatToolbar.vue')['default']
     ChatWindow: typeof import('./components/chat/ChatWindow.vue')['default']
+    CodeBlock: typeof import('./components/chat/CodeBlock.vue')['default']
     ElAside: typeof import('element-plus/es')['ElAside']
     ElAvatar: typeof import('element-plus/es')['ElAvatar']
     ElButton: typeof import('element-plus/es')['ElButton']

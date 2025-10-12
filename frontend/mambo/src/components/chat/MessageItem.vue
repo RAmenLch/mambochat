@@ -16,7 +16,32 @@
     <!-- 消息主体 -->
     <div class="message-body">
       <!-- 消息内容 -->
-      <div class="message-content" v-html="renderedContent"></div>
+      <div class="message-content">
+        <!-- 加载中指示器 -->
+        <div
+          v-if="isGenerating && message.content === ''"
+          class="typing-indicator"
+        >
+          <span></span><span></span><span></span>
+        </div>
+        <!-- 解析后的内容块 -->
+        <template v-else>
+          <div
+            v-for="(block, index) in parsedContent"
+            :key="index"
+            class="content-block"
+          >
+            <CodeBlock
+              v-if="block.type === 'code'"
+              :code="block.content"
+              :language="block.language"
+              :is-generating="isGenerating"
+              @edit="handleEditCodeBlock"
+            />
+            <div v-else v-html="block.content"></div>
+          </div>
+        </template>
+      </div>
 
       <!-- 悬浮操作菜单 -->
       <div
@@ -114,13 +139,19 @@ import {
   Delete,
 } from '@element-plus/icons-vue';
 import MarkdownIt from 'markdown-it';
-import hljs from 'highlight.js';
 import DOMPurify from 'dompurify';
+import CodeBlock from './CodeBlock.vue'; // 引入新组件
+
+interface ParsedBlock {
+  type: 'html' | 'code';
+  content: string;
+  language?: string;
+}
 
 // -- Props 定义 --
 const props = defineProps<{
   message: Message;
-  isLastMessage: boolean; // 仍然保留，可能用于其他UI逻辑
+  isLastMessage: boolean;
 }>();
 
 const chatStore = useChatStore();
@@ -143,6 +174,13 @@ const handleRegenerate = () => {
 const openEditDialog = () => {
   editingMessage.value = props.message;
   editingContent.value = props.message.content;
+  editDialogVisible.value = true;
+};
+
+// 新增：处理代码块的编辑请求
+const handleEditCodeBlock = (code: string) => {
+  editingMessage.value = props.message;
+  editingContent.value = code;
   editDialogVisible.value = true;
 };
 
@@ -197,30 +235,43 @@ const handleDelete = () => {
 };
 
 // --- 渲染逻辑 ---
-const md = new MarkdownIt({
-  highlight: (str, lang) => {
-    if (lang && hljs.getLanguage(lang)) {
-      try {
-        return (
-          '<pre class="hljs"><code>' +
-          hljs.highlight(str, { language: lang, ignoreIllegals: true }).value +
-          '</code></pre>'
-        );
-      } catch (__) {}
-    }
-    return (
-      '<pre class="hljs"><code>' + md.utils.escapeHtml(str) + '</code></pre>'
-    );
-  },
-});
+const md = new MarkdownIt({ html: false });
 
-const renderedContent = computed(() => {
-  if (isGenerating.value && props.message.content === '') {
-    return '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+// 重构渲染逻辑，将Markdown解析为块数组
+const parsedContent = computed((): ParsedBlock[] => {
+  if (!props.message.content) return [];
+
+  const tokens = md.parse(props.message.content, {});
+  const blocks: ParsedBlock[] = [];
+  let currentHtmlTokens: any[] = [];
+
+  const renderHtml = () => {
+    if (currentHtmlTokens.length > 0) {
+      const rawHtml = md.renderer.render(currentHtmlTokens, md.options, {});
+      blocks.push({
+        type: 'html',
+        content: DOMPurify.sanitize(rawHtml),
+      });
+      currentHtmlTokens = [];
+    }
+  };
+
+  for (const token of tokens) {
+    if (token.type === 'fence') {
+      renderHtml(); // 渲染之前积累的HTML
+      blocks.push({
+        type: 'code',
+        content: token.content,
+        language: token.info.split(/\s+/g)[0], // 获取语言名称
+      });
+    } else {
+      currentHtmlTokens.push(token);
+    }
   }
-  const rawHtml = md.render(props.message.content);
-  // 在渲染前清理HTML，防止XSS攻击
-  return DOMPurify.sanitize(rawHtml);
+
+  renderHtml(); // 渲染剩余的HTML
+
+  return blocks;
 });
 
 const roleClass = computed(() => ({
@@ -230,14 +281,10 @@ const roleClass = computed(() => ({
 </script>
 
 <style>
-@import 'highlight.js/styles/github-dark.css';
+/* 移除全局的 highlight.js 样式导入，因为它现在由 CodeBlock.vue 局部管理 */
+/* @import 'highlight.js/styles/github-dark.css'; */
 
-.hljs {
-  border-radius: 6px;
-  padding: 1em !important;
-  font-size: 14px;
-  line-height: 1.5;
-}
+/* .hljs { ... } 样式也移至 CodeBlock.vue */
 </style>
 
 <style scoped>
@@ -284,7 +331,6 @@ const roleClass = computed(() => ({
   visibility: visible;
 }
 
-
 /* -- 用户消息样式 -- */
 .is-user {
   flex-direction: row-reverse;
@@ -306,15 +352,14 @@ const roleClass = computed(() => ({
   align-items: flex-start;
 }
 
-
 /* -- v-html 内容样式 -- */
-.message-content :deep(p) { margin: 0 0 0.5em; }
-.message-content :deep(p:last-child) { margin-bottom: 0; }
-.message-content :deep(ul), .message-content :deep(ol) { padding-inline-start: 25px; }
-.message-content :deep(pre) { margin: 1em 0; }
-.message-content :deep(code) { font-family: 'Courier New', Courier, monospace; }
-.message-content :deep(pre > code) { padding: 0; background-color: transparent; }
-.message-content :deep(:not(pre) > code) {
+.content-block :deep(p) { margin: 0 0 0.5em; }
+.content-block :deep(p:last-child) { margin-bottom: 0; }
+.content-block :deep(ul), .content-block :deep(ol) { padding-inline-start: 25px; }
+.content-block :deep(pre) { margin: 1em 0; }
+.content-block :deep(code) { font-family: 'Courier New', Courier, monospace; }
+.content-block :deep(pre > code) { padding: 0; background-color: transparent; }
+.content-block :deep(:not(pre) > code) {
   background-color: rgba(0, 0, 0, 0.08);
   padding: 0.2em 0.4em;
   border-radius: 4px;
@@ -322,12 +367,12 @@ const roleClass = computed(() => ({
 }
 
 /* -- 打字动画 -- */
-.message-content :deep(.typing-indicator) { display: flex; align-items: center; justify-content: center; height: 24px; }
-.message-content :deep(.typing-indicator span) {
+.typing-indicator { display: flex; align-items: center; justify-content: center; height: 24px; }
+.typing-indicator span {
   height: 8px; width: 8px; border-radius: 50%; background-color: #909399; margin: 0 3px;
   animation: bounce 1.4s infinite ease-in-out both;
 }
-.message-content :deep(.typing-indicator span:nth-of-type(1)) { animation-delay: -0.32s; }
-.message-content :deep(.typing-indicator span:nth-of-type(2)) { animation-delay: -0.16s; }
+.typing-indicator span:nth-of-type(1) { animation-delay: -0.32s; }
+.typing-indicator span:nth-of-type(2) { animation-delay: -0.16s; }
 @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
 </style>

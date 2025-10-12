@@ -17,6 +17,7 @@
         ref="scrollbarRef"
         class="message-list-scrollbar"
         v-loading="isChatHistoryLoading"
+        @scroll="handleScroll"
       >
         <div class="message-list-wrapper">
           <MessageItem
@@ -273,7 +274,6 @@ const handleSendMessage = async () => {
 };
 
 const handleStopGeneration = () => {
-  // 找到当前正在生成的消息并停止它
   const generatingMessage = currentChatMessages.value.find(
     m => m.status === 'generating'
   );
@@ -290,21 +290,46 @@ const handleEnterKey = (event: Event) => {
 };
 
 // --- Auto-Scrolling and Focus ---
-const scrollToBottom = () => {
+const userHasScrolledUp = ref(false);
+
+const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
+  const scrollWrapper = scrollbarRef.value?.wrapRef;
+  if (!scrollWrapper) return;
+
+  const { scrollHeight, clientHeight } = scrollWrapper;
+  const isAtBottom = scrollHeight - clientHeight - scrollTop < 20;
+
+  if (!isAtBottom) {
+    userHasScrolledUp.value = true;
+  } else {
+    userHasScrolledUp.value = false;
+  }
+};
+
+const scrollToBottom = (force = false) => {
+  if (!force && userHasScrolledUp.value && isGenerating.value) {
+    return;
+  }
   nextTick(() => {
     scrollbarRef.value?.setScrollTop(scrollbarRef.value.wrapRef!.scrollHeight);
   });
 };
 
-watch(currentChatMessages, scrollToBottom, { deep: true });
+// 监听最后一条消息的内容变化，用于流式输出时自动滚动
+watch(
+  () => currentChatMessages.value.at(-1)?.content,
+  () => scrollToBottom()
+);
 
+// 监听会话ID变化，用于切换会话后滚动到底部并聚焦输入框
 watch(
   () => currentChat.value?.id,
   (newId, oldId) => {
     if (newId && newId !== oldId) {
+      userHasScrolledUp.value = false; // 重置滚动状态
       const unwatch = watch(isChatHistoryLoading, (isLoading) => {
         if (!isLoading) {
-          scrollToBottom();
+          scrollToBottom(true); // 强制滚动
           unwatch();
         }
       });
