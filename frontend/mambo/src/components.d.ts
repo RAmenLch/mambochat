@@ -9,10 +9,13 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     ChatList: typeof import('./components/chat/ChatList.vue')['default']
+    ChatToolbar: typeof import('./components/chat/ChatToolbar.vue')['default']
     ChatWindow: typeof import('./components/chat/ChatWindow.vue')['default']
     ElAside: typeof import('element-plus/es')['ElAside']
     ElAvatar: typeof import('element-plus/es')['ElAvatar']
     ElButton: typeof import('element-plus/es')['ElButton']
+    ElCheckbox: typeof import('element-plus/es')['ElCheckbox']
+    ElCheckboxGroup: typeof import('element-plus/es')['ElCheckboxGroup']
     ElContainer: typeof import('element-plus/es')['ElContainer']
     ElDialog: typeof import('element-plus/es')['ElDialog']
     ElDivider: typeof import('element-plus/es')['ElDivider']
@@ -36,10 +39,12 @@ declare module 'vue' {
     ElSwitch: typeof import('element-plus/es')['ElSwitch']
     ElTable: typeof import('element-plus/es')['ElTable']
     ElTableColumn: typeof import('element-plus/es')['ElTableColumn']
+    ElTabPane: typeof import('element-plus/es')['ElTabPane']
+    ElTabs: typeof import('element-plus/es')['ElTabs']
     ElTooltip: typeof import('element-plus/es')['ElTooltip']
+    GlobalSettings: typeof import('./components/settings/GlobalSettings.vue')['default']
     MessageItem: typeof import('./components/chat/MessageItem.vue')['default']
-    ModelManager: typeof import('./components/settings/ModelManager.vue')['default']
-    ProviderManager: typeof import('./components/settings/ProviderManager.vue')['default']
+    ProviderModelManager: typeof import('./components/settings/ProviderModelManager.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
   }

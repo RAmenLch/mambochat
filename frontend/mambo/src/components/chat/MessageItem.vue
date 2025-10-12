@@ -255,7 +255,6 @@ const roleClass = computed(() => ({
 .message-body {
   display: flex;
   flex-direction: column;
-  /* 关键修改: 移除 gap，使用 margin-top 代替，确保不可见时无间距 */
   min-width: 80px;
 }
 
@@ -272,15 +271,12 @@ const roleClass = computed(() => ({
 .message-actions {
   display: flex;
   gap: 4px;
-  margin-top: 4px; /* 关键修改: 替代 gap，仅在可见时有意义 */
-
-  /* 关键修改: 默认不可见，但占位 */
+  margin-top: 4px;
   opacity: 0;
   visibility: hidden;
-  height: 24px; /* 关键修改: 预留固定高度 (el-button small size) */
+  height: 24px;
   transition: opacity 0.2s, visibility 0.2s;
 }
-/* 关键修改: 悬停时可见 */
 .message-actions.is-visible {
   opacity: 1;
   visibility: visible;

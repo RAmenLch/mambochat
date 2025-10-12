@@ -10,12 +10,6 @@
       <!-- 1. 顶部标题栏 -->
       <div class="chat-window-header">
         <h3 class="chat-title">{{ currentChat.name }}</h3>
-        <el-button
-          :icon="Setting"
-          circle
-          title="会话设置"
-          @click="openSettingsDrawer"
-        />
       </div>
 
       <!-- 2. 消息列表区域 -->
@@ -35,7 +29,14 @@
         </div>
       </el-scrollbar>
 
-      <!-- 3. 底部输入区域 -->
+      <!-- 3. 中部工具栏 -->
+      <ChatToolbar
+        v-if="currentChat"
+        :current-chat="currentChat"
+        @open-settings="openSettingsDrawer"
+      />
+
+      <!-- 4. 底部输入区域 -->
       <div class="chat-input-area">
         <el-input
           ref="inputRef"
@@ -160,8 +161,9 @@ import { useChatStore } from '@/stores/chatStore';
 import { useProviderStore } from '@/stores/providerStore';
 import { storeToRefs } from 'pinia';
 import { ElScrollbar, ElInput, ElMessage } from 'element-plus';
-import { Promotion, Setting, VideoPause, QuestionFilled } from '@element-plus/icons-vue';
+import { Promotion, VideoPause, QuestionFilled } from '@element-plus/icons-vue';
 import MessageItem from './MessageItem.vue';
+import ChatToolbar from './ChatToolbar.vue';
 import type { ChatUpdate } from '@/api/types';
 
 interface ChatSettingsForm extends ChatUpdate {

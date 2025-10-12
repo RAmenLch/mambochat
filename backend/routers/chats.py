@@ -23,11 +23,19 @@ router = APIRouter()
 async def create_chat(chat: schemas.ChatCreate, db: AsyncSession = Depends(get_db)):
     """
     创建一个新的会话 (itemType='chat') 或文件夹 (itemType='folder')。
+    如果创建会话时未指定模型，将尝试使用全局默认模型。
     """
-    if chat.itemType == 'chat' and chat.aiModelId:
-        db_model = await crud.get_model(db, model_id=chat.aiModelId)
-        if not db_model:
-            raise HTTPException(status_code=404, detail=f"AI Model with id {chat.aiModelId} not found")
+    if chat.itemType == 'chat':
+        if not chat.aiModelId:
+            default_model_setting = await crud.get_setting(db, key="default_model_id")
+            if default_model_setting and default_model_setting.value:
+                chat.aiModelId = default_model_setting.value
+
+        if chat.aiModelId:
+            db_model = await crud.get_model(db, model_id=chat.aiModelId)
+            if not db_model:
+                raise HTTPException(status_code=404, detail=f"AI 模型ID {chat.aiModelId} 未找到")
+
     return await crud.create_chat(db=db, chat=chat)
 
 
@@ -47,6 +55,15 @@ async def reorder_chats(updates: List[schemas.ChatReorderItem], db: AsyncSession
 @router.get("/chats/", response_model=List[schemas.Chat], summary="获取会话和文件夹列表")
 async def read_chats(skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)):
     chats = await crud.get_chats(db, skip=skip, limit=limit)
+
+    # 为列表中模型ID为空的会话应用全局默认模型回退
+    default_model_setting = await crud.get_setting(db, key="default_model_id")
+    if default_model_setting and default_model_setting.value:
+        default_model_id = default_model_setting.value
+        for chat in chats:
+            if chat.itemType == 'chat' and not chat.aiModelId:
+                chat.aiModelId = default_model_id
+
     return chats
 
 
@@ -55,6 +72,13 @@ async def read_chat(chat_id: str, db: AsyncSession = Depends(get_db)):
     db_chat = await crud.get_chat(db, chat_id=chat_id)
     if db_chat is None:
         raise HTTPException(status_code=404, detail="Item not found")
+
+    # 如果会话的模型被删除，则在返回数据时回退至全局默认模型
+    if db_chat.itemType == 'chat' and not db_chat.aiModelId:
+        default_model_setting = await crud.get_setting(db, key="default_model_id")
+        if default_model_setting and default_model_setting.value:
+            db_chat.aiModelId = default_model_setting.value
+
     return db_chat
 
 
@@ -67,9 +91,14 @@ async def read_chat_with_messages(chat_id: str, db: AsyncSession = Depends(get_d
     if db_chat is None:
         raise HTTPException(status_code=404, detail="Chat not found")
 
-    # 确保只为“会话”类型的项目获取消息
     if db_chat.itemType != 'chat':
         raise HTTPException(status_code=400, detail="Cannot get messages for a folder.")
+
+    # 如果会话的模型被删除，则在返回数据时回退至全局默认模型
+    if not db_chat.aiModelId:
+        default_model_setting = await crud.get_setting(db, key="default_model_id")
+        if default_model_setting and default_model_setting.value:
+            db_chat.aiModelId = default_model_setting.value
 
     return db_chat
 
@@ -90,7 +119,7 @@ async def update_chat_settings(
     if chat_update.aiModelId:
         db_model = await crud.get_model(db, model_id=chat_update.aiModelId)
         if not db_model:
-            raise HTTPException(status_code=404, detail=f"AI Model with id {chat_update.aiModelId} not found")
+            raise HTTPException(status_code=404, detail=f"AI 模型ID {chat_update.aiModelId} 未找到")
 
     updated_chat = await crud.update_chat(db, chat_id=chat_id, chat_update=chat_update)
 
@@ -162,7 +191,6 @@ async def update_message_content(
     if not message_update.resend:
         return updated_message
 
-    # "保存并发送"逻辑
     if db_message.role != schemas.MessageRole.USER:
         raise HTTPException(status_code=400, detail="Resend is only applicable to user messages.")
 
@@ -205,12 +233,10 @@ async def regenerate_from_message(
     include_self = (db_message.role == schemas.MessageRole.ASSISTANT)
     await crud.delete_messages_after(db, chat_id=chat_id, message_id=message_id, include_self=include_self)
 
-    # 自动查找上下文并构建请求
     remaining_messages = await crud.get_messages_by_chat(db, chat_id=chat_id)
     if not remaining_messages:
         raise HTTPException(status_code=400, detail="Cannot regenerate from an empty history.")
 
-    # 此时，最后一条消息应为触发重新生成的用户消息
     last_user_content = remaining_messages[-1].content
     internal_request = schemas.GenerateRequest(content=last_user_content)
 
@@ -321,4 +347,3 @@ async def regenerate_response_non_stream(
         save_user_message=False
     )
     return assistant_message
-

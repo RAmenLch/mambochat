@@ -7,7 +7,6 @@ import uuid
 
 
 # 使用 text 类型作为 UUID 的存储方式，兼容性更好
-# 并提供一个默认的 uuid 生成函数
 def generate_uuid():
     return str(uuid.uuid4())
 
@@ -45,7 +44,7 @@ class Chat(Base):
     name = Column(String(100), nullable=False)
     createdAt = Column(DateTime, nullable=False, default=func.now())
 
-    # --- 新增字段，用于支持文件夹、排序和最近会话功能 ---
+    # --- 字段，用于支持文件夹、排序和最近会话功能 ---
     itemType = Column(String(20), nullable=False, default='chat')  # 'chat' 或 'folder'
     parentId = Column(String(36), ForeignKey("Chat.id"), nullable=True)  # 父文件夹ID
     sortOrder = Column(Integer, nullable=False, default=0)  # 排序权重
@@ -77,3 +76,11 @@ class Message(Base):
 
     # 关系：反向引用到 Chat
     chat = relationship("Chat", back_populates="messages")
+
+
+class GlobalSettings(Base):
+    __tablename__ = "GlobalSettings"
+
+    key = Column(String(50), primary_key=True)
+    value = Column(TEXT, nullable=True)
+

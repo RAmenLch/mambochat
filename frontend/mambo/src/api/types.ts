@@ -17,11 +17,24 @@ export interface MessageUpdate {
   resend?: boolean;
 }
 
-export interface AIModel {
-  id: string;
+// --- AI & Provider Types ---
+
+export interface AIModelBase {
   modelId: string;
   name: string;
+}
+
+export interface AIModel extends AIModelBase {
+  id: string;
   providerId: string;
+}
+
+export interface AIModelCreate extends AIModelBase {
+  providerId: string;
+}
+
+export interface AIModelUpdate {
+  name?: string;
 }
 
 export interface AIProvider {
@@ -34,26 +47,53 @@ export interface AIProviderWithModels extends AIProvider {
   models: AIModel[];
 }
 
+export interface AIProviderCreate {
+  id?: string | null;
+  name: string;
+  apiHost: string;
+  apiKey: string;
+}
+
+export interface AIProviderUpdate {
+  name?: string;
+  apiHost?: string;
+  apiKey?: string;
+}
+
+export interface ProviderWithModelsCreate extends AIProviderCreate {
+  models: AIModelBase[];
+}
+
+export interface ConnectionRequest {
+  apiHost: string;
+  apiKey: string;
+}
+
+export interface ConnectionTestResponse {
+  status: string;
+  message: string;
+}
+
+// --- Chat Types ---
+
 export interface Chat {
   id:string;
   name: string;
   createdAt: string;
   systemPrompt: string | null;
-  modelParameters: Record<string, string | number | boolean> | null;
+  modelParameters: Record<string, any> | null;
   aiModelId: string | null;
-  // --- 新增字段，用于支持文件夹、排序和最近会话 ---
   itemType: ChatItemType;
   parentId: string | null;
   sortOrder: number;
-  lastOpenedAt: string | null; // ISO 8601 date string
+  lastOpenedAt: string | null;
 }
 
 export interface ChatCreate {
   name: string;
   systemPrompt?: string | null;
-  modelParameters?: Record<string, string | number | boolean> | null;
+  modelParameters?: Record<string, any> | null;
   aiModelId?: string | null;
-  // --- 新增字段 ---
   itemType?: ChatItemType;
   parentId?: string | null;
   sortOrder?: number;
@@ -63,20 +103,24 @@ export interface ChatUpdate {
   name?: string | null;
   aiModelId?: string | null;
   systemPrompt?: string | null;
-  modelParameters?: Record<string, string | number | boolean> | null;
-  // --- 新增字段 ---
+  modelParameters?: Record<string, any> | null;
   parentId?: string | null;
   sortOrder?: number;
 }
-
 
 export interface ChatWithMessages extends Chat {
   messages: Message[];
 }
 
-// --- 新增类型: 用于批量更新排序和层级关系 ---
 export interface ChatReorderItem {
   id: string;
   parentId: string | null;
   sortOrder: number;
+}
+
+// --- Global Settings Types ---
+
+export interface GlobalSettingsUpdate {
+  default_model_id: string | null;
+  last_selected_provider_id: string | null;
 }

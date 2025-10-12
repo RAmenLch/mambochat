@@ -1,19 +1,15 @@
 <template>
   <div class="chat-list-container">
-    <!-- 顶部操作区 -->
-    <div class="header">
-      <el-button type="primary" :icon="Plus" @click="openNewChatDialog(null)" class="action-btn">
-        新建会话
-      </el-button>
-      <el-button :icon="FolderAdd" @click="handleNewFolder(null)" class="action-btn">
-        新建文件夹
-      </el-button>
+    <!-- 简洁的列表头部 -->
+    <div class="chat-list-header" @contextmenu.prevent="handleContextMenu($event, null)">
+      <h4>会话列表</h4>
     </div>
 
-    <el-divider />
-
     <!-- 会话列表树 -->
-    <el-scrollbar class="chat-list-scrollbar">
+    <el-scrollbar
+      class="chat-list-scrollbar"
+      @contextmenu.prevent="handleContextMenu($event, null)"
+    >
       <div v-if="isChatListLoading" class="loading-container">
         <el-skeleton :rows="5" animated />
       </div>
@@ -30,6 +26,7 @@
         :allow-drop="allowDrop"
         @node-click="handleNodeClick"
         @node-drop="handleNodeDrop"
+        @node-contextmenu="handleContextMenu"
         class="chat-tree"
         :props="{ label: 'name', children: 'children' }"
       >
@@ -39,7 +36,6 @@
               <Folder v-if="data.itemType === 'folder'" />
               <ChatDotRound v-else />
             </el-icon>
-
             <el-tooltip
               :content="node.label"
               placement="top"
@@ -49,36 +45,10 @@
             >
               <span class="node-label">{{ node.label }}</span>
             </el-tooltip>
-
-            <el-dropdown trigger="click" @command="handleCommand($event, data)" class="node-actions">
-               <el-icon class="more-icon"><MoreFilled /></el-icon>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <template v-if="data.itemType === 'folder'">
-                    <el-dropdown-item command="newChatInFolder">
-                      <el-icon><Plus /></el-icon>新建会话
-                    </el-dropdown-item>
-                     <el-dropdown-item command="newFolderInFolder">
-                      <el-icon><FolderAdd /></el-icon>新建文件夹
-                    </el-dropdown-item>
-                  </template>
-
-                  <el-dropdown-item command="rename" :divided="data.itemType === 'folder'">
-                    <el-icon><EditPen /></el-icon>重命名
-                  </el-dropdown-item>
-                  <el-dropdown-item v-if="data.itemType === 'chat'" command="duplicate">
-                    <el-icon><CopyDocument /></el-icon>复制会话
-                  </el-dropdown-item>
-                  <el-dropdown-item command="delete" class="delete-item">
-                    <el-icon><Delete /></el-icon>删除
-                  </el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
           </span>
         </template>
       </el-tree>
-      <el-empty v-else description="暂无会话" />
+      <el-empty v-else description="右键新建会话" />
     </el-scrollbar>
 
     <el-divider />
@@ -87,6 +57,53 @@
     <div class="footer">
       <el-button :icon="Setting" circle @click="goToSettings" />
     </div>
+
+    <!-- 全局右键上下文菜单 -->
+    <el-dropdown
+      ref="contextMenuRef"
+      trigger="manual"
+      @command="handleCommand"
+      :class="{ 'context-menu-hidden': !isContextMenuVisible }"
+    >
+      <!-- 这个空的span是必须的,作为dropdown的定位锚点 -->
+      <span :style="contextMenuPosition" />
+      <template #dropdown>
+        <el-dropdown-menu>
+          <!-- 针对文件夹的菜单项 -->
+          <template v-if="contextMenuItem?.itemType === 'folder'">
+            <el-dropdown-item command="newChatInFolder">
+              <el-icon><Plus /></el-icon>新建会话
+            </el-dropdown-item>
+            <el-dropdown-item command="newFolderInFolder">
+              <el-icon><FolderAdd /></el-icon>新建文件夹
+            </el-dropdown-item>
+          </template>
+
+          <!-- 针对空白区域的菜单项 -->
+          <template v-if="!contextMenuItem">
+            <el-dropdown-item command="newRootChat">
+              <el-icon><Plus /></el-icon>新建会话
+            </el-dropdown-item>
+            <el-dropdown-item command="newRootFolder">
+              <el-icon><FolderAdd /></el-icon>新建文件夹
+            </el-dropdown-item>
+          </template>
+
+          <!-- 通用菜单项 (当有选中项时) -->
+          <template v-if="contextMenuItem">
+            <el-dropdown-item command="rename" :divided="contextMenuItem.itemType === 'folder'">
+              <el-icon><EditPen /></el-icon>重命名
+            </el-dropdown-item>
+            <el-dropdown-item v-if="contextMenuItem.itemType === 'chat'" command="duplicate">
+              <el-icon><CopyDocument /></el-icon>复制会话
+            </el-dropdown-item>
+            <el-dropdown-item command="delete" class="delete-item">
+              <el-icon><Delete /></el-icon>删除
+            </el-dropdown-item>
+          </template>
+        </el-dropdown-menu>
+      </template>
+    </el-dropdown>
 
     <!-- 新建/重命名 弹窗 -->
     <el-dialog v-model="itemDialogVisible" :title="dialogTitle" width="400px">
@@ -129,7 +146,7 @@ import { ElMessage, ElMessageBox, ElTree } from 'element-plus';
 import type { FormInstance, FormRules } from 'element-plus';
 import type { NodeDropType } from 'element-plus/es/components/tree/src/tree.type';
 import type { Chat, ChatReorderItem } from '@/api/types';
-import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, MoreFilled, EditPen, CopyDocument } from '@element-plus/icons-vue';
+import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, EditPen, CopyDocument } from '@element-plus/icons-vue';
 
 // -- Stores & Router --
 const chatStore = useChatStore();
@@ -137,7 +154,7 @@ const providerStore = useProviderStore();
 const router = useRouter();
 
 const { chatList, currentChatId, isChatListLoading } = storeToRefs(chatStore);
-const { providers } = storeToRefs(providerStore);
+const { providers, globalSettings } = storeToRefs(providerStore);
 const treeRef = ref<InstanceType<typeof ElTree>>();
 
 // -- Data Transformation (Flat to Tree) --
@@ -170,8 +187,8 @@ const treeData = computed(() => {
 
 // -- Lifecycle --
 onMounted(async () => {
-  await chatStore.fetchChatList();
   await providerStore.fetchProviders();
+  await chatStore.fetchChatList();
 
   if (chatList.value.length > 0) {
     let lastOpenedChat: Chat | null = null;
@@ -190,13 +207,34 @@ onMounted(async () => {
 
 // -- Tree Operations --
 const handleNodeClick = async (data: Chat) => {
-  await handleSelectChat(data.id);
+  if (data.itemType === 'chat') {
+    await handleSelectChat(data.id);
+  }
 };
 
 const handleSelectChat = async (chatId: string) => {
   await chatStore.selectChat(chatId);
   if (chatStore.currentChat) {
     router.push(`/chat/${chatId}`);
+  }
+};
+
+/**
+ * 选中指定ID的会话并滚动到视图中
+ * @param chatId 要滚动到的会话ID
+ */
+const scrollToChat = async (chatId: string) => {
+  // 选中会话并导航
+  await handleSelectChat(chatId);
+  // 等待DOM更新，确保 'is-current' class 已应用
+  await nextTick();
+
+  if (treeRef.value) {
+    const treeElement = treeRef.value.$el as HTMLElement;
+    const currentNodeElement = treeElement.querySelector('.el-tree-node.is-current');
+    if (currentNodeElement) {
+      currentNodeElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   }
 };
 
@@ -227,30 +265,80 @@ const handleNodeDrop = async (draggingNode: any, dropNode: any, dropType: NodeDr
   await chatStore.reorderChatItems(updates);
 };
 
-// -- Context Menu & Item Operations --
+// -- Context Menu Logic --
+const contextMenuRef = ref();
+const contextMenuItem = ref<Chat | null>(null);
+const isContextMenuVisible = ref(false);
+const contextMenuPosition = reactive({
+  position: 'fixed' as const,
+  top: '0px',
+  left: '0px',
+});
+
+// ======================= FINAL FIX (NO FLICKER) =======================
+const handleContextMenu = (event: MouseEvent, data: Chat | null) => {
+  event.preventDefault();
+
+  if (!data && (event.target as HTMLElement).closest('.el-tree-node')) {
+    return;
+  }
+
+  // 1. Immediately hide the menu to prevent visual flicker
+  isContextMenuVisible.value = false;
+
+  // 2. Update state for the new menu
+  contextMenuItem.value = data;
+  contextMenuPosition.left = `${event.clientX}px`;
+  contextMenuPosition.top = `${event.clientY}px`;
+
+  // 3. Wait for the DOM to update the anchor's position
+  nextTick(() => {
+    if (contextMenuRef.value) {
+      // 4. Force popper to reset and recalculate position (happens invisibly)
+      contextMenuRef.value.handleClose(); // Resets internal state
+      contextMenuRef.value.handleOpen(); // Recalculates position
+
+      // 5. Make the menu visible at the new, correct position
+      isContextMenuVisible.value = true;
+    }
+  });
+};
+// ======================================================================
+
+// -- Item Operations (triggered by Context Menu) --
 const itemDialogVisible = ref(false);
 const dialogTitle = ref('');
 const itemNameInput = ref('');
-const currentOperatingItem = ref<Chat | null>(null);
 const currentParentId = ref<string | null>(null);
 
-const handleCommand = (command: string, data: Chat) => {
-  currentOperatingItem.value = data;
-  if (command === 'rename') {
-    handleRename(data);
-  } else if (command === 'delete') {
-    handleDelete(data);
-  } else if (command === 'duplicate') {
-    chatStore.duplicateChat(data.id);
-  } else if (command === 'newChatInFolder') {
-    openNewChatDialog(data.id);
-  } else if (command === 'newFolderInFolder') {
-    handleNewFolder(data.id);
+const handleCommand = (command: string) => {
+  const data = contextMenuItem.value;
+  switch (command) {
+    case 'rename':
+      if (data) handleRename(data);
+      break;
+    case 'delete':
+      if (data) handleDelete(data);
+      break;
+    case 'duplicate':
+      if (data) handleDuplicateChat(data);
+      break;
+    case 'newChatInFolder':
+      if (data) openNewChatDialog(data.id);
+      break;
+    case 'newFolderInFolder':
+      if (data) handleNewFolder(data.id);
+      break;
+    case 'newRootChat':
+      openNewChatDialog(null);
+      break;
+    case 'newRootFolder':
+      handleNewFolder(null);
+      break;
   }
 };
 
 const handleRename = (data: Chat) => {
-  currentOperatingItem.value = data;
   dialogTitle.value = '重命名';
   itemNameInput.value = data.name;
   itemDialogVisible.value = true;
@@ -267,8 +355,19 @@ const handleDelete = (data: Chat) => {
   }).catch(() => {});
 };
 
+const handleDuplicateChat = async (data: Chat) => {
+  if (data.itemType !== 'chat') return;
+  const newChat = await chatStore.duplicateChat(data.id);
+  if (newChat) {
+    ElMessage.success('复制成功');
+    await scrollToChat(newChat.id);
+  } else {
+    ElMessage.error('复制失败');
+  }
+};
+
 const handleNewFolder = (parentId: string | null) => {
-  currentOperatingItem.value = null;
+  contextMenuItem.value = null; // 重置，因为这是新建操作
   currentParentId.value = parentId;
   dialogTitle.value = '新建文件夹';
   itemNameInput.value = '新的文件夹';
@@ -281,8 +380,8 @@ const handleConfirmItemName = async () => {
     return;
   }
 
-  if (currentOperatingItem.value) { // Rename
-    await chatStore.updateChatSettings({ name: itemNameInput.value });
+  if (dialogTitle.value === '重命名' && contextMenuItem.value) { // Rename
+    await chatStore.updateChatSettings(contextMenuItem.value.id, { name: itemNameInput.value });
   } else { // New Folder
     const parentId = currentParentId.value;
     const sortOrder = chatList.value.filter(item => item.parentId === parentId).length;
@@ -298,7 +397,10 @@ const handleConfirmItemName = async () => {
     }
   }
   itemDialogVisible.value = false;
+  itemNameInput.value = ''; // 清空输入
+  contextMenuItem.value = null;
 };
+
 
 // -- New Chat Dialog --
 const newChatDialogVisible = ref(false);
@@ -314,7 +416,7 @@ const groupedModels = computed(() => providers.value.map(p => ({ label: p.name, 
 const openNewChatDialog = (parentId: string | null) => {
   currentParentId.value = parentId;
   newChatForm.name = '新的会话';
-  newChatForm.modelId = '';
+  newChatForm.modelId = globalSettings.value.default_model_id || '';
   formRef.value?.clearValidate();
   newChatDialogVisible.value = true;
 };
@@ -339,8 +441,7 @@ const handleCreateChat = async () => {
             const parentNode = treeRef.value.getNode(parentId);
             if (parentNode) parentNode.expanded = true;
         }
-        await nextTick();
-        await handleSelectChat(newChat.id);
+        await scrollToChat(newChat.id);
       } else {
         ElMessage.error('创建失败');
       }
@@ -353,6 +454,8 @@ const goToSettings = () => router.push('/settings');
 </script>
 
 <style>
+
+
 .chat-tree {
   background-color: transparent;
 }
@@ -371,30 +474,41 @@ const goToSettings = () => router.push('/settings');
 </style>
 
 <style scoped>
+.context-menu-hidden {
+  visibility: hidden;
+}
+
 .chat-list-container {
   height: 100%;
   display: flex;
   flex-direction: column;
-  padding: 12px;
   box-sizing: border-box;
 }
-.header {
+
+.chat-list-header {
   flex-shrink: 0;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  padding: 16px 16px 8px 16px;
+  cursor: default; /* 增加一个默认光标，提升体验 */
 }
-.action-btn {
-  width: 100%;
+
+/* ... 其余 scoped 样式保持不变 ... */
+.chat-list-header h4 {
   margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
 }
+
 .el-divider {
   margin: 12px 0;
   flex-shrink: 0;
 }
+
 .chat-list-scrollbar {
   flex-grow: 1;
+  padding: 0 12px;
 }
+
 .loading-container {
   padding: 0 10px;
 }
@@ -406,6 +520,8 @@ const goToSettings = () => router.push('/settings');
   font-size: 14px;
   padding-right: 8px;
   overflow: hidden;
+  width: 100%;
+  height: 100%;
 }
 .node-icon {
   margin-right: 8px;
@@ -419,20 +535,7 @@ const goToSettings = () => router.push('/settings');
   min-width: 0;
   margin-right: 8px;
 }
-.node-actions {
-  flex-shrink: 0;
-  display: none;
-}
-.el-tree-node__content:hover .node-actions {
-  display: inline-flex;
-}
-.more-icon {
-  padding: 4px;
-  border-radius: 50%;
-}
-.more-icon:hover {
-  background-color: var(--el-color-info-light-8);
-}
+
 .delete-item {
   color: var(--el-color-danger);
 }
@@ -441,5 +544,6 @@ const goToSettings = () => router.push('/settings');
   display: flex;
   justify-content: flex-end;
   align-items: center;
+  padding: 0 12px;
 }
 </style>
