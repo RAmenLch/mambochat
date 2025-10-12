@@ -5,7 +5,7 @@ import json
 import asyncio
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import AsyncGenerator, List, Tuple, Dict, Any
+from typing import AsyncGenerator, List, Tuple, Dict, Any, Optional
 
 from .. import crud, schemas, models
 from ..database import AsyncSessionLocal
@@ -40,7 +40,7 @@ async def test_connection_to_provider(api_host: str, api_key: str) -> schemas.Co
     except Exception as e:
         # 捕获其他未知异常，打印日志以供调试
         print(f"Unhandled exception during connection test: {e}")
-        return schemas.ConnectionTestResponse(status="error", message=f"连接失败: 发生未知错误。")
+        return schemas.ConnectionTestResponse(status="error", message=f"发生未知错误。")
 
 
 async def fetch_models_from_provider(api_host: str, api_key: str) -> List[schemas.AIModelBase]:
@@ -121,67 +121,99 @@ def _prepare_llm_request_data(
     return headers, payload, provider.apiHost
 
 
-async def generate_chat_response(
+async def prepare_for_generation(
+        db: AsyncSession,
         chat_id: str,
-        request: schemas.GenerateRequest,
-        save_user_message: bool = True
-) -> AsyncGenerator[str, None]:
+        user_content: Optional[str] = None,
+        base_message_id: Optional[str] = None,
+        save_user_message: bool = True,
+) -> models.Message:
     """
-    核心函数：处理聊天请求，调用外部LLM API并流式返回响应。
-    采用“先创建占位，后更新内容”的策略，确保中断后内容能保存。
+    准备生成的前置操作：保存用户消息、删除后续历史、创建AI消息占位符。
     """
-    async with AsyncSessionLocal() as db:
-        if save_user_message:
-            await crud.create_message(
-                db,
-                message=schemas.MessageCreate(content=request.content, role=schemas.MessageRole.USER),
-                chat_id=chat_id
-            )
-        assistant_message = await crud.create_message(
+    db_chat = await crud.get_chat(db, chat_id=chat_id)
+    if not db_chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    if db_chat.itemType != 'chat':
+        raise HTTPException(status_code=400, detail="Cannot perform generation on a folder.")
+
+    if save_user_message and user_content is not None:
+        await crud.create_message(
             db,
-            message=schemas.MessageCreate(content="", role=schemas.MessageRole.ASSISTANT),
+            message=schemas.MessageCreate(content=user_content, role=schemas.MessageRole.USER),
             chat_id=chat_id
         )
-        db_chat = await crud.get_chat(db, chat_id=chat_id)
-        if not db_chat:
-            print(f"Chat with id {chat_id} not found.")
-            return
 
-        # 如果会话没有模型，尝试应用全局默认模型
-        if not db_chat.aiModelId:
-            default_model_setting = await crud.get_setting(db, key="default_model_id")
-            if default_model_setting and default_model_setting.value:
-                db_chat.aiModelId = default_model_setting.value
-                await db.commit()
-                await db.refresh(db_chat)
-                # 重新加载关系
-                db_chat = await crud.get_chat(db, chat_id=chat_id)
-            else:
-                error_msg = "**错误: 当前会话未指定模型，且未设置全局默认模型。**"
-                yield f"data: {json.dumps(error_msg)}\n\n"
+    if base_message_id:
+        ref_message = await crud.get_message(db, message_id=base_message_id)
+        if not ref_message or ref_message.chatId != chat_id:
+            raise HTTPException(status_code=404, detail="Reference message not found in the specified chat.")
+
+        include_self = (ref_message.role == schemas.MessageRole.ASSISTANT)
+        await crud.delete_messages_after(db, chat_id=chat_id, message_id=base_message_id, include_self=include_self)
+
+    # 创建并返回空的 assistant 消息占位符
+    assistant_message = await crud.create_message(
+        db,
+        message=schemas.MessageCreate(content="", role=schemas.MessageRole.ASSISTANT),
+        chat_id=chat_id
+    )
+    return assistant_message
+
+
+async def stream_chat_response(
+        db: AsyncSession,
+        chat_id: str,
+        assistant_message_id: str,
+) -> AsyncGenerator[str, None]:
+    """
+    核心流式函数：调用外部LLM API并流式返回响应，最后更新占位符消息。
+    """
+    db_chat = await crud.get_chat(db, chat_id=chat_id)
+    if not db_chat:
+        # 这种情况理论上不应发生，因为prepare阶段已经检查过
+        print(f"Chat with id {chat_id} not found during streaming.")
+        return
+
+    # 如果会话没有模型，尝试应用全局默认模型
+    if not db_chat.aiModelId:
+        default_model_setting = await crud.get_setting(db, key="default_model_id")
+        if default_model_setting and default_model_setting.value:
+            db_chat.aiModelId = default_model_setting.value
+            await db.commit()
+            await db.refresh(db_chat)
+            db_chat = await crud.get_chat(db, chat_id=chat_id)
+        else:
+            error_msg = "**错误: 当前会话未指定模型，且未设置全局默认模型。**"
+            yield f"data: {json.dumps(error_msg)}\n\n"
+            async with AsyncSessionLocal() as final_db:
                 await crud.update_message(
-                    db, assistant_message.id, schemas.MessageUpdate(content=error_msg)
+                    final_db, assistant_message_id, schemas.MessageUpdate(content=error_msg)
                 )
-                return
+            return
 
     full_response_content = ""
     try:
-        async with AsyncSessionLocal() as prep_db:
-            # 解析模型参数以获取上下文消息数量限制
-            model_params = {}
-            if db_chat.modelParameters:
-                try:
-                    model_params = json.loads(db_chat.modelParameters)
-                except (json.JSONDecodeError, TypeError):
-                    pass
+        # 解析模型参数以获取上下文消息数量限制
+        model_params = {}
+        if db_chat.modelParameters:
+            try:
+                model_params = json.loads(db_chat.modelParameters)
+            except (json.JSONDecodeError, TypeError):
+                pass
 
-            max_messages = model_params.get('max_context_messages')
-            limit = max_messages if isinstance(max_messages, int) and max_messages > 0 else None
+        max_messages = model_params.get('max_context_messages')
+        limit = max_messages if isinstance(max_messages, int) and max_messages > 0 else None
 
-            if limit:
-                history_messages = await crud.get_limited_recent_messages(prep_db, chat_id=chat_id, limit=limit)
-            else:
-                history_messages = await crud.get_messages_by_chat(prep_db, chat_id=chat_id)
+        # 获取历史记录时，应排除我们刚创建的空assistant消息
+        if limit:
+            history_messages = await crud.get_limited_recent_messages(db, chat_id=chat_id, limit=limit + 1)
+            history_messages = [msg for msg in history_messages if msg.id != assistant_message_id]
+            if len(history_messages) > limit:
+                history_messages = history_messages[-limit:]
+        else:
+            all_messages = await crud.get_messages_by_chat(db, chat_id=chat_id)
+            history_messages = [msg for msg in all_messages if msg.id != assistant_message_id]
 
         try:
             headers, payload, api_host = _prepare_llm_request_data(db_chat, history_messages)
@@ -204,12 +236,17 @@ async def generate_chat_response(
                                 break
                             try:
                                 chunk = json.loads(data_str)
-                                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                                content_chunk = delta.get("content")
-                                if content_chunk:
-                                    full_response_content += content_chunk
-                                    yield f"data: {json.dumps(content_chunk)}\n\n"
+                                choices = chunk.get("choices")
+
+                                # 安全地处理数据块，仅当choices列表存在且非空时才提取内容
+                                if choices and len(choices) > 0:
+                                    delta = choices[0].get("delta", {})
+                                    content_chunk = delta.get("content")
+                                    if content_chunk:
+                                        full_response_content += content_chunk
+                                        yield f"data: {json.dumps(content_chunk)}\n\n"
                             except json.JSONDecodeError:
+                                # 如果某一行不是有效的JSON，则忽略并继续
                                 continue
         except httpx.HTTPStatusError as e:
             error_details = ""
@@ -232,20 +269,27 @@ async def generate_chat_response(
                 full_response_content += error_msg
                 yield f"data: {json.dumps(error_msg)}\n\n"
             else:
+                print(
+                    f"[BACKEND DEBUG] asyncio.CancelledError caught for chatId '{chat_id}'. This is likely due to client disconnecting.")
                 raise
     finally:
-        if assistant_message and full_response_content.strip():
+        if full_response_content.strip():
             async def update_task():
                 async with AsyncSessionLocal() as final_db:
+                    print(
+                        f"[BACKEND DEBUG] 'finally' block: Updating message '{assistant_message_id}' with final content.")
                     await crud.update_message(
                         final_db,
-                        message_id=assistant_message.id,
+                        message_id=assistant_message_id,
                         message_update=schemas.MessageUpdate(content=full_response_content.strip())
                     )
+                    print(f"[BACKEND DEBUG] Update complete for message '{assistant_message_id}'.")
 
             try:
                 await asyncio.shield(update_task())
             except asyncio.CancelledError:
+                print(
+                    f"[BACKEND DEBUG] 'finally' block: Update task was cancelled before completion for message '{assistant_message_id}'.")
                 pass
 
 
