@@ -425,20 +425,27 @@ const handleApiKeyBlur = () => {
 };
 
 const handleTestConnection = async () => {
+  // 验证 API Host 和 API Key 是否已填写
+  if (!providerForm.apiHost || !providerForm.apiKey) {
+    ElMessage.warning('请填写 API Host 和 API Key 以进行测试');
+    return;
+  }
+
+  // 如果用户没有修改 Key（仍是占位符），给出明确提示
+  if (isEditingProvider.value && providerForm.apiKey === API_KEY_PLACEHOLDER) {
+    ElMessage.warning('请输入一个新的 API Key 进行测试，或直接保存以继续使用旧的 Key。');
+    return;
+  }
+
   isTestingConnection.value = true;
   try {
-    if (isEditingProvider.value && providerForm.apiKey === API_KEY_PLACEHOLDER) {
-      await providerStore.fetchModelsForProvider(editingProviderId.value!);
-      ElMessage.success('连接成功 (使用已保存的凭证)');
-    } else {
-      if (!providerForm.apiHost || !providerForm.apiKey) {
-        ElMessage.warning('请填写 API Host 和 API Key');
-        isTestingConnection.value = false;
-        return;
-      }
-      const res = await providerStore.testConnection({ apiHost: providerForm.apiHost, apiKey: providerForm.apiKey });
-      ElMessage({ type: res.status, message: res.message });
-    }
+    // 移除之前的 if/else 分支，统一调用 testConnection 服务
+    // 这将始终使用表单中当前的值进行测试
+    const res = await providerStore.testConnection({
+      apiHost: providerForm.apiHost,
+      apiKey: providerForm.apiKey
+    });
+    ElMessage({ type: res.status, message: res.message });
   } catch (error: any) {
     const message = error?.response?.data?.detail || '连接测试失败';
     ElMessage.error(message);

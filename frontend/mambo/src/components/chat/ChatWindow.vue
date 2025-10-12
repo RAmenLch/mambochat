@@ -112,6 +112,25 @@
             />
           </el-form-item>
           <el-divider>模型参数</el-divider>
+          <el-form-item>
+            <template #label>
+              <span>上下文消息数量 (Context)</span>
+              <el-tooltip
+                effect="dark"
+                content="每次请求时携带的最近历史消息数量。0 代表不限制（发送全部历史）。"
+                placement="top"
+              >
+                <el-icon style="margin-left: 8px; color: #909399;"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </template>
+            <el-input-number
+              v-model="chatSettingsForm.modelParameters.max_context_messages"
+              :min="0"
+              :step="2"
+              controls-position="right"
+              style="width: 100%;"
+            />
+          </el-form-item>
           <el-form-item label="Temperature (温度)">
             <el-slider
               v-model="chatSettingsForm.modelParameters.temperature"
@@ -172,6 +191,7 @@ interface ChatSettingsForm extends ChatUpdate {
     temperature: number;
     top_p: number;
     stream: boolean;
+    max_context_messages: number;
   };
 }
 
@@ -207,7 +227,7 @@ const chatSettingsForm = reactive<ChatSettingsForm>({
   name: '',
   aiModelId: null,
   systemPrompt: null,
-  modelParameters: { temperature: 0.7, top_p: 0.9, stream: true },
+  modelParameters: { temperature: 0.7, top_p: 0.9, stream: true, max_context_messages: 0 },
 });
 
 const groupedModels = computed(() => providers.value.map(p => ({ label: p.name, options: p.models })));
@@ -221,20 +241,29 @@ const openSettingsDrawer = () => {
   chatSettingsForm.modelParameters.temperature = params?.temperature ?? 0.7;
   chatSettingsForm.modelParameters.top_p = params?.top_p ?? 0.9;
   chatSettingsForm.modelParameters.stream = params?.stream ?? true;
+  chatSettingsForm.modelParameters.max_context_messages = params?.max_context_messages ?? 0;
   settingsDrawerVisible.value = true;
 };
 
 const handleSaveSettings = async () => {
+  if (!currentChat.value) {
+    ElMessage.error('没有活动的会话，无法保存设置。');
+    return;
+  }
   if (!chatSettingsForm.name?.trim()) {
     ElMessage.warning('会话名称不能为空');
     return;
   }
-  await chatStore.updateChatSettings({
+
+  // --- 核心修正 ---
+  // 调用 store action 时，必须传入当前会话的 ID
+  await chatStore.updateChatSettings(currentChat.value.id, {
     name: chatSettingsForm.name,
     aiModelId: chatSettingsForm.aiModelId,
     systemPrompt: chatSettingsForm.systemPrompt,
     modelParameters: chatSettingsForm.modelParameters,
   });
+
   settingsDrawerVisible.value = false;
   ElMessage.success('设置已保存');
 };

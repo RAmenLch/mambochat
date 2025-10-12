@@ -11,10 +11,42 @@ from .. import crud, schemas, models
 from ..database import AsyncSessionLocal
 
 
+async def test_connection_to_provider(api_host: str, api_key: str) -> schemas.ConnectionTestResponse:
+    """
+    测试与外部LLM服务商的连接。
+    通过尝试获取模型列表来验证API Host和API Key的有效性，并提供详细的错误反馈。
+    """
+    try:
+        await fetch_models_from_provider(api_host, api_key)
+        return schemas.ConnectionTestResponse(status="success", message="连接成功！")
+    except json.JSONDecodeError:
+        return schemas.ConnectionTestResponse(
+            status="error",
+            message="连接失败: 服务器返回的不是有效的JSON格式。请确认 API Host 是 API 的基础地址 (例如 https://api.openai.com/v1)，而不是一个网页地址。"
+        )
+    except httpx.HTTPStatusError as e:
+        status_code = e.response.status_code
+        error_message = f"连接失败: 服务器返回错误码 {status_code}。"
+        if status_code == 401:
+            error_message += " API Key 无效或权限不足，请检查您的 API Key。"
+        elif status_code == 404:
+            error_message += " 无法找到模型接口。请确认 API Host 是正确的 API 基础地址。"
+        return schemas.ConnectionTestResponse(status="error", message=error_message)
+    except httpx.RequestError as e:
+        return schemas.ConnectionTestResponse(
+            status="error",
+            message=f"连接失败: 无法访问 API Host。请检查网络连接或地址拼写是否正确。({type(e).__name__})"
+        )
+    except Exception as e:
+        # 捕获其他未知异常，打印日志以供调试
+        print(f"Unhandled exception during connection test: {e}")
+        return schemas.ConnectionTestResponse(status="error", message=f"连接失败: 发生未知错误。")
+
+
 async def fetch_models_from_provider(api_host: str, api_key: str) -> List[schemas.AIModelBase]:
     """
     调用外部LLM服务商的API以获取其提供的模型列表。
-    此函数也间接用于测试连接的有效性。
+    此函数会抛出原始异常，由调用方处理。
     """
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -27,13 +59,18 @@ async def fetch_models_from_provider(api_host: str, api_key: str) -> List[schema
         response = await client.get(url, headers=headers)
         response.raise_for_status()  # 如果状态码是 4xx 或 5xx, 将会抛出 HTTPStatusError
 
+        # response.json() 可能会抛出 json.JSONDecodeError
         data = response.json()
+
         # 假设响应体格式为 {"data": [{"id": "model-id-1"}, ...]}
         model_list = data.get("data", [])
 
+        if not isinstance(model_list, list):
+            raise json.JSONDecodeError("响应体中的 'data' 字段不是一个列表", str(data), 0)
+
         return [
             schemas.AIModelBase(modelId=model.get("id"), name=model.get("id"))
-            for model in model_list if model.get("id")
+            for model in model_list if isinstance(model, dict) and model.get("id")
         ]
 
 
@@ -71,6 +108,9 @@ def _prepare_llm_request_data(
         except (json.JSONDecodeError, TypeError):
             print(f"Warning: Could not parse modelParameters for chat {db_chat.id}")
             pass
+
+    # 从模型参数中移除自定义的 max_context_messages，避免发送给 LLM API
+    model_params.pop('max_context_messages', None)
 
     payload = {
         "model": model.modelId,
@@ -127,7 +167,21 @@ async def generate_chat_response(
     full_response_content = ""
     try:
         async with AsyncSessionLocal() as prep_db:
-            history_messages = await crud.get_messages_by_chat(prep_db, chat_id=chat_id, limit=20)
+            # 解析模型参数以获取上下文消息数量限制
+            model_params = {}
+            if db_chat.modelParameters:
+                try:
+                    model_params = json.loads(db_chat.modelParameters)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            max_messages = model_params.get('max_context_messages')
+            limit = max_messages if isinstance(max_messages, int) and max_messages > 0 else None
+
+            if limit:
+                history_messages = await crud.get_limited_recent_messages(prep_db, chat_id=chat_id, limit=limit)
+            else:
+                history_messages = await crud.get_messages_by_chat(prep_db, chat_id=chat_id)
 
         try:
             headers, payload, api_host = _prepare_llm_request_data(db_chat, history_messages)
@@ -226,7 +280,21 @@ async def generate_chat_response_non_stream(
         else:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="当前会话未指定模型，且未设置全局默认模型。")
 
-    history_messages = await crud.get_messages_by_chat(db, chat_id=chat_id, limit=20)
+    # 解析模型参数以获取上下文消息数量限制
+    model_params = {}
+    if db_chat.modelParameters:
+        try:
+            model_params = json.loads(db_chat.modelParameters)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    max_messages = model_params.get('max_context_messages')
+    limit = max_messages if isinstance(max_messages, int) and max_messages > 0 else None
+
+    if limit:
+        history_messages = await crud.get_limited_recent_messages(db, chat_id=chat_id, limit=limit)
+    else:
+        history_messages = await crud.get_messages_by_chat(db, chat_id=chat_id)
 
     try:
         headers, payload, api_host = _prepare_llm_request_data(db_chat, history_messages)
@@ -257,4 +325,3 @@ async def generate_chat_response_non_stream(
         return assistant_message
     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                         detail="LLM服务商返回了空响应。")
-

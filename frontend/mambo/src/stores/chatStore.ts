@@ -133,30 +133,23 @@ export const useChatStore = defineStore('chat', {
     },
 
     async deleteItem(itemId: string) {
-        const itemToDelete = this.chatList.find(c => c.id === itemId);
-        if (!itemToDelete) return;
-        try {
-            await deleteChat(itemId);
-            const idsToRemove = new Set<string>([itemId]);
-            if (itemToDelete.itemType === 'folder') {
-                const findChildren = (parentId: string) => {
-                    this.chatList.forEach(item => {
-                        if (item.parentId === parentId) {
-                            idsToRemove.add(item.id);
-                            findChildren(item.id);
-                        }
-                    });
-                };
-                findChildren(itemId);
-            }
-            this.chatList = this.chatList.filter(c => !idsToRemove.has(c.id));
-            if (this.currentChatId && idsToRemove.has(this.currentChatId)) {
-                this.currentChatId = null;
-                this.currentChatMessages = [];
-            }
-        } catch (error) {
-            console.error(`Failed to delete item ${itemId}:`, error);
+      try {
+        // 后端负责处理级联删除逻辑，前端只需发送请求
+        await deleteChat(itemId);
+
+        // 删除成功后，重新获取列表以确保前后端状态一致
+        await this.fetchChatList();
+
+        // 检查当前选中的会话是否已被删除
+        const currentChatExists = this.chatList.some(c => c.id === this.currentChatId);
+        if (!currentChatExists) {
+            this.currentChatId = null;
+            this.currentChatMessages = [];
         }
+      } catch (error) {
+        console.error(`Failed to delete item ${itemId}:`, error);
+        ElMessage.error('删除失败，请稍后重试。');
+      }
     },
 
     async reorderChatItems(updates: ChatReorderItem[]) {
@@ -246,7 +239,7 @@ export const useChatStore = defineStore('chat', {
       } else {
         this.isGenerating = true;
         const assistantMessagePlaceholderId = `temp-assistant-${Date.now()}`;
-        const assistantMessagePlaceholder: Message = { id: assistantMessagePlaceholderId, chatId, role: 'assistant', content: '...', createdAt: new Date().toISOString(), sortOrder: 99999 };
+        const assistantMessagePlaceholder: Message = { id: assistantMessagePlaceholderId, chatId, role: 'assistant', content: '', createdAt: new Date().toISOString(), sortOrder: 99999 };
         this.currentChatMessages.push(assistantMessagePlaceholder);
 
         try {
@@ -308,7 +301,7 @@ export const useChatStore = defineStore('chat', {
       const chatId = this.currentChatId;
 
       const assistantMessagePlaceholderId = `temp-assistant-${Date.now()}`;
-      const assistantMessagePlaceholder: Message = { id: assistantMessagePlaceholderId, chatId, role: 'assistant', content: '...', createdAt: new Date().toISOString(), sortOrder: 99999 };
+      const assistantMessagePlaceholder: Message = { id: assistantMessagePlaceholderId, chatId, role: 'assistant', content: '', createdAt: new Date().toISOString(), sortOrder: 99999 };
       this.currentChatMessages.push(assistantMessagePlaceholder);
 
       this.isGenerating = true;
@@ -322,7 +315,6 @@ export const useChatStore = defineStore('chat', {
         onmessage: (event) => {
           const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessagePlaceholderId);
           if (messageToUpdate) {
-            if (messageToUpdate.content === '...') messageToUpdate.content = '';
             try {
               messageToUpdate.content += JSON.parse(event.data);
             } catch (e) { console.error("Failed to parse SSE data chunk:", event.data, e); }
@@ -337,10 +329,26 @@ export const useChatStore = defineStore('chat', {
           this.isGenerating = false;
           this.currentRequestController = null;
           if (err.name === 'AbortError') {
-            getChatWithMessages(chatId).then(chat => { if (this.currentChatId === chatId) this.currentChatMessages = chat.messages.sort((a, b) => a.sortOrder - b.sortOrder); });
+            // 立即移除临时占位符，防止用户操作一个无效的消息
+            const tempMessageIndex = this.currentChatMessages.findIndex(m => m.id === assistantMessagePlaceholderId);
+            if (tempMessageIndex !== -1) {
+              this.currentChatMessages.splice(tempMessageIndex, 1);
+            }
+            // 然后从后端同步权威的消息列表
+            getChatWithMessages(chatId).then(chat => {
+              if (this.currentChatId === chatId) {
+                this.currentChatMessages = chat.messages.sort((a, b) => a.sortOrder - b.sortOrder);
+              }
+            });
           } else {
              const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessagePlaceholderId);
-             if (messageToUpdate) messageToUpdate.content += '\n\n**抱歉，请求出错。**';
+             if (messageToUpdate) {
+               if (messageToUpdate.content === '') {
+                 messageToUpdate.content = '**抱歉，请求出错。**';
+               } else {
+                 messageToUpdate.content += '\n\n**抱歉，请求出错。**';
+               }
+             }
              console.error("SSE error:", err);
           }
         },
