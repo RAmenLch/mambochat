@@ -10,13 +10,13 @@ import {
   updateChatSettings,
   reorderChats,
   generateResponseNonStream,
-  regenerateResponseNonStream,
   updateMessage,
   deleteMessage,
   duplicateChat,
 } from '@/api/chatService';
 import type { Chat, Message, ChatCreate, ChatUpdate, ChatReorderItem } from '@/api/types';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
+import { useProviderStore } from './providerStore';
 
 interface ChatState {
   chatList: Chat[];
@@ -99,7 +99,18 @@ export const useChatStore = defineStore('chat', {
 
     async createNewItem(itemData: ChatCreate): Promise<Chat | null> {
       try {
-        const newItem = await createChat(itemData);
+        const finalItemData = { ...itemData };
+        if (finalItemData.itemType === 'chat' && !finalItemData.aiModelId) {
+          const providerStore = useProviderStore();
+          if (!providerStore.globalSettings.default_model_id) {
+            await providerStore.fetchGlobalSettings();
+          }
+          if (providerStore.globalSettings.default_model_id) {
+            finalItemData.aiModelId = providerStore.globalSettings.default_model_id;
+          }
+        }
+
+        const newItem = await createChat(finalItemData);
         this.chatList.push(newItem);
         return newItem;
       } catch (error) {
@@ -108,16 +119,16 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    async updateChatSettings(settings: ChatUpdate) {
-      if (!this.currentChatId) return;
+    async updateChatSettings(itemId: string, settings: ChatUpdate) {
+      if (!itemId) return;
       try {
-        const updatedChat = await updateChatSettings(this.currentChatId, settings);
-        const index = this.chatList.findIndex(c => c.id === this.currentChatId);
+        const updatedChat = await updateChatSettings(itemId, settings);
+        const index = this.chatList.findIndex(c => c.id === itemId);
         if (index !== -1) {
-          this.chatList[index] = updatedChat;
+          Object.assign(this.chatList[index], updatedChat);
         }
       } catch (error) {
-        console.error('Failed to update chat settings:', error);
+        console.error(`Failed to update settings for item ${itemId}:`, error);
       }
     },
 
@@ -164,14 +175,14 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    async duplicateChat(itemId: string) {
+    async duplicateChat(itemId: string): Promise<Chat | null> {
       try {
         const newChat = await duplicateChat(itemId);
         this.chatList.push(newChat);
-        await this.selectChat(newChat.id);
+        return newChat;
       } catch (error) {
         console.error(`Failed to duplicate chat ${itemId}:`, error);
-        ElMessage.error('复制会话失败');
+        return null;
       }
     },
 
@@ -223,16 +234,47 @@ export const useChatStore = defineStore('chat', {
     async sendMessage(content: string) {
       if (!this.currentChatId || !this.currentChat || this.isGenerating) return;
 
-      delete this.userInputCache[this.currentChatId];
+      const chatId = this.currentChatId;
+      delete this.userInputCache[chatId];
 
-      const userMessage: Message = { id: `temp-user-${Date.now()}`, chatId: this.currentChatId, role: 'user', content, createdAt: new Date().toISOString(), sortOrder: 99999 };
+      const userMessage: Message = { id: `temp-user-${Date.now()}`, chatId, role: 'user', content, createdAt: new Date().toISOString(), sortOrder: 99999 };
       this.currentChatMessages.push(userMessage);
 
       const useStream = this.currentChat.modelParameters?.stream ?? true;
       if (useStream) {
-        this._startStreamGeneration(`/api/chats/${this.currentChatId}/generate`, 'POST', { content });
+        this._startStreamGeneration(`/api/chats/${chatId}/generate`, 'POST', { content });
       } else {
-        this._startNonStreamGeneration(content, generateResponseNonStream);
+        this.isGenerating = true;
+        const assistantMessagePlaceholderId = `temp-assistant-${Date.now()}`;
+        const assistantMessagePlaceholder: Message = { id: assistantMessagePlaceholderId, chatId, role: 'assistant', content: '...', createdAt: new Date().toISOString(), sortOrder: 99999 };
+        this.currentChatMessages.push(assistantMessagePlaceholder);
+
+        try {
+          const finalMessage = await generateResponseNonStream(chatId, content);
+
+          const messageIndex = this.currentChatMessages.findIndex(m => m.id === assistantMessagePlaceholderId);
+          if (messageIndex !== -1) {
+            this.currentChatMessages[messageIndex] = finalMessage;
+          }
+          const chatWithMessages = await getChatWithMessages(chatId);
+          if (this.currentChatId === chatId) {
+            this.currentChatMessages = chatWithMessages.messages.sort((a, b) => a.sortOrder - b.sortOrder);
+          }
+        } catch (error: unknown) {
+          let errorMessage = '请求失败';
+          if (typeof error === 'object' && error !== null && 'response' in error) {
+            const errResponse = error.response as { data?: { detail?: string } };
+            if (errResponse.data?.detail) {
+              errorMessage = errResponse.data.detail;
+            }
+          } else if (error instanceof Error) {
+            errorMessage = error.message;
+          }
+          const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessagePlaceholderId);
+          if (messageToUpdate) messageToUpdate.content = `**${errorMessage}**`;
+        } finally {
+          this.isGenerating = false;
+        }
       }
     },
 
@@ -303,47 +345,6 @@ export const useChatStore = defineStore('chat', {
           }
         },
       });
-    },
-
-    async _startNonStreamGeneration(content: string, apiCall: (chatId: string, content: string) => Promise<Message>) {
-      if (!this.currentChatId) return;
-      const chatId = this.currentChatId;
-
-      const assistantMessagePlaceholderId = `temp-assistant-${Date.now()}`;
-      const assistantMessagePlaceholder: Message = { id: assistantMessagePlaceholderId, chatId, role: 'assistant', content: '...', createdAt: new Date().toISOString(), sortOrder: 99999 };
-      this.currentChatMessages.push(assistantMessagePlaceholder);
-      this.isGenerating = true;
-
-      try {
-        const finalMessage = await apiCall(chatId, content);
-        const messageIndex = this.currentChatMessages.findIndex(m => m.id === assistantMessagePlaceholderId);
-        if (messageIndex !== -1) {
-          this.currentChatMessages[messageIndex] = finalMessage;
-        } else {
-          this.currentChatMessages.push(finalMessage);
-        }
-        const userMessageIndex = this.currentChatMessages.findIndex(m => m.role === 'user' && m.id.startsWith('temp-user'));
-        if(userMessageIndex !== -1) {
-          getChatWithMessages(chatId).then(chat => { if (this.currentChatId === chatId) this.currentChatMessages = chat.messages.sort((a, b) => a.sortOrder - b.sortOrder); });
-        }
-
-      } catch (error: unknown) {
-        let errorMessage = '请求失败';
-        if (error instanceof Error) {
-          errorMessage = error.message;
-        }
-        if (typeof error === 'object' && error !== null && 'response' in error) {
-            const errResponse = error.response as { data?: { detail?: string } };
-            if(errResponse.data?.detail) {
-                errorMessage = errResponse.data.detail;
-            }
-        }
-
-        const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessagePlaceholderId);
-        if (messageToUpdate) messageToUpdate.content = `**${errorMessage}**`;
-      } finally {
-        this.isGenerating = false;
-      }
     },
   }
 });

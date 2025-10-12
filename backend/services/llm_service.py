@@ -11,6 +11,32 @@ from .. import crud, schemas, models
 from ..database import AsyncSessionLocal
 
 
+async def fetch_models_from_provider(api_host: str, api_key: str) -> List[schemas.AIModelBase]:
+    """
+    调用外部LLM服务商的API以获取其提供的模型列表。
+    此函数也间接用于测试连接的有效性。
+    """
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    # 遵循OpenAI API规范，模型列表端点为 /models
+    url = f"{api_host.rstrip('/')}/models"
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(url, headers=headers)
+        response.raise_for_status()  # 如果状态码是 4xx 或 5xx, 将会抛出 HTTPStatusError
+
+        data = response.json()
+        # 假设响应体格式为 {"data": [{"id": "model-id-1"}, ...]}
+        model_list = data.get("data", [])
+
+        return [
+            schemas.AIModelBase(modelId=model.get("id"), name=model.get("id"))
+            for model in model_list if model.get("id")
+        ]
+
+
 def _prepare_llm_request_data(
         db_chat: models.Chat,
         history_messages: List[models.Message]
@@ -18,8 +44,9 @@ def _prepare_llm_request_data(
     """
     根据会话配置和历史消息，准备发送给 LLM API 的 headers 和 payload。
     """
+    # 如果会话的模型被删除，ai_model会是None
     if not db_chat.ai_model or not db_chat.ai_model.provider:
-        raise ValueError("Chat is not configured with a valid AI model or provider.")
+        raise ValueError("会话未配置有效的AI模型或服务商。")
 
     provider = db_chat.ai_model.provider
     model = db_chat.ai_model
@@ -65,13 +92,11 @@ async def generate_chat_response(
     """
     async with AsyncSessionLocal() as db:
         if save_user_message:
-            # 用户消息现在也需要 sortOrder，由 crud.create_message 自动处理
             await crud.create_message(
                 db,
                 message=schemas.MessageCreate(content=request.content, role=schemas.MessageRole.USER),
                 chat_id=chat_id
             )
-        # 助手消息占位符
         assistant_message = await crud.create_message(
             db,
             message=schemas.MessageCreate(content="", role=schemas.MessageRole.ASSISTANT),
@@ -82,6 +107,23 @@ async def generate_chat_response(
             print(f"Chat with id {chat_id} not found.")
             return
 
+        # 如果会话没有模型，尝试应用全局默认模型
+        if not db_chat.aiModelId:
+            default_model_setting = await crud.get_setting(db, key="default_model_id")
+            if default_model_setting and default_model_setting.value:
+                db_chat.aiModelId = default_model_setting.value
+                await db.commit()
+                await db.refresh(db_chat)
+                # 重新加载关系
+                db_chat = await crud.get_chat(db, chat_id=chat_id)
+            else:
+                error_msg = "**错误: 当前会话未指定模型，且未设置全局默认模型。**"
+                yield f"data: {json.dumps(error_msg)}\n\n"
+                await crud.update_message(
+                    db, assistant_message.id, schemas.MessageUpdate(content=error_msg)
+                )
+                return
+
     full_response_content = ""
     try:
         async with AsyncSessionLocal() as prep_db:
@@ -91,14 +133,14 @@ async def generate_chat_response(
             headers, payload, api_host = _prepare_llm_request_data(db_chat, history_messages)
             payload["stream"] = True
         except ValueError as e:
-            error_msg = f"**错误: 准备请求时发生错误: {e}**"
+            error_msg = f"**错误: {e}**"
             full_response_content = error_msg
             yield f"data: {json.dumps(error_msg)}\n\n"
             return
 
         try:
             async with httpx.AsyncClient(timeout=300) as client:
-                async with client.stream("POST", f"{api_host}/chat/completions", headers=headers,
+                async with client.stream("POST", f"{api_host.rstrip('/')}/chat/completions", headers=headers,
                                          json=payload) as response:
                     response.raise_for_status()
                     async for line in response.aiter_lines():
@@ -116,14 +158,12 @@ async def generate_chat_response(
                             except json.JSONDecodeError:
                                 continue
         except httpx.HTTPStatusError as e:
-            # --- 核心修复：增加对 StreamClosed 异常的健壮处理 ---
             error_details = ""
             try:
                 error_body = await e.response.aread()
                 error_details = error_body.decode()
             except httpx.StreamClosed:
                 error_details = f"HTTP {e.response.status_code} {e.response.reason_phrase}. (无法读取响应体，流已关闭)"
-
             error_msg = f'\n\n**错误: {error_details}**'
             full_response_content += error_msg
             yield f"data: {json.dumps(error_msg)}\n\n"
@@ -141,8 +181,6 @@ async def generate_chat_response(
                 raise
     finally:
         if assistant_message and full_response_content.strip():
-            print(f"Saving content for message {assistant_message.id}. Content length: {len(full_response_content)}")
-
             async def update_task():
                 async with AsyncSessionLocal() as final_db:
                     await crud.update_message(
@@ -150,15 +188,11 @@ async def generate_chat_response(
                         message_id=assistant_message.id,
                         message_update=schemas.MessageUpdate(content=full_response_content.strip())
                     )
-                    print(f"Successfully saved content for message {assistant_message.id}.")
 
             try:
                 await asyncio.shield(update_task())
             except asyncio.CancelledError:
-                print("Request cancelled, shielded update task is running in the background.")
                 pass
-        else:
-            print(f"No content to save for message {assistant_message.id}.")
 
 
 async def generate_chat_response_non_stream(
@@ -181,6 +215,17 @@ async def generate_chat_response_non_stream(
     if not db_chat:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
 
+    # 如果会话没有模型，尝试应用全局默认模型
+    if not db_chat.aiModelId:
+        default_model_setting = await crud.get_setting(db, key="default_model_id")
+        if default_model_setting and default_model_setting.value:
+            db_chat.aiModelId = default_model_setting.value
+            await db.commit()
+            await db.refresh(db_chat)
+            db_chat = await crud.get_chat(db, chat_id=chat_id)
+        else:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="当前会话未指定模型，且未设置全局默认模型。")
+
     history_messages = await crud.get_messages_by_chat(db, chat_id=chat_id, limit=20)
 
     try:
@@ -192,16 +237,16 @@ async def generate_chat_response_non_stream(
     full_response_content = ""
     try:
         async with httpx.AsyncClient(timeout=300) as client:
-            response = await client.post(f"{api_host}/chat/completions", headers=headers, json=payload)
+            response = await client.post(f"{api_host.rstrip('/')}/chat/completions", headers=headers, json=payload)
             response.raise_for_status()
             data = response.json()
             full_response_content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
     except httpx.RequestError as e:
-        raise HTTPException(status_code=status.HTTP_5_02_BAD_GATEWAY,
-                            detail=f"Failed to connect to LLM provider: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
+                            detail=f"无法连接到LLM服务商: {str(e)}")
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_5_00_INTERNAL_SERVER_ERROR,
-                            detail=f"An unexpected error occurred: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=f"发生未知异常: {str(e)}")
 
     if full_response_content:
         assistant_message = await crud.create_message(
@@ -210,5 +255,6 @@ async def generate_chat_response_non_stream(
             chat_id=chat_id
         )
         return assistant_message
-    raise HTTPException(status_code=status.HTTP_5_00_INTERNAL_SERVER_ERROR,
-                        detail="LLM provider returned an empty response.")
+    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="LLM服务商返回了空响应。")
+

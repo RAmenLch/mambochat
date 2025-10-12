@@ -10,6 +10,27 @@ import json
 from . import models, schemas
 
 
+# --- GlobalSettings CRUD ---
+
+async def get_setting(db: AsyncSession, key: str) -> Optional[models.GlobalSettings]:
+    """通过键获取单个全局配置项"""
+    result = await db.execute(select(models.GlobalSettings).filter(models.GlobalSettings.key == key))
+    return result.scalars().first()
+
+
+async def update_setting(db: AsyncSession, setting: schemas.GlobalSetting) -> models.GlobalSettings:
+    """更新或创建(upsert)一个全局配置项"""
+    db_setting = await get_setting(db, setting.key)
+    if db_setting:
+        db_setting.value = setting.value
+    else:
+        db_setting = models.GlobalSettings(**setting.model_dump())
+        db.add(db_setting)
+    await db.commit()
+    await db.refresh(db_setting)
+    return db_setting
+
+
 # --- AIProvider CRUD ---
 
 async def get_provider(db: AsyncSession, provider_id: str) -> Optional[models.AIProvider]:
@@ -29,25 +50,64 @@ async def get_providers(db: AsyncSession, skip: int = 0, limit: int = 100) -> Li
     return result.scalars().all()
 
 
-async def create_provider(db: AsyncSession, provider: schemas.AIProviderCreate) -> models.AIProvider:
-    """创建一个新的AI服务提供商"""
-    provider_id = provider.id if provider.id else models.generate_uuid()
+async def create_provider_with_models(db: AsyncSession,
+                                      provider_data: schemas.ProviderWithModelsCreate) -> models.AIProvider:
+    """事务性地创建一个服务商及其关联的模型，并更新最后选择的服务商设置"""
+    provider_id = provider_data.id if provider_data.id else models.generate_uuid()
+
     db_provider = models.AIProvider(
         id=provider_id,
-        name=provider.name,
-        apiHost=provider.apiHost,
-        apiKey=provider.apiKey
+        name=provider_data.name,
+        apiHost=provider_data.apiHost,
+        apiKey=provider_data.apiKey
     )
     db.add(db_provider)
+
+    for model_schema in provider_data.models:
+        db_model = models.AIModel(
+            id=models.generate_uuid(), # 确保模型有唯一的UUID
+            modelId=model_schema.modelId,
+            name=model_schema.name,
+            providerId=provider_id
+        )
+        db.add(db_model)
+
+    await db.commit()
+    await db.refresh(db_provider, ['models'])
+
+    await update_setting(db, setting=schemas.GlobalSetting(key="last_selected_provider_id", value=db_provider.id))
+
+    return db_provider
+
+
+async def update_provider(db: AsyncSession, provider_id: str, provider_update: schemas.AIProviderUpdate) -> Optional[models.AIProvider]:
+    """更新一个AI服务提供商的信息，并更新最后选择的服务商设置"""
+    db_provider = await get_provider(db, provider_id)
+    if not db_provider:
+        return None
+
+    update_data = provider_update.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_provider, key, value)
+
     await db.commit()
     await db.refresh(db_provider)
+
+    # 更新最后选择的服务商ID
+    await update_setting(db, setting=schemas.GlobalSetting(key="last_selected_provider_id", value=provider_id))
+
     return db_provider
 
 
 async def delete_provider(db: AsyncSession, provider_id: str) -> Optional[models.AIProvider]:
-    """删除一个AI服务提供商及其下所有模型 (利用cascade)"""
+    """删除一个AI服务提供商及其下所有模型，并清理相关的全局设置"""
     db_provider = await get_provider(db, provider_id)
     if db_provider:
+        # 如果删除的是最后选择的服务商，则清空该设置
+        last_selected_setting = await get_setting(db, "last_selected_provider_id")
+        if last_selected_setting and last_selected_setting.value == provider_id:
+            await update_setting(db, setting=schemas.GlobalSetting(key="last_selected_provider_id", value=None))
+
         await db.delete(db_provider)
         await db.commit()
     return db_provider
@@ -69,8 +129,26 @@ async def get_models_by_provider(db: AsyncSession, provider_id: str) -> List[mod
 
 async def create_model(db: AsyncSession, model: schemas.AIModelCreate) -> models.AIModel:
     """为提供商创建一个新的AI模型"""
-    db_model = models.AIModel(**model.model_dump())
+    db_model = models.AIModel(
+        id=models.generate_uuid(),
+        **model.model_dump()
+    )
     db.add(db_model)
+    await db.commit()
+    await db.refresh(db_model)
+    return db_model
+
+
+async def update_model(db: AsyncSession, model_id: str, model_update: schemas.AIModelUpdate) -> Optional[models.AIModel]:
+    """更新一个AI模型的信息"""
+    db_model = await get_model(db, model_id)
+    if not db_model:
+        return None
+
+    update_data = model_update.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_model, key, value)
+
     await db.commit()
     await db.refresh(db_model)
     return db_model
@@ -80,6 +158,13 @@ async def delete_model(db: AsyncSession, model_id: str) -> Optional[models.AIMod
     """删除一个AI模型"""
     db_model = await get_model(db, model_id)
     if db_model:
+        # 在删除模型后，将使用此模型的所有会话的 aiModelId 置为 NULL
+        chats_to_update = await db.execute(
+            select(models.Chat).filter(models.Chat.aiModelId == model_id)
+        )
+        for chat in chats_to_update.scalars().all():
+            chat.aiModelId = None
+
         await db.delete(db_model)
         await db.commit()
     return db_model
@@ -187,7 +272,6 @@ async def duplicate_chat(db: AsyncSession, chat_id: str) -> Optional[models.Chat
     if not original_chat or original_chat.itemType != 'chat':
         return None
 
-    # 计算新会话的排序值，放在同一层级的末尾
     max_sort_order_result = await db.execute(
         select(func.max(models.Chat.sortOrder))
         .filter(models.Chat.parentId == original_chat.parentId)
@@ -195,7 +279,6 @@ async def duplicate_chat(db: AsyncSession, chat_id: str) -> Optional[models.Chat
     max_sort_order = max_sort_order_result.scalar_one_or_none()
     new_sort_order = (max_sort_order or 0) + 1
 
-    # 1. 创建新会话的配置
     new_chat_data = schemas.ChatCreate(
         name=f"{original_chat.name} (副本)",
         systemPrompt=original_chat.systemPrompt,
@@ -207,20 +290,19 @@ async def duplicate_chat(db: AsyncSession, chat_id: str) -> Optional[models.Chat
     )
     new_chat = await create_chat(db, chat=new_chat_data)
 
-    # 2. 复制原会话的所有消息到新会话
     if original_chat.messages:
         new_messages = [
             models.Message(
                 content=msg.content,
                 role=msg.role,
                 sortOrder=msg.sortOrder,
-                chatId=new_chat.id  # 关联到新创建的会话ID
+                chatId=new_chat.id
             )
             for msg in original_chat.messages
         ]
         db.add_all(new_messages)
         await db.commit()
-        await db.refresh(new_chat, ['messages']) # 刷新关系，以便返回对象包含消息
+        await db.refresh(new_chat, ['messages'])
 
     return new_chat
 
@@ -239,7 +321,6 @@ async def update_message(db: AsyncSession, message_id: str, message_update: sche
     db_message = await get_message(db, message_id=message_id)
     if not db_message:
         return None
-    # 仅更新 content，resend 逻辑在 router 层处理
     update_data = message_update.model_dump(exclude_unset=True)
     db_message.content = update_data['content']
     await db.commit()
@@ -262,7 +343,6 @@ async def get_messages_by_chat(db: AsyncSession, chat_id: str, skip: int = 0, li
 
 async def create_message(db: AsyncSession, message: schemas.MessageCreate, chat_id: str) -> models.Message:
     """在指定会话中创建一条新消息"""
-    # 获取当前会话中最大的 sortOrder
     max_sort_order_result = await db.execute(
         select(func.max(models.Message.sortOrder))
         .filter(models.Message.chatId == chat_id)

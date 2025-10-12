@@ -1,54 +1,37 @@
-# main.py
+# backend/main.py
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+from .database import engine, Base
+from .routers import chats, providers_models, settings
 
-# 导入我们的数据库模块和路由模块
-from backend import database
-from backend.routers import providers_models, chats
+# 在应用启动时创建数据库表
+# 注意：在生产环境中，通常使用 Alembic 等工具进行数据库迁移管理
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield
 
-# 1. 创建 FastAPI 应用实例
-app = FastAPI(
-    title="LLM-API Client System",
-    description="一个使用 FastAPI 和 Vue 构建的 LLM 客户端系统",
-    version="1.0.0",
-)
+app = FastAPI(lifespan=lifespan)
 
-# 2. 配置 CORS (跨源资源共享) 中间件
-#    这是至关重要的，因为它允许我们的 Vue 前端 (运行在不同端口) 与后端 API 通信
-origins = [
-    "http://localhost:5173",  # Vue 开发服务器的默认地址
-    "http://127.0.0.1:5173",
-]
-
+# 配置 CORS 中间件
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],  # 在生产中应限制为前端应用的源
     allow_credentials=True,
-    allow_methods=["*"],  # 允许所有 HTTP 方法
-    allow_headers=["*"],  # 允许所有 HTTP 头
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# 3. 添加应用启动事件处理器
-@app.on_event("startup")
-async def startup_event():
-    """
-    应用启动时执行的函数。
-    这里我们调用 create_db_and_tables 来确保数据库和表已创建。
-    """
-    print("应用启动... 正在初始化数据库...")
-    await database.create_db_and_tables()
-    print("数据库初始化完成。")
-
-# 4. 包含 (注册) 我们的 API 路由
-#    使用 prefix="/api" 为所有相关路由添加统一的前缀
-#    使用 tags 为 API 文档中的路由进行分组
-app.include_router(providers_models.router, prefix="/api", tags=["Providers & Models"])
+# 包含各个模块的路由
+# 将所有API路由都挂载在 /api 前缀下
 app.include_router(chats.router, prefix="/api", tags=["Chats & Messages"])
+app.include_router(providers_models.router, prefix="/api", tags=["Providers & Models"])
+app.include_router(settings.router, prefix="/api", tags=["Global Settings"])
 
-
-# 5. (可选) 添加一个根路径用于健康检查
-@app.get("/", tags=["Root"])
-async def read_root():
-    return {"message": "欢迎来到 LLM-API 客户端系统后端！请访问 /docs 查看 API 文档。"}
+@app.get("/")
+async def root():
+    return {"message": "LLM-API Client Backend is running."}
 

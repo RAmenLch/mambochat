@@ -52,6 +52,11 @@ class AIModelCreate(AIModelBase):
     providerId: str
 
 
+class AIModelUpdate(BaseModel):
+    """用于更新AI模型信息"""
+    name: Optional[str] = None
+
+
 class AIModel(AIModelBase):
     id: str
     providerId: str
@@ -72,15 +77,39 @@ class AIProviderCreate(AIProviderBase):
     apiKey: str
 
 
+class AIProviderUpdate(BaseModel):
+    """用于更新AI服务商信息"""
+    name: Optional[str] = None
+    apiHost: Optional[str] = None
+    apiKey: Optional[str] = None
+
+
 class AIProvider(AIProviderBase):
     id: str
 
     class Config:
         from_attributes = True
 
-# noinspection PyDataclass
+
 class AIProviderWithModels(AIProvider):
     models: List[AIModel] = Field(default_factory=list)
+
+
+class ProviderWithModelsCreate(AIProviderCreate):
+    """用于在创建服务商时，同时创建其下的模型列表"""
+    models: List[AIModelBase] = Field(default_factory=list, description="随服务商一同创建的模型列表")
+
+
+class ConnectionRequest(BaseModel):
+    """用于测试连接或获取外部模型列表的请求体"""
+    apiHost: str
+    apiKey: str
+
+
+class ConnectionTestResponse(BaseModel):
+    """连接测试的响应体"""
+    status: str
+    message: str
 
 
 # --- Chat Schemas ---
@@ -91,7 +120,6 @@ class ChatBase(BaseModel):
     modelParameters: Optional[Dict] = Field(None, description="模型参数，例如 {'temperature': 0.7, 'top_p': 0.9}")
     aiModelId: Optional[str] = None
 
-    # --- 新增字段，用于支持文件夹和排序 ---
     itemType: str = Field('chat', description="项目类型: 'chat' 或 'folder'")
     parentId: Optional[str] = Field(None, description="父文件夹的ID")
     sortOrder: int = Field(0, description="排序权重")
@@ -114,7 +142,6 @@ class ChatCreate(ChatBase):
 class Chat(ChatBase):
     id: str
     createdAt: datetime
-    # --- 新增字段，用于支持最近会话功能 ---
     lastOpenedAt: Optional[datetime] = None
 
     class Config:
@@ -127,16 +154,14 @@ class ChatUpdate(BaseModel):
     aiModelId: Optional[str] = None
     systemPrompt: Optional[str] = None
     modelParameters: Optional[Dict] = None
-    # --- 新增字段，用于支持移动和重命名文件夹 ---
     parentId: Optional[str] = None
     sortOrder: Optional[int] = None
 
-# noinspection PyDataclass
+
 class ChatWithMessages(Chat):
     messages: List[Message] = Field(default_factory=list)
 
 
-# --- 新增Schema: 用于批量更新排序和层级关系 ---
 class ChatReorderItem(BaseModel):
     id: str
     parentId: Optional[str]
@@ -146,3 +171,14 @@ class ChatReorderItem(BaseModel):
 class GenerateRequest(BaseModel):
     content: str
 
+
+# --- Global Settings Schemas ---
+class GlobalSetting(BaseModel):
+    key: str
+    value: Optional[str] = None
+
+
+class GlobalSettingsUpdate(BaseModel):
+    """用于更新全局配置的请求体"""
+    default_model_id: Optional[str] = Field(None, description="全局默认模型的ID")
+    last_selected_provider_id: Optional[str] = Field(None, description="最后编辑或选择的服务商ID")
