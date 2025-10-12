@@ -3,7 +3,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload, joinedload
-from sqlalchemy import func, delete
+from sqlalchemy import func, delete, update
 from typing import List, Optional
 import json
 
@@ -56,7 +56,7 @@ async def get_providers(db: AsyncSession, skip: int = 0, limit: int = 100) -> Li
 
 async def create_provider_with_models(db: AsyncSession,
                                       provider_data: schemas.ProviderWithModelsCreate) -> models.AIProvider:
-    """事务性地创建一个服务商及其关联的模型，并更新最后选择的服务商设置"""
+    """事务性地创建一个服务商及其关联的模型"""
     provider_id = provider_data.id if provider_data.id else models.generate_uuid()
 
     db_provider = models.AIProvider(
@@ -69,7 +69,7 @@ async def create_provider_with_models(db: AsyncSession,
 
     for model_schema in provider_data.models:
         db_model = models.AIModel(
-            id=models.generate_uuid(), # 确保模型有唯一的UUID
+            id=models.generate_uuid(),
             modelId=model_schema.modelId,
             name=model_schema.name,
             providerId=provider_id
@@ -79,13 +79,11 @@ async def create_provider_with_models(db: AsyncSession,
     await db.commit()
     await db.refresh(db_provider, ['models'])
 
-    await update_setting(db, setting=schemas.GlobalSetting(key="last_selected_provider_id", value=db_provider.id))
-
     return db_provider
 
 
 async def update_provider(db: AsyncSession, provider_id: str, provider_update: schemas.AIProviderUpdate) -> Optional[models.AIProvider]:
-    """更新一个AI服务提供商的信息，并更新最后选择的服务商设置"""
+    """更新一个AI服务提供商的信息"""
     db_provider = await get_provider(db, provider_id)
     if not db_provider:
         return None
@@ -97,27 +95,13 @@ async def update_provider(db: AsyncSession, provider_id: str, provider_update: s
     await db.commit()
     await db.refresh(db_provider)
 
-    # 更新最后选择的服务商ID
-    await update_setting(db, setting=schemas.GlobalSetting(key="last_selected_provider_id", value=provider_id))
-
     return db_provider
 
 
 async def delete_provider(db: AsyncSession, provider_id: str) -> Optional[models.AIProvider]:
-    """删除一个AI服务提供商及其下所有模型，并清理相关的全局设置"""
+    """删除一个AI服务提供商及其下所有模型"""
     db_provider = await get_provider(db, provider_id)
     if db_provider:
-        # 在删除前，检查并清理相关的全局设置
-        default_model_setting = await get_setting(db, "default_model_id")
-        if default_model_setting and default_model_setting.value:
-            provider_model_ids = {model.id for model in db_provider.models}
-            if default_model_setting.value in provider_model_ids:
-                await update_setting(db, setting=schemas.GlobalSetting(key="default_model_id", value=None))
-
-        last_selected_setting = await get_setting(db, "last_selected_provider_id")
-        if last_selected_setting and last_selected_setting.value == provider_id:
-            await update_setting(db, setting=schemas.GlobalSetting(key="last_selected_provider_id", value=None))
-
         await db.delete(db_provider)
         await db.commit()
     return db_provider
@@ -165,20 +149,15 @@ async def update_model(db: AsyncSession, model_id: str, model_update: schemas.AI
 
 
 async def delete_model(db: AsyncSession, model_id: str) -> Optional[models.AIModel]:
-    """删除一个AI模型，并清理相关的全局设置"""
+    """删除一个AI模型，并将使用此模型的所有会话的 aiModelId 置为 NULL"""
     db_model = await get_model(db, model_id)
     if db_model:
-        # 在删除前，检查该模型是否为全局默认模型
-        default_model_setting = await get_setting(db, "default_model_id")
-        if default_model_setting and default_model_setting.value == model_id:
-            await update_setting(db, setting=schemas.GlobalSetting(key="default_model_id", value=None))
-
-        # 将使用此模型的所有会话的 aiModelId 置为 NULL
-        chats_to_update = await db.execute(
-            select(models.Chat).filter(models.Chat.aiModelId == model_id)
+        # 使用一条批量更新语句，高效地将所有使用此模型的会话 aiModelId 置为 NULL
+        await db.execute(
+            update(models.Chat)
+            .where(models.Chat.aiModelId == model_id)
+            .values(aiModelId=None)
         )
-        for chat in chats_to_update.scalars().all():
-            chat.aiModelId = None
 
         await db.delete(db_model)
         await db.commit()
@@ -294,10 +273,15 @@ async def duplicate_chat(db: AsyncSession, chat_id: str) -> Optional[models.Chat
     max_sort_order = max_sort_order_result.scalar_one_or_none()
     new_sort_order = (max_sort_order or 0) + 1
 
+    try:
+        params = json.loads(original_chat.modelParameters) if original_chat.modelParameters else None
+    except json.JSONDecodeError:
+        params = None  # 如果JSON数据损坏，则安全地回退为None
+
     new_chat_data = schemas.ChatCreate(
         name=f"{original_chat.name} (副本)",
         systemPrompt=original_chat.systemPrompt,
-        modelParameters=json.loads(original_chat.modelParameters) if original_chat.modelParameters else None,
+        modelParameters=params,
         aiModelId=original_chat.aiModelId,
         itemType='chat',
         parentId=original_chat.parentId,
@@ -343,17 +327,34 @@ async def update_message(db: AsyncSession, message_id: str, message_update: sche
     return db_message
 
 
-async def get_messages_by_chat(db: AsyncSession, chat_id: str, skip: int = 0, limit: int = 1000) -> List[
+async def get_messages_by_chat(db: AsyncSession, chat_id: str, skip: int = 0, limit: Optional[int] = None) -> List[
     models.Message]:
-    """获取指定会话的所有消息"""
-    result = await db.execute(
+    """获取指定会话的所有消息（按时间升序）"""
+    query = (
         select(models.Message)
         .filter(models.Message.chatId == chat_id)
         .order_by(models.Message.sortOrder.asc())
         .offset(skip)
+    )
+
+    if limit is not None:
+        query = query.limit(limit)
+
+    result = await db.execute(query)
+    return result.scalars().all()
+
+
+async def get_limited_recent_messages(db: AsyncSession, chat_id: str, limit: int) -> List[models.Message]:
+    """获取指定会话中最新的N条消息（按时间升序返回）"""
+    result = await db.execute(
+        select(models.Message)
+        .filter(models.Message.chatId == chat_id)
+        .order_by(models.Message.sortOrder.desc())
         .limit(limit)
     )
-    return result.scalars().all()
+    # 结果是按时间倒序的，需要反转以恢复正确的对话顺序
+    messages = result.scalars().all()
+    return messages[::-1]
 
 
 async def create_message(db: AsyncSession, message: schemas.MessageCreate, chat_id: str) -> models.Message:

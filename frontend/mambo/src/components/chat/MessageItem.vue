@@ -115,6 +115,7 @@ import {
 } from '@element-plus/icons-vue';
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
+import DOMPurify from 'dompurify';
 
 // -- Props 定义 --
 const props = defineProps<{
@@ -215,10 +216,14 @@ const md = new MarkdownIt({
 });
 
 const renderedContent = computed(() => {
-  if (isGeneratingPlaceholder.value && props.message.content === '...') {
+  // 注意: 在 isGenerating 状态下，后端可能会返回一个空的 assistant 消息作为占位符
+  // 我们应该检查 content 是否为空，而不是使用 '...' 这种魔法字符串
+  if (isGeneratingPlaceholder.value && props.message.content === '') {
     return '<div class="typing-indicator"><span></span><span></span><span></span></div>';
   }
-  return md.render(props.message.content);
+  const rawHtml = md.render(props.message.content);
+  // 在渲染前清理HTML，防止XSS攻击
+  return DOMPurify.sanitize(rawHtml);
 });
 
 const roleClass = computed(() => ({
@@ -297,11 +302,12 @@ const roleClass = computed(() => ({
   color: var(--el-color-primary-dark-2);
 }
 
+/* --- 核心修正 --- */
 .is-user .message-body {
-  align-items: flex-start;
+  align-items: flex-end; /* 用户消息内容及操作按钮应右对齐 */
 }
 .is-assistant .message-body {
-  align-items: flex-end;
+  align-items: flex-start; /* AI消息内容及操作按钮应左对齐 */
 }
 
 

@@ -4,196 +4,226 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 import httpx
+import json
 
-from .. import crud, schemas
 from ..services import llm_service
+from .. import crud, schemas
 from ..database import get_db
 
 router = APIRouter()
 
 
-# --- AIProvider Routes ---
+# --- Provider Routes ---
 
 @router.post(
     "/providers/",
     response_model=schemas.AIProviderWithModels,
     status_code=status.HTTP_201_CREATED,
-    summary="创建AI服务商（可同时创建模型）"
+    summary="创建服务商及其模型"
 )
-async def create_provider_with_models(provider: schemas.ProviderWithModelsCreate, db: AsyncSession = Depends(get_db)):
+async def create_provider(provider: schemas.ProviderWithModelsCreate, db: AsyncSession = Depends(get_db)):
     """
-    创建一个新的AI服务提供商，并可选择性地一次性创建其下的多个模型。
+    创建一个新的服务商，并可选择性地同时创建其下的模型。
+    创建成功后，会自动将该服务商设置为“最后选择的服务商”。
     """
-    return await crud.create_provider_with_models(db=db, provider_data=provider)
+    new_provider = await crud.create_provider_with_models(db=db, provider_data=provider)
+
+    # 业务逻辑: 更新最后选择的服务商ID
+    await crud.update_setting(
+        db, setting=schemas.GlobalSetting(key="last_selected_provider_id", value=new_provider.id)
+    )
+
+    return new_provider
 
 
-@router.get(
-    "/providers/",
-    response_model=List[schemas.AIProviderWithModels],
-    summary="获取所有AI服务商及其模型"
-)
+@router.get("/providers/", response_model=List[schemas.AIProviderWithModels], summary="获取服务商列表")
 async def read_providers(skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)):
     """
-    获取所有AI服务提供商的列表，并同时加载他们拥有的所有模型。
+    获取所有AI服务商及其关联的模型列表。
     """
-    providers = await crud.get_providers(db, skip=skip, limit=limit)
-    return providers
+    return await crud.get_providers(db, skip=skip, limit=limit)
 
 
-@router.put(
-    "/providers/{provider_id}",
-    response_model=schemas.AIProvider,
-    summary="更新AI服务商信息"
-)
+@router.get("/providers/{provider_id}", response_model=schemas.AIProviderWithModels, summary="获取单个服务商")
+async def read_provider(provider_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    获取指定ID的服务商及其所有模型。
+    """
+    db_provider = await crud.get_provider(db, provider_id=provider_id)
+    if db_provider is None:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    return db_provider
+
+
+@router.put("/providers/{provider_id}", response_model=schemas.AIProvider, summary="更新服务商")
 async def update_provider(
     provider_id: str,
     provider_update: schemas.AIProviderUpdate,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    通过ID更新一个AI服务提供商的名称、API Host或API Key。
+    更新一个已存在的服务商信息。
+    更新成功后，会自动将该服务商设置为“最后选择的服务商”。
     """
-    db_provider = await crud.update_provider(db, provider_id=provider_id, provider_update=provider_update)
-    if db_provider is None:
-        raise HTTPException(status_code=404, detail="服务商未找到")
-    return db_provider
+    updated_provider = await crud.update_provider(db, provider_id=provider_id, provider_update=provider_update)
+    if updated_provider is None:
+        raise HTTPException(status_code=404, detail="Provider not found")
+
+    # 业务逻辑: 更新最后选择的服务商ID
+    await crud.update_setting(
+        db, setting=schemas.GlobalSetting(key="last_selected_provider_id", value=provider_id)
+    )
+
+    return updated_provider
 
 
-@router.delete("/providers/{provider_id}", response_model=schemas.AIProvider, summary="删除AI服务商")
+@router.delete("/providers/{provider_id}", response_model=schemas.AIProvider, summary="删除服务商")
 async def delete_provider(provider_id: str, db: AsyncSession = Depends(get_db)):
     """
-    通过ID删除一个AI服务提供商。其下关联的所有AI模型也会被一并删除。
+    删除一个服务商及其下的所有模型。
+    如果被删除的服务商或其模型与全局配置关联，则会一并清理这些配置。
     """
-    db_provider = await crud.delete_provider(db, provider_id=provider_id)
+    # 在删除前，先获取服务商信息以执行业务逻辑
+    db_provider = await crud.get_provider(db, provider_id=provider_id)
     if db_provider is None:
-        raise HTTPException(status_code=404, detail="服务商未找到")
+        raise HTTPException(status_code=404, detail="Provider not found")
+
+    # 业务逻辑: 清理相关的全局设置
+    default_model_setting = await crud.get_setting(db, "default_model_id")
+    if default_model_setting and default_model_setting.value:
+        provider_model_ids = {model.id for model in db_provider.models}
+        if default_model_setting.value in provider_model_ids:
+            await crud.update_setting(db, setting=schemas.GlobalSetting(key="default_model_id", value=None))
+
+    last_selected_setting = await crud.get_setting(db, "last_selected_provider_id")
+    if last_selected_setting and last_selected_setting.value == provider_id:
+        await crud.update_setting(db, setting=schemas.GlobalSetting(key="last_selected_provider_id", value=None))
+
+    # 执行数据库删除操作
+    await crud.delete_provider(db, provider_id=provider_id)
     return db_provider
 
 
-@router.post(
-    "/providers/test-connection",
-    response_model=schemas.ConnectionTestResponse,
-    summary="测试与服务商的连接"
-)
+# --- Provider-related Services ---
+
+@router.post("/providers/test-connection", response_model=schemas.ConnectionTestResponse, summary="测试连接")
 async def test_connection(request: schemas.ConnectionRequest):
     """
-    根据提供的 API Host 和 Key，尝试连接服务商并验证凭证是否有效。
+    根据提供的 API Host 和 Key，测试与外部 LLM 服务的连通性。
+    """
+    return await llm_service.test_connection_to_provider(api_host=request.apiHost, api_key=request.apiKey)
+
+
+@router.post("/providers/fetch-models", response_model=List[schemas.AIModelBase], summary="获取外部模型列表")
+async def fetch_models(request: schemas.ConnectionRequest):
+    """
+    根据提供的 API Host 和 Key，从外部 LLM 服务获取可用的模型列表。
     """
     try:
-        await llm_service.fetch_models_from_provider(api_host=request.apiHost, api_key=request.apiKey)
-        return schemas.ConnectionTestResponse(status="success", message="连接成功")
+        return await llm_service.fetch_models_from_provider(api_host=request.apiHost, api_key=request.apiKey)
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="获取模型失败: 服务器返回的不是有效的JSON格式。请检查 API Host 是否正确。"
+        )
     except httpx.HTTPStatusError as e:
-        if e.response.status_code == 401:
-            return schemas.ConnectionTestResponse(status="error", message="认证失败，请检查 API Key。")
-        else:
-            return schemas.ConnectionTestResponse(status="error", message=f"连接失败，HTTP状态码: {e.response.status_code}")
+        status_code = e.response.status_code
+        detail = f"获取模型失败: 服务器返回错误码 {status_code}。"
+        if status_code == 401:
+            detail += " API Key 无效或权限不足。"
+        elif status_code == 404:
+            detail += " 找不到模型接口，请检查 API Host。"
+        raise HTTPException(status_code=status_code, detail=detail)
     except httpx.RequestError as e:
-        return schemas.ConnectionTestResponse(status="error", message=f"连接失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"获取模型失败: 无法连接到 API Host。({type(e).__name__})"
+        )
     except Exception as e:
-        return schemas.ConnectionTestResponse(status="error", message=f"发生未知错误: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"获取模型失败: 发生未知错误。")
 
 
-@router.post(
-    "/providers/fetch-models",
-    response_model=List[schemas.AIModelBase],
-    summary="从服务商API获取模型列表"
-)
-async def fetch_external_models(request: schemas.ConnectionRequest):
-    """
-    从指定的 API Host 获取可用的模型列表，供用户选择添加。
-    """
-    try:
-        models = await llm_service.fetch_models_from_provider(api_host=request.apiHost, api_key=request.apiKey)
-        return models
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 401:
-            raise HTTPException(status_code=401, detail="认证失败，请检查 API Key。")
-        else:
-            raise HTTPException(status_code=e.response.status_code, detail=f"获取模型列表失败: HTTP {e.response.status_code}")
-    except httpx.RequestError:
-        raise HTTPException(status_code=502, detail="无法连接到指定的服务商API Host。")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取模型列表时发生未知错误: {e}")
-
-
-@router.post(
-    "/providers/{provider_id}/fetch-models",
-    response_model=List[schemas.AIModelBase],
-    summary="为已存在的服务商获取模型列表"
-)
+@router.get("/providers/{provider_id}/fetch-models", response_model=List[schemas.AIModelBase], summary="为现有服务商获取模型")
 async def fetch_models_for_provider(provider_id: str, db: AsyncSession = Depends(get_db)):
     """
-    使用数据库中已存的凭证，为指定服务商获取模型列表。
+    使用已存储的凭证，为指定的服务商获取可用的模型列表。
     """
-    db_provider = await crud.get_provider(db, provider_id=provider_id)
-    if not db_provider:
-        raise HTTPException(status_code=404, detail="服务商未找到")
-
+    provider = await crud.get_provider(db, provider_id=provider_id)
+    if not provider:
+        raise HTTPException(status_code=404, detail="Provider not found")
     try:
-        models = await llm_service.fetch_models_from_provider(api_host=db_provider.apiHost, api_key=db_provider.apiKey)
-        return models
+        return await llm_service.fetch_models_from_provider(api_host=provider.apiHost, api_key=provider.apiKey)
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="获取模型失败: 服务器返回的不是有效的JSON格式。请检查保存的 API Host 是否正确。"
+        )
     except httpx.HTTPStatusError as e:
-        if e.response.status_code == 401:
-            raise HTTPException(status_code=401, detail="认证失败，请检查已保存的 API Key。")
-        else:
-            raise HTTPException(status_code=e.response.status_code, detail=f"获取模型列表失败: HTTP {e.response.status_code}")
-    except httpx.RequestError:
-        raise HTTPException(status_code=502, detail="无法连接到该服务商的 API Host。")
+        status_code = e.response.status_code
+        detail = f"获取模型失败: 服务器返回错误码 {status_code}。"
+        if status_code == 401:
+            detail += " 保存的 API Key 无效或权限不足。"
+        elif status_code == 404:
+            detail += " 找不到模型接口，请检查保存的 API Host。"
+        raise HTTPException(status_code=status_code, detail=detail)
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"获取模型失败: 无法连接到 API Host。({type(e).__name__})"
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取模型列表时发生未知错误: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"获取模型失败: 发生未知错误。")
 
 
-# --- AIModel Routes ---
+# --- Model Routes ---
 
 @router.post(
     "/models/",
     response_model=schemas.AIModel,
     status_code=status.HTTP_201_CREATED,
-    summary="为服务商添加新模型"
+    summary="创建模型"
 )
 async def create_model(model: schemas.AIModelCreate, db: AsyncSession = Depends(get_db)):
     """
-    为一个已存在的服务商添加一个新的AI模型配置。
+    为一个已存在的服务商添加一个新的模型。
     """
-    db_provider = await crud.get_provider(db, provider_id=model.providerId)
-    if not db_provider:
-        raise HTTPException(status_code=404, detail=f"服务商ID {model.providerId} 未找到")
+    provider = await crud.get_provider(db, provider_id=model.providerId)
+    if not provider:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Provider with id {model.providerId} not found"
+        )
     return await crud.create_model(db=db, model=model)
 
 
-@router.put(
-    "/models/{model_id}",
-    response_model=schemas.AIModel,
-    summary="更新AI模型信息"
-)
+@router.put("/models/{model_id}", response_model=schemas.AIModel, summary="更新模型")
 async def update_model(
     model_id: str,
     model_update: schemas.AIModelUpdate,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    通过ID更新一个AI模型的显示名称。
+    更新一个已存在模型的信息（例如，显示名称）。
     """
-    db_model = await crud.update_model(db, model_id=model_id, model_update=model_update)
-    if db_model is None:
-        raise HTTPException(status_code=404, detail="模型未找到")
-    return db_model
+    updated_model = await crud.update_model(db, model_id=model_id, model_update=model_update)
+    if updated_model is None:
+        raise HTTPException(status_code=404, detail="Model not found")
+    return updated_model
 
 
-@router.delete("/models/{model_id}", response_model=schemas.AIModel, summary="删除AI模型")
+@router.delete("/models/{model_id}", response_model=schemas.AIModel, summary="删除模型")
 async def delete_model(model_id: str, db: AsyncSession = Depends(get_db)):
     """
-    通过ID删除一个AI模型配置。
-    如果该模型被设为全局默认模型，则禁止删除。
+    删除一个模型。
+    如果该模型是全局默认模型，则会清空该配置。
     """
-    default_model_setting = await crud.get_setting(db, key="default_model_id")
+    # 业务逻辑: 检查该模型是否为全局默认模型
+    default_model_setting = await crud.get_setting(db, "default_model_id")
     if default_model_setting and default_model_setting.value == model_id:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="无法删除，该模型已被设为全局默认模型。"
-        )
+        await crud.update_setting(db, setting=schemas.GlobalSetting(key="default_model_id", value=None))
 
+    # 执行数据库删除操作
     db_model = await crud.delete_model(db, model_id=model_id)
     if db_model is None:
-        raise HTTPException(status_code=404, detail="模型未找到")
+        raise HTTPException(status_code=404, detail="Model not found")
     return db_model
