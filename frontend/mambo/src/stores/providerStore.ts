@@ -103,6 +103,7 @@ export const useProviderStore = defineStore('providers', {
         await this.reconcileChatModels();
       } catch (error) {
         console.error('Failed to fetch providers:', error);
+        throw error;
       } finally {
         this.isLoading = false;
       }
@@ -210,6 +211,7 @@ export const useProviderStore = defineStore('providers', {
         this.globalSettings = await getGlobalSettings();
       } catch (error) {
         console.error('Failed to fetch global settings:', error);
+        throw error;
       }
     },
 
