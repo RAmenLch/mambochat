@@ -9,12 +9,12 @@ import {
   deleteChat,
   updateChatSettings,
   reorderChats,
-  generateResponseNonStream,
   updateMessage,
   deleteMessage,
   duplicateChat,
   prepareGenerate,
   prepareRegenerate,
+  stopGeneration as stopGenerationAPI,
 } from '@/api/chatService';
 import type { Chat, Message, ChatCreate, ChatUpdate, ChatReorderItem } from '@/api/types';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
@@ -26,8 +26,7 @@ interface ChatState {
   currentChatMessages: Message[];
   isChatListLoading: boolean;
   isChatHistoryLoading: boolean;
-  isGenerating: boolean;
-  currentRequestController: AbortController | null;
+  activeSubscriptions: Map<string, AbortController>; // messageId -> AbortController
   userInputCache: Record<string, string>;
 }
 
@@ -38,8 +37,7 @@ export const useChatStore = defineStore('chat', {
     currentChatMessages: [],
     isChatListLoading: false,
     isChatHistoryLoading: false,
-    isGenerating: false,
-    currentRequestController: null,
+    activeSubscriptions: new Map(),
     userInputCache: {},
   }),
 
@@ -48,6 +46,9 @@ export const useChatStore = defineStore('chat', {
       if (!state.currentChatId) return null;
       const chat = state.chatList.find(chat => chat.id === state.currentChatId);
       return chat?.itemType === 'chat' ? chat : null;
+    },
+    isGenerating(state): boolean {
+      return state.activeSubscriptions.size > 0;
     }
   },
 
@@ -66,9 +67,8 @@ export const useChatStore = defineStore('chat', {
 
     async selectChat(chatId: string) {
       if (this.currentChatId === chatId) return;
-      if (this.isGenerating) {
-        this.stopGeneration();
-      }
+
+      this.stopAllGenerations();
 
       const selectedItem = this.chatList.find(item => item.id === chatId);
       if (!selectedItem || selectedItem.itemType === 'folder') {
@@ -91,6 +91,13 @@ export const useChatStore = defineStore('chat', {
         } else {
           this.currentChatMessages = chatWithMessages.messages.sort((a, b) => a.sortOrder - b.sortOrder);
         }
+
+        this.currentChatMessages.forEach(msg => {
+            if (msg.role === 'assistant' && msg.status === 'generating') {
+                this._subscribeToMessageStream(msg);
+            }
+        });
+
       } catch (error) {
         console.error(`Failed to fetch messages for chat ${chatId}:`, error);
         this.currentChatId = null;
@@ -185,17 +192,18 @@ export const useChatStore = defineStore('chat', {
 
       try {
         this.currentChatMessages[messageIndex].content = content;
+
         const assistantPlaceholder = await updateMessage(messageId, { content, resend });
 
         if (resend) {
           this.currentChatMessages.splice(messageIndex + 1);
           this.currentChatMessages.push(assistantPlaceholder);
-          this._startStreamGeneration(assistantPlaceholder);
+          this._subscribeToMessageStream(assistantPlaceholder);
         }
       } catch (error) {
         console.error('Failed to update message and resend:', error);
         ElMessage.error('操作失败，请重试。');
-        await this.selectChat(this.currentChatId); // 失败时回滚
+        await this.selectChat(this.currentChatId);
       }
     },
 
@@ -206,7 +214,8 @@ export const useChatStore = defineStore('chat', {
       const deletedMessage = this.currentChatMessages.splice(messageIndex, 1)[0];
       try {
         await deleteMessage(messageId);
-      } catch (error) {
+      } catch (error)
+      {
         console.error('Failed to delete message:', error);
         this.currentChatMessages.splice(messageIndex, 0, deletedMessage);
         ElMessage.error('删除消息失败');
@@ -221,44 +230,31 @@ export const useChatStore = defineStore('chat', {
     },
 
     async sendMessage(content: string) {
-      if (!this.currentChatId || !this.currentChat || this.isGenerating) return;
+      if (!this.currentChatId || this.isGenerating) return;
 
       const chatId = this.currentChatId;
       delete this.userInputCache[chatId];
 
-      const useStream = this.currentChat.modelParameters?.stream ?? true;
-      if (useStream) {
-        try {
-          const tempUserMessage: Message = { id: `temp-user-${Date.now()}`, chatId, role: 'user', content, createdAt: new Date().toISOString(), sortOrder: 99998 };
-          this.currentChatMessages.push(tempUserMessage);
+      try {
+        const tempUserMessage: Message = { id: `temp-user-${Date.now()}`, chatId, role: 'user', content, createdAt: new Date().toISOString(), sortOrder: 99998, status: 'completed' };
+        this.currentChatMessages.push(tempUserMessage);
 
-          const assistantPlaceholder = await prepareGenerate(chatId, content);
+        const assistantPlaceholder = await prepareGenerate(chatId, content);
 
-          const lastUserMessageIndex = this.currentChatMessages.length - 1;
-          const lastButOneMessage = await getChatWithMessages(chatId).then(res => res.messages[res.messages.length - 2]);
-          this.currentChatMessages[lastUserMessageIndex] = lastButOneMessage;
-
-          this.currentChatMessages.push(assistantPlaceholder);
-          this._startStreamGeneration(assistantPlaceholder);
-        } catch (error) {
-          console.error('Failed to prepare generation:', error);
-          ElMessage.error('发送失败，请检查网络或服务配置。');
-          const tempMsgIndex = this.currentChatMessages.findIndex(m => m.id.startsWith('temp-user-'));
-          if (tempMsgIndex > -1) this.currentChatMessages.splice(tempMsgIndex, 1);
+        const chatWithMessages = await getChatWithMessages(chatId);
+        const realUserMessage = chatWithMessages.messages[chatWithMessages.messages.length - 2];
+        const tempMsgIndex = this.currentChatMessages.findIndex(m => m.id === tempUserMessage.id);
+        if (tempMsgIndex > -1) {
+            this.currentChatMessages[tempMsgIndex] = realUserMessage;
         }
-      } else {
-        // 非流式逻辑保持不变
-        this.isGenerating = true;
-        try {
-          const userMessage: Message = { id: `temp-user-${Date.now()}`, chatId, role: 'user', content, createdAt: new Date().toISOString(), sortOrder: 99999 };
-          this.currentChatMessages.push(userMessage);
-          await generateResponseNonStream(chatId, content);
-          await this.selectChat(chatId);
-        } catch (error) {
-            console.error('Non-stream generation failed:', error);
-        } finally {
-            this.isGenerating = false;
-        }
+
+        this.currentChatMessages.push(assistantPlaceholder);
+        this._subscribeToMessageStream(assistantPlaceholder);
+      } catch (error) {
+        console.error('Failed to prepare generation:', error);
+        ElMessage.error('发送失败，请检查网络或服务配置。');
+        const tempMsgIndex = this.currentChatMessages.findIndex(m => m.id.startsWith('temp-user-'));
+        if (tempMsgIndex > -1) this.currentChatMessages.splice(tempMsgIndex, 1);
       }
     },
 
@@ -280,66 +276,98 @@ export const useChatStore = defineStore('chat', {
         }
         this.currentChatMessages.push(assistantPlaceholder);
 
-        this._startStreamGeneration(assistantPlaceholder);
+        this._subscribeToMessageStream(assistantPlaceholder);
       } catch (error) {
         console.error('Failed to prepare regeneration:', error);
         ElMessage.error('重新生成失败，请重试。');
       }
     },
 
-    stopGeneration() {
-      if (this.currentRequestController) {
-        // 1. 中止网络请求
-        this.currentRequestController.abort();
+    async stopGeneration(messageId: string) {
+      const controller = this.activeSubscriptions.get(messageId);
+      const messageToUpdate = this.currentChatMessages.find(m => m.id === messageId);
 
-        // 2. 立即、同步地重置所有控制UI状态的变量
-        this.isGenerating = false;
-        this.currentRequestController = null;
+      if (controller && messageToUpdate) {
+        // 1. 立即中止前端的长连接
+        controller.abort();
+        // 2. 立即从 activeSubscriptions 中移除以更新全局UI状态
+        this.activeSubscriptions.delete(messageId);
+        // 3. 立即更新消息的本地状态，以修复UI（如操作菜单）
+        messageToUpdate.status = 'completed';
+      } else if (messageToUpdate && messageToUpdate.status === 'generating') {
+        // 兜底逻辑：如果订阅不存在但消息状态错误，也进行修正
+        messageToUpdate.status = 'completed';
+        this.activeSubscriptions.delete(messageId);
+      }
+
+      // 4. 异步地向后端发送停止请求，不阻塞UI
+      try {
+        await stopGenerationAPI(messageId);
+      } catch (error) {
+        console.error(`Failed to send stop request for message ${messageId}:`, error);
+        ElMessage.error('停止请求发送失败');
       }
     },
 
+    stopAllGenerations() {
+        this.activeSubscriptions.forEach((_controller, messageId) => {
+            this.stopGeneration(messageId);
+        });
+    },
+
     // --- 内部辅助方法 ---
-    _startStreamGeneration(assistantMessage: Message) {
+    _subscribeToMessageStream(assistantMessage: Message) {
       if (!this.currentChatId) return;
       const chatId = this.currentChatId;
       const assistantMessageId = assistantMessage.id;
 
-      this.isGenerating = true;
-      this.currentRequestController = new AbortController();
+      if (this.activeSubscriptions.has(assistantMessageId)) {
+        this.stopGeneration(assistantMessageId);
+      }
+
+      const controller = new AbortController();
+      this.activeSubscriptions.set(assistantMessageId, controller);
 
       const url = `/api/chats/${chatId}/stream-response/${assistantMessageId}`;
 
       fetchEventSource(url, {
         method: 'GET',
-        signal: this.currentRequestController.signal,
+        signal: controller.signal,
+        openWhenHidden: true,
         onmessage: (event) => {
           const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessageId);
           if (messageToUpdate) {
             try {
-              messageToUpdate.content += JSON.parse(event.data);
+              const data = JSON.parse(event.data);
+              if (data.type === 'replace') {
+                messageToUpdate.content = data.content;
+              } else if (data.type === 'append') {
+                messageToUpdate.content += data.content;
+              }
             } catch (e) { console.error("Failed to parse SSE data chunk:", event.data, e); }
           }
         },
         onclose: () => {
-          console.log(`[ChatStore DEBUG] SSE stream closed for messageId: "${assistantMessageId}".`);
-          this.isGenerating = false;
-          this.currentRequestController = null;
+          console.log(`[ChatStore] SSE stream closed for messageId: "${assistantMessageId}".`);
+          // 确保即使 onclose 先于 stopGeneration 的 delete 调用，也能正确清理
+          if (this.activeSubscriptions.has(assistantMessageId)) {
+              this.activeSubscriptions.delete(assistantMessageId);
+          }
+          getChatWithMessages(chatId).then(res => {
+              const finalMessage = res.messages.find(m => m.id === assistantMessageId);
+              const localMessage = this.currentChatMessages.find(m => m.id === assistantMessageId);
+              if (finalMessage && localMessage) {
+                  localMessage.status = finalMessage.status;
+              }
+          });
         },
         onerror: (err) => {
-          // 如果 isGenerating 已经是 false，说明 stopGeneration 已被调用，这是预期的中止
-          if (!this.isGenerating && err.name === 'AbortError') {
-            console.log('[ChatStore DEBUG] Stream aborted by user.');
-            return;
+          if (err.name === 'AbortError') {
+            console.log(`[ChatStore] Stream aborted by user for messageId: "${assistantMessageId}".`);
+            // AbortError 是预期的，当用户点击停止时发生，此时不需要做任何事，onclose会处理后续
+          } else {
+            console.error(`[ChatStore] SSE stream error for messageId: "${assistantMessageId}". Error:`, err);
           }
-
-          // 处理意外错误
-          console.error(`[ChatStore DEBUG] SSE stream error for messageId: "${assistantMessageId}". Error:`, err);
-          const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessageId);
-          if(messageToUpdate) {
-              messageToUpdate.content += '\n\n**抱歉，请求出错，请检查网络或服务配置。**';
-          }
-          this.isGenerating = false;
-          this.currentRequestController = null;
         },
       });
     },

@@ -1,11 +1,12 @@
 # backend/routers/chats.py
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List, Optional
+from typing import List
 from fastapi.responses import StreamingResponse
+import json
 
-from ..services import llm_service
+from ..services import llm_service, stream_manager
 from .. import crud, schemas
 from ..database import get_db
 
@@ -155,33 +156,39 @@ async def duplicate_chat_endpoint(chat_id: str, db: AsyncSession = Depends(get_d
 
 # --- Message and Generation Routes ---
 
-@router.post(
-    "/chats/{chat_id}/messages",
-    response_model=schemas.Message,
-    status_code=status.HTTP_201_CREATED,
-    summary="在会话中创建新消息"
-)
-async def create_message_for_chat(
-        chat_id: str, message: schemas.MessageCreate, db: AsyncSession = Depends(get_db)
+async def _start_generation_task(
+    background_tasks: BackgroundTasks,
+    chat_id: str,
+    assistant_message_id: str,
+    db: AsyncSession
 ):
+    """根据会话设置决定启动流式或非流式后台任务。"""
     db_chat = await crud.get_chat(db, chat_id=chat_id)
-    if not db_chat:
-        raise HTTPException(status_code=404, detail="Chat not found")
-    if db_chat.itemType != 'chat':
-        raise HTTPException(status_code=400, detail="Cannot add messages to a folder.")
-    return await crud.create_message(db=db, message=message, chat_id=chat_id)
+    use_stream = True
+    if db_chat and db_chat.modelParameters:
+        try:
+            params = json.loads(db_chat.modelParameters)
+            if params.get('stream') is False:
+                use_stream = False
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    if use_stream:
+        background_tasks.add_task(llm_service.run_generation_task_stream, chat_id, assistant_message_id)
+    else:
+        background_tasks.add_task(llm_service.run_generation_task_non_stream, chat_id, assistant_message_id)
 
 
 @router.put("/messages/{message_id}", summary="更新消息内容 (并可选择重新生成)")
 async def update_message_content(
         message_id: str,
         message_update: schemas.MessageUpdate,
+        background_tasks: BackgroundTasks,
         db: AsyncSession = Depends(get_db)
 ):
     """
     更新指定消息的内容。
-    如果 `resend` 为 true（仅限用户消息），则更新内容后，删除后续所有消息并准备重新生成AI回答。
-    此端点将返回一个空的 assistant 消息占位符，客户端需使用其ID调用流式端点。
+    如果 `resend` 为 true（仅限用户消息），则删除后续消息并启动后台任务重新生成AI回答。
     """
     db_message = await crud.get_message(db, message_id=message_id)
     if not db_message:
@@ -195,13 +202,11 @@ async def update_message_content(
     if db_message.role != schemas.MessageRole.USER:
         raise HTTPException(status_code=400, detail="Resend is only applicable to user messages.")
 
-    # 准备重新生成
-    return await llm_service.prepare_for_generation(
-        db=db,
-        chat_id=db_message.chatId,
-        base_message_id=message_id,
-        save_user_message=False
+    assistant_placeholder = await llm_service.prepare_for_generation(
+        db=db, chat_id=db_message.chatId, base_message_id=message_id, save_user_message=False
     )
+    await _start_generation_task(background_tasks, db_message.chatId, assistant_placeholder.id, db)
+    return assistant_placeholder
 
 
 @router.delete("/messages/{message_id}", response_model=schemas.Message, summary="删除单条消息")
@@ -212,56 +217,65 @@ async def delete_single_message(message_id: str, db: AsyncSession = Depends(get_
     return db_message
 
 
-# --- Two-Step Generation Endpoints ---
+@router.post("/messages/{message_id}/stop", status_code=status.HTTP_202_ACCEPTED, summary="请求停止AI生成")
+async def stop_generation(message_id: str):
+    """
+    向后台发送一个请求，以优雅地停止与指定消息ID关联的生成任务。
+    """
+    await stream_manager.stream_manager.request_cancellation(message_id)
+    return {"message": "Cancellation requested."}
+
+
+# --- Generation Endpoints ---
 
 @router.post(
     "/chats/{chat_id}/prepare-generate",
     response_model=schemas.Message,
-    summary="第一步：准备生成AI回复"
+    summary="准备并开始生成AI回复"
 )
 async def prepare_to_generate(
         chat_id: str,
         request: schemas.GenerateRequest,
+        background_tasks: BackgroundTasks,
         db: AsyncSession = Depends(get_db)
 ):
     """
-    接收用户新消息，保存它，然后创建一个空的 assistant 消息作为占位符，并将其返回。
-    客户端下一步应使用返回消息的ID来调用流式端点。
+    接收用户新消息，保存它，创建一个空的 assistant 消息占位符并返回。
+    同时，根据会话设置在后台启动一个流式或非流式生成任务。
     """
-    return await llm_service.prepare_for_generation(
-        db=db,
-        chat_id=chat_id,
-        user_content=request.content,
-        save_user_message=True
+    assistant_placeholder = await llm_service.prepare_for_generation(
+        db=db, chat_id=chat_id, user_content=request.content, save_user_message=True
     )
+    await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id, db)
+    return assistant_placeholder
 
 
 @router.post(
     "/chats/{chat_id}/prepare-regenerate/{from_message_id}",
     response_model=schemas.Message,
-    summary="第一步：准备重新生成AI回复"
+    summary="准备并开始重新生成AI回复"
 )
 async def prepare_to_regenerate(
         chat_id: str,
         from_message_id: str,
+        background_tasks: BackgroundTasks,
         db: AsyncSession = Depends(get_db)
 ):
     """
-    根据指定消息，删除其后的对话历史，然后创建一个空的 assistant 消息作为占位符，并将其返回。
-    客户端下一步应使用返回消息的ID来调用流式端点。
+    根据指定消息删除后续历史，创建占位符并返回。
+    同时，根据会话设置在后台启动一个流式或非流式重新生成任务。
     """
-    return await llm_service.prepare_for_generation(
-        db=db,
-        chat_id=chat_id,
-        base_message_id=from_message_id,
-        save_user_message=False
+    assistant_placeholder = await llm_service.prepare_for_generation(
+        db=db, chat_id=chat_id, base_message_id=from_message_id, save_user_message=False
     )
+    await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id, db)
+    return assistant_placeholder
 
 
 @router.get(
     "/chats/{chat_id}/stream-response/{assistant_message_id}",
-    summary="第二步：流式获取AI回复",
-    response_description="一个包含新AI回复文本块的Server-Sent Events (SSE)流"
+    summary="订阅AI回复的流式输出",
+    response_description="一个Server-Sent Events (SSE)流。首先会发送历史内容，然后是实时内容。"
 )
 async def stream_response(
         chat_id: str,
@@ -269,62 +283,11 @@ async def stream_response(
         db: AsyncSession = Depends(get_db)
 ):
     """
-    根据第一步创建的 assistant 消息占位符的ID，流式生成并返回AI的完整响应。
+    客户端通过此端点订阅指定 assistant 消息的生成进度。
+    此连接可以随时中断和重连，都会无缝地从上次中断的地方继续。
     """
     return StreamingResponse(
-        llm_service.stream_chat_response(db, chat_id, assistant_message_id),
+        llm_service.subscribe_to_stream(db, assistant_message_id),
         media_type="text/event-stream"
     )
 
-
-# --- Non-Stream Endpoints (Legacy or for specific use cases) ---
-
-@router.post(
-    "/chats/{chat_id}/generate-non-stream",
-    response_model=schemas.Message,
-    summary="生成AI回复 (非流式)",
-    response_description="一个包含完整AI回复的消息JSON对象"
-)
-async def generate_response_non_stream(
-        chat_id: str,
-        request: schemas.GenerateRequest,
-        db: AsyncSession = Depends(get_db)
-):
-    db_chat = await crud.get_chat(db, chat_id=chat_id)
-    if not db_chat:
-        raise HTTPException(status_code=404, detail="Chat not found")
-    if db_chat.itemType != 'chat':
-        raise HTTPException(status_code=400, detail="Cannot generate response for a folder.")
-    assistant_message = await llm_service.generate_chat_response_non_stream(chat_id, request, db)
-    return assistant_message
-
-
-@router.post(
-    "/chats/{chat_id}/regenerate-non-stream",
-    response_model=schemas.Message,
-    summary="重新生成AI回复 (非流式)",
-    response_description="一个包含新AI回复的消息JSON对象"
-)
-async def regenerate_response_non_stream(
-        chat_id: str,
-        request: schemas.GenerateRequest,
-        db: AsyncSession = Depends(get_db)
-):
-    """
-    删除最后一条AI的回复，并根据相同的用户输入重新生成一次（非流式）。
-    """
-    db_chat = await crud.get_chat(db, chat_id=chat_id)
-    if not db_chat:
-        raise HTTPException(status_code=404, detail="Chat not found")
-    if db_chat.itemType != 'chat':
-        raise HTTPException(status_code=400, detail="Cannot regenerate response for a folder.")
-
-    await crud.delete_last_assistant_message(db, chat_id=chat_id)
-
-    assistant_message = await llm_service.generate_chat_response_non_stream(
-        chat_id,
-        request,
-        db,
-        save_user_message=False
-    )
-    return assistant_message

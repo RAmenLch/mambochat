@@ -14,6 +14,12 @@ class MessageRole(str, Enum):
     SYSTEM = "system"
 
 
+class MessageStatus(str, Enum):
+    GENERATING = "generating"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 # --- Message Schemas ---
 
 class MessageBase(BaseModel):
@@ -22,7 +28,7 @@ class MessageBase(BaseModel):
 
 
 class MessageCreate(MessageBase):
-    pass
+    status: Optional[MessageStatus] = MessageStatus.COMPLETED
 
 
 class MessageUpdate(BaseModel):
@@ -36,6 +42,7 @@ class Message(MessageBase):
     createdAt: datetime
     chatId: str
     sortOrder: int
+    status: MessageStatus
 
     class Config:
         from_attributes = True
@@ -182,3 +189,4 @@ class GlobalSettingsUpdate(BaseModel):
     """用于更新全局配置的请求体"""
     default_model_id: Optional[str] = Field(None, description="全局默认模型的ID")
     last_selected_provider_id: Optional[str] = Field(None, description="最后编辑或选择的服务商ID")
+

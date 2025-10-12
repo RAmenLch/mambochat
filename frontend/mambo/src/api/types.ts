@@ -2,6 +2,7 @@
 
 export type MessageRole = 'user' | 'assistant' | 'system';
 export type ChatItemType = 'chat' | 'folder';
+export type MessageStatus = 'generating' | 'completed' | 'failed';
 
 export interface Message {
   id: string;
@@ -10,6 +11,7 @@ export interface Message {
   role: MessageRole;
   chatId: string;
   sortOrder: number;
+  status: MessageStatus;
 }
 
 export interface MessageUpdate {

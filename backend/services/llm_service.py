@@ -7,6 +7,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import AsyncGenerator, List, Tuple, Dict, Any, Optional
 
+from .stream_manager import stream_manager
 from .. import crud, schemas, models
 from ..database import AsyncSessionLocal
 
@@ -77,11 +78,10 @@ async def fetch_models_from_provider(api_host: str, api_key: str) -> List[schema
 def _prepare_llm_request_data(
         db_chat: models.Chat,
         history_messages: List[models.Message]
-) -> Tuple[Dict[str, Any], Dict[str, Any], str]:
+) -> Tuple[Dict[str, Any], Dict[str, Any], str, bool]:
     """
-    根据会话配置和历史消息，准备发送给 LLM API 的 headers 和 payload。
+    根据会话配置和历史消息，准备发送给 LLM API 的 headers, payload, host 和 stream 标志。
     """
-    # 如果会话的模型被删除，ai_model会是None
     if not db_chat.ai_model or not db_chat.ai_model.provider:
         raise ValueError("会话未配置有效的AI模型或服务商。")
 
@@ -101,16 +101,21 @@ def _prepare_llm_request_data(
         messages_payload.append({"role": msg.role, "content": msg.content})
 
     model_params = {}
+    use_stream = True  # 默认为流式
     if db_chat.modelParameters:
         try:
             model_params = db_chat.modelParameters if isinstance(db_chat.modelParameters, dict) else json.loads(
                 db_chat.modelParameters)
+            # 检查用户是否在设置中显式关闭了流式
+            if model_params.get('stream') is False:
+                use_stream = False
         except (json.JSONDecodeError, TypeError):
             print(f"Warning: Could not parse modelParameters for chat {db_chat.id}")
             pass
 
-    # 从模型参数中移除自定义的 max_context_messages，避免发送给 LLM API
     model_params.pop('max_context_messages', None)
+    # 确保 stream 参数不会被发送到不支持它的模型参数中
+    model_params.pop('stream', None)
 
     payload = {
         "model": model.modelId,
@@ -118,7 +123,7 @@ def _prepare_llm_request_data(
         **model_params
     }
 
-    return headers, payload, provider.apiHost
+    return headers, payload, provider.apiHost, use_stream
 
 
 async def prepare_for_generation(
@@ -152,30 +157,25 @@ async def prepare_for_generation(
         include_self = (ref_message.role == schemas.MessageRole.ASSISTANT)
         await crud.delete_messages_after(db, chat_id=chat_id, message_id=base_message_id, include_self=include_self)
 
-    # 创建并返回空的 assistant 消息占位符
+    # 创建并返回状态为 'generating' 的AI消息占位符
     assistant_message = await crud.create_message(
         db,
-        message=schemas.MessageCreate(content="", role=schemas.MessageRole.ASSISTANT),
+        message=schemas.MessageCreate(
+            content="",
+            role=schemas.MessageRole.ASSISTANT,
+            status=schemas.MessageStatus.GENERATING
+        ),
         chat_id=chat_id
     )
     return assistant_message
 
 
-async def stream_chat_response(
-        db: AsyncSession,
-        chat_id: str,
-        assistant_message_id: str,
-) -> AsyncGenerator[str, None]:
-    """
-    核心流式函数：调用外部LLM API并流式返回响应，最后更新占位符消息。
-    """
+async def _get_common_generation_context(db: AsyncSession, chat_id: str, assistant_message_id: str):
+    """提取流式和非流式任务共用的上下文获取逻辑。"""
     db_chat = await crud.get_chat(db, chat_id=chat_id)
     if not db_chat:
-        # 这种情况理论上不应发生，因为prepare阶段已经检查过
-        print(f"Chat with id {chat_id} not found during streaming.")
-        return
+        raise ValueError(f"Chat with id {chat_id} not found.")
 
-    # 如果会话没有模型，尝试应用全局默认模型
     if not db_chat.aiModelId:
         default_model_setting = await crud.get_setting(db, key="default_model_id")
         if default_model_setting and default_model_setting.value:
@@ -184,147 +184,8 @@ async def stream_chat_response(
             await db.refresh(db_chat)
             db_chat = await crud.get_chat(db, chat_id=chat_id)
         else:
-            error_msg = "**错误: 当前会话未指定模型，且未设置全局默认模型。**"
-            yield f"data: {json.dumps(error_msg)}\n\n"
-            async with AsyncSessionLocal() as final_db:
-                await crud.update_message(
-                    final_db, assistant_message_id, schemas.MessageUpdate(content=error_msg)
-                )
-            return
+            raise ValueError("当前会话未指定模型，且未设置全局默认模型。")
 
-    full_response_content = ""
-    try:
-        # 解析模型参数以获取上下文消息数量限制
-        model_params = {}
-        if db_chat.modelParameters:
-            try:
-                model_params = json.loads(db_chat.modelParameters)
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-        max_messages = model_params.get('max_context_messages')
-        limit = max_messages if isinstance(max_messages, int) and max_messages > 0 else None
-
-        # 获取历史记录时，应排除我们刚创建的空assistant消息
-        if limit:
-            history_messages = await crud.get_limited_recent_messages(db, chat_id=chat_id, limit=limit + 1)
-            history_messages = [msg for msg in history_messages if msg.id != assistant_message_id]
-            if len(history_messages) > limit:
-                history_messages = history_messages[-limit:]
-        else:
-            all_messages = await crud.get_messages_by_chat(db, chat_id=chat_id)
-            history_messages = [msg for msg in all_messages if msg.id != assistant_message_id]
-
-        try:
-            headers, payload, api_host = _prepare_llm_request_data(db_chat, history_messages)
-            payload["stream"] = True
-        except ValueError as e:
-            error_msg = f"**错误: {e}**"
-            full_response_content = error_msg
-            yield f"data: {json.dumps(error_msg)}\n\n"
-            return
-
-        try:
-            async with httpx.AsyncClient(timeout=300) as client:
-                async with client.stream("POST", f"{api_host.rstrip('/')}/chat/completions", headers=headers,
-                                         json=payload) as response:
-                    response.raise_for_status()
-                    async for line in response.aiter_lines():
-                        if line.startswith("data:"):
-                            data_str = line[len("data:"):].strip()
-                            if data_str == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(data_str)
-                                choices = chunk.get("choices")
-
-                                # 安全地处理数据块，仅当choices列表存在且非空时才提取内容
-                                if choices and len(choices) > 0:
-                                    delta = choices[0].get("delta", {})
-                                    content_chunk = delta.get("content")
-                                    if content_chunk:
-                                        full_response_content += content_chunk
-                                        yield f"data: {json.dumps(content_chunk)}\n\n"
-                            except json.JSONDecodeError:
-                                # 如果某一行不是有效的JSON，则忽略并继续
-                                continue
-        except httpx.HTTPStatusError as e:
-            error_details = ""
-            try:
-                error_body = await e.response.aread()
-                error_details = error_body.decode()
-            except httpx.StreamClosed:
-                error_details = f"HTTP {e.response.status_code} {e.response.reason_phrase}. (无法读取响应体，流已关闭)"
-            error_msg = f'\n\n**错误: {error_details}**'
-            full_response_content += error_msg
-            yield f"data: {json.dumps(error_msg)}\n\n"
-        except httpx.RequestError as e:
-            error_msg = f'\n\n**错误: 无法连接到LLM服务商: {e}**'
-            full_response_content += error_msg
-            yield f"data: {json.dumps(error_msg)}\n\n"
-        except Exception as e:
-            if not isinstance(e, asyncio.CancelledError):
-                print(f"An unexpected error occurred: {str(e)}")
-                error_msg = f'\n\n**错误: 发生未知异常: {e}**'
-                full_response_content += error_msg
-                yield f"data: {json.dumps(error_msg)}\n\n"
-            else:
-                print(
-                    f"[BACKEND DEBUG] asyncio.CancelledError caught for chatId '{chat_id}'. This is likely due to client disconnecting.")
-                raise
-    finally:
-        if full_response_content.strip():
-            async def update_task():
-                async with AsyncSessionLocal() as final_db:
-                    print(
-                        f"[BACKEND DEBUG] 'finally' block: Updating message '{assistant_message_id}' with final content.")
-                    await crud.update_message(
-                        final_db,
-                        message_id=assistant_message_id,
-                        message_update=schemas.MessageUpdate(content=full_response_content.strip())
-                    )
-                    print(f"[BACKEND DEBUG] Update complete for message '{assistant_message_id}'.")
-
-            try:
-                await asyncio.shield(update_task())
-            except asyncio.CancelledError:
-                print(
-                    f"[BACKEND DEBUG] 'finally' block: Update task was cancelled before completion for message '{assistant_message_id}'.")
-                pass
-
-
-async def generate_chat_response_non_stream(
-        chat_id: str,
-        request: schemas.GenerateRequest,
-        db: AsyncSession,
-        save_user_message: bool = True
-) -> models.Message:
-    """
-    处理聊天请求，调用外部LLM API并以非流式一次性返回响应。
-    """
-    if save_user_message:
-        await crud.create_message(
-            db,
-            message=schemas.MessageCreate(content=request.content, role=schemas.MessageRole.USER),
-            chat_id=chat_id
-        )
-
-    db_chat = await crud.get_chat(db, chat_id=chat_id)
-    if not db_chat:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
-
-    # 如果会话没有模型，尝试应用全局默认模型
-    if not db_chat.aiModelId:
-        default_model_setting = await crud.get_setting(db, key="default_model_id")
-        if default_model_setting and default_model_setting.value:
-            db_chat.aiModelId = default_model_setting.value
-            await db.commit()
-            await db.refresh(db_chat)
-            db_chat = await crud.get_chat(db, chat_id=chat_id)
-        else:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="当前会话未指定模型，且未设置全局默认模型。")
-
-    # 解析模型参数以获取上下文消息数量限制
     model_params = {}
     if db_chat.modelParameters:
         try:
@@ -336,36 +197,138 @@ async def generate_chat_response_non_stream(
     limit = max_messages if isinstance(max_messages, int) and max_messages > 0 else None
 
     if limit:
-        history_messages = await crud.get_limited_recent_messages(db, chat_id=chat_id, limit=limit)
+        history_messages = await crud.get_limited_recent_messages(db, chat_id=chat_id, limit=limit + 1)
+        history_messages = [msg for msg in history_messages if msg.id != assistant_message_id]
+        if len(history_messages) > limit:
+            history_messages = history_messages[-limit:]
     else:
-        history_messages = await crud.get_messages_by_chat(db, chat_id=chat_id)
+        all_messages = await crud.get_messages_by_chat(db, chat_id=chat_id)
+        history_messages = [msg for msg in all_messages if msg.id != assistant_message_id]
 
+    return db_chat, history_messages
+
+
+async def run_generation_task_stream(chat_id: str, assistant_message_id: str):
+    """后台任务：以流式方式调用LLM，并实时持久化和发布结果。"""
+    async with AsyncSessionLocal() as db:
+        final_status = schemas.MessageStatus.FAILED
+        try:
+            db_chat, history_messages = await _get_common_generation_context(db, chat_id, assistant_message_id)
+            headers, payload, api_host, _ = _prepare_llm_request_data(db_chat, history_messages)
+            payload["stream"] = True
+
+            async with httpx.AsyncClient(timeout=300) as client:
+                async with client.stream("POST", f"{api_host.rstrip('/')}/chat/completions", headers=headers,
+                                         json=payload) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if await stream_manager.is_cancellation_requested(assistant_message_id):
+                            print(f"[Stream Task] Cancellation detected for {assistant_message_id}. Stopping.")
+                            break
+
+                        if line.startswith("data:"):
+                            data_str = line[len("data:"):].strip()
+                            if data_str == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(data_str)
+                                choices = chunk.get("choices")
+                                if choices and len(choices) > 0:
+                                    delta = choices[0].get("delta", {})
+                                    content_chunk = delta.get("content")
+                                    if content_chunk:
+                                        await crud.append_to_message_content(db, assistant_message_id, content_chunk)
+                                        await stream_manager.publish(assistant_message_id, content_chunk)
+                            except json.JSONDecodeError:
+                                continue
+
+            # 如果代码能执行到这里，说明流已正常结束（无论是自然结束还是用户中止）。
+            # 此时我们应该将状态标记为完成。
+            final_status = schemas.MessageStatus.COMPLETED
+
+        except Exception as e:
+            print(f"[Stream Task Error] for message {assistant_message_id}: {e}")
+            error_msg = f"\n\n**错误: {e}**"
+            await crud.append_to_message_content(db, assistant_message_id, error_msg)
+            await stream_manager.publish(assistant_message_id, error_msg)
+            final_status = schemas.MessageStatus.FAILED
+        finally:
+            await crud.update_message_status(db, assistant_message_id, final_status)
+            await stream_manager.close_stream(assistant_message_id)
+
+
+async def run_generation_task_non_stream(chat_id: str, assistant_message_id: str):
+    """后台任务：以非流式方式调用LLM，获取完整响应后一次性持久化和发布。"""
+    async with AsyncSessionLocal() as db:
+        full_response_content = ""
+        final_status = schemas.MessageStatus.FAILED
+        try:
+            db_chat, history_messages = await _get_common_generation_context(db, chat_id, assistant_message_id)
+
+            if await stream_manager.is_cancellation_requested(assistant_message_id):
+                raise asyncio.CancelledError("Task was cancelled before starting.")
+
+            headers, payload, api_host, _ = _prepare_llm_request_data(db_chat, history_messages)
+            payload["stream"] = False
+
+            async with httpx.AsyncClient(timeout=300) as client:
+                response = await client.post(f"{api_host.rstrip('/')}/chat/completions", headers=headers, json=payload)
+                response.raise_for_status()
+                data = response.json()
+                full_response_content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+            if full_response_content:
+                await crud.update_message(db, assistant_message_id,
+                                          schemas.MessageUpdate(content=full_response_content))
+                await stream_manager.publish(assistant_message_id, full_response_content)
+                final_status = schemas.MessageStatus.COMPLETED
+            else:
+                raise ValueError("LLM服务商返回了空响应。")
+
+        except asyncio.CancelledError:
+            print(f"[Non-Stream Task] Cancellation detected for {assistant_message_id}. Stopping.")
+            final_status = schemas.MessageStatus.COMPLETED
+        except Exception as e:
+            print(f"[Non-Stream Task Error] for message {assistant_message_id}: {e}")
+            error_msg = f"\n\n**错误: {e}**"
+            final_content = full_response_content + error_msg
+            await crud.update_message(db, assistant_message_id, schemas.MessageUpdate(content=final_content))
+            await stream_manager.publish(assistant_message_id, error_msg)
+            final_status = schemas.MessageStatus.FAILED
+        finally:
+            await crud.update_message_status(db, assistant_message_id, final_status)
+            await stream_manager.close_stream(assistant_message_id)
+
+
+async def subscribe_to_stream(
+        db: AsyncSession,
+        assistant_message_id: str,
+) -> AsyncGenerator[str, None]:
+    """
+    订阅一个生成流。首先发送历史内容，然后监听实时内容块。
+    此函数对流式和非流式后台任务同样有效。
+    """
+    message = await crud.get_message(db, assistant_message_id)
+    if not message:
+        return
+
+    if message.content:
+        event_data = {"type": "replace", "content": message.content}
+        yield f"data: {json.dumps(event_data)}\n\n"
+
+    if message.status in [schemas.MessageStatus.COMPLETED, schemas.MessageStatus.FAILED]:
+        return
+
+    queue = await stream_manager.subscribe(assistant_message_id)
     try:
-        headers, payload, api_host = _prepare_llm_request_data(db_chat, history_messages)
-        payload["stream"] = False
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
-
-    full_response_content = ""
-    try:
-        async with httpx.AsyncClient(timeout=300) as client:
-            response = await client.post(f"{api_host.rstrip('/')}/chat/completions", headers=headers, json=payload)
-            response.raise_for_status()
-            data = response.json()
-            full_response_content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-    except httpx.RequestError as e:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
-                            detail=f"无法连接到LLM服务商: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail=f"发生未知异常: {str(e)}")
-
-    if full_response_content:
-        assistant_message = await crud.create_message(
-            db,
-            message=schemas.MessageCreate(content=full_response_content, role=schemas.MessageRole.ASSISTANT),
-            chat_id=chat_id
-        )
-        return assistant_message
-    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail="LLM服务商返回了空响应。")
+        while True:
+            chunk = await queue.get()
+            if chunk is None:
+                break
+            event_data = {"type": "append", "content": chunk}
+            yield f"data: {json.dumps(event_data)}\n\n"
+            queue.task_done()
+    except asyncio.CancelledError:
+        print(f"[Subscriber] Client disconnected for message '{assistant_message_id}'.")
+    finally:
+        await stream_manager.unsubscribe(assistant_message_id, queue)

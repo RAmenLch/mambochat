@@ -295,7 +295,8 @@ async def duplicate_chat(db: AsyncSession, chat_id: str) -> Optional[models.Chat
                 content=msg.content,
                 role=msg.role,
                 sortOrder=msg.sortOrder,
-                chatId=new_chat.id
+                chatId=new_chat.id,
+                status=msg.status
             )
             for msg in original_chat.messages
         ]
@@ -327,9 +328,32 @@ async def update_message(db: AsyncSession, message_id: str, message_update: sche
     return db_message
 
 
+async def append_to_message_content(db: AsyncSession, message_id: str, chunk: str):
+    """将文本块追加到现有消息的内容中"""
+    stmt = (
+        update(models.Message)
+        .where(models.Message.id == message_id)
+        .values(content=models.Message.content + chunk)
+        .execution_options(synchronize_session=False)
+    )
+    await db.execute(stmt)
+    await db.commit()
+
+
+async def update_message_status(db: AsyncSession, message_id: str, status: schemas.MessageStatus):
+    """更新消息的状态"""
+    stmt = (
+        update(models.Message)
+        .where(models.Message.id == message_id)
+        .values(status=status.value)
+    )
+    await db.execute(stmt)
+    await db.commit()
+
+
 async def get_messages_by_chat(db: AsyncSession, chat_id: str, skip: int = 0, limit: Optional[int] = None) -> List[
     models.Message]:
-    """获取指定会话的所有消息（按时间升序）"""
+    """获取指定会话的所有消息（按排序权重升序）"""
     query = (
         select(models.Message)
         .filter(models.Message.chatId == chat_id)
@@ -422,3 +446,4 @@ async def delete_last_assistant_message(db: AsyncSession, chat_id: str) -> Optio
         await db.commit()
 
     return last_message
+
