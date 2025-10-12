@@ -74,35 +74,25 @@ export const deleteMessage = (messageId: string): Promise<Message> => {
 };
 
 /**
- * 第一步：为新消息准备生成AI回复。
- * @returns 返回一个空的 assistant 消息对象作为占位符。
+ * 准备并开始生成AI回复。
+ * @returns 返回一个状态为 'generating' 的 assistant 消息对象作为占位符。
  */
 export const prepareGenerate = (chatId: string, content: string): Promise<Message> => {
   return apiClient.post(`/chats/${chatId}/prepare-generate`, { content }).then(res => res.data);
 };
 
 /**
- * 第一步：为重新生成AI回复做准备。
- * @returns 返回一个空的 assistant 消息对象作为占位符。
+ * 准备并开始重新生成AI回复。
+ * @returns 返回一个状态为 'generating' 的 assistant 消息对象作为占位符。
  */
 export const prepareRegenerate = (chatId: string, fromMessageId: string): Promise<Message> => {
   return apiClient.post(`/chats/${chatId}/prepare-regenerate/${fromMessageId}`).then(res => res.data);
 };
 
 /**
- * 生成AI回复 (非流式)
- * @param chatId 会话ID
- * @param content 用户输入内容
+ * 请求服务器停止指定消息的AI生成任务。
+ * @param messageId 正在生成内容的消息ID
  */
-export const generateResponseNonStream = (chatId: string, content: string): Promise<Message> => {
-    return apiClient.post(`/chats/${chatId}/generate-non-stream`, { content }).then(res => res.data);
-};
-
-/**
- * 重新生成AI回复 (非流式)
- * @param chatId 会话ID
- * @param content 对应的用户输入内容
- */
-export const regenerateResponseNonStream = (chatId: string, content: string): Promise<Message> => {
-    return apiClient.post(`/chats/${chatId}/regenerate-non-stream`, { content }).then(res => res.data);
+export const stopGeneration = (messageId: string): Promise<{ message: string }> => {
+  return apiClient.post(`/messages/${messageId}/stop`).then(res => res.data);
 };

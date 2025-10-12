@@ -24,7 +24,6 @@
             :key="message.id"
             :message="message"
             :is-last-message="index === currentChatMessages.length - 1"
-            :is-generating="isGenerating"
           />
         </div>
       </el-scrollbar>
@@ -61,7 +60,7 @@
           v-else
           type="warning"
           class="action-button"
-          @click="chatStore.stopGeneration()"
+          @click="handleStopGeneration"
         >
           <el-icon><VideoPause /></el-icon>
         </el-button>
@@ -255,8 +254,6 @@ const handleSaveSettings = async () => {
     return;
   }
 
-  // --- 核心修正 ---
-  // 调用 store action 时，必须传入当前会话的 ID
   await chatStore.updateChatSettings(currentChat.value.id, {
     name: chatSettingsForm.name,
     aiModelId: chatSettingsForm.aiModelId,
@@ -272,19 +269,22 @@ const handleSaveSettings = async () => {
 const handleSendMessage = async () => {
   if (userInput.value.trim() === '' || isGenerating.value) return;
   const content = userInput.value;
-  // The store action will handle clearing the cache, so we don't clear it here.
   await chatStore.sendMessage(content);
 };
 
-const handleEnterKey = (event: Event) => {
-  // 使用类型守卫确保事件是 KeyboardEvent
-  if (!(event instanceof KeyboardEvent)) return;
-
-  if (event.shiftKey) {
-    // 当 Shift 被按下时，允许默认的换行行为
-    return;
+const handleStopGeneration = () => {
+  // 找到当前正在生成的消息并停止它
+  const generatingMessage = currentChatMessages.value.find(
+    m => m.status === 'generating'
+  );
+  if (generatingMessage) {
+    chatStore.stopGeneration(generatingMessage.id);
   }
-  // 否则，阻止默认的换行行为，并发送消息
+};
+
+const handleEnterKey = (event: Event) => {
+  if (!(event instanceof KeyboardEvent)) return;
+  if (event.shiftKey) return;
   event.preventDefault();
   handleSendMessage();
 };

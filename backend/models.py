@@ -4,11 +4,18 @@ from sqlalchemy import Column, String, TEXT, DateTime, ForeignKey, func, Integer
 from sqlalchemy.orm import relationship
 from .database import Base
 import uuid
+from enum import Enum
 
 
 # 使用 text 类型作为 UUID 的存储方式，兼容性更好
 def generate_uuid():
     return str(uuid.uuid4())
+
+
+class MessageStatus(str, Enum):
+    GENERATING = "generating"
+    COMPLETED = "completed"
+    FAILED = "failed"
 
 
 class AIProvider(Base):
@@ -73,6 +80,7 @@ class Message(Base):
     role = Column(String(20), nullable=False)  # 'user', 'assistant', 'system'
     chatId = Column(String(36), ForeignKey("Chat.id"), nullable=False)
     sortOrder = Column(Integer, nullable=False)
+    status = Column(String(20), nullable=False, default=MessageStatus.COMPLETED.value) # 消息状态
 
     # 关系：反向引用到 Chat
     chat = relationship("Chat", back_populates="messages")

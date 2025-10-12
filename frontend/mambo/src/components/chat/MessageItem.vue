@@ -21,7 +21,7 @@
       <!-- 悬浮操作菜单 -->
       <div
         class="message-actions"
-        :class="{ 'is-visible': showActions && !isGeneratingPlaceholder }"
+        :class="{ 'is-visible': showActions && !isGenerating }"
       >
         <!-- AI消息: 重新回答 -->
         <el-tooltip content="重新回答" placement="top" :show-after="500">
@@ -120,8 +120,7 @@ import DOMPurify from 'dompurify';
 // -- Props 定义 --
 const props = defineProps<{
   message: Message;
-  isLastMessage: boolean;
-  isGenerating: boolean;
+  isLastMessage: boolean; // 仍然保留，可能用于其他UI逻辑
 }>();
 
 const chatStore = useChatStore();
@@ -133,8 +132,8 @@ const editingContent = ref('');
 const editingMessage = shallowRef<Message | null>(null);
 
 // --- 业务逻辑 ---
-const isGeneratingPlaceholder = computed(
-  () => props.isGenerating && props.isLastMessage
+const isGenerating = computed(
+  () => props.message.role === 'assistant' && props.message.status === 'generating'
 );
 
 const handleRegenerate = () => {
@@ -216,9 +215,7 @@ const md = new MarkdownIt({
 });
 
 const renderedContent = computed(() => {
-  // 注意: 在 isGenerating 状态下，后端可能会返回一个空的 assistant 消息作为占位符
-  // 我们应该检查 content 是否为空，而不是使用 '...' 这种魔法字符串
-  if (isGeneratingPlaceholder.value && props.message.content === '') {
+  if (isGenerating.value && props.message.content === '') {
     return '<div class="typing-indicator"><span></span><span></span><span></span></div>';
   }
   const rawHtml = md.render(props.message.content);
@@ -302,12 +299,11 @@ const roleClass = computed(() => ({
   color: var(--el-color-primary-dark-2);
 }
 
-/* --- 核心修正 --- */
 .is-user .message-body {
-  align-items: flex-end; /* 用户消息内容及操作按钮应右对齐 */
+  align-items: flex-end;
 }
 .is-assistant .message-body {
-  align-items: flex-start; /* AI消息内容及操作按钮应左对齐 */
+  align-items: flex-start;
 }
 
 
