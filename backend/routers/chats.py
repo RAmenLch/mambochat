@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List
+from typing import List, Optional
 from fastapi.responses import StreamingResponse
 
 from ..services import llm_service
@@ -172,7 +172,7 @@ async def create_message_for_chat(
     return await crud.create_message(db=db, message=message, chat_id=chat_id)
 
 
-@router.put("/messages/{message_id}", summary="更新消息内容")
+@router.put("/messages/{message_id}", summary="更新消息内容 (并可选择重新生成)")
 async def update_message_content(
         message_id: str,
         message_update: schemas.MessageUpdate,
@@ -180,7 +180,8 @@ async def update_message_content(
 ):
     """
     更新指定消息的内容。
-    如果 `resend` 为 true（仅限用户消息），则更新内容后，删除后续所有消息并重新生成AI回答。
+    如果 `resend` 为 true（仅限用户消息），则更新内容后，删除后续所有消息并准备重新生成AI回答。
+    此端点将返回一个空的 assistant 消息占位符，客户端需使用其ID调用流式端点。
     """
     db_message = await crud.get_message(db, message_id=message_id)
     if not db_message:
@@ -194,12 +195,12 @@ async def update_message_content(
     if db_message.role != schemas.MessageRole.USER:
         raise HTTPException(status_code=400, detail="Resend is only applicable to user messages.")
 
-    await crud.delete_messages_after(db, chat_id=db_message.chatId, message_id=message_id, include_self=False)
-
-    request = schemas.GenerateRequest(content=updated_message.content)
-    return StreamingResponse(
-        llm_service.generate_chat_response(db_message.chatId, request, save_user_message=False),
-        media_type="text/event-stream"
+    # 准备重新生成
+    return await llm_service.prepare_for_generation(
+        db=db,
+        chat_id=db_message.chatId,
+        base_message_id=message_id,
+        save_user_message=False
     )
 
 
@@ -211,92 +212,72 @@ async def delete_single_message(message_id: str, db: AsyncSession = Depends(get_
     return db_message
 
 
-@router.post(
-    "/chats/{chat_id}/regenerate-from/{message_id}",
-    summary="从指定消息开始重新回答 (流式)",
-    response_description="一个包含新AI回复文本块的Server-Sent Events (SSE)流"
-)
-async def regenerate_from_message(
-        chat_id: str,
-        message_id: str,
-        db: AsyncSession = Depends(get_db)
-):
-    """
-    根据指定消息，删除其后的对话历史，并重新生成AI回答。
-    - 如果指定的是AI消息，则删除此消息及之后所有消息。
-    - 如果指定的是用户消息，则删除此消息之后的所有消息。
-    """
-    db_message = await crud.get_message(db, message_id=message_id)
-    if not db_message or db_message.chatId != chat_id:
-        raise HTTPException(status_code=404, detail="Message not found in the specified chat.")
-
-    include_self = (db_message.role == schemas.MessageRole.ASSISTANT)
-    await crud.delete_messages_after(db, chat_id=chat_id, message_id=message_id, include_self=include_self)
-
-    remaining_messages = await crud.get_messages_by_chat(db, chat_id=chat_id)
-    if not remaining_messages:
-        raise HTTPException(status_code=400, detail="Cannot regenerate from an empty history.")
-
-    last_user_content = remaining_messages[-1].content
-    internal_request = schemas.GenerateRequest(content=last_user_content)
-
-    return StreamingResponse(
-        llm_service.generate_chat_response(chat_id, internal_request, save_user_message=False),
-        media_type="text/event-stream"
-    )
-
+# --- Two-Step Generation Endpoints ---
 
 @router.post(
-    "/chats/{chat_id}/generate",
-    summary="生成AI回复 (流式)",
-    response_description="一个包含AI回复文本块的Server-Sent Events (SSE)流"
+    "/chats/{chat_id}/prepare-generate",
+    response_model=schemas.Message,
+    summary="第一步：准备生成AI回复"
 )
-async def generate_response(
+async def prepare_to_generate(
         chat_id: str,
         request: schemas.GenerateRequest,
         db: AsyncSession = Depends(get_db)
 ):
     """
-    接收用户消息，调用后端LLM服务，并以流式方式返回AI的响应。
+    接收用户新消息，保存它，然后创建一个空的 assistant 消息作为占位符，并将其返回。
+    客户端下一步应使用返回消息的ID来调用流式端点。
     """
-    db_chat = await crud.get_chat(db, chat_id=chat_id)
-    if not db_chat:
-        raise HTTPException(status_code=404, detail="Chat not found")
-    if db_chat.itemType != 'chat':
-        raise HTTPException(status_code=400, detail="Cannot generate response for a folder.")
-
-    return StreamingResponse(
-        llm_service.generate_chat_response(chat_id, request),
-        media_type="text/event-stream"
+    return await llm_service.prepare_for_generation(
+        db=db,
+        chat_id=chat_id,
+        user_content=request.content,
+        save_user_message=True
     )
 
 
 @router.post(
-    "/chats/{chat_id}/regenerate",
-    summary="重新生成AI回复 (流式)",
-    response_description="一个包含新AI回复文本块的Server-Sent Events (SSE)流"
+    "/chats/{chat_id}/prepare-regenerate/{from_message_id}",
+    response_model=schemas.Message,
+    summary="第一步：准备重新生成AI回复"
 )
-async def regenerate_response(
+async def prepare_to_regenerate(
         chat_id: str,
-        request: schemas.GenerateRequest,
+        from_message_id: str,
         db: AsyncSession = Depends(get_db)
 ):
     """
-    删除最后一条AI的回复，并根据相同的用户输入重新生成一次。
+    根据指定消息，删除其后的对话历史，然后创建一个空的 assistant 消息作为占位符，并将其返回。
+    客户端下一步应使用返回消息的ID来调用流式端点。
     """
-    db_chat = await crud.get_chat(db, chat_id=chat_id)
-    if not db_chat:
-        raise HTTPException(status_code=404, detail="Chat not found")
-    if db_chat.itemType != 'chat':
-        raise HTTPException(status_code=400, detail="Cannot regenerate response for a folder.")
+    return await llm_service.prepare_for_generation(
+        db=db,
+        chat_id=chat_id,
+        base_message_id=from_message_id,
+        save_user_message=False
+    )
 
-    await crud.delete_last_assistant_message(db, chat_id=chat_id)
 
+@router.get(
+    "/chats/{chat_id}/stream-response/{assistant_message_id}",
+    summary="第二步：流式获取AI回复",
+    response_description="一个包含新AI回复文本块的Server-Sent Events (SSE)流"
+)
+async def stream_response(
+        chat_id: str,
+        assistant_message_id: str,
+        db: AsyncSession = Depends(get_db)
+):
+    """
+    根据第一步创建的 assistant 消息占位符的ID，流式生成并返回AI的完整响应。
+    """
     return StreamingResponse(
-        llm_service.generate_chat_response(chat_id, request, save_user_message=False),
+        llm_service.stream_chat_response(db, chat_id, assistant_message_id),
         media_type="text/event-stream"
     )
 
+
+# --- Non-Stream Endpoints (Legacy or for specific use cases) ---
 
 @router.post(
     "/chats/{chat_id}/generate-non-stream",

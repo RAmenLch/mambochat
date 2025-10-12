@@ -57,10 +57,9 @@ export const reorderChats = (updates: ChatReorderItem[]): Promise<{ message: str
 }
 
 /**
- * 更新单条消息的内容 (不支持重新发送生成)。
- * "保存并发送"的流式响应由 store 层直接处理。
+ * 更新单条消息的内容。
  * @param messageId 消息ID
- * @param data 包含新内容的对象
+ * @param data 包含新内容和resend标志的对象
  */
 export const updateMessage = (messageId: string, data: MessageUpdate): Promise<Message> => {
   return apiClient.put(`/messages/${messageId}`, data).then(res => res.data);
@@ -72,6 +71,22 @@ export const updateMessage = (messageId: string, data: MessageUpdate): Promise<M
  */
 export const deleteMessage = (messageId: string): Promise<Message> => {
   return apiClient.delete(`/messages/${messageId}`).then(res => res.data);
+};
+
+/**
+ * 第一步：为新消息准备生成AI回复。
+ * @returns 返回一个空的 assistant 消息对象作为占位符。
+ */
+export const prepareGenerate = (chatId: string, content: string): Promise<Message> => {
+  return apiClient.post(`/chats/${chatId}/prepare-generate`, { content }).then(res => res.data);
+};
+
+/**
+ * 第一步：为重新生成AI回复做准备。
+ * @returns 返回一个空的 assistant 消息对象作为占位符。
+ */
+export const prepareRegenerate = (chatId: string, fromMessageId: string): Promise<Message> => {
+  return apiClient.post(`/chats/${chatId}/prepare-regenerate/${fromMessageId}`).then(res => res.data);
 };
 
 /**
