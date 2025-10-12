@@ -34,8 +34,12 @@ async def update_setting(db: AsyncSession, setting: schemas.GlobalSetting) -> mo
 # --- AIProvider CRUD ---
 
 async def get_provider(db: AsyncSession, provider_id: str) -> Optional[models.AIProvider]:
-    """通过ID获取单个AI服务提供商"""
-    result = await db.execute(select(models.AIProvider).filter(models.AIProvider.id == provider_id))
+    """通过ID获取单个AI服务提供商（包含其下的模型）"""
+    result = await db.execute(
+        select(models.AIProvider)
+        .options(selectinload(models.AIProvider.models))
+        .filter(models.AIProvider.id == provider_id)
+    )
     return result.scalars().first()
 
 
@@ -103,7 +107,13 @@ async def delete_provider(db: AsyncSession, provider_id: str) -> Optional[models
     """删除一个AI服务提供商及其下所有模型，并清理相关的全局设置"""
     db_provider = await get_provider(db, provider_id)
     if db_provider:
-        # 如果删除的是最后选择的服务商，则清空该设置
+        # 在删除前，检查并清理相关的全局设置
+        default_model_setting = await get_setting(db, "default_model_id")
+        if default_model_setting and default_model_setting.value:
+            provider_model_ids = {model.id for model in db_provider.models}
+            if default_model_setting.value in provider_model_ids:
+                await update_setting(db, setting=schemas.GlobalSetting(key="default_model_id", value=None))
+
         last_selected_setting = await get_setting(db, "last_selected_provider_id")
         if last_selected_setting and last_selected_setting.value == provider_id:
             await update_setting(db, setting=schemas.GlobalSetting(key="last_selected_provider_id", value=None))
@@ -155,10 +165,15 @@ async def update_model(db: AsyncSession, model_id: str, model_update: schemas.AI
 
 
 async def delete_model(db: AsyncSession, model_id: str) -> Optional[models.AIModel]:
-    """删除一个AI模型"""
+    """删除一个AI模型，并清理相关的全局设置"""
     db_model = await get_model(db, model_id)
     if db_model:
-        # 在删除模型后，将使用此模型的所有会话的 aiModelId 置为 NULL
+        # 在删除前，检查该模型是否为全局默认模型
+        default_model_setting = await get_setting(db, "default_model_id")
+        if default_model_setting and default_model_setting.value == model_id:
+            await update_setting(db, setting=schemas.GlobalSetting(key="default_model_id", value=None))
+
+        # 将使用此模型的所有会话的 aiModelId 置为 NULL
         chats_to_update = await db.execute(
             select(models.Chat).filter(models.Chat.aiModelId == model_id)
         )
