@@ -37,6 +37,60 @@
           </el-select>
         </el-form-item>
 
+        <el-divider>新会话默认参数</el-divider>
+
+        <el-form-item>
+          <template #label>
+            <span>上下文消息数量 (Context)</span>
+            <el-tooltip
+              effect="dark"
+              content="新会话默认携带的最近历史消息数量。0 代表不限制（发送全部历史）。"
+              placement="top"
+            >
+              <el-icon class="label-icon"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </template>
+          <el-input-number
+            v-model="settingsForm.default_max_context_messages"
+            :min="0"
+            :step="2"
+            controls-position="right"
+            style="width: 100%;"
+          />
+        </el-form-item>
+
+        <el-form-item label="Temperature (温度)">
+          <el-slider
+            v-model="settingsForm.default_temperature"
+            :min="0"
+            :max="2"
+            :step="0.1"
+            show-input
+          />
+        </el-form-item>
+
+        <el-form-item label="Top P">
+          <el-slider
+            v-model="settingsForm.default_top_p"
+            :min="0"
+            :max="1"
+            :step="0.01"
+            show-input
+          />
+        </el-form-item>
+
+        <el-form-item label="流式对话 (Stream)">
+           <el-switch v-model="settingsForm.default_stream" />
+           <el-tooltip
+              effect="dark"
+              content="新会话默认是否开启流式对话。关闭后, AI将一次性返回完整回复, 可能会增加等待时间。"
+              placement="top"
+            >
+              <el-icon class="label-icon"><QuestionFilled /></el-icon>
+            </el-tooltip>
+        </el-form-item>
+
+
         <el-form-item>
           <el-button type="primary" @click="handleSave" :loading="isSaving">
             保存设置
@@ -60,6 +114,11 @@ const { globalSettings, groupedModels } = storeToRefs(providerStore);
 
 const settingsForm = reactive<GlobalSettingsUpdate>({
   default_model_id: null,
+  last_selected_provider_id: null,
+  default_max_context_messages: 0,
+  default_temperature: 1.0,
+  default_top_p: 1.0,
+  default_stream: true,
 });
 const isSaving = ref(false);
 
@@ -70,7 +129,8 @@ onMounted(async () => {
 
 // 当 store 中的数据加载或更新后，同步到本地表单
 watch(globalSettings, (newSettings) => {
-  settingsForm.default_model_id = newSettings.default_model_id;
+  // 使用 Object.assign 确保响应性
+  Object.assign(settingsForm, newSettings);
 }, { deep: true, immediate: true });
 
 const handleSave = async () => {
@@ -107,5 +167,8 @@ const handleSave = async () => {
   margin-left: 4px;
   color: var(--el-text-color-secondary);
   cursor: help;
+}
+.el-form-item .el-switch {
+  margin-right: 8px;
 }
 </style>
