@@ -9,6 +9,7 @@ import json
 from ..services import llm_service, stream_manager
 from .. import crud, schemas
 from ..database import get_db
+from .settings import get_global_settings # 导入以复用逻辑
 
 router = APIRouter()
 
@@ -25,8 +26,10 @@ async def create_chat(chat: schemas.ChatCreate, db: AsyncSession = Depends(get_d
     """
     创建一个新的会话 (itemType='chat') 或文件夹 (itemType='folder')。
     如果创建会话时未指定模型，将尝试使用全局默认模型。
+    如果创建会话时未指定模型参数，将自动应用全局默认参数。
     """
     if chat.itemType == 'chat':
+        # 1. 设置默认模型
         if not chat.aiModelId:
             default_model_setting = await crud.get_setting(db, key="default_model_id")
             if default_model_setting and default_model_setting.value:
@@ -36,6 +39,16 @@ async def create_chat(chat: schemas.ChatCreate, db: AsyncSession = Depends(get_d
             db_model = await crud.get_model(db, model_id=chat.aiModelId)
             if not db_model:
                 raise HTTPException(status_code=404, detail=f"AI 模型ID {chat.aiModelId} 未找到")
+
+        # 2. 如果前端没有提供模型参数, 则应用全局默认参数
+        if chat.modelParameters is None:
+            global_settings = await get_global_settings(db)
+            chat.modelParameters = {
+                "max_context_messages": global_settings.default_max_context_messages,
+                "temperature": global_settings.default_temperature,
+                "top_p": global_settings.default_top_p,
+                "stream": global_settings.default_stream,
+            }
 
     return await crud.create_chat(db=db, chat=chat)
 
@@ -290,4 +303,3 @@ async def stream_response(
         llm_service.subscribe_to_stream(db, assistant_message_id),
         media_type="text/event-stream"
     )
-

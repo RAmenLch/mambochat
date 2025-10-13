@@ -39,6 +39,11 @@ export const useProviderStore = defineStore('providers', {
     globalSettings: {
       default_model_id: null,
       last_selected_provider_id: null,
+      // 初始化新增的全局模型参数
+      default_max_context_messages: 0,
+      default_temperature: 1.0,
+      default_top_p: 1.0,
+      default_stream: true,
     },
   }),
 

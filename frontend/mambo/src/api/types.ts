@@ -125,4 +125,9 @@ export interface ChatReorderItem {
 export interface GlobalSettingsUpdate {
   default_model_id: string | null;
   last_selected_provider_id: string | null;
+  // 新增的全局模型参数
+  default_max_context_messages: number | null;
+  default_temperature: number | null;
+  default_top_p: number | null;
+  default_stream: boolean | null;
 }
