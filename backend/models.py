@@ -79,7 +79,6 @@ class Message(Base):
     role = Column(String(20), nullable=False)  # 'user', 'assistant', 'system'
     chatId = Column(String(36), ForeignKey("Chat.id"), nullable=False)
     sortOrder = Column(Integer, nullable=False)
-    status = Column(String(20), nullable=False, default=MessageStatus.COMPLETED.value)  # 消息状态
 
     # 关系：反向引用到 Chat
     chat = relationship("Chat", back_populates="messages")
@@ -98,6 +97,7 @@ class SubMessage(Base):
     sortOrder = Column(Integer, nullable=False)
     type = Column(String(50), nullable=False, default="Normal")
     config = Column(TEXT, nullable=True)  # Store as JSON string, e.g., '{"is_collapsed": false}'
+    status = Column(String(20), nullable=False, default=MessageStatus.COMPLETED.value) # 消息分区的状态
 
     # 关系：反向引用到 Message
     message = relationship("Message", back_populates="sub_messages")
@@ -108,4 +108,3 @@ class GlobalSettings(Base):
 
     key = Column(String(50), primary_key=True)
     value = Column(TEXT, nullable=True)
-

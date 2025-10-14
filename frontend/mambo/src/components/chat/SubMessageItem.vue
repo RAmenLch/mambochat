@@ -2,14 +2,38 @@
   <div
     class="sub-message-item"
     :class="{ 'is-user': parentMessage.role === 'user' }"
-    @mouseenter="showActions = true"
-    @mouseleave="showActions = false"
   >
+    <!-- 分区头部 (仅在 showHeader 为 true 时显示) -->
+    <div v-if="showHeader" class="sub-message-header">
+      <span class="partition-title">分区 {{ index }}</span>
+      <div class="actions">
+        <!-- 编辑 -->
+        <el-tooltip content="编辑" placement="top" :show-after="500">
+          <el-button :icon="Edit" circle text size="small" @click="$emit('edit')" :disabled="isGenerating" />
+        </el-tooltip>
+        <!-- 复制 -->
+        <el-tooltip content="复制" placement="top" :show-after="500">
+          <el-button :icon="CopyDocument" circle text size="small" @click="$emit('copy')" :disabled="isGenerating" />
+        </el-tooltip>
+        <!-- 折叠/展开 -->
+        <el-tooltip :content="isCollapsed ? '展开' : '折叠'" placement="top" :show-after="500">
+          <el-button
+            :icon="isCollapsed ? ArrowDownBold : ArrowUpBold"
+            circle
+            text
+            size="small"
+            @click="toggleCollapse"
+            :disabled="isGenerating"
+          />
+        </el-tooltip>
+      </div>
+    </div>
+
     <!-- 消息内容 -->
-    <div class="message-content">
-      <!-- 加载中指示器 (仅对AI消息的第一个分区显示) -->
+    <div class="message-content" :class="{ collapsed: isCollapsed }">
+      <!-- 加载中指示器 (仅对内容为空的生成中分区显示) -->
       <div
-        v-if="isGenerating && subMessage.content === '' && subMessage.sortOrder === 0"
+        v-if="isGenerating && subMessage.content === ''"
         class="typing-indicator"
       >
         <span></span><span></span><span></span>
@@ -31,60 +55,13 @@
         </div>
       </template>
     </div>
-
-    <!-- 悬浮操作菜单 -->
-    <div
-      class="sub-message-actions"
-      :class="{ 'is-visible': showActions && !isGenerating }"
-    >
-      <!-- 编辑 -->
-      <el-tooltip content="编辑" placement="top" :show-after="500">
-        <el-button :icon="Edit" circle size="small" @click="openEditDialog" />
-      </el-tooltip>
-
-      <!-- 复制 -->
-      <el-tooltip content="复制" placement="top" :show-after="500">
-        <el-button
-          :icon="CopyDocument"
-          circle
-          size="small"
-          @click="handleCopy"
-        />
-      </el-tooltip>
-    </div>
   </div>
-
-  <!-- 编辑消息弹窗 -->
-  <el-dialog v-model="editDialogVisible" title="编辑分区内容" width="650px">
-    <el-input
-      v-model="editingContent"
-      type="textarea"
-      :rows="12"
-      resize="none"
-      placeholder="内容不能为空"
-    />
-    <template #footer>
-      <span class="dialog-footer">
-        <el-button @click="editDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSaveEdit">仅保存</el-button>
-        <el-button
-          v-if="parentMessage.role === 'user'"
-          type="success"
-          @click="handleSaveAndResend"
-        >
-          保存并重新生成
-        </el-button>
-      </span>
-    </template>
-  </el-dialog>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import type { SubMessage, Message } from '@/api/types';
-import { useChatStore } from '@/stores/chatStore';
-import { ElMessage } from 'element-plus';
-import { Edit, CopyDocument } from '@element-plus/icons-vue';
+import { Edit, CopyDocument, ArrowUpBold, ArrowDownBold } from '@element-plus/icons-vue';
 import MarkdownIt from 'markdown-it';
 import DOMPurify from 'dompurify';
 import CodeBlock from './CodeBlock.vue';
@@ -95,64 +72,32 @@ interface ParsedBlock {
   language?: string;
 }
 
-const props = defineProps<{
+// 定义 Props 的接口
+interface Props {
   subMessage: SubMessage;
   parentMessage: Message;
-}>();
+  showHeader?: boolean;
+  index?: number;
+}
 
-const chatStore = useChatStore();
-const showActions = ref(false);
-const editDialogVisible = ref(false);
-const editingContent = ref('');
+// 使用 withDefaults 来为 props 提供默认值
+const props = withDefaults(defineProps<Props>(), {
+  showHeader: false,
+  index: 1,
+});
+
+const emit = defineEmits(['edit', 'copy']);
+
+const isCollapsed = ref(props.subMessage.config.is_collapsed || false);
 
 const isGenerating = computed(
-  () => props.parentMessage.role === 'assistant' && props.parentMessage.status === 'generating'
+  () => props.subMessage.status === 'generating'
 );
 
-const openEditDialog = () => {
-  editingContent.value = props.subMessage.content;
-  editDialogVisible.value = true;
-};
-
-const handleSaveEdit = () => {
-  if (editingContent.value.trim() === '') {
-    ElMessage.warning('内容不能为空');
-    return;
-  }
-  chatStore.updateSubMessage({
-    subMessageId: props.subMessage.id,
-    data: { content: editingContent.value },
-  });
-  editDialogVisible.value = false;
-};
-
-const handleSaveAndResend = () => {
-  if (editingContent.value.trim() === '') {
-    ElMessage.warning('内容不能为空');
-    return;
-  }
-
-  // 构建新的 sub_messages 列表
-  const newSubMessages = props.parentMessage.sub_messages.map(sm => ({
-    content: sm.id === props.subMessage.id ? editingContent.value : sm.content,
-    sortOrder: sm.sortOrder,
-    type: sm.type,
-    config: sm.config,
-  }));
-
-  chatStore.editMessageAndRegenerate({
-    messageId: props.parentMessage.id,
-    sub_messages: newSubMessages,
-    resend: true,
-  });
-  editDialogVisible.value = false;
-};
-
-const handleCopy = () => {
-  navigator.clipboard
-    .writeText(props.subMessage.content)
-    .then(() => ElMessage.success('已复制到剪贴板'))
-    .catch(() => ElMessage.error('复制失败'));
+const toggleCollapse = () => {
+  isCollapsed.value = !isCollapsed.value;
+  // 注意: 当前折叠状态仅保存在组件内存中, 刷新后会丢失。
+  // 若需持久化, 需要调用API更新数据库中的config字段。
 };
 
 const md = new MarkdownIt({ html: false });
@@ -197,36 +142,94 @@ const parsedContent = computed((): ParsedBlock[] => {
   display: flex;
   flex-direction: column;
   max-width: 100%;
-}
-.is-user .sub-message-item {
-  align-items: flex-end;
-}
-.sub-message-actions {
-  display: flex;
-  gap: 4px;
-  margin-top: 4px;
-  opacity: 0;
-  visibility: hidden;
-  height: 24px;
-  transition: opacity 0.2s, visibility 0.2s;
-}
-.sub-message-actions.is-visible {
-  opacity: 1;
-  visibility: visible;
-}
-.message-content {
-  padding: 10px 15px;
-  border-radius: 8px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 6px;
   background-color: var(--color-background-soft);
+  overflow: hidden;
+
+  --sub-message-bg: var(--color-background-soft);
+}
+
+.is-user .sub-message-item {
+  background-color: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary-light-8);
+  --sub-message-bg: var(--el-color-primary-light-9);
+}
+
+.sub-message-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 12px;
+  background-color: rgba(0, 0, 0, 0.03);
+  height: 32px;
+  flex-shrink: 0;
+}
+
+.is-user .sub-message-header {
+  background-color: rgba(64, 158, 255, 0.1);
+}
+
+.partition-title {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  font-weight: bold;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.actions .el-button {
+  color: var(--el-text-color-secondary);
+}
+
+.actions .el-button:hover {
+  color: var(--el-text-color-primary);
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.message-content {
+  position: relative;
+  padding: 10px 15px;
   word-break: break-word;
   line-height: 1.7;
   color: var(--color-text);
-  min-height: 40px;
+  min-height: 20px;
+  /* 优化：使用 ease-out 并缩短时长，让动画响应更迅速 */
+  transition: max-height 0.25s ease-out;
+  max-height: 1000px;
+  overflow: hidden;
 }
+
 .is-user .message-content {
-  background-color: var(--el-color-primary-light-9);
   color: var(--el-color-primary-dark-2);
 }
+
+.message-content.collapsed {
+  max-height: 5em;
+}
+
+.message-content::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3em;
+  background: linear-gradient(to bottom, transparent, var(--sub-message-bg));
+  pointer-events: none;
+  opacity: 0;
+  /* 优化：同步动画参数 */
+  transition: opacity 0.25s ease-out;
+}
+
+.message-content.collapsed::after {
+  opacity: 1;
+}
+
 
 /* -- v-html 内容样式 -- */
 .content-block :deep(p) { margin: 0 0 0.5em; }

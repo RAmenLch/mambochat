@@ -162,20 +162,19 @@ const emitEdit = () => {
 }
 
 .code-block-content {
-  position: relative; /* 为 ::after 伪元素定位 */
-  max-height: 800px; /* 默认最大高度 */
+  position: relative;
+  max-height: 800px;
   overflow: auto;
-  transition: max-height 0.3s ease-in-out;
+  /* 优化：使用 ease-out 并缩短时长，让动画响应更迅速 */
+  transition: max-height 0.25s ease-out;
 }
 
 .code-block-content.collapsed {
-  /* 设定一个大约3行代码+padding的高度作为预览高度 */
   max-height: 6.5em;
   overflow: hidden;
 }
 
-/* 折叠时添加底部渐变遮罩，提示有更多内容 */
-.code-block-content.collapsed::after {
+.code-block-content::after {
   content: '';
   position: absolute;
   bottom: 0;
@@ -187,7 +186,14 @@ const emitEdit = () => {
     transparent,
     var(--hljs-background, #2d2d2d)
   );
-  pointer-events: none; /* 确保遮罩不影响文本选择 */
+  pointer-events: none;
+  opacity: 0;
+  /* 优化：同步动画参数 */
+  transition: opacity 0.25s ease-out;
+}
+
+.code-block-content.collapsed::after {
+  opacity: 1;
 }
 
 .code-block-content pre,

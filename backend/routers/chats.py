@@ -233,7 +233,7 @@ async def update_sub_message(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    更新单个消息分区的内容或配置（例如，折叠状态）。
+    更新单个消息分区的内容、配置或状态。
     此操作不触发AI重新生成。
     """
     updated_sub_message = await crud.update_sub_message(db, sub_message_id, sub_message_update)
@@ -308,7 +308,6 @@ async def stream_response(
         db: AsyncSession = Depends(get_db)
 ):
     """
-
     客户端通过此端点订阅指定 assistant 消息的生成进度。
     此连接可以随时中断和重连，都会无缝地从上次中断的地方继续。
     """

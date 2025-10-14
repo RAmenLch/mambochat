@@ -18,6 +18,7 @@ export interface SubMessage {
   sortOrder: number;
   type: string;
   config: SubMessageConfig;
+  status: MessageStatus;
 }
 
 export interface SubMessageCreate {
@@ -25,11 +26,13 @@ export interface SubMessageCreate {
   sortOrder: number;
   type?: string;
   config?: SubMessageConfig;
+  status?: MessageStatus;
 }
 
 export interface SubMessageUpdate {
   content?: string;
   config?: SubMessageConfig;
+  status?: MessageStatus;
 }
 
 
@@ -41,7 +44,6 @@ export interface Message {
   role: MessageRole;
   chatId: string;
   sortOrder: number;
-  status: MessageStatus;
   sub_messages: SubMessage[];
 }
 

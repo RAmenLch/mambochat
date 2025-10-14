@@ -30,6 +30,7 @@ class SubMessageBase(BaseModel):
     content: str
     type: str = Field("Normal", description="分区类型，未来可扩展为 Image, File 等")
     config: SubMessageConfig = Field(default_factory=SubMessageConfig, description="分区的配置项")
+    status: MessageStatus = Field(MessageStatus.COMPLETED, description="分区的状态")
 
 
 class SubMessageCreate(SubMessageBase):
@@ -39,6 +40,7 @@ class SubMessageCreate(SubMessageBase):
 class SubMessageUpdate(BaseModel):
     content: Optional[str] = None
     config: Optional[SubMessageConfig] = None
+    status: Optional[MessageStatus] = None
 
 
 class SubMessage(SubMessageBase):
@@ -46,6 +48,18 @@ class SubMessage(SubMessageBase):
     createdAt: datetime
     messageId: str
     sortOrder: int
+
+    @field_validator("config", mode="before")
+    @classmethod
+    def parse_config_json(cls, v):
+        """在验证前，将从数据库读取的JSON字符串解析为字典。"""
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                # 如果数据库中的JSON格式错误，返回一个默认值以避免崩溃
+                return {}
+        return v
 
     class Config:
         from_attributes = True
@@ -59,7 +73,6 @@ class MessageBase(BaseModel):
 
 class MessageCreate(MessageBase):
     sub_messages: List[SubMessageCreate]
-    status: Optional[MessageStatus] = MessageStatus.COMPLETED
 
 
 class MessageUpdate(BaseModel):
@@ -74,7 +87,6 @@ class Message(MessageBase):
     createdAt: datetime
     chatId: str
     sortOrder: int
-    status: MessageStatus
     sub_messages: List[SubMessage] = Field(default_factory=list)
 
     class Config:

@@ -13,64 +13,92 @@
       </el-avatar>
     </div>
 
-    <!-- 消息主体 (现在是子消息的容器) -->
+    <!-- 消息主体 (根据子消息数量进行条件渲染) -->
     <div class="message-body">
-      <!-- 循环渲染每个子消息分区 -->
-      <SubMessageItem
-        v-for="subMessage in message.sub_messages"
-        :key="subMessage.id"
-        :sub-message="subMessage"
-        :parent-message="message"
-      />
-
-      <!-- 针对整个消息的悬浮操作菜单 -->
-      <div
-        class="message-actions"
-        :class="{ 'is-visible': showActions && !isGenerating }"
-      >
-        <!-- AI消息: 重新回答 -->
-        <el-tooltip content="重新回答" placement="top" :show-after="500">
-          <el-button
-            v-if="message.role === 'assistant'"
-            :icon="Refresh"
-            circle
-            size="small"
-            @click="handleRegenerate"
+      <!-- 单一分区视图 -->
+      <template v-if="isSingleSubMessage">
+        <div class="single-sub-message-wrapper">
+          <SubMessageItem
+            :sub-message="firstSubMessage"
+            :parent-message="message"
+            @edit="openEditDialog(firstSubMessage)"
+            @copy="handleCopy"
           />
-        </el-tooltip>
-        <!-- 用户消息: 在下方重新回答 -->
-        <el-tooltip content="在下方重新回答" placement="top" :show-after="500">
-          <el-button
-            v-if="message.role === 'user'"
-            :icon="RefreshLeft"
-            circle
-            size="small"
-            @click="handleRegenerate"
+        </div>
+      </template>
+
+      <!-- 多分区视图 -->
+      <template v-else>
+        <div class="multi-part-container">
+          <SubMessageItem
+            v-for="(subMessage, index) in message.sub_messages"
+            :key="subMessage.id"
+            :sub-message="subMessage"
+            :parent-message="message"
+            :show-header="true"
+            :index="index + 1"
+            @edit="openEditDialog(subMessage)"
+            @copy="handleCopySingle(subMessage)"
           />
+        </div>
+      </template>
+
+      <!-- 悬浮操作菜单 (根据视图模式显示不同按钮) -->
+      <div class="message-actions" :class="{ 'is-visible': showActions && !isAnySubMessageGenerating }">
+        <!-- 通用: 重新回答 -->
+        <el-tooltip :content="message.role === 'user' ? '在下方重新回答' : '重新回答'" placement="top" :show-after="500">
+          <el-button :icon="message.role === 'user' ? RefreshLeft : Refresh" circle size="small" @click="handleRegenerate" />
         </el-tooltip>
 
-        <!-- 删除整个消息 -->
+        <!-- 单一视图: 编辑 -->
+        <el-tooltip v-if="isSingleSubMessage" content="编辑" placement="top" :show-after="500">
+          <el-button :icon="Edit" circle size="small" @click="openEditDialog(firstSubMessage)" />
+        </el-tooltip>
+
+        <!-- 复制 (行为不同) -->
+        <el-tooltip :content="isSingleSubMessage ? '复制' : '全部复制'" placement="top" :show-after="500">
+          <el-button :icon="CopyDocument" circle size="small" @click="handleCopy" />
+        </el-tooltip>
+
+        <!-- 通用: 删除 -->
         <el-tooltip content="删除" placement="top" :show-after="500">
-          <el-button
-            :icon="Delete"
-            circle
-            size="small"
-            type="danger"
-            plain
-            @click="handleDelete"
-          />
+          <el-button :icon="Delete" circle size="small" type="danger" plain @click="handleDelete" />
         </el-tooltip>
       </div>
     </div>
   </div>
+
+  <!-- 编辑消息弹窗 (由MessageItem统一管理) -->
+  <el-dialog v-model="editDialogVisible" title="编辑分区内容" width="650px">
+    <el-input
+      v-model="editingContent"
+      type="textarea"
+      :rows="12"
+      resize="none"
+      placeholder="内容不能为空"
+    />
+    <template #footer>
+      <span class="dialog-footer">
+        <el-button @click="editDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleSaveEdit">仅保存</el-button>
+        <el-button
+          v-if="message.role === 'user'"
+          type="success"
+          @click="handleSaveAndResend"
+        >
+          保存并重新生成
+        </el-button>
+      </span>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import type { Message } from '@/api/types';
+import type { Message, SubMessage } from '@/api/types';
 import { useChatStore } from '@/stores/chatStore';
-import { ElMessageBox } from 'element-plus';
-import { User, Cpu, Refresh, RefreshLeft, Delete } from '@element-plus/icons-vue';
+import { ElMessage, ElMessageBox } from 'element-plus';
+import { User, Cpu, Refresh, RefreshLeft, Delete, Edit, CopyDocument } from '@element-plus/icons-vue';
 import SubMessageItem from './SubMessageItem.vue';
 
 const props = defineProps<{
@@ -81,10 +109,59 @@ const props = defineProps<{
 const chatStore = useChatStore();
 const showActions = ref(false);
 
-const isGenerating = computed(
-  () => props.message.role === 'assistant' && props.message.status === 'generating'
-);
+// --- 计算属性 ---
+const isSingleSubMessage = computed(() => props.message.sub_messages.length <= 1);
+const firstSubMessage = computed(() => props.message.sub_messages[0]);
+const isAnySubMessageGenerating = computed(() => props.message.sub_messages.some(sm => sm.status === 'generating'));
+const roleClass = computed(() => ({
+  'is-user': props.message.role === 'user',
+  'is-assistant': props.message.role === 'assistant',
+}));
 
+// --- 编辑逻辑 (统一管理) ---
+const editDialogVisible = ref(false);
+const editingContent = ref('');
+const editingSubMessage = ref<SubMessage | null>(null);
+
+const openEditDialog = (subMessage: SubMessage) => {
+  editingSubMessage.value = subMessage;
+  editingContent.value = subMessage.content;
+  editDialogVisible.value = true;
+};
+
+const handleSaveEdit = () => {
+  if (!editingSubMessage.value || editingContent.value.trim() === '') {
+    ElMessage.warning('内容不能为空');
+    return;
+  }
+  chatStore.updateSubMessage({
+    subMessageId: editingSubMessage.value.id,
+    data: { content: editingContent.value },
+  });
+  editDialogVisible.value = false;
+};
+
+const handleSaveAndResend = () => {
+  if (!editingSubMessage.value || editingContent.value.trim() === '') {
+    ElMessage.warning('内容不能为空');
+    return;
+  }
+  const newSubMessages = props.message.sub_messages.map(sm => ({
+    content: sm.id === editingSubMessage.value!.id ? editingContent.value : sm.content,
+    sortOrder: sm.sortOrder,
+    type: sm.type,
+    config: sm.config,
+    status: sm.status,
+  }));
+  chatStore.editMessageAndRegenerate({
+    messageId: props.message.id,
+    sub_messages: newSubMessages,
+    resend: true,
+  });
+  editDialogVisible.value = false;
+};
+
+// --- 其他操作 ---
 const handleRegenerate = () => {
   chatStore.regenerateFrom(props.message.id);
 };
@@ -95,16 +172,31 @@ const handleDelete = () => {
     cancelButtonText: '取消',
     type: 'warning',
   })
-    .then(() => {
-      chatStore.deleteMessage(props.message.id);
-    })
+    .then(() => chatStore.deleteMessage(props.message.id))
     .catch(() => {});
 };
 
-const roleClass = computed(() => ({
-  'is-user': props.message.role === 'user',
-  'is-assistant': props.message.role === 'assistant',
-}));
+const handleCopySingle = (subMessage: SubMessage) => {
+  navigator.clipboard
+    .writeText(subMessage.content)
+    .then(() => ElMessage.success('已复制到剪贴板'))
+    .catch(() => ElMessage.error('复制失败'));
+}
+
+const handleCopy = () => {
+  let contentToCopy = '';
+  if (isSingleSubMessage.value) {
+    contentToCopy = firstSubMessage.value?.content || '';
+  } else {
+    contentToCopy = props.message.sub_messages
+      .map(sm => sm.content)
+      .join('\n--------------------------\n');
+  }
+  navigator.clipboard
+    .writeText(contentToCopy)
+    .then(() => ElMessage.success('已复制到剪贴板'))
+    .catch(() => ElMessage.error('复制失败'));
+};
 </script>
 
 <style scoped>
@@ -124,15 +216,42 @@ const roleClass = computed(() => ({
 .message-body {
   display: flex;
   flex-direction: column;
-  gap: 4px; /* 子消息之间的间距 */
   min-width: 80px;
+  width: 100%;
+}
+
+/* 单一分区包裹器 */
+.single-sub-message-wrapper {
+  padding: 10px 15px;
+  border-radius: 8px;
+  background-color: var(--color-background-soft);
+  min-height: 40px;
+}
+.is-user .single-sub-message-wrapper {
+  background-color: var(--el-color-primary-light-9);
+}
+/* 移除 SubMessageItem 在单一视图下的边框和背景 */
+.single-sub-message-wrapper :deep(.sub-message-item) {
+  border: none;
+  background-color: transparent;
+  overflow: visible;
+}
+.single-sub-message-wrapper :deep(.message-content) {
+  padding: 0;
+}
+
+/* 多分区容器 */
+.multi-part-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px; /* 子消息之间的紧凑间距 */
   width: 100%;
 }
 
 .message-actions {
   display: flex;
   gap: 4px;
-  margin-top: 4px;
+  margin-top: 8px;
   opacity: 0;
   visibility: hidden;
   height: 24px;
@@ -144,7 +263,8 @@ const roleClass = computed(() => ({
 }
 
 /* -- 用户消息样式 -- */
-.is-user {
+/* 核心修复：将 .is-user 选择器变得更具体，防止样式泄漏到子组件 */
+.message-item-container.is-user {
   flex-direction: row-reverse;
   margin-left: auto;
 }
@@ -153,10 +273,14 @@ const roleClass = computed(() => ({
   margin-left: 12px;
 }
 
-.is-user .message-body {
-  align-items: flex-end;
+/* 为了让用户消息整体靠右，我们对消息气泡本身进行对齐 */
+.is-user .single-sub-message-wrapper,
+.is-user .multi-part-container {
+  margin-left: auto;
 }
-.is-assistant .message-body {
-  align-items: flex-start;
+
+/* 确保用户消息的操作菜单也靠右对齐 */
+.is-user .message-actions {
+  justify-content: flex-end;
 }
 </style>
