@@ -292,8 +292,7 @@ async def duplicate_chat(db: AsyncSession, chat_id: str) -> Optional[models.Chat
             new_msg = models.Message(
                 role=msg.role,
                 sortOrder=msg.sortOrder,
-                chatId=new_chat.id,
-                status=msg.status
+                chatId=new_chat.id
             )
             db.add(new_msg)
             # 必须先 flush 以获取 new_msg.id
@@ -305,6 +304,7 @@ async def duplicate_chat(db: AsyncSession, chat_id: str) -> Optional[models.Chat
                     sortOrder=sub.sortOrder,
                     type=sub.type,
                     config=sub.config,
+                    status=sub.status,
                     messageId=new_msg.id
                 )
                 for sub in msg.sub_messages
@@ -348,6 +348,7 @@ async def update_message(db: AsyncSession, message_id: str, message_update: sche
             content=sub_msg_data.content,
             sortOrder=sub_msg_data.sortOrder,
             type=sub_msg_data.type,
+            status=sub_msg_data.status.value,
             config=sub_msg_data.config.model_dump_json()
         )
         new_sub_messages.append(new_sub_msg)
@@ -356,13 +357,6 @@ async def update_message(db: AsyncSession, message_id: str, message_update: sche
     await db.commit()
     await db.refresh(db_message)
     return db_message
-
-
-async def update_message_status(db: AsyncSession, message_id: str, status: schemas.MessageStatus):
-    """更新消息的状态"""
-    stmt = update(models.Message).where(models.Message.id == message_id).values(status=status.value)
-    await db.execute(stmt)
-    await db.commit()
 
 
 async def get_messages_by_chat(db: AsyncSession, chat_id: str, skip: int = 0, limit: Optional[int] = None) -> List[models.Message]:
@@ -405,7 +399,6 @@ async def create_message(db: AsyncSession, message: schemas.MessageCreate, chat_
 
     db_message = models.Message(
         role=message.role,
-        status=message.status,
         chatId=chat_id,
         sortOrder=new_sort_order
     )
@@ -418,6 +411,7 @@ async def create_message(db: AsyncSession, message: schemas.MessageCreate, chat_
             content=sub_msg_data.content,
             sortOrder=sub_msg_data.sortOrder,
             type=sub_msg_data.type,
+            status=sub_msg_data.status.value,
             config=sub_msg_data.config.model_dump_json()
         )
         db.add(db_sub_message)
@@ -479,7 +473,7 @@ async def get_sub_message(db: AsyncSession, sub_message_id: str) -> Optional[mod
 
 
 async def update_sub_message(db: AsyncSession, sub_message_id: str, sub_message_update: schemas.SubMessageUpdate) -> Optional[models.SubMessage]:
-    """更新一条子消息的内容或配置"""
+    """更新一条子消息的内容、配置或状态"""
     db_sub_message = await get_sub_message(db, sub_message_id)
     if not db_sub_message:
         return None
@@ -489,10 +483,19 @@ async def update_sub_message(db: AsyncSession, sub_message_id: str, sub_message_
         db_sub_message.content = update_data['content']
     if 'config' in update_data:
         db_sub_message.config = json.dumps(update_data['config'])
+    if 'status' in update_data and update_data['status'] is not None:
+        db_sub_message.status = update_data['status'].value
 
     await db.commit()
     await db.refresh(db_sub_message)
     return db_sub_message
+
+
+async def update_sub_message_status(db: AsyncSession, sub_message_id: str, status: schemas.MessageStatus):
+    """高效地仅更新单个子消息的状态"""
+    stmt = update(models.SubMessage).where(models.SubMessage.id == sub_message_id).values(status=status.value)
+    await db.execute(stmt)
+    await db.commit()
 
 
 async def append_to_sub_message_content(db: AsyncSession, sub_message_id: str, chunk: str):
@@ -505,4 +508,3 @@ async def append_to_sub_message_content(db: AsyncSession, sub_message_id: str, c
     )
     await db.execute(stmt)
     await db.commit()
-

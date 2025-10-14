@@ -57,7 +57,10 @@ export const useChatStore = defineStore('chat', {
       return chat?.itemType === 'chat' ? chat : null;
     },
     isGenerating(state): boolean {
-      return state.activeSubscriptions.size > 0;
+      // 检查任何子消息的状态是否为 'generating'
+      return state.currentChatMessages.some(msg =>
+        msg.sub_messages.some(sm => sm.status === 'generating')
+      );
     }
   },
 
@@ -101,8 +104,9 @@ export const useChatStore = defineStore('chat', {
           this.currentChatMessages = chatWithMessages.messages.sort((a, b) => a.sortOrder - b.sortOrder);
         }
 
+        // 检查是否有未完成的生成任务，并重新订阅
         this.currentChatMessages.forEach(msg => {
-            if (msg.role === 'assistant' && msg.status === 'generating') {
+            if (msg.role === 'assistant' && msg.sub_messages.some(sm => sm.status === 'generating')) {
                 this._subscribeToMessageStream(msg);
             }
         });
@@ -226,6 +230,7 @@ export const useChatStore = defineStore('chat', {
         if (subMessage) {
           if (data.content !== undefined) subMessage.content = data.content;
           if (data.config !== undefined) subMessage.config = data.config;
+          if (data.status !== undefined) subMessage.status = data.status;
           break;
         }
       }
@@ -278,19 +283,18 @@ export const useChatStore = defineStore('chat', {
             id: `temp-sub-${index}`,
             createdAt: new Date().toISOString(),
             messageId: `temp-user-${Date.now()}`,
-            type: sm.type || 'Normal', // FIX: Ensure type is always a string
+            type: sm.type || 'Normal',
             config: sm.config || { is_collapsed: false },
+            status: 'completed',
           })),
           createdAt: new Date().toISOString(),
-          sortOrder: (lastMessage?.sortOrder ?? 0) + 1, // FIX: Use index access instead of .at()
-          status: 'completed'
+          sortOrder: (lastMessage?.sortOrder ?? -1) + 1,
         };
         this.currentChatMessages.push(tempUserMessage);
 
         const assistantPlaceholder = await prepareGenerate(chatId, { sub_messages });
 
         const chatWithMessages = await getChatWithMessages(chatId);
-        // FIX: Use index access instead of .at()
         const realUserMessage = chatWithMessages.messages[chatWithMessages.messages.length - 2];
         const tempMsgIndex = this.currentChatMessages.findIndex(m => m.id === tempUserMessage.id);
         if (tempMsgIndex > -1 && realUserMessage) {
@@ -338,9 +342,14 @@ export const useChatStore = defineStore('chat', {
         controller.abort();
       }
       this.activeSubscriptions.delete(messageId);
+
+      // Optimistic UI update: find the generating sub-message and mark it as completed
       const messageToUpdate = this.currentChatMessages.find(m => m.id === messageId);
       if (messageToUpdate) {
-        messageToUpdate.status = 'completed';
+        const subMessageToUpdate = messageToUpdate.sub_messages.find(sm => sm.status === 'generating');
+        if (subMessageToUpdate) {
+            subMessageToUpdate.status = 'completed';
+        }
       }
 
       try {
@@ -397,7 +406,7 @@ export const useChatStore = defineStore('chat', {
               const finalMessage = res.messages.find(m => m.id === assistantMessageId);
               const localMessage = this.currentChatMessages.find(m => m.id === assistantMessageId);
               if (finalMessage && localMessage) {
-                  localMessage.status = finalMessage.status;
+                  // Replace the entire sub_messages array to ensure status is synced
                   localMessage.sub_messages = finalMessage.sub_messages;
               }
           }).catch(err => console.error("Failed to fetch final message state:", err));

@@ -3,7 +3,7 @@
 import httpx
 import json
 import asyncio
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import AsyncGenerator, List, Tuple, Dict, Any, Optional
 
@@ -151,11 +151,16 @@ async def prepare_for_generation(
         include_self = (ref_message.role == schemas.MessageRole.ASSISTANT)
         await crud.delete_messages_after(db, chat_id=chat_id, message_id=base_message_id, include_self=include_self)
 
-    # 为AI助手的回复创建一个占位符，包含一个空的SubMessage
+    # 为AI助手的回复创建一个占位符，包含一个状态为 'generating' 的空SubMessage
     assistant_message_create = schemas.MessageCreate(
         role=schemas.MessageRole.ASSISTANT,
-        status=schemas.MessageStatus.GENERATING,
-        sub_messages=[schemas.SubMessageCreate(content="", sortOrder=0)]
+        sub_messages=[
+            schemas.SubMessageCreate(
+                content="",
+                sortOrder=0,
+                status=schemas.MessageStatus.GENERATING
+            )
+        ]
     )
     assistant_placeholder = await crud.create_message(db, message=assistant_message_create, chat_id=chat_id)
     return assistant_placeholder
@@ -249,7 +254,8 @@ async def run_generation_task_stream(chat_id: str, assistant_message_id: str):
                 await stream_manager.publish(assistant_message_id, event_data)
             final_status = schemas.MessageStatus.FAILED
         finally:
-            await crud.update_message_status(db, assistant_message_id, final_status)
+            if sub_message_id_to_update:
+                await crud.update_sub_message_status(db, sub_message_id_to_update, final_status)
             await stream_manager.close_stream(assistant_message_id)
 
 
@@ -294,7 +300,8 @@ async def run_generation_task_non_stream(chat_id: str, assistant_message_id: str
                 await crud.append_to_sub_message_content(db, sub_message_id_to_update, error_msg)
             final_status = schemas.MessageStatus.FAILED
         finally:
-            await crud.update_message_status(db, assistant_message_id, final_status)
+            if sub_message_id_to_update:
+                await crud.update_sub_message_status(db, sub_message_id_to_update, final_status)
             await stream_manager.close_stream(assistant_message_id)
 
 
@@ -309,12 +316,13 @@ async def subscribe_to_stream(
     if not message:
         return
 
-    # 发送初始状态
-    sub_messages_data = [schemas.SubMessage.model_validate(sm).model_dump() for sm in message.sub_messages]
+    sub_messages_data = [schemas.SubMessage.model_validate(sm).model_dump(mode='json') for sm in message.sub_messages]
+
     initial_event_data = {"type": "replace", "sub_messages": sub_messages_data}
     yield f"data: {json.dumps(initial_event_data)}\n\n"
 
-    if message.status in [schemas.MessageStatus.COMPLETED, schemas.MessageStatus.FAILED]:
+    is_still_generating = any(sm.status == models.MessageStatus.GENERATING.value for sm in message.sub_messages)
+    if not is_still_generating:
         return
 
     queue = await stream_manager.subscribe(assistant_message_id)
