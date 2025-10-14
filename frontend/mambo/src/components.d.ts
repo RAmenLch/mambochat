@@ -46,9 +46,11 @@ declare module 'vue' {
     ElTooltip: typeof import('element-plus/es')['ElTooltip']
     GlobalSettings: typeof import('./components/settings/GlobalSettings.vue')['default']
     MessageItem: typeof import('./components/chat/MessageItem.vue')['default']
+    MultiPartInput: typeof import('./components/chat/MultiPartInput.vue')['default']
     ProviderModelManager: typeof import('./components/settings/ProviderModelManager.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    SubMessageItem: typeof import('./components/chat/SubMessageItem.vue')['default']
   }
   export interface GlobalDirectives {
     vLoading: typeof import('element-plus/es')['ElLoadingDirective']

@@ -152,13 +152,11 @@ async def delete_model(db: AsyncSession, model_id: str) -> Optional[models.AIMod
     """删除一个AI模型，并将使用此模型的所有会话的 aiModelId 置为 NULL"""
     db_model = await get_model(db, model_id)
     if db_model:
-        # 使用一条批量更新语句，高效地将所有使用此模型的会话 aiModelId 置为 NULL
         await db.execute(
             update(models.Chat)
             .where(models.Chat.aiModelId == model_id)
             .values(aiModelId=None)
         )
-
         await db.delete(db_model)
         await db.commit()
     return db_model
@@ -167,11 +165,11 @@ async def delete_model(db: AsyncSession, model_id: str) -> Optional[models.AIMod
 # --- Chat CRUD ---
 
 async def get_chat(db: AsyncSession, chat_id: str) -> Optional[models.Chat]:
-    """通过ID获取单个聊天会话（包含其所有消息、模型和提供商信息）"""
+    """通过ID获取单个聊天会话（包含其所有消息、子消息、模型和提供商信息）"""
     result = await db.execute(
         select(models.Chat)
         .options(
-            selectinload(models.Chat.messages),
+            selectinload(models.Chat.messages).selectinload(models.Message.sub_messages),
             joinedload(models.Chat.ai_model).joinedload(models.AIModel.provider)
         )
         .filter(models.Chat.id == chat_id)
@@ -261,7 +259,7 @@ async def batch_update_chats_order(db: AsyncSession, updates: List[schemas.ChatR
 
 
 async def duplicate_chat(db: AsyncSession, chat_id: str) -> Optional[models.Chat]:
-    """复制一个现有会话及其所有消息来创建一个新会话"""
+    """复制一个现有会话及其所有消息和子消息来创建一个新会话"""
     original_chat = await get_chat(db, chat_id=chat_id)
     if not original_chat or original_chat.itemType != 'chat':
         return None
@@ -276,7 +274,7 @@ async def duplicate_chat(db: AsyncSession, chat_id: str) -> Optional[models.Chat
     try:
         params = json.loads(original_chat.modelParameters) if original_chat.modelParameters else None
     except json.JSONDecodeError:
-        params = None  # 如果JSON数据损坏，则安全地回退为None
+        params = None
 
     new_chat_data = schemas.ChatCreate(
         name=f"{original_chat.name} (副本)",
@@ -290,72 +288,88 @@ async def duplicate_chat(db: AsyncSession, chat_id: str) -> Optional[models.Chat
     new_chat = await create_chat(db, chat=new_chat_data)
 
     if original_chat.messages:
-        new_messages = [
-            models.Message(
-                content=msg.content,
+        for msg in original_chat.messages:
+            new_msg = models.Message(
                 role=msg.role,
                 sortOrder=msg.sortOrder,
                 chatId=new_chat.id,
                 status=msg.status
             )
-            for msg in original_chat.messages
-        ]
-        db.add_all(new_messages)
+            db.add(new_msg)
+            # 必须先 flush 以获取 new_msg.id
+            await db.flush()
+
+            new_sub_messages = [
+                models.SubMessage(
+                    content=sub.content,
+                    sortOrder=sub.sortOrder,
+                    type=sub.type,
+                    config=sub.config,
+                    messageId=new_msg.id
+                )
+                for sub in msg.sub_messages
+            ]
+            db.add_all(new_sub_messages)
+
         await db.commit()
         await db.refresh(new_chat, ['messages'])
 
     return new_chat
 
 
-# --- Message CRUD ---
+# --- Message & SubMessage CRUD ---
 
 async def get_message(db: AsyncSession, message_id: str) -> Optional[models.Message]:
-    """通过ID获取单条消息"""
-    result = await db.execute(select(models.Message).filter(models.Message.id == message_id))
+    """通过ID获取单条消息（包含其所有子消息）"""
+    result = await db.execute(
+        select(models.Message)
+        .options(selectinload(models.Message.sub_messages))
+        .filter(models.Message.id == message_id)
+    )
     return result.scalars().first()
 
 
-async def update_message(db: AsyncSession, message_id: str, message_update: schemas.MessageUpdate) -> Optional[
-    models.Message]:
-    """更新一条已存在消息的内容"""
+async def update_message(db: AsyncSession, message_id: str, message_update: schemas.MessageUpdate) -> Optional[models.Message]:
+    """通过替换其所有子消息来更新一条消息"""
     db_message = await get_message(db, message_id=message_id)
     if not db_message:
         return None
-    update_data = message_update.model_dump(exclude_unset=True)
-    db_message.content = update_data['content']
+
+    # 删除所有旧的子消息
+    for sub_message in db_message.sub_messages:
+        await db.delete(sub_message)
+    await db.flush()
+
+    # 创建新的子消息
+    new_sub_messages = []
+    for sub_msg_data in message_update.sub_messages:
+        new_sub_msg = models.SubMessage(
+            messageId=db_message.id,
+            content=sub_msg_data.content,
+            sortOrder=sub_msg_data.sortOrder,
+            type=sub_msg_data.type,
+            config=sub_msg_data.config.model_dump_json()
+        )
+        new_sub_messages.append(new_sub_msg)
+
+    db.add_all(new_sub_messages)
     await db.commit()
     await db.refresh(db_message)
     return db_message
 
 
-async def append_to_message_content(db: AsyncSession, message_id: str, chunk: str):
-    """将文本块追加到现有消息的内容中"""
-    stmt = (
-        update(models.Message)
-        .where(models.Message.id == message_id)
-        .values(content=models.Message.content + chunk)
-        .execution_options(synchronize_session=False)
-    )
-    await db.execute(stmt)
-    await db.commit()
-
-
 async def update_message_status(db: AsyncSession, message_id: str, status: schemas.MessageStatus):
     """更新消息的状态"""
-    stmt = (
-        update(models.Message)
-        .where(models.Message.id == message_id)
-        .values(status=status.value)
-    )
+    stmt = update(models.Message).where(models.Message.id == message_id).values(status=status.value)
     await db.execute(stmt)
     await db.commit()
 
 
-async def get_messages_by_chat(db: AsyncSession, chat_id: str, skip: int = 0, limit: Optional[int] = None) -> List[
-    models.Message]:
-    """获取指定会话的所有消息（按排序权重升序）"""
+async def get_messages_by_chat(db: AsyncSession, chat_id: str, skip: int = 0, limit: Optional[int] = None) -> List[models.Message]:
+    """获取指定会话的所有消息（包含子消息，按排序权重升序）"""
     query = (
         select(models.Message)
+        .options(selectinload(models.Message.sub_messages))
         .filter(models.Message.chatId == chat_id)
         .order_by(models.Message.sortOrder.asc())
         .offset(skip)
@@ -369,41 +383,52 @@ async def get_messages_by_chat(db: AsyncSession, chat_id: str, skip: int = 0, li
 
 
 async def get_limited_recent_messages(db: AsyncSession, chat_id: str, limit: int) -> List[models.Message]:
-    """获取指定会话中最新的N条消息（按时间升序返回）"""
+    """获取指定会话中最新的N条消息（包含子消息，按时间升序返回）"""
     result = await db.execute(
         select(models.Message)
+        .options(selectinload(models.Message.sub_messages))
         .filter(models.Message.chatId == chat_id)
         .order_by(models.Message.sortOrder.desc())
         .limit(limit)
     )
-    # 结果是按时间倒序的，需要反转以恢复正确的对话顺序
     messages = result.scalars().all()
     return messages[::-1]
 
 
 async def create_message(db: AsyncSession, message: schemas.MessageCreate, chat_id: str) -> models.Message:
-    """在指定会话中创建一条新消息"""
+    """在指定会话中创建一条新消息及其关联的子消息"""
     max_sort_order_result = await db.execute(
-        select(func.max(models.Message.sortOrder))
-        .filter(models.Message.chatId == chat_id)
+        select(func.max(models.Message.sortOrder)).filter(models.Message.chatId == chat_id)
     )
     max_sort_order = max_sort_order_result.scalar_one_or_none()
-
     new_sort_order = (max_sort_order or 0) + 1
 
     db_message = models.Message(
-        **message.model_dump(),
+        role=message.role,
+        status=message.status,
         chatId=chat_id,
         sortOrder=new_sort_order
     )
     db.add(db_message)
+    await db.flush()  # Flush to get the db_message.id for foreign key reference
+
+    for sub_msg_data in message.sub_messages:
+        db_sub_message = models.SubMessage(
+            messageId=db_message.id,
+            content=sub_msg_data.content,
+            sortOrder=sub_msg_data.sortOrder,
+            type=sub_msg_data.type,
+            config=sub_msg_data.config.model_dump_json()
+        )
+        db.add(db_sub_message)
+
     await db.commit()
-    await db.refresh(db_message)
+    await db.refresh(db_message, ['sub_messages'])
     return db_message
 
 
 async def delete_message(db: AsyncSession, message_id: str) -> Optional[models.Message]:
-    """通过ID删除单条消息"""
+    """通过ID删除单条消息（其子消息会因cascade被一并删除）"""
     db_message = await get_message(db, message_id)
     if db_message:
         await db.delete(db_message)
@@ -426,7 +451,6 @@ async def delete_messages_after(db: AsyncSession, chat_id: str, message_id: str,
 
     result = await db.execute(query)
     await db.commit()
-
     return result.rowcount
 
 
@@ -446,4 +470,39 @@ async def delete_last_assistant_message(db: AsyncSession, chat_id: str) -> Optio
         await db.commit()
 
     return last_message
+
+
+async def get_sub_message(db: AsyncSession, sub_message_id: str) -> Optional[models.SubMessage]:
+    """通过ID获取单条子消息"""
+    result = await db.execute(select(models.SubMessage).filter(models.SubMessage.id == sub_message_id))
+    return result.scalars().first()
+
+
+async def update_sub_message(db: AsyncSession, sub_message_id: str, sub_message_update: schemas.SubMessageUpdate) -> Optional[models.SubMessage]:
+    """更新一条子消息的内容或配置"""
+    db_sub_message = await get_sub_message(db, sub_message_id)
+    if not db_sub_message:
+        return None
+
+    update_data = sub_message_update.model_dump(exclude_unset=True)
+    if 'content' in update_data:
+        db_sub_message.content = update_data['content']
+    if 'config' in update_data:
+        db_sub_message.config = json.dumps(update_data['config'])
+
+    await db.commit()
+    await db.refresh(db_sub_message)
+    return db_sub_message
+
+
+async def append_to_sub_message_content(db: AsyncSession, sub_message_id: str, chunk: str):
+    """将文本块追加到现有子消息的内容中"""
+    stmt = (
+        update(models.SubMessage)
+        .where(models.SubMessage.id == sub_message_id)
+        .values(content=models.SubMessage.content + chunk)
+        .execution_options(synchronize_session=False)
+    )
+    await db.execute(stmt)
+    await db.commit()
 

@@ -29,7 +29,6 @@ async def create_chat(chat: schemas.ChatCreate, db: AsyncSession = Depends(get_d
     如果创建会话时未指定模型参数，将自动应用全局默认参数。
     """
     if chat.itemType == 'chat':
-        # 1. 设置默认模型
         if not chat.aiModelId:
             default_model_setting = await crud.get_setting(db, key="default_model_id")
             if default_model_setting and default_model_setting.value:
@@ -40,7 +39,6 @@ async def create_chat(chat: schemas.ChatCreate, db: AsyncSession = Depends(get_d
             if not db_model:
                 raise HTTPException(status_code=404, detail=f"AI 模型ID {chat.aiModelId} 未找到")
 
-        # 2. 如果前端没有提供模型参数, 则应用全局默认参数
         if chat.modelParameters is None:
             global_settings = await get_global_settings(db)
             chat.modelParameters = {
@@ -70,7 +68,6 @@ async def reorder_chats(updates: List[schemas.ChatReorderItem], db: AsyncSession
 async def read_chats(skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)):
     chats = await crud.get_chats(db, skip=skip, limit=limit)
 
-    # 为列表中模型ID为空的会话应用全局默认模型回退
     default_model_setting = await crud.get_setting(db, key="default_model_id")
     if default_model_setting and default_model_setting.value:
         default_model_id = default_model_setting.value
@@ -87,7 +84,6 @@ async def read_chat(chat_id: str, db: AsyncSession = Depends(get_db)):
     if db_chat is None:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    # 如果会话的模型被删除，则在返回数据时回退至全局默认模型
     if db_chat.itemType == 'chat' and not db_chat.aiModelId:
         default_model_setting = await crud.get_setting(db, key="default_model_id")
         if default_model_setting and default_model_setting.value:
@@ -98,7 +94,6 @@ async def read_chat(chat_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.get("/chats/{chat_id}/messages", response_model=schemas.ChatWithMessages, summary="获取单个会话及其消息")
 async def read_chat_with_messages(chat_id: str, db: AsyncSession = Depends(get_db)):
-    # 当用户获取消息时，更新会话的“最后打开时间”
     await crud.touch_chat(db, chat_id=chat_id)
 
     db_chat = await crud.get_chat(db, chat_id=chat_id)
@@ -108,7 +103,6 @@ async def read_chat_with_messages(chat_id: str, db: AsyncSession = Depends(get_d
     if db_chat.itemType != 'chat':
         raise HTTPException(status_code=400, detail="Cannot get messages for a folder.")
 
-    # 如果会话的模型被删除，则在返回数据时回退至全局默认模型
     if not db_chat.aiModelId:
         default_model_setting = await crud.get_setting(db, key="default_model_id")
         if default_model_setting and default_model_setting.value:
@@ -159,7 +153,7 @@ async def delete_chat(chat_id: str, db: AsyncSession = Depends(get_db)):
 )
 async def duplicate_chat_endpoint(chat_id: str, db: AsyncSession = Depends(get_db)):
     """
-    根据给定的会话ID，创建一个配置相同的新会话。
+    根据给定的会话ID，创建一个配置和消息历史都相同的新会话。
     """
     new_chat = await crud.duplicate_chat(db, chat_id=chat_id)
     if not new_chat:
@@ -192,15 +186,15 @@ async def _start_generation_task(
         background_tasks.add_task(llm_service.run_generation_task_non_stream, chat_id, assistant_message_id)
 
 
-@router.put("/messages/{message_id}", summary="更新消息内容 (并可选择重新生成)")
-async def update_message_content(
+@router.put("/messages/{message_id}", response_model=schemas.Message, summary="更新消息内容并可选择重新生成")
+async def update_message_and_regenerate(
         message_id: str,
         message_update: schemas.MessageUpdate,
         background_tasks: BackgroundTasks,
         db: AsyncSession = Depends(get_db)
 ):
     """
-    更新指定消息的内容。
+    替换指定消息的全部内容分区。
     如果 `resend` 为 true（仅限用户消息），则删除后续消息并启动后台任务重新生成AI回答。
     """
     db_message = await crud.get_message(db, message_id=message_id)
@@ -208,6 +202,8 @@ async def update_message_content(
         raise HTTPException(status_code=404, detail="Message not found")
 
     updated_message = await crud.update_message(db, message_id=message_id, message_update=message_update)
+    if not updated_message:
+        raise HTTPException(status_code=500, detail="Failed to update message")
 
     if not message_update.resend:
         return updated_message
@@ -228,6 +224,22 @@ async def delete_single_message(message_id: str, db: AsyncSession = Depends(get_
     if db_message is None:
         raise HTTPException(status_code=404, detail="Message not found")
     return db_message
+
+
+@router.put("/sub-messages/{sub_message_id}", response_model=schemas.SubMessage, summary="更新单个消息分区")
+async def update_sub_message(
+    sub_message_id: str,
+    sub_message_update: schemas.SubMessageUpdate,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    更新单个消息分区的内容或配置（例如，折叠状态）。
+    此操作不触发AI重新生成。
+    """
+    updated_sub_message = await crud.update_sub_message(db, sub_message_id, sub_message_update)
+    if not updated_sub_message:
+        raise HTTPException(status_code=404, detail="SubMessage not found")
+    return updated_sub_message
 
 
 @router.post("/messages/{message_id}/stop", status_code=status.HTTP_202_ACCEPTED, summary="请求停止AI生成")
@@ -253,11 +265,11 @@ async def prepare_to_generate(
         db: AsyncSession = Depends(get_db)
 ):
     """
-    接收用户新消息，保存它，创建一个空的 assistant 消息占位符并返回。
+    接收用户新消息（可能包含多个分区），保存它，创建一个空的 assistant 消息占位符并返回。
     同时，根据会话设置在后台启动一个流式或非流式生成任务。
     """
     assistant_placeholder = await llm_service.prepare_for_generation(
-        db=db, chat_id=chat_id, user_content=request.content, save_user_message=True
+        db=db, chat_id=chat_id, user_sub_messages=request.sub_messages, save_user_message=True
     )
     await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id, db)
     return assistant_placeholder
@@ -296,6 +308,7 @@ async def stream_response(
         db: AsyncSession = Depends(get_db)
 ):
     """
+
     客户端通过此端点订阅指定 assistant 消息的生成进度。
     此连接可以随时中断和重连，都会无缝地从上次中断的地方继续。
     """

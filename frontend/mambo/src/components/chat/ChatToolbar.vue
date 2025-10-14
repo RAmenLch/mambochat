@@ -4,12 +4,20 @@
       <el-icon><Cpu /></el-icon>
       <span>当前模型: <strong>{{ displayModelName }}</strong></span>
     </div>
-    <el-button
-      :icon="Setting"
-      circle
-      title="会话设置"
-      @click="$emit('openSettings')"
-    />
+    <div class="actions">
+      <el-button
+        :icon="Files"
+        circle
+        title="聊天分区"
+        @click="$emit('toggleMultiPartMode')"
+      />
+      <el-button
+        :icon="Setting"
+        circle
+        title="会话设置"
+        @click="$emit('openSettings')"
+      />
+    </div>
   </div>
 </template>
 
@@ -18,7 +26,7 @@ import { computed } from 'vue';
 import { useProviderStore } from '@/stores/providerStore';
 import type { Chat } from '@/api/types';
 import type { PropType } from 'vue';
-import { Cpu, Setting } from '@element-plus/icons-vue';
+import { Cpu, Setting, Files } from '@element-plus/icons-vue';
 
 const props = defineProps({
   currentChat: {
@@ -27,7 +35,7 @@ const props = defineProps({
   },
 });
 
-defineEmits(['openSettings']);
+defineEmits(['openSettings', 'toggleMultiPartMode']);
 
 const providerStore = useProviderStore();
 
@@ -66,5 +74,10 @@ const displayModelName = computed(() => {
   color: var(--el-text-color-primary);
   font-weight: 600;
   margin-left: 4px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
 }
 </style>

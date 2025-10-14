@@ -20,29 +20,62 @@ class MessageStatus(str, Enum):
     FAILED = "failed"
 
 
+# --- SubMessage Schemas ---
+
+class SubMessageConfig(BaseModel):
+    is_collapsed: bool = Field(False, description="分区是否折叠")
+
+
+class SubMessageBase(BaseModel):
+    content: str
+    type: str = Field("Normal", description="分区类型，未来可扩展为 Image, File 等")
+    config: SubMessageConfig = Field(default_factory=SubMessageConfig, description="分区的配置项")
+
+
+class SubMessageCreate(SubMessageBase):
+    sortOrder: int = Field(..., description="分区的排序权重")
+
+
+class SubMessageUpdate(BaseModel):
+    content: Optional[str] = None
+    config: Optional[SubMessageConfig] = None
+
+
+class SubMessage(SubMessageBase):
+    id: str
+    createdAt: datetime
+    messageId: str
+    sortOrder: int
+
+    class Config:
+        from_attributes = True
+
+
 # --- Message Schemas ---
 
 class MessageBase(BaseModel):
-    content: str
     role: MessageRole
 
 
 class MessageCreate(MessageBase):
+    sub_messages: List[SubMessageCreate]
     status: Optional[MessageStatus] = MessageStatus.COMPLETED
 
 
 class MessageUpdate(BaseModel):
-    """用于更新消息内容，可选择是否重新触发生成"""
-    content: str
-    resend: Optional[bool] = Field(False, description="仅对用户消息有效。若为true，更新内容后将删除此消息之后的所有对话并重新生成AI回答。")
+    """用于更新消息内容并触发重新生成"""
+    sub_messages: List[SubMessageCreate]
+    resend: bool = Field(False, description="是否删除后续消息并重新生成AI回答")
 
 
+# noinspection PyDataclass
 class Message(MessageBase):
     id: str
     createdAt: datetime
     chatId: str
     sortOrder: int
     status: MessageStatus
+    sub_messages: List[SubMessage] = Field(default_factory=list)
 
     class Config:
         from_attributes = True
@@ -97,11 +130,11 @@ class AIProvider(AIProviderBase):
     class Config:
         from_attributes = True
 
-
+# noinspection PyDataclass
 class AIProviderWithModels(AIProvider):
     models: List[AIModel] = Field(default_factory=list)
 
-
+# noinspection PyDataclass
 class ProviderWithModelsCreate(AIProviderCreate):
     """用于在创建服务商时，同时创建其下的模型列表"""
     models: List[AIModelBase] = Field(default_factory=list, description="随服务商一同创建的模型列表")
@@ -165,6 +198,7 @@ class ChatUpdate(BaseModel):
     sortOrder: Optional[int] = None
 
 
+# noinspection PyDataclass
 class ChatWithMessages(Chat):
     messages: List[Message] = Field(default_factory=list)
 
@@ -176,7 +210,7 @@ class ChatReorderItem(BaseModel):
 
 
 class GenerateRequest(BaseModel):
-    content: str
+    sub_messages: List[SubMessageCreate]
 
 
 # --- Global Settings Schemas ---
@@ -194,4 +228,3 @@ class GlobalSettingsUpdate(BaseModel):
     default_temperature: Optional[float] = Field(None, description="默认Temperature")
     default_top_p: Optional[float] = Field(None, description="默认Top P")
     default_stream: Optional[bool] = Field(None, description="默认是否开启流式对话")
-
