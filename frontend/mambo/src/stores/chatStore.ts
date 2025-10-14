@@ -9,14 +9,23 @@ import {
   deleteChat,
   updateChatSettings,
   reorderChats,
-  updateMessage,
+  updateMessageAndRegenerate,
+  updateSubMessage as updateSubMessageAPI,
   deleteMessage,
   duplicateChat,
   prepareGenerate,
   prepareRegenerate,
   stopGeneration as stopGenerationAPI,
 } from '@/api/chatService';
-import type { Chat, Message, ChatCreate, ChatUpdate, ChatReorderItem } from '@/api/types';
+import type {
+  Chat,
+  Message,
+  ChatCreate,
+  ChatUpdate,
+  ChatReorderItem,
+  SubMessageCreate,
+  SubMessageUpdate,
+} from '@/api/types';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import { useProviderStore } from './providerStore';
 
@@ -27,7 +36,7 @@ interface ChatState {
   isChatListLoading: boolean;
   isChatHistoryLoading: boolean;
   activeSubscriptions: Map<string, AbortController>; // messageId -> AbortController
-  userInputCache: Record<string, string>;
+  userInputCache: Record<string, string>; // 用于简单输入模式的草稿
 }
 
 export const useChatStore = defineStore('chat', {
@@ -72,7 +81,7 @@ export const useChatStore = defineStore('chat', {
 
       const selectedItem = this.chatList.find(item => item.id === chatId);
       if (!selectedItem || selectedItem.itemType === 'folder') {
-        this.currentChatId = chatId;
+        this.currentChatId = selectedItem ? chatId : null;
         this.currentChatMessages = [];
         return;
       }
@@ -184,26 +193,49 @@ export const useChatStore = defineStore('chat', {
     },
 
     // --- 消息操作 ---
-    async editMessage(payload: { messageId: string, content: string, resend?: boolean }) {
+    async editMessageAndRegenerate(payload: { messageId: string, sub_messages: SubMessageCreate[], resend?: boolean }) {
       if (!this.currentChatId) return;
-      const { messageId, content, resend = false } = payload;
+      const { messageId, sub_messages, resend = false } = payload;
       const messageIndex = this.currentChatMessages.findIndex(m => m.id === messageId);
       if (messageIndex === -1) return;
 
       try {
-        this.currentChatMessages[messageIndex].content = content;
-
-        const assistantPlaceholder = await updateMessage(messageId, { content, resend });
+        const assistantPlaceholder = await updateMessageAndRegenerate(messageId, { sub_messages, resend });
 
         if (resend) {
           this.currentChatMessages.splice(messageIndex + 1);
           this.currentChatMessages.push(assistantPlaceholder);
           this._subscribeToMessageStream(assistantPlaceholder);
+        } else {
+          const updatedMessage = await getChatWithMessages(this.currentChatId).then(res => res.messages.find(m => m.id === messageId));
+          if (updatedMessage) {
+            this.currentChatMessages[messageIndex] = updatedMessage;
+          }
         }
       } catch (error) {
         console.error('Failed to update message and resend:', error);
         ElMessage.error('操作失败，请重试。');
         await this.selectChat(this.currentChatId);
+      }
+    },
+
+    async updateSubMessage(payload: { subMessageId: string, data: SubMessageUpdate }) {
+      const { subMessageId, data } = payload;
+      for (const message of this.currentChatMessages) {
+        const subMessage = message.sub_messages.find(sm => sm.id === subMessageId);
+        if (subMessage) {
+          if (data.content !== undefined) subMessage.content = data.content;
+          if (data.config !== undefined) subMessage.config = data.config;
+          break;
+        }
+      }
+
+      try {
+        await updateSubMessageAPI(subMessageId, data);
+      } catch (error) {
+        console.error(`Failed to update sub-message ${subMessageId}:`, error);
+        ElMessage.error('更新失败');
+        if (this.currentChatId) await this.selectChat(this.currentChatId);
       }
     },
 
@@ -229,22 +261,39 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    async sendMessage(content: string) {
+    async sendMessage(sub_messages: SubMessageCreate[]) {
       if (!this.currentChatId || this.isGenerating) return;
 
       const chatId = this.currentChatId;
       delete this.userInputCache[chatId];
 
       try {
-        const tempUserMessage: Message = { id: `temp-user-${Date.now()}`, chatId, role: 'user', content, createdAt: new Date().toISOString(), sortOrder: 99998, status: 'completed' };
+        const lastMessage = this.currentChatMessages[this.currentChatMessages.length - 1];
+        const tempUserMessage: Message = {
+          id: `temp-user-${Date.now()}`,
+          chatId,
+          role: 'user',
+          sub_messages: sub_messages.map((sm, index) => ({
+            ...sm,
+            id: `temp-sub-${index}`,
+            createdAt: new Date().toISOString(),
+            messageId: `temp-user-${Date.now()}`,
+            type: sm.type || 'Normal', // FIX: Ensure type is always a string
+            config: sm.config || { is_collapsed: false },
+          })),
+          createdAt: new Date().toISOString(),
+          sortOrder: (lastMessage?.sortOrder ?? 0) + 1, // FIX: Use index access instead of .at()
+          status: 'completed'
+        };
         this.currentChatMessages.push(tempUserMessage);
 
-        const assistantPlaceholder = await prepareGenerate(chatId, content);
+        const assistantPlaceholder = await prepareGenerate(chatId, { sub_messages });
 
         const chatWithMessages = await getChatWithMessages(chatId);
+        // FIX: Use index access instead of .at()
         const realUserMessage = chatWithMessages.messages[chatWithMessages.messages.length - 2];
         const tempMsgIndex = this.currentChatMessages.findIndex(m => m.id === tempUserMessage.id);
-        if (tempMsgIndex > -1) {
+        if (tempMsgIndex > -1 && realUserMessage) {
             this.currentChatMessages[tempMsgIndex] = realUserMessage;
         }
 
@@ -285,27 +334,19 @@ export const useChatStore = defineStore('chat', {
 
     async stopGeneration(messageId: string) {
       const controller = this.activeSubscriptions.get(messageId);
-      const messageToUpdate = this.currentChatMessages.find(m => m.id === messageId);
-
-      if (controller && messageToUpdate) {
-        // 1. 立即中止前端的长连接
+      if (controller) {
         controller.abort();
-        // 2. 立即从 activeSubscriptions 中移除以更新全局UI状态
-        this.activeSubscriptions.delete(messageId);
-        // 3. 立即更新消息的本地状态，以修复UI（如操作菜单）
+      }
+      this.activeSubscriptions.delete(messageId);
+      const messageToUpdate = this.currentChatMessages.find(m => m.id === messageId);
+      if (messageToUpdate) {
         messageToUpdate.status = 'completed';
-      } else if (messageToUpdate && messageToUpdate.status === 'generating') {
-        // 兜底逻辑：如果订阅不存在但消息状态错误，也进行修正
-        messageToUpdate.status = 'completed';
-        this.activeSubscriptions.delete(messageId);
       }
 
-      // 4. 异步地向后端发送停止请求，不阻塞UI
       try {
         await stopGenerationAPI(messageId);
       } catch (error) {
         console.error(`Failed to send stop request for message ${messageId}:`, error);
-        ElMessage.error('停止请求发送失败');
       }
     },
 
@@ -336,36 +377,33 @@ export const useChatStore = defineStore('chat', {
         openWhenHidden: true,
         onmessage: (event) => {
           const messageToUpdate = this.currentChatMessages.find(m => m.id === assistantMessageId);
-          if (messageToUpdate) {
-            try {
-              const data = JSON.parse(event.data);
-              if (data.type === 'replace') {
-                messageToUpdate.content = data.content;
-              } else if (data.type === 'append') {
-                messageToUpdate.content += data.content;
+          if (!messageToUpdate) return;
+
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'replace') {
+              messageToUpdate.sub_messages = data.sub_messages;
+            } else if (data.type === 'append') {
+              const subMessageToUpdate = messageToUpdate.sub_messages.find(sm => sm.id === data.sub_message_id);
+              if (subMessageToUpdate) {
+                subMessageToUpdate.content += data.content;
               }
-            } catch (e) { console.error("Failed to parse SSE data chunk:", event.data, e); }
-          }
+            }
+          } catch (e) { console.error("Failed to parse SSE data chunk:", event.data, e); }
         },
         onclose: () => {
-          console.log(`[ChatStore] SSE stream closed for messageId: "${assistantMessageId}".`);
-          // 确保即使 onclose 先于 stopGeneration 的 delete 调用，也能正确清理
-          if (this.activeSubscriptions.has(assistantMessageId)) {
-              this.activeSubscriptions.delete(assistantMessageId);
-          }
+          this.activeSubscriptions.delete(assistantMessageId);
           getChatWithMessages(chatId).then(res => {
               const finalMessage = res.messages.find(m => m.id === assistantMessageId);
               const localMessage = this.currentChatMessages.find(m => m.id === assistantMessageId);
               if (finalMessage && localMessage) {
                   localMessage.status = finalMessage.status;
+                  localMessage.sub_messages = finalMessage.sub_messages;
               }
-          });
+          }).catch(err => console.error("Failed to fetch final message state:", err));
         },
         onerror: (err) => {
-          if (err.name === 'AbortError') {
-            console.log(`[ChatStore] Stream aborted by user for messageId: "${assistantMessageId}".`);
-            // AbortError 是预期的，当用户点击停止时发生，此时不需要做任何事，onclose会处理后续
-          } else {
+          if (err.name !== 'AbortError') {
             console.error(`[ChatStore] SSE stream error for messageId: "${assistantMessageId}". Error:`, err);
           }
         },

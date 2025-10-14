@@ -75,15 +75,32 @@ class Message(Base):
     __tablename__ = "Message"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
-    content = Column(TEXT, nullable=False)
     createdAt = Column(DateTime, nullable=False, default=func.now())
     role = Column(String(20), nullable=False)  # 'user', 'assistant', 'system'
     chatId = Column(String(36), ForeignKey("Chat.id"), nullable=False)
     sortOrder = Column(Integer, nullable=False)
-    status = Column(String(20), nullable=False, default=MessageStatus.COMPLETED.value) # 消息状态
+    status = Column(String(20), nullable=False, default=MessageStatus.COMPLETED.value)  # 消息状态
 
     # 关系：反向引用到 Chat
     chat = relationship("Chat", back_populates="messages")
+    # 关系：一个 Message 包含多个 SubMessage
+    sub_messages = relationship("SubMessage", back_populates="message", cascade="all, delete-orphan",
+                                order_by="SubMessage.sortOrder")
+
+
+class SubMessage(Base):
+    __tablename__ = "SubMessage"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    content = Column(TEXT, nullable=False)
+    createdAt = Column(DateTime, nullable=False, default=func.now())
+    messageId = Column(String(36), ForeignKey("Message.id"), nullable=False)
+    sortOrder = Column(Integer, nullable=False)
+    type = Column(String(50), nullable=False, default="Normal")
+    config = Column(TEXT, nullable=True)  # Store as JSON string, e.g., '{"is_collapsed": false}'
+
+    # 关系：反向引用到 Message
+    message = relationship("Message", back_populates="sub_messages")
 
 
 class GlobalSettings(Base):

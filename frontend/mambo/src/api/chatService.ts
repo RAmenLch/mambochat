@@ -1,7 +1,18 @@
 // frontend/mambo/src/api/chatService.ts
 
 import apiClient from './index';
-import type { Chat, ChatCreate, ChatWithMessages, ChatUpdate, ChatReorderItem, Message, MessageUpdate } from './types';
+import type {
+  Chat,
+  ChatCreate,
+  ChatWithMessages,
+  ChatUpdate,
+  ChatReorderItem,
+  Message,
+  MessageUpdate,
+  SubMessage,
+  SubMessageUpdate,
+  GenerateRequest
+} from './types';
 
 /**
  * 获取会话和文件夹列表
@@ -26,13 +37,10 @@ export const getChatWithMessages = (chatId: string): Promise<ChatWithMessages> =
 
 /**
  * 更新会话或文件夹设置
- * @param itemId 要更新的项目ID
- * @param settings 包含更新字段的对象
  */
 export const updateChatSettings = (itemId: string, settings: ChatUpdate): Promise<Chat> => {
   return apiClient.put(`/chats/${itemId}`, settings).then(res => res.data);
 };
-
 
 /**
  * 删除会话或文件夹
@@ -50,24 +58,31 @@ export const duplicateChat = (chatId: string): Promise<Chat> => {
 
 /**
  * 批量更新会话和文件夹的排序与层级
- * @param updates 包含更新信息的项目数组
  */
 export const reorderChats = (updates: ChatReorderItem[]): Promise<{ message: string }> => {
   return apiClient.post('/chats/reorder', updates).then(res => res.data);
 }
 
 /**
- * 更新单条消息的内容。
+ * 更新整条消息（替换其所有子消息），并可选择触发重新生成。
  * @param messageId 消息ID
- * @param data 包含新内容和resend标志的对象
+ * @param data 包含新的子消息列表和resend标志的对象
  */
-export const updateMessage = (messageId: string, data: MessageUpdate): Promise<Message> => {
+export const updateMessageAndRegenerate = (messageId: string, data: MessageUpdate): Promise<Message> => {
   return apiClient.put(`/messages/${messageId}`, data).then(res => res.data);
 };
 
 /**
+ * 更新单个消息分区的内容或配置，此操作不触发重新生成。
+ * @param subMessageId 子消息ID
+ * @param data 包含要更新的 content 或 config 的对象
+ */
+export const updateSubMessage = (subMessageId: string, data: SubMessageUpdate): Promise<SubMessage> => {
+  return apiClient.put(`/sub-messages/${subMessageId}`, data).then(res => res.data);
+};
+
+/**
  * 删除单条消息
- * @param messageId 消息ID
  */
 export const deleteMessage = (messageId: string): Promise<Message> => {
   return apiClient.delete(`/messages/${messageId}`).then(res => res.data);
@@ -77,8 +92,8 @@ export const deleteMessage = (messageId: string): Promise<Message> => {
  * 准备并开始生成AI回复。
  * @returns 返回一个状态为 'generating' 的 assistant 消息对象作为占位符。
  */
-export const prepareGenerate = (chatId: string, content: string): Promise<Message> => {
-  return apiClient.post(`/chats/${chatId}/prepare-generate`, { content }).then(res => res.data);
+export const prepareGenerate = (chatId: string, data: GenerateRequest): Promise<Message> => {
+  return apiClient.post(`/chats/${chatId}/prepare-generate`, data).then(res => res.data);
 };
 
 /**
@@ -91,7 +106,6 @@ export const prepareRegenerate = (chatId: string, fromMessageId: string): Promis
 
 /**
  * 请求服务器停止指定消息的AI生成任务。
- * @param messageId 正在生成内容的消息ID
  */
 export const stopGeneration = (messageId: string): Promise<{ message: string }> => {
   return apiClient.post(`/messages/${messageId}/stop`).then(res => res.data);

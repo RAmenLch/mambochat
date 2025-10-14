@@ -1,18 +1,14 @@
 <template>
   <div class="chat-window-container">
-    <!-- 当没有选中会话时，显示欢迎/引导界面 -->
     <div v-if="!currentChat" class="welcome-view">
       <el-empty description="请从左侧选择或新建一个会话开始聊天" />
     </div>
 
-    <!-- 当选中会话后，显示聊天界面 -->
     <template v-else>
-      <!-- 1. 顶部标题栏 -->
       <div class="chat-window-header">
         <h3 class="chat-title">{{ currentChat.name }}</h3>
       </div>
 
-      <!-- 2. 消息列表区域 -->
       <el-scrollbar
         ref="scrollbarRef"
         class="message-list-scrollbar"
@@ -29,16 +25,20 @@
         </div>
       </el-scrollbar>
 
-      <!-- 3. 中部工具栏 -->
       <ChatToolbar
-        v-if="currentChat"
         :current-chat="currentChat"
         @open-settings="openSettingsDrawer"
+        @toggle-multi-part-mode="isMultiPartMode = !isMultiPartMode"
       />
 
-      <!-- 4. 底部输入区域 -->
       <div class="chat-input-area">
+        <MultiPartInput
+          v-if="isMultiPartMode"
+          ref="multiPartInputRef"
+          class="input-field"
+        />
         <el-input
+          v-else
           ref="inputRef"
           v-model="userInput"
           type="textarea"
@@ -47,12 +47,13 @@
           placeholder="输入消息... (Shift + Enter 换行)"
           :disabled="isGenerating"
           @keydown.enter="handleEnterKey"
+          class="input-field"
         />
         <el-button
           v-if="!isGenerating"
           type="primary"
           class="action-button"
-          :disabled="userInput.trim() === ''"
+          :disabled="isSendButtonDisabled"
           @click="handleSendMessage"
         >
           <el-icon><Promotion /></el-icon>
@@ -68,7 +69,6 @@
       </div>
     </template>
 
-    <!-- 会话设置抽屉 -->
     <el-drawer
       v-model="settingsDrawerVisible"
       title="会话设置"
@@ -78,85 +78,37 @@
       <div class="drawer-content">
         <el-form :model="chatSettingsForm" label-position="top">
           <el-form-item label="会话名称">
-            <el-input
-              v-model="chatSettingsForm.name"
-              placeholder="请输入会话名称"
-            />
+            <el-input v-model="chatSettingsForm.name" placeholder="请输入会话名称" />
           </el-form-item>
           <el-form-item label="AI 模型">
-            <el-select
-              v-model="chatSettingsForm.aiModelId"
-              placeholder="请选择一个AI模型"
-              style="width: 100%"
-            >
-              <el-option-group
-                v-for="group in groupedModels"
-                :key="group.label"
-                :label="group.label"
-              >
-                <el-option
-                  v-for="item in group.options"
-                  :key="item.id"
-                  :label="item.name"
-                  :value="item.id"
-                />
+            <el-select v-model="chatSettingsForm.aiModelId" placeholder="请选择一个AI模型" style="width: 100%">
+              <el-option-group v-for="group in groupedModels" :key="group.label" :label="group.label">
+                <el-option v-for="item in group.options" :key="item.id" :label="item.name" :value="item.id" />
               </el-option-group>
             </el-select>
           </el-form-item>
           <el-form-item label="System Prompt (系统提示词)">
-            <el-input
-              v-model="chatSettingsForm.systemPrompt"
-              type="textarea"
-              :rows="8"
-              placeholder="定义AI的角色和行为"
-            />
+            <el-input v-model="chatSettingsForm.systemPrompt" type="textarea" :rows="8" placeholder="定义AI的角色和行为" />
           </el-form-item>
           <el-divider>模型参数</el-divider>
           <el-form-item>
             <template #label>
               <span>上下文消息数量 (Context)</span>
-              <el-tooltip
-                effect="dark"
-                content="每次请求时携带的最近历史消息数量。0 代表不限制（发送全部历史）。"
-                placement="top"
-              >
+              <el-tooltip effect="dark" content="每次请求时携带的最近历史消息数量。0 代表不限制（发送全部历史）。" placement="top">
                 <el-icon style="margin-left: 8px; color: #909399;"><QuestionFilled /></el-icon>
               </el-tooltip>
             </template>
-            <el-input-number
-              v-model="chatSettingsForm.modelParameters.max_context_messages"
-              :min="0"
-              :step="2"
-              controls-position="right"
-              style="width: 100%;"
-            />
+            <el-input-number v-model="chatSettingsForm.modelParameters.max_context_messages" :min="0" :step="2" controls-position="right" style="width: 100%;" />
           </el-form-item>
           <el-form-item label="Temperature (温度)">
-            <el-slider
-              v-model="chatSettingsForm.modelParameters.temperature"
-              :min="0"
-              :max="2"
-              :step="0.1"
-              show-input
-            />
+            <el-slider v-model="chatSettingsForm.modelParameters.temperature" :min="0" :max="2" :step="0.1" show-input />
           </el-form-item>
           <el-form-item label="Top P">
-            <el-slider
-              v-model="chatSettingsForm.modelParameters.top_p"
-              :min="0"
-              :max="1"
-              :step="0.01"
-              show-input
-            />
+            <el-slider v-model="chatSettingsForm.modelParameters.top_p" :min="0" :max="1" :step="0.01" show-input />
           </el-form-item>
           <el-form-item label="流式对话 (Stream)">
              <el-switch v-model="chatSettingsForm.modelParameters.stream" />
-             <el-tooltip
-                class="box-item"
-                effect="dark"
-                content="关闭后, AI将一次性返回完整回复, 可能会增加等待时间。"
-                placement="top"
-              >
+             <el-tooltip class="box-item" effect="dark" content="关闭后, AI将一次性返回完整回复, 可能会增加等待时间。" placement="top">
                 <el-icon style="margin-left: 8px; color: #909399;"><QuestionFilled /></el-icon>
               </el-tooltip>
           </el-form-item>
@@ -165,9 +117,7 @@
       <template #footer>
         <div style="flex: auto">
           <el-button @click="settingsDrawerVisible = false">取消</el-button>
-          <el-button type="primary" @click="handleSaveSettings"
-            >保存</el-button
-          >
+          <el-button type="primary" @click="handleSaveSettings">保存</el-button>
         </div>
       </template>
     </el-drawer>
@@ -183,6 +133,7 @@ import { ElScrollbar, ElInput, ElMessage } from 'element-plus';
 import { Promotion, VideoPause, QuestionFilled } from '@element-plus/icons-vue';
 import MessageItem from './MessageItem.vue';
 import ChatToolbar from './ChatToolbar.vue';
+import MultiPartInput from './MultiPartInput.vue';
 import type { ChatUpdate } from '@/api/types';
 
 interface ChatSettingsForm extends ChatUpdate {
@@ -198,20 +149,14 @@ interface ChatSettingsForm extends ChatUpdate {
 const chatStore = useChatStore();
 const providerStore = useProviderStore();
 
-const {
-  currentChat,
-  currentChatId,
-  currentChatMessages,
-  isChatHistoryLoading,
-  isGenerating,
-  userInputCache,
-} = storeToRefs(chatStore);
+const { currentChat, currentChatId, currentChatMessages, isChatHistoryLoading, isGenerating, userInputCache } = storeToRefs(chatStore);
 const { providers } = storeToRefs(providerStore);
 
 const scrollbarRef = ref<InstanceType<typeof ElScrollbar>>();
 const inputRef = ref<InstanceType<typeof ElInput>>();
+const multiPartInputRef = ref<InstanceType<typeof MultiPartInput>>();
+const isMultiPartMode = ref(false);
 
-// --- Input Caching Logic ---
 const userInput = computed({
   get: () => currentChatId.value ? (userInputCache.value[currentChatId.value] || '') : '',
   set: (value) => {
@@ -219,6 +164,15 @@ const userInput = computed({
       chatStore.saveDraft(value);
     }
   }
+});
+
+const isSendButtonDisabled = computed(() => {
+  if (isGenerating.value) return true;
+  if (isMultiPartMode.value) {
+    const data = multiPartInputRef.value?.getData() || [];
+    return data.length === 0;
+  }
+  return userInput.value.trim() === '';
 });
 
 // --- Settings Drawer Logic ---
@@ -246,45 +200,46 @@ const openSettingsDrawer = () => {
 };
 
 const handleSaveSettings = async () => {
-  if (!currentChat.value) {
-    ElMessage.error('没有活动的会话，无法保存设置。');
-    return;
-  }
+  if (!currentChat.value) return;
   if (!chatSettingsForm.name?.trim()) {
     ElMessage.warning('会话名称不能为空');
     return;
   }
-
   await chatStore.updateChatSettings(currentChat.value.id, {
     name: chatSettingsForm.name,
     aiModelId: chatSettingsForm.aiModelId,
     systemPrompt: chatSettingsForm.systemPrompt,
     modelParameters: chatSettingsForm.modelParameters,
   });
-
   settingsDrawerVisible.value = false;
   ElMessage.success('设置已保存');
 };
 
 // --- Message Sending Logic ---
 const handleSendMessage = async () => {
-  if (userInput.value.trim() === '' || isGenerating.value) return;
-  const content = userInput.value;
-  await chatStore.sendMessage(content);
+  if (isSendButtonDisabled.value) return;
+
+  if (isMultiPartMode.value) {
+    const subMessages = multiPartInputRef.value?.getData();
+    if (subMessages && subMessages.length > 0) {
+      await chatStore.sendMessage(subMessages);
+      multiPartInputRef.value?.reset();
+    }
+  } else {
+    const content = userInput.value;
+    await chatStore.sendMessage([{ content, sortOrder: 0 }]);
+  }
 };
 
 const handleStopGeneration = () => {
-  const generatingMessage = currentChatMessages.value.find(
-    m => m.status === 'generating'
-  );
+  const generatingMessage = currentChatMessages.value.find(m => m.status === 'generating');
   if (generatingMessage) {
     chatStore.stopGeneration(generatingMessage.id);
   }
 };
 
-const handleEnterKey = (event: Event) => {
-  if (!(event instanceof KeyboardEvent)) return;
-  if (event.shiftKey) return;
+const handleEnterKey = (event: KeyboardEvent) => {
+  if (isMultiPartMode.value || event.shiftKey) return;
   event.preventDefault();
   handleSendMessage();
 };
@@ -295,41 +250,36 @@ const userHasScrolledUp = ref(false);
 const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
   const scrollWrapper = scrollbarRef.value?.wrapRef;
   if (!scrollWrapper) return;
-
   const { scrollHeight, clientHeight } = scrollWrapper;
   const isAtBottom = scrollHeight - clientHeight - scrollTop < 20;
-
-  if (!isAtBottom) {
-    userHasScrolledUp.value = true;
-  } else {
-    userHasScrolledUp.value = false;
-  }
+  userHasScrolledUp.value = !isAtBottom;
 };
 
 const scrollToBottom = (force = false) => {
-  if (!force && userHasScrolledUp.value && isGenerating.value) {
-    return;
-  }
+  if (!force && userHasScrolledUp.value && isGenerating.value) return;
   nextTick(() => {
     scrollbarRef.value?.setScrollTop(scrollbarRef.value.wrapRef!.scrollHeight);
   });
 };
 
-// 监听最后一条消息的内容变化，用于流式输出时自动滚动
 watch(
-  () => currentChatMessages.value.at(-1)?.content,
+  () => {
+    const lastMsg = currentChatMessages.value[currentChatMessages.value.length - 1];
+    const lastSubMsg = lastMsg?.sub_messages[lastMsg.sub_messages.length - 1];
+    return lastSubMsg?.content;
+  },
   () => scrollToBottom()
 );
 
-// 监听会话ID变化，用于切换会话后滚动到底部并聚焦输入框
 watch(
   () => currentChat.value?.id,
   (newId, oldId) => {
     if (newId && newId !== oldId) {
-      userHasScrolledUp.value = false; // 重置滚动状态
+      isMultiPartMode.value = false; // 切换会话时重置为简单模式
+      userHasScrolledUp.value = false;
       const unwatch = watch(isChatHistoryLoading, (isLoading) => {
         if (!isLoading) {
-          scrollToBottom(true); // 强制滚动
+          scrollToBottom(true);
           unwatch();
         }
       });
@@ -380,14 +330,18 @@ watch(
   background-color: var(--color-background-soft);
   display: flex;
   align-items: flex-end;
+  min-height: 76px;
 }
-.chat-input-area .el-textarea {
+.input-field {
+  flex-grow: 1;
   margin-right: 10px;
+  min-height: 54px;
 }
 .action-button {
   height: 54px;
   width: 54px;
   font-size: 20px;
+  flex-shrink: 0;
 }
 .drawer-content {
   padding: 0 20px;

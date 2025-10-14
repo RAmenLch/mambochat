@@ -4,20 +4,56 @@ export type MessageRole = 'user' | 'assistant' | 'system';
 export type ChatItemType = 'chat' | 'folder';
 export type MessageStatus = 'generating' | 'completed' | 'failed';
 
-export interface Message {
+// --- SubMessage Types ---
+
+export interface SubMessageConfig {
+  is_collapsed: boolean;
+}
+
+export interface SubMessage {
   id: string;
   content: string;
+  createdAt: string; // ISO 8601 date string
+  messageId: string;
+  sortOrder: number;
+  type: string;
+  config: SubMessageConfig;
+}
+
+export interface SubMessageCreate {
+  content: string;
+  sortOrder: number;
+  type?: string;
+  config?: SubMessageConfig;
+}
+
+export interface SubMessageUpdate {
+  content?: string;
+  config?: SubMessageConfig;
+}
+
+
+// --- Message Types ---
+
+export interface Message {
+  id: string;
   createdAt: string; // ISO 8601 date string
   role: MessageRole;
   chatId: string;
   sortOrder: number;
   status: MessageStatus;
+  sub_messages: SubMessage[];
 }
 
 export interface MessageUpdate {
-  content: string;
+  sub_messages: SubMessageCreate[];
   resend?: boolean;
 }
+
+export interface GenerateRequest {
+  sub_messages: SubMessageCreate[];
+}
+
 
 // --- AI & Provider Types ---
 
@@ -125,7 +161,6 @@ export interface ChatReorderItem {
 export interface GlobalSettingsUpdate {
   default_model_id: string | null;
   last_selected_provider_id: string | null;
-  // 新增的全局模型参数
   default_max_context_messages: number | null;
   default_temperature: number | null;
   default_top_p: number | null;
