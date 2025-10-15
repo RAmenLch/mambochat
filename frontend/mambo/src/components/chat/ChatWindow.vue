@@ -232,7 +232,9 @@ const handleSendMessage = async () => {
 };
 
 const handleStopGeneration = () => {
-  const generatingMessage = currentChatMessages.value.find(m => m.status === 'generating');
+  const generatingMessage = currentChatMessages.value.find(m =>
+    m.sub_messages.some(sm => sm.status === 'generating')
+  );
   if (generatingMessage) {
     chatStore.stopGeneration(generatingMessage.id);
   }
