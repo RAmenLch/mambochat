@@ -15,7 +15,7 @@ import {
   duplicateChat,
   prepareGenerate,
   prepareRegenerate,
-  stopGeneration as stopGenerationAPI,
+  stopGeneration as stopGenerationAPI, // 保持原有的API导入名称，方便区分
 } from '@/api/chatService';
 import type {
   Chat,
@@ -80,7 +80,8 @@ export const useChatStore = defineStore('chat', {
     async selectChat(chatId: string) {
       if (this.currentChatId === chatId) return;
 
-      this.stopAllGenerations();
+      // 在切换会话时，仅取消所有前端SSE订阅，不发送后端停止请求。
+      this.unsubscribeAllClientSide();
 
       const selectedItem = this.chatList.find(item => item.id === chatId);
       if (!selectedItem || selectedItem.itemType === 'folder') {
@@ -209,8 +210,7 @@ export const useChatStore = defineStore('chat', {
         // 调用API, API会完成DB的更新 (包括替换SubMessages) 和后续消息的删除
         await updateMessageAndRegenerate(messageId, { sub_messages, resend });
 
-        // 核心修复: 不再手动操作本地数组, 而是直接从服务器获取最新的、完全同步的消息列表。
-        // 这确保前端拥有最新的消息和子消息ID, 避免状态不一致。
+        // 从服务器获取最新的、完全同步的消息列表，确保前端拥有最新的消息和子消息ID
         const chatWithMessages = await getChatWithMessages(chatId);
         this.currentChatMessages = chatWithMessages.messages.sort((a, b) => a.sortOrder - b.sortOrder);
 
@@ -342,14 +342,38 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    async stopGeneration(messageId: string) {
-      const controller = this.activeSubscriptions.get(messageId);
-      if (controller) {
-        controller.abort();
-      }
-      this.activeSubscriptions.delete(messageId);
+    /**
+     * 【新增】私有辅助方法：仅取消前端SSE订阅，不通知后端停止任务。
+     * 用于切换会话或在`cancelGeneration`中被调用。
+     */
+    _unsubscribeClientSide(messageId: string) {
+        const controller = this.activeSubscriptions.get(messageId);
+        if (controller) {
+            controller.abort(); // 终止前端SSE连接
+        }
+        this.activeSubscriptions.delete(messageId);
+        // 不修改 UI 状态，因为后端任务可能仍在运行
+    },
 
-      // Optimistic UI update: find the generating sub-message and mark it as completed
+    /**
+     * 【新增】取消所有活跃的前端SSE订阅。
+     * 在切换会话时调用，以避免资源泄露。
+     */
+    unsubscribeAllClientSide() {
+        this.activeSubscriptions.forEach((_controller, messageId) => {
+            this._unsubscribeClientSide(messageId);
+        });
+    },
+
+    /**
+     * 【重命名】用户明确点击“停止”按钮时调用，会通知后端停止生成任务。
+     * 同时会乐观更新前端UI状态。
+     */
+    async cancelGeneration(messageId: string) {
+      // 1. 先取消前端订阅
+      this._unsubscribeClientSide(messageId);
+
+      // 2. 乐观更新 UI 状态为 completed
       const messageToUpdate = this.currentChatMessages.find(m => m.id === messageId);
       if (messageToUpdate) {
         const subMessageToUpdate = messageToUpdate.sub_messages.find(sm => sm.status === 'generating');
@@ -358,6 +382,7 @@ export const useChatStore = defineStore('chat', {
         }
       }
 
+      // 3. 通知后端停止生成任务
       try {
         await stopGenerationAPI(messageId);
       } catch (error) {
@@ -365,9 +390,13 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
+    /**
+     * 停止所有正在进行的AI生成任务（包括通知后端）。
+     * 此方法在`cancelGeneration`重命名后，会自然地调用`cancelGeneration`。
+     */
     stopAllGenerations() {
         this.activeSubscriptions.forEach((_controller, messageId) => {
-            this.stopGeneration(messageId);
+            this.cancelGeneration(messageId);
         });
     },
 
@@ -377,8 +406,9 @@ export const useChatStore = defineStore('chat', {
       const chatId = this.currentChatId;
       const assistantMessageId = assistantMessage.id;
 
+      // 如果已经有订阅，先取消旧的订阅
       if (this.activeSubscriptions.has(assistantMessageId)) {
-        this.stopGeneration(assistantMessageId);
+        this._unsubscribeClientSide(assistantMessageId);
       }
 
       const controller = new AbortController();
@@ -407,20 +437,32 @@ export const useChatStore = defineStore('chat', {
           } catch (e) { console.error("Failed to parse SSE data chunk:", event.data, e); }
         },
         onclose: () => {
+          // 连接关闭时，从 activeSubscriptions 移除
           this.activeSubscriptions.delete(assistantMessageId);
+          // 重新从后端获取消息的最终状态，确保 UI 与数据库一致
           getChatWithMessages(chatId).then(res => {
               const finalMessage = res.messages.find(m => m.id === assistantMessageId);
               const localMessage = this.currentChatMessages.find(m => m.id === assistantMessageId);
               if (finalMessage && localMessage) {
-                  // Replace the entire sub_messages array to ensure status is synced
+                  // 替换整个 sub_messages 数组，以确保状态（如 'completed' 或 'failed'）同步
                   localMessage.sub_messages = finalMessage.sub_messages;
               }
-          }).catch(err => console.error("Failed to fetch final message state:", err));
+          }).catch(err => console.error("Failed to fetch final message state on close:", err));
         },
         onerror: (err) => {
-          if (err.name !== 'AbortError') {
+          if (err.name !== 'AbortError') { // AbortError 是主动取消时的预期错误
             console.error(`[ChatStore] SSE stream error for messageId: "${assistantMessageId}". Error:`, err);
           }
+          // 确保在出错时也从 activeSubscriptions 移除
+          this.activeSubscriptions.delete(assistantMessageId);
+          // 同样，尝试获取最终状态
+          getChatWithMessages(chatId).then(res => {
+              const finalMessage = res.messages.find(m => m.id === assistantMessageId);
+              const localMessage = this.currentChatMessages.find(m => m.id === assistantMessageId);
+              if (finalMessage && localMessage) {
+                  localMessage.sub_messages = finalMessage.sub_messages;
+              }
+          }).catch(err => console.error("Failed to fetch final message state on error:", err));
         },
       });
     },

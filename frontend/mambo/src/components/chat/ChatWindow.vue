@@ -236,7 +236,8 @@ const handleStopGeneration = () => {
     m.sub_messages.some(sm => sm.status === 'generating')
   );
   if (generatingMessage) {
-    chatStore.stopGeneration(generatingMessage.id);
+    // 调用 chatStore 中新的 cancelGeneration action
+    chatStore.cancelGeneration(generatingMessage.id);
   }
 };
 
@@ -355,3 +356,4 @@ watch(
   margin-right: 8px;
 }
 </style>
+
