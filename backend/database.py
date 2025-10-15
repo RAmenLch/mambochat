@@ -8,17 +8,20 @@ from sqlalchemy.orm import declarative_base
 from pathlib import Path
 
 # --- 数据库配置 ---
-
-
 DATABASE_FILE = Path(os.path.dirname(__file__)).parent.joinpath("DB/mambo.dat")
-DATABASE_URL = f"sqlite+aiosqlite:///{DATABASE_FILE.resolve()}" # 使用 .resolve() 确保路径正确
+DATABASE_URL = f"sqlite+aiosqlite:///{DATABASE_FILE.resolve()}"  # 使用 .resolve() 确保路径正确
+
+# 从环境变量读取配置，决定是否打印SQL语句，默认为False
+# 在开发时可设置环境变量 DB_ECHO=True
+SQLALCHEMY_ECHO = os.getenv("DB_ECHO", "False").lower() == "true"
+
 
 # --- SQLAlchemy 核心对象 ---
 
 # 1. 创建异步数据库引擎
 engine = create_async_engine(
     DATABASE_URL,
-    echo=True,
+    echo=SQLALCHEMY_ECHO,
 )
 
 # 2. 创建一个异步会话的工厂
@@ -47,3 +50,4 @@ async def get_db() -> AsyncSession:
 async def create_db_and_tables():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+

@@ -2,16 +2,23 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List
+from typing import List, Optional
 from fastapi.responses import StreamingResponse
 import json
+import logging
 
 from ..services import llm_service, stream_manager
-from .. import crud, schemas
+from .. import crud, schemas, models
 from ..database import get_db
-from .settings import get_global_settings # 导入以复用逻辑
+from .settings import get_global_settings  # 导入以复用逻辑
 
 router = APIRouter()
+
+
+def _apply_default_model_to_chat_object(chat: models.Chat, default_model_id: Optional[str]):
+    """如果会话本身没有模型ID，则将全局默认模型ID赋值给它。"""
+    if chat.itemType == 'chat' and not chat.aiModelId and default_model_id:
+        chat.aiModelId = default_model_id
 
 
 # --- Chat and Folder Routes ---
@@ -69,11 +76,10 @@ async def read_chats(skip: int = 0, limit: int = 100, db: AsyncSession = Depends
     chats = await crud.get_chats(db, skip=skip, limit=limit)
 
     default_model_setting = await crud.get_setting(db, key="default_model_id")
-    if default_model_setting and default_model_setting.value:
-        default_model_id = default_model_setting.value
-        for chat in chats:
-            if chat.itemType == 'chat' and not chat.aiModelId:
-                chat.aiModelId = default_model_id
+    default_model_id = default_model_setting.value if default_model_setting else None
+
+    for chat in chats:
+        _apply_default_model_to_chat_object(chat, default_model_id)
 
     return chats
 
@@ -84,10 +90,9 @@ async def read_chat(chat_id: str, db: AsyncSession = Depends(get_db)):
     if db_chat is None:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    if db_chat.itemType == 'chat' and not db_chat.aiModelId:
-        default_model_setting = await crud.get_setting(db, key="default_model_id")
-        if default_model_setting and default_model_setting.value:
-            db_chat.aiModelId = default_model_setting.value
+    default_model_setting = await crud.get_setting(db, key="default_model_id")
+    default_model_id = default_model_setting.value if default_model_setting else None
+    _apply_default_model_to_chat_object(db_chat, default_model_id)
 
     return db_chat
 
@@ -103,10 +108,9 @@ async def read_chat_with_messages(chat_id: str, db: AsyncSession = Depends(get_d
     if db_chat.itemType != 'chat':
         raise HTTPException(status_code=400, detail="Cannot get messages for a folder.")
 
-    if not db_chat.aiModelId:
-        default_model_setting = await crud.get_setting(db, key="default_model_id")
-        if default_model_setting and default_model_setting.value:
-            db_chat.aiModelId = default_model_setting.value
+    default_model_setting = await crud.get_setting(db, key="default_model_id")
+    default_model_id = default_model_setting.value if default_model_setting else None
+    _apply_default_model_to_chat_object(db_chat, default_model_id)
 
     return db_chat
 
@@ -178,7 +182,11 @@ async def _start_generation_task(
             if params.get('stream') is False:
                 use_stream = False
         except (json.JSONDecodeError, TypeError):
-            pass
+            logging.warning(
+                "Could not parse modelParameters for chat %s. Falling back to default stream=True.",
+                chat_id,
+                exc_info=True
+            )
 
     if use_stream:
         background_tasks.add_task(llm_service.run_generation_task_stream, chat_id, assistant_message_id)
@@ -315,3 +323,4 @@ async def stream_response(
         llm_service.subscribe_to_stream(db, assistant_message_id),
         media_type="text/event-stream"
     )
+
