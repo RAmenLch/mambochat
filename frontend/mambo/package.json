@@ -21,8 +21,11 @@
     "axios": "^1.12.2",
     "dompurify": "^3.2.7",
     "element-plus": "^2.11.4",
+    "gpt-tokenizer": "^3.2.0",
     "highlight.js": "^11.11.1",
+    "lodash-es": "^4.17.21",
     "markdown-it": "^14.1.0",
+    "markdown-it-link-attributes": "^4.0.1",
     "pinia": "^3.0.3",
     "vue": "^3.5.18",
     "vue-router": "^4.5.1"

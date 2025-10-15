@@ -14,7 +14,7 @@
         </div>
       </el-scrollbar>
       <div class="add-partition">
-        <el-button :icon="Plus" circle @click="addPartition" title="添加分区" />
+        <el-button :icon="Plus" circle size="small" @click="addPartition" title="添加分区" />
       </div>
     </div>
     <div class="partition-editor">
@@ -99,7 +99,7 @@ defineExpose({
 }
 
 .partition-sidebar {
-  width: 60px;
+  width: 40px;
   flex-shrink: 0;
   border-right: 1px solid var(--el-border-color);
   display: flex;
@@ -112,7 +112,7 @@ defineExpose({
 }
 
 .partition-tab {
-  height: 40px;
+  height: 25px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -151,7 +151,7 @@ defineExpose({
 }
 
 .add-partition {
-  height: 50px;
+  height: 25px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
