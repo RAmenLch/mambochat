@@ -240,11 +240,14 @@ const handleStopGeneration = () => {
   }
 };
 
-const handleEnterKey = (event: KeyboardEvent) => {
-  if (isMultiPartMode.value || event.shiftKey) return;
-  event.preventDefault();
+const handleEnterKey = (event: Event | KeyboardEvent) => {
+  // 使用类型断言确保event有keyboardEvent的属性
+  const keyboardEvent = event as KeyboardEvent;
+  if (isMultiPartMode.value || keyboardEvent.shiftKey) return;
+  keyboardEvent.preventDefault();
   handleSendMessage();
 };
+
 
 // --- Auto-Scrolling and Focus ---
 const userHasScrolledUp = ref(false);

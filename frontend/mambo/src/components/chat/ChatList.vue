@@ -18,7 +18,7 @@
         ref="treeRef"
         :data="treeData"
         node-key="id"
-        :current-node-key="currentChatId"
+        :current-node-key="currentChatId || undefined"
         highlight-current
         default-expand-all
         :expand-on-click-node="false"
@@ -61,7 +61,7 @@
     <!-- 全局右键上下文菜单 -->
     <el-dropdown
       ref="contextMenuRef"
-      trigger="manual"
+      trigger="contextmenu"
       @command="handleCommand"
       :class="{ 'context-menu-hidden': !isContextMenuVisible }"
     >
@@ -238,7 +238,7 @@ const scrollToChat = async (chatId: string) => {
   }
 };
 
-const allowDrop = (draggingNode: any, dropNode: any, type: NodeDropType) => {
+const allowDrop = (draggingNode: any, dropNode: any, type: 'prev' | 'inner' | 'next') => {
   if (dropNode.data.itemType === 'chat' && type === 'inner') {
     return false;
   }

@@ -48,7 +48,7 @@
           <CodeBlock
             v-if="block.type === 'code'"
             :code="block.content"
-            :language="block.language"
+            :language="block.language || 'Text'"
             :is-generating="isGenerating"
           />
           <div v-else v-html="block.content"></div>
@@ -62,7 +62,7 @@
 import { computed, ref } from 'vue';
 import type { SubMessage, Message } from '@/api/types';
 import { Edit, CopyDocument, ArrowUpBold, ArrowDownBold } from '@element-plus/icons-vue';
-import MarkdownIt from 'markdown-it';
+import * as MarkdownIt from 'markdown-it';
 import DOMPurify from 'dompurify';
 import CodeBlock from './CodeBlock.vue';
 
@@ -100,7 +100,7 @@ const toggleCollapse = () => {
   // 若需持久化, 需要调用API更新数据库中的config字段。
 };
 
-const md = new MarkdownIt({ html: false });
+const md = new MarkdownIt.default({ html: false });
 
 const parsedContent = computed((): ParsedBlock[] => {
   if (!props.subMessage.content) return [];
