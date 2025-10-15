@@ -64,7 +64,8 @@ import { computed, ref, watch } from 'vue';
 import type { SubMessage, Message } from '@/api/types';
 import { useChatStore } from '@/stores/chatStore';
 import { Edit, CopyDocument, ArrowUpBold, ArrowDownBold } from '@element-plus/icons-vue';
-import * as MarkdownIt from 'markdown-it';
+import MarkdownIt from 'markdown-it';
+import markdownItLinkAttributes from 'markdown-it-link-attributes';
 import type { Token } from 'markdown-it';
 import DOMPurify from 'dompurify';
 import CodeBlock from './CodeBlock.vue';
@@ -115,7 +116,17 @@ const toggleCollapse = () => {
   });
 };
 
-const md = new MarkdownIt.default({ html: false });
+// 初始化 Markdown-it, 启用 breaks 选项以支持单回车换行
+const md = new MarkdownIt({
+  html: false,
+  breaks: true,
+  linkify: true,
+}).use(markdownItLinkAttributes, {
+  attrs: {
+    target: '_blank',
+    rel: 'noopener noreferrer',
+  },
+});
 
 const parsedContent = computed((): ParsedBlock[] => {
   if (!props.subMessage.content) return [];

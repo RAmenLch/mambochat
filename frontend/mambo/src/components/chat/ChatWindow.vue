@@ -25,47 +25,51 @@
         </div>
       </el-scrollbar>
 
-      <ChatToolbar
-        :current-chat="currentChat"
-        @open-settings="openSettingsDrawer"
-        @toggle-multi-part-mode="isMultiPartMode = !isMultiPartMode"
-      />
-
-      <div class="chat-input-area">
-        <MultiPartInput
-          v-if="isMultiPartMode"
-          ref="multiPartInputRef"
-          class="input-field"
+      <div class="input-container-wrapper" :style="{ height: `${inputAreaHeight}px` }">
+        <div class="resize-handle" @mousedown.prevent="startResize"></div>
+        <ChatToolbar
+          :current-chat="currentChat"
+          :estimated-tokens="estimatedTokens"
+          @open-settings="openSettingsDrawer"
+          @toggle-multi-part-mode="isMultiPartMode = !isMultiPartMode"
         />
-        <el-input
-          v-else
-          ref="inputRef"
-          v-model="userInput"
-          type="textarea"
-          :rows="3"
-          resize="none"
-          placeholder="输入消息... (Shift + Enter 换行)"
-          :disabled="isGenerating"
-          @keydown.enter="handleEnterKey"
-          class="input-field"
-        />
-        <el-button
-          v-if="!isGenerating"
-          type="primary"
-          class="action-button"
-          :disabled="isSendButtonDisabled"
-          @click="handleSendMessage"
-        >
-          <el-icon><Promotion /></el-icon>
-        </el-button>
-        <el-button
-          v-else
-          type="warning"
-          class="action-button"
-          @click="handleStopGeneration"
-        >
-          <el-icon><VideoPause /></el-icon>
-        </el-button>
+        <div class="chat-input-area">
+          <MultiPartInput
+            v-if="isMultiPartMode"
+            ref="multiPartInputRef"
+            class="input-field"
+            @keydown="handleKeydown"
+          />
+          <el-input
+            v-else
+            ref="inputRef"
+            v-model="localUserInput"
+            type="textarea"
+            :autosize="false"
+            resize="none"
+            placeholder="输入消息... (Shift + Enter 换行)"
+            :disabled="isGenerating"
+            @keydown="handleKeydown"
+            class="input-field"
+          />
+          <el-button
+            v-if="!isGenerating"
+            type="primary"
+            class="action-button"
+            :disabled="isSendButtonDisabled"
+            @click="handleSendMessage"
+          >
+            <el-icon><Promotion /></el-icon>
+          </el-button>
+          <el-button
+            v-else
+            type="warning"
+            class="action-button"
+            @click="handleStopGeneration"
+          >
+            <el-icon><VideoPause /></el-icon>
+          </el-button>
+        </div>
       </div>
     </template>
 
@@ -135,6 +139,8 @@ import MessageItem from './MessageItem.vue';
 import ChatToolbar from './ChatToolbar.vue';
 import MultiPartInput from './MultiPartInput.vue';
 import type { ChatUpdate } from '@/api/types';
+import { debounce } from 'lodash-es';
+import { encode } from 'gpt-tokenizer';
 
 interface ChatSettingsForm extends ChatUpdate {
   name: string | null;
@@ -149,22 +155,56 @@ interface ChatSettingsForm extends ChatUpdate {
 const chatStore = useChatStore();
 const providerStore = useProviderStore();
 
-const { currentChat, currentChatId, currentChatMessages, isChatHistoryLoading, isGenerating, userInputCache } = storeToRefs(chatStore);
+const { currentChat, currentChatMessages, isChatHistoryLoading, isGenerating, currentDraft, contextForTokenEstimation } = storeToRefs(chatStore);
 const { providers } = storeToRefs(providerStore);
 
 const scrollbarRef = ref<InstanceType<typeof ElScrollbar>>();
 const inputRef = ref<InstanceType<typeof ElInput>>();
 const multiPartInputRef = ref<InstanceType<typeof MultiPartInput>>();
 const isMultiPartMode = ref(false);
+const localUserInput = ref('');
 
-const userInput = computed({
-  get: () => currentChatId.value ? (userInputCache.value[currentChatId.value] || '') : '',
-  set: (value) => {
-    if (currentChatId.value) {
-      chatStore.saveDraft(value);
-    }
+// --- 响应式输入区高度 ---
+const inputAreaHeight = ref(150); // 初始高度
+const MIN_INPUT_HEIGHT = 100;
+const MAX_INPUT_HEIGHT = 600;
+
+// --- Token 估算 ---
+const estimatedTokens = ref(0);
+const debouncedEstimateTokens = debounce((currentUserInputText: string) => {
+  const fullText = [contextForTokenEstimation.value, currentUserInputText].filter(Boolean).join('\n');
+  if (!fullText) {
+    estimatedTokens.value = 0;
+    return;
+  }
+  try {
+    estimatedTokens.value = encode(fullText).length;
+  } catch (e) {
+    console.error("Token estimation failed:", e);
+    estimatedTokens.value = 0;
+  }
+}, 500);
+
+// --- 输入区历史记录 (Undo/Redo) & 双向同步 ---
+const debouncedSaveDraft = debounce((content: string) => {
+  chatStore.saveDraft(content);
+}, 300);
+
+// 从 Store -> UI 的同步
+watch(currentDraft, (newDraft) => {
+  if (localUserInput.value !== newDraft) {
+    localUserInput.value = newDraft;
   }
 });
+
+// 从 UI -> Store 的同步, 并触发 Token 估算
+watch(localUserInput, (newInput) => {
+  debouncedSaveDraft(newInput);
+  if (!isMultiPartMode.value) {
+    debouncedEstimateTokens(newInput);
+  }
+});
+
 
 const isSendButtonDisabled = computed(() => {
   if (isGenerating.value) return true;
@@ -172,7 +212,7 @@ const isSendButtonDisabled = computed(() => {
     const data = multiPartInputRef.value?.getData() || [];
     return data.length === 0;
   }
-  return userInput.value.trim() === '';
+  return localUserInput.value.trim() === '';
 });
 
 // --- Settings Drawer Logic ---
@@ -215,7 +255,7 @@ const handleSaveSettings = async () => {
   ElMessage.success('设置已保存');
 };
 
-// --- Message Sending Logic ---
+// --- 交互逻辑 ---
 const handleSendMessage = async () => {
   if (isSendButtonDisabled.value) return;
 
@@ -226,8 +266,9 @@ const handleSendMessage = async () => {
       multiPartInputRef.value?.reset();
     }
   } else {
-    const content = userInput.value;
+    const content = localUserInput.value;
     await chatStore.sendMessage([{ content, sortOrder: 0 }]);
+    localUserInput.value = ''; // 发送后清空本地输入
   }
 };
 
@@ -236,19 +277,45 @@ const handleStopGeneration = () => {
     m.sub_messages.some(sm => sm.status === 'generating')
   );
   if (generatingMessage) {
-    // 调用 chatStore 中新的 cancelGeneration action
     chatStore.cancelGeneration(generatingMessage.id);
   }
 };
 
-const handleEnterKey = (event: Event | KeyboardEvent) => {
-  // 使用类型断言确保event有keyboardEvent的属性
-  const keyboardEvent = event as KeyboardEvent;
-  if (isMultiPartMode.value || keyboardEvent.shiftKey) return;
-  keyboardEvent.preventDefault();
-  handleSendMessage();
+const handleKeydown = (event: KeyboardEvent) => {
+  if (event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === 'z') {
+    event.preventDefault();
+    chatStore.undo();
+  } else if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'z') {
+    event.preventDefault();
+    chatStore.redo();
+  } else if (event.key === 'Enter' && !event.shiftKey && !isMultiPartMode.value) {
+    event.preventDefault();
+    handleSendMessage();
+  }
 };
 
+const startResize = (event: MouseEvent) => {
+  const startY = event.clientY;
+  const startHeight = inputAreaHeight.value;
+
+  const doResize = (e: MouseEvent) => {
+    const deltaY = startY - e.clientY;
+    const newHeight = startHeight + deltaY;
+    inputAreaHeight.value = Math.max(MIN_INPUT_HEIGHT, Math.min(newHeight, MAX_INPUT_HEIGHT));
+  };
+
+  const stopResize = () => {
+    window.removeEventListener('mousemove', doResize);
+    window.removeEventListener('mouseup', stopResize);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  };
+
+  window.addEventListener('mousemove', doResize);
+  window.addEventListener('mouseup', stopResize);
+  document.body.style.cursor = 'ns-resize';
+  document.body.style.userSelect = 'none';
+};
 
 // --- Auto-Scrolling and Focus ---
 const userHasScrolledUp = ref(false);
@@ -281,8 +348,10 @@ watch(
   () => currentChat.value?.id,
   (newId, oldId) => {
     if (newId && newId !== oldId) {
-      isMultiPartMode.value = false; // 切换会话时重置为简单模式
+      isMultiPartMode.value = false;
       userHasScrolledUp.value = false;
+      // 切换会话时, 加载对应的草稿
+      localUserInput.value = currentDraft.value;
       const unwatch = watch(isChatHistoryLoading, (isLoading) => {
         if (!isLoading) {
           scrollToBottom(true);
@@ -293,6 +362,19 @@ watch(
     }
   }
 );
+
+watch(isMultiPartMode, (isMulti) => {
+  if(isMulti) {
+    // 监听多分区输入内容变化以估算token
+    watch(() => multiPartInputRef.value?.getData(), (data) => {
+      const allContent = data?.map(d => d.content).join('\n') || '';
+      debouncedEstimateTokens(allContent);
+    }, { deep: true, immediate: true });
+  } else {
+    // 单分区模式下监听 localUserInput 即可
+    debouncedEstimateTokens(localUserInput.value);
+  }
+}, { immediate: true });
 </script>
 
 <style scoped>
@@ -301,6 +383,7 @@ watch(
   display: flex;
   flex-direction: column;
   background-color: var(--color-background);
+  overflow: hidden;
 }
 .welcome-view {
   display: flex;
@@ -329,25 +412,45 @@ watch(
 .message-list-wrapper {
   padding: 20px;
 }
-.chat-input-area {
+.input-container-wrapper {
   flex-shrink: 0;
-  padding: 10px 20px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
   border-top: 1px solid var(--color-border);
+}
+.resize-handle {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  width: 100%;
+  height: 6px;
+  cursor: ns-resize;
+  z-index: 10;
+}
+.chat-input-area {
+  flex-grow: 1;
+  padding: 10px 20px;
   background-color: var(--color-background-soft);
   display: flex;
-  align-items: flex-end;
-  min-height: 76px;
+  align-items: stretch;
+  min-height: 0;
 }
 .input-field {
   flex-grow: 1;
   margin-right: 10px;
-  min-height: 54px;
+}
+.input-field:deep(.el-textarea__inner) {
+  height: 100% !important;
 }
 .action-button {
-  height: 54px;
+  height: auto;
   width: 54px;
   font-size: 20px;
   flex-shrink: 0;
+  align-self: flex-end;
+  margin-bottom: 1px; /* 微调对齐 */
+  height: calc(100% - 2px); /* 充满父容器高度 */
 }
 .drawer-content {
   padding: 0 20px;
@@ -356,4 +459,3 @@ watch(
   margin-right: 8px;
 }
 </style>
-

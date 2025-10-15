@@ -15,7 +15,7 @@ import {
   duplicateChat,
   prepareGenerate,
   prepareRegenerate,
-  stopGeneration as stopGenerationAPI, // 保持原有的API导入名称，方便区分
+  stopGeneration as stopGenerationAPI,
 } from '@/api/chatService';
 import type {
   Chat,
@@ -29,6 +29,16 @@ import type {
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import { useProviderStore } from './providerStore';
 
+// --- 常量定义 ---
+const GLOBAL_HISTORY_LIMIT = 200;
+const CHAT_HISTORY_LIMIT = 50;
+
+// --- 内部类型定义 ---
+interface HistoryEntry {
+  chatId: string;
+  content: string;
+}
+
 interface ChatState {
   chatList: Chat[];
   currentChatId: string | null;
@@ -36,7 +46,10 @@ interface ChatState {
   isChatListLoading: boolean;
   isChatHistoryLoading: boolean;
   activeSubscriptions: Map<string, AbortController>; // messageId -> AbortController
-  userInputCache: Record<string, string>; // 用于简单输入模式的草稿
+  history: {
+    stack: HistoryEntry[];
+    pointer: number;
+  };
 }
 
 export const useChatStore = defineStore('chat', {
@@ -47,7 +60,10 @@ export const useChatStore = defineStore('chat', {
     isChatListLoading: false,
     isChatHistoryLoading: false,
     activeSubscriptions: new Map(),
-    userInputCache: {},
+    history: {
+      stack: [],
+      pointer: -1,
+    },
   }),
 
   getters: {
@@ -57,10 +73,40 @@ export const useChatStore = defineStore('chat', {
       return chat?.itemType === 'chat' ? chat : null;
     },
     isGenerating(state): boolean {
-      // 检查任何子消息的状态是否为 'generating'
       return state.currentChatMessages.some(msg =>
         msg.sub_messages.some(sm => sm.status === 'generating')
       );
+    },
+    currentDraft(state): string {
+      if (!state.currentChatId || state.history.pointer < 0) return '';
+      // 从当前指针位置向后查找属于当前会话的最新草稿
+      for (let i = state.history.pointer; i >= 0; i--) {
+        const entry = state.history.stack[i];
+        if (entry.chatId === state.currentChatId) {
+          return entry.content;
+        }
+      }
+      return '';
+    },
+    /**
+     * 获取用于Token估算的上下文内容, 包括System Prompt和历史消息。
+     */
+    contextForTokenEstimation(state): string {
+      const chat = this.currentChat;
+      if (!chat) return '';
+
+      const systemPrompt = chat.systemPrompt || '';
+
+      const maxContext = chat.modelParameters?.max_context_messages ?? 0;
+      const messagesToConsider = maxContext > 0
+        ? state.currentChatMessages.slice(-maxContext)
+        : state.currentChatMessages;
+
+      const historyContent = messagesToConsider
+        .map(msg => msg.sub_messages.map(sm => sm.content).join('\n'))
+        .join('\n');
+
+      return [systemPrompt, historyContent].filter(Boolean).join('\n');
     }
   },
 
@@ -80,7 +126,6 @@ export const useChatStore = defineStore('chat', {
     async selectChat(chatId: string) {
       if (this.currentChatId === chatId) return;
 
-      // 在切换会话时，仅取消所有前端SSE订阅，不发送后端停止请求。
       this.unsubscribeAllClientSide();
 
       const selectedItem = this.chatList.find(item => item.id === chatId);
@@ -105,7 +150,6 @@ export const useChatStore = defineStore('chat', {
           this.currentChatMessages = chatWithMessages.messages.sort((a, b) => a.sortOrder - b.sortOrder);
         }
 
-        // 检查是否有未完成的生成任务，并重新订阅
         this.currentChatMessages.forEach(msg => {
             if (msg.role === 'assistant' && msg.sub_messages.some(sm => sm.status === 'generating')) {
                 this._subscribeToMessageStream(msg);
@@ -207,14 +251,10 @@ export const useChatStore = defineStore('chat', {
       const chatId = this.currentChatId;
 
       try {
-        // 调用API, API会完成DB的更新 (包括替换SubMessages) 和后续消息的删除
         await updateMessageAndRegenerate(messageId, { sub_messages, resend });
-
-        // 从服务器获取最新的、完全同步的消息列表，确保前端拥有最新的消息和子消息ID
         const chatWithMessages = await getChatWithMessages(chatId);
         this.currentChatMessages = chatWithMessages.messages.sort((a, b) => a.sortOrder - b.sortOrder);
 
-        // 如果触发了重新生成, 需要为新的占位符消息启动流式订阅
         if (resend) {
           const assistantPlaceholder = this.currentChatMessages[this.currentChatMessages.length - 1];
           if (assistantPlaceholder && assistantPlaceholder.role === 'assistant' && assistantPlaceholder.sub_messages.some(sm => sm.status === 'generating')) {
@@ -224,7 +264,6 @@ export const useChatStore = defineStore('chat', {
       } catch (error) {
         console.error('Failed to update message and resend:', error);
         ElMessage.error('操作失败，正在尝试恢复会话状态...');
-        // 如果失败, 也通过重新拉取数据来确保状态一致性
         await this.selectChat(chatId);
       }
     },
@@ -265,10 +304,66 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    // --- 对话生成 ---
+    // --- 对话生成与草稿历史 ---
+    _pushToHistory(entry: HistoryEntry) {
+      // 如果指针不在栈顶,说明进行过撤销操作,此时新的输入会覆盖掉“未来”的历史
+      if (this.history.pointer < this.history.stack.length - 1) {
+        this.history.stack.splice(this.history.pointer + 1);
+      }
+
+      this.history.stack.push(entry);
+
+      // 应用单个会话的历史限制
+      const chatEntries = this.history.stack.filter(e => e.chatId === entry.chatId);
+      if (chatEntries.length > CHAT_HISTORY_LIMIT) {
+        const oldestIndex = this.history.stack.findIndex(e => e.chatId === entry.chatId);
+        if (oldestIndex !== -1) {
+          this.history.stack.splice(oldestIndex, 1);
+        }
+      }
+
+      // 应用全局历史限制
+      if (this.history.stack.length > GLOBAL_HISTORY_LIMIT) {
+        this.history.stack.shift();
+      }
+
+      // 更新指针到栈顶
+      this.history.pointer = this.history.stack.length - 1;
+    },
+
     saveDraft(content: string) {
-      if (this.currentChatId) {
-        this.userInputCache[this.currentChatId] = content;
+      if (!this.currentChatId) return;
+
+      const latestEntry = this.history.stack[this.history.pointer];
+      // 避免连续存入完全相同的草稿
+      if (latestEntry && latestEntry.chatId === this.currentChatId && latestEntry.content === content) {
+        return;
+      }
+
+      this._pushToHistory({ chatId: this.currentChatId, content });
+    },
+
+    undo() {
+      if (!this.currentChatId || this.history.pointer < 0) return;
+
+      // 从当前指针的前一个位置开始,向后查找属于当前会话的记录
+      for (let i = this.history.pointer - 1; i >= 0; i--) {
+        if (this.history.stack[i].chatId === this.currentChatId) {
+          this.history.pointer = i;
+          return;
+        }
+      }
+    },
+
+    redo() {
+      if (!this.currentChatId || this.history.pointer >= this.history.stack.length - 1) return;
+
+      // 从当前指针的后一个位置开始,向前查找属于当前会话的记录
+      for (let i = this.history.pointer + 1; i < this.history.stack.length; i++) {
+        if (this.history.stack[i].chatId === this.currentChatId) {
+          this.history.pointer = i;
+          return;
+        }
       }
     },
 
@@ -276,7 +371,7 @@ export const useChatStore = defineStore('chat', {
       if (!this.currentChatId || this.isGenerating) return;
 
       const chatId = this.currentChatId;
-      delete this.userInputCache[chatId];
+      this.saveDraft(''); // 发送后清空草稿
 
       try {
         const lastMessage = this.currentChatMessages[this.currentChatMessages.length - 1];
@@ -342,38 +437,23 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    /**
-     * 【新增】私有辅助方法：仅取消前端SSE订阅，不通知后端停止任务。
-     * 用于切换会话或在`cancelGeneration`中被调用。
-     */
     _unsubscribeClientSide(messageId: string) {
         const controller = this.activeSubscriptions.get(messageId);
         if (controller) {
-            controller.abort(); // 终止前端SSE连接
+            controller.abort();
         }
         this.activeSubscriptions.delete(messageId);
-        // 不修改 UI 状态，因为后端任务可能仍在运行
     },
 
-    /**
-     * 【新增】取消所有活跃的前端SSE订阅。
-     * 在切换会话时调用，以避免资源泄露。
-     */
     unsubscribeAllClientSide() {
         this.activeSubscriptions.forEach((_controller, messageId) => {
             this._unsubscribeClientSide(messageId);
         });
     },
 
-    /**
-     * 【重命名】用户明确点击“停止”按钮时调用，会通知后端停止生成任务。
-     * 同时会乐观更新前端UI状态。
-     */
     async cancelGeneration(messageId: string) {
-      // 1. 先取消前端订阅
       this._unsubscribeClientSide(messageId);
 
-      // 2. 乐观更新 UI 状态为 completed
       const messageToUpdate = this.currentChatMessages.find(m => m.id === messageId);
       if (messageToUpdate) {
         const subMessageToUpdate = messageToUpdate.sub_messages.find(sm => sm.status === 'generating');
@@ -382,7 +462,6 @@ export const useChatStore = defineStore('chat', {
         }
       }
 
-      // 3. 通知后端停止生成任务
       try {
         await stopGenerationAPI(messageId);
       } catch (error) {
@@ -390,10 +469,6 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    /**
-     * 停止所有正在进行的AI生成任务（包括通知后端）。
-     * 此方法在`cancelGeneration`重命名后，会自然地调用`cancelGeneration`。
-     */
     stopAllGenerations() {
         this.activeSubscriptions.forEach((_controller, messageId) => {
             this.cancelGeneration(messageId);
@@ -406,7 +481,6 @@ export const useChatStore = defineStore('chat', {
       const chatId = this.currentChatId;
       const assistantMessageId = assistantMessage.id;
 
-      // 如果已经有订阅，先取消旧的订阅
       if (this.activeSubscriptions.has(assistantMessageId)) {
         this._unsubscribeClientSide(assistantMessageId);
       }
@@ -437,25 +511,20 @@ export const useChatStore = defineStore('chat', {
           } catch (e) { console.error("Failed to parse SSE data chunk:", event.data, e); }
         },
         onclose: () => {
-          // 连接关闭时，从 activeSubscriptions 移除
           this.activeSubscriptions.delete(assistantMessageId);
-          // 重新从后端获取消息的最终状态，确保 UI 与数据库一致
           getChatWithMessages(chatId).then(res => {
               const finalMessage = res.messages.find(m => m.id === assistantMessageId);
               const localMessage = this.currentChatMessages.find(m => m.id === assistantMessageId);
               if (finalMessage && localMessage) {
-                  // 替换整个 sub_messages 数组，以确保状态（如 'completed' 或 'failed'）同步
                   localMessage.sub_messages = finalMessage.sub_messages;
               }
           }).catch(err => console.error("Failed to fetch final message state on close:", err));
         },
         onerror: (err) => {
-          if (err.name !== 'AbortError') { // AbortError 是主动取消时的预期错误
+          if (err.name !== 'AbortError') {
             console.error(`[ChatStore] SSE stream error for messageId: "${assistantMessageId}". Error:`, err);
           }
-          // 确保在出错时也从 activeSubscriptions 移除
           this.activeSubscriptions.delete(assistantMessageId);
-          // 同样，尝试获取最终状态
           getChatWithMessages(chatId).then(res => {
               const finalMessage = res.messages.find(m => m.id === assistantMessageId);
               const localMessage = this.currentChatMessages.find(m => m.id === assistantMessageId);
