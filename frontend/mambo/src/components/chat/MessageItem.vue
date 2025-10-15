@@ -17,11 +17,11 @@
     <div class="message-body">
       <!-- 单一分区视图 -->
       <template v-if="isSingleSubMessage">
-        <div class="single-sub-message-wrapper">
+        <div class="single-sub-message-wrapper" :class="{ collapsed: isSingleViewCollapsed }">
           <SubMessageItem
             :sub-message="firstSubMessage"
             :parent-message="message"
-            @edit="openEditDialog(firstSubMessage)"
+            @edit="(content) => openEditDialog(firstSubMessage, content)"
             @copy="handleCopy"
           />
         </div>
@@ -37,7 +37,7 @@
             :parent-message="message"
             :show-header="true"
             :index="index + 1"
-            @edit="openEditDialog(subMessage)"
+            @edit="(content) => openEditDialog(subMessage, content)"
             @copy="handleCopySingle(subMessage)"
           />
         </div>
@@ -50,9 +50,14 @@
           <el-button :icon="message.role === 'user' ? RefreshLeft : Refresh" circle size="small" @click="handleRegenerate" />
         </el-tooltip>
 
+        <!-- 单一视图: 折叠/展开 -->
+        <el-tooltip v-if="isSingleSubMessage" :content="isSingleViewCollapsed ? '展开' : '折叠'" placement="top" :show-after="500">
+          <el-button :icon="isSingleViewCollapsed ? ArrowDownBold : ArrowUpBold" circle size="small" @click="toggleSingleViewCollapse" />
+        </el-tooltip>
+
         <!-- 单一视图: 编辑 -->
         <el-tooltip v-if="isSingleSubMessage" content="编辑" placement="top" :show-after="500">
-          <el-button :icon="Edit" circle size="small" @click="openEditDialog(firstSubMessage)" />
+          <el-button :icon="Edit" circle size="small" @click="openEditDialog(firstSubMessage, firstSubMessage.content)" />
         </el-tooltip>
 
         <!-- 复制 (行为不同) -->
@@ -94,11 +99,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { Message, SubMessage } from '@/api/types';
 import { useChatStore } from '@/stores/chatStore';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { User, Cpu, Refresh, RefreshLeft, Delete, Edit, CopyDocument } from '@element-plus/icons-vue';
+import { User, Cpu, Refresh, RefreshLeft, Delete, Edit, CopyDocument, ArrowUpBold, ArrowDownBold } from '@element-plus/icons-vue';
 import SubMessageItem from './SubMessageItem.vue';
 
 const props = defineProps<{
@@ -118,15 +123,46 @@ const roleClass = computed(() => ({
   'is-assistant': props.message.role === 'assistant',
 }));
 
+// --- 单一视图折叠逻辑 ---
+const isSingleViewCollapsed = ref(firstSubMessage.value?.config?.is_collapsed || false);
+watch(() => firstSubMessage.value?.config?.is_collapsed, (newValue) => {
+  isSingleViewCollapsed.value = newValue || false;
+});
+
+const toggleSingleViewCollapse = () => {
+  if (!firstSubMessage.value) return;
+  const newCollapsedState = !isSingleViewCollapsed.value;
+  isSingleViewCollapsed.value = newCollapsedState;
+  chatStore.updateSubMessage({
+    subMessageId: firstSubMessage.value.id,
+    data: {
+      config: { ...firstSubMessage.value.config, is_collapsed: newCollapsedState },
+    },
+  });
+};
+
 // --- 编辑逻辑 (统一管理) ---
 const editDialogVisible = ref(false);
 const editingContent = ref('');
+const originalEditingContent = ref('');
 const editingSubMessage = ref<SubMessage | null>(null);
 
-const openEditDialog = (subMessage: SubMessage) => {
+const openEditDialog = (subMessage: SubMessage, contentToEdit: string) => {
   editingSubMessage.value = subMessage;
-  editingContent.value = subMessage.content;
+  editingContent.value = contentToEdit;
+  originalEditingContent.value = contentToEdit;
   editDialogVisible.value = true;
+};
+
+const getUpdatedFullContent = () => {
+  if (!editingSubMessage.value) return '';
+  const fullOriginalContent = editingSubMessage.value.content;
+  const newContent = editingContent.value;
+  // 如果原始编辑内容与完整内容相同，则直接替换；否则，进行字符串替换
+  if (originalEditingContent.value === fullOriginalContent) {
+    return newContent;
+  }
+  return fullOriginalContent.replace(originalEditingContent.value, newContent);
 };
 
 const handleSaveEdit = () => {
@@ -134,9 +170,10 @@ const handleSaveEdit = () => {
     ElMessage.warning('内容不能为空');
     return;
   }
+  const updatedContent = getUpdatedFullContent();
   chatStore.updateSubMessage({
     subMessageId: editingSubMessage.value.id,
-    data: { content: editingContent.value },
+    data: { content: updatedContent },
   });
   editDialogVisible.value = false;
 };
@@ -146,8 +183,9 @@ const handleSaveAndResend = () => {
     ElMessage.warning('内容不能为空');
     return;
   }
+  const updatedContent = getUpdatedFullContent();
   const newSubMessages = props.message.sub_messages.map(sm => ({
-    content: sm.id === editingSubMessage.value!.id ? editingContent.value : sm.content,
+    content: sm.id === editingSubMessage.value!.id ? updatedContent : sm.content,
     sortOrder: sm.sortOrder,
     type: sm.type,
     config: sm.config,
@@ -226,6 +264,9 @@ const handleCopy = () => {
   border-radius: 8px;
   background-color: var(--color-background-soft);
   min-height: 40px;
+  transition: max-height 0.25s ease-out;
+  overflow: hidden;
+  position: relative;
 }
 .is-user .single-sub-message-wrapper {
   background-color: var(--el-color-primary-light-9);
@@ -238,6 +279,28 @@ const handleCopy = () => {
 }
 .single-sub-message-wrapper :deep(.message-content) {
   padding: 0;
+  max-height: none; /* 让SubMessageItem的内容区不限制高度 */
+}
+.single-sub-message-wrapper :deep(.message-content)::after {
+  display: none; /* 移除SubMessageItem内部的折叠遮罩 */
+}
+
+/* 单一分区折叠样式 */
+.single-sub-message-wrapper.collapsed {
+  max-height: 5em;
+}
+.single-sub-message-wrapper.collapsed::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3em;
+  background: linear-gradient(to bottom, transparent, var(--color-background-soft));
+  pointer-events: none;
+}
+.is-user .single-sub-message-wrapper.collapsed::after {
+  background: linear-gradient(to bottom, transparent, var(--el-color-primary-light-9));
 }
 
 /* 多分区容器 */

@@ -9,7 +9,7 @@
       <div class="actions">
         <!-- 编辑 -->
         <el-tooltip content="编辑" placement="top" :show-after="500">
-          <el-button :icon="Edit" circle text size="small" @click="$emit('edit')" :disabled="isGenerating" />
+          <el-button :icon="Edit" circle text size="small" @click="$emit('edit', subMessage.content)" :disabled="isGenerating" />
         </el-tooltip>
         <!-- 复制 -->
         <el-tooltip content="复制" placement="top" :show-after="500">
@@ -50,6 +50,7 @@
             :code="block.content"
             :language="block.language || 'Text'"
             :is-generating="isGenerating"
+            @edit="(code) => $emit('edit', code)"
           />
           <div v-else v-html="block.content"></div>
         </div>
@@ -59,10 +60,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { SubMessage, Message } from '@/api/types';
+import { useChatStore } from '@/stores/chatStore';
 import { Edit, CopyDocument, ArrowUpBold, ArrowDownBold } from '@element-plus/icons-vue';
 import * as MarkdownIt from 'markdown-it';
+import type { Token } from 'markdown-it';
 import DOMPurify from 'dompurify';
 import CodeBlock from './CodeBlock.vue';
 
@@ -86,18 +89,30 @@ const props = withDefaults(defineProps<Props>(), {
   index: 1,
 });
 
-const emit = defineEmits(['edit', 'copy']);
+// 声明组件可触发的事件
+defineEmits(['edit', 'copy']);
+
+const chatStore = useChatStore();
 
 const isCollapsed = ref(props.subMessage.config.is_collapsed || false);
-
 const isGenerating = computed(
   () => props.subMessage.status === 'generating'
 );
 
+// 监听来自store/prop的变动, 确保UI同步
+watch(() => props.subMessage.config.is_collapsed, (newValue) => {
+  isCollapsed.value = newValue || false;
+});
+
 const toggleCollapse = () => {
-  isCollapsed.value = !isCollapsed.value;
-  // 注意: 当前折叠状态仅保存在组件内存中, 刷新后会丢失。
-  // 若需持久化, 需要调用API更新数据库中的config字段。
+  const newCollapsedState = !isCollapsed.value;
+  isCollapsed.value = newCollapsedState; // 乐观更新UI
+  chatStore.updateSubMessage({
+    subMessageId: props.subMessage.id,
+    data: {
+      config: { ...props.subMessage.config, is_collapsed: newCollapsedState },
+    },
+  });
 };
 
 const md = new MarkdownIt.default({ html: false });
@@ -107,7 +122,7 @@ const parsedContent = computed((): ParsedBlock[] => {
 
   const tokens = md.parse(props.subMessage.content, {});
   const blocks: ParsedBlock[] = [];
-  let currentHtmlTokens: any[] = [];
+  let currentHtmlTokens: Token[] = [];
 
   const renderHtml = () => {
     if (currentHtmlTokens.length > 0) {
@@ -198,9 +213,9 @@ const parsedContent = computed((): ParsedBlock[] => {
   line-height: 1.7;
   color: var(--color-text);
   min-height: 20px;
-  /* 优化：使用 ease-out 并缩短时长，让动画响应更迅速 */
   transition: max-height 0.25s ease-out;
-  max-height: 1000px;
+  /* 设定一个足够大的值以容纳非常长的消息,同时保持动画效果 */
+  max-height: 10000px;
   overflow: hidden;
 }
 
@@ -222,7 +237,6 @@ const parsedContent = computed((): ParsedBlock[] => {
   background: linear-gradient(to bottom, transparent, var(--sub-message-bg));
   pointer-events: none;
   opacity: 0;
-  /* 优化：同步动画参数 */
   transition: opacity 0.25s ease-out;
 }
 

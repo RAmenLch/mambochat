@@ -89,7 +89,6 @@ const highlightedCode = computed(() => {
       console.error(e);
     }
   }
-  // [修复一] 使用推荐的方式处理纯文本，而不是调用已废弃的 escapeHTML
   return hljs.highlight(props.code, { language: 'plaintext', ignoreIllegals: true }).value;
 });
 
@@ -117,7 +116,6 @@ const emitEdit = () => {
 
 <style scoped>
 .code-block-container {
-  /* [修复二] 定义这两个缺失的 CSS 变量, 并使用 github-dark 主题的实际颜色 */
   --hljs-background: #282c34;
   --hljs-color: #abb2bf;
 
@@ -170,7 +168,6 @@ const emitEdit = () => {
   position: relative;
   max-height: 800px;
   overflow: auto;
-  /* 优化：使用 ease-out 并缩短时长，让动画响应更迅速 */
   transition: max-height 0.25s ease-out;
 }
 
@@ -189,11 +186,10 @@ const emitEdit = () => {
   background: linear-gradient(
     to bottom,
     transparent,
-    var(--hljs-background) /* 使用变量确保渐变色一致 */
+    var(--hljs-background)
   );
   pointer-events: none;
   opacity: 0;
-  /* 优化：同步动画参数 */
   transition: opacity 0.25s ease-out;
 }
 
