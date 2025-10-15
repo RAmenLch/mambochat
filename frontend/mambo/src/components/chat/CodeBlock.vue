@@ -89,7 +89,8 @@ const highlightedCode = computed(() => {
       console.error(e);
     }
   }
-  return hljs.escapeHTML(props.code);
+  // [修复一] 使用推荐的方式处理纯文本，而不是调用已废弃的 escapeHTML
+  return hljs.highlight(props.code, { language: 'plaintext', ignoreIllegals: true }).value;
 });
 
 // --- 事件处理 ---
@@ -116,8 +117,12 @@ const emitEdit = () => {
 
 <style scoped>
 .code-block-container {
-  background-color: var(--hljs-background, #2d2d2d);
-  color: var(--hljs-color, #ccc);
+  /* [修复二] 定义这两个缺失的 CSS 变量, 并使用 github-dark 主题的实际颜色 */
+  --hljs-background: #282c34;
+  --hljs-color: #abb2bf;
+
+  background-color: var(--hljs-background);
+  color: var(--hljs-color);
   border-radius: 6px;
   margin: 1em 0;
   overflow: hidden;
@@ -184,7 +189,7 @@ const emitEdit = () => {
   background: linear-gradient(
     to bottom,
     transparent,
-    var(--hljs-background, #2d2d2d)
+    var(--hljs-background) /* 使用变量确保渐变色一致 */
   );
   pointer-events: none;
   opacity: 0;
