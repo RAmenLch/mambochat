@@ -436,16 +436,26 @@ async def delete_messages_after(db: AsyncSession, chat_id: str, message_id: str,
     if not ref_message:
         return 0
 
-    query = delete(models.Message).where(models.Message.chatId == chat_id)
-
+    # 构建查询以选择要删除的消息对象
+    stmt = select(models.Message).where(models.Message.chatId == chat_id)
     if include_self:
-        query = query.where(models.Message.sortOrder >= ref_message.sortOrder)
+        stmt = stmt.where(models.Message.sortOrder >= ref_message.sortOrder)
     else:
-        query = query.where(models.Message.sortOrder > ref_message.sortOrder)
+        stmt = stmt.where(models.Message.sortOrder > ref_message.sortOrder)
 
-    result = await db.execute(query)
+    result = await db.execute(stmt)
+    messages_to_delete = result.scalars().all()
+
+    if not messages_to_delete:
+        return 0
+
+    count = len(messages_to_delete)
+    # 通过ORM会话删除对象，以触发级联删除
+    for msg in messages_to_delete:
+        await db.delete(msg)
+
     await db.commit()
-    return result.rowcount
+    return count
 
 
 async def delete_last_assistant_message(db: AsyncSession, chat_id: str) -> Optional[models.Message]:

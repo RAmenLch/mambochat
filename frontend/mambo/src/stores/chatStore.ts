@@ -203,23 +203,29 @@ export const useChatStore = defineStore('chat', {
       const messageIndex = this.currentChatMessages.findIndex(m => m.id === messageId);
       if (messageIndex === -1) return;
 
-      try {
-        const assistantPlaceholder = await updateMessageAndRegenerate(messageId, { sub_messages, resend });
+      const chatId = this.currentChatId;
 
+      try {
+        // 调用API, API会完成DB的更新 (包括替换SubMessages) 和后续消息的删除
+        await updateMessageAndRegenerate(messageId, { sub_messages, resend });
+
+        // 核心修复: 不再手动操作本地数组, 而是直接从服务器获取最新的、完全同步的消息列表。
+        // 这确保前端拥有最新的消息和子消息ID, 避免状态不一致。
+        const chatWithMessages = await getChatWithMessages(chatId);
+        this.currentChatMessages = chatWithMessages.messages.sort((a, b) => a.sortOrder - b.sortOrder);
+
+        // 如果触发了重新生成, 需要为新的占位符消息启动流式订阅
         if (resend) {
-          this.currentChatMessages.splice(messageIndex + 1);
-          this.currentChatMessages.push(assistantPlaceholder);
-          this._subscribeToMessageStream(assistantPlaceholder);
-        } else {
-          const updatedMessage = await getChatWithMessages(this.currentChatId).then(res => res.messages.find(m => m.id === messageId));
-          if (updatedMessage) {
-            this.currentChatMessages[messageIndex] = updatedMessage;
+          const assistantPlaceholder = this.currentChatMessages[this.currentChatMessages.length - 1];
+          if (assistantPlaceholder && assistantPlaceholder.role === 'assistant' && assistantPlaceholder.sub_messages.some(sm => sm.status === 'generating')) {
+            this._subscribeToMessageStream(assistantPlaceholder);
           }
         }
       } catch (error) {
         console.error('Failed to update message and resend:', error);
-        ElMessage.error('操作失败，请重试。');
-        await this.selectChat(this.currentChatId);
+        ElMessage.error('操作失败，正在尝试恢复会话状态...');
+        // 如果失败, 也通过重新拉取数据来确保状态一致性
+        await this.selectChat(chatId);
       }
     },
 
