@@ -159,7 +159,24 @@ import { useProviderStore } from '@/stores/providerStore';
 import { storeToRefs } from 'pinia';
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type ElTable } from 'element-plus';
 import { Plus, Delete, Download } from '@element-plus/icons-vue';
-import type { AIProviderWithModels, AIModel, AIModelCreate, ProviderWithModelsCreate, AIModelBase, AIModelUpdate, AIProviderUpdate } from '@/api/types';
+import type { AIProviderWithModels, AIModel, AIModelCreate, AIModelBase, AIProviderUpdate, ProviderWithModelsCreate } from '@/api/types';
+
+// 为表单数据定义一个清晰、准确的接口
+interface ProviderFormData {
+  name: string;
+  apiHost: string;
+  apiKey: string;
+  models: (AIModelBase & { id?: string })[]; // 模型可能包含id(已存在)或不包含(新添加)
+}
+
+// 定义一个类型来安全地处理API错误
+type ApiError = {
+  response?: {
+    data?: {
+      detail?: string;
+    };
+  };
+};
 
 const API_KEY_PLACEHOLDER = '********';
 
@@ -183,12 +200,13 @@ const editingModelId = ref<string | null>(null);
 // Forms and temporary state
 const providerFormRef = ref<FormInstance>();
 const modelFormRef = ref<FormInstance>();
-const providerForm = reactive<ProviderWithModelsCreate & { models: (AIModelBase & { id?: string })[] }>({ name: '', apiHost: '', apiKey: '', models: [] });
+const providerForm = reactive<ProviderFormData>({ name: '', apiHost: '', apiKey: '', models: [] });
 const modelForm = reactive<Omit<AIModelCreate, 'providerId'>>({ name: '', modelId: '' });
 const fetchedModels = ref<AIModelBase[]>([]);
 const selectedFetchedModels = ref<string[]>([]);
 const modelSearchQuery = ref('');
-let initialModels: (AIModelBase & { id?: string })[] = []; // Used to track changes in edit mode
+// 用于存储编辑时模型的初始状态，以便比较变更
+let initialModels: AIModel[] = [];
 
 // 表单验证规则
 const providerFormRules = reactive<FormRules>({
@@ -199,6 +217,7 @@ const providerFormRules = reactive<FormRules>({
       if (!isEditingProvider.value && !value) {
         callback(new Error('请输入 API Key'));
       } else if (isEditingProvider.value && !value) {
+        // 在编辑模式下，如果 apiKey 为空，将其重置为占位符，表示不更新
         providerForm.apiKey = API_KEY_PLACEHOLDER;
         callback();
       } else {
@@ -304,8 +323,9 @@ const openEditProviderDialog = (provider: AIProviderWithModels) => {
     apiHost: provider.apiHost,
     apiKey: API_KEY_PLACEHOLDER
   });
+  // 深拷贝模型数据以避免直接修改store
   providerForm.models = JSON.parse(JSON.stringify(provider.models));
-  initialModels = JSON.parse(JSON.stringify(provider.models)); // Save initial state
+  initialModels = JSON.parse(JSON.stringify(provider.models)); // 保存初始状态用于对比
   providerDialogVisible.value = true;
 };
 
@@ -315,52 +335,78 @@ const handleSaveProvider = async () => {
     if (valid) {
       try {
         if (isEditingProvider.value && editingProviderId.value) {
-          // 1. Update provider details
-          const updateData: AIProviderUpdate = {
+          // --- 逻辑分支：编辑现有服务商 ---
+
+          // 1. 更新服务商自身信息
+          const providerUpdateData: AIProviderUpdate = {
             name: providerForm.name,
             apiHost: providerForm.apiHost,
           };
           if (providerForm.apiKey && providerForm.apiKey !== API_KEY_PLACEHOLDER) {
-            updateData.apiKey = providerForm.apiKey;
+            providerUpdateData.apiKey = providerForm.apiKey;
           }
-          await providerStore.updateProvider(editingProviderId.value, updateData);
+          const providerUpdatePromise = providerStore.updateProvider(editingProviderId.value, providerUpdateData);
 
-          // 2. Sync model changes
-          const currentModelIds = new Set(providerForm.models.map(m => m.id).filter(Boolean));
-          const initialModelIds = new Set(initialModels.map(m => m.id).filter(Boolean));
+          // 2. 识别出需要 新增、删除、更新 的模型
+          const currentModelIdsInForm = new Set(providerForm.models.filter(m => m.id).map(m => m.id!));
 
-          const modelsToDelete = initialModels.filter(m => m.id && !currentModelIds.has(m.id));
           const modelsToAdd = providerForm.models.filter(m => !m.id);
+          const modelsToDelete = initialModels.filter(m => !currentModelIdsInForm.has(m.id));
+          const modelsToUpdate = providerForm.models.filter(currentModel => {
+            if (!currentModel.id) return false;
+            const initialModel = initialModels.find(m => m.id === currentModel.id);
+            return initialModel && initialModel.name !== currentModel.name;
+          });
 
-          const deletePromises = modelsToDelete.map(m => providerStore.removeModel(m.id!));
-          const addPromises = modelsToAdd.map(m => providerStore.addModel({ ...m, providerId: editingProviderId.value! }));
+          // 3. 为所有模型操作创建 API 请求的 Promise
+          const addPromises = modelsToAdd.map(m => providerStore.addModel({
+            modelId: m.modelId, name: m.name, providerId: editingProviderId.value!,
+          }));
+          const deletePromises = modelsToDelete.map(m => providerStore.removeModel(m.id));
+          const updatePromises = modelsToUpdate.map(m => providerStore.updateModel(m.id!, { name: m.name }));
 
-          await Promise.all([...deletePromises, ...addPromises]);
+          // 4. 并发执行所有数据库操作
+          await Promise.all([ providerUpdatePromise, ...addPromises, ...deletePromises, ...updatePromises ]);
 
-          ElMessage.success('更新服务商成功！');
+          ElMessage.success('更新服务商及模型成功！');
+
         } else {
-          // This is for creating a new provider
-          await providerStore.addProviderWithModels(providerForm);
+          // --- 逻辑分支：创建新服务商 ---
+          const createData: ProviderWithModelsCreate = {
+              name: providerForm.name,
+              apiHost: providerForm.apiHost,
+              apiKey: providerForm.apiKey,
+              models: providerForm.models,
+          };
+          await providerStore.addProviderWithModels(createData);
           ElMessage.success('新增服务商成功！');
         }
+
         providerDialogVisible.value = false;
+
       } catch (error) {
-        ElMessage.error('操作失败，请检查控制台。');
+        const apiError = error as ApiError;
+        const message = apiError?.response?.data?.detail || '操作失败，请检查控制台。';
+        ElMessage.error(message);
       }
     }
   });
 };
 
+
 const handleDeleteProvider = async (provider: AIProviderWithModels) => {
-  await ElMessageBox.confirm(`确定删除服务商 "${provider.name}" 吗？其下所有模型也将被删除。`, '警告', { type: 'warning' });
   try {
+    await ElMessageBox.confirm(`确定删除服务商 "${provider.name}" 吗？其下所有模型也将被删除。`, '警告', { type: 'warning' });
     await providerStore.removeProvider(provider.id);
     if (selectedProvider.value?.id === provider.id) {
       selectedProvider.value = null;
     }
     ElMessage.success('删除成功！');
   } catch (error) {
-    if (error !== 'cancel') ElMessage.error('删除失败，请检查控制台。');
+    if (error === 'cancel') return; // User cancelled the dialog, do nothing.
+    const apiError = error as ApiError;
+    const message = apiError?.response?.data?.detail || '删除失败，请检查控制台。';
+    ElMessage.error(message);
   }
 };
 
@@ -394,20 +440,24 @@ const handleSaveModel = async () => {
         }
         modelDialogVisible.value = false;
       } catch (error) {
-        ElMessage.error('操作失败，请检查控制台。');
+        const apiError = error as ApiError;
+        const message = apiError?.response?.data?.detail || '操作失败，请检查控制台。';
+        ElMessage.error(message);
       }
     }
   });
 };
 
 const handleDeleteModel = async (model: AIModel) => {
-  await ElMessageBox.confirm(`确定删除模型 "${model.name}" 吗？`, '警告', { type: 'warning' });
   try {
+    await ElMessageBox.confirm(`确定删除模型 "${model.name}" 吗？`, '警告', { type: 'warning' });
     await providerStore.removeModel(model.id);
     ElMessage.success('删除模型成功！');
-  } catch (error: any) {
-    const message = error?.response?.data?.detail || '删除模型失败';
-    if (error !== 'cancel') ElMessage.error(message);
+  } catch (error) {
+    if (error === 'cancel') return; // User cancelled the dialog, do nothing.
+    const apiError = error as ApiError;
+    const message = apiError?.response?.data?.detail || '删除模型失败';
+    ElMessage.error(message);
   }
 };
 
@@ -425,13 +475,10 @@ const handleApiKeyBlur = () => {
 };
 
 const handleTestConnection = async () => {
-  // 验证 API Host 和 API Key 是否已填写
   if (!providerForm.apiHost || !providerForm.apiKey) {
     ElMessage.warning('请填写 API Host 和 API Key 以进行测试');
     return;
   }
-
-  // 如果用户没有修改 Key（仍是占位符），给出明确提示
   if (isEditingProvider.value && providerForm.apiKey === API_KEY_PLACEHOLDER) {
     ElMessage.warning('请输入一个新的 API Key 进行测试，或直接保存以继续使用旧的 Key。');
     return;
@@ -439,15 +486,14 @@ const handleTestConnection = async () => {
 
   isTestingConnection.value = true;
   try {
-    // 移除之前的 if/else 分支，统一调用 testConnection 服务
-    // 这将始终使用表单中当前的值进行测试
     const res = await providerStore.testConnection({
       apiHost: providerForm.apiHost,
       apiKey: providerForm.apiKey
     });
-    ElMessage({ type: res.status, message: res.message });
-  } catch (error: any) {
-    const message = error?.response?.data?.detail || '连接测试失败';
+    ElMessage({ type: res.status === 'success' ? 'success' : 'error', message: res.message });
+  } catch (error) {
+    const apiError = error as ApiError;
+    const message = apiError?.response?.data?.detail || '连接测试失败';
     ElMessage.error(message);
   } finally {
     isTestingConnection.value = false;
@@ -473,8 +519,9 @@ const handleFetchModels = async () => {
     selectedFetchedModels.value = providerForm.models.map(m => m.modelId);
     modelSearchQuery.value = '';
     fetchModelsDialogVisible.value = true;
-  } catch (error: any) {
-    const message = error?.response?.data?.detail || '获取模型列表失败';
+  } catch (error) {
+    const apiError = error as ApiError;
+    const message = apiError?.response?.data?.detail || '获取模型列表失败';
     ElMessage.error(message);
   } finally {
     isFetchingModels.value = false;
@@ -490,8 +537,9 @@ const handleFetchModelsForProvider = async () => {
     selectedFetchedModels.value = [];
     modelSearchQuery.value = '';
     fetchModelsDialogVisible.value = true;
-  } catch (error: any) {
-    const message = error?.response?.data?.detail || '获取模型列表失败';
+  } catch (error) {
+    const apiError = error as ApiError;
+    const message = apiError?.response?.data?.detail || '获取模型列表失败';
     ElMessage.error(message);
   } finally {
     isFetchingModels.value = false;
