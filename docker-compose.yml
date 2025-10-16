@@ -1,0 +1,32 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  # 1. 后端 FastAPI 服务
+  backend:
+    build:
+      context: ./backend  # Dockerfile 所在的目录
+      dockerfile: Dockerfile
+    volumes:
+      # 将宿主机的 ./DB 目录映射到容器内的 /app/DB 目录
+      # 这样 SQLite 数据库文件就能持久化保存
+      - ./DB:/app/DB
+    expose:
+      # 只在 Docker 内部网络暴露 8000 端口，不直接映射到宿主机
+      - "8000"
+    restart: unless-stopped
+
+  # 2. 前端 Nginx 服务
+  frontend:
+    build:
+      context: ./frontend/mambo # Dockerfile 所在的目录
+      dockerfile: Dockerfile
+    ports:
+      # 将宿主机的 8080 端口映射到容器的 80 端口
+      # 你可以通过 http://localhost:8080 访问应用
+      - "24911:80"
+    depends_on:
+      # 确保后端服务启动后，前端服务再启动
+      - backend
+    restart: unless-stopped
+
