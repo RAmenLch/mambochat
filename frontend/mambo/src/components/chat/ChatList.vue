@@ -20,13 +20,15 @@
         node-key="id"
         :current-node-key="currentChatId || undefined"
         highlight-current
-        default-expand-all
         :expand-on-click-node="false"
         draggable
         :allow-drop="allowDrop"
+        :indent="8"
         @node-click="handleNodeClick"
         @node-drop="handleNodeDrop"
         @node-contextmenu="handleContextMenu"
+        @node-expand="handleNodeExpand"
+        @node-collapse="handleNodeCollapse"
         class="chat-tree"
         :props="{ label: 'name', children: 'children' }"
       >
@@ -137,7 +139,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed, nextTick } from 'vue';
+import { ref, reactive, onMounted, computed, nextTick, watch } from 'vue';
 import { useChatStore } from '@/stores/chatStore';
 import { useProviderStore } from '@/stores/providerStore';
 import { storeToRefs } from 'pinia';
@@ -145,6 +147,7 @@ import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox, ElTree } from 'element-plus';
 import type { FormInstance, FormRules } from 'element-plus';
 import type { NodeDropType } from 'element-plus/es/components/tree/src/tree.type';
+import type Node from 'element-plus/es/components/tree/src/model/node';
 import type { Chat, ChatReorderItem } from '@/api/types';
 import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, EditPen, CopyDocument } from '@element-plus/icons-vue';
 
@@ -185,8 +188,69 @@ const treeData = computed(() => {
   return tree;
 });
 
+// -- Folder Expansion State Management --
+const FOLDER_STATE_KEY = 'mambo_folder_expanded_state';
+const expandedState = ref<Record<string, boolean>>({});
+
+const handleNodeExpand = (data: Chat) => {
+  if (data.itemType === 'folder') {
+    expandedState.value[data.id] = true;
+    localStorage.setItem(FOLDER_STATE_KEY, JSON.stringify(expandedState.value));
+  }
+};
+
+const handleNodeCollapse = (data: Chat) => {
+  if (data.itemType === 'folder') {
+    delete expandedState.value[data.id];
+    localStorage.setItem(FOLDER_STATE_KEY, JSON.stringify(expandedState.value));
+  }
+};
+
+// 监视列表变化, 自动清理已删除文件夹的持久化展开状态
+watch(chatList, (newList) => {
+  const folderIds = new Set(newList.filter(item => item.itemType === 'folder').map(item => item.id));
+  const currentStateKeys = Object.keys(expandedState.value);
+  let stateChanged = false;
+  for (const expandedId of currentStateKeys) {
+    if (!folderIds.has(expandedId)) {
+      delete expandedState.value[expandedId];
+      stateChanged = true;
+    }
+  }
+  if (stateChanged) {
+    localStorage.setItem(FOLDER_STATE_KEY, JSON.stringify(expandedState.value));
+  }
+});
+
+// 监视树数据的加载, 加载完成后根据缓存恢复文件夹展开状态
+watch(treeData, (newTreeData) => {
+  if (newTreeData.length > 0 && treeRef.value) {
+    nextTick(() => {
+      const keysToExpand = Object.keys(expandedState.value).filter(key => expandedState.value[key]);
+      keysToExpand.forEach(key => {
+        const node = treeRef.value!.getNode(key);
+        if (node) {
+          node.expanded = true;
+        }
+      });
+    });
+  }
+}, { flush: 'post' }); // 使用 flush: 'post' 确保在 DOM 更新后执行
+
+
 // -- Lifecycle --
 onMounted(async () => {
+  // 从本地存储加载文件夹的展开状态
+  const savedState = localStorage.getItem(FOLDER_STATE_KEY);
+  if (savedState) {
+    try {
+      expandedState.value = JSON.parse(savedState);
+    } catch (e) {
+      console.error('Failed to parse folder state from localStorage', e);
+      localStorage.removeItem(FOLDER_STATE_KEY);
+    }
+  }
+
   await providerStore.fetchProviders();
   await chatStore.fetchChatList();
 
@@ -224,9 +288,7 @@ const handleSelectChat = async (chatId: string) => {
  * @param chatId 要滚动到的会话ID
  */
 const scrollToChat = async (chatId: string) => {
-  // 选中会话并导航
   await handleSelectChat(chatId);
-  // 等待DOM更新，确保 'is-current' class 已应用
   await nextTick();
 
   if (treeRef.value) {
@@ -238,31 +300,41 @@ const scrollToChat = async (chatId: string) => {
   }
 };
 
-const allowDrop = (draggingNode: any, dropNode: any, type: 'prev' | 'inner' | 'next') => {
-  if (dropNode.data.itemType === 'chat' && type === 'inner') {
+const allowDrop = (draggingNode: Node, dropNode: Node, type: 'prev' | 'inner' | 'next') => {
+  // 不允许将任何节点拖拽入一个会话(chat)中
+  if ((dropNode.data as Chat).itemType === 'chat' && type === 'inner') {
     return false;
   }
   return true;
 };
 
-const handleNodeDrop = async (draggingNode: any, dropNode: any, dropType: NodeDropType) => {
+const handleNodeDrop = async (draggingNode: Node, dropNode: Node, dropType: NodeDropType) => {
   const updates: ChatReorderItem[] = [];
   let parentId: string | null = null;
-  let siblings: any[] = [];
+  let siblings: Node[] = [];
 
   if (dropType === 'inner') {
-    parentId = dropNode.data.id;
+    // 拖入文件夹
+    parentId = (dropNode.data as Chat).id;
     siblings = dropNode.childNodes || [];
   } else {
-    parentId = dropNode.data.parentId;
-    siblings = dropNode.parent.childNodes || [];
+    // 作为兄弟节点拖放
+    parentId = (dropNode.data as Chat).parentId;
+    if (dropNode.parent) {
+      siblings = dropNode.parent.childNodes || [];
+    } else {
+      // 处理拖放到根目录的情况, 此时 parent 为 null
+      siblings = treeRef.value?.root.childNodes || [];
+    }
   }
 
   siblings.forEach((node, index) => {
-    updates.push({ id: node.data.id, parentId: parentId, sortOrder: index });
+    updates.push({ id: (node.data as Chat).id, parentId: parentId, sortOrder: index });
   });
 
-  await chatStore.reorderChatItems(updates);
+  if (updates.length > 0) {
+    await chatStore.reorderChatItems(updates);
+  }
 };
 
 // -- Context Menu Logic --
@@ -275,35 +347,34 @@ const contextMenuPosition = reactive({
   left: '0px',
 });
 
-// ======================= FINAL FIX (NO FLICKER) =======================
 const handleContextMenu = (event: MouseEvent, data: Chat | null) => {
   event.preventDefault();
 
+  // 如果在节点上右键但没有获取到节点数据, 则判定为无效操作 (例如点击了节点的空白区域)
   if (!data && (event.target as HTMLElement).closest('.el-tree-node')) {
     return;
   }
 
-  // 1. Immediately hide the menu to prevent visual flicker
+  // 1. 立即隐藏旧菜单, 防止闪烁
   isContextMenuVisible.value = false;
 
-  // 2. Update state for the new menu
+  // 2. 更新菜单关联的数据和目标位置
   contextMenuItem.value = data;
   contextMenuPosition.left = `${event.clientX}px`;
   contextMenuPosition.top = `${event.clientY}px`;
 
-  // 3. Wait for the DOM to update the anchor's position
+  // 3. 等待DOM更新, 使菜单的锚点定位到新位置
   nextTick(() => {
     if (contextMenuRef.value) {
-      // 4. Force popper to reset and recalculate position (happens invisibly)
-      contextMenuRef.value.handleClose(); // Resets internal state
-      contextMenuRef.value.handleOpen(); // Recalculates position
+      // 4. 强制关闭并重新打开dropdown, 以便其内部的popper.js重新计算定位
+      contextMenuRef.value.handleClose();
+      contextMenuRef.value.handleOpen();
 
-      // 5. Make the menu visible at the new, correct position
+      // 5. 在新位置上显示菜单
       isContextMenuVisible.value = true;
     }
   });
 };
-// ======================================================================
 
 // -- Item Operations (triggered by Context Menu) --
 const itemDialogVisible = ref(false);
@@ -367,7 +438,7 @@ const handleDuplicateChat = async (data: Chat) => {
 };
 
 const handleNewFolder = (parentId: string | null) => {
-  contextMenuItem.value = null; // 重置，因为这是新建操作
+  contextMenuItem.value = null; // 重置, 因为是新建操作
   currentParentId.value = parentId;
   dialogTitle.value = '新建文件夹';
   itemNameInput.value = '新的文件夹';
@@ -380,9 +451,11 @@ const handleConfirmItemName = async () => {
     return;
   }
 
-  if (dialogTitle.value === '重命名' && contextMenuItem.value) { // Rename
+  if (dialogTitle.value === '重命名' && contextMenuItem.value) {
+    // 重命名操作
     await chatStore.updateChatSettings(contextMenuItem.value.id, { name: itemNameInput.value });
-  } else { // New Folder
+  } else {
+    // 新建文件夹操作
     const parentId = currentParentId.value;
     const sortOrder = chatList.value.filter(item => item.parentId === parentId).length;
     await chatStore.createNewItem({
@@ -391,13 +464,18 @@ const handleConfirmItemName = async () => {
       parentId: parentId,
       sortOrder: sortOrder,
     });
+    // 如果在文件夹内创建, 则自动展开该文件夹
     if (parentId && treeRef.value) {
       const parentNode = treeRef.value.getNode(parentId);
-      if (parentNode) parentNode.expanded = true;
+      if (parentNode) {
+        parentNode.expanded = true;
+        // 手动触发状态更新以进行持久化
+        handleNodeExpand({ id: parentId } as Chat);
+      }
     }
   }
   itemDialogVisible.value = false;
-  itemNameInput.value = ''; // 清空输入
+  itemNameInput.value = '';
   contextMenuItem.value = null;
 };
 
@@ -437,9 +515,14 @@ const handleCreateChat = async () => {
       if (newChat) {
         ElMessage.success('创建成功');
         newChatDialogVisible.value = false;
+        // 如果在文件夹内创建, 则自动展开该文件夹
         if (parentId && treeRef.value) {
             const parentNode = treeRef.value.getNode(parentId);
-            if (parentNode) parentNode.expanded = true;
+            if (parentNode) {
+              parentNode.expanded = true;
+              // 手动触发状态更新以进行持久化
+              handleNodeExpand({ id: parentId } as Chat);
+            }
         }
         await scrollToChat(newChat.id);
       } else {
@@ -454,8 +537,7 @@ const goToSettings = () => router.push('/settings');
 </script>
 
 <style>
-
-
+/* 全局样式定义, 用于覆盖Element Plus默认样式 */
 .chat-tree {
   background-color: transparent;
 }
@@ -488,10 +570,9 @@ const goToSettings = () => router.push('/settings');
 .chat-list-header {
   flex-shrink: 0;
   padding: 16px 16px 8px 16px;
-  cursor: default; /* 增加一个默认光标，提升体验 */
+  cursor: default;
 }
 
-/* ... 其余 scoped 样式保持不变 ... */
 .chat-list-header h4 {
   margin: 0;
   font-size: 16px;
