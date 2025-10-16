@@ -21,4 +21,4 @@ COPY . .
 # -k uvicorn.workers.UvicornWorker: 使用 Uvicorn 的 worker 类来运行 ASGI 应用
 # backend.main:app: Gunicorn 要运行的应用实例
 # --bind 0.0.0.0:8000: 监听容器内的 8000 端口
-CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "backend.main:app", "--bind", "0.0.0.0:8000"]
+CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "main:app", "--bind", "0.0.0.0:8000"]
