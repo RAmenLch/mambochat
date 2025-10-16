@@ -1,24 +1,23 @@
 # backend/Dockerfile
 
-# --- Stage 1: Build Stage ---
 # 使用官方 Python 3.11 slim 镜像作为基础
 FROM python:3.11-slim
 
-# 设置工作目录
+# 设置工作目录为 /app
+# 我们将从这个目录启动应用，这样 Python 就能找到 'backend' 包
 WORKDIR /app
 
-# 复制依赖文件
+# 复制依赖文件到工作目录
 COPY requirements.txt .
 
-# 安装依赖，使用 --no-cache-dir 减小镜像体积
+# 安装依赖
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 复制所有后端代码到工作目录
-COPY . .
+# 将您本地 backend/ 目录下的所有内容，
+# 复制到容器内 /app/backend/ 这个新目录中
+COPY . ./backend/
 
-# --- Gunicorn 启动命令 ---
-# -w 4: 启动 4 个工作进程 (可根据 CPU 核心数调整, 推荐 2 * cores + 1)
-# -k uvicorn.workers.UvicornWorker: 使用 Uvicorn 的 worker 类来运行 ASGI 应用
-# backend.main:app: Gunicorn 要运行的应用实例
-# --bind 0.0.0.0:8000: 监听容器内的 8000 端口
-CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "main:app", "--bind", "0.0.0.0:8000"]
+# 启动命令：
+# 从 /app 目录启动，告诉 gunicorn 运行 backend 包里的 main 模块的 app 实例
+# 这就解决了相对导入的问题
+CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "backend.main:app", "--bind", "0.0.0.0:8000"]
