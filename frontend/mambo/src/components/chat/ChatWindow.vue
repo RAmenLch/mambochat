@@ -281,7 +281,10 @@ const handleStopGeneration = () => {
   }
 };
 
-const handleKeydown = (event: KeyboardEvent) => {
+const handleKeydown = (event: KeyboardEvent|Event) => {
+    if (!(event instanceof KeyboardEvent)) {
+    return;
+  }
   if (event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === 'z') {
     event.preventDefault();
     chatStore.undo();

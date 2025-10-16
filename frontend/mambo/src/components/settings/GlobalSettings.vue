@@ -61,7 +61,8 @@
 
         <el-form-item label="Temperature (温度)">
           <el-slider
-            v-model="settingsForm.default_temperature"
+            :model-value="settingsForm.default_temperature ?? 1.0"
+            @update:model-value="val => settingsForm.default_temperature = val as number"
             :min="0"
             :max="2"
             :step="0.1"
@@ -71,7 +72,8 @@
 
         <el-form-item label="Top P">
           <el-slider
-            v-model="settingsForm.default_top_p"
+            :model-value="settingsForm.default_top_p ?? 1.0"
+            @update:model-value="val => settingsForm.default_top_p = val as number"
             :min="0"
             :max="1"
             :step="0.01"
@@ -80,7 +82,10 @@
         </el-form-item>
 
         <el-form-item label="流式对话 (Stream)">
-           <el-switch v-model="settingsForm.default_stream" />
+           <el-switch
+             :model-value="settingsForm.default_stream ?? true"
+              @update:model-value="val => settingsForm.default_stream = val as boolean"
+           />
            <el-tooltip
               effect="dark"
               content="新会话默认是否开启流式对话。关闭后, AI将一次性返回完整回复, 可能会增加等待时间。"
