@@ -14,7 +14,7 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
     yield
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan,version="1.0.1")
 
 # 配置 CORS 中间件
 app.add_middleware(

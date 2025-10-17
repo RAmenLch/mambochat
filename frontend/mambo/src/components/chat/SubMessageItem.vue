@@ -118,15 +118,40 @@ const toggleCollapse = () => {
 };
 
 const handleBlockCopy = (contentToCopy: string) => {
-  navigator.clipboard
-    .writeText(contentToCopy)
-    .then(() => {
-      ElMessage.success('代码已复制到剪贴板');
-    })
-    .catch((err) => {
-      ElMessage.error('复制失败');
-      console.error('Could not copy text: ', err);
-    });
+  // 优先使用 navigator.clipboard API (在 HTTPS 或 localhost 环境下可用)
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard
+      .writeText(contentToCopy)
+      .then(() => {
+        ElMessage.success('代码已复制到剪贴板');
+      })
+      .catch((err) => {
+        ElMessage.error('复制失败');
+        console.error('Could not copy text using navigator.clipboard: ', err);
+      });
+  } else {
+    // 降级方案: 使用 document.execCommand (在 HTTP+IP 环境下可用)
+    const textArea = document.createElement('textarea');
+    textArea.value = contentToCopy;
+    textArea.style.position = 'fixed';
+    textArea.style.top = '-9999px';
+    textArea.style.left = '-9999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    try {
+      const successful = document.execCommand('copy');
+      if (successful) {
+        ElMessage.success('代码已复制到剪贴板');
+      } else {
+        ElMessage.error('复制失败');
+      }
+    } catch (err) {
+      ElMessage.error('复制失败，浏览器不支持此操作');
+      console.error('Could not copy text using document.execCommand: ', err);
+    }
+    document.body.removeChild(textArea);
+  }
 };
 
 // 初始化 Markdown-it, 启用 breaks 选项以支持单回车换行
