@@ -65,7 +65,7 @@
       ref="contextMenuRef"
       trigger="contextmenu"
       @command="handleCommand"
-      :class="{ 'context-menu-hidden': !isContextMenuVisible }"
+      popper-class="no-animation-popper"
     >
       <!-- 这个空的span是必须的,作为dropdown的定位锚点 -->
       <span :style="contextMenuPosition" />
@@ -340,7 +340,6 @@ const handleNodeDrop = async (draggingNode: Node, dropNode: Node, dropType: Node
 // -- Context Menu Logic --
 const contextMenuRef = ref();
 const contextMenuItem = ref<Chat | null>(null);
-const isContextMenuVisible = ref(false);
 const contextMenuPosition = reactive({
   position: 'fixed' as const,
   top: '0px',
@@ -350,30 +349,29 @@ const contextMenuPosition = reactive({
 const handleContextMenu = (event: MouseEvent, data: Chat | null) => {
   event.preventDefault();
 
-  // 如果在节点上右键但没有获取到节点数据, 则判定为无效操作 (例如点击了节点的空白区域)
+  // 如果在节点上右键但没有获取到节点数据 (例如点击了节点的空白区域), 则判定为无效操作
   if (!data && (event.target as HTMLElement).closest('.el-tree-node')) {
     return;
   }
 
-  // 1. 立即隐藏旧菜单, 防止闪烁
-  isContextMenuVisible.value = false;
+  // 1. 立即关闭任何已打开的菜单以重置其状态
+  if (contextMenuRef.value) {
+    contextMenuRef.value.handleClose();
+  }
 
-  // 2. 更新菜单关联的数据和目标位置
+  // 2. 更新菜单所需的数据和锚点位置
   contextMenuItem.value = data;
   contextMenuPosition.left = `${event.clientX}px`;
   contextMenuPosition.top = `${event.clientY}px`;
 
-  // 3. 等待DOM更新, 使菜单的锚点定位到新位置
-  nextTick(() => {
+  // 3. 将打开操作推迟到下一个宏任务事件循环中
+  // 这确保了Vue的DOM更新和上一步的 close 操作都已完成,
+  // 从而使Popper.js能在正确的位置上重新计算并打开菜单。
+  setTimeout(() => {
     if (contextMenuRef.value) {
-      // 4. 强制关闭并重新打开dropdown, 以便其内部的popper.js重新计算定位
-      contextMenuRef.value.handleClose();
       contextMenuRef.value.handleOpen();
-
-      // 5. 在新位置上显示菜单
-      isContextMenuVisible.value = true;
     }
-  });
+  }, 0);
 };
 
 // -- Item Operations (triggered by Context Menu) --
@@ -537,7 +535,10 @@ const goToSettings = () => router.push('/settings');
 </script>
 
 <style>
-/* 全局样式定义, 用于覆盖Element Plus默认样式 */
+/*
+  全局样式定义 (非 scoped)
+  用于覆盖 Element Plus 默认样式或定义全局辅助类
+*/
 .chat-tree {
   background-color: transparent;
 }
@@ -553,13 +554,15 @@ const goToSettings = () => router.push('/settings');
 .chat-tree .el-tree-node__content:hover {
     background-color: var(--color-background-mute);
 }
+
+.no-animation-popper {
+  /* 禁用 Element Plus 的默认缩放和淡入淡出动画 */
+  transition: none !important;
+  animation: none !important;
+}
 </style>
 
 <style scoped>
-.context-menu-hidden {
-  visibility: hidden;
-}
-
 .chat-list-container {
   height: 100%;
   display: flex;
