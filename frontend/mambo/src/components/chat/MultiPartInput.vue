@@ -113,7 +113,8 @@ const removePartition = (index: number) => {
 /**
  * 监听键盘事件，实现 Enter 发送，Shift+Enter 换行。
  */
-const handleKeydown = (event: KeyboardEvent) => {
+const handleKeydown = (event: KeyboardEvent| Event) => {
+  if (!(event instanceof KeyboardEvent)) return;
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault(); // 阻止默认的换行行为
     emit('send'); // 触发发送事件
