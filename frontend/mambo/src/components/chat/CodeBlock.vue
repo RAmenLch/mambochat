@@ -21,7 +21,7 @@
             text
             size="small"
             :disabled="isGenerating"
-            @click="copyCode"
+            @click="emitCopy"
           />
         </el-tooltip>
         <el-tooltip
@@ -51,8 +51,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ref, computed, watch } from 'vue';
 import {
   Edit,
   CopyDocument,
@@ -71,11 +70,14 @@ const props = defineProps<{
   isGenerating?: boolean;
 }>();
 
-const emit = defineEmits(['edit']);
+const emit = defineEmits(['edit', 'copy']);
 
 // --- 状态计算 ---
 const totalLines = computed(() => props.code.split('\n').length);
-const isCollapsed = ref(totalLines.value > DEFAULT_COLLAPSE_THRESHOLD);
+
+const isCollapsed = ref(
+  !props.isGenerating && totalLines.value > DEFAULT_COLLAPSE_THRESHOLD
+);
 
 const highlightedCode = computed(() => {
   const lang = props.language || 'plaintext';
@@ -92,25 +94,29 @@ const highlightedCode = computed(() => {
   return hljs.highlight(props.code, { language: 'plaintext', ignoreIllegals: true }).value;
 });
 
-// --- 事件处理 ---
-const copyCode = () => {
-  navigator.clipboard
-    .writeText(props.code)
-    .then(() => {
-      ElMessage.success('已复制到剪贴板');
-    })
-    .catch((err) => {
-      ElMessage.error('复制失败');
-      console.error('Could not copy text: ', err);
-    });
-};
+// 侦听 AI 生成状态以控制折叠行为
+watch(() => props.isGenerating, (generating, wasGenerating) => {
+  if (generating) {
+    // 如果开始生成, 强制展开
+    isCollapsed.value = false;
+  } else if (wasGenerating && !generating) {
+    // 如果生成刚结束, 根据最终行数决定是否折叠
+    isCollapsed.value = totalLines.value > DEFAULT_COLLAPSE_THRESHOLD;
+  }
+});
 
+
+// --- 事件处理 ---
 const toggleCollapse = () => {
   isCollapsed.value = !isCollapsed.value;
 };
 
 const emitEdit = () => {
   emit('edit', props.code);
+};
+
+const emitCopy = () => {
+  emit('copy', props.code);
 };
 </script>
 
