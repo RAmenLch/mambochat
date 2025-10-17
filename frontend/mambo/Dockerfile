@@ -1,4 +1,4 @@
-# frontend/mambo/Dockerfile
+# frontend/mambochat/Dockerfile
 
 # --- Stage 1: Build Stage ---
 # 使用 Node.js 22-alpine 镜像作为构建环境

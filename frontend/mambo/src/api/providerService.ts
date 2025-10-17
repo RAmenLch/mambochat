@@ -1,4 +1,4 @@
-// frontend/mambo/src/api/providerService.ts
+// frontend/mambochat/src/api/providerService.ts
 
 import apiClient from './index';
 import type {
