@@ -1,4 +1,4 @@
-// frontend/mambo/src/stores/chatStore.ts
+// frontend/mambochat/src/stores/chatStore.ts
 
 import { defineStore } from 'pinia';
 import { ElMessage } from 'element-plus';

@@ -1,4 +1,4 @@
-// frontend/mambo/src/stores/providerStore.ts
+// frontend/mambochat/src/stores/providerStore.ts
 
 import { defineStore } from 'pinia';
 import {

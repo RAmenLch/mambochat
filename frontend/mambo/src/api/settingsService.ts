@@ -1,4 +1,4 @@
-// frontend/mambo/src/api/settingsService.ts
+// frontend/mambochat/src/api/settingsService.ts
 
 import apiClient from './index';
 import type { GlobalSettingsUpdate } from './types';
