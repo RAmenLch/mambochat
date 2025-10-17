@@ -15,7 +15,7 @@
       style="width: 100%"
       highlight-current-row
       @row-click="handleRowClick"
-      :row-key="row => row.id"
+      :row-key="(row: AIProviderWithModels) => row.id"
       ref="providerTableRef"
     >
       <el-table-column prop="name" label="服务商名称" width="220" />
