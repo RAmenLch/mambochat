@@ -130,6 +130,26 @@ pip install -r requirements.txt
 uvicorn backend.main:app --reload
 ```
 
+#### **2. 前端 (Frontend)**
+
+```bash
+# 1. 进入前端目录
+cd frontend/mambo
+
+# 2. 安装依赖
+npm install
+
+# 3. 启动开发服务器 (支持热更新)
+#    Vite 将在 http://localhost:5173 (或其他可用端口) 运行
+npm run dev
+```
+
+启动后，访问 Vite 提供的地址（如 `http://localhost:5173`）即可。
+
+## 🤝 贡献
+
+欢迎任何形式的贡献！如果您有好的想法、发现了 Bug，或者希望添加新功能，请随时提交 Pull Request 或创建 Issue。
+
 ## 👨‍💻 下一步的开发计划
 1.  抽象关键功能,支持插件能力
 2.  我之初心,构建一个用于角色扮演的插件
