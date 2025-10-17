@@ -6,6 +6,8 @@ services:
     build:
       context: ./backend  # Dockerfile 所在的目录
       dockerfile: Dockerfile
+    environment:
+        - TZ=Asia/Shanghai
     volumes:
       # 将宿主机的 ./DB 目录映射到容器内的 /app/DB 目录
       # 这样 SQLite 数据库文件就能持久化保存
