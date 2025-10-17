@@ -51,6 +51,7 @@
             :language="block.language || 'Text'"
             :is-generating="isGenerating"
             @edit="(code) => $emit('edit', code)"
+            @copy="handleBlockCopy"
           />
           <div v-else v-html="block.content"></div>
         </div>
@@ -63,6 +64,7 @@
 import { computed, ref, watch } from 'vue';
 import type { SubMessage, Message } from '@/api/types';
 import { useChatStore } from '@/stores/chatStore';
+import { ElMessage } from 'element-plus';
 import { Edit, CopyDocument, ArrowUpBold, ArrowDownBold } from '@element-plus/icons-vue';
 import * as MarkdownIt from 'markdown-it';
 import * as markdownItLinkAttributes from 'markdown-it-link-attributes';
@@ -113,6 +115,18 @@ const toggleCollapse = () => {
       config: { ...props.subMessage.config, is_collapsed: newCollapsedState },
     },
   });
+};
+
+const handleBlockCopy = (contentToCopy: string) => {
+  navigator.clipboard
+    .writeText(contentToCopy)
+    .then(() => {
+      ElMessage.success('代码已复制到剪贴板');
+    })
+    .catch((err) => {
+      ElMessage.error('复制失败');
+      console.error('Could not copy text: ', err);
+    });
 };
 
 // 初始化 Markdown-it, 启用 breaks 选项以支持单回车换行
