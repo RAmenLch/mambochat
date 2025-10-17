@@ -1,4 +1,4 @@
-# LLM-API Client (Mambo) - v1.0.1
+# MamboChat 🐱爬架 LLM-API聊天工具
 
 [![版本](https://img.shields.io/badge/version-1.0.1-blue.svg)](https://github.com/RAmenLch/mambochat/releases/tag/v1.0.1)
 [![许可证](https://img.shields.io/badge/license-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
