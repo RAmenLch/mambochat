@@ -105,6 +105,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { User, Cpu, Refresh, RefreshLeft, Delete, Edit, CopyDocument, ArrowUpBold, ArrowDownBold } from '@element-plus/icons-vue';
 import SubMessageItem from './SubMessageItem.vue';
+import { copyToClipboard } from '@/utils/clipboard';
 
 const props = defineProps<{
   message: Message;
@@ -215,8 +216,7 @@ const handleDelete = () => {
 };
 
 const handleCopySingle = (subMessage: SubMessage) => {
-  navigator.clipboard
-    .writeText(subMessage.content)
+  copyToClipboard(subMessage.content)
     .then(() => ElMessage.success('已复制到剪贴板'))
     .catch(() => ElMessage.error('复制失败'));
 }
@@ -230,8 +230,7 @@ const handleCopy = () => {
       .map(sm => sm.content)
       .join('\n--------------------------\n');
   }
-  navigator.clipboard
-    .writeText(contentToCopy)
+  copyToClipboard(contentToCopy)
     .then(() => ElMessage.success('已复制到剪贴板'))
     .catch(() => ElMessage.error('复制失败'));
 };
