@@ -581,7 +581,7 @@ const goToSettings = () => router.push('/settings');
 }
 
 .el-divider {
-  margin: 12px 0;
+  margin: 0px 0px;
   flex-shrink: 0;
 }
 
@@ -625,6 +625,6 @@ const goToSettings = () => router.push('/settings');
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  padding: 0 12px;
+  padding: 8px 12px;
 }
 </style>
