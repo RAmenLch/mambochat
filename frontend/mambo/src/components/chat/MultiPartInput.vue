@@ -3,7 +3,7 @@
     <div class="partition-sidebar">
       <el-scrollbar>
         <div
-          v-for="(part, index) in partitions"
+          v-for="(part, index) in localPartitions"
           :key="part.id"
           class="partition-tab"
           :class="{ 'is-active': activeIndex === index }"
@@ -18,31 +18,74 @@
       </div>
     </div>
     <div class="partition-editor">
+      <!-- 确保在 localPartitions 可用时才渲染 el-input，防止绑定错误 -->
       <el-input
+        v-if="localPartitions.length > 0 && localPartitions[activeIndex]"
         ref="textareaRef"
-        v-model="partitions[activeIndex].content"
+        v-model="localPartitions[activeIndex].content"
         type="textarea"
         resize="none"
-        :placeholder="`输入分区 ${activeIndex + 1} 的内容...`"
+        :placeholder="`输入分区 ${activeIndex + 1} 的内容... (Shift + Enter 换行)`"
+        @keydown="handleKeydown"
       />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick } from 'vue';
+import { ref, watch, nextTick } from 'vue';
 import { Plus, Close } from '@element-plus/icons-vue';
 import type { SubMessageCreate } from '@/api/types';
 import type { ElInput } from 'element-plus';
 
+// 分区对象的本地UI表示
 interface Partition {
   id: number;
   content: string;
 }
 
-const partitions = ref<Partition[]>([{ id: Date.now(), content: '' }]);
+// 接收 modelValue prop (用于 v-model)
+const props = defineProps<{
+  modelValue: Partition[];
+}>();
+
+// 定义组件可发出的事件
+const emit = defineEmits<{
+  (e: 'update:modelValue', value: Partition[]): void;
+  (e: 'send'): void;
+}>();
+
+
+const localPartitions = ref<Partition[]>([]);
 const activeIndex = ref(0);
 const textareaRef = ref<InstanceType<typeof ElInput>>();
+
+// --- 数据同步 ---
+
+// 1. 从父组件(prop)到本地状态的单向同步
+//    当外部的 modelValue (例如，来自store的草稿) 变化时，更新本地UI
+watch(() => props.modelValue, (newVal) => {
+  // 使用JSON字符串比较来避免因对象引用不同而导致的无限更新循环
+  if (JSON.stringify(newVal) !== JSON.stringify(localPartitions.value)) {
+    // 确保分区数组至少有一个元素，以防UI绑定出错
+    const partitionsToSet = newVal && newVal.length > 0 ? newVal : [{ id: Date.now(), content: '' }];
+    localPartitions.value = JSON.parse(JSON.stringify(partitionsToSet)); // 深拷贝
+
+    // 如果当前选中的索引在新数据中无效，则重置它
+    if (activeIndex.value >= localPartitions.value.length) {
+      activeIndex.value = Math.max(0, localPartitions.value.length - 1);
+    }
+  }
+}, { deep: true, immediate: true });
+
+// 2. 从本地状态到父组件(emit)的单向同步
+//    当用户在UI中操作 (输入、增删分区) 时，通知父组件数据已更新
+watch(localPartitions, (newVal) => {
+  emit('update:modelValue', newVal);
+}, { deep: true });
+
+
+// --- UI 交互方法 ---
 
 const selectPartition = (index: number) => {
   activeIndex.value = index;
@@ -50,26 +93,40 @@ const selectPartition = (index: number) => {
 };
 
 const addPartition = async () => {
-  partitions.value.push({ id: Date.now(), content: '' });
+  localPartitions.value.push({ id: Date.now(), content: '' });
   await nextTick();
-  selectPartition(partitions.value.length - 1);
+  selectPartition(localPartitions.value.length - 1);
 };
 
 const removePartition = (index: number) => {
-  if (partitions.value.length <= 1) return;
+  // 保持至少有一个分区
+  if (localPartitions.value.length <= 1) return;
 
-  partitions.value.splice(index, 1);
+  localPartitions.value.splice(index, 1);
 
-  if (activeIndex.value >= partitions.value.length) {
-    activeIndex.value = partitions.value.length - 1;
-  } else if (activeIndex.value === index) {
-    // If the active tab was deleted, stay at the same index if possible
-    // This is handled implicitly by the previous check if it was the last one
+  // 如果删除的是当前或之前的分区，调整 activeIndex
+  if (activeIndex.value >= localPartitions.value.length) {
+    activeIndex.value = localPartitions.value.length - 1;
   }
 };
 
+/**
+ * 监听键盘事件，实现 Enter 发送，Shift+Enter 换行。
+ */
+const handleKeydown = (event: KeyboardEvent) => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault(); // 阻止默认的换行行为
+    emit('send'); // 触发发送事件
+  }
+};
+
+// --- 暴露给父组件的方法 ---
+
+/**
+ * 获取符合API格式的分区数据。
+ */
 const getData = (): SubMessageCreate[] => {
-  return partitions.value
+  return localPartitions.value
     .map((part, index) => ({
       content: part.content,
       sortOrder: index,
@@ -77,8 +134,11 @@ const getData = (): SubMessageCreate[] => {
     .filter(part => part.content.trim() !== '');
 };
 
+/**
+ * 重置输入框为初始状态。
+ */
 const reset = () => {
-  partitions.value = [{ id: Date.now(), content: '' }];
+  localPartitions.value = [{ id: Date.now(), content: '' }];
   activeIndex.value = 0;
 };
 
@@ -163,7 +223,9 @@ defineExpose({
   flex-grow: 1;
 }
 
-.partition-editor .el-textarea {
+/* 确保 el-input 和其内部的 textarea 填满容器高度 */
+.partition-editor .el-input,
+.partition-editor :deep(.el-textarea) {
   height: 100%;
 }
 

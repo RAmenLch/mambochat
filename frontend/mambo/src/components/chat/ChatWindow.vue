@@ -31,14 +31,15 @@
           :current-chat="currentChat"
           :estimated-tokens="estimatedTokens"
           @open-settings="openSettingsDrawer"
-          @toggle-multi-part-mode="isMultiPartMode = !isMultiPartMode"
+          @toggle-multi-part-mode="handleToggleMultiPartMode"
         />
-        <div class="chat-input-area">
+        <div class="chat-input-area" @keydown="handleGlobalKeydown">
           <MultiPartInput
             v-if="isMultiPartMode"
             ref="multiPartInputRef"
+            v-model="multiPartDraft"
             class="input-field"
-            @keydown="handleKeydown"
+            @send="handleSendMessage"
           />
           <el-input
             v-else
@@ -49,7 +50,7 @@
             resize="none"
             placeholder="输入消息... (Shift + Enter 换行)"
             :disabled="isGenerating"
-            @keydown="handleKeydown"
+            @keydown="handleSingleInputKeydown"
             class="input-field"
           />
           <el-button
@@ -142,6 +143,7 @@ import type { ChatUpdate } from '@/api/types';
 import { debounce } from 'lodash-es';
 import { encode } from 'gpt-tokenizer';
 
+// --- 类型定义 ---
 interface ChatSettingsForm extends ChatUpdate {
   name: string | null;
   modelParameters: {
@@ -152,6 +154,12 @@ interface ChatSettingsForm extends ChatUpdate {
   };
 }
 
+interface Partition {
+  id: number;
+  content: string;
+}
+
+// --- Store 和 Refs ---
 const chatStore = useChatStore();
 const providerStore = useProviderStore();
 
@@ -161,11 +169,16 @@ const { providers } = storeToRefs(providerStore);
 const scrollbarRef = ref<InstanceType<typeof ElScrollbar>>();
 const inputRef = ref<InstanceType<typeof ElInput>>();
 const multiPartInputRef = ref<InstanceType<typeof MultiPartInput>>();
+
 const isMultiPartMode = ref(false);
 const localUserInput = ref('');
+const multiPartDraft = ref<Partition[]>([{ id: Date.now(), content: '' }]);
+
+// 用于持久化每个会话的输入模式
+const chatInputModeState = reactive<Record<string, boolean>>({});
 
 // --- 响应式输入区高度 ---
-const inputAreaHeight = ref(150); // 初始高度
+const inputAreaHeight = ref(150);
 const MIN_INPUT_HEIGHT = 100;
 const MAX_INPUT_HEIGHT = 600;
 
@@ -185,35 +198,96 @@ const debouncedEstimateTokens = debounce((currentUserInputText: string) => {
   }
 }, 500);
 
-// --- 输入区历史记录 (Undo/Redo) & 双向同步 ---
-const debouncedSaveDraft = debounce((content: string) => {
+// --- 输入区草稿管理 (Undo/Redo & 双向同步) ---
+const debouncedSaveSingleDraft = debounce((content: string) => {
   chatStore.saveDraft(content);
 }, 300);
 
-// 从 Store -> UI 的同步
+const debouncedSaveMultiPartDraft = debounce((partitions: Partition[]) => {
+  const jsonString = JSON.stringify(partitions);
+  chatStore.saveDraft(jsonString);
+}, 300);
+
+
 watch(currentDraft, (newDraft) => {
-  if (localUserInput.value !== newDraft) {
-    localUserInput.value = newDraft;
+  if (isMultiPartMode.value) {
+    try {
+      const parsedPartitions: Partition[] = JSON.parse(newDraft);
+      if (JSON.stringify(parsedPartitions) !== JSON.stringify(multiPartDraft.value)) {
+        multiPartDraft.value = parsedPartitions;
+      }
+    } catch (e) {
+      multiPartDraft.value = [{ id: Date.now(), content: '' }];
+    }
+  } else {
+    if (localUserInput.value !== newDraft) {
+      localUserInput.value = newDraft;
+    }
   }
 });
 
-// 从 UI -> Store 的同步, 并触发 Token 估算
 watch(localUserInput, (newInput) => {
-  debouncedSaveDraft(newInput);
-  if (!isMultiPartMode.value) {
-    debouncedEstimateTokens(newInput);
-  }
+  if (isMultiPartMode.value) return;
+  debouncedSaveSingleDraft(newInput);
+  debouncedEstimateTokens(newInput);
 });
 
+watch(multiPartDraft, (newPartitions) => {
+  if (!isMultiPartMode.value) return;
+  debouncedSaveMultiPartDraft(newPartitions);
+  const allContent = newPartitions.map(p => p.content).join('\n');
+  debouncedEstimateTokens(allContent);
+}, { deep: true });
 
+// --- 按钮与发送逻辑 ---
 const isSendButtonDisabled = computed(() => {
   if (isGenerating.value) return true;
   if (isMultiPartMode.value) {
-    const data = multiPartInputRef.value?.getData() || [];
-    return data.length === 0;
+    return !multiPartDraft.value.some(p => p.content.trim() !== '');
   }
   return localUserInput.value.trim() === '';
 });
+
+const handleSendMessage = async () => {
+  if (isSendButtonDisabled.value) return;
+
+  if (isMultiPartMode.value) {
+    const subMessages = multiPartInputRef.value?.getData();
+    if (subMessages && subMessages.length > 0) {
+      await chatStore.sendMessage(subMessages);
+      multiPartInputRef.value?.reset();
+    }
+  } else {
+    const content = localUserInput.value;
+    await chatStore.sendMessage([{ content, sortOrder: 0 }]);
+    localUserInput.value = '';
+  }
+};
+
+// --- 输入模式切换与数据转换 ---
+const handleToggleMultiPartMode = () => {
+  if (!currentChat.value) return;
+  const chatId = currentChat.value.id;
+  const nextMode = !isMultiPartMode.value;
+
+  if (nextMode) { // 切换到多分区
+    multiPartDraft.value = [{ id: Date.now(), content: localUserInput.value }];
+  } else { // 切换到单行
+    localUserInput.value = multiPartDraft.value
+      .map(p => p.content)
+      .join('\n--------------------------\n');
+  }
+
+  isMultiPartMode.value = nextMode;
+  chatInputModeState[chatId] = nextMode;
+
+  // 切换后，立即为新模式保存一次草稿
+  if (nextMode) {
+    debouncedSaveMultiPartDraft(multiPartDraft.value);
+  } else {
+    debouncedSaveSingleDraft(localUserInput.value);
+  }
+};
 
 // --- Settings Drawer Logic ---
 const settingsDrawerVisible = ref(false);
@@ -255,23 +329,8 @@ const handleSaveSettings = async () => {
   ElMessage.success('设置已保存');
 };
 
-// --- 交互逻辑 ---
-const handleSendMessage = async () => {
-  if (isSendButtonDisabled.value) return;
 
-  if (isMultiPartMode.value) {
-    const subMessages = multiPartInputRef.value?.getData();
-    if (subMessages && subMessages.length > 0) {
-      await chatStore.sendMessage(subMessages);
-      multiPartInputRef.value?.reset();
-    }
-  } else {
-    const content = localUserInput.value;
-    await chatStore.sendMessage([{ content, sortOrder: 0 }]);
-    localUserInput.value = ''; // 发送后清空本地输入
-  }
-};
-
+// --- 其他交互逻辑 ---
 const handleStopGeneration = () => {
   const generatingMessage = currentChatMessages.value.find(m =>
     m.sub_messages.some(sm => sm.status === 'generating')
@@ -281,17 +340,19 @@ const handleStopGeneration = () => {
   }
 };
 
-const handleKeydown = (event: KeyboardEvent|Event) => {
-    if (!(event instanceof KeyboardEvent)) {
-    return;
-  }
+const handleGlobalKeydown = (event: KeyboardEvent) => {
   if (event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === 'z') {
     event.preventDefault();
     chatStore.undo();
   } else if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'z') {
     event.preventDefault();
     chatStore.redo();
-  } else if (event.key === 'Enter' && !event.shiftKey && !isMultiPartMode.value) {
+  }
+};
+
+const handleSingleInputKeydown = (event: KeyboardEvent | Event) => {
+  if (!(event instanceof KeyboardEvent)) return;
+  if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
     handleSendMessage();
   }
@@ -300,20 +361,17 @@ const handleKeydown = (event: KeyboardEvent|Event) => {
 const startResize = (event: MouseEvent) => {
   const startY = event.clientY;
   const startHeight = inputAreaHeight.value;
-
   const doResize = (e: MouseEvent) => {
     const deltaY = startY - e.clientY;
     const newHeight = startHeight + deltaY;
     inputAreaHeight.value = Math.max(MIN_INPUT_HEIGHT, Math.min(newHeight, MAX_INPUT_HEIGHT));
   };
-
   const stopResize = () => {
     window.removeEventListener('mousemove', doResize);
     window.removeEventListener('mouseup', stopResize);
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
   };
-
   window.addEventListener('mousemove', doResize);
   window.addEventListener('mouseup', stopResize);
   document.body.style.cursor = 'ns-resize';
@@ -338,8 +396,7 @@ const scrollToBottom = (force = false) => {
   });
 };
 
-watch(
-  () => {
+watch(() => {
     const lastMsg = currentChatMessages.value[currentChatMessages.value.length - 1];
     const lastSubMsg = lastMsg?.sub_messages[lastMsg.sub_messages.length - 1];
     return lastSubMsg?.content;
@@ -347,37 +404,43 @@ watch(
   () => scrollToBottom()
 );
 
-watch(
-  () => currentChat.value?.id,
-  (newId, oldId) => {
+// 切换会话时，加载对应的草稿和输入模式
+watch(() => currentChat.value?.id, (newId, oldId) => {
     if (newId && newId !== oldId) {
-      isMultiPartMode.value = false;
       userHasScrolledUp.value = false;
-      // 切换会话时, 加载对应的草稿
-      localUserInput.value = currentDraft.value;
+
+      // 恢复该会话的输入模式，默认为 false (单行)
+      isMultiPartMode.value = chatInputModeState[newId] ?? false;
+
+      // 根据恢复的模式，加载和解析草稿
+      if (isMultiPartMode.value) {
+        try {
+          const parsed = JSON.parse(currentDraft.value);
+          multiPartDraft.value = Array.isArray(parsed) && parsed.length > 0 ? parsed : [{ id: Date.now(), content: '' }];
+        } catch {
+          multiPartDraft.value = [{ id: Date.now(), content: '' }];
+        }
+      } else {
+        localUserInput.value = currentDraft.value;
+      }
+
+      // 滚动到底部并聚焦
       const unwatch = watch(isChatHistoryLoading, (isLoading) => {
         if (!isLoading) {
           scrollToBottom(true);
           unwatch();
         }
       });
-      nextTick(() => inputRef.value?.focus());
+      nextTick(() => {
+        if (isMultiPartMode.value) {
+          // 在多分区模式下，可能需要主动聚焦子组件的输入框
+        } else {
+          inputRef.value?.focus();
+        }
+      });
     }
   }
 );
-
-watch(isMultiPartMode, (isMulti) => {
-  if(isMulti) {
-    // 监听多分区输入内容变化以估算token
-    watch(() => multiPartInputRef.value?.getData(), (data) => {
-      const allContent = data?.map(d => d.content).join('\n') || '';
-      debouncedEstimateTokens(allContent);
-    }, { deep: true, immediate: true });
-  } else {
-    // 单分区模式下监听 localUserInput 即可
-    debouncedEstimateTokens(localUserInput.value);
-  }
-}, { immediate: true });
 </script>
 
 <style scoped>
@@ -447,13 +510,11 @@ watch(isMultiPartMode, (isMulti) => {
   height: 100% !important;
 }
 .action-button {
-  height: auto;
   width: 54px;
   font-size: 20px;
   flex-shrink: 0;
   align-self: flex-end;
-  margin-bottom: 1px; /* 微调对齐 */
-  height: calc(100% - 2px); /* 充满父容器高度 */
+  height: calc(100% - 2px);
 }
 .drawer-content {
   padding: 0 20px;
