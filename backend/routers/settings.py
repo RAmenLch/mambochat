@@ -2,9 +2,12 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 from typing import Any, Optional
 
-from .. import crud, schemas
+from ..crud import setting_crud, provider_crud
+from ..models import setting_model
+from .. import schemas
 from ..database import get_db
 
 router = APIRouter()
@@ -32,21 +35,16 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
     获取系统当前的全局配置。
     如果用户未设置过某些配置，则返回系统预设的默认值。
     """
-    # 批量获取所有相关配置
     keys = [
         "default_model_id", "last_selected_provider_id", "default_max_context_messages",
         "default_temperature", "default_top_p", "default_stream"
     ]
 
-    # --- FIX START ---
-    # 先 await db.execute 获取 Result 对象, 然后再调用 .scalars()
     result = await db.execute(
-        crud.select(crud.models.GlobalSettings).filter(crud.models.GlobalSettings.key.in_(keys))
+        select(setting_model.GlobalSettings).filter(setting_model.GlobalSettings.key.in_(keys))
     )
     settings_map = {s.key: s for s in result.scalars().all()}
-    # --- FIX END ---
 
-    # 使用辅助函数安全地获取和转换值
     default_model_id = _get_typed_setting(settings_map.get("default_model_id"), None, str)
     last_selected_provider_id = _get_typed_setting(settings_map.get("last_selected_provider_id"), None, str)
     max_context = _get_typed_setting(settings_map.get("default_max_context_messages"), 0, int)
@@ -82,7 +80,7 @@ async def update_global_settings(
     if "default_model_id" in update_data:
         model_id = update_data["default_model_id"]
         if model_id:
-            db_model = await crud.get_model(db, model_id=model_id)
+            db_model = await provider_crud.get_model(db, model_id=model_id)
             if not db_model:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -93,7 +91,7 @@ async def update_global_settings(
     if "last_selected_provider_id" in update_data:
         provider_id = update_data["last_selected_provider_id"]
         if provider_id:
-            db_provider = await crud.get_provider(db, provider_id=provider_id)
+            db_provider = await provider_crud.get_provider(db, provider_id=provider_id)
             if not db_provider:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -101,7 +99,6 @@ async def update_global_settings(
                 )
         settings_to_update.append(schemas.GlobalSetting(key="last_selected_provider_id", value=provider_id))
 
-    # 处理新增的模型参数
     param_keys = {
         "default_max_context_messages": int,
         "default_temperature": float,
@@ -111,11 +108,10 @@ async def update_global_settings(
     for key, _ in param_keys.items():
         if key in update_data:
             value = update_data[key]
-            # 将值转换为字符串以便存入数据库
             settings_to_update.append(schemas.GlobalSetting(key=key, value=str(value) if value is not None else None))
 
-    # 批量更新数据库
     for setting in settings_to_update:
-        await crud.update_setting(db, setting=setting)
+        await setting_crud.update_setting(db, setting=setting)
 
     return await get_global_settings(db)
+

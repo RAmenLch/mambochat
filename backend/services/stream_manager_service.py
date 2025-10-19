@@ -1,9 +1,8 @@
-# backend/services/stream_manager.py
+# backend/services/stream_manager_service.py
 
 import asyncio
 from collections import defaultdict
 from typing import Dict, List, Set
-
 
 class StreamManager:
     """
@@ -62,13 +61,13 @@ class StreamManager:
                 except ValueError:
                     pass
 
-    async def publish(self, message_id: str, chunk: str):
+    async def publish(self, message_id: str, chunk: any):
         """
         向指定流的所有订阅者发布一个数据块。
 
         Args:
             message_id: 目标流的ID。
-            chunk: 要发送的字符串数据块。
+            chunk: 要发送的数据块。
         """
         async with self.lock:
             if message_id in self.active_streams:
@@ -78,20 +77,17 @@ class StreamManager:
     async def close_stream(self, message_id: str):
         """
         关闭一个流，通知所有订阅者流已结束，并清理资源。
-        这通常在任务自然完成或失败时由后台任务自己调用。
         """
         async with self.lock:
             if message_id in self.active_streams:
                 subscribers = self.active_streams.pop(message_id, [])
                 print(f"[StreamManager] Closing stream '{message_id}' for {len(subscribers)} subscribers.")
                 await asyncio.gather(*(queue.put(None) for queue in subscribers))
-            # 清理可能存在的停止请求
             self.cancellation_requests.discard(message_id)
 
     async def request_cancellation(self, message_id: str):
         """
         请求停止一个正在运行的生成任务。
-        这会向后台任务发出一个信号，但不会立即中断它。
         """
         async with self.lock:
             print(f"[StreamManager] Cancellation requested for message '{message_id}'.")
@@ -100,7 +96,6 @@ class StreamManager:
     async def is_cancellation_requested(self, message_id: str) -> bool:
         """
         检查一个任务是否已被请求停止。
-        后台任务应该在它的循环中定期调用此方法。
         """
         async with self.lock:
             return message_id in self.cancellation_requests
@@ -108,3 +103,4 @@ class StreamManager:
 
 # 创建一个全局唯一的 StreamManager 实例，供整个应用使用
 stream_manager = StreamManager()
+
