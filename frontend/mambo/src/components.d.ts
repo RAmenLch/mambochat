@@ -9,6 +9,7 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     ChatList: typeof import('./components/chat/ChatList.vue')['default']
+    ChatSettingsDrawer: typeof import('./components/chat/ChatSettingsDrawer.vue')['default']
     ChatToolbar: typeof import('./components/chat/ChatToolbar.vue')['default']
     ChatWindow: typeof import('./components/chat/ChatWindow.vue')['default']
     CodeBlock: typeof import('./components/chat/CodeBlock.vue')['default']
@@ -37,9 +38,15 @@ declare module 'vue' {
     ElSlider: typeof import('element-plus/es')['ElSlider']
     ElSwitch: typeof import('element-plus/es')['ElSwitch']
     ElTooltip: typeof import('element-plus/es')['ElTooltip']
+    FetchModelsDialog: typeof import('./components/settings/dialogs/FetchModelsDialog.vue')['default']
     GlobalSettings: typeof import('./components/settings/GlobalSettings.vue')['default']
+    ItemNameDialog: typeof import('./components/chat/dialogs/ItemNameDialog.vue')['default']
+    MessageEditDialog: typeof import('./components/chat/dialogs/MessageEditDialog.vue')['default']
     MessageItem: typeof import('./components/chat/MessageItem.vue')['default']
+    ModelFormDialog: typeof import('./components/settings/dialogs/ModelFormDialog.vue')['default']
     MultiPartInput: typeof import('./components/chat/MultiPartInput.vue')['default']
+    NewChatDialog: typeof import('./components/chat/dialogs/NewChatDialog.vue')['default']
+    ProviderFormDialog: typeof import('./components/settings/dialogs/ProviderFormDialog.vue')['default']
     ProviderModelManager: typeof import('./components/settings/ProviderModelManager.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
