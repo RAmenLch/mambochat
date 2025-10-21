@@ -65,7 +65,6 @@
     </div>
   </div>
 
-  <!-- 【关键修复】将 v-if 替换为 v-show，确保组件实例存在以接收 props 更新 -->
   <MessageEditDialog
     v-show="editDialogVisible"
     v-model:visible="editDialogVisible"

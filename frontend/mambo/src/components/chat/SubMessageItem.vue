@@ -85,23 +85,13 @@ watch(() => props.subMessage.config.is_collapsed, (newValue) => {
   isCollapsed.value = newValue || false;
 });
 
-// [LOG] 新增函数处理头部编辑按钮点击
 function handleHeaderEditClick() {
   const payload = { content: props.subMessage.content };
-  console.log(
-    '[DEBUG SubMessageItem.vue] handleHeaderEditClick called. Emitting "edit" with payload:',
-    JSON.stringify(payload, null, 2)
-  );
   emit('edit', payload);
 }
 
-// [LOG] 新增函数处理 CodeBlock 的 edit 事件
 function handleCodeBlockEdit(code: string, blockIndex: number) {
   const payload = { content: code, blockIndex };
-  console.log(
-    '[DEBUG SubMessageItem.vue] handleCodeBlockEdit called (from CodeBlock). Emitting "edit" with payload:',
-    JSON.stringify(payload, null, 2)
-  );
   emit('edit', payload);
 }
 
