@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/chat/SubMessageItem.vue -->
 <template>
   <div
     class="sub-message-item"
@@ -8,10 +9,10 @@
       <span class="partition-title">分区 {{ index }}</span>
       <div class="actions">
         <el-tooltip content="编辑" placement="top" :show-after="500">
-          <el-button :icon="Edit" circle text size="small" @click="$emit('edit', { content: subMessage.content })" :disabled="isGenerating" />
+          <el-button :icon="Edit" circle text size="small" @click="handleHeaderEditClick" :disabled="isGenerating" />
         </el-tooltip>
         <el-tooltip content="复制" placement="top" :show-after="500">
-          <el-button :icon="CopyDocument" circle text size="small" @click="$emit('copy')" :disabled="isGenerating" />
+          <el-button :icon="CopyDocument" circle text size="small" @click="emit('copy')" :disabled="isGenerating" />
         </el-tooltip>
         <el-tooltip :content="isCollapsed ? '展开' : '折叠'" placement="top" :show-after="500">
           <el-button
@@ -32,16 +33,14 @@
         <span></span><span></span><span></span>
       </div>
       <template v-else>
-        <!-- 修复点: v-for 循环中的 key 应为 block.content + idx 以增加唯一性, 但为简化此处保持 idx -->
         <div v-for="(block, idx) in contentBlocks" :key="idx" class="content-block">
-          <!-- 修复点: 注释移到标签外部 -->
           <!-- 编辑代码块时，携带块的索引信息 -->
           <CodeBlock
             v-if="block.type === 'code'"
             :code="block.content"
             :language="block.language || 'Text'"
             :is-generating="isGenerating"
-            @edit="(code) => $emit('edit', { content: code, blockIndex: idx })"
+            @edit="(code) => handleCodeBlockEdit(code, idx)"
             @copy="handleBlockCopy"
           />
           <div v-else v-html="block.content"></div>
@@ -53,7 +52,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import type { SubMessage, Message, SubMessageConfig } from '@/api/types'; // 确保类型导入
+import type { SubMessage, Message, SubMessageConfig } from '@/api/types';
 import { useChatStore } from '@/stores/chatStore';
 import { ElMessage } from 'element-plus';
 import { Edit, CopyDocument, ArrowUpBold, ArrowDownBold } from '@element-plus/icons-vue';
@@ -71,7 +70,7 @@ const props = withDefaults(defineProps<{
   index: 1,
 });
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'edit', payload: { content: string, blockIndex?: number }): void;
   (e: 'copy'): void;
 }>();
@@ -85,6 +84,26 @@ const contentBlocks = computed(() => parseMarkdown(props.subMessage.content));
 watch(() => props.subMessage.config.is_collapsed, (newValue) => {
   isCollapsed.value = newValue || false;
 });
+
+// [LOG] 新增函数处理头部编辑按钮点击
+function handleHeaderEditClick() {
+  const payload = { content: props.subMessage.content };
+  console.log(
+    '[DEBUG SubMessageItem.vue] handleHeaderEditClick called. Emitting "edit" with payload:',
+    JSON.stringify(payload, null, 2)
+  );
+  emit('edit', payload);
+}
+
+// [LOG] 新增函数处理 CodeBlock 的 edit 事件
+function handleCodeBlockEdit(code: string, blockIndex: number) {
+  const payload = { content: code, blockIndex };
+  console.log(
+    '[DEBUG SubMessageItem.vue] handleCodeBlockEdit called (from CodeBlock). Emitting "edit" with payload:',
+    JSON.stringify(payload, null, 2)
+  );
+  emit('edit', payload);
+}
 
 function toggleCollapse() {
   const newCollapsedState = !isCollapsed.value;

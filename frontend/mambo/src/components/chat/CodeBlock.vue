@@ -112,6 +112,11 @@ const toggleCollapse = () => {
 };
 
 const emitEdit = () => {
+  // [LOG] 记录点击事件和即将 emit 的内容
+  console.log(
+    '[DEBUG CodeBlock.vue] emitEdit called. Emitting "edit" event with code:',
+    JSON.stringify(props.code)
+  );
   emit('edit', props.code);
 };
 

@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/chat/MessageItem.vue -->
 <template>
   <div
     class="message-item-container"
@@ -49,6 +50,7 @@
         </el-tooltip>
 
         <el-tooltip v-if="isSingleSubMessage" content="编辑" placement="top" :show-after="500">
+          <!-- 这里也统一调用 handleEditRequest -->
           <el-button :icon="Edit" circle size="small" @click="handleEditRequest(firstSubMessage, { content: firstSubMessage.content })" />
         </el-tooltip>
 
@@ -63,8 +65,9 @@
     </div>
   </div>
 
+  <!-- 【关键修复】将 v-if 替换为 v-show，确保组件实例存在以接收 props 更新 -->
   <MessageEditDialog
-    v-if="editingSubMessage"
+    v-show="editDialogVisible"
     v-model:visible="editDialogVisible"
     :initial-content="originalEditingContent"
     :is-user-message="message.role === 'user'"
@@ -75,7 +78,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import type { Message, SubMessage, SubMessageCreate, MessageStatus } from '@/api/types'; // 导入 SubMessageCreate
+import type { Message, SubMessage, SubMessageCreate, MessageStatus } from '@/api/types';
 import { useChatStore } from '@/stores/chatStore';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { User, Cpu, Refresh, RefreshLeft, Delete, Edit, CopyDocument, ArrowUpBold, ArrowDownBold } from '@element-plus/icons-vue';
@@ -120,8 +123,23 @@ const editingSubMessage = ref<SubMessage | null>(null);
 const originalEditingContent = ref('');
 const editingBlockIndex = ref<number | null>(null);
 
+// 【关键修复】添加 watch 来处理对话框关闭后的清理工作
+watch(editDialogVisible, (newValue) => {
+  if (!newValue) {
+    // 当对话框关闭时，重置状态，以便下次正确打开
+    editingSubMessage.value = null;
+    originalEditingContent.value = '';
+    editingBlockIndex.value = null;
+  }
+});
 
 function handleEditRequest(subMessage: SubMessage, payload: { content: string; blockIndex?: number }) {
+  // 如果没有 subMessage 或者 payload，则不执行任何操作
+  if (!subMessage || !payload) {
+    console.error("handleEditRequest called with invalid arguments", { subMessage, payload });
+    return;
+  }
+
   editingSubMessage.value = subMessage;
   originalEditingContent.value = payload.content;
   editingBlockIndex.value = payload.blockIndex ?? null;
@@ -137,7 +155,7 @@ function replaceNthOccurrence(str: string, find: string, replace: string, n: num
   return str.substring(0, i) + replace + str.substring(i + find.length);
 }
 
-function getUpdatedFullContent(newPartialContent: string) {
+function getUpdatedFullContent(newPartialContent: string): string {
   if (!editingSubMessage.value) return '';
 
   const fullOriginalContent = editingSubMessage.value.content;
@@ -150,16 +168,14 @@ function getUpdatedFullContent(newPartialContent: string) {
 
   const originalBlocks = parseMarkdown(fullOriginalContent);
   let occurrence = 0;
-  // blockIndex is the index in the originalBlocks array
   if (blockIndex < originalBlocks.length && originalBlocks[blockIndex].content === partialOriginalContent) {
-    // Count how many times the same content appeared *before* this blockIndex
     for (let i = 0; i < blockIndex; i++) {
       if (originalBlocks[i].content === partialOriginalContent) {
         occurrence++;
       }
     }
   } else {
-    // Fallback if something is inconsistent, though unlikely
+    // Fallback if something is inconsistent
     return fullOriginalContent.replace(partialOriginalContent, newPartialContent);
   }
 
@@ -180,9 +196,7 @@ function handleSaveAndResend(newContent: string) {
 
   const updatedContent = getUpdatedFullContent(newContent);
 
-  // 修复点: 显式构建 SubMessageCreate[] 类型的数组
   const newSubMessages: SubMessageCreate[] = props.message.sub_messages.map(sm => {
-    // 显式创建符合 SubMessageCreate 接口的对象
     return {
       content: sm.id === editingSubMessage.value!.id ? updatedContent : sm.content,
       sortOrder: sm.sortOrder,
@@ -220,8 +234,8 @@ async function handleCopySingle(subMessage: SubMessage) {
 }
 
 async function handleCopy() {
-  const contentToCopy = isSingleSubMessage.value
-    ? firstSubMessage.value?.content || ''
+  const contentToCopy = (isSingleSubMessage.value && firstSubMessage.value)
+    ? firstSubMessage.value.content || ''
     : props.message.sub_messages.map(sm => sm.content).join('\n--------------------------\n');
   try {
     await copyToClipboard(contentToCopy);

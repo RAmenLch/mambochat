@@ -48,14 +48,28 @@ const editingContent = ref('');
 
 // 监听外部 visible 属性的变化
 watch(() => props.visible, (newVal) => {
+  // [LOG] 监听 props.visible 的变化
+  console.log(
+    `[DEBUG MessageEditDialog.vue] Watcher triggered. props.visible changed to: ${newVal}`
+  );
+
   internalVisible.value = newVal;
   if (newVal) {
     // 每次打开对话框时，用 props 的初始内容填充输入框
     editingContent.value = props.initialContent;
+    console.log(
+      '[DEBUG MessageEditDialog.vue] Dialog is opening. Initial content set.'
+    );
+  } else {
+     console.log(
+      '[DEBUG MessageEditDialog.vue] Dialog is closing.'
+    );
   }
 });
 
 const handleClose = () => {
+  // [LOG] 记录关闭事件
+  console.log('[DEBUG MessageEditDialog.vue] handleClose called. Emitting "update:visible" with value: false');
   emit('update:visible', false);
 };
 
