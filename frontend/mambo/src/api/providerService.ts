@@ -63,14 +63,24 @@ export const deleteModel = (modelId: string): Promise<void> => {
 };
 
 /**
- * 测试与外部服务的连接
+ * 测试与外部服务的连接 (需要提供 apiHost 和 apiKey)
  */
 export const testConnection = (connectionData: ConnectionRequest): Promise<ConnectionTestResponse> => {
   return apiClient.post('/providers/test-connection', connectionData).then(res => res.data);
 };
 
 /**
- * 从外部服务获取模型列表
+ * 为已存在的服务商测试连接 (使用已存储的凭证)
+ * @param providerId 服务商ID
+ * @param apiHost 要测试的 API Host (用户可能在表单中修改)
+ */
+export const testConnectionForProvider = (providerId: string, apiHost: string): Promise<ConnectionTestResponse> => {
+  // 后端会根据 providerId 从数据库中获取 key
+  return apiClient.post(`/providers/${providerId}/test-connection`, { apiHost }).then(res => res.data);
+};
+
+/**
+ * 从外部服务获取模型列表 (需要提供 apiHost 和 apiKey)
  */
 export const fetchExternalModels = (connectionData: ConnectionRequest): Promise<AIModelBase[]> => {
   return apiClient.post('/providers/fetch-models', connectionData).then(res => res.data);
@@ -81,6 +91,6 @@ export const fetchExternalModels = (connectionData: ConnectionRequest): Promise<
  * @param providerId 服务商ID
  */
 export const fetchModelsForProvider = (providerId: string): Promise<AIModelBase[]> => {
-  // 修正：将请求方法从 POST 改为 GET 以匹配后端路由
   return apiClient.get(`/providers/${providerId}/fetch-models`).then(res => res.data);
 };
+

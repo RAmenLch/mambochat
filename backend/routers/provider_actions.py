@@ -66,6 +66,24 @@ async def test_connection(request: schemas.ConnectionRequest):
     return await provider_service.test_connection_to_provider(api_host=request.apiHost, api_key=request.apiKey)
 
 
+@router.post("/providers/{provider_id}/test-connection", response_model=schemas.ConnectionTestResponse, summary="为现有服务商测试连接")
+async def test_connection_for_provider(
+    provider_id: str,
+    request: schemas.ConnectionTestForExistingProviderRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    使用已存储的 API Key 为指定服务商测试连通性。
+    API Host 从请求体中获取，以允许用户在前端修改后进行测试。
+    """
+    provider = await provider_crud.get_provider(db, provider_id=provider_id)
+    if not provider:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Provider not found")
+
+    # 使用请求中提供的 apiHost 和数据库中存储的 apiKey 进行测试
+    return await provider_service.test_connection_to_provider(api_host=request.apiHost, api_key=provider.apiKey)
+
+
 @router.post("/providers/fetch-models", response_model=List[schemas.AIModelBase], summary="获取外部模型列表")
 async def fetch_models(request: schemas.ConnectionRequest):
     """

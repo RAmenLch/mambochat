@@ -91,6 +91,7 @@ import type { AIProviderWithModels, AIModel, AIModelBase } from '@/api/types';
 import ProviderFormDialog from './dialogs/ProviderFormDialog.vue';
 import ModelFormDialog from './dialogs/ModelFormDialog.vue';
 import FetchModelsDialog from './dialogs/FetchModelsDialog.vue';
+import {AxiosError} from "axios";
 
 // Store setup
 const providerStore = useProviderStore();
@@ -114,7 +115,7 @@ onMounted(async () => {
 
 watch(providers, (newProviders) => {
   if (newProviders.length > 0) {
-    let providerToSelect = newProviders.find(p => p.id === selectedProvider.value?.id)
+    const providerToSelect = newProviders.find(p => p.id === selectedProvider.value?.id)
       ?? newProviders.find(p => p.id === globalSettings.value.last_selected_provider_id)
       ?? newProviders[0];
 
@@ -152,10 +153,16 @@ const handleDeleteProvider = async (provider: AIProviderWithModels) => {
       selectedProvider.value = null;
     }
     ElMessage.success('删除成功！');
-  } catch (error: any) {
-    if (error !== 'cancel') {
+  } catch (error) {
+    if (error instanceof AxiosError) {
       ElMessage.error(error?.response?.data?.detail || '删除失败');
-    }
+  } else {
+    // 处理其他类型的错误
+    ElMessage.error('发生未知错误');
+  }
+
+
+
   }
 };
 

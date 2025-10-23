@@ -10,7 +10,7 @@
           border
           class="fetched-model-checkbox"
         >
-          {{ model.name }} ({{ model.modelId }})
+          {{ model.modelId }}
         </el-checkbox>
       </el-checkbox-group>
     </el-scrollbar>

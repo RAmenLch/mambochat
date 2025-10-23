@@ -68,6 +68,11 @@ class ConnectionRequest(BaseModel):
     apiKey: str
 
 
+class ConnectionTestForExistingProviderRequest(BaseModel):
+    """为已存在的服务商测试连接的请求体，apiKey 由后端从数据库获取"""
+    apiHost: str
+
+
 class ConnectionTestResponse(BaseModel):
     """连接测试的响应体"""
     status: str

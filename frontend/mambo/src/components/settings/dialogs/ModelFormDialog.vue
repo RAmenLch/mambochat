@@ -32,6 +32,7 @@ import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
 import { Download } from '@element-plus/icons-vue';
 import { useProviderStore } from '@/stores/providerStore';
 import type { AIModel, AIModelCreate } from '@/api/types';
+import {AxiosError} from "axios";
 
 interface ModelFormData {
   name: string;
@@ -100,8 +101,14 @@ async function submitForm() {
         }
         emit('submitted');
         handleClose();
-      } catch (error: any) {
-        ElMessage.error(error?.response?.data?.detail || '操作失败');
+      } catch (error ) {
+        if (error instanceof AxiosError) {
+          const errorMessage = error.response?.data?.detail || '操作失败';
+          ElMessage.error(errorMessage);
+        } else {
+          // 处理其他类型的错误
+          ElMessage.error('发生未知错误');
+        }
       }
     }
   });

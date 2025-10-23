@@ -8,6 +8,7 @@ import {
   deleteModel,
   createProviderWithModels,
   testConnection,
+  testConnectionForProvider, // 新增的导入
   fetchExternalModels,
   updateProvider,
   updateModel,
@@ -22,7 +23,8 @@ import type {
   GlobalSettingsUpdate,
   AIModelBase,
   AIProviderUpdate,
-  AIModelUpdate
+  AIModelUpdate,
+  ConnectionTestResponse // 导入 ConnectionTestResponse 类型
 } from '@/api/types';
 import { useChatStore } from './chatStore';
 
@@ -39,7 +41,6 @@ export const useProviderStore = defineStore('providers', {
     globalSettings: {
       default_model_id: null,
       last_selected_provider_id: null,
-      // 初始化新增的全局模型参数
       default_max_context_messages: 0,
       default_temperature: 1.0,
       default_top_p: 1.0,
@@ -183,11 +184,30 @@ export const useProviderStore = defineStore('providers', {
     },
 
     // --- External API Actions ---
-    async testConnection(connectionData: ConnectionRequest) {
+
+    /**
+     * 测试普通连接，需提供 apiHost 和 apiKey
+     * @param connectionData 包含 apiHost 和 apiKey 的连接数据
+     */
+    async testConnection(connectionData: ConnectionRequest): Promise<ConnectionTestResponse> {
       try {
         return await testConnection(connectionData);
       } catch (error) {
         console.error('Connection test failed:', error);
+        throw error;
+      }
+    },
+
+    /**
+     * 为已存在的服务商测试连接，apiHost 从前端获取，apiKey 从后端数据库获取
+     * @param providerId 服务商ID
+     * @param apiHost 用户在表单中输入的 API Host
+     */
+    async testConnectionForProvider(providerId: string, apiHost: string): Promise<ConnectionTestResponse> {
+      try {
+        return await testConnectionForProvider(providerId, apiHost);
+      } catch (error) {
+        console.error('Connection test for existing provider failed:', error);
         throw error;
       }
     },
@@ -231,3 +251,4 @@ export const useProviderStore = defineStore('providers', {
     }
   }
 });
+
