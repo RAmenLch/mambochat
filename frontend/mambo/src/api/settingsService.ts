@@ -1,7 +1,7 @@
 // frontend/mambochat/src/api/settingsService.ts
 
 import apiClient from './index';
-import type { GlobalSettingsUpdate } from './types';
+import type { GlobalSettingsUpdate, ProxyTestRequest, ConnectionTestResponse } from './types';
 
 /**
  * 获取全局配置
@@ -16,4 +16,12 @@ export const getGlobalSettings = (): Promise<GlobalSettingsUpdate> => {
  */
 export const updateGlobalSettings = (settings: GlobalSettingsUpdate): Promise<GlobalSettingsUpdate> => {
   return apiClient.put('/settings/global', settings).then(res => res.data);
+};
+
+/**
+ * 测试代理服务器的连通性
+ * @param data - 包含代理URL和测试目标URL的对象
+ */
+export const testProxyConnection = (data: ProxyTestRequest): Promise<ConnectionTestResponse> => {
+  return apiClient.post('/settings/test-proxy', data).then(res => res.data);
 };

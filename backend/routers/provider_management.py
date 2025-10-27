@@ -23,7 +23,11 @@ async def create_provider(provider: schemas.ProviderWithModelsCreate, db: AsyncS
     创建一个新的服务商，并可选择性地同时创建其下的模型。
     创建成功后，会自动将该服务商设置为“最后选择的服务商”。
     """
-    new_provider = await provider_crud.create_provider_with_models(db=db, provider_data=provider)
+    # 确保在创建时传递了 use_proxy 字段
+    provider_data_dict = provider.model_dump()
+    provider_create_schema = schemas.ProviderWithModelsCreate(**provider_data_dict)
+
+    new_provider = await provider_crud.create_provider_with_models(db=db, provider_data=provider_create_schema)
 
     await setting_crud.update_setting(
         db, setting=schemas.GlobalSetting(key="last_selected_provider_id", value=new_provider.id)

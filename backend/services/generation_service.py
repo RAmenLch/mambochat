@@ -13,6 +13,27 @@ from .. import schemas
 from ..models import chat_model
 from ..database import AsyncSessionLocal
 
+
+async def _get_http_client_with_proxy(
+    db: AsyncSession,
+    use_proxy_flag: bool,
+    timeout: int = 300
+) -> httpx.AsyncClient:
+    """
+    根据需要创建一个配置了代理的 httpx.AsyncClient 实例。
+    """
+    proxy_url = None
+    if use_proxy_flag:
+        proxy_enabled_setting = await setting_crud.get_setting(db, "proxy_enabled")
+        if proxy_enabled_setting and proxy_enabled_setting.value == 'True':
+            proxy_url_setting = await setting_crud.get_setting(db, "proxy_url")
+            if proxy_url_setting and proxy_url_setting.value:
+                proxy_url = proxy_url_setting.value
+
+    # 使用 'proxy' (单数) 参数, 它更简单且兼容性更好
+    return httpx.AsyncClient(proxy=proxy_url, timeout=timeout)
+
+
 async def prepare_for_generation(
         db: AsyncSession,
         chat_id: str,
@@ -63,7 +84,7 @@ def _prepare_llm_request_data(
         history_messages: List[chat_model.Message]
 ) -> Tuple[Dict[str, Any], Dict[str, Any], str, bool]:
     """
-    根据会话配置和历史消息，准备发送给 LLM API 的 headers, payload, host 和 stream 标志。
+    根据会话配置和历史消息，准备发送给 LLM API 的 headers, payload, host 和 use_proxy 标志。
     """
     if not db_chat.ai_model or not db_chat.ai_model.provider:
         raise ValueError("会话未配置有效的AI模型或服务商。")
@@ -85,18 +106,16 @@ def _prepare_llm_request_data(
         messages_payload.append({"role": msg.role, "content": full_content})
 
     model_params = {}
-    use_stream = True
     if db_chat.modelParameters:
         try:
             params_str = db_chat.modelParameters
             model_params = json.loads(params_str) if isinstance(params_str, str) else params_str
-            if model_params.get('stream') is False:
-                use_stream = False
         except (json.JSONDecodeError, TypeError):
             print(f"Warning: Could not parse modelParameters for chat {db_chat.id}")
             pass
 
     model_params.pop('max_context_messages', None)
+    # stream 参数在调用时单独处理, 这里也移除
     model_params.pop('stream', None)
 
     payload = {
@@ -105,7 +124,7 @@ def _prepare_llm_request_data(
         **model_params
     }
 
-    return headers, payload, provider.apiHost, use_stream
+    return headers, payload, provider.apiHost, provider.use_proxy
 
 
 async def _get_common_generation_context(db: AsyncSession, chat_id: str, assistant_message_id: str):
@@ -159,10 +178,10 @@ async def run_generation_task_stream(chat_id: str, assistant_message_id: str):
             sub_message_id_to_update = assistant_message.sub_messages[0].id
 
             db_chat, history_messages = await _get_common_generation_context(db, chat_id, assistant_message_id)
-            headers, payload, api_host, _ = _prepare_llm_request_data(db_chat, history_messages)
+            headers, payload, api_host, use_proxy = _prepare_llm_request_data(db_chat, history_messages)
             payload["stream"] = True
 
-            async with httpx.AsyncClient(timeout=300) as client:
+            async with await _get_http_client_with_proxy(db, use_proxy_flag=use_proxy) as client:
                 async with client.stream("POST", f"{api_host.rstrip('/')}/chat/completions", headers=headers, json=payload) as response:
                     response.raise_for_status()
                     async for line in response.aiter_lines():
@@ -217,10 +236,10 @@ async def run_generation_task_non_stream(chat_id: str, assistant_message_id: str
                 raise asyncio.CancelledError("Task was cancelled before starting.")
 
             db_chat, history_messages = await _get_common_generation_context(db, chat_id, assistant_message_id)
-            headers, payload, api_host, _ = _prepare_llm_request_data(db_chat, history_messages)
+            headers, payload, api_host, use_proxy = _prepare_llm_request_data(db_chat, history_messages)
             payload["stream"] = False
 
-            async with httpx.AsyncClient(timeout=300) as client:
+            async with await _get_http_client_with_proxy(db, use_proxy_flag=use_proxy) as client:
                 response = await client.post(f"{api_host.rstrip('/')}/chat/completions", headers=headers, json=payload)
                 response.raise_for_status()
                 data = response.json()
@@ -281,4 +300,3 @@ async def subscribe_to_stream(
         print(f"[Subscriber] Client disconnected for message '{assistant_message_id}'.")
     finally:
         await stream_manager.unsubscribe(assistant_message_id, queue)
-

@@ -37,6 +37,7 @@ class AIProviderBase(BaseModel):
 class AIProviderCreate(AIProviderBase):
     id: Optional[str] = Field(None, description="自定义ID，如 'openai'，若不提供则自动生成UUID")
     apiKey: str
+    use_proxy: bool = Field(False, description="是否为此服务商启用代理")
 
 
 class AIProviderUpdate(BaseModel):
@@ -44,10 +45,12 @@ class AIProviderUpdate(BaseModel):
     name: Optional[str] = None
     apiHost: Optional[str] = None
     apiKey: Optional[str] = None
+    use_proxy: Optional[bool] = None
 
 
 class AIProvider(AIProviderBase):
     id: str
+    use_proxy: bool
 
     class Config:
         from_attributes = True

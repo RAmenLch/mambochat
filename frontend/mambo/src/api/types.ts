@@ -81,6 +81,7 @@ export interface AIProvider {
   id: string;
   name: string;
   apiHost: string;
+  use_proxy: boolean;
 }
 
 export interface AIProviderWithModels extends AIProvider {
@@ -92,12 +93,14 @@ export interface AIProviderCreate {
   name: string;
   apiHost: string;
   apiKey: string;
+  use_proxy: boolean;
 }
 
 export interface AIProviderUpdate {
   name?: string;
   apiHost?: string;
   apiKey?: string;
+  use_proxy?: boolean;
 }
 
 export interface ProviderWithModelsCreate extends AIProviderCreate {
@@ -167,4 +170,13 @@ export interface GlobalSettingsUpdate {
   default_temperature: number | null;
   default_top_p: number | null;
   default_stream: boolean | null;
+  proxy_enabled: boolean | null;
+  proxy_url: string | null;
+}
+
+// --- Proxy Test Types ---
+
+export interface ProxyTestRequest {
+  proxy_url: string;
+  test_url: string;
 }

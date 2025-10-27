@@ -1,11 +1,12 @@
 # backend/routers/settings.py
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import Any, Optional
 
 from ..crud import setting_crud, provider_crud
+from ..services import provider_service
 from ..models import setting_model
 from .. import schemas
 from ..database import get_db
@@ -37,7 +38,8 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
     """
     keys = [
         "default_model_id", "last_selected_provider_id", "default_max_context_messages",
-        "default_temperature", "default_top_p", "default_stream"
+        "default_temperature", "default_top_p", "default_stream",
+        "proxy_enabled", "proxy_url"
     ]
 
     result = await db.execute(
@@ -51,6 +53,8 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
     temperature = _get_typed_setting(settings_map.get("default_temperature"), 1.0, float)
     top_p = _get_typed_setting(settings_map.get("default_top_p"), 1.0, float)
     stream = _get_typed_setting(settings_map.get("default_stream"), True, bool)
+    proxy_enabled = _get_typed_setting(settings_map.get("proxy_enabled"), False, bool)
+    proxy_url = _get_typed_setting(settings_map.get("proxy_url"), None, str)
 
     return schemas.GlobalSettingsUpdate(
         default_model_id=default_model_id,
@@ -58,7 +62,9 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
         default_max_context_messages=max_context,
         default_temperature=temperature,
         default_top_p=top_p,
-        default_stream=stream
+        default_stream=stream,
+        proxy_enabled=proxy_enabled,
+        proxy_url=proxy_url
     )
 
 
@@ -99,13 +105,11 @@ async def update_global_settings(
                 )
         settings_to_update.append(schemas.GlobalSetting(key="last_selected_provider_id", value=provider_id))
 
-    param_keys = {
-        "default_max_context_messages": int,
-        "default_temperature": float,
-        "default_top_p": float,
-        "default_stream": bool,
-    }
-    for key, _ in param_keys.items():
+    param_keys = [
+        "default_max_context_messages", "default_temperature", "default_top_p",
+        "default_stream", "proxy_enabled", "proxy_url"
+    ]
+    for key in param_keys:
         if key in update_data:
             value = update_data[key]
             settings_to_update.append(schemas.GlobalSetting(key=key, value=str(value) if value is not None else None))
@@ -114,4 +118,24 @@ async def update_global_settings(
         await setting_crud.update_setting(db, setting=setting)
 
     return await get_global_settings(db)
+
+
+@router.post(
+    "/settings/test-proxy",
+    response_model=schemas.ConnectionTestResponse,
+    summary="测试代理连接"
+)
+async def test_proxy(
+    proxy_url: str = Body(..., embed=True),
+    test_url: str = Body(..., embed=True)
+):
+    """
+    通过指定的代理服务器访问一个测试URL，以验证代理的连通性。
+    """
+    if not proxy_url:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Proxy URL cannot be empty.")
+    if not test_url:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Test URL cannot be empty.")
+
+    return await provider_service.test_proxy_connection(proxy_url, test_url)
 

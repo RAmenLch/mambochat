@@ -37,6 +37,38 @@
           </el-select>
         </el-form-item>
 
+        <el-divider>代理配置</el-divider>
+        <el-form-item label="启用代理">
+           <el-switch
+             :model-value="settingsForm.proxy_enabled ?? false"
+             @update:model-value="val => settingsForm.proxy_enabled = val as boolean"
+           />
+           <el-tooltip
+              effect="dark"
+              content="全局启用代理后，可在各个服务商设置中独立开关"
+              placement="top"
+            >
+              <el-icon class="label-icon"><QuestionFilled /></el-icon>
+            </el-tooltip>
+        </el-form-item>
+        <el-form-item label="代理 URL" v-if="settingsForm.proxy_enabled">
+          <el-input
+            v-model.trim="settingsForm.proxy_url"
+            placeholder="例如: http://127.0.0.1:7890"
+          />
+        </el-form-item>
+        <el-form-item label="代理测试" v-if="settingsForm.proxy_enabled">
+          <div class="proxy-test-container">
+            <el-input
+              v-model.trim="proxyTestUrl"
+              placeholder="测试链接, 如 https://www.google.com"
+              class="proxy-test-input"
+            />
+            <el-button @click="handleTestProxy" :loading="isTestingProxy">测试代理</el-button>
+          </div>
+        </el-form-item>
+
+
         <el-divider>新会话默认参数</el-divider>
 
         <el-form-item>
@@ -84,7 +116,7 @@
         <el-form-item label="流式对话 (Stream)">
            <el-switch
              :model-value="settingsForm.default_stream ?? true"
-              @update:model-value="val => settingsForm.default_stream = val as boolean"
+             @update:model-value="val => settingsForm.default_stream = val as boolean"
            />
            <el-tooltip
               effect="dark"
@@ -113,6 +145,7 @@ import { storeToRefs } from 'pinia';
 import { ElMessage } from 'element-plus';
 import { QuestionFilled } from '@element-plus/icons-vue';
 import type { GlobalSettingsUpdate } from '@/api/types';
+import { isAxiosError } from 'axios';
 
 const providerStore = useProviderStore();
 const { globalSettings, groupedModels } = storeToRefs(providerStore);
@@ -124,17 +157,19 @@ const settingsForm = reactive<GlobalSettingsUpdate>({
   default_temperature: 1.0,
   default_top_p: 1.0,
   default_stream: true,
+  proxy_enabled: false,
+  proxy_url: null,
 });
+
 const isSaving = ref(false);
+const isTestingProxy = ref(false);
+const proxyTestUrl = ref('https://www.google.com');
 
 onMounted(async () => {
-  // 页面加载时获取最新设置
   await providerStore.fetchGlobalSettings();
 });
 
-// 当 store 中的数据加载或更新后，同步到本地表单
 watch(globalSettings, (newSettings) => {
-  // 使用 Object.assign 确保响应性
   Object.assign(settingsForm, newSettings);
 }, { deep: true, immediate: true });
 
@@ -143,11 +178,45 @@ const handleSave = async () => {
   try {
     await providerStore.saveGlobalSettings(settingsForm);
     ElMessage.success('全局设置已保存！');
-  } catch (error: any) {
-    const message = error?.response?.data?.detail || '保存失败，请稍后重试。';
+  } catch (error: unknown) {
+    let message = '保存失败，请稍后重试。';
+    if (isAxiosError(error) && error.response?.data?.detail) {
+      message = error.response.data.detail;
+    }
     ElMessage.error(message);
   } finally {
     isSaving.value = false;
+  }
+};
+
+const handleTestProxy = async () => {
+  if (!settingsForm.proxy_url) {
+    ElMessage.warning('请输入代理 URL');
+    return;
+  }
+  if (!proxyTestUrl.value) {
+    ElMessage.warning('请输入测试链接');
+    return;
+  }
+
+  isTestingProxy.value = true;
+  try {
+    const response = await providerStore.testProxy({
+      proxy_url: settingsForm.proxy_url,
+      test_url: proxyTestUrl.value,
+    });
+    ElMessage({
+      type: response.status === 'success' ? 'success' : 'error',
+      message: response.message,
+    });
+  } catch (error: unknown) {
+     let message = '测试请求失败';
+     if (isAxiosError(error) && error.response?.data?.detail) {
+        message = error.response.data.detail;
+     }
+     ElMessage.error(message);
+  } finally {
+    isTestingProxy.value = false;
   }
 };
 </script>
@@ -175,5 +244,12 @@ const handleSave = async () => {
 }
 .el-form-item .el-switch {
   margin-right: 8px;
+}
+.proxy-test-container {
+  display: flex;
+  width: 100%;
+}
+.proxy-test-input {
+  margin-right: 10px;
 }
 </style>

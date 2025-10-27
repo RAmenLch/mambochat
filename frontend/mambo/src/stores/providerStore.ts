@@ -8,13 +8,13 @@ import {
   deleteModel,
   createProviderWithModels,
   testConnection,
-  testConnectionForProvider, // 新增的导入
+  testConnectionForProvider,
   fetchExternalModels,
   updateProvider,
   updateModel,
   fetchModelsForProvider
 } from '@/api/providerService';
-import { getGlobalSettings, updateGlobalSettings } from '@/api/settingsService';
+import { getGlobalSettings, updateGlobalSettings, testProxyConnection } from '@/api/settingsService';
 import type {
   AIProviderWithModels,
   AIModelCreate,
@@ -24,7 +24,8 @@ import type {
   AIModelBase,
   AIProviderUpdate,
   AIModelUpdate,
-  ConnectionTestResponse // 导入 ConnectionTestResponse 类型
+  ConnectionTestResponse,
+  ProxyTestRequest
 } from '@/api/types';
 import { useChatStore } from './chatStore';
 
@@ -45,6 +46,8 @@ export const useProviderStore = defineStore('providers', {
       default_temperature: 1.0,
       default_top_p: 1.0,
       default_stream: true,
+      proxy_enabled: false,
+      proxy_url: null,
     },
   }),
 
@@ -191,7 +194,8 @@ export const useProviderStore = defineStore('providers', {
      */
     async testConnection(connectionData: ConnectionRequest): Promise<ConnectionTestResponse> {
       try {
-        return await testConnection(connectionData);
+        // 由于测试新连接时是否使用代理取决于全局设置，这里需要传递该状态
+        return await testConnection(connectionData, this.globalSettings.proxy_enabled ?? false);
       } catch (error) {
         console.error('Connection test failed:', error);
         throw error;
@@ -199,7 +203,7 @@ export const useProviderStore = defineStore('providers', {
     },
 
     /**
-     * 为已存在的服务商测试连接，apiHost 从前端获取，apiKey 从后端数据库获取
+     * 为已存在的服务商测试连接
      * @param providerId 服务商ID
      * @param apiHost 用户在表单中输入的 API Host
      */
@@ -214,7 +218,8 @@ export const useProviderStore = defineStore('providers', {
 
     async fetchExternalModels(connectionData: ConnectionRequest): Promise<AIModelBase[]> {
        try {
-        return await fetchExternalModels(connectionData);
+        // 获取外部模型时，同样需要传递全局代理状态
+        return await fetchExternalModels(connectionData, this.globalSettings.proxy_enabled ?? false);
       } catch (error) {
         console.error('Failed to fetch external models:', error);
         throw error;
@@ -230,7 +235,7 @@ export const useProviderStore = defineStore('providers', {
       }
     },
 
-    // --- Global Settings Actions ---
+    // --- Global Settings & Proxy Actions ---
     async fetchGlobalSettings() {
       try {
         this.globalSettings = await getGlobalSettings();
@@ -248,7 +253,10 @@ export const useProviderStore = defineStore('providers', {
         console.error('Failed to save global settings:', error);
         throw error;
       }
-    }
+    },
+
+    async testProxy(requestData: ProxyTestRequest): Promise<ConnectionTestResponse> {
+        return await testProxyConnection(requestData);
+    },
   }
 });
-

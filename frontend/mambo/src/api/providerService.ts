@@ -65,8 +65,10 @@ export const deleteModel = (modelId: string): Promise<void> => {
 /**
  * 测试与外部服务的连接 (需要提供 apiHost 和 apiKey)
  */
-export const testConnection = (connectionData: ConnectionRequest): Promise<ConnectionTestResponse> => {
-  return apiClient.post('/providers/test-connection', connectionData).then(res => res.data);
+export const testConnection = (connectionData: ConnectionRequest, useProxy: boolean): Promise<ConnectionTestResponse> => {
+  return apiClient.post('/providers/test-connection', connectionData, {
+    params: { use_proxy: useProxy }
+  }).then(res => res.data);
 };
 
 /**
@@ -75,15 +77,17 @@ export const testConnection = (connectionData: ConnectionRequest): Promise<Conne
  * @param apiHost 要测试的 API Host (用户可能在表单中修改)
  */
 export const testConnectionForProvider = (providerId: string, apiHost: string): Promise<ConnectionTestResponse> => {
-  // 后端会根据 providerId 从数据库中获取 key
+  // 后端会根据 providerId 从数据库中获取 key 和 use_proxy 设置
   return apiClient.post(`/providers/${providerId}/test-connection`, { apiHost }).then(res => res.data);
 };
 
 /**
  * 从外部服务获取模型列表 (需要提供 apiHost 和 apiKey)
  */
-export const fetchExternalModels = (connectionData: ConnectionRequest): Promise<AIModelBase[]> => {
-  return apiClient.post('/providers/fetch-models', connectionData).then(res => res.data);
+export const fetchExternalModels = (connectionData: ConnectionRequest, useProxy: boolean): Promise<AIModelBase[]> => {
+  return apiClient.post('/providers/fetch-models', connectionData, {
+    params: { use_proxy: useProxy }
+  }).then(res => res.data);
 };
 
 /**
@@ -93,4 +97,3 @@ export const fetchExternalModels = (connectionData: ConnectionRequest): Promise<
 export const fetchModelsForProvider = (providerId: string): Promise<AIModelBase[]> => {
   return apiClient.get(`/providers/${providerId}/fetch-models`).then(res => res.data);
 };
-

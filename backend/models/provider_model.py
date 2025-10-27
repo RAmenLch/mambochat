@@ -1,6 +1,6 @@
 # backend/models/provider_model.py
 
-from sqlalchemy import Column, String, ForeignKey
+from sqlalchemy import Column, String, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 from .base_model import Base, generate_uuid
 
@@ -11,6 +11,7 @@ class AIProvider(Base):
     name = Column(String(100), nullable=False)
     apiHost = Column(String(255), nullable=False)
     apiKey = Column(String(255), nullable=False)
+    use_proxy = Column(Boolean, nullable=False, default=False)
 
     # 关系: 一个 Provider 可以有多个 Model
     models = relationship("AIModel", back_populates="provider", cascade="all, delete-orphan")
