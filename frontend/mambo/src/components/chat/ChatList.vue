@@ -107,7 +107,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { useProviderStore } from '@/stores/providerStore';
 import { storeToRefs } from 'pinia';
 import { useRouter } from 'vue-router';
-import { ElMessage, ElMessageBox, ElTree } from 'element-plus';
+import {type AllowDropType, ElMessage, ElMessageBox, ElTree} from 'element-plus';
 import type { NodeDropType } from 'element-plus/es/components/tree/src/tree.type';
 import type Node from 'element-plus/es/components/tree/src/model/node';
 import type { Chat, ChatReorderItem } from '@/api/types';
@@ -234,8 +234,8 @@ const scrollToChat = async (chatId: string) => {
   node?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 };
 
-const allowDrop = (draggingNode: Node, dropNode: Node, type: NodeDropType) => {
-  return !((dropNode.data as Chat).itemType === 'chat' && type === 'inner');
+const allowDrop = (draggingNode: Node, dropNode: Node, dropType: AllowDropType) => {
+  return !((dropNode.data as Chat).itemType === 'chat' && dropType  === 'inner');
 };
 
 const handleNodeDrop = async (draggingNode: Node, dropNode: Node, dropType: NodeDropType) => {

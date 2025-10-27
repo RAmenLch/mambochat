@@ -74,7 +74,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, computed, reactive, toRef } from 'vue';
+import { ref, watch, nextTick, computed, reactive } from 'vue';
 import { useChatStore } from '@/stores/chatStore';
 import { useProviderStore } from '@/stores/providerStore';
 import { storeToRefs } from 'pinia';
@@ -200,12 +200,17 @@ function handleGlobalKeydown(event: KeyboardEvent) {
   }
 }
 
-function handleSingleInputKeydown(event: KeyboardEvent) {
+function handleSingleInputKeydown(event: Event) { // 接受更通用的 Event 类型
+  // 使用类型守卫确保这是一个键盘事件
+  if (!(event instanceof KeyboardEvent)) return;
+
+  // 在这个代码块之后，TypeScript 会智能地推断出 event 是 KeyboardEvent 类型
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
     handleSendMessage();
   }
 }
+
 
 const userHasScrolledUp = ref(false);
 const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
@@ -218,8 +223,15 @@ const scrollToBottom = (force = false) => {
   nextTick(() => scrollbarRef.value?.setScrollTop(scrollbarRef.value.wrapRef!.scrollHeight));
 };
 
-// --- Watchers for Chat Switching & Content Changes ---
-watch(() => currentChatMessages.value[currentChatMessages.value.length - 1]?.sub_messages.slice(-1)[0]?.content, scrollToBottom);
+watch(
+  () => currentChatMessages.value[currentChatMessages.value.length - 1]?.sub_messages.slice(-1)[0]?.content,
+  (newContent, oldContent) => {
+    // 只有当内容实际发生变化时才滚动，并且忽略 watch 传递的参数
+    if (newContent !== oldContent) {
+      scrollToBottom();
+    }
+  }
+);
 
 watch(() => currentChat.value?.id, (newId) => {
   if (newId) {

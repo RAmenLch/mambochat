@@ -182,9 +182,11 @@ const handleDeleteModel = async (model: AIModel) => {
     await ElMessageBox.confirm(`确定删除模型 "${model.name}" 吗？`, '警告', { type: 'warning' });
     await providerStore.removeModel(model.id);
     ElMessage.success('删除模型成功！');
-  } catch (error: any) {
-    if (error !== 'cancel') {
+  } catch (error) {
+    if(error instanceof AxiosError){
       ElMessage.error(error?.response?.data?.detail || '删除失败');
+    }else{
+      ElMessage.error("未知错误")
     }
   }
 };
@@ -204,12 +206,17 @@ const handleFetchModelsForProvider = async () => {
   if (!selectedProvider.value) return;
   isFetchingModels.value = true;
   try {
-    const models = await providerStore.fetchModelsForProvider(selectedProvider.value.id);
+    const models = await providerStore.fetchModelsForProvider(selectedProvider.value.id,selectedProvider.value.use_proxy);
     fetchModelsDialog.data = models;
     fetchModelsDialog.existingIds = selectedProvider.value.models.map(m => m.modelId);
     fetchModelsDialog.visible = true;
-  } catch (error: any) {
-    ElMessage.error(error?.response?.data?.detail || '获取模型列表失败');
+  } catch (error) {
+    if(error instanceof AxiosError){
+      ElMessage.error(error?.response?.data?.detail || '获取模型列表失败');
+    }else{
+      ElMessage.error("未知错误")
+    }
+
   } finally {
     isFetchingModels.value = false;
   }
@@ -228,7 +235,14 @@ const onConfirmAddFetchedModels = (selectedIds: string[]) => {
 
     Promise.all(modelsToAdd.map(m => providerStore.addModel(m)))
       .then(() => ElMessage.success(`已批量添加 ${modelsToAdd.length} 个模型。`))
-      .catch((error: any) => ElMessage.error(error?.response?.data?.detail || '批量添加失败'));
+      .catch((error) => {
+            if(error instanceof AxiosError){
+              ElMessage.error(error?.response?.data?.detail || '批量添加失败');
+            }else{
+              ElMessage.error("未知错误")
+            }
+        }
+      );
   }
 };
 </script>
