@@ -75,10 +75,12 @@ export const testConnection = (connectionData: ConnectionRequest, useProxy: bool
  * 为已存在的服务商测试连接 (使用已存储的凭证)
  * @param providerId 服务商ID
  * @param apiHost 要测试的 API Host (用户可能在表单中修改)
+ * @param useProxy 是否启用代理 (用户可能在表单中修改)
  */
-export const testConnectionForProvider = (providerId: string, apiHost: string): Promise<ConnectionTestResponse> => {
-  // 后端会根据 providerId 从数据库中获取 key 和 use_proxy 设置
-  return apiClient.post(`/providers/${providerId}/test-connection`, { apiHost }).then(res => res.data);
+export const testConnectionForProvider = (providerId: string, apiHost: string, useProxy: boolean): Promise<ConnectionTestResponse> => {
+  return apiClient.post(`/providers/${providerId}/test-connection`, { apiHost }, {
+    params: { use_proxy: useProxy }
+  }).then(res => res.data);
 };
 
 /**
@@ -93,7 +95,10 @@ export const fetchExternalModels = (connectionData: ConnectionRequest, useProxy:
 /**
  * 为已存在的服务商获取模型列表 (使用已存凭证)
  * @param providerId 服务商ID
+ * @param useProxy 是否启用代理 (用户可能在表单中修改)
  */
-export const fetchModelsForProvider = (providerId: string): Promise<AIModelBase[]> => {
-  return apiClient.get(`/providers/${providerId}/fetch-models`).then(res => res.data);
+export const fetchModelsForProvider = (providerId: string, useProxy: boolean): Promise<AIModelBase[]> => {
+  return apiClient.get(`/providers/${providerId}/fetch-models`, {
+    params: { use_proxy: useProxy }
+  }).then(res => res.data);
 };

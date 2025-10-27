@@ -205,9 +205,9 @@ async function handleTestConnection() {
   try {
     let res;
     if (isEditing.value && providerForm.apiKey === API_KEY_PLACEHOLDER && props.providerData) {
-      res = await providerStore.testConnectionForProvider(props.providerData.id, providerForm.apiHost);
+      res = await providerStore.testConnectionForProvider(props.providerData.id, providerForm.apiHost, providerForm.use_proxy);
     } else {
-      res = await providerStore.testConnection({ apiHost: providerForm.apiHost, apiKey: providerForm.apiKey });
+      res = await providerStore.testConnection({ apiHost: providerForm.apiHost, apiKey: providerForm.apiKey }, providerForm.use_proxy);
     }
     ElMessage({ type: res.status === 'success' ? 'success' : 'error', message: res.message });
   } catch (error: unknown) {
@@ -226,14 +226,14 @@ async function handleFetchModels() {
   try {
     let models: AIModelBase[];
     if (isEditing.value && providerForm.apiKey === API_KEY_PLACEHOLDER && props.providerData) {
-      models = await providerStore.fetchModelsForProvider(props.providerData.id);
+      models = await providerStore.fetchModelsForProvider(props.providerData.id, providerForm.use_proxy);
     } else {
       if (!providerForm.apiHost || !providerForm.apiKey) {
         ElMessage.warning('请填写 API Host 和 API Key 以获取模型列表');
         isFetchingModels.value = false;
         return;
       }
-      models = await providerStore.fetchExternalModels({ apiHost: providerForm.apiHost, apiKey: providerForm.apiKey });
+      models = await providerStore.fetchExternalModels({ apiHost: providerForm.apiHost, apiKey: providerForm.apiKey }, providerForm.use_proxy);
     }
     emit('fetch-models', models);
   } catch (error: unknown) {

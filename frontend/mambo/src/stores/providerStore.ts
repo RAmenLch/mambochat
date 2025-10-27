@@ -189,13 +189,13 @@ export const useProviderStore = defineStore('providers', {
     // --- External API Actions ---
 
     /**
-     * 测试普通连接，需提供 apiHost 和 apiKey
-     * @param connectionData 包含 apiHost 和 apiKey 的连接数据
+     * 测试新连接，需提供 apiHost, apiKey 和 useProxy 状态。
+     * @param connectionData 包含 apiHost 和 apiKey 的连接数据。
+     * @param useProxy 从表单实时传入的代理状态。
      */
-    async testConnection(connectionData: ConnectionRequest): Promise<ConnectionTestResponse> {
+    async testConnection(connectionData: ConnectionRequest, useProxy: boolean): Promise<ConnectionTestResponse> {
       try {
-        // 由于测试新连接时是否使用代理取决于全局设置，这里需要传递该状态
-        return await testConnection(connectionData, this.globalSettings.proxy_enabled ?? false);
+        return await testConnection(connectionData, useProxy);
       } catch (error) {
         console.error('Connection test failed:', error);
         throw error;
@@ -203,32 +203,42 @@ export const useProviderStore = defineStore('providers', {
     },
 
     /**
-     * 为已存在的服务商测试连接
-     * @param providerId 服务商ID
-     * @param apiHost 用户在表单中输入的 API Host
+     * 为已存在的服务商测试连接。
+     * @param providerId 服务商ID。
+     * @param apiHost 从表单实时传入的 API Host。
+     * @param useProxy 从表单实时传入的代理状态。
      */
-    async testConnectionForProvider(providerId: string, apiHost: string): Promise<ConnectionTestResponse> {
+    async testConnectionForProvider(providerId: string, apiHost: string, useProxy: boolean): Promise<ConnectionTestResponse> {
       try {
-        return await testConnectionForProvider(providerId, apiHost);
+        return await testConnectionForProvider(providerId, apiHost, useProxy);
       } catch (error) {
         console.error('Connection test for existing provider failed:', error);
         throw error;
       }
     },
 
-    async fetchExternalModels(connectionData: ConnectionRequest): Promise<AIModelBase[]> {
+    /**
+     * 获取外部模型，需提供 apiHost, apiKey 和 useProxy 状态。
+     * @param connectionData 包含 apiHost 和 apiKey 的连接数据。
+     * @param useProxy 从表单实时传入的代理状态。
+     */
+    async fetchExternalModels(connectionData: ConnectionRequest, useProxy: boolean): Promise<AIModelBase[]> {
        try {
-        // 获取外部模型时，同样需要传递全局代理状态
-        return await fetchExternalModels(connectionData, this.globalSettings.proxy_enabled ?? false);
+        return await fetchExternalModels(connectionData, useProxy);
       } catch (error) {
         console.error('Failed to fetch external models:', error);
         throw error;
       }
     },
 
-    async fetchModelsForProvider(providerId: string): Promise<AIModelBase[]> {
+    /**
+     * 为已存在的服务商获取模型列表。
+     * @param providerId 服务商ID。
+     * @param useProxy 从表单实时传入的代理状态。
+     */
+    async fetchModelsForProvider(providerId: string, useProxy: boolean): Promise<AIModelBase[]> {
       try {
-        return await fetchModelsForProvider(providerId);
+        return await fetchModelsForProvider(providerId, useProxy);
       } catch (error) {
         console.error('Failed to fetch models for existing provider:', error);
         throw error;

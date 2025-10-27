@@ -70,11 +70,12 @@ async def test_connection(
 async def test_connection_for_provider(
     provider_id: str,
     request: schemas.ConnectionTestForExistingProviderRequest,
+    use_proxy: bool, # 从前端实时获取代理选项
     db: AsyncSession = Depends(get_db)
 ):
     """
     使用已存储的 API Key 为指定服务商测试连通性。
-    API Host 从请求体中获取，use_proxy 状态从数据库中获取。
+    API Host 和 use_proxy 状态从请求中获取，以反映前端的实时编辑状态。
     """
     provider = await provider_crud.get_provider(db, provider_id=provider_id)
     if not provider:
@@ -84,7 +85,7 @@ async def test_connection_for_provider(
         db=db,
         api_host=request.apiHost,
         api_key=provider.apiKey,
-        use_proxy=provider.use_proxy
+        use_proxy=use_proxy
     )
 
 
@@ -107,9 +108,14 @@ async def fetch_models(
 
 
 @router.get("/providers/{provider_id}/fetch-models", response_model=List[schemas.AIModelBase], summary="为现有服务商获取模型")
-async def fetch_models_for_provider(provider_id: str, db: AsyncSession = Depends(get_db)):
+async def fetch_models_for_provider(
+    provider_id: str,
+    use_proxy: bool, # 从前端实时获取代理选项
+    db: AsyncSession = Depends(get_db)
+):
     """
     使用已存储的凭证，为指定的服务商获取可用的模型列表。
+    use_proxy 状态从请求中获取，以反映前端的实时编辑状态。
     """
     provider = await provider_crud.get_provider(db, provider_id=provider_id)
     if not provider:
@@ -119,7 +125,6 @@ async def fetch_models_for_provider(provider_id: str, db: AsyncSession = Depends
         db=db,
         api_host=provider.apiHost,
         api_key=provider.apiKey,
-        use_proxy=provider.use_proxy,
+        use_proxy=use_proxy,
         source_description="保存的 API Host"
     )
-
