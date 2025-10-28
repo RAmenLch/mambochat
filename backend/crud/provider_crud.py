@@ -40,7 +40,8 @@ async def create_provider_with_models(db: AsyncSession,
         id=provider_id,
         name=provider_data.name,
         apiHost=provider_data.apiHost,
-        apiKey=provider_data.apiKey
+        apiKey=provider_data.apiKey,
+        use_proxy=provider_data.use_proxy
     )
     db.add(db_provider)
 
