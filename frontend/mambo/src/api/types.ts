@@ -1,4 +1,4 @@
-// frontend/mambochat/src/api/types.ts
+// frontend/mambo/src/api/types.ts
 
 export type MessageRole = 'user' | 'assistant' | 'system';
 export type ChatItemType = 'chat' | 'folder';

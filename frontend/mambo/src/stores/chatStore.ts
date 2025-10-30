@@ -63,19 +63,41 @@ export const useChatStore = defineStore('chat', () => {
     const onMessage = (data: StreamedChunk) => {
       const msgToUpdate = currentChatMessages.value.find(m => m.id === assistantMessageId);
       if (!msgToUpdate) return;
-      if (data.type === 'replace') {
-        msgToUpdate.sub_messages = data.sub_messages;
-      } else if (data.type === 'append') {
-        const subMsg = msgToUpdate.sub_messages.find(sm => sm.id === data.sub_message_id);
-        if (subMsg) subMsg.content += data.content;
+
+      switch (data.type) {
+        case 'replace':
+          msgToUpdate.sub_messages = data.sub_messages;
+          break;
+        case 'create':
+          // 确保在处理 create 事件时，如果 sub_message 已存在（可能由 replace 事件引入），则不重复添加
+          if (!msgToUpdate.sub_messages.some(sm => sm.id === data.sub_message.id)) {
+            msgToUpdate.sub_messages.push(data.sub_message);
+            // 确保子消息按 sortOrder 排序
+            msgToUpdate.sub_messages.sort((a, b) => a.sortOrder - b.sortOrder);
+          }
+          break;
+        case 'append': {
+          const subMsg = msgToUpdate.sub_messages.find(sm => sm.id === data.sub_message_id);
+          if (subMsg) {
+            subMsg.content += data.content;
+          }
+          break;
+        }
+        case 'status_update': {
+          const subMsg = msgToUpdate.sub_messages.find(sm => sm.id === data.sub_message_id);
+          if (subMsg) {
+            subMsg.status = data.status;
+          }
+          break;
+        }
       }
     };
 
     const finalizeMessageState = async () => {
       activeSubscriptions.delete(assistantMessageId);
+      // 状态同步：在流结束后，获取一次最终消息状态以确保一致性，防止因网络问题等导致状态不同步
       try {
-        const res = await getChatWithMessages(chatId);
-        const finalMsg = res.messages.find(m => m.id === assistantMessageId);
+        const finalMsg = await getChatWithMessages(chatId).then(res => res.messages.find(m => m.id === assistantMessageId));
         const localMsg = currentChatMessages.value.find(m => m.id === assistantMessageId);
         if (finalMsg && localMsg) {
           localMsg.sub_messages = finalMsg.sub_messages;
@@ -207,16 +229,18 @@ export const useChatStore = defineStore('chat', () => {
     if (!currentChatId.value) return;
     const { resend = false } = payload;
     try {
-      await updateMessageAndRegenerate(payload.messageId, { sub_messages: payload.sub_messages, resend });
+      const placeholder = await updateMessageAndRegenerate(payload.messageId, { sub_messages: payload.sub_messages, resend });
+      // 重新获取整个会话以保证状态完全同步
       const chat = await getChatWithMessages(currentChatId.value);
       currentChatMessages.value = chat.messages.sort((a, b) => a.sortOrder - b.sortOrder);
       if (resend) {
-        const placeholder = currentChatMessages.value.slice(-1)[0];
-        if (placeholder?.role === 'assistant' && placeholder.sub_messages.some(sm => sm.status === 'generating')) {
-          _subscribeToMessageStream(placeholder);
+        // FIX: Replaced .at(-1) with backward-compatible syntax
+        const latestMessage = currentChatMessages.value[currentChatMessages.value.length - 1];
+        if (latestMessage?.id === placeholder.id && latestMessage.role === 'assistant') {
+          _subscribeToMessageStream(latestMessage);
         }
       }
-    } catch (error) { console.error('Failed to update and resend:', error); await selectChat(currentChatId.value); }
+    } catch (error) { console.error('Failed to update and resend:', error); if (currentChatId.value) await selectChat(currentChatId.value); }
   }
 
   async function updateSubMessage(payload: { subMessageId: string, data: SubMessageUpdate }) {
@@ -245,15 +269,51 @@ export const useChatStore = defineStore('chat', () => {
   async function sendMessage(sub_messages: SubMessageCreate[]) {
     if (!currentChatId.value || isGenerating.value) return;
     const chatId = currentChatId.value;
-    saveDraft(chatId, '');
+    saveCurrentDraft('');
+
+    // FIX: Replaced .at(-1) with backward-compatible syntax
+    const lastMessage = currentChatMessages.value[currentChatMessages.value.length - 1];
+    const lastMessageSortOrder = lastMessage?.sortOrder ?? -1;
+
+    // 乐观更新：立即在UI上显示用户消息
+    const userMessageForUI: Message = {
+      id: `temp-user-${Date.now()}`,
+      role: 'user',
+      createdAt: new Date().toISOString(),
+      chatId: chatId,
+      sortOrder: lastMessageSortOrder + 1,
+      sub_messages: sub_messages.map((sm, index) => ({
+        id: `temp-sub-${Date.now()}-${index}`,
+        messageId: `temp-user-${Date.now()}`,
+        createdAt: new Date().toISOString(),
+        content: sm.content,
+        sortOrder: sm.sortOrder,
+        type: sm.type ?? 'Normal',
+        config: sm.config ?? { is_collapsed: false },
+        status: 'completed'
+      }))
+    };
+    currentChatMessages.value.push(userMessageForUI);
+
     try {
-      const placeholder = await prepareGenerate(chatId, { sub_messages });
-      const chat = await getChatWithMessages(chatId); // Fetch to get the newly created user message
-      currentChatMessages.value = chat.messages.sort((a, b) => a.sortOrder - b.sortOrder);
-      _subscribeToMessageStream(placeholder);
+      // API调用：后端创建真实的用户消息和AI助手消息占位符
+      const assistantPlaceholder = await prepareGenerate(chatId, { sub_messages });
+
+      // 状态同步：用真实的AI占位符替换掉临时的用户消息后的位置（或直接添加）
+      // 此时后端已创建用户消息，但前端的userMessageForUI是临时的。
+      // 为避免UI跳动，直接添加assistantPlaceholder，下次加载时会完全同步。
+      currentChatMessages.value.push(assistantPlaceholder);
+
+      // 启动流式订阅
+      _subscribeToMessageStream(assistantPlaceholder);
     } catch (error) {
       console.error('Failed to prepare generation:', error);
       ElMessage.error('发送失败');
+      // 失败时回滚乐观更新
+      const tempMsgIndex = currentChatMessages.value.findIndex(m => m.id === userMessageForUI.id);
+      if (tempMsgIndex > -1) {
+        currentChatMessages.value.splice(tempMsgIndex, 1);
+      }
     }
   }
 
@@ -265,6 +325,7 @@ export const useChatStore = defineStore('chat', () => {
       const index = currentChatMessages.value.findIndex(m => m.id === messageId);
       if (index === -1) return;
       const targetMsg = currentChatMessages.value[index];
+      // 删除目标消息之后的所有消息，如果目标是助手消息，则包含其自身
       const sliceIndex = targetMsg.role === 'assistant' ? index : index + 1;
       currentChatMessages.value.splice(sliceIndex);
       currentChatMessages.value.push(placeholder);
@@ -275,8 +336,13 @@ export const useChatStore = defineStore('chat', () => {
   async function cancelGeneration(messageId: string) {
     _unsubscribeClientSide(messageId);
     const msg = currentChatMessages.value.find(m => m.id === messageId);
-    const subMsg = msg?.sub_messages.find(sm => sm.status === 'generating');
-    if (subMsg) subMsg.status = 'completed';
+    if (msg) {
+      msg.sub_messages.forEach(sm => {
+        if (sm.status === 'generating') {
+          sm.status = 'completed';
+        }
+      });
+    }
     try { await stopGenerationAPI(messageId); }
     catch(error) { console.error(`Failed to send stop request for ${messageId}:`, error); }
   }

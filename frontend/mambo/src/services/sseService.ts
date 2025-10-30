@@ -1,16 +1,20 @@
 // frontend/mambo/src/services/sseService.ts
 
 import { fetchEventSource } from '@microsoft/fetch-event-source';
-import type { SubMessage } from '@/api/types';
+import type { SubMessage, MessageStatus } from '@/api/types';
 
 /**
- * 定义了从 SSE 流接收到的数据块的类型结构。
- * 'replace': 用全新的子消息数组完全替换现有内容。
+ * 定义了从 SSE 流接收到的各类事件数据块的类型结构。
+ * 'replace': 用全新的子消息数组完全替换现有内容，通常用于初次连接。
+ * 'create': 指示在前端创建一个新的子消息。
  * 'append': 将内容追加到指定的子消息末尾。
+ * 'status_update': 更新指定子消息的状态 (例如从 'generating' 到 'completed')。
  */
 export type StreamedChunk =
   | { type: 'replace'; sub_messages: SubMessage[] }
-  | { type: 'append'; sub_message_id: string; content: string };
+  | { type: 'create'; sub_message: SubMessage }
+  | { type: 'append'; sub_message_id: string; content: string }
+  | { type: 'status_update'; sub_message_id: string; status: MessageStatus };
 
 /**
  * SSE 订阅服务的参数配置。

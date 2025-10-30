@@ -6,7 +6,7 @@
   >
     <!-- 分区头部 (仅在 showHeader 为 true 时显示) -->
     <div v-if="showHeader" class="sub-message-header">
-      <span class="partition-title">分区 {{ index }}</span>
+      <span class="partition-title">{{ partitionTitle }}</span>
       <div class="actions">
         <el-tooltip content="编辑" placement="top" :show-after="500">
           <el-button :icon="Edit" circle text size="small" @click="handleHeaderEditClick" :disabled="isGenerating" />
@@ -80,6 +80,38 @@ const isCollapsed = ref(props.subMessage.config.is_collapsed || false);
 const isGenerating = computed(() => props.subMessage.status === 'generating');
 
 const contentBlocks = computed(() => parseMarkdown(props.subMessage.content));
+
+/**
+ * 动态计算分区标题。
+ * - 'Reasoning' 类型显示为 "深度思考"。
+ * - 'Normal' 类型根据数量显示为 "正文" 或 "正文(n)"。
+ */
+const partitionTitle = computed(() => {
+  if (props.subMessage.type === 'Reasoning') {
+    return '深度思考';
+  }
+
+  if (props.subMessage.type === 'Normal') {
+    const normalSubMessages = props.parentMessage.sub_messages.filter(
+      sm => sm.type === 'Normal'
+    );
+
+    if (normalSubMessages.length <= 1) {
+      return '正文';
+    }
+
+    const normalIndex = normalSubMessages.findIndex(
+      sm => sm.id === props.subMessage.id
+    );
+
+    if (normalIndex !== -1) {
+      return `正文(${normalIndex + 1})`;
+    }
+  }
+
+  // 为其他未知类型或边缘情况提供默认标题
+  return `分区 ${props.index}`;
+});
 
 watch(() => props.subMessage.config.is_collapsed, (newValue) => {
   isCollapsed.value = newValue || false;
