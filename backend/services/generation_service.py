@@ -1,37 +1,18 @@
 # backend/services/generation_service.py
 
-import httpx
 import json
 import asyncio
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import AsyncGenerator, List, Tuple, Dict, Any, Optional
+from typing import AsyncGenerator, List, Optional
 
 from .stream_manager_service import stream_manager
 from ..crud import chat_crud, message_crud, setting_crud
 from .. import schemas
 from ..models import chat_model
 from ..database import AsyncSessionLocal
-
-
-async def _get_http_client_with_proxy(
-    db: AsyncSession,
-    use_proxy_flag: bool,
-    timeout: int = 300
-) -> httpx.AsyncClient:
-    """
-    根据需要创建一个配置了代理的 httpx.AsyncClient 实例。
-    """
-    proxy_url = None
-    if use_proxy_flag:
-        proxy_enabled_setting = await setting_crud.get_setting(db, "proxy_enabled")
-        if proxy_enabled_setting and proxy_enabled_setting.value == 'True':
-            proxy_url_setting = await setting_crud.get_setting(db, "proxy_url")
-            if proxy_url_setting and proxy_url_setting.value:
-                proxy_url = proxy_url_setting.value
-
-    # 使用 'proxy' (单数) 参数, 它更简单且兼容性更好
-    return httpx.AsyncClient(proxy=proxy_url, timeout=timeout)
+from .generation.manager import DefaultGenerateManager
+from .generation.openai_worker import OpenAIGenerateWorker
 
 
 async def prepare_for_generation(
@@ -43,6 +24,7 @@ async def prepare_for_generation(
 ) -> chat_model.Message:
     """
     准备生成的前置操作：保存用户消息、删除后续历史、创建AI消息占位符。
+    AI消息占位符将不包含子消息，子消息的创建将由生成任务动态推送。
     """
     db_chat = await chat_crud.get_chat(db, chat_id=chat_id)
     if not db_chat:
@@ -65,70 +47,17 @@ async def prepare_for_generation(
         include_self = (ref_message.role == schemas.MessageRole.ASSISTANT)
         await message_crud.delete_messages_after(db, chat_id=chat_id, message_id=base_message_id, include_self=include_self)
 
+    # 创建一个空的assistant消息占位符，其sub_messages将由Manager动态创建
     assistant_message_create = schemas.MessageCreate(
         role=schemas.MessageRole.ASSISTANT,
-        sub_messages=[
-            schemas.SubMessageCreate(
-                content="",
-                sortOrder=0,
-                status=schemas.MessageStatus.GENERATING
-            )
-        ]
+        sub_messages=[] # 初始时不包含任何子消息
     )
     assistant_placeholder = await message_crud.create_message(db, message=assistant_message_create, chat_id=chat_id)
     return assistant_placeholder
 
 
-def _prepare_llm_request_data(
-        db_chat: chat_model.Chat,
-        history_messages: List[chat_model.Message]
-) -> Tuple[Dict[str, Any], Dict[str, Any], str, bool]:
-    """
-    根据会话配置和历史消息，准备发送给 LLM API 的 headers, payload, host 和 use_proxy 标志。
-    """
-    if not db_chat.ai_model or not db_chat.ai_model.provider:
-        raise ValueError("会话未配置有效的AI模型或服务商。")
-
-    provider = db_chat.ai_model.provider
-    model = db_chat.ai_model
-
-    headers = {
-        "Authorization": f"Bearer {provider.apiKey}",
-        "Content-Type": "application/json",
-    }
-
-    messages_payload = []
-    if db_chat.systemPrompt:
-        messages_payload.append({"role": "system", "content": db_chat.systemPrompt})
-
-    for msg in history_messages:
-        full_content = "\n".join(sub.content for sub in msg.sub_messages)
-        messages_payload.append({"role": msg.role, "content": full_content})
-
-    model_params = {}
-    if db_chat.modelParameters:
-        try:
-            params_str = db_chat.modelParameters
-            model_params = json.loads(params_str) if isinstance(params_str, str) else params_str
-        except (json.JSONDecodeError, TypeError):
-            print(f"Warning: Could not parse modelParameters for chat {db_chat.id}")
-            pass
-
-    model_params.pop('max_context_messages', None)
-    # stream 参数在调用时单独处理, 这里也移除
-    model_params.pop('stream', None)
-
-    payload = {
-        "model": model.modelId,
-        "messages": messages_payload,
-        **model_params
-    }
-
-    return headers, payload, provider.apiHost, provider.use_proxy
-
-
 async def _get_common_generation_context(db: AsyncSession, chat_id: str, assistant_message_id: str):
-    """提取流式和非流式任务共用的上下文获取逻辑。"""
+    """提取生成任务共用的上下文获取逻辑。"""
     db_chat = await chat_crud.get_chat(db, chat_id=chat_id)
     if not db_chat:
         raise ValueError(f"Chat with id {chat_id} not found.")
@@ -139,7 +68,7 @@ async def _get_common_generation_context(db: AsyncSession, chat_id: str, assista
             db_chat.aiModelId = default_model_setting.value
             await db.commit()
             await db.refresh(db_chat)
-            db_chat = await chat_crud.get_chat(db, chat_id=chat_id)
+            db_chat = await chat_crud.get_chat(db, chat_id=chat_id) # Refresh to get associated model/provider
         else:
             raise ValueError("当前会话未指定模型，且未设置全局默认模型。")
 
@@ -166,104 +95,55 @@ async def _get_common_generation_context(db: AsyncSession, chat_id: str, assista
     return db_chat, history_messages
 
 
-async def run_generation_task_stream(chat_id: str, assistant_message_id: str):
-    """后台任务：以流式方式调用LLM，并实时持久化和发布结果。"""
+async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
+    """
+    后台任务：协调LLM生成过程，使用Worker生成指令，Manager执行指令。
+    """
+    overall_status = schemas.MessageStatus.FAILED
     async with AsyncSessionLocal() as db:
-        final_status = schemas.MessageStatus.FAILED
-        sub_message_id_to_update = None
         try:
-            assistant_message = await message_crud.get_message(db, assistant_message_id)
-            if not assistant_message or not assistant_message.sub_messages:
-                raise ValueError(f"Assistant placeholder message {assistant_message_id} or its sub_message not found.")
-            sub_message_id_to_update = assistant_message.sub_messages[0].id
-
             db_chat, history_messages = await _get_common_generation_context(db, chat_id, assistant_message_id)
-            headers, payload, api_host, use_proxy = _prepare_llm_request_data(db_chat, history_messages)
-            payload["stream"] = True
 
-            async with await _get_http_client_with_proxy(db, use_proxy_flag=use_proxy) as client:
-                async with client.stream("POST", f"{api_host.rstrip('/')}/chat/completions", headers=headers, json=payload) as response:
-                    response.raise_for_status()
-                    async for line in response.aiter_lines():
-                        if await stream_manager.is_cancellation_requested(assistant_message_id):
-                            print(f"[Stream Task] Cancellation detected for {assistant_message_id}. Stopping.")
-                            break
+            # 根据模型类型选择合适的Worker，目前只有OpenAI Worker
+            worker = OpenAIGenerateWorker(db_session=db)
+            manager = DefaultGenerateManager(db_session=db)
 
-                        if line.startswith("data:"):
-                            data_str = line[len("data:"):].strip()
-                            if data_str == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(data_str)
-                                choices = chunk.get("choices")
-                                if choices and len(choices) > 0:
-                                    delta = choices[0].get("delta", {})
-                                    content_chunk = delta.get("content")
-                                    if content_chunk:
-                                        await message_crud.append_to_sub_message_content(db, sub_message_id_to_update, content_chunk)
-                                        event_data = {"sub_message_id": sub_message_id_to_update, "content": content_chunk}
-                                        await stream_manager.publish(assistant_message_id, event_data)
-                            except json.JSONDecodeError:
-                                continue
-            final_status = schemas.MessageStatus.COMPLETED
-
-        except Exception as e:
-            print(f"[Stream Task Error] for message {assistant_message_id}: {e}")
-            if sub_message_id_to_update:
-                error_msg = f"\n\n**错误: {e}**"
-                await message_crud.append_to_sub_message_content(db, sub_message_id_to_update, error_msg)
-                event_data = {"sub_message_id": sub_message_id_to_update, "content": error_msg}
-                await stream_manager.publish(assistant_message_id, event_data)
-            final_status = schemas.MessageStatus.FAILED
-        finally:
-            if sub_message_id_to_update:
-                await message_crud.update_sub_message_status(db, sub_message_id_to_update, final_status)
-            await stream_manager.close_stream(assistant_message_id)
-
-
-async def run_generation_task_non_stream(chat_id: str, assistant_message_id: str):
-    """后台任务：以非流式方式调用LLM，获取完整响应后一次性持久化和发布。"""
-    async with AsyncSessionLocal() as db:
-        final_status = schemas.MessageStatus.FAILED
-        sub_message_id_to_update = None
-        try:
-            assistant_message = await message_crud.get_message(db, assistant_message_id)
-            if not assistant_message or not assistant_message.sub_messages:
-                raise ValueError(f"Assistant placeholder message {assistant_message_id} or its sub_message not found.")
-            sub_message_id_to_update = assistant_message.sub_messages[0].id
-
-            if await stream_manager.is_cancellation_requested(assistant_message_id):
-                raise asyncio.CancelledError("Task was cancelled before starting.")
-
-            db_chat, history_messages = await _get_common_generation_context(db, chat_id, assistant_message_id)
-            headers, payload, api_host, use_proxy = _prepare_llm_request_data(db_chat, history_messages)
-            payload["stream"] = False
-
-            async with await _get_http_client_with_proxy(db, use_proxy_flag=use_proxy) as client:
-                response = await client.post(f"{api_host.rstrip('/')}/chat/completions", headers=headers, json=payload)
-                response.raise_for_status()
-                data = response.json()
-                full_response_content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-
-            if full_response_content:
-                update_schema = schemas.SubMessageUpdate(content=full_response_content)
-                await message_crud.update_sub_message(db, sub_message_id_to_update, update_schema)
-                final_status = schemas.MessageStatus.COMPLETED
-            else:
-                raise ValueError("LLM服务商返回了空响应。")
+            overall_status = await manager.run(
+                worker=worker,
+                assistant_message_id=assistant_message_id,
+                db_chat=db_chat,
+                history_messages=history_messages
+            )
 
         except asyncio.CancelledError:
-            print(f"[Non-Stream Task] Cancellation detected for {assistant_message_id}. Stopping.")
-            final_status = schemas.MessageStatus.COMPLETED
+            print(f"[Generation Service] Task cancelled for message '{assistant_message_id}'.")
+            overall_status = schemas.MessageStatus.COMPLETED # Treat cancellation as completed for the message
         except Exception as e:
-            print(f"[Non-Stream Task Error] for message {assistant_message_id}: {e}")
-            if sub_message_id_to_update:
-                error_msg = f"\n\n**错误: {e}**"
-                await message_crud.append_to_sub_message_content(db, sub_message_id_to_update, error_msg)
-            final_status = schemas.MessageStatus.FAILED
+            print(f"[Generation Service Error] for message {assistant_message_id}: {e}")
+            # 如果在Manager运行之前发生错误，或者Manager内部未捕获的错误，这里进行处理
+            # 尝试更新assistant消息的整体状态
+            assistant_message = await message_crud.get_message(db, assistant_message_id)
+            if assistant_message:
+                # 如果有任何子消息，更新其状态；如果没有，则创建一个错误子消息
+                if assistant_message.sub_messages:
+                    for sub_msg in assistant_message.sub_messages:
+                        if sub_msg.status == schemas.MessageStatus.GENERATING.value:
+                            await message_crud.update_sub_message_status(db, sub_msg.id, schemas.MessageStatus.FAILED)
+                            # 确保错误信息被添加到某个子消息
+                            if not sub_msg.content.endswith(f"\n\n**错误: {e}**"):
+                                await message_crud.append_to_sub_message_content(db, sub_msg.id, f"\n\n**错误: {e}**")
+                else:
+                    # 如果没有子消息，创建一个错误子消息
+                    error_sub_message_create = schemas.SubMessageCreate(
+                        content=f"生成失败: {e}",
+                        sortOrder=0,
+                        type="Normal",
+                        status=schemas.MessageStatus.FAILED
+                    )
+                    await message_crud.create_sub_message(db, assistant_message_id, error_sub_message_create)
+
+            overall_status = schemas.MessageStatus.FAILED
         finally:
-            if sub_message_id_to_update:
-                await message_crud.update_sub_message_status(db, sub_message_id_to_update, final_status)
             await stream_manager.close_stream(assistant_message_id)
 
 
@@ -278,25 +158,28 @@ async def subscribe_to_stream(
     if not message:
         return
 
+    # 发送初始的完整消息状态
     sub_messages_data = [schemas.SubMessage.model_validate(sm).model_dump(mode='json') for sm in message.sub_messages]
-
     initial_event_data = {"type": "replace", "sub_messages": sub_messages_data}
     yield f"data: {json.dumps(initial_event_data)}\n\n"
 
+    # 检查是否有任何子消息仍在生成中
     is_still_generating = any(sm.status == chat_model.MessageStatus.GENERATING.value for sm in message.sub_messages)
     if not is_still_generating:
+        # 如果所有子消息都已完成，则无需订阅实时流
         return
 
     queue = await stream_manager.subscribe(assistant_message_id)
     try:
         while True:
             chunk_data = await queue.get()
-            if chunk_data is None:
+            if chunk_data is None: # 流结束的信号
                 break
-            event_data = {"type": "append", **chunk_data}
-            yield f"data: {json.dumps(event_data)}\n\n"
+            # chunk_data 现在已经是 Manager 发布的结构化事件 (create, append, status_update)
+            yield f"data: {json.dumps(chunk_data)}\n\n"
             queue.task_done()
     except asyncio.CancelledError:
         print(f"[Subscriber] Client disconnected for message '{assistant_message_id}'.")
     finally:
         await stream_manager.unsubscribe(assistant_message_id, queue)
+

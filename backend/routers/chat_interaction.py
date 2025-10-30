@@ -19,29 +19,10 @@ router = APIRouter()
 async def _start_generation_task(
     background_tasks: BackgroundTasks,
     chat_id: str,
-    assistant_message_id: str,
-    db: AsyncSession
+    assistant_message_id: str
 ):
-    """根据会话设置决定启动流式或非流式后台任务。"""
-    db_chat = await chat_crud.get_chat(db, chat_id=chat_id)
-    use_stream = True
-    if db_chat and db_chat.modelParameters:
-        try:
-            params_str = db_chat.modelParameters
-            params = json.loads(params_str) if isinstance(params_str, str) else params_str
-            if params.get('stream') is False:
-                use_stream = False
-        except (json.JSONDecodeError, TypeError):
-            logging.warning(
-                "Could not parse modelParameters for chat %s. Falling back to default stream=True.",
-                chat_id,
-                exc_info=True
-            )
-
-    if use_stream:
-        background_tasks.add_task(generation_service.run_generation_task_stream, chat_id, assistant_message_id)
-    else:
-        background_tasks.add_task(generation_service.run_generation_task_non_stream, chat_id, assistant_message_id)
+    """启动后台生成任务。"""
+    background_tasks.add_task(generation_service._run_managed_generation_task, chat_id, assistant_message_id)
 
 
 @router.get("/chats/{chat_id}/messages", response_model=schemas.ChatWithMessages, summary="获取单个会话及其消息")
@@ -90,7 +71,7 @@ async def update_message_and_regenerate(
     assistant_placeholder = await generation_service.prepare_for_generation(
         db=db, chat_id=db_message.chatId, base_message_id=message_id, save_user_message=False
     )
-    await _start_generation_task(background_tasks, db_message.chatId, assistant_placeholder.id, db)
+    await _start_generation_task(background_tasks, db_message.chatId, assistant_placeholder.id)
     return assistant_placeholder
 
 
@@ -145,7 +126,7 @@ async def prepare_to_generate(
     assistant_placeholder = await generation_service.prepare_for_generation(
         db=db, chat_id=chat_id, user_sub_messages=request.sub_messages, save_user_message=True
     )
-    await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id, db)
+    await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id)
     return assistant_placeholder
 
 
@@ -167,7 +148,7 @@ async def prepare_to_regenerate(
     assistant_placeholder = await generation_service.prepare_for_generation(
         db=db, chat_id=chat_id, base_message_id=from_message_id, save_user_message=False
     )
-    await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id, db)
+    await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id)
     return assistant_placeholder
 
 

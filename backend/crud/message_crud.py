@@ -163,6 +163,22 @@ async def delete_last_assistant_message(db: AsyncSession, chat_id: str) -> Optio
     return last_message
 
 
+async def create_sub_message(db: AsyncSession, message_id: str, sub_message_data: schemas.SubMessageCreate) -> chat_model.SubMessage:
+    """在指定消息下创建一个新的子消息。"""
+    db_sub_message = chat_model.SubMessage(
+        messageId=message_id,
+        content=sub_message_data.content,
+        sortOrder=sub_message_data.sortOrder,
+        type=sub_message_data.type,
+        status=sub_message_data.status.value,
+        config=sub_message_data.config.model_dump_json()
+    )
+    db.add(db_sub_message)
+    await db.commit()
+    await db.refresh(db_sub_message)
+    return db_sub_message
+
+
 async def get_sub_message(db: AsyncSession, sub_message_id: str) -> Optional[chat_model.SubMessage]:
     """通过ID获取单条子消息"""
     result = await db.execute(select(chat_model.SubMessage).filter(chat_model.SubMessage.id == sub_message_id))
