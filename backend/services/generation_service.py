@@ -163,9 +163,15 @@ async def subscribe_to_stream(
     initial_event_data = {"type": "replace", "sub_messages": sub_messages_data}
     yield f"data: {json.dumps(initial_event_data)}\n\n"
 
-    # 检查是否有任何子消息仍在生成中
-    is_still_generating = any(sm.status == chat_model.MessageStatus.GENERATING.value for sm in message.sub_messages)
-    if not is_still_generating:
+    # 只有当消息存在子消息，且没有任何一个子消息处于 'generating' 状态时，
+    # 我们才能确定生成过程已经结束，从而可以安全地关闭流。
+    # 如果消息没有任何子消息，我们必须假设生成任务即将开始，不能提前返回。
+    has_sub_messages = len(message.sub_messages) > 0
+    is_any_sub_generating = any(sm.status == chat_model.MessageStatus.GENERATING.value for sm in message.sub_messages)
+
+    is_generation_definitely_finished = has_sub_messages and not is_any_sub_generating
+
+    if is_generation_definitely_finished:
         # 如果所有子消息都已完成，则无需订阅实时流
         return
 
@@ -182,4 +188,3 @@ async def subscribe_to_stream(
         print(f"[Subscriber] Client disconnected for message '{assistant_message_id}'.")
     finally:
         await stream_manager.unsubscribe(assistant_message_id, queue)
-

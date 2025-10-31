@@ -14,31 +14,24 @@
     </div>
 
     <div class="message-body">
-      <template v-if="isSingleSubMessage">
-        <div class="single-sub-message-wrapper" :class="{ collapsed: isSingleViewCollapsed }">
-          <SubMessageItem
-            :sub-message="firstSubMessage"
-            :parent-message="message"
-            @edit="(payload) => handleEditRequest(firstSubMessage, payload)"
-            @copy="handleCopy"
-          />
-        </div>
-      </template>
-
-      <template v-else>
-        <div class="multi-part-container">
-          <SubMessageItem
-            v-for="(subMessage, index) in message.sub_messages"
-            :key="subMessage.id"
-            :sub-message="subMessage"
-            :parent-message="message"
-            :show-header="true"
-            :index="index + 1"
-            @edit="(payload) => handleEditRequest(subMessage, payload)"
-            @copy="handleCopySingle(subMessage)"
-          />
-        </div>
-      </template>
+      <div
+        class="sub-messages-container"
+        :class="{
+          'is-single': useSinglePartitionView,
+          'is-single-collapsed': useSinglePartitionView && isSingleViewCollapsed
+        }"
+      >
+        <SubMessageItem
+          v-for="(subMessage, index) in message.sub_messages"
+          :key="subMessage.id"
+          :sub-message="subMessage"
+          :parent-message="message"
+          :show-header="!useSinglePartitionView"
+          :index="index + 1"
+          @edit="(payload) => handleEditRequest(subMessage, payload)"
+          @copy="handleCopySingle(subMessage)"
+        />
+      </div>
 
       <div class="message-actions" :class="{ 'is-visible': showActions && !isAnySubMessageGenerating }">
         <el-tooltip :content="message.role === 'user' ? '在下方重新回答' : '重新回答'" placement="top" :show-after="500">
@@ -50,7 +43,6 @@
         </el-tooltip>
 
         <el-tooltip v-if="isSingleSubMessage" content="编辑" placement="top" :show-after="500">
-          <!-- 这里也统一调用 handleEditRequest -->
           <el-button :icon="Edit" circle size="small" @click="handleEditRequest(firstSubMessage, { content: firstSubMessage.content })" />
         </el-tooltip>
 
@@ -96,6 +88,12 @@ const showActions = ref(false);
 
 const isSingleSubMessage = computed(() => props.message.sub_messages.length <= 1);
 const firstSubMessage = computed(() => props.message.sub_messages[0]);
+
+// 决定是否使用简化的单分区视图（无头部，有特殊背景和折叠效果）
+const useSinglePartitionView = computed(() => {
+  return props.message.sub_messages.length === 1 && firstSubMessage.value?.type === 'Normal';
+});
+
 const isAnySubMessageGenerating = computed(() => props.message.sub_messages.some(sm => sm.status === 'generating'));
 const roleClass = computed(() => ({
   'is-user': props.message.role === 'user',
@@ -122,10 +120,8 @@ const editingSubMessage = ref<SubMessage | null>(null);
 const originalEditingContent = ref('');
 const editingBlockIndex = ref<number | null>(null);
 
-// 【关键修复】添加 watch 来处理对话框关闭后的清理工作
 watch(editDialogVisible, (newValue) => {
   if (!newValue) {
-    // 当对话框关闭时，重置状态，以便下次正确打开
     editingSubMessage.value = null;
     originalEditingContent.value = '';
     editingBlockIndex.value = null;
@@ -133,7 +129,6 @@ watch(editDialogVisible, (newValue) => {
 });
 
 function handleEditRequest(subMessage: SubMessage, payload: { content: string; blockIndex?: number }) {
-  // 如果没有 subMessage 或者 payload，则不执行任何操作
   if (!subMessage || !payload) {
     console.error("handleEditRequest called with invalid arguments", { subMessage, payload });
     return;
@@ -174,7 +169,6 @@ function getUpdatedFullContent(newPartialContent: string): string {
       }
     }
   } else {
-    // Fallback if something is inconsistent
     return fullOriginalContent.replace(partialOriginalContent, newPartialContent);
   }
 
@@ -248,19 +242,62 @@ async function handleCopy() {
 .message-item-container { display: flex; align-items: flex-start; margin-bottom: 20px; max-width: 90%; }
 .message-avatar { flex-shrink: 0; margin-right: 12px; margin-top: 2px; }
 .message-body { display: flex; flex-direction: column; min-width: 80px; width: 100%; }
-.single-sub-message-wrapper { padding: 10px 15px; border-radius: 8px; background-color: var(--color-background-soft); min-height: 40px; transition: max-height 0.25s ease-out; overflow: hidden; position: relative; }
-.is-user .single-sub-message-wrapper { background-color: var(--el-color-primary-light-9); }
-.single-sub-message-wrapper :deep(.sub-message-item) { border: none; background-color: transparent; overflow: visible; }
-.single-sub-message-wrapper :deep(.message-content) { padding: 0; max-height: none; }
-.single-sub-message-wrapper :deep(.message-content)::after { display: none; }
-.single-sub-message-wrapper.collapsed { max-height: 5em; }
-.single-sub-message-wrapper.collapsed::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 3em; background: linear-gradient(to bottom, transparent, var(--color-background-soft)); pointer-events: none; }
-.is-user .single-sub-message-wrapper.collapsed::after { background: linear-gradient(to bottom, transparent, var(--el-color-primary-light-9)); }
-.multi-part-container { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+
+.sub-messages-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  position: relative;
+  transition: max-height 0.25s ease-out;
+  overflow: hidden;
+}
+
+.sub-messages-container.is-single {
+  gap: 0;
+  padding: 10px 15px;
+  border-radius: 8px;
+  background-color: var(--color-background-soft);
+  min-height: 40px;
+}
+.is-user .sub-messages-container.is-single {
+  background-color: var(--el-color-primary-light-9);
+}
+
+.sub-messages-container.is-single :deep(.sub-message-item) {
+  border: none;
+  background-color: transparent;
+  overflow: visible;
+}
+.sub-messages-container.is-single :deep(.message-content) {
+  padding: 0;
+  max-height: none;
+}
+.sub-messages-container.is-single :deep(.message-content)::after {
+  display: none;
+}
+
+.sub-messages-container.is-single-collapsed {
+  max-height: 5em;
+}
+.sub-messages-container.is-single-collapsed::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3em;
+  background: linear-gradient(to bottom, transparent, var(--color-background-soft));
+  pointer-events: none;
+}
+.is-user .sub-messages-container.is-single-collapsed::after {
+  background: linear-gradient(to bottom, transparent, var(--el-color-primary-light-9));
+}
+
 .message-actions { display: flex; gap: 4px; margin-top: 8px; opacity: 0; visibility: hidden; height: 24px; transition: opacity 0.2s, visibility 0.2s; }
 .message-actions.is-visible { opacity: 1; visibility: visible; }
 .message-item-container.is-user { flex-direction: row-reverse; margin-left: auto; }
 .is-user .message-avatar { margin-right: 0; margin-left: 12px; }
-.is-user .single-sub-message-wrapper, .is-user .multi-part-container { margin-left: auto; }
+.is-user .sub-messages-container { margin-left: auto; }
 .is-user .message-actions { justify-content: flex-end; }
 </style>
