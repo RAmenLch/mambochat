@@ -46,6 +46,7 @@ export interface Message {
   chatId: string;
   sortOrder: number;
   sub_messages: SubMessage[];
+  status: MessageStatus;
 }
 
 export interface MessageUpdate {

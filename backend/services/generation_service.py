@@ -2,6 +2,7 @@
 
 import json
 import asyncio
+from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import AsyncGenerator, List, Optional
@@ -13,6 +14,40 @@ from ..models import chat_model
 from ..database import AsyncSessionLocal
 from .generation.manager import DefaultGenerateManager
 from .generation.openai_worker import OpenAIGenerateWorker
+
+# 定义生成任务启动的超时阈值
+GENERATION_START_TIMEOUT = timedelta(minutes=10)
+
+
+async def _calculate_message_status(message: chat_model.Message) -> schemas.MessageStatus:
+    """
+    根据消息的角色、子消息状态和活跃流状态，动态计算消息的聚合状态。
+    """
+    if message.role != schemas.MessageRole.ASSISTANT:
+        return schemas.MessageStatus.COMPLETED
+
+    # 1. 基于子消息状态判断
+    if message.sub_messages:
+        sub_statuses = {sm.status for sm in message.sub_messages}
+        if schemas.MessageStatus.GENERATING.value in sub_statuses:
+            return schemas.MessageStatus.GENERATING
+        if schemas.MessageStatus.FAILED.value in sub_statuses:
+            return schemas.MessageStatus.FAILED
+        # 如果所有子消息都已完成
+        return schemas.MessageStatus.COMPLETED
+
+    # 2. 无子消息时的判断
+    # 检查是否有活跃的流，有则说明正在生成
+    if await stream_manager.is_stream_active(message.id):
+        return schemas.MessageStatus.GENERATING
+
+    # 无活跃流，检查是否超时（后台任务可能启动失败）
+    time_since_creation = datetime.now(timezone.utc) - message.createdAt.replace(tzinfo=timezone.utc)
+    if time_since_creation > GENERATION_START_TIMEOUT:
+        return schemas.MessageStatus.FAILED
+
+    # 未超时，但无子消息和活跃流，可能处于任务启动的短暂间隙，仍视为生成中
+    return schemas.MessageStatus.GENERATING
 
 
 async def prepare_for_generation(
@@ -49,7 +84,7 @@ async def prepare_for_generation(
 
     assistant_message_create = schemas.MessageCreate(
         role=schemas.MessageRole.ASSISTANT,
-        sub_messages=[] # 初始时不包含任何子消息
+        sub_messages=[]  # 初始时不包含任何子消息
     )
     assistant_placeholder = await message_crud.create_message(db, message=assistant_message_create, chat_id=chat_id)
     return assistant_placeholder
@@ -100,29 +135,34 @@ async def subscribe_to_stream(
         assistant_message_id: str,
 ) -> AsyncGenerator[str, None]:
     """
-    订阅一个生成流。首先发送历史内容，然后监听实时内容块。
+    订阅一个生成流。首先发送历史内容和当前聚合状态，然后监听实时内容块。
     """
     message = await message_crud.get_message(db, assistant_message_id)
     if not message:
         return
 
+    # 计算初始的聚合状态
+    calculated_status = await _calculate_message_status(message)
+
+    # 准备并发送初始的替换事件，包含子消息和聚合状态
     sub_messages_data = [schemas.SubMessage.model_validate(sm).model_dump(mode='json') for sm in message.sub_messages]
-    initial_event_data = {"type": "replace", "sub_messages": sub_messages_data}
+    initial_event_data = {
+        "type": "replace",
+        "sub_messages": sub_messages_data,
+        "status": calculated_status.value
+    }
     yield f"data: {json.dumps(initial_event_data)}\n\n"
 
-    has_sub_messages = len(message.sub_messages) > 0
-    is_any_sub_generating = any(sm.status == chat_model.MessageStatus.GENERATING.value for sm in message.sub_messages)
-
-    is_generation_definitely_finished = has_sub_messages and not is_any_sub_generating
-
-    if is_generation_definitely_finished:
+    # 如果生成任务已经明确结束（完成或失败），则无需继续订阅
+    if calculated_status in [schemas.MessageStatus.COMPLETED, schemas.MessageStatus.FAILED]:
         return
 
+    # 订阅实时事件流
     queue = await stream_manager.subscribe(assistant_message_id)
     try:
         while True:
             chunk_data = await queue.get()
-            if chunk_data is None:
+            if chunk_data is None:  # 流结束的信号
                 break
             yield f"data: {json.dumps(chunk_data)}\n\n"
             queue.task_done()

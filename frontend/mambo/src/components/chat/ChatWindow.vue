@@ -88,6 +88,7 @@ import { useResizablePanels } from '@/composables/useResizablePanels';
 import { useTokenEstimator } from '@/composables/useTokenEstimator';
 import type { ChatUpdate, SubMessageCreate, AIModel } from '@/api/types';
 import { debounce } from 'lodash-es';
+import type { Ref } from 'vue'; // 显式导入 Ref 类型
 
 interface Partition { id: number; content: string; }
 interface GroupedModels { label: string; options: AIModel[]; }
@@ -162,7 +163,8 @@ async function handleSendMessage() {
 }
 
 function handleStopGeneration() {
-  const genMsg = currentChatMessages.value.find(m => m.sub_messages.some(sm => sm.status === 'generating'));
+  // 直接通过消息的聚合状态 `message.status` 来查找正在生成的消息
+  const genMsg = currentChatMessages.value.find(m => m.status === 'generating');
   if (genMsg) chatStore.cancelGeneration(genMsg.id);
 }
 
@@ -244,7 +246,7 @@ watch(() => currentChat.value?.id, (newId) => {
       if (draft && draft.startsWith('[')) {
         try { multiPartDraft.value = JSON.parse(draft) } catch { /* ignore */ }
       } else {
-        multiPartDraft.value = [{ id: Date.now(), content: draft }];
+        multiPartDraft.value = [{ id: Date.now(), content: '' }];
       }
     } else {
       singlePartDraft.value = (draft && draft.startsWith('[')) ? '' : draft;
@@ -276,3 +278,4 @@ watch(() => currentChat.value?.id, (newId) => {
 .input-field:deep(.el-textarea__inner) { height: 100% !important; }
 .action-button { width: 54px; font-size: 20px; flex-shrink: 0; align-self: flex-end; height: calc(100% - 2px); }
 </style>
+

@@ -85,6 +85,14 @@ class StreamManager:
                 await asyncio.gather(*(queue.put(None) for queue in subscribers))
             self.cancellation_requests.discard(message_id)
 
+    async def is_stream_active(self, message_id: str) -> bool:
+        """
+        检查指定ID的流当前是否有任何活动的订阅者。
+        这可以用来判断一个生成任务是否仍在进行中。
+        """
+        async with self.lock:
+            return message_id in self.active_streams and len(self.active_streams[message_id]) > 0
+
     async def request_cancellation(self, message_id: str):
         """
         请求停止一个正在运行的生成任务。
@@ -103,4 +111,3 @@ class StreamManager:
 
 # 创建一个全局唯一的 StreamManager 实例，供整个应用使用
 stream_manager = StreamManager()
-

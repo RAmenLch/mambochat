@@ -76,7 +76,7 @@ class Message(MessageBase):
     chatId: str
     sortOrder: int
     sub_messages: List[SubMessage] = Field(default_factory=list)
+    status: Optional[MessageStatus] = Field(None, description="消息的动态计算状态，例如 'generating', 'completed', 'failed'。仅在API响应时填充。")
 
     class Config:
         from_attributes = True
-

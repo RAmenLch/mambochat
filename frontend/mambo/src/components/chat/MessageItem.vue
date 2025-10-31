@@ -21,6 +21,13 @@
           'is-single-collapsed': useSinglePartitionView && isSingleViewCollapsed
         }"
       >
+        <!-- Display a loading indicator when the message is generating but has no sub-messages yet -->
+        <div v-if="message.status === 'generating' && message.sub_messages.length === 0" class="initial-loading-placeholder">
+          <div class="typing-indicator">
+            <span></span><span></span><span></span>
+          </div>
+        </div>
+
         <SubMessageItem
           v-for="(subMessage, index) in message.sub_messages"
           :key="subMessage.id"
@@ -33,7 +40,7 @@
         />
       </div>
 
-      <div class="message-actions" :class="{ 'is-visible': showActions && !isAnySubMessageGenerating }">
+      <div class="message-actions" :class="{ 'is-visible': showActions && message.status !== 'generating' }">
         <el-tooltip :content="message.role === 'user' ? '在下方重新回答' : '重新回答'" placement="top" :show-after="500">
           <el-button :icon="message.role === 'user' ? RefreshLeft : Refresh" circle size="small" @click="handleRegenerate" />
         </el-tooltip>
@@ -94,7 +101,6 @@ const useSinglePartitionView = computed(() => {
   return props.message.sub_messages.length === 1 && firstSubMessage.value?.type === 'Normal';
 });
 
-const isAnySubMessageGenerating = computed(() => props.message.sub_messages.some(sm => sm.status === 'generating'));
 const roleClass = computed(() => ({
   'is-user': props.message.role === 'user',
   'is-assistant': props.message.role === 'assistant',
@@ -169,6 +175,7 @@ function getUpdatedFullContent(newPartialContent: string): string {
       }
     }
   } else {
+    // Fallback if blockIndex doesn't match or partialOriginalContent isn't found in blocks
     return fullOriginalContent.replace(partialOriginalContent, newPartialContent);
   }
 
@@ -300,4 +307,19 @@ async function handleCopy() {
 .is-user .message-avatar { margin-right: 0; margin-left: 12px; }
 .is-user .sub-messages-container { margin-left: auto; }
 .is-user .message-actions { justify-content: flex-end; }
+
+.initial-loading-placeholder {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 10px 15px;
+  border-radius: 8px;
+  background-color: var(--color-background-soft);
+}
+
+.typing-indicator { display: flex; align-items: center; justify-content: flex-start; height: 24px; }
+.typing-indicator span { height: 8px; width: 8px; border-radius: 50%; background-color: #909399; margin: 0 3px; animation: bounce 1.4s infinite ease-in-out both; }
+.typing-indicator span:nth-of-type(1) { animation-delay: -0.32s; }
+.typing-indicator span:nth-of-type(2) { animation-delay: -0.16s; }
+@keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
 </style>

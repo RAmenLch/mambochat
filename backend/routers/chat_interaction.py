@@ -17,9 +17,9 @@ router = APIRouter()
 
 
 async def _start_generation_task(
-    background_tasks: BackgroundTasks,
-    chat_id: str,
-    assistant_message_id: str
+        background_tasks: BackgroundTasks,
+        chat_id: str,
+        assistant_message_id: str
 ):
     """启动后台生成任务。"""
     background_tasks.add_task(generation_service._run_managed_generation_task, chat_id, assistant_message_id)
@@ -40,7 +40,19 @@ async def read_chat_with_messages(chat_id: str, db: AsyncSession = Depends(get_d
     default_model_id = default_model_setting.value if default_model_setting else None
     _apply_default_model_to_chat_object(db_chat, default_model_id)
 
-    return db_chat
+    # 手动构建响应模型以注入动态计算的 status 字段
+    chat_response = schemas.ChatWithMessages.model_validate(db_chat)
+
+    # 为每条消息计算并设置其状态
+    message_responses = []
+    for db_message in db_chat.messages:
+        message_res = schemas.Message.model_validate(db_message)
+        message_res.status = await generation_service._calculate_message_status(db_message)
+        message_responses.append(message_res)
+
+    chat_response.messages = message_responses
+
+    return chat_response
 
 
 @router.put("/messages/{message_id}", response_model=schemas.Message, summary="更新消息内容并可选择重新生成")
@@ -63,7 +75,9 @@ async def update_message_and_regenerate(
         raise HTTPException(status_code=500, detail="Failed to update message")
 
     if not message_update.resend:
-        return updated_message
+        response_message = schemas.Message.model_validate(updated_message)
+        response_message.status = await generation_service._calculate_message_status(updated_message)
+        return response_message
 
     if db_message.role != schemas.MessageRole.USER:
         raise HTTPException(status_code=400, detail="Resend is only applicable to user messages.")
@@ -72,7 +86,10 @@ async def update_message_and_regenerate(
         db=db, chat_id=db_message.chatId, base_message_id=message_id, save_user_message=False
     )
     await _start_generation_task(background_tasks, db_message.chatId, assistant_placeholder.id)
-    return assistant_placeholder
+
+    response_placeholder = schemas.Message.model_validate(assistant_placeholder)
+    response_placeholder.status = schemas.MessageStatus.GENERATING
+    return response_placeholder
 
 
 @router.delete("/messages/{message_id}", response_model=schemas.Message, summary="删除单条消息")
@@ -85,9 +102,9 @@ async def delete_single_message(message_id: str, db: AsyncSession = Depends(get_
 
 @router.put("/sub-messages/{sub_message_id}", response_model=schemas.SubMessage, summary="更新单个消息分区")
 async def update_sub_message(
-    sub_message_id: str,
-    sub_message_update: schemas.SubMessageUpdate,
-    db: AsyncSession = Depends(get_db)
+        sub_message_id: str,
+        sub_message_update: schemas.SubMessageUpdate,
+        db: AsyncSession = Depends(get_db)
 ):
     """
     更新单个消息分区的内容、配置或状态。
@@ -127,7 +144,11 @@ async def prepare_to_generate(
         db=db, chat_id=chat_id, user_sub_messages=request.sub_messages, save_user_message=True
     )
     await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id)
-    return assistant_placeholder
+
+    # 构建包含 'generating' 状态的响应模型
+    response_placeholder = schemas.Message.model_validate(assistant_placeholder)
+    response_placeholder.status = schemas.MessageStatus.GENERATING
+    return response_placeholder
 
 
 @router.post(
@@ -149,7 +170,11 @@ async def prepare_to_regenerate(
         db=db, chat_id=chat_id, base_message_id=from_message_id, save_user_message=False
     )
     await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id)
-    return assistant_placeholder
+
+    # 构建包含 'generating' 状态的响应模型
+    response_placeholder = schemas.Message.model_validate(assistant_placeholder)
+    response_placeholder.status = schemas.MessageStatus.GENERATING
+    return response_placeholder
 
 
 @router.get(
@@ -169,4 +194,3 @@ async def stream_response(
         generation_service.subscribe_to_stream(db, assistant_message_id),
         media_type="text/event-stream"
     )
-
