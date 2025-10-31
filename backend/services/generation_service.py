@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import AsyncGenerator, List, Optional
 
 from .stream_manager_service import stream_manager
-from ..crud import chat_crud, message_crud, setting_crud
+from ..crud import chat_crud, message_crud
 from .. import schemas
 from ..models import chat_model
 from ..database import AsyncSessionLocal
@@ -47,7 +47,6 @@ async def prepare_for_generation(
         include_self = (ref_message.role == schemas.MessageRole.ASSISTANT)
         await message_crud.delete_messages_after(db, chat_id=chat_id, message_id=base_message_id, include_self=include_self)
 
-    # 创建一个空的assistant消息占位符，其sub_messages将由Manager动态创建
     assistant_message_create = schemas.MessageCreate(
         role=schemas.MessageRole.ASSISTANT,
         sub_messages=[] # 初始时不包含任何子消息
@@ -56,93 +55,42 @@ async def prepare_for_generation(
     return assistant_placeholder
 
 
-async def _get_common_generation_context(db: AsyncSession, chat_id: str, assistant_message_id: str):
-    """提取生成任务共用的上下文获取逻辑。"""
-    db_chat = await chat_crud.get_chat(db, chat_id=chat_id)
-    if not db_chat:
-        raise ValueError(f"Chat with id {chat_id} not found.")
-
-    if not db_chat.aiModelId:
-        default_model_setting = await setting_crud.get_setting(db, key="default_model_id")
-        if default_model_setting and default_model_setting.value:
-            db_chat.aiModelId = default_model_setting.value
-            await db.commit()
-            await db.refresh(db_chat)
-            db_chat = await chat_crud.get_chat(db, chat_id=chat_id) # Refresh to get associated model/provider
-        else:
-            raise ValueError("当前会话未指定模型，且未设置全局默认模型。")
-
-    model_params = {}
-    if db_chat.modelParameters:
-        try:
-            params_str = db_chat.modelParameters
-            model_params = json.loads(params_str) if isinstance(params_str, str) else params_str
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-    max_messages = model_params.get('max_context_messages')
-    limit = max_messages if isinstance(max_messages, int) and max_messages > 0 else None
-
-    if limit:
-        history_messages = await message_crud.get_limited_recent_messages(db, chat_id=chat_id, limit=limit + 1)
-        history_messages = [msg for msg in history_messages if msg.id != assistant_message_id]
-        if len(history_messages) > limit:
-            history_messages = history_messages[-limit:]
-    else:
-        all_messages = await message_crud.get_messages_by_chat(db, chat_id=chat_id)
-        history_messages = [msg for msg in all_messages if msg.id != assistant_message_id]
-
-    return db_chat, history_messages
-
-
 async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
     """
-    后台任务：协调LLM生成过程，使用Worker生成指令，Manager执行指令。
+    后台任务：协调整个生成过程。它实例化适当的 Worker 和 Manager，
+    然后调用 manager.run() 来执行生成流程。
     """
-    overall_status = schemas.MessageStatus.FAILED
     async with AsyncSessionLocal() as db:
         try:
-            db_chat, history_messages = await _get_common_generation_context(db, chat_id, assistant_message_id)
-
             # 根据模型类型选择合适的Worker，目前只有OpenAI Worker
             worker = OpenAIGenerateWorker(db_session=db)
             manager = DefaultGenerateManager(db_session=db)
 
-            overall_status = await manager.run(
+            # 调用Manager的run方法，它现在负责准备上下文和执行所有生成逻辑
+            await manager.run(
                 worker=worker,
-                assistant_message_id=assistant_message_id,
-                db_chat=db_chat,
-                history_messages=history_messages
+                chat_id=chat_id,
+                assistant_message_id=assistant_message_id
             )
 
         except asyncio.CancelledError:
             print(f"[Generation Service] Task cancelled for message '{assistant_message_id}'.")
-            overall_status = schemas.MessageStatus.COMPLETED # Treat cancellation as completed for the message
+            # Manager内部已处理了取消，这里仅作记录。
         except Exception as e:
             print(f"[Generation Service Error] for message {assistant_message_id}: {e}")
-            # 如果在Manager运行之前发生错误，或者Manager内部未捕获的错误，这里进行处理
-            # 尝试更新assistant消息的整体状态
-            assistant_message = await message_crud.get_message(db, assistant_message_id)
-            if assistant_message:
-                # 如果有任何子消息，更新其状态；如果没有，则创建一个错误子消息
-                if assistant_message.sub_messages:
-                    for sub_msg in assistant_message.sub_messages:
-                        if sub_msg.status == schemas.MessageStatus.GENERATING.value:
-                            await message_crud.update_sub_message_status(db, sub_msg.id, schemas.MessageStatus.FAILED)
-                            # 确保错误信息被添加到某个子消息
-                            if not sub_msg.content.endswith(f"\n\n**错误: {e}**"):
-                                await message_crud.append_to_sub_message_content(db, sub_msg.id, f"\n\n**错误: {e}**")
-                else:
-                    # 如果没有子消息，创建一个错误子消息
-                    error_sub_message_create = schemas.SubMessageCreate(
-                        content=f"生成失败: {e}",
-                        sortOrder=0,
-                        type="Normal",
-                        status=schemas.MessageStatus.FAILED
-                    )
-                    await message_crud.create_sub_message(db, assistant_message_id, error_sub_message_create)
+            # Manager内部已经处理了大部分异常，这里捕获的是Manager初始化或运行前可能发生的错误。
+            # 尝试更新占位符消息以反映错误。
+            try:
+                error_sub_message_create = schemas.SubMessageCreate(
+                    content=f"生成流程启动失败: {e}",
+                    sortOrder=0,
+                    type="Normal",
+                    status=schemas.MessageStatus.FAILED
+                )
+                await message_crud.create_sub_message(db, assistant_message_id, error_sub_message_create)
+            except Exception as inner_e:
+                 print(f"Failed to even create an error message for {assistant_message_id}: {inner_e}")
 
-            overall_status = schemas.MessageStatus.FAILED
         finally:
             await stream_manager.close_stream(assistant_message_id)
 
@@ -158,30 +106,24 @@ async def subscribe_to_stream(
     if not message:
         return
 
-    # 发送初始的完整消息状态
     sub_messages_data = [schemas.SubMessage.model_validate(sm).model_dump(mode='json') for sm in message.sub_messages]
     initial_event_data = {"type": "replace", "sub_messages": sub_messages_data}
     yield f"data: {json.dumps(initial_event_data)}\n\n"
 
-    # 只有当消息存在子消息，且没有任何一个子消息处于 'generating' 状态时，
-    # 我们才能确定生成过程已经结束，从而可以安全地关闭流。
-    # 如果消息没有任何子消息，我们必须假设生成任务即将开始，不能提前返回。
     has_sub_messages = len(message.sub_messages) > 0
     is_any_sub_generating = any(sm.status == chat_model.MessageStatus.GENERATING.value for sm in message.sub_messages)
 
     is_generation_definitely_finished = has_sub_messages and not is_any_sub_generating
 
     if is_generation_definitely_finished:
-        # 如果所有子消息都已完成，则无需订阅实时流
         return
 
     queue = await stream_manager.subscribe(assistant_message_id)
     try:
         while True:
             chunk_data = await queue.get()
-            if chunk_data is None: # 流结束的信号
+            if chunk_data is None:
                 break
-            # chunk_data 现在已经是 Manager 发布的结构化事件 (create, append, status_update)
             yield f"data: {json.dumps(chunk_data)}\n\n"
             queue.task_done()
     except asyncio.CancelledError:

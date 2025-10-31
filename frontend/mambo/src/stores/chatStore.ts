@@ -25,6 +25,12 @@ export const useChatStore = defineStore('chat', () => {
   const isChatHistoryLoading = ref(false);
   const activeSubscriptions = new Map<string, AbortController>();
 
+  /**
+   * 标志是否正在等待后端准备生成（API调用阶段），用于立即更新UI。
+   * 在调用 prepareGenerate/prepareRegenerate API 和接收到SSE流的第一个数据块之间，这个状态为 true。
+   */
+  const isPreparingGeneration = ref(false);
+
   // --- Composables ---
   const { saveDraft, undo, redo, currentDraft } = useUndoRedoHistory(currentChatId);
 
@@ -36,6 +42,7 @@ export const useChatStore = defineStore('chat', () => {
   });
 
   const isGenerating = computed((): boolean =>
+    isPreparingGeneration.value || // 立即反映发送意图
     currentChatMessages.value.some(msg =>
       msg.sub_messages.some(sm => sm.status === 'generating')
     )
@@ -69,25 +76,19 @@ export const useChatStore = defineStore('chat', () => {
           msgToUpdate.sub_messages = data.sub_messages;
           break;
         case 'create':
-          // 确保在处理 create 事件时，如果 sub_message 已存在（可能由 replace 事件引入），则不重复添加
           if (!msgToUpdate.sub_messages.some(sm => sm.id === data.sub_message.id)) {
             msgToUpdate.sub_messages.push(data.sub_message);
-            // 确保子消息按 sortOrder 排序
             msgToUpdate.sub_messages.sort((a, b) => a.sortOrder - b.sortOrder);
           }
           break;
         case 'append': {
           const subMsg = msgToUpdate.sub_messages.find(sm => sm.id === data.sub_message_id);
-          if (subMsg) {
-            subMsg.content += data.content;
-          }
+          if (subMsg) subMsg.content += data.content;
           break;
         }
         case 'status_update': {
           const subMsg = msgToUpdate.sub_messages.find(sm => sm.id === data.sub_message_id);
-          if (subMsg) {
-            subMsg.status = data.status;
-          }
+          if (subMsg) subMsg.status = data.status;
           break;
         }
       }
@@ -95,7 +96,6 @@ export const useChatStore = defineStore('chat', () => {
 
     const finalizeMessageState = async () => {
       activeSubscriptions.delete(assistantMessageId);
-      // 状态同步：在流结束后，获取一次最终消息状态以确保一致性，防止因网络问题等导致状态不同步
       try {
         const finalMsg = await getChatWithMessages(chatId).then(res => res.messages.find(m => m.id === assistantMessageId));
         const localMsg = currentChatMessages.value.find(m => m.id === assistantMessageId);
@@ -130,8 +130,8 @@ export const useChatStore = defineStore('chat', () => {
     finally { isChatListLoading.value = false; }
   }
 
-  async function selectChat(chatId: string) {
-    if (currentChatId.value === chatId) return;
+  async function selectChat(chatId: string, forceRefresh: boolean = false) {
+    if (currentChatId.value === chatId && !forceRefresh) return;
     activeSubscriptions.forEach(controller => controller.abort());
     activeSubscriptions.clear();
 
@@ -228,19 +228,34 @@ export const useChatStore = defineStore('chat', () => {
   async function editMessageAndRegenerate(payload: { messageId: string, sub_messages: SubMessageCreate[], resend?: boolean }) {
     if (!currentChatId.value) return;
     const { resend = false } = payload;
-    try {
-      const placeholder = await updateMessageAndRegenerate(payload.messageId, { sub_messages: payload.sub_messages, resend });
-      // 重新获取整个会话以保证状态完全同步
-      const chat = await getChatWithMessages(currentChatId.value);
-      currentChatMessages.value = chat.messages.sort((a, b) => a.sortOrder - b.sortOrder);
-      if (resend) {
-        // FIX: Replaced .at(-1) with backward-compatible syntax
-        const latestMessage = currentChatMessages.value[currentChatMessages.value.length - 1];
-        if (latestMessage?.id === placeholder.id && latestMessage.role === 'assistant') {
-          _subscribeToMessageStream(latestMessage);
+
+    // 如果不重新生成，则这是一个简单的更新操作
+    if (!resend) {
+        try {
+            await updateMessageAndRegenerate(payload.messageId, { sub_messages: payload.sub_messages, resend: false });
+            await selectChat(currentChatId.value, true);
+        } catch (error) {
+            console.error('Failed to update message:', error);
+            if (currentChatId.value) await selectChat(currentChatId.value, true);
         }
+        return;
+    }
+
+    // 如果需要重新生成，则走包含状态管理的完整流程
+    isPreparingGeneration.value = true;
+    try {
+      const placeholder = await updateMessageAndRegenerate(payload.messageId, { sub_messages: payload.sub_messages, resend: true });
+      await selectChat(currentChatId.value, true);
+      const latestMessage = currentChatMessages.value[currentChatMessages.value.length - 1];
+      if (latestMessage?.id === placeholder.id && latestMessage.role === 'assistant') {
+        _subscribeToMessageStream(latestMessage);
       }
-    } catch (error) { console.error('Failed to update and resend:', error); if (currentChatId.value) await selectChat(currentChatId.value); }
+    } catch (error) {
+      console.error('Failed to update and resend:', error);
+      if (currentChatId.value) await selectChat(currentChatId.value, true);
+    } finally {
+        isPreparingGeneration.value = false;
+    }
   }
 
   async function updateSubMessage(payload: { subMessageId: string, data: SubMessageUpdate }) {
@@ -251,7 +266,7 @@ export const useChatStore = defineStore('chat', () => {
     try { await updateSubMessageAPI(payload.subMessageId, payload.data); }
     catch (error) {
       console.error(`Failed to update sub-message ${payload.subMessageId}:`, error);
-      if (currentChatId.value) await selectChat(currentChatId.value);
+      if (currentChatId.value) await selectChat(currentChatId.value, true);
     }
   }
 
@@ -269,68 +284,49 @@ export const useChatStore = defineStore('chat', () => {
   async function sendMessage(sub_messages: SubMessageCreate[]) {
     if (!currentChatId.value || isGenerating.value) return;
     const chatId = currentChatId.value;
+
+    isPreparingGeneration.value = true;
     saveCurrentDraft('');
 
-    // FIX: Replaced .at(-1) with backward-compatible syntax
-    const lastMessage = currentChatMessages.value[currentChatMessages.value.length - 1];
-    const lastMessageSortOrder = lastMessage?.sortOrder ?? -1;
-
-    // 乐观更新：立即在UI上显示用户消息
-    const userMessageForUI: Message = {
-      id: `temp-user-${Date.now()}`,
-      role: 'user',
-      createdAt: new Date().toISOString(),
-      chatId: chatId,
-      sortOrder: lastMessageSortOrder + 1,
-      sub_messages: sub_messages.map((sm, index) => ({
-        id: `temp-sub-${Date.now()}-${index}`,
-        messageId: `temp-user-${Date.now()}`,
-        createdAt: new Date().toISOString(),
-        content: sm.content,
-        sortOrder: sm.sortOrder,
-        type: sm.type ?? 'Normal',
-        config: sm.config ?? { is_collapsed: false },
-        status: 'completed'
-      }))
-    };
-    currentChatMessages.value.push(userMessageForUI);
-
     try {
-      // API调用：后端创建真实的用户消息和AI助手消息占位符
       const assistantPlaceholder = await prepareGenerate(chatId, { sub_messages });
-
-      // 状态同步：用真实的AI占位符替换掉临时的用户消息后的位置（或直接添加）
-      // 此时后端已创建用户消息，但前端的userMessageForUI是临时的。
-      // 为避免UI跳动，直接添加assistantPlaceholder，下次加载时会完全同步。
-      currentChatMessages.value.push(assistantPlaceholder);
-
-      // 启动流式订阅
-      _subscribeToMessageStream(assistantPlaceholder);
+      await selectChat(chatId, true);
+      const msgToStream = currentChatMessages.value.find(m => m.id === assistantPlaceholder.id);
+      if (msgToStream) {
+        _subscribeToMessageStream(msgToStream);
+      }
     } catch (error) {
       console.error('Failed to prepare generation:', error);
       ElMessage.error('发送失败');
-      // 失败时回滚乐观更新
-      const tempMsgIndex = currentChatMessages.value.findIndex(m => m.id === userMessageForUI.id);
-      if (tempMsgIndex > -1) {
-        currentChatMessages.value.splice(tempMsgIndex, 1);
-      }
+      if (currentChatId.value) await selectChat(currentChatId.value, true);
+    } finally {
+      isPreparingGeneration.value = false;
     }
   }
 
   async function regenerateFrom(messageId: string) {
     if (!currentChatId.value || isGenerating.value) return;
     const chatId = currentChatId.value;
+
+    isPreparingGeneration.value = true;
+
     try {
       const placeholder = await prepareRegenerate(chatId, messageId);
+
       const index = currentChatMessages.value.findIndex(m => m.id === messageId);
       if (index === -1) return;
       const targetMsg = currentChatMessages.value[index];
-      // 删除目标消息之后的所有消息，如果目标是助手消息，则包含其自身
       const sliceIndex = targetMsg.role === 'assistant' ? index : index + 1;
       currentChatMessages.value.splice(sliceIndex);
       currentChatMessages.value.push(placeholder);
+
       _subscribeToMessageStream(placeholder);
-    } catch (error) { console.error('Failed to prepare regeneration:', error); }
+    } catch (error) {
+      console.error('Failed to prepare regeneration:', error);
+       if (currentChatId.value) await selectChat(currentChatId.value, true);
+    } finally {
+      isPreparingGeneration.value = false;
+    }
   }
 
   async function cancelGeneration(messageId: string) {
@@ -364,7 +360,6 @@ export const useChatStore = defineStore('chat', () => {
         redo(currentChatId.value);
     }
   }
-
 
   return {
     chatList, currentChatId, currentChatMessages, isChatListLoading, isChatHistoryLoading,
