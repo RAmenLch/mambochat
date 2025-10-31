@@ -1,6 +1,6 @@
 # backend/services/generation/instructions.py
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict
 from ...schemas.enums import MessageStatus
 
 class BaseInstruction(BaseModel):
@@ -16,12 +16,14 @@ class CreateSubMessage(BaseInstruction):
     sortOrder: 子消息在父消息中的排序顺序。
     status: 子消息的初始状态。
     initial_content: 首次创建时可能包含的初始内容。
+    config: 子消息的配置项。
     """
     temp_ref_id: str
     type: str = "Normal"
     sortOrder: int
     status: MessageStatus = MessageStatus.GENERATING
     initial_content: str = ""
+    config: Optional[Dict] = None
 
 class AppendToSubMessage(BaseInstruction):
     """指令：向指定的子消息追加内容。
@@ -47,4 +49,3 @@ class SetFinalStatus(BaseInstruction):
     status: 整个生成任务的最终状态。
     """
     status: MessageStatus
-

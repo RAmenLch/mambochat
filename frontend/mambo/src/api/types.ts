@@ -8,6 +8,7 @@ export type MessageStatus = 'generating' | 'completed' | 'failed';
 
 export interface SubMessageConfig {
   is_collapsed: boolean;
+  context_participation_length?: number;
 }
 
 export interface SubMessage {

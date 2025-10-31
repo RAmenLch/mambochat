@@ -11,6 +11,7 @@ from .enums import MessageRole, MessageStatus
 
 class SubMessageConfig(BaseModel):
     is_collapsed: bool = Field(False, description="分区是否折叠")
+    context_participation_length: Optional[int] = Field(None, description="参加上下文长度: None(默认)-参与; 0-不参与; N>0-在倒数N条内参与")
 
 
 class SubMessageBase(BaseModel):

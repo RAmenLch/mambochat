@@ -81,11 +81,16 @@ class DefaultGenerateManager(AbstractGenerateManager):
         处理从工作者接收到的单个指令，并与数据库和流管理器交互。
         """
         if isinstance(instruction, CreateSubMessage):
+            # 从指令的字典或None创建配置对象
+            config_data = schemas_message.SubMessageConfig(
+                **(instruction.config or {})
+            )
             sub_message_create_schema = schemas_message.SubMessageCreate(
                 content=instruction.initial_content,
                 sortOrder=instruction.sortOrder,
                 type=instruction.type,
-                status=instruction.status
+                status=instruction.status,
+                config=config_data
             )
             db_sub_message = await message_crud.create_sub_message(
                 self.db_session,
@@ -146,4 +151,3 @@ class DefaultGenerateManager(AbstractGenerateManager):
                     )
             except Exception as e_inner:
                 print(f"[DefaultGenerateManager] Error updating sub-message {sub_id} during cleanup: {e_inner}")
-

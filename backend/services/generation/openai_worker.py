@@ -37,6 +37,7 @@ def _prepare_llm_request_data(
 ) -> Tuple[Dict[str, Any], Dict[str, Any], str, bool]:
     """
     根据会话配置和历史消息，准备发送给 LLM API 的 headers, payload, host 和 use_proxy 标志。
+    此函数包含根据 submessage 配置过滤上下文的核心逻辑。
     """
     if not db_chat.ai_model or not db_chat.ai_model.provider:
         raise ValueError("会话未配置有效的AI模型或服务商。")
@@ -49,14 +50,65 @@ def _prepare_llm_request_data(
         "Content-Type": "application/json",
     }
 
+    # 1. 将所有历史子消息扁平化处理
+    flat_submessages = []
+    for msg in history_messages:
+        # 假设 sub_messages 在从数据库获取时已按 sortOrder 排序
+        for sub in msg.sub_messages:
+            flat_submessages.append((msg.role, sub))
+
+    # 2. 根据 config 过滤子消息
+    total_sub_count = len(flat_submessages)
+    filtered_submessages = []
+    for i, (role, sub) in enumerate(flat_submessages):
+        pos_from_end = total_sub_count - i
+
+        # 安全地解析 config
+        N = None
+        if sub.config and isinstance(sub.config, str):
+            try:
+                config_dict = json.loads(sub.config)
+                N = config_dict.get('context_participation_length')
+            except (json.JSONDecodeError, TypeError):
+                pass
+        elif sub.config and isinstance(sub.config, dict):
+            N = sub.config.get('context_participation_length')
+
+        # 应用过滤规则
+        if N is None:  # 未设置，保留
+            filtered_submessages.append((role, sub))
+            continue
+        if N == 0:  # 设置为0，删除
+            continue
+        if N > 0 and pos_from_end <= N:  # 设置为N，且在倒数N位或更后面，保留
+            filtered_submessages.append((role, sub))
+            continue
+        # 其他情况（例如 pos_from_end > N），删除
+
+    # 3. 将过滤后的子消息重新聚合为 LLM API 的格式
     messages_payload = []
     if db_chat.systemPrompt:
         messages_payload.append({"role": "system", "content": db_chat.systemPrompt})
 
-    for msg in history_messages:
-        full_content = "\n".join(sub.content for sub in msg.sub_messages)
-        messages_payload.append({"role": msg.role, "content": full_content})
+    if filtered_submessages:
+        # 按角色对相邻的子消息进行分组
+        current_role = filtered_submessages[0][0]
+        current_content_parts = [filtered_submessages[0][1].content]
 
+        for i in range(1, len(filtered_submessages)):
+            role, sub = filtered_submessages[i]
+            if role == current_role:
+                current_content_parts.append(sub.content)
+            else:
+                messages_payload.append({"role": current_role, "content": "\n".join(current_content_parts)})
+                current_role = role
+                current_content_parts = [sub.content]
+
+        # 追加最后一个聚合的消息
+        if current_content_parts:
+            messages_payload.append({"role": current_role, "content": "\n".join(current_content_parts)})
+
+    # 4. 准备最终的 payload
     model_params = {}
     if db_chat.modelParameters:
         try:
@@ -122,9 +174,10 @@ class OpenAIGenerateWorker(AbstractGenerateWorker):
                                             yield CreateSubMessage(
                                                 temp_ref_id="reasoning_content",
                                                 type="Reasoning",
-                                                sortOrder=0,  # 修正: 思维链排在最前面
+                                                sortOrder=0,
                                                 status=schemas_enums.MessageStatus.GENERATING,
-                                                initial_content=reason_chunk
+                                                initial_content=reason_chunk,
+                                                config={"context_participation_length": 0}
                                             )
                                             reasoning_content_sub_message_started = True
                                         else:
@@ -139,7 +192,7 @@ class OpenAIGenerateWorker(AbstractGenerateWorker):
                                             yield CreateSubMessage(
                                                 temp_ref_id="main_content",
                                                 type="Normal",
-                                                sortOrder=1,  # 修正: 主要内容排在思维链之后
+                                                sortOrder=1,
                                                 status=schemas_enums.MessageStatus.GENERATING,
                                                 initial_content=content_chunk
                                             )
@@ -168,7 +221,7 @@ class OpenAIGenerateWorker(AbstractGenerateWorker):
                 yield CreateSubMessage(
                     temp_ref_id="main_content",
                     type="Normal",
-                    sortOrder=1,  # 即使是错误，也给一个排序
+                    sortOrder=1,
                     status=schemas_enums.MessageStatus.FAILED,
                     initial_content=f"生成失败: {e}"
                 )
@@ -182,4 +235,3 @@ class OpenAIGenerateWorker(AbstractGenerateWorker):
                                                  status=schemas_enums.MessageStatus.FAILED)
 
             yield SetFinalStatus(status=schemas_enums.MessageStatus.FAILED)
-
