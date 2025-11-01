@@ -139,7 +139,33 @@ class DefaultGenerateManager(AbstractGenerateManager):
     async def _cleanup_on_exception(self, assistant_message_id: str, final_status: schemas_enums.MessageStatus):
         """
         在任务异常或被取消时，将所有仍处于'generating'状态的子消息更新为最终状态。
+        如果没有任何子消息被创建，则创建一个空的子消息以确保任务有一个明确的最终状态。
         """
+        if not self.temp_ref_id_map:
+            try:
+                # 创建一个标记性子消息，以防止父消息在没有任何子消息的情况下结束，
+                # 从而避免其状态被错误地重新计算为'generating'。
+                sentinel_sub_message = schemas_message.SubMessageCreate(
+                    content="",
+                    sortOrder=0,
+                    type="Normal",
+                    status=final_status,
+                    config=schemas_message.SubMessageConfig()
+                )
+                db_sub_message = await message_crud.create_sub_message(
+                    self.db_session,
+                    message_id=assistant_message_id,
+                    sub_message_data=sentinel_sub_message
+                )
+                stream_data = schemas_message.SubMessage.model_validate(db_sub_message).model_dump(mode='json')
+                await stream_manager.publish(
+                    assistant_message_id,
+                    {"type": "create", "sub_message": stream_data}
+                )
+            except Exception as e_inner:
+                print(f"[DefaultGenerateManager] Error creating sentinel sub-message during cleanup: {e_inner}")
+            return
+
         for temp_ref_id, sub_id in self.temp_ref_id_map.items():
             try:
                 db_sub_message = await message_crud.get_sub_message(self.db_session, sub_id)
