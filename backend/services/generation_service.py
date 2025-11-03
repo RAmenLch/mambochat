@@ -98,7 +98,7 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
     async with AsyncSessionLocal() as db:
         try:
             # 根据模型类型选择合适的Worker，目前只有OpenAI Worker
-            worker = OpenAIGenerateWorker(db_session=db)
+            worker = OpenAIGenerateWorker()
             manager = DefaultGenerateManager(db_session=db)
 
             # 调用Manager的run方法，它现在负责准备上下文和执行所有生成逻辑
