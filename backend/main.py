@@ -10,7 +10,8 @@ from .routers import (
     chat_interaction,
     provider_management,
     provider_actions,
-    settings
+    settings,
+    notifications
 )
 
 @asynccontextmanager
@@ -35,6 +36,7 @@ app.include_router(chat_interaction.router, prefix="/api", tags=["Chat Interacti
 app.include_router(provider_management.router, prefix="/api", tags=["Provider & Model Management"])
 app.include_router(provider_actions.router, prefix="/api", tags=["Provider Actions"])
 app.include_router(settings.router, prefix="/api", tags=["Global Settings"])
+app.include_router(notifications.router, prefix="/api", tags=["Notifications"])
 
 @app.get("/")
 async def root():

@@ -13,6 +13,7 @@ from .. import schemas
 from ..models import chat_model
 from ..database import AsyncSessionLocal
 from .generation.manager import DefaultGenerateManager
+from .generation.title_manager import TitleGenerateManager
 from .generation.openai_worker import OpenAIGenerateWorker
 
 # 定义生成任务启动的超时阈值
@@ -128,6 +129,27 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
 
         finally:
             await stream_manager.close_stream(assistant_message_id)
+
+
+async def run_title_generation_task(chat_id: str):
+    """
+    后台任务：为指定的会话生成并更新标题。
+    """
+    task_id = f"title-gen-{chat_id}"
+    async with AsyncSessionLocal() as db:
+        try:
+            worker = OpenAIGenerateWorker()
+            manager = TitleGenerateManager(db_session=db)
+            await manager.run(
+                worker=worker,
+                chat_id=chat_id,
+                assistant_message_id=task_id
+            )
+        except Exception as e:
+            print(f"[Title Generation Service Error] for chat {chat_id}: {e}")
+        finally:
+            # 清理可能存在的取消请求状态
+            await stream_manager.close_stream(task_id)
 
 
 async def subscribe_to_stream(

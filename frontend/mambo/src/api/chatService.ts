@@ -110,3 +110,10 @@ export const prepareRegenerate = (chatId: string, fromMessageId: string): Promis
 export const stopGeneration = (messageId: string): Promise<{ message: string }> => {
   return apiClient.post(`/messages/${messageId}/stop`).then(res => res.data);
 };
+
+/**
+ * 为指定的会话异步触发一个后台任务，以根据其内容自动生成标题。
+ */
+export const generateChatTitle = (chatId: string): Promise<{ message: string }> => {
+  return apiClient.post(`/chats/${chatId}/generate-title`).then(res => res.data);
+};

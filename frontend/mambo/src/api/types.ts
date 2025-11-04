@@ -182,3 +182,17 @@ export interface ProxyTestRequest {
   proxy_url: string;
   test_url: string;
 }
+
+// --- Notification Types ---
+
+export interface ChatUpdateNotificationPayload {
+  id: string;
+  name: string;
+}
+
+export type GlobalNotificationPayload = ChatUpdateNotificationPayload;
+
+export interface GlobalNotification {
+  type: 'chat_update';
+  payload: GlobalNotificationPayload;
+}

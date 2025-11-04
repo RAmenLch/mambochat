@@ -6,7 +6,32 @@
 
     <template v-else>
       <div class="chat-window-header">
-        <h3 class="chat-title">{{ currentChat.name }}</h3>
+        <div v-if="!isEditingTitle" class="title-display-area">
+          <h3 class="chat-title">{{ currentChat.name }}</h3>
+          <div class="title-actions">
+            <el-tooltip content="编辑标题" placement="bottom" :show-after="500">
+              <el-button :icon="Edit" circle text @click="startTitleEdit" />
+            </el-tooltip>
+            <el-tooltip content="刷新标题" placement="bottom" :show-after="500">
+              <el-button
+                :icon="Refresh"
+                circle
+                text
+                @click="handleRefreshTitle"
+                :loading="isTitleRefreshing"
+              />
+            </el-tooltip>
+          </div>
+        </div>
+        <div v-else class="title-edit-area">
+          <el-input
+            ref="titleInputRef"
+            v-model="titleInput"
+            @blur="saveTitle"
+            @keydown.enter.prevent="saveTitle"
+            class="title-input"
+          />
+        </div>
       </div>
 
       <el-scrollbar ref="scrollbarRef" class="message-list-scrollbar" v-loading="isChatHistoryLoading" @scroll="handleScroll">
@@ -79,7 +104,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { useProviderStore } from '@/stores/providerStore';
 import { storeToRefs } from 'pinia';
 import { ElScrollbar, ElInput, ElMessage } from 'element-plus';
-import { Promotion, VideoPause } from '@element-plus/icons-vue';
+import { Promotion, VideoPause, Edit, Refresh } from '@element-plus/icons-vue';
 import MessageItem from './MessageItem.vue';
 import ChatToolbar from './ChatToolbar.vue';
 import MultiPartInput from './MultiPartInput.vue';
@@ -88,14 +113,14 @@ import { useResizablePanels } from '@/composables/useResizablePanels';
 import { useTokenEstimator } from '@/composables/useTokenEstimator';
 import type { ChatUpdate, SubMessageCreate, AIModel } from '@/api/types';
 import { debounce } from 'lodash-es';
-import type { Ref } from 'vue'; // 显式导入 Ref 类型
+import type { Ref } from 'vue';
 
 interface Partition { id: number; content: string; }
 interface GroupedModels { label: string; options: AIModel[]; }
 
 const chatStore = useChatStore();
 const providerStore = useProviderStore();
-const { currentChat, currentChatMessages, isChatHistoryLoading, isGenerating, currentDraft, contextForTokenEstimation } = storeToRefs(chatStore);
+const { currentChat, currentChatMessages, isChatHistoryLoading, isGenerating, currentDraft, contextForTokenEstimation, refreshingTitleChatId } = storeToRefs(chatStore);
 const { groupedModels } = storeToRefs(providerStore) as { groupedModels: Ref<GroupedModels[]>};
 
 const scrollbarRef = ref<InstanceType<typeof ElScrollbar>>();
@@ -107,6 +132,12 @@ const isMultiPartMode = ref(false);
 const singlePartDraft = ref('');
 const multiPartDraft = ref<Partition[]>([{ id: Date.now(), content: '' }]);
 const chatInputModeState = reactive<Record<string, boolean>>({});
+
+// --- Title Editing State ---
+const isEditingTitle = ref(false);
+const titleInput = ref('');
+const titleInputRef = ref<InstanceType<typeof ElInput>>();
+const isTitleRefreshing = computed(() => refreshingTitleChatId.value === currentChat.value?.id);
 
 // --- Composables for UI logic ---
 const inputAreaHeight = ref(150);
@@ -163,9 +194,34 @@ async function handleSendMessage() {
 }
 
 function handleStopGeneration() {
-  // 直接通过消息的聚合状态 `message.status` 来查找正在生成的消息
   const genMsg = currentChatMessages.value.find(m => m.status === 'generating');
   if (genMsg) chatStore.cancelGeneration(genMsg.id);
+}
+
+// --- Title Actions ---
+function startTitleEdit() {
+  if (!currentChat.value) return;
+  isEditingTitle.value = true;
+  titleInput.value = currentChat.value.name;
+  nextTick(() => {
+    titleInputRef.value?.focus();
+  });
+}
+
+function saveTitle() {
+  if (!currentChat.value || !isEditingTitle.value) return;
+
+  const newName = titleInput.value.trim();
+  if (newName && newName !== currentChat.value.name) {
+    chatStore.updateChatSettings(currentChat.value.id, { name: newName });
+  }
+  isEditingTitle.value = false;
+}
+
+function handleRefreshTitle() {
+  if (currentChat.value) {
+    chatStore.refreshChatTitle(currentChat.value.id);
+  }
 }
 
 // --- Input Mode Switching ---
@@ -202,17 +258,13 @@ function handleGlobalKeydown(event: KeyboardEvent) {
   }
 }
 
-function handleSingleInputKeydown(event: Event) { // 接受更通用的 Event 类型
-  // 使用类型守卫确保这是一个键盘事件
+function handleSingleInputKeydown(event: Event) {
   if (!(event instanceof KeyboardEvent)) return;
-
-  // 在这个代码块之后，TypeScript 会智能地推断出 event 是 KeyboardEvent 类型
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
     handleSendMessage();
   }
 }
-
 
 const userHasScrolledUp = ref(false);
 const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
@@ -228,7 +280,6 @@ const scrollToBottom = (force = false) => {
 watch(
   () => currentChatMessages.value[currentChatMessages.value.length - 1]?.sub_messages.slice(-1)[0]?.content,
   (newContent, oldContent) => {
-    // 只有当内容实际发生变化时才滚动，并且忽略 watch 传递的参数
     if (newContent !== oldContent) {
       scrollToBottom();
     }
@@ -237,10 +288,10 @@ watch(
 
 watch(() => currentChat.value?.id, (newId) => {
   if (newId) {
+    isEditingTitle.value = false; // Exit editing mode when switching chats
     userHasScrolledUp.value = false;
     isMultiPartMode.value = chatInputModeState[newId] ?? false;
 
-    // Trigger draft update
     const draft = currentDraft.value;
     if (isMultiPartMode.value) {
       if (draft && draft.startsWith('[')) {
@@ -252,7 +303,6 @@ watch(() => currentChat.value?.id, (newId) => {
       singlePartDraft.value = (draft && draft.startsWith('[')) ? '' : draft;
     }
 
-    // Auto scroll & focus
     const stopWatch = watch(isChatHistoryLoading, (loading) => {
       if (!loading) {
         scrollToBottom(true);
@@ -268,7 +318,10 @@ watch(() => currentChat.value?.id, (newId) => {
 .chat-window-container { height: 100%; display: flex; flex-direction: column; background-color: var(--color-background); overflow: hidden; }
 .welcome-view { display: flex; justify-content: center; align-items: center; height: 100%; }
 .chat-window-header { flex-shrink: 0; padding: 0 20px; height: 60px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--color-border); }
-.chat-title { margin: 0; font-size: 18px; font-weight: 600; color: var(--color-heading); }
+.title-display-area { display: flex; align-items: center; gap: 8px; overflow: hidden; }
+.chat-title { margin: 0; font-size: 18px; font-weight: 600; color: var(--color-heading); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.title-actions { display: flex; align-items: center; }
+.title-edit-area { width: 100%; }
 .message-list-scrollbar { flex-grow: 1; }
 .message-list-wrapper { padding: 20px; }
 .input-container-wrapper { flex-shrink: 0; position: relative; display: flex; flex-direction: column; border-top: 1px solid var(--color-border); }
@@ -278,4 +331,3 @@ watch(() => currentChat.value?.id, (newId) => {
 .input-field:deep(.el-textarea__inner) { height: 100% !important; }
 .action-button { width: 54px; font-size: 20px; flex-shrink: 0; align-self: flex-end; height: calc(100% - 2px); }
 </style>
-

@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { RouterView } from 'vue-router'
+import { onMounted } from 'vue';
+import { RouterView } from 'vue-router';
+import { useChatStore } from '@/stores/chatStore';
+
+const chatStore = useChatStore();
+
+onMounted(() => {
+  // Initialize the global notification listener when the application mounts.
+  chatStore.initializeNotificationListener();
+});
 </script>
 
 <template>

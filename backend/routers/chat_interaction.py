@@ -177,6 +177,29 @@ async def prepare_to_regenerate(
     return response_placeholder
 
 
+@router.post(
+    "/chats/{chat_id}/generate-title",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="自动生成会话标题"
+)
+async def generate_chat_title(
+    chat_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    为指定的会话异步触发一个后台任务，以根据其内容自动生成标题。
+    """
+    db_chat = await chat_crud.get_chat(db, chat_id=chat_id)
+    if not db_chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    if db_chat.itemType != 'chat':
+        raise HTTPException(status_code=400, detail="Title generation is only applicable to chats, not folders.")
+
+    background_tasks.add_task(generation_service.run_title_generation_task, chat_id)
+    return {"message": "Title generation has been initiated."}
+
+
 @router.get(
     "/chats/{chat_id}/stream-response/{assistant_message_id}",
     summary="订阅AI回复的流式输出",
@@ -194,3 +217,4 @@ async def stream_response(
         generation_service.subscribe_to_stream(db, assistant_message_id),
         media_type="text/event-stream"
     )
+

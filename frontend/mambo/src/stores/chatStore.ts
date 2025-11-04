@@ -9,10 +9,15 @@ import {
   deleteMessage as deleteMessageAPI,
   duplicateChat as duplicateChatAPI,
   prepareGenerate, prepareRegenerate, stopGeneration as stopGenerationAPI,
+  generateChatTitle as generateChatTitleAPI,
 } from '@/api/chatService';
 import { subscribeToMessageStream } from '@/services/sseService';
+import { subscribeToGlobalNotifications } from '@/services/notificationService';
 import type { StreamedChunk } from '@/services/sseService';
-import type { Chat, Message, ChatCreate, ChatUpdate, ChatReorderItem, SubMessageCreate, SubMessageUpdate, SubMessage } from '@/api/types';
+import type {
+  Chat, Message, ChatCreate, ChatUpdate, ChatReorderItem, SubMessageCreate,
+  SubMessageUpdate, SubMessage, GlobalNotification
+} from '@/api/types';
 import { useProviderStore } from './providerStore';
 import { useUndoRedoHistory } from '@/composables/useUndoRedoHistory';
 
@@ -24,6 +29,7 @@ export const useChatStore = defineStore('chat', () => {
   const isChatListLoading = ref(false);
   const isChatHistoryLoading = ref(false);
   const activeSubscriptions = new Map<string, AbortController>();
+  const refreshingTitleChatId = ref<string | null>(null);
 
   // --- Composables ---
   const { saveDraft, undo, redo, currentDraft } = useUndoRedoHistory(currentChatId);
@@ -35,10 +41,6 @@ export const useChatStore = defineStore('chat', () => {
     return chat?.itemType === 'chat' ? chat : null;
   });
 
-  /**
-   * 全局生成状态。如果任何消息的状态为 'generating'，则为 true。
-   * 这是UI中禁用输入、显示停止按钮等的单一事实来源。
-   */
   const isGenerating = computed((): boolean =>
     currentChatMessages.value.some(msg => msg.status === 'generating')
   );
@@ -95,7 +97,6 @@ export const useChatStore = defineStore('chat', () => {
       try {
         const chatWithMessages = await getChatWithMessages(chatId);
 
-        // 同步最终的AI助手消息状态
         const finalAssistantMsg = chatWithMessages.messages.find(m => m.id === assistantMessageId);
         const localAssistantMsg = currentChatMessages.value.find(m => m.id === assistantMessageId);
         if (finalAssistantMsg && localAssistantMsg) {
@@ -103,7 +104,6 @@ export const useChatStore = defineStore('chat', () => {
           localAssistantMsg.status = finalAssistantMsg.status;
         }
 
-        // 如果是通过编辑用户消息触发的，则同步该用户消息的状态，以替换临时ID
         if (editedUserMessageId) {
           const finalUserMsg = chatWithMessages.messages.find(m => m.id === editedUserMessageId);
           const localUserMsg = currentChatMessages.value.find(m => m.id === editedUserMessageId);
@@ -111,6 +111,16 @@ export const useChatStore = defineStore('chat', () => {
             localUserMsg.sub_messages = finalUserMsg.sub_messages;
           }
         }
+
+        // Trigger auto-title generation after the first exchange in a new chat.
+        if (
+          currentChat.value &&
+          currentChat.value.name === '新的会话' &&
+          currentChatMessages.value.length === 2 // user + assistant
+        ) {
+          refreshChatTitle(chatId);
+        }
+
       } catch (err) { console.error("Failed to fetch final message state:", err); }
     };
 
@@ -238,7 +248,6 @@ export const useChatStore = defineStore('chat', () => {
     if (!currentChatId.value) return;
     const { resend = false } = payload;
 
-    // "仅保存" 逻辑：更新消息内容，然后全量刷新以保证状态同步
     if (!resend) {
         try {
             await updateMessageAndRegenerate(payload.messageId, { sub_messages: payload.sub_messages, resend: false });
@@ -250,7 +259,6 @@ export const useChatStore = defineStore('chat', () => {
         return;
     }
 
-    // "保存并重新发送" 逻辑：使用乐观更新，避免全量刷新
     if (isGenerating.value) return;
 
     const baseMessageIndex = currentChatMessages.value.findIndex(m => m.id === payload.messageId);
@@ -260,14 +268,11 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     try {
-      // API调用现在会返回新生成的AI助手消息占位符
       const assistantPlaceholder = await updateMessageAndRegenerate(payload.messageId, {
         sub_messages: payload.sub_messages,
         resend: true
       });
 
-      // 乐观更新UI：
-      // 1. 更新被编辑的用户消息的本地内容
       const userMessageToUpdate = currentChatMessages.value[baseMessageIndex];
       const now = new Date().toISOString();
       userMessageToUpdate.sub_messages = payload.sub_messages.map((sm, index): SubMessage => ({
@@ -281,20 +286,15 @@ export const useChatStore = defineStore('chat', () => {
         config: sm.config ?? { is_collapsed: false },
       }));
 
-      // 2. 截断被编辑消息之后的所有消息
       currentChatMessages.value.splice(baseMessageIndex + 1);
-
-      // 3. 将API返回的AI助手占位符添加到消息列表
       currentChatMessages.value.push(assistantPlaceholder);
 
-      // 4. 直接基于占位符开始监听SSE流，并传入被编辑的用户消息ID以供后续同步
       if (assistantPlaceholder.status === 'generating') {
         _subscribeToMessageStream(assistantPlaceholder, payload.messageId);
       }
     } catch (error) {
       console.error('Failed to update and resend:', error);
       ElMessage.error('操作失败，正在同步最新状态...');
-      // 发生错误时，回退到全量刷新以保证数据一致性
       if (currentChatId.value) await selectChat(currentChatId.value, true);
     }
   }
@@ -328,7 +328,6 @@ export const useChatStore = defineStore('chat', () => {
 
     saveCurrentDraft('');
 
-    // 乐观地在UI中创建并添加用户消息以获得即时反馈
     const now = new Date().toISOString();
     const tempUserMessageId = `temp-user-${Date.now()}`;
     const userMessageForDisplay: Message = {
@@ -352,13 +351,9 @@ export const useChatStore = defineStore('chat', () => {
     currentChatMessages.value.push(userMessageForDisplay);
 
     try {
-      // 后端保存用户消息并返回一个AI助手占位符
       const assistantPlaceholder = await prepareGenerate(chatId, { sub_messages });
-
-      // 将真实的AI助手占位符添加到UI中，这将触发加载动画
       currentChatMessages.value.push(assistantPlaceholder);
 
-      // 开始为新的AI助手消息订阅SSE流
       if (assistantPlaceholder.status === 'generating') {
         _subscribeToMessageStream(assistantPlaceholder);
       }
@@ -366,7 +361,6 @@ export const useChatStore = defineStore('chat', () => {
       console.error('Failed to prepare generation:', error);
       ElMessage.error('发送失败，正在同步最新状态...');
 
-      // 失败时，移除乐观创建的用户消息，并回退到完全刷新以确保数据一致性
       const index = currentChatMessages.value.findIndex(m => m.id === userMessageForDisplay.id);
       if (index > -1) {
         currentChatMessages.value.splice(index, 1);
@@ -383,14 +377,11 @@ export const useChatStore = defineStore('chat', () => {
     if (baseMessageIndex === -1) return;
     const baseMessage = currentChatMessages.value[baseMessageIndex];
 
-    // 乐观地从UI中移除后续消息
     const sliceIndex = baseMessage.role === 'assistant' ? baseMessageIndex : baseMessageIndex + 1;
     currentChatMessages.value.splice(sliceIndex);
 
     try {
       const assistantPlaceholder = await prepareRegenerate(chatId, messageId);
-
-      // 将新的AI助手占位符添加到UI并开始监听流
       currentChatMessages.value.push(assistantPlaceholder);
       if (assistantPlaceholder.status === 'generating') {
         _subscribeToMessageStream(assistantPlaceholder);
@@ -398,16 +389,13 @@ export const useChatStore = defineStore('chat', () => {
     } catch (error) {
       console.error('Failed to prepare regeneration:', error);
       ElMessage.error('重新生成失败，正在同步最新状态...');
-      // 失败时，回退到完全刷新以确保数据一致性
       if (currentChatId.value) await selectChat(currentChatId.value, true);
     }
   }
 
   async function cancelGeneration(messageId: string) {
-    // 1. 停止客户端的SSE流监听
     _unsubscribeClientSide(messageId);
 
-    // 2. 乐观更新UI，立即给用户反馈
     const msg = currentChatMessages.value.find(m => m.id === messageId);
     if (msg && msg.status === 'generating') {
       msg.status = 'completed';
@@ -419,12 +407,8 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     try {
-      // 3. 通知后端停止生成任务
       await stopGenerationAPI(messageId);
 
-      // 4. 手动同步最终状态。
-      // 这是必需的，因为手动中止SSE流会阻止正常的finalizeMessageState回调，
-      // 可能导致前端的临时ID（如新发送的用户消息）无法更新为真实的ID。
       if (currentChatId.value) {
         const chat = await getChatWithMessages(currentChatId.value);
         currentChatMessages.value = chat.messages.sort((a, b) => a.sortOrder - b.sortOrder);
@@ -432,7 +416,6 @@ export const useChatStore = defineStore('chat', () => {
     } catch(error) {
       console.error(`Failed to process stop request for ${messageId}:`, error);
       ElMessage.error('停止操作失败，正在尝试同步状态...');
-      // 即使停止失败，也尝试刷新状态以修复潜在的不一致
       if (currentChatId.value) {
         await selectChat(currentChatId.value, true);
       }
@@ -457,12 +440,48 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  async function refreshChatTitle(chatId: string) {
+    refreshingTitleChatId.value = chatId;
+    try {
+      await generateChatTitleAPI(chatId);
+      // The success case is handled by the SSE notification, which will reset refreshingTitleChatId.
+    } catch (error) {
+      console.error(`Failed to initiate title generation for chat ${chatId}:`, error);
+      ElMessage.error('刷新标题失败');
+      // If the request fails, reset the loading state immediately.
+      if (refreshingTitleChatId.value === chatId) {
+        refreshingTitleChatId.value = null;
+      }
+    }
+  }
+
+  function initializeNotificationListener() {
+    subscribeToGlobalNotifications({
+      onNotification: (notification: GlobalNotification) => {
+        if (notification.type === 'chat_update') {
+          const { id, name } = notification.payload;
+          const chatInList = chatList.value.find(c => c.id === id);
+          if (chatInList) {
+            chatInList.name = name;
+          }
+          if (refreshingTitleChatId.value === id) {
+            refreshingTitleChatId.value = null;
+          }
+        }
+      },
+      onError: (error: unknown) => {
+        console.error('Global notification stream error:', error);
+      }
+    });
+  }
+
   return {
     chatList, currentChatId, currentChatMessages, isChatListLoading, isChatHistoryLoading,
+    refreshingTitleChatId,
     currentChat, isGenerating, currentDraft, contextForTokenEstimation,
     fetchChatList, selectChat, createNewItem, updateChatSettings, deleteItem, reorderChatItems,
     duplicateChat, editMessageAndRegenerate, updateSubMessage, deleteMessage, sendMessage,
-    regenerateFrom, cancelGeneration,
+    regenerateFrom, cancelGeneration, refreshChatTitle, initializeNotificationListener,
     saveDraft: saveCurrentDraft,
     undo: undoCurrentDraft,
     redo: redoCurrentDraft,

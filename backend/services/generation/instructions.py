@@ -49,3 +49,9 @@ class SetFinalStatus(BaseInstruction):
     status: 整个生成任务的最终状态。
     """
     status: MessageStatus
+
+class UpdateChatName(BaseInstruction):
+    """指令：更新指定会话的名称。"""
+    chat_id: str
+    new_name: str
+
