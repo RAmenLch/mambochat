@@ -93,26 +93,16 @@ export const useChatStore = defineStore('chat', () => {
     };
 
     const finalizeMessageState = async () => {
+      // 从活动订阅中移除当前流
       activeSubscriptions.delete(assistantMessageId);
       try {
+        // 从服务器获取会话的完整最新消息
         const chatWithMessages = await getChatWithMessages(chatId);
 
-        const finalAssistantMsg = chatWithMessages.messages.find(m => m.id === assistantMessageId);
-        const localAssistantMsg = currentChatMessages.value.find(m => m.id === assistantMessageId);
-        if (finalAssistantMsg && localAssistantMsg) {
-          localAssistantMsg.sub_messages = finalAssistantMsg.sub_messages;
-          localAssistantMsg.status = finalAssistantMsg.status;
-        }
+        // 使用服务器的权威数据完全替换本地消息列表, 以确保数据最终一致性
+        currentChatMessages.value = chatWithMessages.messages.sort((a, b) => a.sortOrder - b.sortOrder);
 
-        if (editedUserMessageId) {
-          const finalUserMsg = chatWithMessages.messages.find(m => m.id === editedUserMessageId);
-          const localUserMsg = currentChatMessages.value.find(m => m.id === editedUserMessageId);
-          if (finalUserMsg && localUserMsg) {
-            localUserMsg.sub_messages = finalUserMsg.sub_messages;
-          }
-        }
-
-        // Trigger auto-title generation after the first exchange in a new chat.
+        // 如果是新会话的首次交互，触发标题自动生成
         if (
           currentChat.value &&
           currentChat.value.name === '新的会话' &&
@@ -121,8 +111,15 @@ export const useChatStore = defineStore('chat', () => {
           refreshChatTitle(chatId);
         }
 
-      } catch (err) { console.error("Failed to fetch final message state:", err); }
+      } catch (err) {
+        console.error("Failed to fetch final message state, performing a full refresh:", err);
+        // 同步失败时，强制刷新整个会话作为后备方案
+        if (currentChatId.value) {
+          selectChat(currentChatId.value, true);
+        }
+      }
     };
+
 
     const controller = subscribeToMessageStream({
       chatId, assistantMessageId, onMessage,
