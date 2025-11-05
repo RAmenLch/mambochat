@@ -27,28 +27,31 @@ async def _calculate_message_status(message: chat_model.Message) -> schemas.Mess
     if message.role != schemas.MessageRole.ASSISTANT:
         return schemas.MessageStatus.COMPLETED
 
+    # 检查内存中是否存在针对此消息的取消请求
+    cancellation_requested = await stream_manager.is_cancellation_requested(message.id)
+
     # 1. 基于子消息状态判断
     if message.sub_messages:
         sub_statuses = {sm.status for sm in message.sub_messages}
         if schemas.MessageStatus.GENERATING.value in sub_statuses:
-            return schemas.MessageStatus.GENERATING
+            # 如果仍在生成但已请求取消，则乐观地返回最终状态
+            return schemas.MessageStatus.COMPLETED if cancellation_requested else schemas.MessageStatus.GENERATING
         if schemas.MessageStatus.FAILED.value in sub_statuses:
             return schemas.MessageStatus.FAILED
-        # 如果所有子消息都已完成
         return schemas.MessageStatus.COMPLETED
 
     # 2. 无子消息时的判断
     # 检查是否有活跃的流，有则说明正在生成
     if await stream_manager.is_stream_active(message.id):
-        return schemas.MessageStatus.GENERATING
+        return schemas.MessageStatus.COMPLETED if cancellation_requested else schemas.MessageStatus.GENERATING
 
     # 无活跃流，检查是否超时（后台任务可能启动失败）
     time_since_creation = datetime.now(timezone.utc) - message.createdAt.replace(tzinfo=timezone.utc)
     if time_since_creation > GENERATION_START_TIMEOUT:
         return schemas.MessageStatus.FAILED
 
-    # 未超时，但无子消息和活跃流，可能处于任务启动的短暂间隙，仍视为生成中
-    return schemas.MessageStatus.GENERATING
+    # 未超时，但无子消息和活跃流，可能处于任务启动的短暂间隙
+    return schemas.MessageStatus.COMPLETED if cancellation_requested else schemas.MessageStatus.GENERATING
 
 
 async def prepare_for_generation(
