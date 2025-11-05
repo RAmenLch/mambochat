@@ -62,7 +62,7 @@ class TitleGenerateManager(AbstractGenerateManager):
 
         dialogue_summary = []
         for msg in context_messages:
-            content = " ".join([sub.content for sub in msg.sub_messages])
+            content = " ".join([sub.content[:200] for sub in msg.sub_messages])
             dialogue_summary.append(f"{msg.role}: {content}")
 
         user_content = "\n".join(dialogue_summary)
