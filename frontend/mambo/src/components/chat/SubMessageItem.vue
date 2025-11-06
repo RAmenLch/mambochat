@@ -53,7 +53,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import type { SubMessage, Message, SubMessageConfig } from '@/api/types';
-import { useChatStore } from '@/stores/chatStore';
+import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { ElMessage } from 'element-plus';
 import { Edit, CopyDocument, ArrowUpBold, ArrowDownBold } from '@element-plus/icons-vue';
 import CodeBlock from './CodeBlock.vue';
@@ -75,7 +75,7 @@ const emit = defineEmits<{
   (e: 'copy'): void;
 }>();
 
-const chatStore = useChatStore();
+const interactionStore = useChatInteractionStore();
 const isCollapsed = ref(props.subMessage.config.is_collapsed || false);
 const isGenerating = computed(() => props.subMessage.status === 'generating');
 
@@ -131,7 +131,7 @@ function toggleCollapse() {
   const newCollapsedState = !isCollapsed.value;
   isCollapsed.value = newCollapsedState;
   const newConfig: SubMessageConfig = { ...props.subMessage.config, is_collapsed: newCollapsedState };
-  chatStore.updateSubMessage({
+  interactionStore.updateSubMessage({
     subMessageId: props.subMessage.id,
     data: {
       config: newConfig,

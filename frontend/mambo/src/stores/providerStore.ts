@@ -27,7 +27,7 @@ import type {
   ConnectionTestResponse,
   ProxyTestRequest
 } from '@/api/types';
-import { useChatStore } from './chatStore';
+import { useChatListStore } from './chatListStore.ts';
 
 interface ProviderState {
   providers: AIProviderWithModels[];
@@ -73,14 +73,14 @@ export const useProviderStore = defineStore('providers', {
         await this.fetchGlobalSettings();
       }
 
-      const chatStore = useChatStore();
-      if (chatStore.chatList.length === 0) return;
+      const chatListStore = useChatListStore();
+      if (chatListStore.chatList.length === 0) return;
 
       const validModelIds = new Set(this.allModels.map(m => m.id));
       const defaultModelId = this.globalSettings.default_model_id;
 
       let changed = false;
-      chatStore.chatList.forEach(chat => {
+      chatListStore.chatList.forEach(chat => {
         if (chat.itemType === 'chat') {
           const modelIdIsValid = chat.aiModelId && validModelIds.has(chat.aiModelId);
 

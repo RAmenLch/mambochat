@@ -103,31 +103,40 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed, nextTick, watch } from 'vue';
-import { useChatStore } from '@/stores/chatStore';
-import { useProviderStore } from '@/stores/providerStore';
 import { storeToRefs } from 'pinia';
 import { useRouter } from 'vue-router';
-import {type AllowDropType, ElMessage, ElMessageBox, ElTree} from 'element-plus';
+import { type AllowDropType, ElMessage, ElMessageBox, ElTree } from 'element-plus';
 import type { NodeDropType } from 'element-plus/es/components/tree/src/tree.type';
 import type Node from 'element-plus/es/components/tree/src/model/node';
 import type { Chat, ChatReorderItem } from '@/api/types';
 import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, EditPen, CopyDocument } from '@element-plus/icons-vue';
 
+// --- Stores ---
+import { useChatListStore } from '@/stores/chatListStore';
+import { useChatSessionStore } from '@/stores/chatSessionStore';
+import { useProviderStore } from '@/stores/providerStore';
+
+// --- Utils & Composables ---
 import { buildChatTree } from '@/utils/treeHelper';
 import { useContextMenu } from '@/composables/useContextMenu';
+
+// --- Components ---
 import ItemNameDialog from './dialogs/ItemNameDialog.vue';
 import NewChatDialog from './dialogs/NewChatDialog.vue';
 
-// -- Stores & Router --
-const chatStore = useChatStore();
+// -- Store Instances & State --
+const chatListStore = useChatListStore();
+const chatSessionStore = useChatSessionStore();
 const providerStore = useProviderStore();
 const router = useRouter();
-const { chatList, currentChatId, isChatListLoading } = storeToRefs(chatStore);
+
+const { chatList, isChatListLoading } = storeToRefs(chatListStore);
+const { currentChatId } = storeToRefs(chatSessionStore);
 const { providers, globalSettings } = storeToRefs(providerStore);
+
+// -- Local Component State --
 const treeRef = ref<InstanceType<typeof ElTree>>();
 const contextMenuRef = ref();
-
-// -- State & Composables --
 const currentParentId = ref<string | null>(null); // For creating new items
 const { contextMenuItem, contextMenuPosition, handleContextMenu } = useContextMenu<Chat>();
 
@@ -202,7 +211,7 @@ watch(treeData, (newTreeData) => {
 onMounted(async () => {
   loadExpandedState();
   await providerStore.fetchProviders();
-  await chatStore.fetchChatList();
+  await chatListStore.fetchChatList();
 
   const lastOpenedChat = chatList.value
     .filter(c => c.itemType === 'chat' && c.lastOpenedAt)
@@ -221,8 +230,10 @@ const handleNodeClick = (data: Chat) => {
 };
 
 const handleSelectChat = async (chatId: string) => {
-  await chatStore.selectChat(chatId);
-  if (chatStore.currentChat) {
+  // Delegate chat selection to the session store
+  await chatSessionStore.selectChat(chatId);
+  // Navigate only if the selection was successful and resulted in a current chat
+  if (chatSessionStore.currentChat) {
     router.push(`/chat/${chatId}`);
   }
 };
@@ -257,7 +268,7 @@ const handleNodeDrop = async (draggingNode: Node, dropNode: Node, dropType: Node
   }));
 
   if (updates.length > 0) {
-    await chatStore.reorderChatItems(updates);
+    await chatListStore.reorderChatItems(updates);
   }
 };
 
@@ -301,12 +312,12 @@ const openNewChatDialog = (parentId: string | null) => {
 
 const handleConfirmItemName = async (name: string) => {
   if (itemNameDialog.isRenaming && contextMenuItem.value) {
-    await chatStore.updateChatSettings(contextMenuItem.value.id, { name });
+    await chatListStore.updateChatSettings(contextMenuItem.value.id, { name });
   } else {
     const parentId = currentParentId.value;
     const sortOrder = chatList.value.filter(item => item.parentId === parentId).length;
 
-    await chatStore.createNewItem({
+    await chatListStore.createNewItem({
       name,
       itemType: 'folder',
       parentId,
@@ -315,7 +326,7 @@ const handleConfirmItemName = async (name: string) => {
 
     if (parentId) {
       treeRef.value?.getNode(parentId)?.expand();
-      handleNodeExpand({ id: parentId } as Chat);
+      handleNodeExpand({ id: parentId } as Chat); // Persist expanded state
     }
   }
 };
@@ -324,7 +335,7 @@ const handleCreateChat = async (formData: { name: string; modelId: string }) => 
   const parentId = currentParentId.value;
   const sortOrder = chatList.value.filter(item => item.parentId === parentId).length;
 
-  const newChat = await chatStore.createNewItem({
+  const newChat = await chatListStore.createNewItem({
     ...formData,
     aiModelId: formData.modelId,
     itemType: 'chat',
@@ -336,12 +347,11 @@ const handleCreateChat = async (formData: { name: string; modelId: string }) => 
     ElMessage.success('创建成功');
     if (parentId) {
       treeRef.value?.getNode(parentId)?.expand();
-      handleNodeExpand({ id: parentId } as Chat);
+      handleNodeExpand({ id: parentId } as Chat); // Persist expanded state
     }
     await scrollToChat(newChat.id);
-  } else {
-    ElMessage.error('创建失败');
   }
+  // Error messages are now handled within the store action
 };
 
 const handleDelete = async (item: Chat) => {
@@ -349,20 +359,19 @@ const handleDelete = async (item: Chat) => {
     await ElMessageBox.confirm(`确定要删除 "${item.name}" 吗？此操作不可恢复。`, '警告', {
       confirmButtonText: '确定删除', cancelButtonText: '取消', type: 'warning'
     });
-    await chatStore.deleteItem(item.id);
+    await chatListStore.deleteItem(item.id);
     ElMessage.success('删除成功');
   } catch { /* User canceled */ }
 };
 
 const handleDuplicateChat = async (item: Chat) => {
   if (item.itemType !== 'chat') return;
-  const newChat = await chatStore.duplicateChat(item.id);
+  const newChat = await chatListStore.duplicateChat(item.id);
   if (newChat) {
     ElMessage.success('复制成功');
     await scrollToChat(newChat.id);
-  } else {
-    ElMessage.error('复制失败');
   }
+  // Error messages are now handled within the store action
 };
 
 // -- Navigation --

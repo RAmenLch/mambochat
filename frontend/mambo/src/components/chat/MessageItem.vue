@@ -77,7 +77,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import type { Message, SubMessage, SubMessageCreate, MessageStatus } from '@/api/types';
-import { useChatStore } from '@/stores/chatStore';
+import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { User, Cpu, Refresh, RefreshLeft, Delete, Edit, CopyDocument, ArrowUpBold, ArrowDownBold } from '@element-plus/icons-vue';
 import SubMessageItem from './SubMessageItem.vue';
@@ -90,7 +90,7 @@ const props = defineProps<{
   isLastMessage: boolean;
 }>();
 
-const chatStore = useChatStore();
+const interactionStore = useChatInteractionStore();
 const showActions = ref(false);
 
 const isSingleSubMessage = computed(() => props.message.sub_messages.length <= 1);
@@ -115,7 +115,7 @@ function toggleSingleViewCollapse() {
   if (!firstSubMessage.value) return;
   const newCollapsedState = !isSingleViewCollapsed.value;
   isSingleViewCollapsed.value = newCollapsedState;
-  chatStore.updateSubMessage({
+  interactionStore.updateSubMessage({
     subMessageId: firstSubMessage.value.id,
     data: { config: { ...firstSubMessage.value.config, is_collapsed: newCollapsedState } },
   });
@@ -185,7 +185,7 @@ function getUpdatedFullContent(newPartialContent: string): string {
 function handleSaveEdit(newContent: string) {
   if (!editingSubMessage.value) return;
   const updatedContent = getUpdatedFullContent(newContent);
-  chatStore.updateSubMessage({
+  interactionStore.updateSubMessage({
     subMessageId: editingSubMessage.value.id,
     data: { content: updatedContent },
   });
@@ -206,7 +206,7 @@ function handleSaveAndResend(newContent: string) {
     };
   });
 
-  chatStore.editMessageAndRegenerate({
+  interactionStore.editMessageAndRegenerate({
     messageId: props.message.id,
     sub_messages: newSubMessages,
     resend: true,
@@ -214,7 +214,7 @@ function handleSaveAndResend(newContent: string) {
 }
 
 function handleRegenerate() {
-  chatStore.regenerateFrom(props.message.id);
+  interactionStore.regenerateFrom(props.message.id);
 }
 
 async function handleDelete() {
@@ -222,7 +222,7 @@ async function handleDelete() {
     await ElMessageBox.confirm('确定要删除这条消息吗？（包含所有分区）', '确认删除', {
       confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning'
     });
-    await chatStore.deleteMessage(props.message.id);
+    await interactionStore.deleteMessage(props.message.id);
   } catch { /* User canceled */ }
 }
 

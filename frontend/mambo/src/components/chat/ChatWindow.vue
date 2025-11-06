@@ -51,7 +51,7 @@
           :current-chat="currentChat"
           :estimated-tokens="estimatedTokens"
           @open-settings="settingsDrawerVisible = true"
-          @toggle-multi-part-mode="handleToggleMultiPartMode"
+          @toggle-multi-part-mode="toggleMultiPartMode"
         />
         <div class="chat-input-area" @keydown="handleGlobalKeydown">
           <MultiPartInput
@@ -99,83 +99,77 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, computed, reactive } from 'vue';
-import { useChatStore } from '@/stores/chatStore';
-import { useProviderStore } from '@/stores/providerStore';
+import { ref, watch, nextTick, computed } from 'vue';
 import { storeToRefs } from 'pinia';
 import { ElScrollbar, ElInput, ElMessage } from 'element-plus';
 import { Promotion, VideoPause, Edit, Refresh } from '@element-plus/icons-vue';
+import type { Ref } from 'vue';
+import type { ChatUpdate, SubMessageCreate, AIModel } from '@/api/types';
+
+// --- Stores & Composables ---
+import { useChatListStore } from '@/stores/chatListStore';
+import { useChatSessionStore } from '@/stores/chatSessionStore';
+import { useChatInteractionStore } from '@/stores/chatInteractionStore';
+import { useProviderStore } from '@/stores/providerStore';
+import { useChatInput } from '@/composables/useChatInput';
+import { useResizablePanels } from '@/composables/useResizablePanels';
+import { useTokenEstimator } from '@/composables/useTokenEstimator';
+
+// --- Components ---
 import MessageItem from './MessageItem.vue';
 import ChatToolbar from './ChatToolbar.vue';
 import MultiPartInput from './MultiPartInput.vue';
 import ChatSettingsDrawer from './ChatSettingsDrawer.vue';
-import { useResizablePanels } from '@/composables/useResizablePanels';
-import { useTokenEstimator } from '@/composables/useTokenEstimator';
-import type { ChatUpdate, SubMessageCreate, AIModel } from '@/api/types';
-import { debounce } from 'lodash-es';
-import type { Ref } from 'vue';
 
-interface Partition { id: number; content: string; }
 interface GroupedModels { label: string; options: AIModel[]; }
 
-const chatStore = useChatStore();
+// --- Store Instances ---
+const chatListStore = useChatListStore();
+const chatSessionStore = useChatSessionStore();
+const chatInteractionStore = useChatInteractionStore();
 const providerStore = useProviderStore();
-const { currentChat, currentChatMessages, isChatHistoryLoading, isGenerating, currentDraft, contextForTokenEstimation, refreshingTitleChatId } = storeToRefs(chatStore);
+
+// --- State from Stores ---
+const { refreshingTitleChatId } = storeToRefs(chatListStore);
+const { currentChat, currentChatId, currentChatMessages, isChatHistoryLoading, isGenerating, contextForTokenEstimation } = storeToRefs(chatSessionStore);
 const { groupedModels } = storeToRefs(providerStore) as { groupedModels: Ref<GroupedModels[]>};
 
-const scrollbarRef = ref<InstanceType<typeof ElScrollbar>>();
-const inputRef = ref<InstanceType<typeof ElInput>>();
-const multiPartInputRef = ref<InstanceType<typeof MultiPartInput>>();
-const settingsDrawerVisible = ref(false);
+// --- State from Composables ---
+const {
+  isMultiPartMode,
+  singlePartDraft,
+  multiPartDraft,
+  toggleMultiPartMode,
+  currentUserInputText,
+  undo,
+  redo,
+  resetDraft
+} = useChatInput(currentChatId);
 
-const isMultiPartMode = ref(false);
-const singlePartDraft = ref('');
-const multiPartDraft = ref<Partition[]>([{ id: Date.now(), content: '' }]);
-const chatInputModeState = reactive<Record<string, boolean>>({});
-
-// --- Title Editing State ---
-const isEditingTitle = ref(false);
-const titleInput = ref('');
-const titleInputRef = ref<InstanceType<typeof ElInput>>();
-const isTitleRefreshing = computed(() => refreshingTitleChatId.value === currentChat.value?.id);
-
-// --- Composables for UI logic ---
 const inputAreaHeight = ref(150);
 const { startResize: startResizeInputArea } = useResizablePanels(inputAreaHeight, {
   min: 100, max: 600, orientation: 'vertical', inverted: true
 });
 
-const currentUserInputText = computed(() => isMultiPartMode.value
-  ? multiPartDraft.value.map(p => p.content).join('\n')
-  : singlePartDraft.value
-);
 const { estimatedTokens } = useTokenEstimator(contextForTokenEstimation, currentUserInputText);
 
-// --- Draft Management ---
-const debouncedSaveDraft = debounce((content: string) => {
-  chatStore.saveDraft(content);
-}, 300);
+// --- Local Component State ---
+const scrollbarRef = ref<InstanceType<typeof ElScrollbar>>();
+const inputRef = ref<InstanceType<typeof ElInput>>();
+const multiPartInputRef = ref<InstanceType<typeof MultiPartInput>>();
+const settingsDrawerVisible = ref(false);
+const isEditingTitle = ref(false);
+const titleInput = ref('');
+const titleInputRef = ref<InstanceType<typeof ElInput>>();
+const userHasScrolledUp = ref(false);
 
-watch(currentDraft, (newDraft) => {
-  if (isMultiPartMode.value) {
-    try {
-      const parsed = JSON.parse(newDraft);
-      if (Array.isArray(parsed) && JSON.stringify(parsed) !== JSON.stringify(multiPartDraft.value)) {
-        multiPartDraft.value = parsed.length > 0 ? parsed : [{ id: Date.now(), content: '' }];
-      }
-    } catch { multiPartDraft.value = [{ id: Date.now(), content: '' }]; }
-  } else {
-    if (singlePartDraft.value !== newDraft) {
-      singlePartDraft.value = newDraft;
-    }
-  }
-});
-watch(singlePartDraft, (newInput) => !isMultiPartMode.value && debouncedSaveDraft(newInput));
-watch(multiPartDraft, (newPartitions) => isMultiPartMode.value && debouncedSaveDraft(JSON.stringify(newPartitions)), { deep: true });
-
-// --- Send & Stop Logic ---
+// --- Computed Properties ---
+const isTitleRefreshing = computed(() => refreshingTitleChatId.value === currentChat.value?.id);
 const isSendButtonDisabled = computed(() => isGenerating.value || currentUserInputText.value.trim() === '');
 
+// --- Methods ---
+
+// Send & Stop Logic
 async function handleSendMessage() {
   if (isSendButtonDisabled.value) return;
 
@@ -184,77 +178,60 @@ async function handleSendMessage() {
     : [{ content: singlePartDraft.value, sortOrder: 0 }];
 
   if (subMessages.length > 0) {
-    await chatStore.sendMessage(subMessages);
+    await chatInteractionStore.sendMessage(subMessages);
+    // The original logic was to reset the specific draft model.
+    // The new `resetDraft` composable function encapsulates this behavior.
     if (isMultiPartMode.value) {
       multiPartInputRef.value?.reset();
-    } else {
-      singlePartDraft.value = '';
     }
+    resetDraft();
   }
 }
 
 function handleStopGeneration() {
   const genMsg = currentChatMessages.value.find(m => m.status === 'generating');
-  if (genMsg) chatStore.cancelGeneration(genMsg.id);
+  if (genMsg) chatInteractionStore.cancelGeneration(genMsg.id);
 }
 
-// --- Title Actions ---
+// Title Actions
 function startTitleEdit() {
   if (!currentChat.value) return;
   isEditingTitle.value = true;
   titleInput.value = currentChat.value.name;
-  nextTick(() => {
-    titleInputRef.value?.focus();
-  });
+  nextTick(() => titleInputRef.value?.focus());
 }
 
 function saveTitle() {
   if (!currentChat.value || !isEditingTitle.value) return;
-
   const newName = titleInput.value.trim();
   if (newName && newName !== currentChat.value.name) {
-    chatStore.updateChatSettings(currentChat.value.id, { name: newName });
+    chatListStore.updateChatSettings(currentChat.value.id, { name: newName });
   }
   isEditingTitle.value = false;
 }
 
 function handleRefreshTitle() {
   if (currentChat.value) {
-    chatStore.refreshChatTitle(currentChat.value.id);
+    chatListStore.refreshChatTitle(currentChat.value.id);
   }
 }
 
-// --- Input Mode Switching ---
-function handleToggleMultiPartMode() {
-  if (!currentChat.value) return;
-  const nextMode = !isMultiPartMode.value;
-  if (nextMode) {
-    multiPartDraft.value = [{ id: Date.now(), content: singlePartDraft.value }];
-  } else {
-    singlePartDraft.value = multiPartDraft.value.map(p => p.content).join('\n--------------------------\n');
-  }
-  isMultiPartMode.value = nextMode;
-  chatInputModeState[currentChat.value.id] = nextMode;
-
-  debouncedSaveDraft(nextMode ? JSON.stringify(multiPartDraft.value) : singlePartDraft.value);
-}
-
-// --- Settings ---
+// Settings
 async function handleSaveSettings(settings: ChatUpdate) {
   if (!currentChat.value) return;
-  await chatStore.updateChatSettings(currentChat.value.id, settings);
+  await chatListStore.updateChatSettings(currentChat.value.id, settings);
   settingsDrawerVisible.value = false;
   ElMessage.success('设置已保存');
 }
 
-// --- Keyboard & Scroll ---
+// Keyboard & Scroll
 function handleGlobalKeydown(event: KeyboardEvent) {
   if (event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === 'z') {
     event.preventDefault();
-    chatStore.undo();
+    undo();
   } else if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'z') {
     event.preventDefault();
-    chatStore.redo();
+    redo();
   }
 }
 
@@ -266,17 +243,25 @@ function handleSingleInputKeydown(event: Event) {
   }
 }
 
-const userHasScrolledUp = ref(false);
 const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
   const el = scrollbarRef.value?.wrapRef;
   if (!el) return;
   userHasScrolledUp.value = el.scrollHeight - el.clientHeight - scrollTop > 20;
 };
+
 const scrollToBottom = (force = false) => {
   if (!force && userHasScrolledUp.value && isGenerating.value) return;
-  nextTick(() => scrollbarRef.value?.setScrollTop(scrollbarRef.value.wrapRef!.scrollHeight));
+  nextTick(() => {
+    const scrollbar = scrollbarRef.value;
+    if (scrollbar && scrollbar.wrapRef) {
+      scrollbar.setScrollTop(scrollbar.wrapRef.scrollHeight);
+    }
+  });
 };
 
+// --- Watchers ---
+
+// Auto-scroll on new message content
 watch(
   () => currentChatMessages.value[currentChatMessages.value.length - 1]?.sub_messages.slice(-1)[0]?.content,
   (newContent, oldContent) => {
@@ -286,27 +271,20 @@ watch(
   }
 );
 
-watch(() => currentChat.value?.id, (newId) => {
+// Handle chat switching
+watch(currentChatId, (newId) => {
   if (newId) {
-    isEditingTitle.value = false; // Exit editing mode when switching chats
+    isEditingTitle.value = false;
     userHasScrolledUp.value = false;
-    isMultiPartMode.value = chatInputModeState[newId] ?? false;
 
-    const draft = currentDraft.value;
-    if (isMultiPartMode.value) {
-      if (draft && draft.startsWith('[')) {
-        try { multiPartDraft.value = JSON.parse(draft) } catch { /* ignore */ }
-      } else {
-        multiPartDraft.value = [{ id: Date.now(), content: '' }];
-      }
-    } else {
-      singlePartDraft.value = (draft && draft.startsWith('[')) ? '' : draft;
-    }
-
+    // This logic is preserved exactly from the original implementation.
+    // It focuses the single-part input after history loads.
     const stopWatch = watch(isChatHistoryLoading, (loading) => {
       if (!loading) {
         scrollToBottom(true);
-        nextTick(() => inputRef.value?.focus());
+        nextTick(() => {
+            inputRef.value?.focus();
+        });
         stopWatch();
       }
     }, { immediate: true });
