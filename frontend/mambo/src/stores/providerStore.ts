@@ -41,6 +41,7 @@ export const useProviderStore = defineStore('providers', {
     isLoading: false,
     globalSettings: {
       default_model_id: null,
+      title_generation_model_id: null, // 新增：专门用于生成标题的模型ID
       last_selected_provider_id: null,
       default_max_context_messages: 0,
       default_temperature: 1.0,
@@ -270,3 +271,4 @@ export const useProviderStore = defineStore('providers', {
     },
   }
 });
+

@@ -167,6 +167,7 @@ export interface ChatReorderItem {
 
 export interface GlobalSettingsUpdate {
   default_model_id: string | null;
+  title_generation_model_id: string | null; // 新增：专门用于生成标题的模型ID
   last_selected_provider_id: string | null;
   default_max_context_messages: number | null;
   default_temperature: number | null;
@@ -196,3 +197,4 @@ export interface GlobalNotification {
   type: 'chat_update';
   payload: GlobalNotificationPayload;
 }
+

@@ -37,9 +37,9 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
     如果用户未设置过某些配置，则返回系统预设的默认值。
     """
     keys = [
-        "default_model_id", "last_selected_provider_id", "default_max_context_messages",
-        "default_temperature", "default_top_p", "default_stream",
-        "proxy_enabled", "proxy_url"
+        "default_model_id", "title_generation_model_id", "last_selected_provider_id",
+        "default_max_context_messages", "default_temperature", "default_top_p",
+        "default_stream", "proxy_enabled", "proxy_url"
     ]
 
     result = await db.execute(
@@ -48,6 +48,7 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
     settings_map = {s.key: s for s in result.scalars().all()}
 
     default_model_id = _get_typed_setting(settings_map.get("default_model_id"), None, str)
+    title_generation_model_id = _get_typed_setting(settings_map.get("title_generation_model_id"), None, str)
     last_selected_provider_id = _get_typed_setting(settings_map.get("last_selected_provider_id"), None, str)
     max_context = _get_typed_setting(settings_map.get("default_max_context_messages"), 0, int)
     temperature = _get_typed_setting(settings_map.get("default_temperature"), 1.0, float)
@@ -58,6 +59,7 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
 
     return schemas.GlobalSettingsUpdate(
         default_model_id=default_model_id,
+        title_generation_model_id=title_generation_model_id,
         last_selected_provider_id=last_selected_provider_id,
         default_max_context_messages=max_context,
         default_temperature=temperature,
@@ -93,6 +95,17 @@ async def update_global_settings(
                     detail=f"模型ID '{model_id}' 不存在。"
                 )
         settings_to_update.append(schemas.GlobalSetting(key="default_model_id", value=model_id))
+
+    if "title_generation_model_id" in update_data:
+        model_id = update_data["title_generation_model_id"]
+        if model_id:
+            db_model = await provider_crud.get_model(db, model_id=model_id)
+            if not db_model:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"标题生成模型ID '{model_id}' 不存在。"
+                )
+        settings_to_update.append(schemas.GlobalSetting(key="title_generation_model_id", value=model_id))
 
     if "last_selected_provider_id" in update_data:
         provider_id = update_data["last_selected_provider_id"]

@@ -37,6 +37,38 @@
           </el-select>
         </el-form-item>
 
+        <el-form-item>
+          <template #label>
+            <span>生成标题模型</span>
+            <el-tooltip
+              effect="dark"
+              content="专门用于自动生成会话标题的模型。如果未设置，将使用上方的全局默认模型。"
+              placement="top"
+            >
+              <el-icon class="label-icon"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </template>
+          <el-select
+            v-model="settingsForm.title_generation_model_id"
+            placeholder="请选择一个用于生成标题的模型"
+            style="width: 100%"
+            clearable
+          >
+            <el-option-group
+              v-for="group in groupedModels"
+              :key="group.label"
+              :label="group.label"
+            >
+              <el-option
+                v-for="item in group.options"
+                :key="item.id"
+                :label="item.name"
+                :value="item.id"
+              />
+            </el-option-group>
+          </el-select>
+        </el-form-item>
+
         <el-divider>代理配置</el-divider>
         <el-form-item label="启用代理">
            <el-switch
@@ -152,6 +184,7 @@ const { globalSettings, groupedModels } = storeToRefs(providerStore);
 
 const settingsForm = reactive<GlobalSettingsUpdate>({
   default_model_id: null,
+  title_generation_model_id: null, // 新增：专门用于生成标题的模型ID
   last_selected_provider_id: null,
   default_max_context_messages: 0,
   default_temperature: 1.0,

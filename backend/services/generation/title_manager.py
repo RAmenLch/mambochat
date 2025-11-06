@@ -33,16 +33,23 @@ class TitleGenerateManager(AbstractGenerateManager):
         """
         self.chat_id = db_chat.id
 
-        # 1. 获取全局默认模型ID
-        default_model_setting = await setting_crud.get_setting(self.db_session, "default_model_id")
-        if not (default_model_setting and default_model_setting.value):
-            raise ValueError("未设置全局默认模型，无法生成标题。")
-        default_model_id = default_model_setting.value
+        # 1. 获取标题生成模型ID，如果未设置则回退到全局默认模型
+        model_id_to_use = None
+        title_model_setting = await setting_crud.get_setting(self.db_session, "title_generation_model_id")
+        if title_model_setting and title_model_setting.value:
+            model_id_to_use = title_model_setting.value
+        else:
+            default_model_setting = await setting_crud.get_setting(self.db_session, "default_model_id")
+            if default_model_setting and default_model_setting.value:
+                model_id_to_use = default_model_setting.value
+
+        if not model_id_to_use:
+            raise ValueError("未配置标题生成模型, 且未设置全局默认模型作为备选。")
 
         # 2. 获取模型及其提供商信息
-        model = await provider_crud.get_model(self.db_session, model_id=default_model_id)
+        model = await provider_crud.get_model(self.db_session, model_id=model_id_to_use)
         if not model or not model.provider:
-            raise ValueError(f"全局默认模型ID '{default_model_id}' 未找到或未关联提供商。")
+            raise ValueError(f"用于生成标题的模型ID '{model_id_to_use}' 未找到或未关联提供商。")
         provider = model.provider
 
         # 3. 构建Prompt
@@ -163,3 +170,4 @@ class TitleGenerateManager(AbstractGenerateManager):
         """
         print(f"[TitleGenerateManager] Cleanup for task '{assistant_message_id}' with status {final_status.value}.")
         pass
+
