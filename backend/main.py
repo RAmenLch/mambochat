@@ -11,12 +11,14 @@ from .routers import (
     provider_management,
     provider_actions,
     settings,
-    notifications
+    notifications,
+    file_management
 )
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
+        # 在应用启动时，确保所有定义的模型表都已在数据库中创建
         await conn.run_sync(Base.metadata.create_all)
     yield
 
@@ -37,6 +39,9 @@ app.include_router(provider_management.router, prefix="/api", tags=["Provider & 
 app.include_router(provider_actions.router, prefix="/api", tags=["Provider Actions"])
 app.include_router(settings.router, prefix="/api", tags=["Global Settings"])
 app.include_router(notifications.router, prefix="/api", tags=["Notifications"])
+# 新增文件管理路由，其前缀已在路由器内部定义
+app.include_router(file_management.router)
+
 
 @app.get("/")
 async def root():

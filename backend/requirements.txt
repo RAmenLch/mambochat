@@ -1,3 +1,5 @@
+# backend/requirements.txt
+aiofiles==23.2.1
 aiosqlite==0.21.0
 annotated-types==0.7.0
 anyio==4.11.0
@@ -14,6 +16,7 @@ idna==3.11
 packaging==25.0
 pydantic==2.12.2
 pydantic_core==2.41.4
+python-multipart==0.0.9
 sniffio==1.3.1
 SQLAlchemy==2.0.44
 starlette==0.48.0

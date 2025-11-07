@@ -17,3 +17,4 @@ from .chat import (
 )
 from .setting import GlobalSetting, GlobalSettingsUpdate
 
+from .file import File,FileBase
