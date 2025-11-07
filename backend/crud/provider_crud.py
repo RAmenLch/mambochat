@@ -2,7 +2,7 @@
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy import update
 from typing import List, Optional
 
@@ -86,8 +86,12 @@ async def delete_provider(db: AsyncSession, provider_id: str) -> Optional[provid
 
 
 async def get_model(db: AsyncSession, model_id: str) -> Optional[provider_model.AIModel]:
-    """通过ID获取单个AI模型"""
-    result = await db.execute(select(provider_model.AIModel).filter(provider_model.AIModel.id == model_id))
+    """通过ID获取单个AI模型（并预加载其提供商信息）"""
+    result = await db.execute(
+        select(provider_model.AIModel)
+        .options(joinedload(provider_model.AIModel.provider)) # <-- 添加这一行
+        .filter(provider_model.AIModel.id == model_id)
+    )
     return result.scalars().first()
 
 
