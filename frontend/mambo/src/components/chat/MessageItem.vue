@@ -7,7 +7,7 @@
     @mouseleave="showActions = false"
   >
     <div class="message-avatar">
-      <el-avatar>
+      <el-avatar :src="avatarUrl || ''">
         <el-icon v-if="message.role === 'user'"><User /></el-icon>
         <el-icon v-else><Cpu /></el-icon>
       </el-avatar>
@@ -76,8 +76,10 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import { storeToRefs } from 'pinia';
 import type { Message, SubMessage, SubMessageCreate, MessageStatus } from '@/api/types';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
+import { useProviderStore } from '@/stores/providerStore';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { User, Cpu, Refresh, RefreshLeft, Delete, Edit, CopyDocument, ArrowUpBold, ArrowDownBold } from '@element-plus/icons-vue';
 import SubMessageItem from './SubMessageItem.vue';
@@ -91,6 +93,9 @@ const props = defineProps<{
 }>();
 
 const interactionStore = useChatInteractionStore();
+const providerStore = useProviderStore();
+const { globalSettings } = storeToRefs(providerStore);
+
 const showActions = ref(false);
 
 const isSingleSubMessage = computed(() => props.message.sub_messages.length <= 1);
@@ -105,6 +110,16 @@ const roleClass = computed(() => ({
   'is-user': props.message.role === 'user',
   'is-assistant': props.message.role === 'assistant',
 }));
+
+const avatarUrl = computed(() => {
+  if (props.message.role === 'user') {
+    return globalSettings.value.user_avatar_url;
+  }
+  if (props.message.role === 'assistant') {
+    return globalSettings.value.ai_avatar_url;
+  }
+  return null;
+});
 
 const isSingleViewCollapsed = ref(firstSubMessage.value?.config?.is_collapsed || false);
 watch(() => firstSubMessage.value?.config?.is_collapsed, (newValue) => {

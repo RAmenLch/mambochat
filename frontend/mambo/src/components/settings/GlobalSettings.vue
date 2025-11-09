@@ -69,6 +69,26 @@
           </el-select>
         </el-form-item>
 
+        <el-divider>头像设置</el-divider>
+        <div class="avatar-settings-section">
+          <AvatarUploader
+            title="用户头像"
+            :avatar-url="globalSettings.user_avatar_url"
+            :icon="User"
+            :is-loading="isAvatarLoading.user"
+            @upload="file => handleUploadAvatar('user', file)"
+            @delete="() => handleDeleteAvatar('user')"
+          />
+          <AvatarUploader
+            title="AI 助手头像"
+            :avatar-url="globalSettings.ai_avatar_url"
+            :icon="Cpu"
+            :is-loading="isAvatarLoading.ai"
+            @upload="file => handleUploadAvatar('ai', file)"
+            @delete="() => handleDeleteAvatar('ai')"
+          />
+        </div>
+
         <el-divider>代理配置</el-divider>
         <el-form-item label="启用代理">
            <el-switch
@@ -175,16 +195,19 @@ import { ref, reactive, onMounted, watch } from 'vue';
 import { useProviderStore } from '@/stores/providerStore';
 import { storeToRefs } from 'pinia';
 import { ElMessage } from 'element-plus';
-import { QuestionFilled } from '@element-plus/icons-vue';
+import { QuestionFilled, User, Cpu } from '@element-plus/icons-vue';
 import type { GlobalSettingsUpdate } from '@/api/types';
 import { isAxiosError } from 'axios';
+import AvatarUploader from './AvatarUploader.vue';
+
+type AvatarType = 'user' | 'ai';
 
 const providerStore = useProviderStore();
 const { globalSettings, groupedModels } = storeToRefs(providerStore);
 
-const settingsForm = reactive<GlobalSettingsUpdate>({
+const settingsForm = reactive<Omit<GlobalSettingsUpdate, 'user_avatar_url' | 'ai_avatar_url'>>({
   default_model_id: null,
-  title_generation_model_id: null, // 新增：专门用于生成标题的模型ID
+  title_generation_model_id: null,
   last_selected_provider_id: null,
   default_max_context_messages: 0,
   default_temperature: 1.0,
@@ -197,19 +220,68 @@ const settingsForm = reactive<GlobalSettingsUpdate>({
 const isSaving = ref(false);
 const isTestingProxy = ref(false);
 const proxyTestUrl = ref('https://www.google.com');
+const isAvatarLoading = reactive({
+  user: false,
+  ai: false,
+});
 
 onMounted(async () => {
   await providerStore.fetchGlobalSettings();
 });
 
 watch(globalSettings, (newSettings) => {
-  Object.assign(settingsForm, newSettings);
+  // 只同步表单相关的设置, 头像URL由 AvatarUploader 组件直接消费
+  Object.assign(settingsForm, {
+    default_model_id: newSettings.default_model_id,
+    title_generation_model_id: newSettings.title_generation_model_id,
+    last_selected_provider_id: newSettings.last_selected_provider_id,
+    default_max_context_messages: newSettings.default_max_context_messages,
+    default_temperature: newSettings.default_temperature,
+    default_top_p: newSettings.default_top_p,
+    default_stream: newSettings.default_stream,
+    proxy_enabled: newSettings.proxy_enabled,
+    proxy_url: newSettings.proxy_url,
+  });
 }, { deep: true, immediate: true });
+
+const handleUploadAvatar = async (type: AvatarType, file: File) => {
+  isAvatarLoading[type] = true;
+  try {
+    await providerStore.uploadAvatar(type, file);
+    ElMessage.success('头像上传成功！');
+  } catch (error: unknown) {
+    let message = '上传失败，请稍后重试。';
+    if (isAxiosError(error) && error.response?.data?.detail) {
+      message = error.response.data.detail;
+    }
+    ElMessage.error(message);
+  } finally {
+    isAvatarLoading[type] = false;
+  }
+};
+
+const handleDeleteAvatar = async (type: AvatarType) => {
+  isAvatarLoading[type] = true;
+  try {
+    await providerStore.deleteAvatar(type);
+    ElMessage.success('头像已删除。');
+  } catch (error: unknown) {
+    let message = '删除失败，请稍后重试。';
+    if (isAxiosError(error) && error.response?.data?.detail) {
+      message = error.response.data.detail;
+    }
+    ElMessage.error(message);
+  } finally {
+    isAvatarLoading[type] = false;
+  }
+};
 
 const handleSave = async () => {
   isSaving.value = true;
   try {
-    await providerStore.saveGlobalSettings(settingsForm);
+    // 创建一个不包含头像URL的副本进行保存
+    const settingsToSave: GlobalSettingsUpdate = { ...settingsForm, user_avatar_url: null, ai_avatar_url: null };
+    await providerStore.saveGlobalSettings(settingsToSave);
     ElMessage.success('全局设置已保存！');
   } catch (error: unknown) {
     let message = '保存失败，请稍后重试。';
@@ -284,5 +356,11 @@ const handleTestProxy = async () => {
 }
 .proxy-test-input {
   margin-right: 10px;
+}
+.avatar-settings-section {
+  display: flex;
+  justify-content: flex-start;
+  gap: 20px;
+  margin-bottom: 22px; /* el-form-item default margin-bottom */
 }
 </style>

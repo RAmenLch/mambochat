@@ -14,7 +14,13 @@ import {
   updateModel,
   fetchModelsForProvider
 } from '@/api/providerService';
-import { getGlobalSettings, updateGlobalSettings, testProxyConnection } from '@/api/settingsService';
+import {
+  getGlobalSettings,
+  updateGlobalSettings,
+  testProxyConnection,
+  uploadAvatar,
+  deleteAvatar
+} from '@/api/settingsService';
 import type {
   AIProviderWithModels,
   AIModelCreate,
@@ -41,7 +47,7 @@ export const useProviderStore = defineStore('providers', {
     isLoading: false,
     globalSettings: {
       default_model_id: null,
-      title_generation_model_id: null, // 新增：专门用于生成标题的模型ID
+      title_generation_model_id: null,
       last_selected_provider_id: null,
       default_max_context_messages: 0,
       default_temperature: 1.0,
@@ -49,6 +55,8 @@ export const useProviderStore = defineStore('providers', {
       default_stream: true,
       proxy_enabled: false,
       proxy_url: null,
+      user_avatar_url: null,
+      ai_avatar_url: null,
     },
   }),
 
@@ -246,7 +254,7 @@ export const useProviderStore = defineStore('providers', {
       }
     },
 
-    // --- Global Settings & Proxy Actions ---
+    // --- Global Settings, Proxy & Avatar Actions ---
     async fetchGlobalSettings() {
       try {
         this.globalSettings = await getGlobalSettings();
@@ -269,6 +277,34 @@ export const useProviderStore = defineStore('providers', {
     async testProxy(requestData: ProxyTestRequest): Promise<ConnectionTestResponse> {
         return await testProxyConnection(requestData);
     },
+
+    /**
+     * 上传指定类型的头像。
+     * @param type - 头像类型, 'user' 或 'ai'
+     * @param file - 文件对象
+     */
+    async uploadAvatar(type: 'user' | 'ai', file: File) {
+      try {
+        await uploadAvatar(type, file);
+        await this.fetchGlobalSettings(); // 成功后刷新全局设置以获取新URL
+      } catch (error) {
+        console.error(`Failed to upload ${type} avatar:`, error);
+        throw error;
+      }
+    },
+
+    /**
+     * 删除指定类型的头像。
+     * @param type - 头像类型, 'user' 或 'ai'
+     */
+    async deleteAvatar(type: 'user' | 'ai') {
+      try {
+        await deleteAvatar(type);
+        await this.fetchGlobalSettings(); // 成功后刷新全局设置
+      } catch (error) {
+        console.error(`Failed to delete ${type} avatar:`, error);
+        throw error;
+      }
+    },
   }
 });
-

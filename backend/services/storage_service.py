@@ -5,14 +5,13 @@ import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
 import aiofiles
+import aiofiles.os  # 导入 aiofiles.os 模块
 from fastapi import UploadFile
-
 
 class AbstractStorageService(ABC):
     """
     文件存储服务的抽象基类，定义了标准的文件操作接口。
     """
-
     @abstractmethod
     async def save(self, file: UploadFile, sub_path: str) -> str:
         """
@@ -48,7 +47,6 @@ class LocalStorageService(AbstractStorageService):
     """
     使用本地文件系统实现的文件存储服务。
     """
-
     def __init__(self, base_path: str):
         self.base_path = Path(base_path).resolve()
         self.base_path.mkdir(parents=True, exist_ok=True)
@@ -66,7 +64,7 @@ class LocalStorageService(AbstractStorageService):
                 await out_file.write(content)
 
         relative_path = Path(sub_path) / unique_filename
-        return str(relative_path).replace('\\', '/')  # 保证路径分隔符的统一性
+        return str(relative_path).replace('\\', '/') # 保证路径分隔符的统一性
 
     def get_url(self, storage_path: str) -> str:
         # 构建一个指向API下载端点的相对URL
@@ -77,14 +75,12 @@ class LocalStorageService(AbstractStorageService):
             return
 
         file_path = self.base_path / storage_path
-        # 使用 aiofiles 在异步环境中安全地删除文件
-        try:
-            if await aiofiles.os.path.isfile(file_path):
-                await aiofiles.os.remove(file_path)
-        except FileNotFoundError:
-            # 如果文件已不存在，则静默处理
-            pass
 
+        try:
+            await aiofiles.os.remove(file_path)
+        except FileNotFoundError:
+            # 如果文件已不存在，则静默处理，因为目标（文件被删除）已经达成。
+            pass
 
 # --- 服务实例化 ---
 

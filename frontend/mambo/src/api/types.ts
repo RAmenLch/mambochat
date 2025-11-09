@@ -175,6 +175,19 @@ export interface GlobalSettingsUpdate {
   default_stream: boolean | null;
   proxy_enabled: boolean | null;
   proxy_url: string | null;
+  user_avatar_url: string | null;
+  ai_avatar_url: string | null;
+}
+
+// --- File Management Types ---
+
+export interface FileResponse {
+  id: string;
+  filename: string;
+  mime_type: string;
+  size: number;
+  created_at: string; // ISO 8601 date string
+  url: string;
 }
 
 // --- Proxy Test Types ---
@@ -197,4 +210,3 @@ export interface GlobalNotification {
   type: 'chat_update';
   payload: GlobalNotificationPayload;
 }
-
