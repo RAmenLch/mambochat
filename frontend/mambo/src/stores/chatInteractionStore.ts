@@ -257,5 +257,6 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     updateSubMessage,
     deleteMessage,
     cancelGeneration,
+    _subscribeToMessageStream
   };
 });

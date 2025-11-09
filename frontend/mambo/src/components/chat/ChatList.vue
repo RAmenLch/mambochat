@@ -115,6 +115,7 @@ import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, EditPen, CopyDo
 import { useChatListStore } from '@/stores/chatListStore';
 import { useChatSessionStore } from '@/stores/chatSessionStore';
 import { useProviderStore } from '@/stores/providerStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 
 // --- Utils & Composables ---
 import { buildChatTree } from '@/utils/treeHelper';
@@ -128,11 +129,13 @@ import NewChatDialog from './dialogs/NewChatDialog.vue';
 const chatListStore = useChatListStore();
 const chatSessionStore = useChatSessionStore();
 const providerStore = useProviderStore();
+const settingsStore = useSettingsStore();
 const router = useRouter();
 
 const { chatList, isChatListLoading } = storeToRefs(chatListStore);
 const { currentChatId } = storeToRefs(chatSessionStore);
-const { providers, globalSettings } = storeToRefs(providerStore);
+const { providers } = storeToRefs(providerStore);
+const { globalSettings } = storeToRefs(settingsStore);
 
 // -- Local Component State --
 const treeRef = ref<InstanceType<typeof ElTree>>();

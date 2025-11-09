@@ -4,9 +4,9 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { getChatWithMessages } from '@/api/chatService';
 import { useChatListStore } from './chatListStore';
+import { useChatInteractionStore } from './chatInteractionStore';
 import type { Chat, Message, SubMessage } from '@/api/types';
 import type { StreamedChunk } from '@/services/sseService';
-
 /**
  * 管理当前激活会话的数据状态。
  * 这个 Store 扮演着当前会话的响应式“数据库”角色，
@@ -68,6 +68,7 @@ export const useChatSessionStore = defineStore('chatSession', () => {
     _clearAllSubscriptions();
 
     const chatListStore = useChatListStore();
+    const interactionStore = useChatInteractionStore();
     const item = chatListStore.chatList.find(i => i.id === chatId);
 
     // 如果选择的是文件夹或无效项，则清空会话
@@ -89,6 +90,11 @@ export const useChatSessionStore = defineStore('chatSession', () => {
         Object.assign(chatListStore.chatList[chatIndex], chatWithMessages);
       }
       currentChatMessages.value = chatWithMessages.messages.sort((a, b) => a.sortOrder - b.sortOrder);
+      currentChatMessages.value.forEach(msg => {
+        if (msg.status === 'generating') {
+          interactionStore._subscribeToMessageStream(msg);
+        }
+      });
     } catch (error) {
       console.error(`Failed to fetch messages for chat ${chatId}:`, error);
       clearSession();
