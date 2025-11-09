@@ -77,6 +77,7 @@ import { ref, reactive, watch, computed } from 'vue';
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
 import { Plus, Delete, Download, QuestionFilled } from '@element-plus/icons-vue';
 import { useProviderStore } from '@/stores/providerStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { storeToRefs } from 'pinia';
 import type {
   AIProviderWithModels,
@@ -114,7 +115,8 @@ const emit = defineEmits<{
 const API_KEY_PLACEHOLDER = '********';
 
 const providerStore = useProviderStore();
-const { globalSettings } = storeToRefs(providerStore);
+const settingsStore = useSettingsStore();
+const { globalSettings } = storeToRefs(settingsStore);
 
 const providerFormRef = ref<FormInstance>();
 const internalVisible = ref(false);

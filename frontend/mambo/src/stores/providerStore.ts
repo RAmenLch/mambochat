@@ -1,4 +1,4 @@
-// frontend/mambochat/src/stores/providerStore.ts
+// frontend/mambo/src/stores/providerStore.ts
 
 import { defineStore } from 'pinia';
 import {
@@ -14,50 +14,28 @@ import {
   updateModel,
   fetchModelsForProvider
 } from '@/api/providerService';
-import {
-  getGlobalSettings,
-  updateGlobalSettings,
-  testProxyConnection,
-  uploadAvatar,
-  deleteAvatar
-} from '@/api/settingsService';
 import type {
   AIProviderWithModels,
   AIModelCreate,
   ProviderWithModelsCreate,
   ConnectionRequest,
-  GlobalSettingsUpdate,
   AIModelBase,
   AIProviderUpdate,
   AIModelUpdate,
   ConnectionTestResponse,
-  ProxyTestRequest
 } from '@/api/types';
-import { useChatListStore } from './chatListStore.ts';
+import { useChatListStore } from './chatListStore';
+import { useSettingsStore } from './settingsStore';
 
 interface ProviderState {
   providers: AIProviderWithModels[];
   isLoading: boolean;
-  globalSettings: GlobalSettingsUpdate;
 }
 
 export const useProviderStore = defineStore('providers', {
   state: (): ProviderState => ({
     providers: [],
     isLoading: false,
-    globalSettings: {
-      default_model_id: null,
-      title_generation_model_id: null,
-      last_selected_provider_id: null,
-      default_max_context_messages: 0,
-      default_temperature: 1.0,
-      default_top_p: 1.0,
-      default_stream: true,
-      proxy_enabled: false,
-      proxy_url: null,
-      user_avatar_url: null,
-      ai_avatar_url: null,
-    },
   }),
 
   getters: {
@@ -78,15 +56,16 @@ export const useProviderStore = defineStore('providers', {
      * 确保所有会话都指向一个有效的模型，如果模型ID无效或为空，则回退到全局默认模型。
      */
     async reconcileChatModels() {
-      if (!this.globalSettings.default_model_id) {
-        await this.fetchGlobalSettings();
+      const settingsStore = useSettingsStore();
+      if (!settingsStore.globalSettings.default_model_id) {
+        await settingsStore.fetchGlobalSettings();
       }
 
       const chatListStore = useChatListStore();
       if (chatListStore.chatList.length === 0) return;
 
       const validModelIds = new Set(this.allModels.map(m => m.id));
-      const defaultModelId = this.globalSettings.default_model_id;
+      const defaultModelId = settingsStore.globalSettings.default_model_id;
 
       let changed = false;
       chatListStore.chatList.forEach(chat => {
@@ -119,80 +98,48 @@ export const useProviderStore = defineStore('providers', {
         this.providers = await getProviders();
         // 在获取最新的服务商和模型列表后，立即同步聊天状态
         await this.reconcileChatModels();
-      } catch (error) {
-        console.error('Failed to fetch providers:', error);
-        throw error;
       } finally {
         this.isLoading = false;
       }
     },
 
     async addProviderWithModels(providerData: ProviderWithModelsCreate) {
-      try {
-        const newProvider = await createProviderWithModels(providerData);
-        await this.fetchProviders();
-        // 后端会自动更新 last_selected_provider_id, 这里获取最新设置以保持同步
-        await this.fetchGlobalSettings();
-        return newProvider;
-      } catch (error) {
-        console.error('Failed to add provider:', error);
-        throw error;
-      }
+      const settingsStore = useSettingsStore();
+      const newProvider = await createProviderWithModels(providerData);
+      await this.fetchProviders();
+      // 后端会自动更新 last_selected_provider_id, 这里获取最新设置以保持同步
+      await settingsStore.fetchGlobalSettings();
+      return newProvider;
     },
 
     async updateProvider(providerId: string, providerData: AIProviderUpdate) {
-      try {
-        await updateProvider(providerId, providerData);
-        await this.fetchProviders();
-        await this.fetchGlobalSettings();
-      } catch (error) {
-        console.error('Failed to update provider:', error);
-        throw error;
-      }
+      const settingsStore = useSettingsStore();
+      await updateProvider(providerId, providerData);
+      await this.fetchProviders();
+      await settingsStore.fetchGlobalSettings();
     },
 
     async removeProvider(providerId: string) {
-      try {
-        await deleteProvider(providerId);
-        await this.fetchProviders();
-        await this.fetchGlobalSettings();
-      } catch (error) {
-        console.error('Failed to remove provider:', error);
-        throw error;
-      }
+      const settingsStore = useSettingsStore();
+      await deleteProvider(providerId);
+      await this.fetchProviders();
+      await settingsStore.fetchGlobalSettings();
     },
 
     async addModel(modelData: AIModelCreate) {
-      try {
-        await createModel(modelData);
-        await this.fetchProviders();
-      } catch (error) {
-        console.error('Failed to add model:', error);
-        throw error;
-      }
+      await createModel(modelData);
+      await this.fetchProviders();
     },
 
     async updateModel(modelId: string, modelData: AIModelUpdate) {
-      try {
-        await updateModel(modelId, modelData);
-        await this.fetchProviders();
-      } catch (error) {
-        console.error('Failed to update model:', error);
-        throw error;
-      }
+      await updateModel(modelId, modelData);
+      await this.fetchProviders();
     },
 
     async removeModel(modelId: string) {
-      try {
-        await deleteModel(modelId);
-        // 刷新服务商和模型列表，这将自动触发 reconcileChatModels 动作
-        await this.fetchProviders();
-      }
-      catch (error)
-      {
-        console.error('Failed to remove model:', error);
-        throw error;
-      }
+      await deleteModel(modelId);
+      // 刷新服务商和模型列表，这将自动触发 reconcileChatModels 动作
+      await this.fetchProviders();
     },
 
     // --- External API Actions ---
@@ -203,12 +150,7 @@ export const useProviderStore = defineStore('providers', {
      * @param useProxy 从表单实时传入的代理状态。
      */
     async testConnection(connectionData: ConnectionRequest, useProxy: boolean): Promise<ConnectionTestResponse> {
-      try {
-        return await testConnection(connectionData, useProxy);
-      } catch (error) {
-        console.error('Connection test failed:', error);
-        throw error;
-      }
+      return await testConnection(connectionData, useProxy);
     },
 
     /**
@@ -218,12 +160,7 @@ export const useProviderStore = defineStore('providers', {
      * @param useProxy 从表单实时传入的代理状态。
      */
     async testConnectionForProvider(providerId: string, apiHost: string, useProxy: boolean): Promise<ConnectionTestResponse> {
-      try {
-        return await testConnectionForProvider(providerId, apiHost, useProxy);
-      } catch (error) {
-        console.error('Connection test for existing provider failed:', error);
-        throw error;
-      }
+      return await testConnectionForProvider(providerId, apiHost, useProxy);
     },
 
     /**
@@ -232,12 +169,7 @@ export const useProviderStore = defineStore('providers', {
      * @param useProxy 从表单实时传入的代理状态。
      */
     async fetchExternalModels(connectionData: ConnectionRequest, useProxy: boolean): Promise<AIModelBase[]> {
-       try {
-        return await fetchExternalModels(connectionData, useProxy);
-      } catch (error) {
-        console.error('Failed to fetch external models:', error);
-        throw error;
-      }
+       return await fetchExternalModels(connectionData, useProxy);
     },
 
     /**
@@ -246,65 +178,7 @@ export const useProviderStore = defineStore('providers', {
      * @param useProxy 从表单实时传入的代理状态。
      */
     async fetchModelsForProvider(providerId: string, useProxy: boolean): Promise<AIModelBase[]> {
-      try {
-        return await fetchModelsForProvider(providerId, useProxy);
-      } catch (error) {
-        console.error('Failed to fetch models for existing provider:', error);
-        throw error;
-      }
-    },
-
-    // --- Global Settings, Proxy & Avatar Actions ---
-    async fetchGlobalSettings() {
-      try {
-        this.globalSettings = await getGlobalSettings();
-      } catch (error) {
-        console.error('Failed to fetch global settings:', error);
-        throw error;
-      }
-    },
-
-    async saveGlobalSettings(settings: GlobalSettingsUpdate) {
-      try {
-        const updatedSettings = await updateGlobalSettings(settings);
-        this.globalSettings = updatedSettings;
-      } catch (error) {
-        console.error('Failed to save global settings:', error);
-        throw error;
-      }
-    },
-
-    async testProxy(requestData: ProxyTestRequest): Promise<ConnectionTestResponse> {
-        return await testProxyConnection(requestData);
-    },
-
-    /**
-     * 上传指定类型的头像。
-     * @param type - 头像类型, 'user' 或 'ai'
-     * @param file - 文件对象
-     */
-    async uploadAvatar(type: 'user' | 'ai', file: File) {
-      try {
-        await uploadAvatar(type, file);
-        await this.fetchGlobalSettings(); // 成功后刷新全局设置以获取新URL
-      } catch (error) {
-        console.error(`Failed to upload ${type} avatar:`, error);
-        throw error;
-      }
-    },
-
-    /**
-     * 删除指定类型的头像。
-     * @param type - 头像类型, 'user' 或 'ai'
-     */
-    async deleteAvatar(type: 'user' | 'ai') {
-      try {
-        await deleteAvatar(type);
-        await this.fetchGlobalSettings(); // 成功后刷新全局设置
-      } catch (error) {
-        console.error(`Failed to delete ${type} avatar:`, error);
-        throw error;
-      }
+      return await fetchModelsForProvider(providerId, useProxy);
     },
   }
 });

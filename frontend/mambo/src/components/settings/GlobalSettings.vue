@@ -193,17 +193,20 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, watch } from 'vue';
 import { useProviderStore } from '@/stores/providerStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { storeToRefs } from 'pinia';
 import { ElMessage } from 'element-plus';
 import { QuestionFilled, User, Cpu } from '@element-plus/icons-vue';
 import type { GlobalSettingsUpdate } from '@/api/types';
-import { isAxiosError } from 'axios';
 import AvatarUploader from './AvatarUploader.vue';
 
 type AvatarType = 'user' | 'ai';
 
 const providerStore = useProviderStore();
-const { globalSettings, groupedModels } = storeToRefs(providerStore);
+const settingsStore = useSettingsStore();
+
+const { groupedModels } = storeToRefs(providerStore);
+const { globalSettings } = storeToRefs(settingsStore);
 
 const settingsForm = reactive<Omit<GlobalSettingsUpdate, 'user_avatar_url' | 'ai_avatar_url'>>({
   default_model_id: null,
@@ -226,7 +229,7 @@ const isAvatarLoading = reactive({
 });
 
 onMounted(async () => {
-  await providerStore.fetchGlobalSettings();
+  await settingsStore.fetchGlobalSettings();
 });
 
 watch(globalSettings, (newSettings) => {
@@ -247,14 +250,11 @@ watch(globalSettings, (newSettings) => {
 const handleUploadAvatar = async (type: AvatarType, file: File) => {
   isAvatarLoading[type] = true;
   try {
-    await providerStore.uploadAvatar(type, file);
+    await settingsStore.uploadAvatar(type, file);
     ElMessage.success('头像上传成功！');
   } catch (error: unknown) {
-    let message = '上传失败，请稍后重试。';
-    if (isAxiosError(error) && error.response?.data?.detail) {
-      message = error.response.data.detail;
-    }
-    ElMessage.error(message);
+    // 错误消息已由全局拦截器处理
+    console.error(`Failed to upload ${type} avatar:`, error);
   } finally {
     isAvatarLoading[type] = false;
   }
@@ -263,14 +263,11 @@ const handleUploadAvatar = async (type: AvatarType, file: File) => {
 const handleDeleteAvatar = async (type: AvatarType) => {
   isAvatarLoading[type] = true;
   try {
-    await providerStore.deleteAvatar(type);
+    await settingsStore.deleteAvatar(type);
     ElMessage.success('头像已删除。');
-  } catch (error: unknown) {
-    let message = '删除失败，请稍后重试。';
-    if (isAxiosError(error) && error.response?.data?.detail) {
-      message = error.response.data.detail;
-    }
-    ElMessage.error(message);
+  } catch (error: unknown)
+  {
+    console.error(`Failed to delete ${type} avatar:`, error);
   } finally {
     isAvatarLoading[type] = false;
   }
@@ -279,16 +276,11 @@ const handleDeleteAvatar = async (type: AvatarType) => {
 const handleSave = async () => {
   isSaving.value = true;
   try {
-    // 创建一个不包含头像URL的副本进行保存
     const settingsToSave: GlobalSettingsUpdate = { ...settingsForm, user_avatar_url: null, ai_avatar_url: null };
-    await providerStore.saveGlobalSettings(settingsToSave);
+    await settingsStore.saveGlobalSettings(settingsToSave);
     ElMessage.success('全局设置已保存！');
   } catch (error: unknown) {
-    let message = '保存失败，请稍后重试。';
-    if (isAxiosError(error) && error.response?.data?.detail) {
-      message = error.response.data.detail;
-    }
-    ElMessage.error(message);
+    console.error('Failed to save global settings:', error);
   } finally {
     isSaving.value = false;
   }
@@ -306,7 +298,7 @@ const handleTestProxy = async () => {
 
   isTestingProxy.value = true;
   try {
-    const response = await providerStore.testProxy({
+    const response = await settingsStore.testProxy({
       proxy_url: settingsForm.proxy_url,
       test_url: proxyTestUrl.value,
     });
@@ -315,11 +307,7 @@ const handleTestProxy = async () => {
       message: response.message,
     });
   } catch (error: unknown) {
-     let message = '测试请求失败';
-     if (isAxiosError(error) && error.response?.data?.detail) {
-        message = error.response.data.detail;
-     }
-     ElMessage.error(message);
+     console.error('Failed to test proxy:', error);
   } finally {
     isTestingProxy.value = false;
   }

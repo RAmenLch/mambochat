@@ -7,7 +7,7 @@ import type { GlobalSettingsUpdate, ProxyTestRequest, ConnectionTestResponse, Fi
  * 获取全局配置
  */
 export const getGlobalSettings = (): Promise<GlobalSettingsUpdate> => {
-  return apiClient.get('/settings/global').then(res => res.data);
+  return apiClient.get('/settings/global')
 };
 
 /**
@@ -15,7 +15,7 @@ export const getGlobalSettings = (): Promise<GlobalSettingsUpdate> => {
  * @param settings - 包含要更新的配置的对象
  */
 export const updateGlobalSettings = (settings: GlobalSettingsUpdate): Promise<GlobalSettingsUpdate> => {
-  return apiClient.put('/settings/global', settings).then(res => res.data);
+  return apiClient.put('/settings/global', settings)
 };
 
 /**
@@ -35,7 +35,7 @@ export const uploadAvatar = (type: 'user' | 'ai', file: File): Promise<FileRespo
       // 通常不需要手动设置, 但为明确起见保留
       'Content-Type': 'multipart/form-data',
     }
-  }).then(res => res.data);
+  })
 };
 
 /**
@@ -45,7 +45,7 @@ export const uploadAvatar = (type: 'user' | 'ai', file: File): Promise<FileRespo
 export const deleteAvatar = (type: 'user' | 'ai'): Promise<void> => {
   const url = `/settings/avatar/${type}`;
   // 204 No Content 响应体为空, .then() 会接收到 undefined
-  return apiClient.delete(url).then(() => {});
+  return apiClient.delete(url)
 };
 
 /**
@@ -53,5 +53,5 @@ export const deleteAvatar = (type: 'user' | 'ai'): Promise<void> => {
  * @param data - 包含代理URL和测试目标URL的对象
  */
 export const testProxyConnection = (data: ProxyTestRequest): Promise<ConnectionTestResponse> => {
-  return apiClient.post('/settings/test-proxy', data).then(res => res.data);
+  return apiClient.post('/settings/test-proxy', data)
 };

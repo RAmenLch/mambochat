@@ -2,7 +2,6 @@
 
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import { ElMessage } from 'element-plus';
 import {
   getChats, createChat, deleteChat, updateChatSettings as updateChatSettingsAPI,
   reorderChats, duplicateChat as duplicateChatAPI, generateChatTitle as generateChatTitleAPI
@@ -31,8 +30,8 @@ export const useChatListStore = defineStore('chatList', () => {
     try {
       chatList.value = await getChats();
     } catch (error) {
+      // 错误消息已由全局拦截器处理
       console.error('Failed to fetch chat list:', error);
-      ElMessage.error('获取会话列表失败');
     } finally {
       isChatListLoading.value = false;
     }
@@ -50,7 +49,6 @@ export const useChatListStore = defineStore('chatList', () => {
       return newItem;
     } catch (error) {
       console.error('Failed to create new item:', error);
-      ElMessage.error('创建失败');
       return null;
     }
   }
@@ -70,7 +68,6 @@ export const useChatListStore = defineStore('chatList', () => {
       }
     } catch (error) {
       console.error(`Failed to update settings for item ${itemId}:`, error);
-      ElMessage.error('更新设置失败');
     }
   }
 
@@ -91,7 +88,6 @@ export const useChatListStore = defineStore('chatList', () => {
       }
     } catch (error) {
       console.error(`Failed to delete item ${itemId}:`, error);
-      ElMessage.error('删除失败');
     }
   }
 
@@ -114,7 +110,6 @@ export const useChatListStore = defineStore('chatList', () => {
       await reorderChats(updates);
     } catch (error) {
       console.error('Failed to reorder items:', error);
-      ElMessage.error('排序失败，正在恢复...');
       // 如果API调用失败，则重新获取列表以回滚更改
       await fetchChatList();
     }
@@ -132,7 +127,6 @@ export const useChatListStore = defineStore('chatList', () => {
       return newChat;
     } catch (error) {
       console.error(`Failed to duplicate chat ${itemId}:`, error);
-      ElMessage.error('复制失败');
       return null;
     }
   }
@@ -148,7 +142,6 @@ export const useChatListStore = defineStore('chatList', () => {
       // 成功后，标题的更新将通过SSE通知来处理，届时会清除refreshingTitleChatId
     } catch (error) {
       console.error(`Failed to initiate title generation for chat ${chatId}:`, error);
-      ElMessage.error('刷新标题失败');
       // 如果请求本身失败，立即清除加载状态
       if (refreshingTitleChatId.value === chatId) {
         refreshingTitleChatId.value = null;

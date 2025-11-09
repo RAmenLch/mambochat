@@ -83,6 +83,7 @@
 <script setup lang="ts">
 import { ref, reactive, watch, onMounted, nextTick } from 'vue';
 import { useProviderStore } from '@/stores/providerStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { storeToRefs } from 'pinia';
 import { ElMessage, ElMessageBox, type ElTable } from 'element-plus';
 import { Plus } from '@element-plus/icons-vue';
@@ -91,13 +92,14 @@ import type { AIProviderWithModels, AIModel, AIModelBase } from '@/api/types';
 import ProviderFormDialog from './dialogs/ProviderFormDialog.vue';
 import ModelFormDialog from './dialogs/ModelFormDialog.vue';
 import FetchModelsDialog from './dialogs/FetchModelsDialog.vue';
-import {AxiosError} from "axios";
 
-// Store setup
 const providerStore = useProviderStore();
-const { providers, isLoading, globalSettings } = storeToRefs(providerStore);
+const settingsStore = useSettingsStore();
 
-// Component State
+const { providers, isLoading } = storeToRefs(providerStore);
+const { globalSettings } = storeToRefs(settingsStore);
+
+
 const providerTableRef = ref<InstanceType<typeof ElTable>>();
 const providerFormDialogRef = ref<InstanceType<typeof ProviderFormDialog>>();
 const selectedProvider = ref<AIProviderWithModels | null>(null);
@@ -109,7 +111,7 @@ const fetchModelsDialog = reactive<{ visible: boolean; data: AIModelBase[]; exis
 
 // Lifecycle and Watchers
 onMounted(async () => {
-  await providerStore.fetchGlobalSettings();
+  await settingsStore.fetchGlobalSettings();
   await providerStore.fetchProviders();
 });
 
@@ -146,24 +148,12 @@ const openEditProviderDialog = (provider: AIProviderWithModels) => {
 };
 
 const handleDeleteProvider = async (provider: AIProviderWithModels) => {
-  try {
     await ElMessageBox.confirm(`确定删除服务商 "${provider.name}" 吗？其下所有模型也将被删除。`, '警告', { type: 'warning' });
     await providerStore.removeProvider(provider.id);
     if (selectedProvider.value?.id === provider.id) {
       selectedProvider.value = null;
     }
     ElMessage.success('删除成功！');
-  } catch (error) {
-    if (error instanceof AxiosError) {
-      ElMessage.error(error?.response?.data?.detail || '删除失败');
-  } else {
-    // 处理其他类型的错误
-    ElMessage.error('发生未知错误');
-  }
-
-
-
-  }
 };
 
 // Model Handlers
@@ -178,17 +168,9 @@ const openEditModelDialog = (model: AIModel) => {
 };
 
 const handleDeleteModel = async (model: AIModel) => {
-  try {
     await ElMessageBox.confirm(`确定删除模型 "${model.name}" 吗？`, '警告', { type: 'warning' });
     await providerStore.removeModel(model.id);
     ElMessage.success('删除模型成功！');
-  } catch (error) {
-    if(error instanceof AxiosError){
-      ElMessage.error(error?.response?.data?.detail || '删除失败');
-    }else{
-      ElMessage.error("未知错误")
-    }
-  }
 };
 
 // Dialog Event Handlers
@@ -211,12 +193,7 @@ const handleFetchModelsForProvider = async () => {
     fetchModelsDialog.existingIds = selectedProvider.value.models.map(m => m.modelId);
     fetchModelsDialog.visible = true;
   } catch (error) {
-    if(error instanceof AxiosError){
-      ElMessage.error(error?.response?.data?.detail || '获取模型列表失败');
-    }else{
-      ElMessage.error("未知错误")
-    }
-
+    console.error('Failed to fetch models for provider:', error);
   } finally {
     isFetchingModels.value = false;
   }
@@ -236,11 +213,7 @@ const onConfirmAddFetchedModels = (selectedIds: string[]) => {
     Promise.all(modelsToAdd.map(m => providerStore.addModel(m)))
       .then(() => ElMessage.success(`已批量添加 ${modelsToAdd.length} 个模型。`))
       .catch((error) => {
-            if(error instanceof AxiosError){
-              ElMessage.error(error?.response?.data?.detail || '批量添加失败');
-            }else{
-              ElMessage.error("未知错误")
-            }
+          console.error('Failed to batch add models:', error);
         }
       );
   }

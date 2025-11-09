@@ -17,49 +17,49 @@ import type {
  * 获取所有服务商及其模型
  */
 export const getProviders = (): Promise<AIProviderWithModels[]> => {
-  return apiClient.get('/providers/').then(res => res.data);
+  return apiClient.get('/providers/')
 };
 
 /**
  * 创建一个包含模型的新服务商
  */
 export const createProviderWithModels = (providerData: ProviderWithModelsCreate): Promise<AIProviderWithModels> => {
-  return apiClient.post('/providers/', providerData).then(res => res.data);
+  return apiClient.post('/providers/', providerData)
 };
 
 /**
  * 更新服务商信息
  */
 export const updateProvider = (providerId: string, providerData: AIProviderUpdate): Promise<AIProviderWithModels> => {
-  return apiClient.put(`/providers/${providerId}`, providerData).then(res => res.data);
+  return apiClient.put(`/providers/${providerId}`, providerData)
 };
 
 /**
  * 删除一个服务商
  */
 export const deleteProvider = (providerId: string): Promise<void> => {
-  return apiClient.delete(`/providers/${providerId}`).then(res => res.data);
+  return apiClient.delete(`/providers/${providerId}`)
 };
 
 /**
  * 创建一个新模型
  */
 export const createModel = (modelData: AIModelCreate): Promise<AIModel> => {
-  return apiClient.post('/models/', modelData).then(res => res.data);
+  return apiClient.post('/models/', modelData)
 };
 
 /**
  * 更新模型信息
  */
 export const updateModel = (modelId: string, modelData: AIModelUpdate): Promise<AIModel> => {
-  return apiClient.put(`/models/${modelId}`, modelData).then(res => res.data);
+  return apiClient.put(`/models/${modelId}`, modelData)
 };
 
 /**
  * 删除一个模型
  */
 export const deleteModel = (modelId: string): Promise<void> => {
-  return apiClient.delete(`/models/${modelId}`).then(res => res.data);
+  return apiClient.delete(`/models/${modelId}`)
 };
 
 /**
@@ -68,7 +68,7 @@ export const deleteModel = (modelId: string): Promise<void> => {
 export const testConnection = (connectionData: ConnectionRequest, useProxy: boolean): Promise<ConnectionTestResponse> => {
   return apiClient.post('/providers/test-connection', connectionData, {
     params: { use_proxy: useProxy }
-  }).then(res => res.data);
+  })
 };
 
 /**
@@ -80,7 +80,7 @@ export const testConnection = (connectionData: ConnectionRequest, useProxy: bool
 export const testConnectionForProvider = (providerId: string, apiHost: string, useProxy: boolean): Promise<ConnectionTestResponse> => {
   return apiClient.post(`/providers/${providerId}/test-connection`, { apiHost }, {
     params: { use_proxy: useProxy }
-  }).then(res => res.data);
+  })
 };
 
 /**
@@ -89,7 +89,7 @@ export const testConnectionForProvider = (providerId: string, apiHost: string, u
 export const fetchExternalModels = (connectionData: ConnectionRequest, useProxy: boolean): Promise<AIModelBase[]> => {
   return apiClient.post('/providers/fetch-models', connectionData, {
     params: { use_proxy: useProxy }
-  }).then(res => res.data);
+  })
 };
 
 /**
@@ -100,5 +100,5 @@ export const fetchExternalModels = (connectionData: ConnectionRequest, useProxy:
 export const fetchModelsForProvider = (providerId: string, useProxy: boolean): Promise<AIModelBase[]> => {
   return apiClient.get(`/providers/${providerId}/fetch-models`, {
     params: { use_proxy: useProxy }
-  }).then(res => res.data);
+  })
 };

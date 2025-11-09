@@ -1,7 +1,6 @@
 // frontend/mambo/src/stores/chatInteractionStore.ts
 
 import { defineStore } from 'pinia';
-import { ElMessage } from 'element-plus';
 import {
   updateMessageAndRegenerate, updateSubMessage as updateSubMessageAPI,
   deleteMessage as deleteMessageAPI, prepareGenerate, prepareRegenerate,
@@ -108,7 +107,6 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
       }
     } catch (error) {
       console.error('Failed to prepare generation:', error);
-      ElMessage.error('发送失败，正在同步最新状态...');
       sessionStore._removeMessage(tempUserMessageId); // 回滚乐观更新
       if (sessionStore.currentChatId) await sessionStore.selectChat(sessionStore.currentChatId, true);
     }
@@ -137,7 +135,6 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
       }
     } catch (error) {
       console.error('Failed to prepare regeneration:', error);
-      ElMessage.error('重新生成失败，正在同步最新状态...');
       if (sessionStore.currentChatId) await sessionStore.selectChat(sessionStore.currentChatId, true);
     }
   }
@@ -180,7 +177,6 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
       }
     } catch (error) {
       console.error('Failed to update and resend:', error);
-      ElMessage.error('操作失败，正在同步最新状态...');
       if (chatId) await sessionStore.selectChat(chatId, true);
     }
   }
@@ -220,7 +216,6 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
       console.error('Failed to delete message:', error);
       sessionStore.currentChatMessages.push(backup); // 回滚
       sessionStore.currentChatMessages.sort((a,b) => a.sortOrder - b.sortOrder);
-      ElMessage.error('删除失败');
     }
   }
 
@@ -249,7 +244,6 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
       }
     } catch (error) {
       console.error(`Failed to process stop request for ${messageId}:`, error);
-      ElMessage.error('停止操作失败，正在尝试同步状态...');
       if (sessionStore.currentChatId) {
         await sessionStore.selectChat(sessionStore.currentChatId, true);
       }

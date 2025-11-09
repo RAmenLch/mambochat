@@ -79,7 +79,7 @@ import { computed, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import type { Message, SubMessage, SubMessageCreate, MessageStatus } from '@/api/types';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
-import { useProviderStore } from '@/stores/providerStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { User, Cpu, Refresh, RefreshLeft, Delete, Edit, CopyDocument, ArrowUpBold, ArrowDownBold } from '@element-plus/icons-vue';
 import SubMessageItem from './SubMessageItem.vue';
@@ -93,8 +93,8 @@ const props = defineProps<{
 }>();
 
 const interactionStore = useChatInteractionStore();
-const providerStore = useProviderStore();
-const { globalSettings } = storeToRefs(providerStore);
+const settingsStore = useSettingsStore();
+const { globalSettings } = storeToRefs(settingsStore);
 
 const showActions = ref(false);
 
