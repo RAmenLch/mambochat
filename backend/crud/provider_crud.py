@@ -36,20 +36,16 @@ async def create_provider_with_models(db: AsyncSession,
     """事务性地创建一个服务商及其关联的模型"""
     provider_id = provider_data.id if provider_data.id else generate_uuid()
 
-    db_provider = provider_model.AIProvider(
-        id=provider_id,
-        name=provider_data.name,
-        apiHost=provider_data.apiHost,
-        apiKey=provider_data.apiKey,
-        use_proxy=provider_data.use_proxy
-    )
+    # 从 Pydantic 模型中 dump 数据时，排除 'models' 和 'id'
+    # 'models' 需要单独处理，'id' 我们已经手动生成并会显式传递
+    provider_create_data = provider_data.model_dump(exclude={'models', 'id'})
+    db_provider = provider_model.AIProvider(id=provider_id, **provider_create_data)
     db.add(db_provider)
 
     for model_schema in provider_data.models:
         db_model = provider_model.AIModel(
             id=generate_uuid(),
-            modelId=model_schema.modelId,
-            name=model_schema.name,
+            **model_schema.model_dump(),  # 传递所有模型数据，包括 meta_config
             providerId=provider_id
         )
         db.add(db_model)
@@ -89,7 +85,7 @@ async def get_model(db: AsyncSession, model_id: str) -> Optional[provider_model.
     """通过ID获取单个AI模型（并预加载其提供商信息）"""
     result = await db.execute(
         select(provider_model.AIModel)
-        .options(joinedload(provider_model.AIModel.provider)) # <-- 添加这一行
+        .options(joinedload(provider_model.AIModel.provider))
         .filter(provider_model.AIModel.id == model_id)
     )
     return result.scalars().first()
@@ -121,7 +117,14 @@ async def update_model(db: AsyncSession, model_id: str, model_update: schemas.AI
 
     update_data = model_update.model_dump(exclude_unset=True)
     for key, value in update_data.items():
-        setattr(db_model, key, value)
+        # 如果更新的是 meta_config，需要特殊处理字典的合并
+        if key == 'meta_config' and value is not None and db_model.meta_config is not None:
+            # 将传入的更新与现有的配置合并
+            merged_config = db_model.meta_config.copy()
+            merged_config.update(value)
+            setattr(db_model, key, merged_config)
+        else:
+            setattr(db_model, key, value)
 
     await db.commit()
     await db.refresh(db_model)
@@ -140,4 +143,3 @@ async def delete_model(db: AsyncSession, model_id: str) -> Optional[provider_mod
         await db.delete(db_model)
         await db.commit()
     return db_model
-

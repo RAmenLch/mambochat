@@ -55,7 +55,7 @@ class TitleGenerateManager(AbstractGenerateManager):
         # 3. 构建Prompt
         system_prompt = (
             "你是一个对话标题生成器。请根据以下对话内容, "
-            "为其生成一个简洁、精确、不超过12个字的标题。"
+            "为其生成一个简洁、精确、不超过12个字[len(title)<12]的标题。"
             "请仅以JSON格式返回, 格式为: {\"title\": \"生成的标题\"}"
         )
 
@@ -116,7 +116,7 @@ class TitleGenerateManager(AbstractGenerateManager):
             try:
                 data = json.loads(output.content)
                 title = data.get("title")
-                if isinstance(title, str) and 0 < len(title) <= 12:
+                if isinstance(title, str) and 0 < len(title) <= 24:
                     yield UpdateChatName(chat_id=self.chat_id, new_name=title.strip())
                 else:
                     self.error_occurred = True

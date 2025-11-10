@@ -1,6 +1,6 @@
 # backend/models/provider_model.py
 
-from sqlalchemy import Column, String, ForeignKey, Boolean
+from sqlalchemy import Column, String, ForeignKey, Boolean,TEXT
 from sqlalchemy.orm import relationship
 from .base_model import Base, generate_uuid
 
@@ -24,6 +24,7 @@ class AIModel(Base):
     modelId = Column(String(100), nullable=False)  # e.g., "gpt-4o"
     name = Column(String(100), nullable=False)  # e.g., "GPT-4o"
     providerId = Column(String(36), ForeignKey("AIProvider.id"), nullable=False)
+    meta_config = Column(TEXT, nullable=True) # 存储模型的元配置信息，如上下文长度、支持的参数等
 
     # 关系: 反向引用到 AIProvider
     provider = relationship("AIProvider", back_populates="models")

@@ -9,7 +9,8 @@ from .provider import (
     AIModelBase, AIModelCreate, AIModelUpdate, AIModel,
     AIProviderBase, AIProviderCreate, AIProviderUpdate, AIProvider,
     AIProviderWithModels, ProviderWithModelsCreate,
-    ConnectionRequest, ConnectionTestResponse,ConnectionTestForExistingProviderRequest
+    ConnectionRequest, ConnectionTestResponse,ConnectionTestForExistingProviderRequest,
+    AIModelMetaConfig
 )
 from .chat import (
     ChatBase, ChatCreate, Chat, ChatUpdate, ChatWithMessages,

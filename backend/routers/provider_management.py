@@ -23,11 +23,7 @@ async def create_provider(provider: schemas.ProviderWithModelsCreate, db: AsyncS
     创建一个新的服务商，并可选择性地同时创建其下的模型。
     创建成功后，会自动将该服务商设置为“最后选择的服务商”。
     """
-    # 确保在创建时传递了 use_proxy 字段
-    provider_data_dict = provider.model_dump()
-    provider_create_schema = schemas.ProviderWithModelsCreate(**provider_data_dict)
-
-    new_provider = await provider_crud.create_provider_with_models(db=db, provider_data=provider_create_schema)
+    new_provider = await provider_crud.create_provider_with_models(db=db, provider_data=provider)
 
     await setting_crud.update_setting(
         db, setting=schemas.GlobalSetting(key="last_selected_provider_id", value=new_provider.id)
@@ -128,7 +124,7 @@ async def update_model(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    更新一个已存在模型的信息（例如，显示名称）。
+    更新一个已存在模型的信息（例如，显示名称或元配置）。
     """
     updated_model = await provider_crud.update_model(db, model_id=model_id, model_update=model_update)
     if updated_model is None:
@@ -150,4 +146,3 @@ async def delete_model(model_id: str, db: AsyncSession = Depends(get_db)):
     if db_model is None:
         raise HTTPException(status_code=404, detail="Model not found")
     return db_model
-

@@ -11,9 +11,9 @@ from ..models import provider_model
 
 
 async def _get_http_client_with_proxy(
-    db: AsyncSession,
-    use_proxy_flag: bool = False,
-    timeout: int = 30
+        db: AsyncSession,
+        use_proxy_flag: bool = False,
+        timeout: int = 30
 ) -> httpx.AsyncClient:
     """
     根据需要创建一个配置了代理的 httpx.AsyncClient 实例。
@@ -26,7 +26,6 @@ async def _get_http_client_with_proxy(
             if proxy_url_setting and proxy_url_setting.value:
                 proxy_url = proxy_url_setting.value
 
-    # 使用 'proxy' (单数) 参数, 它更简单且兼容性更好
     return httpx.AsyncClient(proxy=proxy_url, timeout=timeout)
 
 
@@ -55,16 +54,14 @@ async def test_proxy_connection(proxy_url: str, test_url: str) -> schemas.Connec
             message=f"请求失败: 无法通过代理访问目标地址。请检查网络和目标地址。 ({type(e).__name__})"
         )
     except Exception as e:
-        # 修复: BUG的根源在这里, 我们捕获'proxies'关键字错误, 但现在已经修复了它
-        # 依然保留通用的异常捕获
         return schemas.ConnectionTestResponse(status="error", message=f"发生未知错误: {e}")
 
 
 async def test_connection_to_provider(
-    db: AsyncSession,
-    api_host: str,
-    api_key: str,
-    use_proxy: bool
+        db: AsyncSession,
+        api_host: str,
+        api_key: str,
+        use_proxy: bool
 ) -> schemas.ConnectionTestResponse:
     """
     测试与外部LLM服务商的连接，并可选择通过代理进行。
@@ -96,13 +93,13 @@ async def test_connection_to_provider(
 
 
 async def fetch_models_from_provider(
-    db: AsyncSession,
-    api_host: str,
-    api_key: str,
-    use_proxy: bool
+        db: AsyncSession,
+        api_host: str,
+        api_key: str,
+        use_proxy: bool
 ) -> List[schemas.AIModelBase]:
     """
-    调用外部LLM服务商的API以获取其提供的模型列表，并可选择通过代理进行。
+    调用外部LLM服务商的API以获取其提供的模型列表，并解析元数据。
     """
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -119,7 +116,42 @@ async def fetch_models_from_provider(
         if not isinstance(model_list, list):
             raise json.JSONDecodeError("响应体中的 'data' 字段不是一个列表", str(data), 0)
 
-        return [
-            schemas.AIModelBase(modelId=model.get("id"), name=model.get("id"))
-            for model in model_list if isinstance(model, dict) and model.get("id")
-        ]
+        processed_models = []
+        for model in model_list:
+            if not (isinstance(model, dict) and model.get("id")):
+                continue
+
+            meta_dict = {}
+            architecture = model.get('architecture', {}) or {}
+            top_provider = model.get('top_provider', {}) or {}
+
+            # 安全地提取所有潜在的元配置字段
+            tokenizer = architecture.get('tokenizer')
+            input_modalities = architecture.get('input_modalities')
+            output_modalities = architecture.get('output_modalities')
+            context_length = top_provider.get('context_length')
+            max_output_tokens = top_provider.get('max_completion_tokens')
+            supported_parameters = model.get('supported_parameters')
+
+            # 仅当值有效时才将其添加到字典中
+            if tokenizer: meta_dict['tokenizer'] = tokenizer
+            if input_modalities: meta_dict['input_modalities'] = input_modalities
+            if output_modalities: meta_dict['output_modalities'] = output_modalities
+            if context_length is not None: meta_dict['context_length'] = context_length
+            if max_output_tokens is not None: meta_dict['max_output_tokens'] = max_output_tokens
+            if supported_parameters: meta_dict['supported_parameters'] = supported_parameters
+
+            # 仅当 meta_dict 非空时才创建 meta_config 对象
+            meta_config_obj = schemas.AIModelMetaConfig(**meta_dict) if meta_dict else None
+
+            # 使用更友好的 "name" 字段（如果存在），否则回退到 "id"
+            model_name = model.get("name", model.get("id"))
+
+            processed_models.append(
+                schemas.AIModelBase(
+                    modelId=model.get("id"),
+                    name=model_name,
+                    meta_config=meta_config_obj
+                )
+            )
+        return processed_models
