@@ -34,7 +34,7 @@
       </div>
       <template v-else>
         <div v-for="(block, idx) in contentBlocks" :key="idx" class="content-block">
-          <!-- 编辑代码块时，携带块的索引信息 -->
+          <!-- 渲染代码块 -->
           <CodeBlock
             v-if="block.type === 'code'"
             :code="block.content"
@@ -43,6 +43,14 @@
             @edit="(code) => handleCodeBlockEdit(code, idx)"
             @copy="handleBlockCopy"
           />
+          <!-- 渲染 Base64 图片 -->
+          <img
+            v-else-if="block.type === 'base64_image'"
+            :src="block.content"
+            :alt="block.alt"
+            class="rendered-image"
+          />
+          <!-- 渲染普通 HTML -->
           <div v-else v-html="block.content"></div>
         </div>
       </template>
@@ -165,6 +173,13 @@ async function handleBlockCopy(contentToCopy: string) {
 .message-content.collapsed { max-height: 5em; }
 .message-content::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 3em; background: linear-gradient(to bottom, transparent, var(--sub-message-bg)); pointer-events: none; opacity: 0; transition: opacity 0.25s ease-out; }
 .message-content.collapsed::after { opacity: 1; }
+
+.rendered-image {
+  max-width: 100%;
+  border-radius: 6px;
+  margin: 0.5em 0;
+}
+
 .content-block :deep(p) { margin: 0 0 0.5em; }
 .content-block :deep(p:last-child) { margin-bottom: 0; }
 .content-block :deep(ul), .content-block :deep(ol) { padding-inline-start: 25px; }

@@ -8,9 +8,10 @@ import DOMPurify from 'dompurify';
  * 定义解析后的内容块的结构。
  */
 export interface ParsedBlock {
-  type: 'html' | 'code';
+  type: 'html' | 'code' | 'base64_image';
   content: string;
   language?: string;
+  alt?: string;
 }
 
 /**
@@ -30,17 +31,18 @@ export const md = new MarkdownIt({
   },
 });
 
-/**
- * 将Markdown文本解析为HTML块和代码块的数组。
- * 代码块 (```...```) 被单独提取出来，其余部分被渲染为HTML并进行安全过滤。
- *
- * @param markdownText - 原始的Markdown格式字符串。
- * @returns ParsedBlock[] - 一个包含HTML和代码块对象的数组。
- */
-export function parseMarkdown(markdownText: string): ParsedBlock[] {
-  if (!markdownText) return [];
+// 正则表达式，用于匹配 Base64 图片的 Markdown 语法
+const base64ImageRegex = /!\[(.*?)\]\((data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+)\)/g;
 
-  const tokens = md.parse(markdownText, {});
+/**
+ * 辅助函数，用于解析不含 Base64 图片的纯文本和代码块。
+ * @param text - 不含 Base64 图片的 Markdown 文本。
+ * @returns ParsedBlock[] - 只包含 'html' 和 'code' 类型的块。
+ */
+function parseTextAndCode(text: string): ParsedBlock[] {
+  if (!text) return [];
+
+  const tokens = md.parse(text, {});
   const blocks: ParsedBlock[] = [];
 
   // Markdown-it Token 的具体类型
@@ -79,4 +81,49 @@ export function parseMarkdown(markdownText: string): ParsedBlock[] {
   renderAndPushHtmlBlock();
 
   return blocks;
+}
+
+/**
+ * 将Markdown文本解析为HTML、代码块和Base64图片块的数组。
+ * 此函数会先分离出Base64图片，再将剩余文本交给Markdown解析器，以避免性能问题。
+ *
+ * @param markdownText - 原始的Markdown格式字符串。
+ * @returns ParsedBlock[] - 一个包含HTML、代码和图片块对象的数组。
+ */
+export function parseMarkdown(markdownText: string): ParsedBlock[] {
+  if (!markdownText) return [];
+
+  const finalBlocks: ParsedBlock[] = [];
+  let lastIndex = 0;
+  let match;
+
+  // 重置正则表达式的 lastIndex，以确保从头开始匹配
+  base64ImageRegex.lastIndex = 0;
+
+  // 遍历所有匹配到的 Base64 图片
+  while ((match = base64ImageRegex.exec(markdownText)) !== null) {
+    // 1. 处理图片之前的所有文本
+    const textBefore = markdownText.substring(lastIndex, match.index);
+    if (textBefore.trim()) {
+      finalBlocks.push(...parseTextAndCode(textBefore));
+    }
+
+    // 2. 将图片作为一个独立的块添加
+    finalBlocks.push({
+      type: 'base64_image',
+      alt: match[1],      // alt text
+      content: match[2],  // data:image/...
+    });
+
+    // 更新下一个搜索的起始位置
+    lastIndex = base64ImageRegex.lastIndex;
+  }
+
+  // 3. 处理最后一个图片之后的所有剩余文本
+  const textAfter = markdownText.substring(lastIndex);
+  if (textAfter.trim()) {
+    finalBlocks.push(...parseTextAndCode(textAfter));
+  }
+
+  return finalBlocks;
 }
