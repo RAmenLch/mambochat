@@ -1,5 +1,6 @@
 # backend/crud/provider_crud.py
 
+import json  # 导入 json 模块
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload, joinedload
@@ -9,6 +10,7 @@ from typing import List, Optional
 from ..models import provider_model, chat_model
 from ..models.base_model import generate_uuid
 from .. import schemas
+
 
 async def get_provider(db: AsyncSession, provider_id: str) -> Optional[provider_model.AIProvider]:
     """通过ID获取单个AI服务提供商（包含其下的模型）"""
@@ -36,17 +38,20 @@ async def create_provider_with_models(db: AsyncSession,
     """事务性地创建一个服务商及其关联的模型"""
     provider_id = provider_data.id if provider_data.id else generate_uuid()
 
-    # 从 Pydantic 模型中 dump 数据时，排除 'models' 和 'id'
-    # 'models' 需要单独处理，'id' 我们已经手动生成并会显式传递
     provider_create_data = provider_data.model_dump(exclude={'models', 'id'})
     db_provider = provider_model.AIProvider(id=provider_id, **provider_create_data)
     db.add(db_provider)
 
     for model_schema in provider_data.models:
+        model_dict = model_schema.model_dump()
+        meta_config_obj = model_dict.pop('meta_config', None)
+
         db_model = provider_model.AIModel(
             id=generate_uuid(),
-            **model_schema.model_dump(),  # 传递所有模型数据，包括 meta_config
-            providerId=provider_id
+            **model_dict,
+            providerId=provider_id,
+            # 将 meta_config 对象序列化为 JSON 字符串
+            meta_config=json.dumps(meta_config_obj) if meta_config_obj else None
         )
         db.add(db_model)
 
@@ -56,7 +61,8 @@ async def create_provider_with_models(db: AsyncSession,
     return db_provider
 
 
-async def update_provider(db: AsyncSession, provider_id: str, provider_update: schemas.AIProviderUpdate) -> Optional[provider_model.AIProvider]:
+async def update_provider(db: AsyncSession, provider_id: str, provider_update: schemas.AIProviderUpdate) -> Optional[
+    provider_model.AIProvider]:
     """更新一个AI服务提供商的信息"""
     db_provider = await get_provider(db, provider_id)
     if not db_provider:
@@ -99,9 +105,14 @@ async def get_models_by_provider(db: AsyncSession, provider_id: str) -> List[pro
 
 async def create_model(db: AsyncSession, model: schemas.AIModelCreate) -> provider_model.AIModel:
     """为提供商创建一个新的AI模型"""
+    model_dict = model.model_dump()
+    meta_config_obj = model_dict.pop('meta_config', None)
+
     db_model = provider_model.AIModel(
         id=generate_uuid(),
-        **model.model_dump()
+        **model_dict,
+        # 将 meta_config 对象序列化为 JSON 字符串
+        meta_config=json.dumps(meta_config_obj) if meta_config_obj else None
     )
     db.add(db_model)
     await db.commit()
@@ -109,22 +120,32 @@ async def create_model(db: AsyncSession, model: schemas.AIModelCreate) -> provid
     return db_model
 
 
-async def update_model(db: AsyncSession, model_id: str, model_update: schemas.AIModelUpdate) -> Optional[provider_model.AIModel]:
+async def update_model(db: AsyncSession, model_id: str, model_update: schemas.AIModelUpdate) -> Optional[
+    provider_model.AIModel]:
     """更新一个AI模型的信息"""
     db_model = await get_model(db, model_id)
     if not db_model:
         return None
 
     update_data = model_update.model_dump(exclude_unset=True)
+
+    # 特殊处理 meta_config
+    if 'meta_config' in update_data:
+        new_meta_config = update_data.pop('meta_config')
+
+        # 从数据库中加载现有的 meta_config (如果存在)
+        existing_meta_config = json.loads(db_model.meta_config) if db_model.meta_config else {}
+
+        # 合并新旧配置
+        if new_meta_config is not None:
+            existing_meta_config.update(new_meta_config)
+
+        # 将合并后的字典序列化回 JSON 字符串
+        db_model.meta_config = json.dumps(existing_meta_config)
+
+    # 更新其他常规字段
     for key, value in update_data.items():
-        # 如果更新的是 meta_config，需要特殊处理字典的合并
-        if key == 'meta_config' and value is not None and db_model.meta_config is not None:
-            # 将传入的更新与现有的配置合并
-            merged_config = db_model.meta_config.copy()
-            merged_config.update(value)
-            setattr(db_model, key, merged_config)
-        else:
-            setattr(db_model, key, value)
+        setattr(db_model, key, value)
 
     await db.commit()
     await db.refresh(db_model)

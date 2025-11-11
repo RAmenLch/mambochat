@@ -61,9 +61,22 @@ export interface GenerateRequest {
 
 // --- AI & Provider Types ---
 
+/**
+ * 存储模型的元配置信息
+ */
+export interface AIModelMetaConfig {
+  context_length?: number | null;
+  max_output_tokens?: number | null;
+  tokenizer?: string | null;
+  input_modalities?: string[] | null;
+  output_modalities?: string[] | null;
+  supported_parameters?: string[] | null;
+}
+
 export interface AIModelBase {
   modelId: string;
   name: string;
+  meta_config?: AIModelMetaConfig | null;
 }
 
 export interface AIModel extends AIModelBase {
@@ -77,6 +90,7 @@ export interface AIModelCreate extends AIModelBase {
 
 export interface AIModelUpdate {
   name?: string;
+  meta_config?: AIModelMetaConfig | null;
 }
 
 export interface AIProvider {
@@ -167,7 +181,7 @@ export interface ChatReorderItem {
 
 export interface GlobalSettingsUpdate {
   default_model_id: string | null;
-  title_generation_model_id: string | null; // 新增：专门用于生成标题的模型ID
+  title_generation_model_id: string | null;
   last_selected_provider_id: string | null;
   default_max_context_messages: number | null;
   default_temperature: number | null;

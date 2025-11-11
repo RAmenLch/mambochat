@@ -41,9 +41,53 @@
         当前服务商: <strong>{{ selectedProvider.name }}</strong>
       </p>
       <el-table :data="selectedProvider.models" border style="width: 100%">
-        <el-table-column prop="modelId" label="模型 ID" />
-        <el-table-column prop="name" label="模型显示名称" width="220" />
-        <el-table-column label="操作" width="180" align="center">
+        <el-table-column prop="modelId" label="模型 ID" width="220" />
+        <el-table-column prop="name" label="模型显示名称" width="200" />
+        <el-table-column label="上下文/输出" width="130" align="center">
+          <template #default="{ row }">
+            <span v-if="row.meta_config?.context_length || row.meta_config?.max_output_tokens">
+              {{ row.meta_config.context_length || 'N/A' }} / {{ row.meta_config.max_output_tokens || 'N/A' }}
+            </span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="分词器" width="120" align="center">
+          <template #default="{ row }">
+            <span>{{ row.meta_config?.tokenizer || '-' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="模态能力" width="200" align="center">
+          <template #default="{ row }">
+            <div class="modality-cell" v-if="row.meta_config">
+              <div class="modality-group">
+                <el-tooltip v-for="mod in row.meta_config.input_modalities" :key="mod" :content="mod" placement="top">
+                  <el-icon class="modality-icon"><component :is="modalityIcons[mod]" /></el-icon>
+                </el-tooltip>
+              </div>
+              <el-icon v-if="row.meta_config.input_modalities?.length && row.meta_config.output_modalities?.length" class="arrow-icon"><ArrowRight /></el-icon>
+              <div class="modality-group">
+                <el-tooltip v-for="mod in row.meta_config.output_modalities" :key="mod" :content="mod" placement="top">
+                  <el-icon class="modality-icon"><component :is="modalityIcons[mod]" /></el-icon>
+                </el-tooltip>
+              </div>
+            </div>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="支持参数" align="center" width="100">
+          <template #default="{ row }">
+            <el-popover v-if="row.meta_config?.supported_parameters?.length" placement="top" :width="200" trigger="hover">
+              <template #reference>
+                <el-button link type="primary">查看</el-button>
+              </template>
+              <div class="parameter-list">
+                <el-tag v-for="param in row.meta_config.supported_parameters" :key="param" size="small" type="info">{{ param }}</el-tag>
+              </div>
+            </el-popover>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="180" align="center" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEditModelDialog(row)">编辑</el-button>
             <el-button link type="danger" @click="handleDeleteModel(row)">删除</el-button>
@@ -81,13 +125,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, onMounted, nextTick } from 'vue';
+import { ref, reactive, watch, onMounted, nextTick, shallowRef, type Component } from 'vue';
 import { useProviderStore } from '@/stores/providerStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { storeToRefs } from 'pinia';
 import { ElMessage, ElMessageBox, type ElTable } from 'element-plus';
-import { Plus } from '@element-plus/icons-vue';
-import type { AIProviderWithModels, AIModel, AIModelBase } from '@/api/types';
+import { Plus, Document, Picture, Headset, VideoCamera, Folder, ArrowRight } from '@element-plus/icons-vue';
+import type { AIProviderWithModels, AIModel, AIModelBase, AIModelCreate } from '@/api/types';
 
 import ProviderFormDialog from './dialogs/ProviderFormDialog.vue';
 import ModelFormDialog from './dialogs/ModelFormDialog.vue';
@@ -99,7 +143,6 @@ const settingsStore = useSettingsStore();
 const { providers, isLoading } = storeToRefs(providerStore);
 const { globalSettings } = storeToRefs(settingsStore);
 
-
 const providerTableRef = ref<InstanceType<typeof ElTable>>();
 const providerFormDialogRef = ref<InstanceType<typeof ProviderFormDialog>>();
 const selectedProvider = ref<AIProviderWithModels | null>(null);
@@ -108,6 +151,15 @@ const isFetchingModels = ref(false);
 const providerDialog = reactive<{ visible: boolean; data: AIProviderWithModels | null }>({ visible: false, data: null });
 const modelDialog = reactive<{ visible: boolean; data: AIModel | null }>({ visible: false, data: null });
 const fetchModelsDialog = reactive<{ visible: boolean; data: AIModelBase[]; existingIds: string[] }>({ visible: false, data: [], existingIds: [] });
+
+// 映射模态字符串到图标组件
+const modalityIcons = shallowRef<Record<string, Component>>({
+  text: Document,
+  image: Picture,
+  audio: Headset,
+  video: VideoCamera,
+  file: Folder,
+});
 
 // Lifecycle and Watchers
 onMounted(async () => {
@@ -203,19 +255,27 @@ const onConfirmAddFetchedModels = (selectedIds: string[]) => {
   if (providerDialog.visible) {
     providerFormDialogRef.value?.addFetchedModels(selectedIds, fetchModelsDialog.data);
   } else if (modelDialog.visible && selectedProvider.value) {
-    const modelsToAdd = selectedIds
+    const modelsToAdd: AIModelCreate[] = selectedIds
       .filter(id => !selectedProvider.value!.models.some(m => m.modelId === id))
       .map(id => {
         const modelInfo = fetchModelsDialog.data.find(m => m.modelId === id);
-        return { name: modelInfo?.name || id, modelId: id, providerId: selectedProvider.value!.id };
+        // 传递完整的模型信息，包括 meta_config
+        return {
+          name: modelInfo?.name || id,
+          modelId: id,
+          providerId: selectedProvider.value!.id,
+          meta_config: modelInfo?.meta_config || null
+        };
       });
 
-    Promise.all(modelsToAdd.map(m => providerStore.addModel(m)))
-      .then(() => ElMessage.success(`已批量添加 ${modelsToAdd.length} 个模型。`))
-      .catch((error) => {
-          console.error('Failed to batch add models:', error);
-        }
-      );
+    if (modelsToAdd.length > 0) {
+      Promise.all(modelsToAdd.map(m => providerStore.addModel(m)))
+        .then(() => ElMessage.success(`已批量添加 ${modelsToAdd.length} 个模型。`))
+        .catch((error) => {
+            console.error('Failed to batch add models:', error);
+          }
+        );
+    }
   }
 };
 </script>
@@ -224,4 +284,9 @@ const onConfirmAddFetchedModels = (selectedIds: string[]) => {
 .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .header h2 { margin: 0; font-size: 20px; }
 .provider-info { margin-bottom: 16px; font-size: 14px; color: #606266; }
+.modality-cell { display: flex; align-items: center; justify-content: center; gap: 4px; }
+.modality-group { display: flex; align-items: center; gap: 4px; }
+.modality-icon { font-size: 16px; color: var(--el-text-color-regular); }
+.arrow-icon { color: var(--el-text-color-secondary); }
+.parameter-list { display: flex; flex-wrap: wrap; gap: 4px; }
 </style>

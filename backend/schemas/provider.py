@@ -1,6 +1,7 @@
 # backend/schemas/provider.py
-from pydantic import BaseModel, Field
-from typing import Optional, List
+import json
+from pydantic import BaseModel, Field, field_validator
+from typing import Optional, List, Any
 
 
 # --- AIModel Meta Config Schema ---
@@ -37,6 +38,20 @@ class AIModel(AIModelBase):
     id: str
     providerId: str
 
+    @field_validator('meta_config', mode='before')
+    @classmethod
+    def parse_meta_config(cls, v: Any) -> Optional[dict]:
+        """
+        在验证之前，将从数据库取出的 JSON 字符串解析为字典，
+        以确保 Pydantic 模型能够正确处理来自 ORM 的数据。
+        """
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return None  # 如果字符串不是有效的JSON，则视为None
+        return v
+
     class Config:
         from_attributes = True
 
@@ -71,11 +86,13 @@ class AIProvider(AIProviderBase):
 
 
 class AIProviderWithModels(AIProvider):
+    # noinspection PyDataclass
     models: List[AIModel] = Field(default_factory=list)
 
 
 class ProviderWithModelsCreate(AIProviderCreate):
     """用于在创建服务商时，同时创建其下的模型列表"""
+    # noinspection PyDataclass
     models: List[AIModelBase] = Field(default_factory=list, description="随服务商一同创建的模型列表")
 
 

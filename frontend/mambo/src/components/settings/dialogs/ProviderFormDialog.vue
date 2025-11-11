@@ -89,8 +89,8 @@ import type {
 } from '@/api/types';
 import { isAxiosError } from "axios";
 
-// 为表单的内部数据结构定义清晰的类型
-interface ModelFormData extends Omit<AIModelBase, 'id'> {
+// 此处模型数据包含了可选的 meta_config
+interface ModelFormData extends AIModelBase {
   id?: string;
 }
 interface ProviderFormData {
@@ -182,9 +182,9 @@ function resetAndInitializeForm() {
       apiHost: props.providerData.apiHost,
       apiKey: API_KEY_PLACEHOLDER,
       use_proxy: props.providerData.use_proxy,
-      models: JSON.parse(JSON.stringify(props.providerData.models)),
+      models: JSON.parse(JSON.stringify(props.providerData.models)), // 深拷贝
     });
-    initialModels = JSON.parse(JSON.stringify(props.providerData.models));
+    initialModels = JSON.parse(JSON.stringify(props.providerData.models)); // 深拷贝
   } else { // 新增模式
     Object.assign(providerForm, { name: '', apiHost: '', apiKey: '', use_proxy: false, models: [] });
     initialModels = [];
@@ -262,7 +262,7 @@ function handleApiKeyBlur() {
 }
 
 function addModelEntryToForm() {
-  providerForm.models.push({ name: '', modelId: '' });
+  providerForm.models.push({ name: '', modelId: '', meta_config: null });
 }
 
 function removeModelEntryFromForm(index: number) {
@@ -302,7 +302,8 @@ async function handleCreateProvider() {
     apiHost: providerForm.apiHost,
     apiKey: providerForm.apiKey,
     use_proxy: providerForm.use_proxy,
-    models: providerForm.models.map(({ name, modelId }) => ({ name, modelId })),
+    // 确保 meta_config 被包含在内
+    models: providerForm.models.map(({ name, modelId, meta_config }) => ({ name, modelId, meta_config })),
   };
   await providerStore.addProviderWithModels(createData);
   ElMessage.success('新增服务商成功！');
@@ -331,15 +332,18 @@ async function handleUpdateProvider() {
     .map(m => ({
       name: m.name,
       modelId: m.modelId,
-      providerId: currentProviderId
+      providerId: currentProviderId,
+      meta_config: m.meta_config // 确保 meta_config 被包含在内
     }) as AIModelCreate);
 
   const modelsToDelete = initialModels.filter(m => !currentModelIdsInForm.has(m.id));
 
+  // 在此对话框中不处理模型更新，仅处理增删。更新操作由 ModelFormDialog 负责
   const modelsToUpdatePromises = providerForm.models
     .filter((currentModel: ModelFormData): currentModel is AIModel => !!currentModel.id)
     .map(currentModel => {
       const initialModel = initialModels.find(m => m.id === currentModel.id);
+      // 仅当模型名称或ID发生变化时才更新，meta_config 的更新不在此处处理
       if (initialModel && (initialModel.name !== currentModel.name || initialModel.modelId !== currentModel.modelId)) {
         return providerStore.updateModel(currentModel.id, { name: currentModel.name });
       }
@@ -365,9 +369,11 @@ defineExpose({
       if (!modelExists) {
         const fullModel = fetchedModels.find(m => m.modelId === modelId);
         if (fullModel) {
+          // 将获取到的完整模型信息（包括 meta_config）添加到表单
           providerForm.models.push({
             name: fullModel.name,
             modelId: fullModel.modelId,
+            meta_config: fullModel.meta_config,
           });
         }
       }
