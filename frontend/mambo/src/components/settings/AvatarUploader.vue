@@ -38,7 +38,7 @@ import { ElMessage } from 'element-plus';
 import { Delete } from '@element-plus/icons-vue';
 import type { UploadRequestOptions, UploadRawFile } from 'element-plus';
 
-const props = defineProps<{
+defineProps<{
   title: string;
   avatarUrl: string | null;
   icon: Component;
@@ -68,6 +68,7 @@ const handleBeforeUpload = (rawFile: UploadRawFile): boolean => {
 const handleHttpRequest = (options: UploadRequestOptions) => {
   // 自定义上传行为, 仅将文件 emit 出去, 由父组件处理实际的上传逻辑
   emit('upload', options.file);
+  return Promise.resolve(true);
 };
 
 const handleDelete = () => {
