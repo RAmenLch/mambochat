@@ -1,4 +1,4 @@
-// frontend/mambochat/src/api/chatService.ts
+// frontend/mambo/src/api/chatService.ts
 
 import apiClient from './index';
 import type {
@@ -11,7 +11,8 @@ import type {
   MessageUpdate,
   SubMessage,
   SubMessageUpdate,
-  GenerateRequest
+  GenerateRequest,
+  PrepareGenerateResponse
 } from './types';
 
 /**
@@ -90,9 +91,9 @@ export const deleteMessage = (messageId: string): Promise<Message> => {
 
 /**
  * 准备并开始生成AI回复。
- * @returns 返回一个状态为 'generating' 的 assistant 消息对象作为占位符。
+ * @returns 返回包含新用户消息和AI助手占位符消息的对象。
  */
-export const prepareGenerate = (chatId: string, data: GenerateRequest): Promise<Message> => {
+export const prepareGenerate = (chatId: string, data: GenerateRequest): Promise<PrepareGenerateResponse> => {
   return apiClient.post(`/chats/${chatId}/prepare-generate`, data)
 };
 

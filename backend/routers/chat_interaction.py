@@ -82,8 +82,8 @@ async def update_message_and_regenerate(
     if db_message.role != schemas.MessageRole.USER:
         raise HTTPException(status_code=400, detail="Resend is only applicable to user messages.")
 
-    assistant_placeholder = await generation_service.prepare_for_generation(
-        db=db, chat_id=db_message.chatId, base_message_id=message_id, save_user_message=False
+    assistant_placeholder = await generation_service.prepare_for_regeneration(
+        db=db, chat_id=db_message.chatId, base_message_id=message_id
     )
     await _start_generation_task(background_tasks, db_message.chatId, assistant_placeholder.id)
 
@@ -127,7 +127,7 @@ async def stop_generation(message_id: str):
 
 @router.post(
     "/chats/{chat_id}/prepare-generate",
-    response_model=schemas.Message,
+    response_model=schemas.PrepareGenerateResponse,
     summary="准备并开始生成AI回复"
 )
 async def prepare_to_generate(
@@ -137,18 +137,24 @@ async def prepare_to_generate(
         db: AsyncSession = Depends(get_db)
 ):
     """
-    接收用户新消息，保存它，创建一个空的 assistant 消息占位符并返回。
+    接收用户新消息，保存它，创建一个空的 assistant 消息占位符并返回两者。
     同时，根据会话设置在后台启动一个生成任务。
     """
-    assistant_placeholder = await generation_service.prepare_for_generation(
-        db=db, chat_id=chat_id, user_sub_messages=request.sub_messages, save_user_message=True
+    user_message, assistant_placeholder = await generation_service.create_user_message_and_prepare_generation(
+        db=db, chat_id=chat_id, user_sub_messages=request.sub_messages
     )
     await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id)
 
-    # 构建包含 'generating' 状态的响应模型
-    response_placeholder = schemas.Message.model_validate(assistant_placeholder)
-    response_placeholder.status = schemas.MessageStatus.GENERATING
-    return response_placeholder
+    user_message_response = schemas.Message.model_validate(user_message)
+    user_message_response.status = schemas.MessageStatus.COMPLETED
+
+    assistant_placeholder_response = schemas.Message.model_validate(assistant_placeholder)
+    assistant_placeholder_response.status = schemas.MessageStatus.GENERATING
+
+    return schemas.PrepareGenerateResponse(
+        user_message=user_message_response,
+        assistant_message=assistant_placeholder_response
+    )
 
 
 @router.post(
@@ -166,12 +172,11 @@ async def prepare_to_regenerate(
     根据指定消息删除后续历史，创建占位符并返回。
     同时，根据会话设置在后台启动一个重新生成任务。
     """
-    assistant_placeholder = await generation_service.prepare_for_generation(
-        db=db, chat_id=chat_id, base_message_id=from_message_id, save_user_message=False
+    assistant_placeholder = await generation_service.prepare_for_regeneration(
+        db=db, chat_id=chat_id, base_message_id=from_message_id
     )
     await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id)
 
-    # 构建包含 'generating' 状态的响应模型
     response_placeholder = schemas.Message.model_validate(assistant_placeholder)
     response_placeholder.status = schemas.MessageStatus.GENERATING
     return response_placeholder
@@ -217,4 +222,3 @@ async def stream_response(
         generation_service.subscribe_to_stream(db, assistant_message_id),
         media_type="text/event-stream"
     )
-

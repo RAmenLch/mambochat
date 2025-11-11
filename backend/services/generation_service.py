@@ -5,7 +5,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import AsyncGenerator, List, Optional
+from typing import AsyncGenerator, List, Optional, Tuple
 
 from .stream_manager_service import stream_manager
 from ..crud import chat_crud, message_crud
@@ -54,16 +54,13 @@ async def _calculate_message_status(message: chat_model.Message) -> schemas.Mess
     return schemas.MessageStatus.COMPLETED if cancellation_requested else schemas.MessageStatus.GENERATING
 
 
-async def prepare_for_generation(
+async def prepare_for_regeneration(
         db: AsyncSession,
         chat_id: str,
-        user_sub_messages: Optional[List[schemas.SubMessageCreate]] = None,
-        base_message_id: Optional[str] = None,
-        save_user_message: bool = True,
+        base_message_id: str,
 ) -> chat_model.Message:
     """
-    准备生成的前置操作：保存用户消息、删除后续历史、创建AI消息占位符。
-    AI消息占位符将不包含子消息，子消息的创建将由生成任务动态推送。
+    准备重新生成：删除指定消息之后的所有消息，并创建一个新的AI消息占位符。
     """
     db_chat = await chat_crud.get_chat(db, chat_id=chat_id)
     if not db_chat:
@@ -71,27 +68,39 @@ async def prepare_for_generation(
     if db_chat.itemType != 'chat':
         raise HTTPException(status_code=400, detail="Cannot perform generation on a folder.")
 
-    if save_user_message and user_sub_messages is not None:
-        user_message_create = schemas.MessageCreate(
-            role=schemas.MessageRole.USER,
-            sub_messages=user_sub_messages
-        )
-        await message_crud.create_message(db, message=user_message_create, chat_id=chat_id)
+    ref_message = await message_crud.get_message(db, message_id=base_message_id)
+    if not ref_message or ref_message.chatId != chat_id:
+        raise HTTPException(status_code=404, detail="Reference message not found in the specified chat.")
 
-    if base_message_id:
-        ref_message = await message_crud.get_message(db, message_id=base_message_id)
-        if not ref_message or ref_message.chatId != chat_id:
-            raise HTTPException(status_code=404, detail="Reference message not found in the specified chat.")
-
-        include_self = (ref_message.role == schemas.MessageRole.ASSISTANT)
-        await message_crud.delete_messages_after(db, chat_id=chat_id, message_id=base_message_id, include_self=include_self)
+    include_self = (ref_message.role == schemas.MessageRole.ASSISTANT)
+    await message_crud.delete_messages_after(db, chat_id=chat_id, message_id=base_message_id, include_self=include_self)
 
     assistant_message_create = schemas.MessageCreate(
         role=schemas.MessageRole.ASSISTANT,
-        sub_messages=[]  # 初始时不包含任何子消息
+        sub_messages=[]
     )
     assistant_placeholder = await message_crud.create_message(db, message=assistant_message_create, chat_id=chat_id)
     return assistant_placeholder
+
+
+async def create_user_message_and_prepare_generation(
+        db: AsyncSession,
+        chat_id: str,
+        user_sub_messages: List[schemas.SubMessageCreate],
+) -> Tuple[chat_model.Message, chat_model.Message]:
+    """
+    处理发送新消息的场景：创建用户消息，然后准备生成AI回复。
+    返回一个元组 (新创建的用户消息, AI占位符消息)。
+    """
+    user_message_create = schemas.MessageCreate(
+        role=schemas.MessageRole.USER,
+        sub_messages=user_sub_messages
+    )
+    user_message = await message_crud.create_message(db, message=user_message_create, chat_id=chat_id)
+
+    assistant_placeholder = await prepare_for_regeneration(db, chat_id, user_message.id)
+
+    return user_message, assistant_placeholder
 
 
 async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):

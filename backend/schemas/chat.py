@@ -67,3 +67,11 @@ class ChatReorderItem(BaseModel):
 class GenerateRequest(BaseModel):
     sub_messages: List[SubMessageCreate]
 
+
+class PrepareGenerateResponse(BaseModel):
+    """
+    用于 /prepare-generate 端点的响应模型。
+    """
+    user_message: Message = Field(..., description="新创建的用户消息对象。")
+    assistant_message: Message = Field(..., description="为AI回复创建的占位符消息对象。")
+

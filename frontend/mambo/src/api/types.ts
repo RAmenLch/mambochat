@@ -58,6 +58,15 @@ export interface GenerateRequest {
   sub_messages: SubMessageCreate[];
 }
 
+/**
+ * The response object from the prepare-generate endpoint.
+ * Contains both the newly created user message and the AI assistant's placeholder.
+ */
+export interface PrepareGenerateResponse {
+  user_message: Message;
+  assistant_message: Message;
+}
+
 
 // --- AI & Provider Types ---
 

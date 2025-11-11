@@ -14,7 +14,7 @@ from .provider import (
 )
 from .chat import (
     ChatBase, ChatCreate, Chat, ChatUpdate, ChatWithMessages,
-    ChatReorderItem, GenerateRequest
+    ChatReorderItem, GenerateRequest,PrepareGenerateResponse
 )
 from .setting import GlobalSetting, GlobalSettingsUpdate
 

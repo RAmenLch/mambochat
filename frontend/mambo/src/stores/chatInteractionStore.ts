@@ -76,38 +76,17 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     const chatId = sessionStore.currentChatId;
     if (!chatId || sessionStore.isGenerating) return;
 
-    // 乐观地创建并显示用户消息
-    const now = new Date().toISOString();
-    const tempUserMessageId = `temp-user-${Date.now()}`;
-    const userMessageForDisplay: Message = {
-      id: tempUserMessageId,
-      role: 'user',
-      status: 'completed',
-      chatId: chatId,
-      createdAt: now,
-      sortOrder: (sessionStore.currentChatMessages[sessionStore.currentChatMessages.length - 1]?.sortOrder ?? -1) + 1,
-      sub_messages: sub_messages.map((sm, index): SubMessage => ({
-        id: `temp-sub-user-${Date.now()}-${index}`,
-        messageId: tempUserMessageId,
-        createdAt: now,
-        content: sm.content,
-        sortOrder: sm.sortOrder,
-        status: 'completed',
-        type: sm.type ?? 'Normal',
-        config: sm.config ?? { is_collapsed: false },
-      })),
-    };
-    sessionStore._addMessage(userMessageForDisplay);
-
     try {
-      const assistantPlaceholder = await prepareGenerate(chatId, { sub_messages });
-      sessionStore._addMessage(assistantPlaceholder);
-      if (assistantPlaceholder.status === 'generating') {
-        _subscribeToMessageStream(assistantPlaceholder);
+      const { user_message, assistant_message } = await prepareGenerate(chatId, { sub_messages });
+      sessionStore._addMessage(user_message);
+      sessionStore._addMessage(assistant_message);
+
+      if (assistant_message.status === 'generating') {
+        _subscribeToMessageStream(assistant_message);
       }
     } catch (error) {
       console.error('Failed to prepare generation:', error);
-      sessionStore._removeMessage(tempUserMessageId); // 回滚乐观更新
+      // If the API call fails, refresh the chat to ensure a consistent state.
       if (sessionStore.currentChatId) await sessionStore.selectChat(sessionStore.currentChatId, true);
     }
   }
