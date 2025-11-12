@@ -8,13 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import AsyncGenerator, List, Optional, Tuple
 
 from .stream_manager_service import stream_manager
-from ..crud import chat_crud, message_crud
+from ..crud import chat_crud, message_crud, file_crud
 from .. import schemas
 from ..models import chat_model
 from ..database import AsyncSessionLocal
 from .generation.manager import DefaultGenerateManager
 from .generation.title_manager import TitleGenerateManager
 from .generation.openai_worker import OpenAIGenerateWorker
+from ..schemas.enums import FileManagementType
 
 # 定义生成任务启动的超时阈值
 GENERATION_START_TIMEOUT = timedelta(minutes=10)
@@ -92,6 +93,19 @@ async def create_user_message_and_prepare_generation(
     处理发送新消息的场景：创建用户消息，然后准备生成AI回复。
     返回一个元组 (新创建的用户消息, AI占位符消息)。
     """
+    # 在创建消息前，处理文件类型的子消息
+    for sub_message in user_sub_messages:
+        if sub_message.type == 'File':
+            file_id = sub_message.content
+            # 将文件管理类型从 'temporary' 更新为 'sub_message'
+            await file_crud.update_file_management_type(
+                db,
+                file_id=file_id,
+                new_type=FileManagementType.SUB_MESSAGE.value
+            )
+            # 确保文件信息不参与LLM上下文
+            sub_message.config.context_participation_length = 0
+
     user_message_create = schemas.MessageCreate(
         role=schemas.MessageRole.USER,
         sub_messages=user_sub_messages

@@ -14,5 +14,6 @@ class File(Base):
     storage_path = Column(String(512), nullable=False, unique=True)
     mime_type = Column(String(100), nullable=False)
     size = Column(Integer, nullable=False)
+    management_type = Column(String(50), nullable=False, index=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
 

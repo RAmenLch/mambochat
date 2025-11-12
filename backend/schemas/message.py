@@ -5,18 +5,20 @@ from typing import Optional, List
 import json
 
 from .enums import MessageRole, MessageStatus
+from .file import File as FileSchema  # 导入文件模型以供类型提示
 
 
 # --- SubMessage Schemas ---
 
 class SubMessageConfig(BaseModel):
     is_collapsed: bool = Field(False, description="分区是否折叠")
-    context_participation_length: Optional[int] = Field(None, description="参加上下文长度: None(默认)-参与; 0-不参与; N>0-在倒数N条内参与")
+    context_participation_length: Optional[int] = Field(None,
+                                                        description="参加上下文长度: None(默认)-参与; 0-不参与; N>0-在倒数N条内参与")
 
 
 class SubMessageBase(BaseModel):
     content: str
-    type: str = Field("Normal", description="分区类型，未来可扩展为 Image, File 等")
+    type: str = Field("Normal", description="分区类型，可为 Normal,Reasoning, File 等")
     config: SubMessageConfig = Field(default_factory=SubMessageConfig, description="分区的配置项")
     status: MessageStatus = Field(MessageStatus.COMPLETED, description="分区的状态")
 
@@ -36,6 +38,9 @@ class SubMessage(SubMessageBase):
     createdAt: datetime
     messageId: str
     sortOrder: int
+
+    # 新增字段，用于在API响应中携带文件详细信息
+    file_info: Optional[FileSchema] = Field(None, description="如果分区类型是文件，此字段将包含文件的详细信息")
 
     @field_validator("config", mode="before")
     @classmethod
@@ -76,7 +81,9 @@ class Message(MessageBase):
     chatId: str
     sortOrder: int
     sub_messages: List[SubMessage] = Field(default_factory=list)
-    status: Optional[MessageStatus] = Field(None, description="消息的动态计算状态，例如 'generating', 'completed', 'failed'。仅在API响应时填充。")
+    status: Optional[MessageStatus] = Field(None,
+                                            description="消息的动态计算状态，例如 'generating', 'completed', 'failed'。仅在API响应时填充。")
 
     class Config:
         from_attributes = True
+

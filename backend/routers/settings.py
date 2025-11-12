@@ -11,6 +11,7 @@ from ..services.storage_service import storage_service
 from ..models import setting_model
 from .. import schemas
 from ..database import get_db
+from ..schemas.enums import FileManagementType
 
 router = APIRouter()
 
@@ -189,7 +190,8 @@ async def _update_avatar(db: AsyncSession, file: UploadFile, avatar_key: str):
             filename=file.filename,
             storage_path=storage_path,
             mime_type=file.content_type,
-            size=file.size
+            size=file.size,
+            management_type=FileManagementType.GLOBAL_SETTING.value
         )
 
         # 3. 更新全局配置中的文件ID
