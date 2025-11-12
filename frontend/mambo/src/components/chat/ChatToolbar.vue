@@ -12,6 +12,12 @@
     </div>
     <div class="actions">
       <el-button
+        :icon="Upload"
+        circle
+        title="上传文件"
+        @click="$emit('triggerFileUpload')"
+      />
+      <el-button
         :icon="Files"
         circle
         title="聊天分区"
@@ -32,7 +38,7 @@ import { computed } from 'vue';
 import { useProviderStore } from '@/stores/providerStore';
 import type { Chat } from '@/api/types';
 import type { PropType } from 'vue';
-import { Cpu, Setting, Files, Tickets } from '@element-plus/icons-vue';
+import { Cpu, Setting, Files, Tickets, Upload } from '@element-plus/icons-vue';
 
 const props = defineProps({
   currentChat: {
@@ -45,7 +51,7 @@ const props = defineProps({
   },
 });
 
-defineEmits(['openSettings', 'toggleMultiPartMode']);
+defineEmits(['openSettings', 'toggleMultiPartMode', 'triggerFileUpload']);
 
 const providerStore = useProviderStore();
 

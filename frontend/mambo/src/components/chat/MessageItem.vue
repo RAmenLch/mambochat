@@ -28,16 +28,31 @@
           </div>
         </div>
 
-        <SubMessageItem
-          v-for="(subMessage, index) in message.sub_messages"
-          :key="subMessage.id"
-          :sub-message="subMessage"
-          :parent-message="message"
-          :show-header="!useSinglePartitionView"
-          :index="index + 1"
-          @edit="(payload) => handleEditRequest(subMessage, payload)"
-          @copy="handleCopySingle(subMessage)"
-        />
+        <template v-for="(group, groupIndex) in groupedSubMessages" :key="groupIndex">
+          <!-- Render a group of files with a flex layout -->
+          <div v-if="group.type === 'file'" class="file-group-container">
+            <SubMessageItem
+              v-for="(subMessage, index) in group.sub_messages"
+              :key="subMessage.id"
+              :sub-message="subMessage"
+              :parent-message="message"
+              :index="index + 1"
+              @edit="(payload) => handleEditRequest(subMessage, payload)"
+              @copy="handleCopySingle(subMessage)"
+            />
+          </div>
+          <!-- Render a single non-file sub-message -->
+          <SubMessageItem
+            v-else
+            :key="group.sub_messages[0].id"
+            :sub-message="group.sub_messages[0]"
+            :parent-message="message"
+            :show-header="!useSinglePartitionView"
+            :index="group.sub_messages[0].sortOrder + 1"
+            @edit="(payload) => handleEditRequest(group.sub_messages[0], payload)"
+            @copy="handleCopySingle(group.sub_messages[0])"
+          />
+        </template>
       </div>
 
       <div class="message-actions" :class="{ 'is-visible': showActions && message.status !== 'generating' }">
@@ -87,6 +102,11 @@ import MessageEditDialog from './dialogs/MessageEditDialog.vue';
 import { copyToClipboard } from '@/utils/clipboard';
 import { parseMarkdown } from '@/utils/markdownParser';
 
+interface SubMessageGroup {
+  type: 'file' | 'normal';
+  sub_messages: SubMessage[];
+}
+
 const props = defineProps<{
   message: Message;
   isLastMessage: boolean;
@@ -98,8 +118,35 @@ const { globalSettings } = storeToRefs(settingsStore);
 
 const showActions = ref(false);
 
-const isSingleSubMessage = computed(() => props.message.sub_messages.length <= 1);
+const isSingleSubMessage = computed(() => props.message.sub_messages.length === 1);
 const firstSubMessage = computed(() => props.message.sub_messages[0]);
+
+// Groups consecutive file sub-messages for grid layout, while keeping others separate.
+const groupedSubMessages = computed((): SubMessageGroup[] => {
+  if (!props.message.sub_messages || props.message.sub_messages.length === 0) {
+    return [];
+  }
+
+  const result: SubMessageGroup[] = [];
+  let lastGroup: SubMessageGroup | null = null;
+
+  for (const subMessage of props.message.sub_messages) {
+    if (subMessage.type === 'File') {
+      if (lastGroup && lastGroup.type === 'file') {
+        lastGroup.sub_messages.push(subMessage);
+      } else {
+        const newGroup: SubMessageGroup = { type: 'file', sub_messages: [subMessage] };
+        result.push(newGroup);
+        lastGroup = newGroup;
+      }
+    } else {
+      const newGroup: SubMessageGroup = { type: 'normal', sub_messages: [subMessage] };
+      result.push(newGroup);
+      lastGroup = newGroup;
+    }
+  }
+  return result;
+});
 
 // 决定是否使用简化的单分区视图（无头部，有特殊背景和折叠效果）
 const useSinglePartitionView = computed(() => {
@@ -249,16 +296,18 @@ async function handleCopySingle(subMessage: SubMessage) {
 }
 
 async function handleCopy() {
-  const contentToCopy = (isSingleSubMessage.value && firstSubMessage.value)
-    ? firstSubMessage.value.content || ''
-    : props.message.sub_messages.map(sm => sm.content).join('\n--------------------------\n');
+  const contentToCopy = props.message.sub_messages.map(sm => {
+    // For file types, we might want to copy a link or filename instead of just the ID.
+    // For now, we'll stick to the content, which is the file ID.
+    return sm.content;
+  }).join('\n--------------------------\n');
+
   try {
     await copyToClipboard(contentToCopy);
     ElMessage.success('已复制到剪贴板');
   } catch { ElMessage.error('复制失败'); }
 }
 </script>
-
 
 <style scoped>
 .message-item-container { display: flex; align-items: flex-start; margin-bottom: 20px; max-width: 90%; }
@@ -268,11 +317,17 @@ async function handleCopy() {
 .sub-messages-container {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px; /* Spacing between groups */
   width: 100%;
   position: relative;
   transition: max-height 0.25s ease-out;
   overflow: hidden;
+}
+
+.file-group-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px; /* Spacing between files in a group */
 }
 
 .sub-messages-container.is-single {
@@ -320,7 +375,8 @@ async function handleCopy() {
 .message-actions.is-visible { opacity: 1; visibility: visible; }
 .message-item-container.is-user { flex-direction: row-reverse; margin-left: auto; }
 .is-user .message-avatar { margin-right: 0; margin-left: 12px; }
-.is-user .sub-messages-container { margin-left: auto; }
+.is-user .sub-messages-container { align-items: flex-end; }
+.is-user .file-group-container { justify-content: flex-end; }
 .is-user .message-actions { justify-content: flex-end; }
 
 .initial-loading-placeholder {

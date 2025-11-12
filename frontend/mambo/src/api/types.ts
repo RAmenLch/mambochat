@@ -20,6 +20,7 @@ export interface SubMessage {
   type: string;
   config: SubMessageConfig;
   status: MessageStatus;
+  file_info?: FileResponse; // 新增：用于承载文件类型消息的完整文件元数据
 }
 
 export interface SubMessageCreate {

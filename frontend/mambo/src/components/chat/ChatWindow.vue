@@ -1,5 +1,7 @@
 <template>
   <div class="chat-window-container">
+    <input type="file" ref="fileInputRef" @change="onFileSelected" multiple style="display: none;" />
+
     <div v-if="!currentChat" class="welcome-view">
       <el-empty description="请从左侧选择或新建一个会话开始聊天" />
     </div>
@@ -52,7 +54,37 @@
           :estimated-tokens="estimatedTokens"
           @open-settings="settingsDrawerVisible = true"
           @toggle-multi-part-mode="toggleMultiPartMode"
+          @trigger-file-upload="handleTriggerFileUpload"
         />
+        <!-- Uploaded Files Preview Area -->
+        <div v-if="uploadedFiles.length > 0" class="uploaded-files-preview">
+          <div v-for="file in uploadedFiles" :key="file.id" class="file-item">
+            <el-image
+              v-if="file.mime_type.startsWith('image/')"
+              :src="file.url"
+              fit="cover"
+              class="file-thumbnail"
+            >
+              <template #error>
+                <div class="image-slot-error">
+                  <el-icon><Picture /></el-icon>
+                </div>
+              </template>
+            </el-image>
+            <div v-else class="file-icon">
+              <el-icon><Document /></el-icon>
+            </div>
+            <span class="file-name" :title="file.filename">{{ file.filename }}</span>
+            <el-button
+              :icon="Close"
+              circle
+              text
+              class="remove-file-btn"
+              @click="removeUploadedFile(file.id)"
+            />
+          </div>
+        </div>
+
         <div class="chat-input-area" @keydown="handleGlobalKeydown">
           <MultiPartInput
             v-if="isMultiPartMode"
@@ -102,9 +134,10 @@
 import { ref, watch, nextTick, computed } from 'vue';
 import { storeToRefs } from 'pinia';
 import { ElScrollbar, ElInput, ElMessage } from 'element-plus';
-import { Promotion, VideoPause, Edit, Refresh } from '@element-plus/icons-vue';
+import { Promotion, VideoPause, Edit, Refresh, Document, Picture, Close } from '@element-plus/icons-vue';
 import type { Ref } from 'vue';
 import type { ChatUpdate, SubMessageCreate, AIModel } from '@/api/types';
+import { uploadFile } from '@/api/chatService';
 
 // --- Stores & Composables ---
 import { useChatListStore } from '@/stores/chatListStore';
@@ -139,8 +172,12 @@ const {
   isMultiPartMode,
   singlePartDraft,
   multiPartDraft,
+  uploadedFiles,
+  isReadyToSend,
   toggleMultiPartMode,
   currentUserInputText,
+  addUploadedFile,
+  removeUploadedFile,
   undo,
   redo,
   resetDraft
@@ -157,6 +194,7 @@ const { estimatedTokens } = useTokenEstimator(contextForTokenEstimation, current
 const scrollbarRef = ref<InstanceType<typeof ElScrollbar>>();
 const inputRef = ref<InstanceType<typeof ElInput>>();
 const multiPartInputRef = ref<InstanceType<typeof MultiPartInput>>();
+const fileInputRef = ref<HTMLInputElement | null>(null);
 const settingsDrawerVisible = ref(false);
 const isEditingTitle = ref(false);
 const titleInput = ref('');
@@ -165,9 +203,34 @@ const userHasScrolledUp = ref(false);
 
 // --- Computed Properties ---
 const isTitleRefreshing = computed(() => refreshingTitleChatId.value === currentChat.value?.id);
-const isSendButtonDisabled = computed(() => isGenerating.value || currentUserInputText.value.trim() === '');
+const isSendButtonDisabled = computed(() => isGenerating.value || !isReadyToSend.value);
 
 // --- Methods ---
+
+// File Upload Logic
+function handleTriggerFileUpload() {
+  fileInputRef.value?.click();
+}
+
+async function onFileSelected(event: Event) {
+  const target = event.target as HTMLInputElement;
+  if (!target.files) return;
+
+  const files = Array.from(target.files);
+  // Reset input value to allow re-selecting the same file
+  target.value = '';
+
+  for (const file of files) {
+    try {
+      // TODO: Add visual feedback for upload progress
+      const fileInfo = await uploadFile(file);
+      addUploadedFile(fileInfo);
+    } catch (error) {
+      // The apiClient interceptor already shows an ElMessage on error
+      console.error(`Failed to upload file ${file.name}:`, error);
+    }
+  }
+}
 
 // Send & Stop Logic
 async function handleSendMessage() {
@@ -304,6 +367,63 @@ watch(currentChatId, (newId) => {
 .message-list-wrapper { padding: 20px; }
 .input-container-wrapper { flex-shrink: 0; position: relative; display: flex; flex-direction: column; border-top: 1px solid var(--color-border); }
 .resize-handle { position: absolute; top: -3px; left: 0; width: 100%; height: 6px; cursor: ns-resize; z-index: 10; }
+
+.uploaded-files-preview {
+  padding: 8px 20px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  background-color: var(--color-background-soft);
+  max-height: 100px; /* Example max height */
+  overflow-y: auto;
+}
+.file-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background-color: var(--color-background);
+  border: 1px solid var(--color-border);
+  font-size: 13px;
+}
+.file-thumbnail {
+  width: 24px;
+  height: 24px;
+  border-radius: 3px;
+}
+.image-slot-error {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-secondary);
+  font-size: 14px;
+}
+.file-icon {
+  font-size: 18px;
+  color: var(--el-text-color-secondary);
+  display: flex;
+  align-items: center;
+}
+.file-name {
+  max-width: 150px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.remove-file-btn {
+  margin-left: 4px;
+  font-size: 14px;
+  --el-button-text-color: var(--el-text-color-placeholder);
+}
+.remove-file-btn:hover {
+  --el-button-text-color: var(--el-color-danger);
+  background-color: transparent;
+}
+
 .chat-input-area { flex-grow: 1; padding: 10px 20px; background-color: var(--color-background-soft); display: flex; align-items: stretch; min-height: 0; }
 .input-field { flex-grow: 1; margin-right: 10px; }
 .input-field:deep(.el-textarea__inner) { height: 100% !important; }

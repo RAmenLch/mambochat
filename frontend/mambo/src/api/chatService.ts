@@ -12,7 +12,8 @@ import type {
   SubMessage,
   SubMessageUpdate,
   GenerateRequest,
-  PrepareGenerateResponse
+  PrepareGenerateResponse,
+  FileResponse
 } from './types';
 
 /**
@@ -87,6 +88,18 @@ export const updateSubMessage = (subMessageId: string, data: SubMessageUpdate): 
  */
 export const deleteMessage = (messageId: string): Promise<Message> => {
   return apiClient.delete(`/messages/${messageId}`)
+};
+
+/**
+ * 上传单个文件到服务器。
+ * @param file 用户选择的 File 对象。
+ * @returns 返回已上传文件的元数据。
+ */
+export const uploadFile = (file: File): Promise<FileResponse> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  // 当请求体是 FormData 时, Axios 会自动设置正确的 'multipart/form-data' Content-Type 和 boundary。
+  return apiClient.post('/api/files/upload', formData);
 };
 
 /**

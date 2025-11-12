@@ -4,6 +4,7 @@ import { ref, watch, computed, reactive } from 'vue';
 import { useUndoRedoHistory } from './useUndoRedoHistory';
 import { debounce } from 'lodash-es';
 import type { Ref } from 'vue';
+import type { FileResponse } from '@/api/types';
 
 /**
  * 定义多部分输入的分区结构。
@@ -23,7 +24,7 @@ interface Partition {
 export function useChatInput(currentChatId: Ref<string | null>) {
   // --- 内部状态 ---
 
-  // 1. 底层历史记录引擎
+  // 1. 底层历史记录引擎 (仅用于文本草稿)
   const {
     saveDraft: saveHistory,
     undo: undoHistory,
@@ -35,6 +36,7 @@ export function useChatInput(currentChatId: Ref<string | null>) {
   const isMultiPartMode = ref(false);
   const singlePartDraft = ref('');
   const multiPartDraft = ref<Partition[]>([{ id: Date.now(), content: '' }]);
+  const uploadedFiles = ref<FileResponse[]>([]); // 新增: 存储已上传的文件
 
   // 3. 跨会话记住用户的输入模式偏好
   const chatInputModeState = reactive<Record<string, boolean>>({});
@@ -83,6 +85,9 @@ export function useChatInput(currentChatId: Ref<string | null>) {
   // 7. 监听会话ID变化，加载新会话的草稿和输入模式
   watch(currentChatId, (newId, oldId) => {
     if (newId && newId !== oldId) {
+      // 清空上一个会话的暂存文件
+      uploadedFiles.value = [];
+
       isMultiPartMode.value = chatInputModeState[newId] ?? false;
       const draft = rawDraftFromHistory.value;
 
@@ -134,8 +139,21 @@ export function useChatInput(currentChatId: Ref<string | null>) {
   const resetDraft = () => {
     singlePartDraft.value = '';
     multiPartDraft.value = [{ id: Date.now(), content: '' }];
+    uploadedFiles.value = []; // 修改: 同时清空已上传文件列表
     // 发送后，立即保存空草稿，避免刷新后旧内容重现
     debouncedSave('');
+  };
+
+  // --- 新增: 文件管理方法 ---
+  const addUploadedFile = (file: FileResponse) => {
+    uploadedFiles.value.push(file);
+  };
+
+  const removeUploadedFile = (fileId: string) => {
+    const index = uploadedFiles.value.findIndex(f => f.id === fileId);
+    if (index !== -1) {
+      uploadedFiles.value.splice(index, 1);
+    }
   };
 
   // --- 对外暴露的API ---
@@ -144,17 +162,26 @@ export function useChatInput(currentChatId: Ref<string | null>) {
     isMultiPartMode,
     singlePartDraft,
     multiPartDraft,
+    uploadedFiles, // 新增
 
     // 计算属性
     currentUserInputText: computed((): string => isMultiPartMode.value
       ? multiPartDraft.value.map(p => p.content).join('\n')
       : singlePartDraft.value
     ),
+    isReadyToSend: computed((): boolean =>
+      (isMultiPartMode.value
+        ? multiPartDraft.value.some(p => p.content.trim() !== '')
+        : singlePartDraft.value.trim() !== '')
+      || uploadedFiles.value.length > 0
+    ), // 新增
 
     // 方法
     toggleMultiPartMode,
     undo,
     redo,
     resetDraft,
+    addUploadedFile, // 新增
+    removeUploadedFile, // 新增
   };
 }
