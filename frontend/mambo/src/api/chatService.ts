@@ -98,8 +98,14 @@ export const deleteMessage = (messageId: string): Promise<Message> => {
 export const uploadFile = (file: File): Promise<FileResponse> => {
   const formData = new FormData();
   formData.append('file', file);
-  // 当请求体是 FormData 时, Axios 会自动设置正确的 'multipart/form-data' Content-Type 和 boundary。
-  return apiClient.post('/api/files/upload', formData);
+
+  // 解决方案：在此处为本次请求单独覆盖 Content-Type
+  // 这会覆盖 apiClient 实例的全局默认 'application/json' 设置
+  return apiClient.post('/files/upload', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  });
 };
 
 /**
