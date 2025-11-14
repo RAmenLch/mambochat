@@ -236,17 +236,30 @@ async function onFileSelected(event: Event) {
 async function handleSendMessage() {
   if (isSendButtonDisabled.value) return;
 
-  const subMessages: SubMessageCreate[] = isMultiPartMode.value
+  // 1. Get text-based sub-messages
+  const textSubMessages: SubMessageCreate[] = isMultiPartMode.value
     ? (multiPartInputRef.value?.getData() || [])
-    : [{ content: singlePartDraft.value, sortOrder: 0 }];
+    : singlePartDraft.value.trim() !== ''
+      ? [{ content: singlePartDraft.value, sortOrder: 0, type: 'Normal' }]
+      : [];
 
-  if (subMessages.length > 0) {
-    await chatInteractionStore.sendMessage(subMessages);
-    // The original logic was to reset the specific draft model.
-    // The new `resetDraft` composable function encapsulates this behavior.
-    if (isMultiPartMode.value) {
-      multiPartInputRef.value?.reset();
-    }
+  // 2. Get file-based sub-messages
+  const fileSubMessages: SubMessageCreate[] = uploadedFiles.value.map(file => ({
+    content: file.id,
+    type: 'File',
+    sortOrder: 0 // Placeholder, will be recalculated
+  }));
+
+  // 3. Combine and re-calculate sort order
+  const finalSubMessages = [...textSubMessages, ...fileSubMessages].map((subMessage, index) => ({
+    ...subMessage,
+    sortOrder: index,
+  }));
+
+  // 4. Send if there is any content
+  if (finalSubMessages.length > 0) {
+    await chatInteractionStore.sendMessage(finalSubMessages);
+    // resetDraft from useChatInput will clear both text and files
     resetDraft();
   }
 }

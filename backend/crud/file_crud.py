@@ -7,13 +7,14 @@ from typing import Optional, List
 from ..models import file_model
 
 
+# --- 修改函数 ---
 async def create_file(
         db: AsyncSession,
         filename: str,
         storage_path: str,
         mime_type: str,
         size: int,
-        management_type: str  # 新增参数
+        management_type: str
 ) -> file_model.File:
     """
     在数据库中创建一条新的文件元数据记录。
@@ -50,6 +51,21 @@ async def get_file(db: AsyncSession, file_id: str) -> Optional[file_model.File]:
     if not file_id:
         return None
     result = await db.execute(select(file_model.File).filter(file_model.File.id == file_id))
+    return result.scalars().first()
+
+
+# +++ 新增函数 +++
+async def get_file_by_storage_path(db: AsyncSession, path: str) -> Optional[file_model.File]:
+    """
+    通过 storage_path 从数据库中获取文件元数据。
+
+    :param db: 数据库会话。
+    :param path: 文件的存储路径。
+    :return: File对象或None。
+    """
+    if not path:
+        return None
+    result = await db.execute(select(file_model.File).filter(file_model.File.storage_path == path))
     return result.scalars().first()
 
 
@@ -101,7 +117,6 @@ async def get_files_by_ids(db: AsyncSession, file_ids: List[str]) -> List[file_m
     if not file_ids:
         return []
 
-    # 使用 .in_() 操作符进行高效的批量查询
     result = await db.execute(select(file_model.File).filter(file_model.File.id.in_(file_ids)))
     return result.scalars().all()
 
