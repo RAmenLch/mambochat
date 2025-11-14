@@ -17,15 +17,68 @@ router = APIRouter(
 
 # 定义允许上传的文件类型和最大大小
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
+# 扩展后的文件MIME类型白名单
 ALLOWED_MIME_TYPES = {
-    # ... (此处省略，内容不变)
-    "text/plain", "text/markdown", "image/jpeg", "image/png", "image/gif", "image/webp",
-    "audio/mpeg", "audio/wav", "audio/ogg", "audio/webm", "video/mp4", "video/webm",
-    "application/pdf", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/json", "text/xml", "application/xml", "text/csv", "text/x-python",
-    "application/javascript", "text/css", "text/html", "application/x-yaml",
+    # --- 文本与标记语言 (Text & Markup) ---
+    "text/plain",          # .txt, .log
+    "text/markdown",       # .md
+    "text/csv",            # .csv
+    "text/html",           # .html
+    "text/css",            # .css
+    "application/rtf",     # .rtf (富文本)
+
+    # --- 图片 (Images) ---
+    "image/jpeg",          # .jpeg, .jpg
+    "image/png",           # .png
+    "image/gif",           # .gif
+    "image/webp",          # .webp
+    "image/svg+xml",       # .svg (矢量图)
+    "image/bmp",           # .bmp
+    "image/tiff",          # .tiff, .tif
+    "image/heic",          # .heic (苹果高效图片格式)
+    "image/heif",          # .heif (苹果高效图片格式)
+
+    # --- 代码与数据 (Code & Data) ---
+    "application/json",    # .json
+    "application/xml",     # .xml (更通用)
+    "text/xml",            # .xml (作为文本)
+    "application/x-yaml",  # .yaml, .yml
+    "text/yaml",           # .yaml, .yml (备用)
+    "text/x-python",       # .py
+    "application/javascript", # .js
+    "text/typescript",     # .ts
+    "text/x-java-source",  # .java
+    "text/x-csharp",       # .cs
+    "text/x-c",            # .c
+    "text/x-c++src",       # .cpp
+    "text/x-go",           # .go
+    "text/x-ruby",         # .rb
+    "application/sql",     # .sql
+    "application/x-sh",    # .sh (Shell脚本)
+    "application/x-ipynb+json", # .ipynb (Jupyter Notebook)
+
+    # --- 音频 (Audio) ---
+    "audio/mpeg",          # .mp3
+    "audio/wav",           # .wav
+    "audio/ogg",           # .ogg
+    "audio/webm",          # .webm (音频)
+    "audio/mp4",           # .m4a
+    "audio/flac",          # .flac (无损音频)
+    "audio/aac",           # .aac
+
+    # --- 视频 (Video) ---
+    "video/mp4",           # .mp4
+    "video/webm",          # .webm (视频)
+    "video/quicktime",     # .mov (Apple QuickTime)
+    "video/x-msvideo",     # .avi
+    "video/x-matroska",    # .mkv
+
+    # --- 文档类型 (保留) ---
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", # .xlsx
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document", # .docx
 }
+
 
 
 @router.post(
