@@ -1,7 +1,9 @@
 # backend/services/generation/instructions.py
 from pydantic import BaseModel
 from typing import Optional, Dict
-from ...schemas.enums import MessageStatus
+
+
+from ...schemas.enums import MessageStatus,SubMessageType
 
 class BaseInstruction(BaseModel):
     """所有生成指令的基类。"""
@@ -19,7 +21,7 @@ class CreateSubMessage(BaseInstruction):
     config: 子消息的配置项。
     """
     temp_ref_id: str
-    type: str = "Normal"
+    type: str = SubMessageType.NORMAL
     sortOrder: int
     status: MessageStatus = MessageStatus.GENERATING
     initial_content: str = ""

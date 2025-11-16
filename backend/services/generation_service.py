@@ -146,7 +146,7 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
                 error_sub_message_create = schemas.SubMessageCreate(
                     content=f"生成流程启动失败: {e}",
                     sortOrder=0,
-                    type="Normal",
+                    type=schemas.SubMessageType.NORMAL,
                     status=schemas.MessageStatus.FAILED
                 )
                 await message_crud.create_sub_message(db, assistant_message_id, error_sub_message_create)

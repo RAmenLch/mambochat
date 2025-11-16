@@ -1,6 +1,6 @@
 # backend/schemas/__init__.py
 
-from .enums import MessageRole, MessageStatus
+from .enums import MessageRole, MessageStatus,SubMessageType
 from .message import (
     SubMessageConfig, SubMessageBase, SubMessageCreate, SubMessageUpdate, SubMessage,
     MessageBase, MessageCreate, MessageUpdate, Message

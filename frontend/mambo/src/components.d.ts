@@ -53,6 +53,7 @@ declare module 'vue' {
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SubMessageItem: typeof import('./components/chat/SubMessageItem.vue')['default']
+    UsageInfo: typeof import('./components/chat/UsageInfo.vue')['default']
   }
   export interface GlobalDirectives {
     vLoading: typeof import('element-plus/es')['ElLoadingDirective']

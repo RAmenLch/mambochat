@@ -22,6 +22,7 @@ class WorkerOutput(BaseModel):
     一个标准化的、与具体模型无关的LLM响应块。
     由 Worker 创建，由 Manager 消费。
     """
-    type: str  # 例如: 'content', 'reasoning', 'error', 'done'
+    type: str  # 例如: 'content', 'reasoning', 'error', 'done', 'usage'
     content: Optional[str] = None
+    usage: Optional[Dict[str, Any]] = None
 

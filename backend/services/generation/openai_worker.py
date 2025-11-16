@@ -38,6 +38,11 @@ class OpenAIGenerateWorker(AbstractGenerateWorker):
 
                 try:
                     chunk = json.loads(data_str)
+
+                    # 捕获并传递每次更新的 usage 信息
+                    if "usage" in chunk and chunk["usage"]:
+                        yield WorkerOutput(type="usage", usage=chunk["usage"])
+
                     choices = chunk.get("choices")
                     if not (choices and len(choices) > 0):
                         continue
@@ -66,6 +71,10 @@ class OpenAIGenerateWorker(AbstractGenerateWorker):
         response = await client.post(url, headers=headers, json=payload)
         response.raise_for_status()
         data = response.json()
+
+        # 捕获并传递最终的 usage 信息
+        if "usage" in data and data["usage"]:
+            yield WorkerOutput(type="usage", usage=data["usage"])
 
         message_data = data.get("choices", [{}])[0].get("message", {})
         full_reasoning_content = get_reason(message_data)

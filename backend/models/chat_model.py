@@ -4,11 +4,7 @@ from sqlalchemy import Column, String, TEXT, DateTime, ForeignKey, func, Integer
 from sqlalchemy.orm import relationship
 from enum import Enum
 from .base_model import Base, generate_uuid
-
-class MessageStatus(str, Enum):
-    GENERATING = "generating"
-    COMPLETED = "completed"
-    FAILED = "failed"
+from ..schemas.enums import MessageStatus,SubMessageType
 
 
 class Chat(Base):
@@ -61,7 +57,7 @@ class SubMessage(Base):
     createdAt = Column(DateTime, nullable=False, default=func.now())
     messageId = Column(String(36), ForeignKey("Message.id"), nullable=False)
     sortOrder = Column(Integer, nullable=False)
-    type = Column(String(50), nullable=False, default="Normal")
+    type = Column(String(50), nullable=False, default=SubMessageType.NORMAL.value)
     config = Column(TEXT, nullable=True)  # Store as JSON string
     status = Column(String(20), nullable=False, default=MessageStatus.COMPLETED.value)
 

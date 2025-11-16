@@ -22,7 +22,7 @@
         }"
       >
         <!-- Display a loading indicator when the message is generating but has no sub-messages yet -->
-        <div v-if="message.status === 'generating' && message.sub_messages.length === 0" class="initial-loading-placeholder">
+        <div v-if="message.status === 'generating' && displayableSubMessages.length === 0" class="initial-loading-placeholder">
           <div class="typing-indicator">
             <span></span><span></span><span></span>
           </div>
@@ -75,6 +75,12 @@
         <el-tooltip content="删除" placement="top" :show-after="500">
           <el-button :icon="Delete" circle size="small" type="danger" plain @click="handleDelete" />
         </el-tooltip>
+
+        <UsageInfo
+          v-if="usageSubMessage"
+          :usage-sub-message="usageSubMessage"
+          class="usage-info-component"
+        />
       </div>
     </div>
   </div>
@@ -99,6 +105,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { User, Cpu, Refresh, RefreshLeft, Delete, Edit, CopyDocument, ArrowUpBold, ArrowDownBold } from '@element-plus/icons-vue';
 import SubMessageItem from './SubMessageItem.vue';
 import MessageEditDialog from './dialogs/MessageEditDialog.vue';
+import UsageInfo from './UsageInfo.vue';
 import { copyToClipboard } from '@/utils/clipboard';
 import { parseMarkdown } from '@/utils/markdownParser';
 
@@ -118,19 +125,33 @@ const { globalSettings } = storeToRefs(settingsStore);
 
 const showActions = ref(false);
 
-const isSingleSubMessage = computed(() => props.message.sub_messages.length === 1);
-const firstSubMessage = computed(() => props.message.sub_messages[0]);
+/**
+ * 过滤出所有用于在消息气泡中显示的子消息 (排除 'Usage' 类型)。
+ */
+const displayableSubMessages = computed(() =>
+  props.message.sub_messages.filter(sm => sm.type !== 'Usage')
+);
+
+/**
+ * 提取出 'Usage' 类型的子消息，用于在工具栏中显示。
+ */
+const usageSubMessage = computed(() =>
+  props.message.sub_messages.find(sm => sm.type === 'Usage')
+);
+
+const isSingleSubMessage = computed(() => displayableSubMessages.value.length === 1);
+const firstSubMessage = computed(() => displayableSubMessages.value[0]);
 
 // Groups consecutive file sub-messages for grid layout, while keeping others separate.
 const groupedSubMessages = computed((): SubMessageGroup[] => {
-  if (!props.message.sub_messages || props.message.sub_messages.length === 0) {
+  if (!displayableSubMessages.value || displayableSubMessages.value.length === 0) {
     return [];
   }
 
   const result: SubMessageGroup[] = [];
   let lastGroup: SubMessageGroup | null = null;
 
-  for (const subMessage of props.message.sub_messages) {
+  for (const subMessage of displayableSubMessages.value) {
     if (subMessage.type === 'File') {
       if (lastGroup && lastGroup.type === 'file') {
         lastGroup.sub_messages.push(subMessage);
@@ -150,7 +171,7 @@ const groupedSubMessages = computed((): SubMessageGroup[] => {
 
 // 决定是否使用简化的单分区视图（无头部，有特殊背景和折叠效果）
 const useSinglePartitionView = computed(() => {
-  return props.message.sub_messages.length === 1 && firstSubMessage.value?.type === 'Normal';
+  return displayableSubMessages.value.length === 1 && firstSubMessage.value?.type === 'Normal';
 });
 
 const roleClass = computed(() => ({
@@ -259,6 +280,8 @@ function handleSaveAndResend(newContent: string) {
   const updatedContent = getUpdatedFullContent(newContent);
 
   const newSubMessages: SubMessageCreate[] = props.message.sub_messages.map(sm => {
+    // Note: We resend ALL sub-messages, including the unmodified original Usage sub-message if it exists.
+    // The edit only applies to a displayable sub-message.
     return {
       content: sm.id === editingSubMessage.value!.id ? updatedContent : sm.content,
       sortOrder: sm.sortOrder,
@@ -296,7 +319,7 @@ async function handleCopySingle(subMessage: SubMessage) {
 }
 
 async function handleCopy() {
-  const contentToCopy = props.message.sub_messages.map(sm => {
+  const contentToCopy = displayableSubMessages.value.map(sm => {
     // For file types, we might want to copy a link or filename instead of just the ID.
     // For now, we'll stick to the content, which is the file ID.
     return sm.content;
@@ -371,13 +394,17 @@ async function handleCopy() {
   background: linear-gradient(to bottom, transparent, var(--el-color-primary-light-9));
 }
 
-.message-actions { display: flex; gap: 4px; margin-top: 8px; opacity: 0; visibility: hidden; height: 24px; transition: opacity 0.2s, visibility 0.2s; }
+.message-actions { display: flex; gap: 4px; margin-top: 8px; opacity: 0; visibility: hidden; min-height: 24px; transition: opacity 0.2s, visibility 0.2s; align-items: center; }
 .message-actions.is-visible { opacity: 1; visibility: visible; }
 .message-item-container.is-user { flex-direction: row-reverse; margin-left: auto; }
 .is-user .message-avatar { margin-right: 0; margin-left: 12px; }
 .is-user .sub-messages-container { align-items: flex-end; }
 .is-user .file-group-container { justify-content: flex-end; }
 .is-user .message-actions { justify-content: flex-end; }
+
+.usage-info-component {
+  margin-left: 8px;
+}
 
 .initial-loading-placeholder {
   display: flex;

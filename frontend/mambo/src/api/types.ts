@@ -6,6 +6,15 @@ export type MessageStatus = 'generating' | 'completed' | 'failed';
 
 // --- SubMessage Types ---
 
+/**
+ * 定义了子消息的所有可能类型。
+ * - Normal: 普通的Markdown文本内容。
+ * - Reasoning: AI的思考过程或元数据。
+ * - File: 引用一个已上传的文件。
+ * - Usage: 包含本次生成的Token用量信息。
+ */
+export type SubMessageType = 'Normal' | 'Reasoning' | 'File' | 'Usage';
+
 export interface SubMessageConfig {
   is_collapsed: boolean;
   context_participation_length?: number;
@@ -17,16 +26,16 @@ export interface SubMessage {
   createdAt: string; // ISO 8601 date string
   messageId: string;
   sortOrder: number;
-  type: string;
+  type: SubMessageType;
   config: SubMessageConfig;
   status: MessageStatus;
-  file_info?: FileResponse; // 新增：用于承载文件类型消息的完整文件元数据
+  file_info?: FileResponse; // 用于承载文件类型消息的完整文件元数据
 }
 
 export interface SubMessageCreate {
   content: string;
   sortOrder: number;
-  type?: string;
+  type?: SubMessageType;
   config?: SubMessageConfig;
   status?: MessageStatus;
 }

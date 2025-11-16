@@ -1,6 +1,6 @@
 # backend/services/generation/manager.py
 import json
-from typing import AsyncGenerator, List, Tuple
+from typing import AsyncGenerator, List, Tuple, Optional, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .base import AbstractGenerateManager
@@ -29,6 +29,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
         super().__init__(db_session)
         self._main_content_started = False
         self._reasoning_content_started = False
+        self._final_usage_data: Optional[Dict] = None
 
     async def _prepare_llm_input(
         self,
@@ -66,7 +67,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
             elif sub.config and isinstance(sub.config, dict):
                 N = sub.config.get('context_participation_length')
 
-            if N is None or N > 0 and pos_from_end <= N:
+            if N is None or (isinstance(N, int) and N > 0 and pos_from_end <= N):
                 filtered_submessages.append((role, sub))
 
         # 3. 将过滤后的子消息重新聚合为 LLM API 的格式
@@ -125,7 +126,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
         if output.type == "reasoning":
             if not self._reasoning_content_started:
                 yield CreateSubMessage(
-                    temp_ref_id="reasoning_content", type="Reasoning", sortOrder=0,
+                    temp_ref_id="reasoning_content", type=schemas_enums.SubMessageType.REASONING.value, sortOrder=0,
                     status=schemas_enums.MessageStatus.GENERATING,
                     config={"context_participation_length": 0}
                 )
@@ -135,24 +136,40 @@ class DefaultGenerateManager(AbstractGenerateManager):
         elif output.type == "content":
             if not self._main_content_started:
                 yield CreateSubMessage(
-                    temp_ref_id="main_content", type="Normal", sortOrder=1,
+                    temp_ref_id="main_content", type=schemas_enums.SubMessageType.NORMAL.value, sortOrder=1,
                     status=schemas_enums.MessageStatus.GENERATING
                 )
                 self._main_content_started = True
             yield AppendToSubMessage(temp_ref_id="main_content", content=output.content)
+
+        elif output.type == "usage":
+            if output.usage:
+                self._final_usage_data = output.usage
 
         elif output.type == "done":
             if self._main_content_started:
                 yield UpdateSubMessageStatus(temp_ref_id="main_content", status=schemas_enums.MessageStatus.COMPLETED)
             if self._reasoning_content_started:
                 yield UpdateSubMessageStatus(temp_ref_id="reasoning_content", status=schemas_enums.MessageStatus.COMPLETED)
+
+            if self._final_usage_data:
+                usage_content = json.dumps(self._final_usage_data)
+                yield CreateSubMessage(
+                    temp_ref_id="usage_info",
+                    type=schemas_enums.SubMessageType.USAGE.value,
+                    sortOrder=99,
+                    status=schemas_enums.MessageStatus.COMPLETED,
+                    initial_content=usage_content,
+                    config={"context_participation_length": 0}
+                )
+
             yield SetFinalStatus(status=schemas_enums.MessageStatus.COMPLETED)
 
         elif output.type == "error":
             error_message = f"\n\n**错误: {output.content}**"
             if not self._main_content_started and not self._reasoning_content_started:
                 yield CreateSubMessage(
-                    temp_ref_id="main_content", type="Normal", sortOrder=1,
+                    temp_ref_id="main_content", type=schemas_enums.SubMessageType.NORMAL.value, sortOrder=1,
                     status=schemas_enums.MessageStatus.FAILED, initial_content=f"生成失败: {output.content}"
                 )
             else:
@@ -170,7 +187,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
         if not self.temp_ref_id_map:
             try:
                 sentinel_sub_message = schemas_message.SubMessageCreate(
-                    content="", sortOrder=0, type="Normal", status=final_status,
+                    content="", sortOrder=0, type=schemas_enums.SubMessageType.NORMAL.value, status=final_status,
                     config=schemas_message.SubMessageConfig()
                 )
                 db_sub_message = await message_crud.create_sub_message(

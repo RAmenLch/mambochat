@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Optional, List
 import json
 
-from .enums import MessageRole, MessageStatus
+from .enums import MessageRole, MessageStatus, SubMessageType
 from .file import File as FileSchema  # 导入文件模型以供类型提示
 
 
@@ -18,7 +18,7 @@ class SubMessageConfig(BaseModel):
 
 class SubMessageBase(BaseModel):
     content: str
-    type: str = Field("Normal", description="分区类型，可为 Normal,Reasoning, File 等")
+    type: SubMessageType = Field(SubMessageType.NORMAL, description="分区类型，例如 Normal, Reasoning, File, Usage 等")
     config: SubMessageConfig = Field(default_factory=SubMessageConfig, description="分区的配置项")
     status: MessageStatus = Field(MessageStatus.COMPLETED, description="分区的状态")
 
