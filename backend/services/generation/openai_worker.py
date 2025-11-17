@@ -1,6 +1,7 @@
 # backend/services/generation/openai_worker.py
 import httpx
 import json
+import traceback # +++ 新增导入 +++
 from typing import AsyncGenerator, Dict, Any, List
 
 from .base import AbstractGenerateWorker
@@ -35,25 +36,25 @@ class OpenAIGenerateWorker(AbstractGenerateWorker):
             client: httpx.AsyncClient,
             url: str,
             headers: Dict[str, Any],
-            payload: Dict[str, Any]
+            payload: Dict[str, Any],
+            timeout: int
     ) -> AsyncGenerator[WorkerOutput, None]:
         """处理流式API响应，并生成 WorkerOutput 流。"""
         payload["stream"] = True
-        async with client.stream("POST", url, headers=headers, json=payload) as response:
-            # **修正点**: 不立即调用 raise_for_status()，而是先检查状态码。
-            # 这样我们就能在流关闭前安全地读取错误响应体。
+        async with client.stream("POST", url, headers=headers, json=payload, timeout=timeout) as response:
             if not response.is_success:
                 await response.aread()
                 error_content = response.text
                 try:
                     error_data = response.json()
-                    error_content = error_data.get("error", {}).get("message", error_content)
+                    # +++ 修正点 1: 增加类型检查, 使其更健壮 +++
+                    if isinstance(error_data, dict):
+                        error_content = error_data.get("error", {}).get("message", error_content)
                 except json.JSONDecodeError:
                     pass
                 yield WorkerOutput(type="error", content=f"API Error {response.status_code}: {error_content}")
                 return
 
-            # 状态码为 2xx，正常处理流
             async for line in response.aiter_lines():
                 if not line.startswith("data:"):
                     continue
@@ -90,6 +91,7 @@ class OpenAIGenerateWorker(AbstractGenerateWorker):
                             yield image_output
 
                 except json.JSONDecodeError:
+                    print(f"Warning: Could not decode JSON from stream line: {data_str}")
                     continue
 
     async def _generate_non_stream(
@@ -97,12 +99,13 @@ class OpenAIGenerateWorker(AbstractGenerateWorker):
             client: httpx.AsyncClient,
             url: str,
             headers: Dict[str, Any],
-            payload: Dict[str, Any]
+            payload: Dict[str, Any],
+            timeout: int
     ) -> AsyncGenerator[WorkerOutput, None]:
         """处理非流式API响应，并生成 WorkerOutput。"""
         payload["stream"] = False
-        response = await client.post(url, headers=headers, json=payload)
-        response.raise_for_status()  # 非流式请求在这里抛出异常是安全的
+        response = await client.post(url, headers=headers, json=payload, timeout=timeout)
+        response.raise_for_status()
         data = response.json()
 
         if "usage" in data and data["usage"]:
@@ -143,23 +146,27 @@ class OpenAIGenerateWorker(AbstractGenerateWorker):
         use_stream = llm_input.parameters.get('stream', True)
 
         try:
-            async with httpx.AsyncClient(proxy=llm_input.proxy_url, timeout=llm_input.timeout) as client:
-                generator = self._generate_stream(client, url, headers, payload) \
-                    if use_stream else self._generate_non_stream(client, url, headers, payload)
+            async with httpx.AsyncClient(proxy=llm_input.proxy_url) as client:
+                generator = self._generate_stream(client, url, headers, payload, llm_input.timeout) \
+                    if use_stream else self._generate_non_stream(client, url, headers, payload, llm_input.timeout)
                 async for output in generator:
                     yield output
 
             yield WorkerOutput(type="done")
 
         except httpx.HTTPStatusError as e:
-            # 这个异常块现在主要处理非流式请求的错误
             error_content = e.response.text
             try:
                 error_data = e.response.json()
-                error_content = error_data.get("error", {}).get("message", error_content)
+                # +++ 修正点 2: 同样增加类型检查 +++
+                if isinstance(error_data, dict):
+                    error_content = error_data.get("error", {}).get("message", error_content)
             except json.JSONDecodeError:
                 pass
             yield WorkerOutput(type="error", content=f"API Error {e.response.status_code}: {error_content}")
         except Exception as e:
-            # 捕获其他类型的错误，如连接超时
-            yield WorkerOutput(type="error", content=str(e))
+            # +++ 修正点 3: 打印原始堆栈, 方便调试 +++
+            print(f"[OpenAIGenerateWorker] Caught unexpected exception:")
+            traceback.print_exc()
+            yield WorkerOutput(type="error", content=f"An unexpected error occurred: {str(e)}")
+

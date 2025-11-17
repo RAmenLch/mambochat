@@ -82,8 +82,8 @@ class LocalStorageService(AbstractStorageService):
         return full_path
 
     async def save(self, file: UploadFile, sub_path: str) -> str:
-        file_extension = Path(file.filename).suffix
-        unique_filename = f"{uuid.uuid4()}{file_extension}"
+        # --- 修改点 1: 生成不带后缀的唯一文件名 ---
+        unique_filename = f"{uuid.uuid4()}"
 
         storage_dir = self.base_path / sub_path
         storage_dir.mkdir(parents=True, exist_ok=True)
@@ -97,8 +97,9 @@ class LocalStorageService(AbstractStorageService):
         return str(relative_path).replace('\\', '/') # 保证路径分隔符的统一性
 
     async def save_from_bytes(self, data: bytes, filename: str, sub_path: str) -> str:
-        file_extension = Path(filename).suffix
-        unique_filename = f"{uuid.uuid4()}{file_extension}"
+        # --- 修改点 2: 生成不带后缀的唯一文件名 ---
+        # 注意: 这里的 filename 参数仅用于可能的元数据记录, 不再用于生成物理文件名
+        unique_filename = f"{uuid.uuid4()}"
 
         storage_dir = self.base_path / sub_path
         storage_dir.mkdir(parents=True, exist_ok=True)
@@ -140,8 +141,7 @@ class LocalStorageService(AbstractStorageService):
 
 # --- 服务实例化 ---
 
-# 从环境变量中读取存储根路径，默认为 './uploads'
-STORAGE_PATH = os.getenv("STORAGE_PATH", "./uploads")
+PROJECT_ROOT = Path(__file__).parent.parent
+STORAGE_PATH_STR = os.getenv("STORAGE_PATH", str(PROJECT_ROOT.joinpath("uploads")))
+storage_service: AbstractStorageService = LocalStorageService(base_path=STORAGE_PATH_STR)
 
-# 创建LocalStorageService的单例
-storage_service: AbstractStorageService = LocalStorageService(base_path=STORAGE_PATH)

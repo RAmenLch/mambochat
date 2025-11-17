@@ -2,6 +2,7 @@
 from abc import ABC, abstractmethod
 import asyncio
 import json
+import traceback  # +++ 新增导入 +++
 from typing import AsyncGenerator, List, Dict, Any, Optional, Tuple
 
 from .llm_io import LLMInput, WorkerOutput
@@ -238,8 +239,10 @@ class AbstractGenerateManager(ABC):
                 print(f"[AbstractGenerateManager] Task cancelled for message '{assistant_message_id}'.")
                 overall_status = schemas_enums.MessageStatus.COMPLETED
             else:
+                # --- 修改点: 打印完整错误堆栈 ---
                 print(
                     f"[AbstractGenerateManager] Unhandled error in run loop for message '{assistant_message_id}': {e}")
+                traceback.print_exc()  # 在后端日志中输出完整堆栈
                 overall_status = schemas_enums.MessageStatus.FAILED
 
             # 将异常传递给清理方法，以便在SubMessage中向用户显示

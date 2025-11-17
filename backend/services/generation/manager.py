@@ -113,24 +113,31 @@ class DefaultGenerateManager(AbstractGenerateManager):
                     pass
 
                 if sub.type == schemas_enums.SubMessageType.FILE.value:
-                    if not is_multimodal_enabled:
-                        continue
-
                     db_file = await file_crud.get_file(self.db_session, sub.content)
                     if not db_file:
                         continue
 
                     try:
+                        # 1. 处理图片文件：这部分逻辑依赖 is_multimodal_enabled
                         if db_file.mime_type.startswith("image/"):
+                            if not is_multimodal_enabled:
+                                # 如果模型不支持图片，则跳过这个图片文件
+                                continue
+
                             image_bytes = await storage_service.read_bytes(db_file.storage_path)
                             base64_image = base64.b64encode(image_bytes).decode('utf-8')
                             data_url = f"data:{db_file.mime_type};base64,{base64_image}"
                             current_content_parts.append({"type": "image_url", "image_url": {"url": data_url}})
+
+                        # 2. 处理文本文件：这部分逻辑不依赖 is_multimodal_enabled，始终执行
                         elif db_file.mime_type in SUPPORTED_TEXT_MIME_TYPES:
                             text_bytes = await storage_service.read_bytes(db_file.storage_path)
                             file_content = text_bytes.decode('utf-8')
-                            current_content_parts.append({"type": "text",
-                                                          "text": f"\n--- Start of file: {db_file.filename} ---\n{file_content}\n--- End of file: {db_file.filename} ---"})
+                            current_content_parts.append({
+                                "type": "text",
+                                "text": f"\n--- Start of file: {db_file.filename} ---\n{file_content}\n--- End of file: {db_file.filename} ---"
+                            })
+                        # --- 修改结束 ---
                     except Exception as e:
                         print(f"Error processing file {db_file.id} for context: {e}")
                 else:
