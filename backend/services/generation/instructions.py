@@ -2,8 +2,7 @@
 from pydantic import BaseModel
 from typing import Optional, Dict
 
-
-from ...schemas.enums import MessageStatus,SubMessageType
+from ...schemas.enums import MessageStatus, SubMessageType
 
 class BaseInstruction(BaseModel):
     """所有生成指令的基类。"""
@@ -21,7 +20,7 @@ class CreateSubMessage(BaseInstruction):
     config: 子消息的配置项。
     """
     temp_ref_id: str
-    type: str = SubMessageType.NORMAL
+    type: str = SubMessageType.NORMAL.value
     sortOrder: int
     status: MessageStatus = MessageStatus.GENERATING
     initial_content: str = ""
@@ -56,4 +55,10 @@ class UpdateChatName(BaseInstruction):
     """指令：更新指定会话的名称。"""
     chat_id: str
     new_name: str
+
+class UpdateZipHistorySubMessage(BaseInstruction):
+    """指令：创建或更新一个ZipHistory类型的子消息。"""
+    target_message_id: str
+    content: str
+    status: MessageStatus
 

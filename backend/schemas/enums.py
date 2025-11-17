@@ -20,6 +20,8 @@ class SubMessageType(str, Enum):
     REASONING = "Reasoning"
     FILE = "File"
     USAGE = "Usage"
+    ZIP_HISTORY = "ZipHistory"
+
 
 
 class FileManagementType(str, Enum):

@@ -39,9 +39,9 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
     如果用户未设置过某些配置，则返回系统预设的默认值。
     """
     keys = [
-        "default_model_id", "title_generation_model_id", "last_selected_provider_id",
-        "default_max_context_messages", "default_temperature", "default_top_p",
-        "default_stream", "proxy_enabled", "proxy_url",
+        "default_model_id", "title_generation_model_id", "zip_history_system_prompt",
+        "last_selected_provider_id", "default_max_context_messages", "default_temperature",
+        "default_top_p", "default_stream", "proxy_enabled", "proxy_url",
         "user_avatar_file_id", "ai_avatar_file_id"
     ]
 
@@ -68,6 +68,7 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
     # --- 获取其他配置 ---
     default_model_id = _get_typed_setting(settings_map.get("default_model_id"), None, str)
     title_generation_model_id = _get_typed_setting(settings_map.get("title_generation_model_id"), None, str)
+    zip_history_system_prompt = _get_typed_setting(settings_map.get("zip_history_system_prompt"), None, str)
     last_selected_provider_id = _get_typed_setting(settings_map.get("last_selected_provider_id"), None, str)
     max_context = _get_typed_setting(settings_map.get("default_max_context_messages"), 0, int)
     temperature = _get_typed_setting(settings_map.get("default_temperature"), 1.0, float)
@@ -79,6 +80,7 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
     return schemas.GlobalSettingsUpdate(
         default_model_id=default_model_id,
         title_generation_model_id=title_generation_model_id,
+        zip_history_system_prompt=zip_history_system_prompt,
         last_selected_provider_id=last_selected_provider_id,
         default_max_context_messages=max_context,
         default_temperature=temperature,
@@ -141,7 +143,7 @@ async def update_global_settings(
 
     param_keys = [
         "default_max_context_messages", "default_temperature", "default_top_p",
-        "default_stream", "proxy_enabled", "proxy_url"
+        "default_stream", "proxy_enabled", "proxy_url", "zip_history_system_prompt"
     ]
     for key in param_keys:
         if key in update_data:

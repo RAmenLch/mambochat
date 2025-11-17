@@ -167,6 +167,38 @@ async def stop_generation(message_id: str):
 
 
 @router.post(
+    "/messages/{message_id}/compress-history",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="压缩指定消息及之前的所有对话历史"
+)
+async def compress_history_above_message(
+    message_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    为指定消息（及其之前）的所有对话历史启动一个后台压缩任务。
+    只能对助手的消息进行此操作。
+    """
+    db_message = await message_crud.get_message(db, message_id=message_id)
+    if not db_message:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    if db_message.role != schemas.MessageRole.ASSISTANT:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="History compression can only be initiated from an assistant's message."
+        )
+
+    background_tasks.add_task(
+        generation_service.run_zip_history_generation_task,
+        chat_id=db_message.chatId,
+        target_message_id=message_id
+    )
+    return {"message": "History compression task has been initiated."}
+
+
+@router.post(
     "/chats/{chat_id}/prepare-generate",
     response_model=schemas.PrepareGenerateResponse,
     summary="准备并开始生成AI回复",

@@ -2,8 +2,8 @@
 import asyncio
 import json
 import base64
-import uuid
 from typing import AsyncGenerator, List, Dict, Any, Optional
+from types import SimpleNamespace
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,9 +16,7 @@ from .instructions import (
     BaseInstruction
 )
 from .llm_io import LLMInput, WorkerOutput
-from ..stream_manager_service import stream_manager
 from ...crud import message_crud, setting_crud, file_crud
-from ...schemas import message as schemas_message
 from ...schemas import enums as schemas_enums
 from ...models import chat_model
 from ...services.storage_service import storage_service
@@ -32,9 +30,95 @@ SUPPORTED_TEXT_MIME_TYPES = {
 }
 
 
+async def _build_llm_messages_payload(
+        db_session: AsyncSession,
+        history_messages: List[chat_model.Message],
+        is_multimodal_enabled: bool
+) -> List[Dict[str, Any]]:
+    """
+    【共享函数】根据历史消息列表，构建用于LLM输入的标准化消息负载。
+    此函数包含上下文过滤和多模态内容组装的核心逻辑。
+    """
+    messages_payload = []
+
+    def merge_text_parts(parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not parts:
+            return []
+        merged = []
+        buffer = ""
+        for part in parts:
+            if part['type'] == 'text':
+                buffer += part['text'] + "\n"
+            else:
+                if buffer:
+                    merged.append({'type': 'text', 'text': buffer.strip()})
+                    buffer = ""
+                merged.append(part)
+        if buffer:
+            merged.append({'type': 'text', 'text': buffer.strip()})
+        return merged
+
+    current_role = None
+    current_content_parts = []
+
+    for msg in history_messages:
+        if current_role != msg.role and current_role is not None:
+            merged_parts = merge_text_parts(current_content_parts)
+            if merged_parts:
+                content = merged_parts[0]['text'] if len(merged_parts) == 1 and merged_parts[0][
+                    'type'] == 'text' else merged_parts
+                messages_payload.append({"role": current_role, "content": content})
+            current_content_parts = []
+
+        current_role = msg.role
+
+        for sub in msg.sub_messages:
+            config_str = sub.config if isinstance(sub.config, str) else json.dumps(sub.config or {})
+            try:
+                config_dict = json.loads(config_str)
+                if config_dict.get('context_participation_length') == 0:
+                    continue
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+            if sub.type == schemas_enums.SubMessageType.FILE.value:
+                db_file = await file_crud.get_file(db_session, sub.content)
+                if not db_file:
+                    continue
+
+                try:
+                    if db_file.mime_type.startswith("image/"):
+                        if not is_multimodal_enabled:
+                            continue
+                        image_bytes = await storage_service.read_bytes(db_file.storage_path)
+                        base64_image = base64.b64encode(image_bytes).decode('utf-8')
+                        data_url = f"data:{db_file.mime_type};base64,{base64_image}"
+                        current_content_parts.append({"type": "image_url", "image_url": {"url": data_url}})
+                    elif db_file.mime_type in SUPPORTED_TEXT_MIME_TYPES:
+                        text_bytes = await storage_service.read_bytes(db_file.storage_path)
+                        file_content = text_bytes.decode('utf-8')
+                        current_content_parts.append({
+                            "type": "text",
+                            "text": f"\n--- Start of file: {db_file.filename} ---\n{file_content}\n--- End of file: {db_file.filename} ---"
+                        })
+                except Exception as e:
+                    print(f"Error processing file {db_file.id} for context: {e}")
+            elif sub.type != schemas_enums.SubMessageType.ZIP_HISTORY.value:
+                current_content_parts.append({"type": "text", "text": sub.content})
+
+    if current_role and current_content_parts:
+        merged_parts = merge_text_parts(current_content_parts)
+        if merged_parts:
+            content = merged_parts[0]['text'] if len(merged_parts) == 1 and merged_parts[0][
+                'type'] == 'text' else merged_parts
+            messages_payload.append({"role": current_role, "content": content})
+
+    return messages_payload
+
+
 class DefaultGenerateManager(AbstractGenerateManager):
     """
-    默认生成管理器，负责根据聊天记录准备LLM输入（包括处理图片和文本文件等多模态内容），
+    默认生成管理器，负责根据聊天记录准备LLM输入（包括处理图片、文本文件和已启用的压缩历史），
     并能将LLM的输出（包括生成的图片）翻译成数据库和流指令。
     """
 
@@ -51,7 +135,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
     ) -> LLMInput:
         """
         根据会话配置和历史消息，准备发送给 Worker 的标准化 LLMInput。
-        此函数包含上下文过滤和多模态内容组装的核心逻辑。
+        此函数包含上下文过滤、压缩历史替换和多模态内容组装的核心逻辑。
         """
         if not db_chat.ai_model or not db_chat.ai_model.provider:
             raise ValueError("会话未配置有效的AI模型或服务商。")
@@ -59,6 +143,38 @@ class DefaultGenerateManager(AbstractGenerateManager):
         provider = db_chat.ai_model.provider
         model = db_chat.ai_model
 
+        # 1. 查找并应用已启用的压缩历史
+        effective_history = history_messages
+        last_enabled_zip_index = -1
+        zip_content = None
+
+        for i in range(len(history_messages) - 1, -1, -1):
+            msg = history_messages[i]
+            for sub in msg.sub_messages:
+                if sub.type == schemas_enums.SubMessageType.ZIP_HISTORY.value:
+                    try:
+                        config = json.loads(sub.config) if isinstance(sub.config, str) else sub.config
+                        if config and config.get('zip_enable') is True:
+                            last_enabled_zip_index = i
+                            zip_content = sub.content
+                            break
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+            if last_enabled_zip_index != -1:
+                break
+
+        if last_enabled_zip_index != -1 and zip_content:
+            # 构造虚拟消息来代表压缩历史
+            user_sub = SimpleNamespace(content="对之前的对话进行了总结摘要。", type=schemas_enums.SubMessageType.NORMAL.value, config='{}')
+            user_msg = SimpleNamespace(role=schemas_enums.MessageRole.USER.value, sub_messages=[user_sub])
+
+            assistant_sub = SimpleNamespace(content=zip_content, type=schemas_enums.SubMessageType.NORMAL.value, config='{}')
+            assistant_msg = SimpleNamespace(role=schemas_enums.MessageRole.ASSISTANT.value, sub_messages=[assistant_sub])
+
+            # 构建新的有效历史记录
+            effective_history = [user_msg, assistant_msg] + history_messages[last_enabled_zip_index + 1:]
+
+        # 2. 准备多模态和消息负载
         meta_config = {}
         if model.meta_config and isinstance(model.meta_config, str):
             try:
@@ -68,88 +184,14 @@ class DefaultGenerateManager(AbstractGenerateManager):
 
         is_multimodal_enabled = 'image' in (meta_config.get('input_modalities') or [])
 
-        messages_payload = []
+        messages_payload = await _build_llm_messages_payload(
+            self.db_session, effective_history, is_multimodal_enabled
+        )
+
         if db_chat.systemPrompt:
-            messages_payload.append({"role": "system", "content": db_chat.systemPrompt})
+            messages_payload.insert(0, {"role": "system", "content": db_chat.systemPrompt})
 
-        def merge_text_parts(parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-            if not parts:
-                return []
-            merged = []
-            buffer = ""
-            for part in parts:
-                if part['type'] == 'text':
-                    buffer += part['text'] + "\n"
-                else:
-                    if buffer:
-                        merged.append({'type': 'text', 'text': buffer.strip()})
-                        buffer = ""
-                    merged.append(part)
-            if buffer:
-                merged.append({'type': 'text', 'text': buffer.strip()})
-            return merged
-
-        current_role = None
-        current_content_parts = []
-
-        for msg in history_messages:
-            if current_role != msg.role and current_role is not None:
-                merged_parts = merge_text_parts(current_content_parts)
-                if merged_parts:
-                    content = merged_parts[0]['text'] if len(merged_parts) == 1 and merged_parts[0][
-                        'type'] == 'text' else merged_parts
-                    messages_payload.append({"role": current_role, "content": content})
-                current_content_parts = []
-
-            current_role = msg.role
-
-            for sub in msg.sub_messages:
-                config_str = sub.config if isinstance(sub.config, str) else json.dumps(sub.config or {})
-                try:
-                    config_dict = json.loads(config_str)
-                    if config_dict.get('context_participation_length') == 0:
-                        continue
-                except (json.JSONDecodeError, TypeError):
-                    pass
-
-                if sub.type == schemas_enums.SubMessageType.FILE.value:
-                    db_file = await file_crud.get_file(self.db_session, sub.content)
-                    if not db_file:
-                        continue
-
-                    try:
-                        # 1. 处理图片文件：这部分逻辑依赖 is_multimodal_enabled
-                        if db_file.mime_type.startswith("image/"):
-                            if not is_multimodal_enabled:
-                                # 如果模型不支持图片，则跳过这个图片文件
-                                continue
-
-                            image_bytes = await storage_service.read_bytes(db_file.storage_path)
-                            base64_image = base64.b64encode(image_bytes).decode('utf-8')
-                            data_url = f"data:{db_file.mime_type};base64,{base64_image}"
-                            current_content_parts.append({"type": "image_url", "image_url": {"url": data_url}})
-
-                        # 2. 处理文本文件：这部分逻辑不依赖 is_multimodal_enabled，始终执行
-                        elif db_file.mime_type in SUPPORTED_TEXT_MIME_TYPES:
-                            text_bytes = await storage_service.read_bytes(db_file.storage_path)
-                            file_content = text_bytes.decode('utf-8')
-                            current_content_parts.append({
-                                "type": "text",
-                                "text": f"\n--- Start of file: {db_file.filename} ---\n{file_content}\n--- End of file: {db_file.filename} ---"
-                            })
-                        # --- 修改结束 ---
-                    except Exception as e:
-                        print(f"Error processing file {db_file.id} for context: {e}")
-                else:
-                    current_content_parts.append({"type": "text", "text": sub.content})
-
-        if current_role and current_content_parts:
-            merged_parts = merge_text_parts(current_content_parts)
-            if merged_parts:
-                content = merged_parts[0]['text'] if len(merged_parts) == 1 and merged_parts[0][
-                    'type'] == 'text' else merged_parts
-                messages_payload.append({"role": current_role, "content": content})
-
+        # 3. 准备模型参数和连接配置
         model_params = {}
         if db_chat.modelParameters:
             try:

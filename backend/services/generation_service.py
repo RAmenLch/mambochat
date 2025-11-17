@@ -14,6 +14,7 @@ from ..models import chat_model
 from ..database import AsyncSessionLocal
 from .generation.manager import DefaultGenerateManager
 from .generation.title_manager import TitleGenerateManager
+from .generation.zip_history_manager import ZipHistoryGenerateManager
 from .generation.openai_worker import OpenAIGenerateWorker
 from ..schemas.enums import FileManagementType
 
@@ -173,6 +174,28 @@ async def run_title_generation_task(chat_id: str):
             print(f"[Title Generation Service Error] for chat {chat_id}: {e}")
         finally:
             # 清理可能存在的取消请求状态
+            await stream_manager.close_stream(task_id)
+
+
+async def run_zip_history_generation_task(chat_id: str, target_message_id: str):
+    """
+    后台任务：为指定消息之前的对话历史生成压缩摘要。
+    """
+    task_id = f"zip-history-gen-{target_message_id}"
+    async with AsyncSessionLocal() as db:
+        try:
+            worker = OpenAIGenerateWorker()
+            manager = ZipHistoryGenerateManager(db_session=db)
+            # 在ZipHistoryManager中，assistant_message_id被用作target_message_id
+            await manager.run(
+                worker=worker,
+                chat_id=chat_id,
+                assistant_message_id=target_message_id
+            )
+        except Exception as e:
+            print(f"[Zip History Generation Service Error] for message {target_message_id}: {e}")
+        finally:
+            # 此类任务不直接面向客户端流，但清理取消状态以防万一
             await stream_manager.close_stream(task_id)
 
 

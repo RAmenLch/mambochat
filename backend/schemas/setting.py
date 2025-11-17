@@ -13,6 +13,7 @@ class GlobalSettingsUpdate(BaseModel):
     """用于更新和响应全局配置的模型"""
     default_model_id: Optional[str] = Field(None, description="全局默认模型的ID")
     title_generation_model_id: Optional[str] = Field(None, description="专门用于生成标题的模型ID, 未设置则使用全局默认模型")
+    zip_history_system_prompt: Optional[str] = Field(None, description="用于对话历史压缩的System Prompt")
     last_selected_provider_id: Optional[str] = Field(None, description="最后编辑或选择的服务商ID")
     # 全局模型参数
     default_max_context_messages: Optional[int] = Field(None, description="默认上下文消息数量")
