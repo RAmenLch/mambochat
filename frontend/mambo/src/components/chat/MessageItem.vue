@@ -55,6 +55,19 @@
         </template>
       </div>
 
+      <!-- Zip History Bookmark and Card -->
+      <div v-if="zipHistorySubMessage" class="zip-history-section">
+        <div class="zip-history-bookmark" @click="isZipCardVisible = !isZipCardVisible">
+          <el-icon><Clock /></el-icon>
+          <span>历史摘要</span>
+        </div>
+        <ZipHistoryCard
+          v-if="isZipCardVisible"
+          :sub-message="zipHistorySubMessage"
+          class="zip-history-card"
+        />
+      </div>
+
       <div class="message-actions" :class="{ 'is-visible': showActions && message.status !== 'generating' }">
         <el-tooltip :content="message.role === 'user' ? '在下方重新回答' : '重新回答'" placement="top" :show-after="500">
           <el-button :icon="message.role === 'user' ? RefreshLeft : Refresh" circle size="small" @click="handleRegenerate" />
@@ -70,6 +83,10 @@
 
         <el-tooltip :content="isSingleSubMessage ? '复制' : '全部复制'" placement="top" :show-after="500">
           <el-button :icon="CopyDocument" circle size="small" @click="handleCopy" />
+        </el-tooltip>
+
+        <el-tooltip v-if="message.role === 'assistant'" content="压缩以上历史" placement="top" :show-after="500">
+          <el-button :icon="Clock" circle size="small" @click="handleCompressHistory" />
         </el-tooltip>
 
         <el-tooltip content="删除" placement="top" :show-after="500">
@@ -102,10 +119,11 @@ import type { Message, SubMessage, SubMessageCreate, MessageStatus } from '@/api
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { User, Cpu, Refresh, RefreshLeft, Delete, Edit, CopyDocument, ArrowUpBold, ArrowDownBold } from '@element-plus/icons-vue';
+import { User, Cpu, Refresh, RefreshLeft, Delete, Edit, CopyDocument, ArrowUpBold, ArrowDownBold, Clock } from '@element-plus/icons-vue';
 import SubMessageItem from './SubMessageItem.vue';
 import MessageEditDialog from './dialogs/MessageEditDialog.vue';
 import UsageInfo from './UsageInfo.vue';
+import ZipHistoryCard from './ZipHistoryCard.vue';
 import { copyToClipboard } from '@/utils/clipboard';
 import { parseMarkdown } from '@/utils/markdownParser';
 
@@ -124,12 +142,13 @@ const settingsStore = useSettingsStore();
 const { globalSettings } = storeToRefs(settingsStore);
 
 const showActions = ref(false);
+const isZipCardVisible = ref(false);
 
 /**
- * 过滤出所有用于在消息气泡中显示的子消息 (排除 'Usage' 类型)。
+ * 过滤出所有用于在消息气泡中显示的子消息 (排除 'Usage' 和 'ZipHistory' 类型)。
  */
 const displayableSubMessages = computed(() =>
-  props.message.sub_messages.filter(sm => sm.type !== 'Usage')
+  props.message.sub_messages.filter(sm => sm.type !== 'Usage' && sm.type !== 'ZipHistory')
 );
 
 /**
@@ -137,6 +156,13 @@ const displayableSubMessages = computed(() =>
  */
 const usageSubMessage = computed(() =>
   props.message.sub_messages.find(sm => sm.type === 'Usage')
+);
+
+/**
+ * 提取出 'ZipHistory' 类型的子消息，用于显示历史摘要卡片。
+ */
+const zipHistorySubMessage = computed(() =>
+  props.message.sub_messages.find(sm => sm.type === 'ZipHistory')
 );
 
 const isSingleSubMessage = computed(() => displayableSubMessages.value.length === 1);
@@ -330,6 +356,11 @@ async function handleCopy() {
     ElMessage.success('已复制到剪贴板');
   } catch { ElMessage.error('复制失败'); }
 }
+
+function handleCompressHistory() {
+  interactionStore.initiateHistoryCompression(props.message.id);
+  ElMessage.info('已开始在后台压缩历史对话，您可以继续聊天。');
+}
 </script>
 
 <style scoped>
@@ -392,6 +423,29 @@ async function handleCopy() {
 }
 .is-user .sub-messages-container.is-single-collapsed::after {
   background: linear-gradient(to bottom, transparent, var(--el-color-primary-light-9));
+}
+
+.zip-history-section {
+  margin-top: 8px;
+}
+.zip-history-bookmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background-color: var(--el-color-info-light-9);
+  border: 1px solid var(--el-color-info-light-7);
+  color: var(--el-color-info-dark-2);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+.zip-history-bookmark:hover {
+  background-color: var(--el-color-info-light-8);
+}
+.zip-history-card {
+  margin-top: 8px;
 }
 
 .message-actions { display: flex; gap: 4px; margin-top: 8px; opacity: 0; visibility: hidden; min-height: 24px; transition: opacity 0.2s, visibility 0.2s; align-items: center; }

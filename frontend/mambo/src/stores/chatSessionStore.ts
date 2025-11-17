@@ -171,6 +171,31 @@ export const useChatSessionStore = defineStore('chatSession', () => {
   }
 
   /**
+   * (内部) 在指定消息中添加或更新一个子消息。
+   * 用于处理如历史压缩摘要生成等实时通知。
+   * @param messageId - 父消息的ID。
+   * @param subMessage - 要添加或更新的子消息。
+   * @private
+   */
+  function _addOrUpdateSubMessage(messageId: string, subMessage: SubMessage) {
+    const parentMessage = currentChatMessages.value.find(m => m.id === messageId);
+    if (!parentMessage) {
+      console.warn(`[chatSessionStore] 未找到ID为 ${messageId} 的父消息以添加/更新子消息。`);
+      return;
+    }
+
+    const subMessageIndex = parentMessage.sub_messages.findIndex(sm => sm.id === subMessage.id);
+
+    if (subMessageIndex !== -1) {
+      // 替换现有的子消息以确保响应性
+      parentMessage.sub_messages.splice(subMessageIndex, 1, subMessage);
+    } else {
+      // 添加新的子消息
+      parentMessage.sub_messages.push(subMessage);
+    }
+  }
+
+  /**
    * (内部) 处理SSE流数据块，更新消息状态。
    * @param assistantMessageId - 正在接收流数据的助手消息ID。
    * @param data - 从SSE接收的数据块。
@@ -225,6 +250,7 @@ export const useChatSessionStore = defineStore('chatSession', () => {
     _removeMessage,
     _spliceMessages,
     _updateSubMessages,
+    _addOrUpdateSubMessage,
     _processStreamChunk,
   };
 });

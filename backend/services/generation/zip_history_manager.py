@@ -88,7 +88,7 @@ class ZipHistoryGenerateManager(AbstractGenerateManager):
             self.db_session, history_messages, is_multimodal_enabled
         )
         messages_payload.insert(0, {"role": "system", "content": system_prompt})
-
+        messages_payload.append({"role": "user", "content": "请输出历史摘要:"})
         # 3. 准备模型参数和连接配置
         parameters = {'stream': True} # 强制流式以获得更好的体验
         proxy_url = None

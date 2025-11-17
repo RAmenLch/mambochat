@@ -151,7 +151,7 @@ export const useChatListStore = defineStore('chatList', () => {
 
   /**
    * 初始化并监听来自服务器的全局通知（SSE）。
-   * 主要用于实时更新会话标题等。
+   * 用于实时更新会话标题、接收历史压缩结果等。
    */
   function initializeNotificationListener() {
     subscribeToGlobalNotifications({
@@ -165,6 +165,15 @@ export const useChatListStore = defineStore('chatList', () => {
           // 无论是否在列表中找到，都清除加载状态
           if (refreshingTitleChatId.value === id) {
             refreshingTitleChatId.value = null;
+          }
+        } else if (notification.type === 'zip_history_update') {
+          const sessionStore = useChatSessionStore();
+          // 仅当通知与当前活动会话相关时，才更新会话状态
+          if (sessionStore.currentChatId === notification.payload.chat_id) {
+            sessionStore._addOrUpdateSubMessage(
+              notification.payload.message_id,
+              notification.payload.sub_message
+            );
           }
         }
       },

@@ -132,6 +132,14 @@ export const stopGeneration = (messageId: string): Promise<{ message: string }> 
 };
 
 /**
+ * 针对指定消息发起一个后台对话历史压缩任务。
+ * @param messageId - 必须是 assistant 角色的消息ID。
+ */
+export const initiateHistoryCompression = (messageId: string): Promise<{ message: string }> => {
+  return apiClient.post(`/messages/${messageId}/compress-history`);
+};
+
+/**
  * 为指定的会话异步触发一个后台任务，以根据其内容自动生成标题。
  */
 export const generateChatTitle = (chatId: string): Promise<{ message: string }> => {

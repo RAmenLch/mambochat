@@ -120,6 +120,25 @@
           </div>
         </el-form-item>
 
+        <el-divider>对话历史压缩</el-divider>
+        <el-form-item>
+          <template #label>
+            <span>生成压缩历史 System Prompt</span>
+            <el-tooltip
+              effect="dark"
+              content="用于指导 AI 如何进行对话历史压缩的系统指令。如果为空，将使用后端默认的 Prompt。"
+              placement="top"
+            >
+              <el-icon class="label-icon"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </template>
+          <el-input
+            v-model="settingsForm.zip_history_system_prompt"
+            type="textarea"
+            :rows="5"
+            placeholder="例如：请将以上对话内容浓缩为一段简洁的摘要，保留关键信息、问题和结论。"
+          />
+        </el-form-item>
 
         <el-divider>新会话默认参数</el-divider>
 
@@ -218,6 +237,7 @@ const settingsForm = reactive<Omit<GlobalSettingsUpdate, 'user_avatar_url' | 'ai
   default_stream: true,
   proxy_enabled: false,
   proxy_url: null,
+  zip_history_system_prompt: null,
 });
 
 const isSaving = ref(false);
@@ -244,6 +264,7 @@ watch(globalSettings, (newSettings) => {
     default_stream: newSettings.default_stream,
     proxy_enabled: newSettings.proxy_enabled,
     proxy_url: newSettings.proxy_url,
+    zip_history_system_prompt: newSettings.zip_history_system_prompt,
   });
 }, { deep: true, immediate: true });
 

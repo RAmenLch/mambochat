@@ -12,12 +12,14 @@ export type MessageStatus = 'generating' | 'completed' | 'failed';
  * - Reasoning: AI的思考过程或元数据。
  * - File: 引用一个已上传的文件。
  * - Usage: 包含本次生成的Token用量信息。
+ * - ZipHistory: 对话历史的压缩摘要。
  */
-export type SubMessageType = 'Normal' | 'Reasoning' | 'File' | 'Usage';
+export type SubMessageType = 'Normal' | 'Reasoning' | 'File' | 'Usage' | 'ZipHistory';
 
 export interface SubMessageConfig {
   is_collapsed: boolean;
   context_participation_length?: number;
+  zip_enable?: boolean | null; // 压缩历史是否启用
 }
 
 export interface SubMessage {
@@ -210,6 +212,7 @@ export interface GlobalSettingsUpdate {
   proxy_url: string | null;
   user_avatar_url: string | null;
   ai_avatar_url: string | null;
+  zip_history_system_prompt?: string | null; // 生成压缩历史的System Prompt
 }
 
 // --- File Management Types ---
@@ -232,14 +235,33 @@ export interface ProxyTestRequest {
 
 // --- Notification Types ---
 
+/**
+ * `chat_update` 事件的载荷，通常用于标题更新。
+ */
 export interface ChatUpdateNotificationPayload {
   id: string;
   name: string;
 }
 
-export type GlobalNotificationPayload = ChatUpdateNotificationPayload;
-
-export interface GlobalNotification {
-  type: 'chat_update';
-  payload: GlobalNotificationPayload;
+/**
+ * `zip_history_update` 事件的载荷，在历史压缩完成后触发。
+ */
+export interface ZipHistoryUpdateNotificationPayload {
+  chat_id: string;
+  message_id: string;
+  sub_message: SubMessage;
 }
+
+/**
+ * 定义所有可能的全局通知类型，使用可辨识联合类型。
+ */
+export type GlobalNotification =
+  | {
+      type: 'chat_update';
+      payload: ChatUpdateNotificationPayload;
+    }
+  | {
+      type: 'zip_history_update';
+      payload: ZipHistoryUpdateNotificationPayload;
+    };
+

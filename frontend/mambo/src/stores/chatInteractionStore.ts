@@ -4,7 +4,8 @@ import { defineStore } from 'pinia';
 import {
   updateMessageAndRegenerate, updateSubMessage as updateSubMessageAPI,
   deleteMessage as deleteMessageAPI, prepareGenerate, prepareRegenerate,
-  stopGeneration as stopGenerationAPI, getChatWithMessages
+  stopGeneration as stopGenerationAPI, getChatWithMessages,
+  initiateHistoryCompression as initiateHistoryCompressionAPI,
 } from '@/api/chatService';
 import { subscribeToMessageStream } from '@/services/sseService';
 import { useChatSessionStore } from './chatSessionStore';
@@ -216,6 +217,51 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     }
   }
 
+  /**
+   * 发起一个后台对话历史压缩任务。
+   * @param messageId - 作为压缩起点的助手消息ID。
+   */
+  async function initiateHistoryCompression(messageId: string) {
+    try {
+      await initiateHistoryCompressionAPI(messageId);
+    } catch (error) {
+      console.error(`Failed to initiate history compression for message ${messageId}:`, error);
+      // 错误消息将由全局API拦截器显示
+    }
+  }
+
+  /**
+   * 更新历史压缩子消息（内容或启用状态）。
+   * @param subMessageId - 'ZipHistory' 类型子消息的ID。
+   * @param data - 要更新的数据。
+   */
+  async function updateZipHistorySubMessage(subMessageId: string, data: SubMessageUpdate) {
+    // 乐观更新UI
+    for (const msg of sessionStore.currentChatMessages) {
+      const subMsg = msg.sub_messages.find(sm => sm.id === subMessageId);
+      if (subMsg) {
+        if (data.content) {
+          subMsg.content = data.content;
+        }
+        if (data.config) {
+          // 合并config对象，而不是直接替换
+          subMsg.config = { ...subMsg.config, ...data.config };
+        }
+        break;
+      }
+    }
+
+    try {
+      await updateSubMessageAPI(subMessageId, data);
+    } catch (error) {
+      console.error(`Failed to update zip history sub-message ${subMessageId}:`, error);
+      // 发生错误时，强制刷新整个会话以确保数据一致性
+      if (sessionStore.currentChatId) {
+        await sessionStore.selectChat(sessionStore.currentChatId, true);
+      }
+    }
+  }
+
   return {
     sendMessage,
     regenerateFrom,
@@ -223,6 +269,8 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     updateSubMessage,
     deleteMessage,
     cancelGeneration,
+    initiateHistoryCompression,
+    updateZipHistorySubMessage,
     _subscribeToMessageStream
   };
 });

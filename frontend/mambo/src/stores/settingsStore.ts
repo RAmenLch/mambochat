@@ -32,6 +32,7 @@ export const useSettingsStore = defineStore('settings', {
       proxy_url: null,
       user_avatar_url: null,
       ai_avatar_url: null,
+      zip_history_system_prompt: null,
     },
   }),
 
