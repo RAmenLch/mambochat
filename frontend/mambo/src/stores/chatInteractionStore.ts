@@ -215,6 +215,12 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
         if (sm.status === 'generating') sm.status = 'completed';
       });
     }
+     try {
+      await stopGenerationAPI(messageId);
+      // 停止后，强制刷新以获取最终一致状态
+    } catch (error) {
+      console.error(`Failed to process stop request for ${messageId}:`, error);
+    }
   }
 
   /**
