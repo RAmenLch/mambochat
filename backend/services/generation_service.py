@@ -103,8 +103,6 @@ async def create_user_message_and_prepare_generation(
                 file_id=file_id,
                 new_type=FileManagementType.SUB_MESSAGE.value
             )
-            # 确保文件信息不参与LLM上下文
-            sub_message.config.context_participation_length = 0
 
     user_message_create = schemas.MessageCreate(
         role=schemas.MessageRole.USER,

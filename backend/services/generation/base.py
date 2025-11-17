@@ -24,6 +24,7 @@ class AbstractGenerateWorker(ABC):
 
     它是一个无状态的适配器，不应包含任何业务逻辑或数据库访问。
     """
+
     @abstractmethod
     async def generate(self, llm_input: LLMInput) -> AsyncGenerator[WorkerOutput, None]:
         """
@@ -53,9 +54,9 @@ class AbstractGenerateManager(ABC):
 
     @abstractmethod
     async def _prepare_llm_input(
-        self,
-        db_chat: chat_model.Chat,
-        history_messages: List[chat_model.Message]
+            self,
+            db_chat: chat_model.Chat,
+            history_messages: List[chat_model.Message]
     ) -> LLMInput:
         """
         【业务逻辑插槽 1】
@@ -66,8 +67,8 @@ class AbstractGenerateManager(ABC):
 
     @abstractmethod
     async def _translate_worker_output_to_instructions(
-        self,
-        output: WorkerOutput
+            self,
+            output: WorkerOutput
     ) -> AsyncGenerator[BaseInstruction, None]:
         """
         【业务逻辑插槽 2】
@@ -79,19 +80,20 @@ class AbstractGenerateManager(ABC):
             yield
 
     @abstractmethod
-    async def _cleanup_on_exception(self, assistant_message_id: str, final_status: schemas_enums.MessageStatus):
+    async def _cleanup_on_exception(self, assistant_message_id: str, final_status: schemas_enums.MessageStatus,
+                                    exception: Optional[Exception] = None):
         """
         【业务逻辑插槽 3】
-        定义在发生异常时如何清理。
+        定义在发生异常时如何清理，并可选择性地记录异常信息。
         """
         pass
 
     # --- 由基类提供的具体方法 (框架能力) ---
 
     async def _prepare_context(
-        self,
-        chat_id: str,
-        assistant_message_id: str
+            self,
+            chat_id: str,
+            assistant_message_id: str
     ) -> Tuple[chat_model.Chat, List[chat_model.Message]]:
         """
         【框架提供】
@@ -135,9 +137,9 @@ class AbstractGenerateManager(ABC):
         return db_chat, history_messages
 
     async def _process_instruction(
-        self,
-        instruction: BaseInstruction,
-        assistant_message_id: str
+            self,
+            instruction: BaseInstruction,
+            assistant_message_id: str
     ) -> Optional[schemas_enums.MessageStatus]:
         """
         【框架提供】
@@ -190,9 +192,9 @@ class AbstractGenerateManager(ABC):
         return None
 
     async def _process_custom_instruction(
-        self,
-        instruction: BaseInstruction,
-        assistant_message_id: str
+            self,
+            instruction: BaseInstruction,
+            assistant_message_id: str
     ) -> Optional[schemas_enums.MessageStatus]:
         """
         【可选重写】
@@ -204,10 +206,10 @@ class AbstractGenerateManager(ABC):
     # --- 模板方法 ---
 
     async def run(
-        self,
-        worker: AbstractGenerateWorker,
-        chat_id: str,
-        assistant_message_id: str
+            self,
+            worker: AbstractGenerateWorker,
+            chat_id: str,
+            assistant_message_id: str
     ) -> schemas_enums.MessageStatus:
         """
         模板方法：执行由工作者生成的指令流，并内置上下文准备、取消和错误处理逻辑。
@@ -222,7 +224,7 @@ class AbstractGenerateManager(ABC):
 
             async for output in worker_output_generator:
                 if await stream_manager.is_cancellation_requested(assistant_message_id):
-                    raise asyncio.CancelledError
+                    raise asyncio.CancelledError("Generation was cancelled by user request.")
 
                 instruction_generator = self._translate_worker_output_to_instructions(output)
 
@@ -231,15 +233,16 @@ class AbstractGenerateManager(ABC):
                     if status_from_instruction:
                         overall_status = status_from_instruction
 
-        except asyncio.CancelledError:
-            print(f"[AbstractGenerateManager] Task cancelled for message '{assistant_message_id}'.")
-            overall_status = schemas_enums.MessageStatus.COMPLETED
-            await self._cleanup_on_exception(assistant_message_id, overall_status)
+        except (asyncio.CancelledError, Exception) as e:
+            if isinstance(e, asyncio.CancelledError):
+                print(f"[AbstractGenerateManager] Task cancelled for message '{assistant_message_id}'.")
+                overall_status = schemas_enums.MessageStatus.COMPLETED
+            else:
+                print(
+                    f"[AbstractGenerateManager] Unhandled error in run loop for message '{assistant_message_id}': {e}")
+                overall_status = schemas_enums.MessageStatus.FAILED
 
-        except Exception as e:
-            print(f"[AbstractGenerateManager] Unhandled error in run loop for message '{assistant_message_id}': {e}")
-            overall_status = schemas_enums.MessageStatus.FAILED
-            await self._cleanup_on_exception(assistant_message_id, overall_status)
+            # 将异常传递给清理方法，以便在SubMessage中向用户显示
+            await self._cleanup_on_exception(assistant_message_id, overall_status, e)
 
         return overall_status
-
