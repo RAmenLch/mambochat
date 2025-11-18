@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/chat/ChatToolbar.vue -->
 <template>
   <div class="chat-toolbar">
     <div class="toolbar-left">
@@ -16,6 +17,12 @@
         circle
         title="上传文件"
         @click="$emit('triggerFileUpload')"
+      />
+      <el-button
+        :icon="Collection"
+        circle
+        title="从资源库选择"
+        @click="$emit('openResourceSelector')"
       />
       <el-button
         :icon="Files"
@@ -38,7 +45,7 @@ import { computed } from 'vue';
 import { useProviderStore } from '@/stores/providerStore';
 import type { Chat } from '@/api/types';
 import type { PropType } from 'vue';
-import { Cpu, Setting, Files, Tickets, Upload } from '@element-plus/icons-vue';
+import { Cpu, Setting, Files, Tickets, Upload, Collection } from '@element-plus/icons-vue';
 
 const props = defineProps({
   currentChat: {
@@ -51,7 +58,7 @@ const props = defineProps({
   },
 });
 
-defineEmits(['openSettings', 'toggleMultiPartMode', 'triggerFileUpload']);
+defineEmits(['openSettings', 'toggleMultiPartMode', 'triggerFileUpload', 'openResourceSelector']);
 
 const providerStore = useProviderStore();
 

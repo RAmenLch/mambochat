@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/chat/ChatWindow.vue -->
 <template>
   <div class="chat-window-container">
     <input type="file" ref="fileInputRef" @change="onFileSelected" multiple style="display: none;" />
@@ -55,6 +56,7 @@
           @open-settings="settingsDrawerVisible = true"
           @toggle-multi-part-mode="toggleMultiPartMode"
           @trigger-file-upload="handleTriggerFileUpload"
+          @open-resource-selector="resourceSelectorVisible = true"
         />
         <!-- Uploaded Files Preview Area -->
         <div v-if="uploadedFiles.length > 0" class="uploaded-files-preview">
@@ -127,6 +129,11 @@
       :grouped-models="groupedModels"
       @save="handleSaveSettings"
     />
+
+    <ResourceSelectorDialog
+      v-model:visible="resourceSelectorVisible"
+      @append-content="handleAppendResourceContent"
+    />
   </div>
 </template>
 
@@ -153,6 +160,7 @@ import MessageItem from './MessageItem.vue';
 import ChatToolbar from './ChatToolbar.vue';
 import MultiPartInput from './MultiPartInput.vue';
 import ChatSettingsDrawer from './ChatSettingsDrawer.vue';
+import ResourceSelectorDialog from './dialogs/ResourceSelectorDialog.vue';
 
 interface GroupedModels { label: string; options: AIModel[]; }
 
@@ -180,7 +188,8 @@ const {
   removeUploadedFile,
   undo,
   redo,
-  resetDraft
+  resetDraft,
+  appendContentToDraft,
 } = useChatInput(currentChatId);
 
 const inputAreaHeight = ref(150);
@@ -196,6 +205,7 @@ const inputRef = ref<InstanceType<typeof ElInput>>();
 const multiPartInputRef = ref<InstanceType<typeof MultiPartInput>>();
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const settingsDrawerVisible = ref(false);
+const resourceSelectorVisible = ref(false);
 const isEditingTitle = ref(false);
 const titleInput = ref('');
 const titleInputRef = ref<InstanceType<typeof ElInput>>();
@@ -207,6 +217,22 @@ const isSendButtonDisabled = computed(() => isGenerating.value || !isReadyToSend
 
 // --- Methods ---
 
+/**
+ * Handles appending content from the resource selector to the current input draft
+ * and focuses the input area.
+ * @param content The string content to append.
+ */
+async function handleAppendResourceContent(content: string) {
+  appendContentToDraft(content);
+
+  await nextTick();
+  if (isMultiPartMode.value) {
+    multiPartInputRef.value?.focus();
+  } else {
+    inputRef.value?.focus();
+  }
+}
+
 // File Upload Logic
 function handleTriggerFileUpload() {
   fileInputRef.value?.click();
@@ -217,16 +243,13 @@ async function onFileSelected(event: Event) {
   if (!target.files) return;
 
   const files = Array.from(target.files);
-  // Reset input value to allow re-selecting the same file
   target.value = '';
 
   for (const file of files) {
     try {
-      // TODO: Add visual feedback for upload progress
       const fileInfo = await uploadFile(file);
       addUploadedFile(fileInfo);
     } catch (error) {
-      // The apiClient interceptor already shows an ElMessage on error
       console.error(`Failed to upload file ${file.name}:`, error);
     }
   }
@@ -236,30 +259,25 @@ async function onFileSelected(event: Event) {
 async function handleSendMessage() {
   if (isSendButtonDisabled.value) return;
 
-  // 1. Get text-based sub-messages
   const textSubMessages: SubMessageCreate[] = isMultiPartMode.value
     ? (multiPartInputRef.value?.getData() || [])
     : singlePartDraft.value.trim() !== ''
       ? [{ content: singlePartDraft.value, sortOrder: 0, type: 'Normal' }]
       : [];
 
-  // 2. Get file-based sub-messages
   const fileSubMessages: SubMessageCreate[] = uploadedFiles.value.map(file => ({
     content: file.id,
     type: 'File',
-    sortOrder: 0 // Placeholder, will be recalculated
+    sortOrder: 0
   }));
 
-  // 3. Combine and re-calculate sort order
   const finalSubMessages = [...textSubMessages, ...fileSubMessages].map((subMessage, index) => ({
     ...subMessage,
     sortOrder: index,
   }));
 
-  // 4. Send if there is any content
   if (finalSubMessages.length > 0) {
     await chatInteractionStore.sendMessage(finalSubMessages);
-    // resetDraft from useChatInput will clear both text and files
     resetDraft();
   }
 }
@@ -337,7 +355,6 @@ const scrollToBottom = (force = false) => {
 
 // --- Watchers ---
 
-// Auto-scroll on new message content
 watch(
   () => currentChatMessages.value[currentChatMessages.value.length - 1]?.sub_messages.slice(-1)[0]?.content,
   (newContent, oldContent) => {
@@ -347,14 +364,11 @@ watch(
   }
 );
 
-// Handle chat switching
 watch(currentChatId, (newId) => {
   if (newId) {
     isEditingTitle.value = false;
     userHasScrolledUp.value = false;
 
-    // This logic is preserved exactly from the original implementation.
-    // It focuses the single-part input after history loads.
     const stopWatch = watch(isChatHistoryLoading, (loading) => {
       if (!loading) {
         scrollToBottom(true);

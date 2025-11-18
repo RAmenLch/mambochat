@@ -273,7 +273,10 @@ export type GlobalNotification =
 // --- Resource Center Types ---
 
 export type ResourceItemType = 'resource' | 'folder';
-export type ResourceType = 'system_prompt';
+/**
+ * 定义资源的具体品类。
+ */
+export type ResourceType = string;
 
 /**
  * 代表一个资源版本快照。
@@ -328,7 +331,6 @@ export interface ResourceCreate {
   resourceType?: ResourceType | null;
   parentId?: string | null;
   sortOrder: number;
-  initial_content?: string | null; // 创建资源时可附带初始版本内容
 }
 
 /**

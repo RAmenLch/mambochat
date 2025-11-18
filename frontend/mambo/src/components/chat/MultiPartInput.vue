@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/chat/MultiPartInput.vue -->
 <template>
   <div class="multi-part-input-container">
     <div class="partition-sidebar">
@@ -63,15 +64,11 @@ const textareaRef = ref<InstanceType<typeof ElInput>>();
 // --- 数据同步 ---
 
 // 1. 从父组件(prop)到本地状态的单向同步
-//    当外部的 modelValue (例如，来自store的草稿) 变化时，更新本地UI
 watch(() => props.modelValue, (newVal) => {
-  // 使用JSON字符串比较来避免因对象引用不同而导致的无限更新循环
   if (JSON.stringify(newVal) !== JSON.stringify(localPartitions.value)) {
-    // 确保分区数组至少有一个元素，以防UI绑定出错
     const partitionsToSet = newVal && newVal.length > 0 ? newVal : [{ id: Date.now(), content: '' }];
-    localPartitions.value = JSON.parse(JSON.stringify(partitionsToSet)); // 深拷贝
+    localPartitions.value = JSON.parse(JSON.stringify(partitionsToSet));
 
-    // 如果当前选中的索引在新数据中无效，则重置它
     if (activeIndex.value >= localPartitions.value.length) {
       activeIndex.value = Math.max(0, localPartitions.value.length - 1);
     }
@@ -79,7 +76,6 @@ watch(() => props.modelValue, (newVal) => {
 }, { deep: true, immediate: true });
 
 // 2. 从本地状态到父组件(emit)的单向同步
-//    当用户在UI中操作 (输入、增删分区) 时，通知父组件数据已更新
 watch(localPartitions, (newVal) => {
   emit('update:modelValue', newVal);
 }, { deep: true });
@@ -99,25 +95,20 @@ const addPartition = async () => {
 };
 
 const removePartition = (index: number) => {
-  // 保持至少有一个分区
   if (localPartitions.value.length <= 1) return;
 
   localPartitions.value.splice(index, 1);
 
-  // 如果删除的是当前或之前的分区，调整 activeIndex
   if (activeIndex.value >= localPartitions.value.length) {
     activeIndex.value = localPartitions.value.length - 1;
   }
 };
 
-/**
- * 监听键盘事件，实现 Enter 发送，Shift+Enter 换行。
- */
-const handleKeydown = (event: KeyboardEvent| Event) => {
+const handleKeydown = (event: Event) => {
   if (!(event instanceof KeyboardEvent)) return;
   if (event.key === 'Enter' && !event.shiftKey) {
-    event.preventDefault(); // 阻止默认的换行行为
-    emit('send'); // 触发发送事件
+    event.preventDefault();
+    emit('send');
   }
 };
 
@@ -128,9 +119,10 @@ const handleKeydown = (event: KeyboardEvent| Event) => {
  */
 const getData = (): SubMessageCreate[] => {
   return localPartitions.value
-    .map((part, index) => ({
+    .map((part, index): SubMessageCreate => ({ // <-- FIX: Explicitly type the returned object
       content: part.content,
       sortOrder: index,
+      type: 'Normal',
     }))
     .filter(part => part.content.trim() !== '');
 };
@@ -143,9 +135,17 @@ const reset = () => {
   activeIndex.value = 0;
 };
 
+/**
+ * 将焦点设置到当前激活的文本区域。
+ */
+const focus = () => {
+  textareaRef.value?.focus();
+};
+
 defineExpose({
   getData,
   reset,
+  focus,
 });
 </script>
 
@@ -224,7 +224,6 @@ defineExpose({
   flex-grow: 1;
 }
 
-/* 确保 el-input 和其内部的 textarea 填满容器高度 */
 .partition-editor .el-input,
 .partition-editor :deep(.el-textarea) {
   height: 100%;

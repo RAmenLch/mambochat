@@ -33,7 +33,7 @@ async def get_resource_with_versions(db: AsyncSession, resource_id: str) -> Opti
     """通过ID获取单个资源及其所有版本列表。"""
     result = await db.execute(
         select(resource_model.Resource)
-        .options(selectinload(resource_model.Resource.versions))
+        .options(selectinload(resource_model.Resource.versions), joinedload(resource_model.Resource.latest_version))
         .filter(resource_model.Resource.id == resource_id)
     )
     return result.scalars().first()
@@ -58,8 +58,11 @@ async def create_resource(db: AsyncSession, resource: schemas.ResourceCreate) ->
 
     await db.commit()
 
-    # MODIFIED: 在 refresh 时，明确指定要预加载 latest_version 关系
-    await db.refresh(db_resource, ['latest_version'])
+    # Refresh the object to load all its attributes, including the newly linked latest_version
+    await db.refresh(db_resource)
+    if db_resource.latestVersionId:
+        # Ensure the relationship attribute is populated after refresh
+        await db.refresh(db_resource, ['latest_version'])
 
     return db_resource
 
@@ -76,13 +79,13 @@ async def update_resource(db: AsyncSession, resource_id: str, resource_update: s
         setattr(db_resource, key, value)
 
     await db.commit()
-    await db.refresh(db_resource, ['latest_version'])  # 同样在此处添加预加载，保持一致性
+    # MODIFIED: Refresh the scalar attributes of the object after commit.
+    await db.refresh(db_resource)
     return db_resource
 
 
 async def delete_resource(db: AsyncSession, resource_id: str) -> Optional[resource_model.Resource]:
     """删除一个资源或文件夹。"""
-    # For delete operations, we don't need to load relationships for the response
     db_resource = await get_resource(db, resource_id=resource_id)
     if db_resource:
         await db.delete(db_resource)
@@ -130,7 +133,9 @@ Optional[resource_model.ResourceVersion]:
 
 async def set_active_version(db: AsyncSession, resource_id: str, version_id: str) -> Optional[resource_model.Resource]:
     """设置资源的活跃版本（更新latestVersionId指针）。"""
-    db_resource = await get_resource(db, resource_id=resource_id)
+    # We get the resource without the relationship first to avoid loading stale data
+    result = await db.execute(select(resource_model.Resource).filter(resource_model.Resource.id == resource_id))
+    db_resource = result.scalars().first()
     if not db_resource:
         return None
 
@@ -145,7 +150,11 @@ async def set_active_version(db: AsyncSession, resource_id: str, version_id: str
 
     db_resource.latestVersionId = version_id
     await db.commit()
-    await db.refresh(db_resource, ['latest_version'])  # 同样在此处添加预加载
+
+    # MODIFIED: Refresh the scalar attributes first, then reload the relationship to ensure it's fresh.
+    await db.refresh(db_resource)
+    await db.refresh(db_resource, ['latest_version'])
+
     return db_resource
 
 

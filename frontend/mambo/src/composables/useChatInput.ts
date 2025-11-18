@@ -36,7 +36,7 @@ export function useChatInput(currentChatId: Ref<string | null>) {
   const isMultiPartMode = ref(false);
   const singlePartDraft = ref('');
   const multiPartDraft = ref<Partition[]>([{ id: Date.now(), content: '' }]);
-  const uploadedFiles = ref<FileResponse[]>([]); // 新增: 存储已上传的文件
+  const uploadedFiles = ref<FileResponse[]>([]);
 
   // 3. 跨会话记住用户的输入模式偏好
   const chatInputModeState = reactive<Record<string, boolean>>({});
@@ -67,12 +67,10 @@ export function useChatInput(currentChatId: Ref<string | null>) {
     if (isMultiPartMode.value) {
       try {
         const parsed = JSON.parse(newDraft);
-        // 仅在数据实际不同时更新，避免不必要的重渲染
         if (Array.isArray(parsed) && JSON.stringify(parsed) !== JSON.stringify(multiPartDraft.value)) {
           multiPartDraft.value = parsed.length > 0 ? parsed : [{ id: Date.now(), content: '' }];
         }
       } catch {
-        // 如果解析失败，重置为安全状态
         multiPartDraft.value = [{ id: Date.now(), content: '' }];
       }
     } else {
@@ -85,9 +83,7 @@ export function useChatInput(currentChatId: Ref<string | null>) {
   // 7. 监听会话ID变化，加载新会话的草稿和输入模式
   watch(currentChatId, (newId, oldId) => {
     if (newId && newId !== oldId) {
-      // 清空上一个会话的暂存文件
       uploadedFiles.value = [];
-
       isMultiPartMode.value = chatInputModeState[newId] ?? false;
       const draft = rawDraftFromHistory.value;
 
@@ -113,17 +109,14 @@ export function useChatInput(currentChatId: Ref<string | null>) {
 
     const nextMode = !isMultiPartMode.value;
     if (nextMode) {
-      // 从单行切换到多部分，将当前内容作为第一个分区
       multiPartDraft.value = [{ id: Date.now(), content: singlePartDraft.value }];
     } else {
-      // 从多部分切换到单行，将所有分区内容合并
       singlePartDraft.value = multiPartDraft.value.map(p => p.content).join('\n--------------------------\n');
     }
     isMultiPartMode.value = nextMode;
     chatInputModeState[currentChatId.value] = nextMode;
 
-    // 立即保存切换后的草稿状态
-    debouncedSave.cancel(); // 取消任何待处理的保存
+    debouncedSave.cancel();
     debouncedSave(nextMode ? JSON.stringify(multiPartDraft.value) : singlePartDraft.value);
   };
 
@@ -139,12 +132,11 @@ export function useChatInput(currentChatId: Ref<string | null>) {
   const resetDraft = () => {
     singlePartDraft.value = '';
     multiPartDraft.value = [{ id: Date.now(), content: '' }];
-    uploadedFiles.value = []; // 修改: 同时清空已上传文件列表
-    // 发送后，立即保存空草稿，避免刷新后旧内容重现
+    uploadedFiles.value = [];
     debouncedSave('');
   };
 
-  // --- 新增: 文件管理方法 ---
+  // 11. 文件管理方法
   const addUploadedFile = (file: FileResponse) => {
     uploadedFiles.value.push(file);
   };
@@ -156,13 +148,34 @@ export function useChatInput(currentChatId: Ref<string | null>) {
     }
   };
 
+  /**
+   * 将内容追加到当前激活的输入框草稿中。
+   * @param content - 要追加的文本内容。
+   */
+  const appendContentToDraft = (content: string) => {
+    if (isMultiPartMode.value) {
+      if (multiPartDraft.value.length === 0) {
+        multiPartDraft.value.push({ id: Date.now(), content: '' });
+      }
+      const lastPartition = multiPartDraft.value[multiPartDraft.value.length - 1];
+      const currentContent = lastPartition.content.trim();
+      const separator = currentContent.length > 0 ? '\n' : '';
+      lastPartition.content += separator + content;
+    } else {
+      const currentContent = singlePartDraft.value.trim();
+      const separator = currentContent.length > 0 ? '\n' : '';
+      singlePartDraft.value += separator + content;
+    }
+  };
+
+
   // --- 对外暴露的API ---
   return {
     // 状态
     isMultiPartMode,
     singlePartDraft,
     multiPartDraft,
-    uploadedFiles, // 新增
+    uploadedFiles,
 
     // 计算属性
     currentUserInputText: computed((): string => isMultiPartMode.value
@@ -174,14 +187,15 @@ export function useChatInput(currentChatId: Ref<string | null>) {
         ? multiPartDraft.value.some(p => p.content.trim() !== '')
         : singlePartDraft.value.trim() !== '')
       || uploadedFiles.value.length > 0
-    ), // 新增
+    ),
 
     // 方法
     toggleMultiPartMode,
     undo,
     redo,
     resetDraft,
-    addUploadedFile, // 新增
-    removeUploadedFile, // 新增
+    addUploadedFile,
+    removeUploadedFile,
+    appendContentToDraft,
   };
 }

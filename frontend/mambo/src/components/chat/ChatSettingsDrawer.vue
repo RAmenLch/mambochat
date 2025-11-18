@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/chat/ChatSettingsDrawer.vue -->
 <template>
   <el-drawer
     :model-value="visible"
@@ -5,7 +6,7 @@
     direction="rtl"
     size="450px"
     @update:model-value="val => emit('update:visible', val)"
-    @close="emit('close')"
+    @close="handleDrawerClose"
   >
     <div class="drawer-content">
       <el-form v-if="chatData" :model="chatSettingsForm" label-position="top">
@@ -60,34 +61,20 @@
     </template>
   </el-drawer>
 
-  <!-- System Prompt Selection Dialog -->
-  <el-dialog v-model="promptDialogVisible" title="选择一个 System Prompt" width="500px">
-    <div class="prompt-list-container">
-      <el-scrollbar>
-        <div v-if="isResourcesLoading" class="loading-state">
-          <el-skeleton :rows="3" animated />
-        </div>
-        <div v-else-if="systemPrompts.length === 0" class="empty-state">
-          <el-empty description="没有可用的提示模板" />
-        </div>
-        <ul v-else class="prompt-list">
-          <li v-for="prompt in systemPrompts" :key="prompt.id" class="prompt-item" @click="handleSelectPrompt(prompt)">
-            <div class="prompt-name">{{ prompt.name }}</div>
-            <div class="prompt-description">{{ prompt.description }}</div>
-          </li>
-        </ul>
-      </el-scrollbar>
-    </div>
-  </el-dialog>
+  <!-- Reusable Resource Selector Dialog -->
+  <ResourceSelectorDialog
+    v-model:visible="promptDialogVisible"
+    resource-type-filter="system_prompt"
+    @append-content="handleAppendSystemPrompt"
+  />
 </template>
 
 <script setup lang="ts">
-import { reactive, watch, ref, computed } from 'vue';
+import { reactive, watch, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { QuestionFilled } from '@element-plus/icons-vue';
-import { storeToRefs } from 'pinia';
-import { useResourceStore } from '@/stores/resourceStore';
-import type { Chat, ChatUpdate, AIModel, Resource } from '@/api/types.ts';
+import type { Chat, ChatUpdate, AIModel } from '@/api/types.ts';
+import ResourceSelectorDialog from './dialogs/ResourceSelectorDialog.vue';
 
 interface GroupedModels {
   label: string;
@@ -115,14 +102,8 @@ const emit = defineEmits<{
   (e: 'save', settings: ChatUpdate): void;
 }>();
 
-// --- Resource Store Integration ---
-const resourceStore = useResourceStore();
-const { resources, isResourcesLoading } = storeToRefs(resourceStore);
+// --- Dialog Visibility State ---
 const promptDialogVisible = ref(false);
-
-const systemPrompts = computed(() =>
-  resources.value.filter(r => r.itemType === 'resource' && r.resourceType === 'system_prompt')
-);
 
 // --- Form State ---
 const chatSettingsForm = reactive<ChatSettingsForm>({
@@ -133,13 +114,6 @@ const chatSettingsForm = reactive<ChatSettingsForm>({
 });
 
 // --- Watchers ---
-watch(() => props.visible, (isVisible) => {
-  // Fetch resources when the drawer is opened, if they haven't been fetched yet.
-  if (isVisible && resources.value.length === 0) {
-    resourceStore.fetchResources();
-  }
-});
-
 watch(() => props.chatData, (newChat) => {
   if (newChat) {
     chatSettingsForm.name = newChat.name;
@@ -154,11 +128,11 @@ watch(() => props.chatData, (newChat) => {
 }, { immediate: true, deep: true });
 
 // --- Methods ---
-function handleSelectPrompt(prompt: Resource) {
-  if (prompt.latest_version && prompt.latest_version.content) {
-    chatSettingsForm.systemPrompt = prompt.latest_version.content;
-  }
-  promptDialogVisible.value = false;
+function handleAppendSystemPrompt(content: string) {
+  const currentPrompt = chatSettingsForm.systemPrompt || '';
+  const separator = currentPrompt.trim().length > 0 ? '\n' : '';
+
+  chatSettingsForm.systemPrompt = currentPrompt + separator + content;
 }
 
 function handleSaveSettings() {
@@ -173,6 +147,10 @@ function handleSaveSettings() {
     systemPrompt: chatSettingsForm.systemPrompt,
     modelParameters: { ...chatSettingsForm.modelParameters },
   });
+}
+
+function handleDrawerClose() {
+  emit('close');
 }
 </script>
 
@@ -193,45 +171,5 @@ function handleSaveSettings() {
   justify-content: space-between;
   align-items: center;
   width: 100%;
-}
-
-/* Styles for Prompt Selection Dialog */
-.prompt-list-container {
-  height: 400px;
-}
-.prompt-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-.prompt-item {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-.prompt-item:hover {
-  background-color: var(--el-fill-color-light);
-}
-.prompt-item:last-child {
-  border-bottom: none;
-}
-.prompt-name {
-  font-weight: 500;
-  color: var(--el-text-color-primary);
-}
-.prompt-description {
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
-  margin-top: 4px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.loading-state, .empty-state {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 100%;
 }
 </style>

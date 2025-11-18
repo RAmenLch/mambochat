@@ -11,7 +11,8 @@ from ..database import get_db
 router = APIRouter(prefix="/resources", tags=["Resource Management"])
 
 
-@router.get("/", response_model=List[schemas.Resource], summary="获取资源和文件夹列表")
+# MODIFIED: Changed path from "/" to "" to respond at /api/resources without a trailing slash.
+@router.get("", response_model=List[schemas.Resource], summary="获取资源和文件夹列表")
 async def read_resources(db: AsyncSession = Depends(get_db)):
     """
     获取所有资源和文件夹的列表，用于构建树状结构。
@@ -19,7 +20,8 @@ async def read_resources(db: AsyncSession = Depends(get_db)):
     return await resource_crud.get_resources(db=db)
 
 
-@router.post("/", response_model=schemas.Resource, status_code=status.HTTP_201_CREATED, summary="创建新资源或文件夹")
+# MODIFIED: Changed path from "/" to "" to respond at /api/resources without a trailing slash.
+@router.post("", response_model=schemas.Resource, status_code=status.HTTP_201_CREATED, summary="创建新资源或文件夹")
 async def create_resource(resource: schemas.ResourceCreate, db: AsyncSession = Depends(get_db)):
     """
     创建一个新的资源项（'resource'）或文件夹（'folder'）。
@@ -97,6 +99,7 @@ async def set_active_version(resource_id: str, version_id: str, db: AsyncSession
 @router.post("/reorder", status_code=status.HTTP_200_OK, summary="批量更新资源排序")
 async def reorder_resources(updates: List[schemas.ResourceReorderItem], db: AsyncSession = Depends(get_db)):
     """
+
     接收一个包含ID、新父ID和新排序顺序的列表，以批量更新项目层级和顺序。
     """
     await resource_crud.batch_update_resources_order(db, updates=updates)
