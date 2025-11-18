@@ -29,6 +29,7 @@
                 <span class="custom-tree-node">
                   <el-icon>
                     <Folder v-if="data.itemType === 'folder'" />
+                    <Memo v-else-if="data.resourceType === 'submessage_template'" />
                     <Document v-else />
                   </el-icon>
                   <span class="node-label">{{ data.name }}</span>
@@ -57,9 +58,9 @@
       <el-button
         type="primary"
         @click="handleConfirmSelection"
-        :disabled="!selectedForPreview || !selectedForPreview.latest_version?.content"
+        :disabled="!selectedForPreview"
       >
-        追加内容
+        使用
       </el-button>
     </template>
   </el-dialog>
@@ -68,7 +69,9 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import { ElTree } from 'element-plus';
-import { Folder, Document } from '@element-plus/icons-vue';
+// 导入 Element Plus 的内部类型
+import type { TreeNodeData } from 'element-plus/es/components/tree/src/tree.type';
+import { Folder, Document, Memo } from '@element-plus/icons-vue';
 import { storeToRefs } from 'pinia';
 import { useResourceStore } from '@/stores/resourceStore';
 import type { Resource, ResourceNode } from '@/api/types';
@@ -81,7 +84,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void;
-  (e: 'append-content', content: string): void;
+  (e: 'select-resource', resource: Resource): void;
 }>();
 
 // --- Store Integration ---
@@ -133,18 +136,20 @@ watch(searchText, (val) => {
 // --- Methods ---
 /**
  * Method for the el-tree's `filter-node-method` prop to filter nodes by name.
- * The `data` parameter is typed as `any` to match the signature of ElTree's prop.
+ * The `data` parameter is typed as `TreeNodeData` to satisfy Element Plus's signature.
  */
-const filterNode = (value: string, data: any): boolean => {
+const filterNode = (value: string, data: TreeNodeData): boolean => {
   if (!value) return true;
+  // 使用类型断言来安全地访问 'name' 属性
   return (data as ResourceNode).name.toLowerCase().includes(value.toLowerCase());
 };
 
 /**
  * Handles clicks on tree nodes, setting the selected item for preview if it's a resource.
- * The `data` parameter is typed as `any` to match the signature of ElTree's event.
+ * The `data` parameter is typed as `TreeNodeData` to satisfy Element Plus's signature.
  */
-const handleNodeClick = (data: any) => {
+const handleNodeClick = (data: TreeNodeData) => {
+  // 使用类型断言来安全地访问 'itemType' 属性
   const resource = data as ResourceNode;
   if (resource.itemType === 'resource') {
     selectedForPreview.value = resource;
@@ -152,14 +157,13 @@ const handleNodeClick = (data: any) => {
 };
 
 /**
- * Emits the selected resource's content and closes the dialog.
+ * Emits the selected resource object and closes the dialog.
  */
 function handleConfirmSelection() {
-  if (!selectedForPreview.value || !selectedForPreview.value.latest_version?.content) {
+  if (!selectedForPreview.value) {
     return;
   }
-  const contentToAppend = selectedForPreview.value.latest_version.content;
-  emit('append-content', contentToAppend);
+  emit('select-resource', selectedForPreview.value);
   emit('update:visible', false);
 }
 

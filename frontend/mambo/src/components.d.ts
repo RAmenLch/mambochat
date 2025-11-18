@@ -63,6 +63,7 @@ declare module 'vue' {
     NewChatDialog: typeof import('./components/chat/dialogs/NewChatDialog.vue')['default']
     ProviderFormDialog: typeof import('./components/settings/dialogs/ProviderFormDialog.vue')['default']
     ProviderModelManager: typeof import('./components/settings/ProviderModelManager.vue')['default']
+    ResourceCreateDialog: typeof import('./components/settings/dialogs/ResourceCreateDialog.vue')['default']
     ResourceManager: typeof import('./components/settings/ResourceManager.vue')['default']
     ResourceSelectorDialog: typeof import('./components/chat/dialogs/ResourceSelectorDialog.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']

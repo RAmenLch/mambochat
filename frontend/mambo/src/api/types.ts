@@ -68,6 +68,7 @@ export interface MessageUpdate {
 
 export interface GenerateRequest {
   sub_messages: SubMessageCreate[];
+  attachedSubmessageResourceIds?: string[];
 }
 
 /**
@@ -276,7 +277,7 @@ export type ResourceItemType = 'resource' | 'folder';
 /**
  * 定义资源的具体品类。
  */
-export type ResourceType = string;
+export type ResourceType = 'system_prompt' | 'submessage_template' | string;
 
 /**
  * 代表一个资源版本快照。
@@ -331,6 +332,8 @@ export interface ResourceCreate {
   resourceType?: ResourceType | null;
   parentId?: string | null;
   sortOrder: number;
+  initial_content?: string | null;
+  initial_attributes?: Record<string, any> | null;
 }
 
 /**

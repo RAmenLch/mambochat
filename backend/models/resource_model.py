@@ -40,11 +40,15 @@ class Resource(Base):
         back_populates="resource",
         cascade="all, delete-orphan",
         order_by="ResourceVersion.sortOrder.asc()",
-        # MODIFIED: 明确指定此关系使用 ResourceVersion.resourceId 作为外键
         foreign_keys="[ResourceVersion.resourceId]"
     )
-    # 这个关系已经通过 foreign_keys=[latestVersionId] 明确指定了，所以是正确的
-    latest_version = relationship("ResourceVersion", foreign_keys=[latestVersionId])
+
+    # MODIFIED: Added post_update=True to break the circular dependency during delete operations.
+    latest_version = relationship(
+        "ResourceVersion",
+        foreign_keys=[latestVersionId],
+        post_update=True
+    )
 
     children = relationship("Resource", back_populates="parent", cascade="all, delete-orphan")
     parent = relationship("Resource", remote_side=[id], back_populates="children")
@@ -72,7 +76,6 @@ class ResourceVersion(Base):
     resource = relationship(
         "Resource",
         back_populates="versions",
-        # MODIFIED: 明确指定此反向关系使用本表(ResourceVersion)的 resourceId 字段
         foreign_keys=[resourceId]
     )
     associated_files = relationship("File", secondary="ResourceVersionFileAssociation")

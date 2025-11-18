@@ -72,13 +72,17 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
   /**
    * 发送新消息。
    * @param sub_messages - 用户创建的子消息数组。
+   * @param attachedResourceIds - 附加的SubMessage模板资源ID数组。
    */
-  async function sendMessage(sub_messages: SubMessageCreate[]) {
+  async function sendMessage(sub_messages: SubMessageCreate[], attachedResourceIds?: string[]) {
     const chatId = sessionStore.currentChatId;
     if (!chatId || sessionStore.isGenerating) return;
 
     try {
-      const { user_message, assistant_message } = await prepareGenerate(chatId, { sub_messages });
+      const { user_message, assistant_message } = await prepareGenerate(chatId, {
+        sub_messages,
+        attachedSubmessageResourceIds: attachedResourceIds,
+      });
       sessionStore._addMessage(user_message);
       sessionStore._addMessage(assistant_message);
 

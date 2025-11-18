@@ -4,7 +4,7 @@ import { ref, watch, computed, reactive } from 'vue';
 import { useUndoRedoHistory } from './useUndoRedoHistory';
 import { debounce } from 'lodash-es';
 import type { Ref } from 'vue';
-import type { FileResponse } from '@/api/types';
+import type { FileResponse, Resource } from '@/api/types';
 
 /**
  * 定义多部分输入的分区结构。
@@ -37,6 +37,7 @@ export function useChatInput(currentChatId: Ref<string | null>) {
   const singlePartDraft = ref('');
   const multiPartDraft = ref<Partition[]>([{ id: Date.now(), content: '' }]);
   const uploadedFiles = ref<FileResponse[]>([]);
+  const attachedSubmessageResources = ref<Resource[]>([]);
 
   // 3. 跨会话记住用户的输入模式偏好
   const chatInputModeState = reactive<Record<string, boolean>>({});
@@ -84,6 +85,7 @@ export function useChatInput(currentChatId: Ref<string | null>) {
   watch(currentChatId, (newId, oldId) => {
     if (newId && newId !== oldId) {
       uploadedFiles.value = [];
+      attachedSubmessageResources.value = [];
       isMultiPartMode.value = chatInputModeState[newId] ?? false;
       const draft = rawDraftFromHistory.value;
 
@@ -133,6 +135,7 @@ export function useChatInput(currentChatId: Ref<string | null>) {
     singlePartDraft.value = '';
     multiPartDraft.value = [{ id: Date.now(), content: '' }];
     uploadedFiles.value = [];
+    // Note: attachedSubmessageResources is NOT reset here, as per requirement.
     debouncedSave('');
   };
 
@@ -145,6 +148,20 @@ export function useChatInput(currentChatId: Ref<string | null>) {
     const index = uploadedFiles.value.findIndex(f => f.id === fileId);
     if (index !== -1) {
       uploadedFiles.value.splice(index, 1);
+    }
+  };
+
+  // 12. SubMessage 模板管理方法
+  const addAttachedResource = (resource: Resource) => {
+    if (!attachedSubmessageResources.value.some(r => r.id === resource.id)) {
+      attachedSubmessageResources.value.push(resource);
+    }
+  };
+
+  const removeAttachedResource = (resourceId: string) => {
+    const index = attachedSubmessageResources.value.findIndex(r => r.id === resourceId);
+    if (index !== -1) {
+      attachedSubmessageResources.value.splice(index, 1);
     }
   };
 
@@ -176,6 +193,7 @@ export function useChatInput(currentChatId: Ref<string | null>) {
     singlePartDraft,
     multiPartDraft,
     uploadedFiles,
+    attachedSubmessageResources,
 
     // 计算属性
     currentUserInputText: computed((): string => isMultiPartMode.value
@@ -196,6 +214,8 @@ export function useChatInput(currentChatId: Ref<string | null>) {
     resetDraft,
     addUploadedFile,
     removeUploadedFile,
+    addAttachedResource,
+    removeAttachedResource,
     appendContentToDraft,
   };
 }

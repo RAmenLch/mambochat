@@ -22,6 +22,7 @@ import type {
   ResourceNode,
   ResourceVersionCreate,
   ResourceWithVersions,
+  ResourceVersionUpdate,
 } from '@/api/types';
 
 /**
@@ -105,6 +106,29 @@ export const useResourceStore = defineStore('resource', () => {
   }
 
   /**
+   * 更新指定资源当前活跃版本的内容和属性。
+   */
+  async function updateActiveVersionDetails(resourceId: string, data: ResourceVersionUpdate) {
+    const resource = resources.value.find(r => r.id === resourceId);
+    if (!resource || !resource.latest_version) {
+      console.error(`Resource ${resourceId} or its active version not found.`);
+      return;
+    }
+    const versionId = resource.latest_version.id;
+    try {
+      const updatedVersion = await updateResourceVersion(versionId, data);
+      if (resource.latest_version) {
+        // 使用返回的完整版本对象进行更新，确保数据同步
+        Object.assign(resource.latest_version, updatedVersion);
+      }
+    } catch (error) {
+      console.error(`Failed to update details for version ${versionId}:`, error);
+      // 发生错误时，从服务器获取最新状态以保证一致性
+      await fetchResourceDetails(resourceId);
+    }
+  }
+
+  /**
    * 删除一个资源或文件夹。
    */
   async function deleteResourceItem(resourceId: string) {
@@ -134,7 +158,8 @@ export const useResourceStore = defineStore('resource', () => {
     resources.value.sort((a, b) => a.sortOrder - b.sortOrder);
     try {
       await reorderResources(updates);
-    } catch (error) {
+    } catch (error)
+    {
       console.error('Failed to reorder resources:', error);
       await fetchResources();
     }
@@ -193,6 +218,7 @@ export const useResourceStore = defineStore('resource', () => {
     addResourceItem,
     updateResourceItem,
     updateVersionContent,
+    updateActiveVersionDetails,
     deleteResourceItem,
     reorderResourceItems,
     createNewVersion,

@@ -61,7 +61,11 @@ async def _build_llm_messages_payload(
     current_role = None
     current_content_parts = []
 
-    for msg in history_messages:
+    total_messages = len(history_messages)
+    for msg_index, msg in enumerate(history_messages):
+        # 计算消息的新旧程度排名 (1=最新, 2=次新, ...)
+        message_recency_rank = total_messages - msg_index
+
         if current_role != msg.role and current_role is not None:
             merged_parts = merge_text_parts(current_content_parts)
             if merged_parts:
@@ -73,14 +77,26 @@ async def _build_llm_messages_payload(
         current_role = msg.role
 
         for sub in msg.sub_messages:
-            config_str = sub.config if isinstance(sub.config, str) else json.dumps(sub.config or {})
+            cpl = None
             try:
-                config_dict = json.loads(config_str)
-                if config_dict.get('context_participation_length') == 0:
-                    continue
+                config_str = sub.config if isinstance(sub.config, str) else json.dumps(sub.config or {})
+                if config_str:
+                    config_dict = json.loads(config_str)
+                    cpl = config_dict.get('context_participation_length')
             except (json.JSONDecodeError, TypeError):
+                # 解析失败则 cpl 保持为 None, 按默认逻辑(参与上下文)处理
                 pass
 
+            # 如果 cpl 为 0, 则此 sub-message 不参与上下文
+            if cpl == 0:
+                continue
+
+            # 如果 cpl 是正整数, 检查当前 message 是否在指定的“新”范围内
+            if isinstance(cpl, int) and cpl > 0:
+                if message_recency_rank > cpl:
+                    continue
+
+            # 其他情况 (cpl 为 None 或满足条件) 则正常加入上下文
             if sub.type == schemas_enums.SubMessageType.FILE.value:
                 db_file = await file_crud.get_file(db_session, sub.content)
                 if not db_file:
@@ -274,7 +290,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
                     sortOrder=2,
                     status=schemas_enums.MessageStatus.COMPLETED,
                     initial_content=db_file.id,
-                    config={"context_participation_length": 0}
+                    config={}
                 )
             except Exception as e:
                 print(f"Error processing generated image: {e}")

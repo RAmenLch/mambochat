@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/settings/ResourceManager.vue -->
 <template>
   <el-container class="resource-manager-container">
     <!-- Left Panel: Resource Tree -->
@@ -30,6 +31,7 @@
             <span class="custom-tree-node">
               <el-icon class="node-icon">
                 <Folder v-if="data.itemType === 'folder'" />
+                <Memo v-else-if="data.resourceType === 'submessage_template'" />
                 <Document v-else />
               </el-icon>
               <span class="node-label">{{ data.name }}</span>
@@ -55,14 +57,40 @@
             <el-form-item label="描述" prop="description">
               <el-input v-model="form.description" type="textarea" :rows="2" />
             </el-form-item>
-            <el-form-item
-              v-if="activeResourceDetails.itemType === 'resource'"
-              :label="contentEditorLabel"
-              prop="content"
-              class="content-form-item"
-            >
-              <el-input v-model="form.content" type="textarea" placeholder="在此处输入内容..." />
-            </el-form-item>
+
+            <template v-if="activeResourceDetails.itemType === 'resource'">
+              <el-form-item
+                :label="contentEditorLabel"
+                prop="content"
+                class="content-form-item"
+              >
+                <el-input v-model="form.content" type="textarea" placeholder="在此处输入内容..." />
+              </el-form-item>
+
+              <!-- SubMessage Template Attributes -->
+              <div v-if="activeResourceDetails.resourceType === 'submessage_template'" class="attributes-section">
+                <el-divider>模板配置</el-divider>
+                <el-form-item>
+                   <template #label>
+                    <span>上下文参与长度 (Context Participation Length)</span>
+                    <el-tooltip effect="dark" content="0代表参与所有上下文, 1代表仅参与最新一轮对话" placement="top">
+                      <el-icon class="label-icon"><QuestionFilled /></el-icon>
+                    </el-tooltip>
+                  </template>
+                  <el-input-number v-model="form.attributes.context_participation_length" :min="0" :step="1" controls-position="right" style="width: 100%;" />
+                </el-form-item>
+                <el-form-item>
+                  <template #label>
+                    <span>默认折叠 (Is Collapsed)</span>
+                    <el-tooltip effect="dark" content="在对话中注入时, 该模板内容是否默认折叠" placement="top">
+                      <el-icon class="label-icon"><QuestionFilled /></el-icon>
+                    </el-tooltip>
+                  </template>
+                  <el-switch v-model="form.attributes.is_collapsed" />
+                </el-form-item>
+              </div>
+            </template>
+
           </el-form>
           <div class="editor-footer">
             <el-button @click="resetForm">重置</el-button>
@@ -124,14 +152,21 @@
       </template>
     </el-dropdown>
 
-    <!-- Dialog for Name Input (Rename/New) -->
+    <!-- Dialog for Rename and New Folder -->
     <ItemNameDialog
       v-model:visible="itemNameDialog.visible"
       :title="itemNameDialog.title"
       :initial-name="itemNameDialog.initialName"
       :item-type="itemNameDialog.itemType"
+      @confirm="handleItemNameConfirm"
+    />
+
+    <!-- Dialog for New Resource -->
+    <ResourceCreateDialog
+      v-model:visible="resourceCreateDialog.visible"
+      title="新建资源"
       :resource-types="creatableResourceTypes"
-      @confirm="handleConfirmItemName"
+      @confirm="handleResourceCreateConfirm"
     />
 
     <!-- Dialog for New Version -->
@@ -158,12 +193,19 @@ import { storeToRefs } from 'pinia';
 import { ElMessage, ElMessageBox, ElTree, type FormInstance } from 'element-plus';
 import type { AllowDropType, NodeDropType } from 'element-plus/es/components/tree/src/tree.type';
 import type Node from 'element-plus/es/components/tree/src/model/node';
-import { Folder, Document, DocumentAdd, FolderAdd, EditPen, Delete } from '@element-plus/icons-vue';
+import { Folder, Document, DocumentAdd, FolderAdd, EditPen, Delete, Memo, QuestionFilled } from '@element-plus/icons-vue';
 
 import { useResourceStore } from '@/stores/resourceStore';
 import { useContextMenu } from '@/composables/useContextMenu';
 import ItemNameDialog from '@/components/chat/dialogs/ItemNameDialog.vue';
-import type { Resource, ResourceReorderItem, ResourceWithVersions, ResourceType, ResourceVersion, ResourceVersionCreate } from '@/api/types';
+import ResourceCreateDialog from './dialogs/ResourceCreateDialog.vue';
+import type { Resource, ResourceReorderItem, ResourceWithVersions, ResourceType, ResourceVersion, ResourceVersionCreate, ResourceItemType } from '@/api/types';
+
+// --- Local Type Definitions ---
+interface SubMessageTemplateAttributes {
+  context_participation_length: number;
+  is_collapsed: boolean;
+}
 
 // --- Store ---
 const resourceStore = useResourceStore();
@@ -172,7 +214,13 @@ const { isResourcesLoading, resources, resourceTree } = storeToRefs(resourceStor
 // --- Constants for Extensibility ---
 const creatableResourceTypes: { value: ResourceType, label: string }[] = [
   { value: 'system_prompt', label: 'System Prompt' },
+  { value: 'submessage_template', label: 'SubMessage 模板' },
 ];
+
+const DEFAULT_SUBMESSAGE_ATTRIBUTES: SubMessageTemplateAttributes = {
+  context_participation_length: 1, // 默认值已修改为 1
+  is_collapsed: false,
+};
 
 // --- Refs and Reactive State ---
 const treeRef = ref<InstanceType<typeof ElTree>>();
@@ -185,13 +233,18 @@ const form = reactive({
   name: '',
   description: '',
   content: '',
+  attributes: { ...DEFAULT_SUBMESSAGE_ATTRIBUTES },
 });
 
 const itemNameDialog = reactive({
   visible: false,
   title: '',
   initialName: '',
-  itemType: 'folder' as 'folder' | 'resource',
+  itemType: 'folder' as ResourceItemType,
+});
+
+const resourceCreateDialog = reactive({
+  visible: false,
 });
 
 const newVersionDialog = reactive({
@@ -215,13 +268,23 @@ const activeResourceDetails = computed((): ResourceWithVersions | null => {
 const isFormDirty = computed(() => {
   if (!activeResourceDetails.value) return false;
   const original = activeResourceDetails.value;
-  const originalContent = loadedVersionInEditor.value?.content ?? original.latest_version?.content ?? '';
+  const originalVersion = loadedVersionInEditor.value ?? original.latest_version;
 
-  return (
-    form.name !== original.name ||
-    form.description !== (original.description || '') ||
-    (original.itemType === 'resource' && form.content !== originalContent)
-  );
+  const isMetaDirty = form.name !== original.name || form.description !== (original.description || '');
+
+  if (original.itemType === 'resource') {
+    const isContentDirty = form.content !== (originalVersion?.content || '');
+
+    let isAttributesDirty = false;
+    if (original.resourceType === 'submessage_template') {
+      const originalAttributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES, ...(originalVersion?.attributes as Partial<SubMessageTemplateAttributes> || {}) };
+      isAttributesDirty = JSON.stringify(form.attributes) !== JSON.stringify(originalAttributes);
+    }
+
+    return isMetaDirty || isContentDirty || isAttributesDirty;
+  }
+
+  return isMetaDirty;
 });
 
 const contentEditorLabel = computed(() => {
@@ -242,6 +305,16 @@ watch(activeResourceDetails, (newSelection) => {
     form.name = newSelection.name;
     form.description = newSelection.description || '';
     form.content = newSelection.latest_version?.content || '';
+
+    if (newSelection.resourceType === 'submessage_template') {
+      form.attributes = {
+        ...DEFAULT_SUBMESSAGE_ATTRIBUTES,
+        ...(newSelection.latest_version?.attributes as Partial<SubMessageTemplateAttributes> || {}),
+      };
+    } else {
+      form.attributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES };
+    }
+
     loadedVersionInEditor.value = null;
   } else {
     resetForm();
@@ -257,15 +330,24 @@ async function handleNodeClick(data: ResourceWithVersions) {
 }
 
 function resetForm() {
-  if (activeResourceDetails.value) {
-    form.name = activeResourceDetails.value.name;
-    form.description = activeResourceDetails.value.description || '';
-    form.content = activeResourceDetails.value.latest_version?.content || '';
+  const selection = activeResourceDetails.value;
+  if (selection) {
+    form.name = selection.name;
+    form.description = selection.description || '';
+    form.content = selection.latest_version?.content || '';
+
+    if (selection.resourceType === 'submessage_template') {
+      form.attributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES, ...(selection.latest_version?.attributes as Partial<SubMessageTemplateAttributes> || {}) };
+    } else {
+      form.attributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES };
+    }
+
     loadedVersionInEditor.value = null;
   } else {
     form.name = '';
     form.description = '';
     form.content = '';
+    form.attributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES };
   }
 }
 
@@ -280,8 +362,11 @@ async function handleSaveChanges() {
     });
   }
 
-  if (resource.itemType === 'resource' && form.content !== (resource.latest_version?.content || '')) {
-    await resourceStore.updateVersionContent(resource, form.content);
+  if (resource.itemType === 'resource') {
+    await resourceStore.updateActiveVersionDetails(resource.id, {
+      content: form.content,
+      attributes: form.attributes,
+    });
   }
 
   ElMessage.success('保存成功');
@@ -325,10 +410,7 @@ const handleCommand = (command: 'newResource' | 'newFolder' | 'rename' | 'delete
   const item = contextMenuItem.value;
   switch (command) {
     case 'newResource':
-      itemNameDialog.title = '新建资源';
-      itemNameDialog.initialName = '新的资源';
-      itemNameDialog.itemType = 'resource';
-      itemNameDialog.visible = true;
+      resourceCreateDialog.visible = true;
       break;
     case 'newFolder':
       itemNameDialog.title = '新建文件夹';
@@ -340,7 +422,7 @@ const handleCommand = (command: 'newResource' | 'newFolder' | 'rename' | 'delete
       if (item) {
         itemNameDialog.title = '重命名';
         itemNameDialog.initialName = item.name;
-        itemNameDialog.itemType = item.itemType as 'folder' | 'resource';
+        itemNameDialog.itemType = item.itemType;
         itemNameDialog.visible = true;
       }
       break;
@@ -350,34 +432,38 @@ const handleCommand = (command: 'newResource' | 'newFolder' | 'rename' | 'delete
   }
 };
 
-async function handleConfirmItemName(payload: string | { name: string; resourceType?: ResourceType }) {
-  let name: string;
-  let resourceType: ResourceType | undefined;
-
-  if (typeof payload === 'string') {
-    name = payload;
-  } else {
-    name = payload.name;
-    resourceType = payload.resourceType;
-  }
-
+async function handleResourceCreateConfirm(payload: { name: string; resourceType: ResourceType }) {
+  const { name, resourceType } = payload;
   const parentId = contextMenuItem.value?.itemType === 'folder'
     ? contextMenuItem.value.id
     : contextMenuItem.value?.parentId ?? null;
   const sortOrder = resourceStore.resources.filter(r => r.parentId === parentId).length;
 
+  let initial_attributes: Partial<SubMessageTemplateAttributes> | undefined;
+  if (resourceType === 'submessage_template') {
+      initial_attributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES };
+  }
+
+  await resourceStore.addResourceItem({
+    name,
+    itemType: 'resource',
+    resourceType,
+    parentId,
+    sortOrder,
+    initial_content: '',
+    initial_attributes,
+  });
+}
+
+async function handleItemNameConfirm(name: string) {
   if (itemNameDialog.title === '重命名' && contextMenuItem.value) {
     await resourceStore.updateResourceItem(contextMenuItem.value.id, { name });
   } else if (itemNameDialog.itemType === 'folder') {
+    const parentId = contextMenuItem.value?.itemType === 'folder'
+      ? contextMenuItem.value.id
+      : contextMenuItem.value?.parentId ?? null;
+    const sortOrder = resourceStore.resources.filter(r => r.parentId === parentId).length;
     await resourceStore.addResourceItem({ name, itemType: 'folder', parentId, sortOrder });
-  } else if (itemNameDialog.itemType === 'resource') {
-    await resourceStore.addResourceItem({
-      name,
-      itemType: 'resource',
-      resourceType,
-      parentId,
-      sortOrder,
-    });
   }
 }
 
@@ -397,6 +483,11 @@ const handleDelete = async (item: Resource) => {
 // --- Versioning Methods ---
 function loadVersionIntoEditor(version: ResourceVersion) {
   form.content = version.content || '';
+  if (activeResourceDetails.value?.resourceType === 'submessage_template') {
+    form.attributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES, ...(version.attributes as Partial<SubMessageTemplateAttributes> || {}) };
+  } else {
+    form.attributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES };
+  }
   loadedVersionInEditor.value = version;
 }
 
@@ -425,6 +516,7 @@ async function handleConfirmNewVersion() {
       const versionData: ResourceVersionCreate = {
         ...newVersionDialog.form,
         content: form.content,
+        attributes: form.attributes,
       };
       await resourceStore.createNewVersion(activeResourceDetails.value!.id, versionData);
       newVersionDialog.visible = false;
@@ -531,6 +623,15 @@ async function handleConfirmNewVersion() {
 }
 .delete-item {
   color: var(--el-color-danger);
+}
+
+.attributes-section {
+  margin-top: -10px;
+}
+.label-icon {
+  margin-left: 8px;
+  color: #909399;
+  cursor: help;
 }
 
 /* Version History Panel Styles */

@@ -58,6 +58,21 @@
           @trigger-file-upload="handleTriggerFileUpload"
           @open-resource-selector="resourceSelectorVisible = true"
         />
+
+        <!-- Attached Templates Preview Area -->
+        <div v-if="attachedSubmessageResources.length > 0" class="attached-templates-preview">
+          <el-tag
+            v-for="resource in attachedSubmessageResources"
+            :key="resource.id"
+            closable
+            disable-transitions
+            type="info"
+            @close="removeAttachedResource(resource.id)"
+          >
+            {{ resource.name }}
+          </el-tag>
+        </div>
+
         <!-- Uploaded Files Preview Area -->
         <div v-if="uploadedFiles.length > 0" class="uploaded-files-preview">
           <div v-for="file in uploadedFiles" :key="file.id" class="file-item">
@@ -132,7 +147,7 @@
 
     <ResourceSelectorDialog
       v-model:visible="resourceSelectorVisible"
-      @append-content="handleAppendResourceContent"
+      @select-resource="handleResourceSelected"
     />
   </div>
 </template>
@@ -143,7 +158,7 @@ import { storeToRefs } from 'pinia';
 import { ElScrollbar, ElInput, ElMessage } from 'element-plus';
 import { Promotion, VideoPause, Edit, Refresh, Document, Picture, Close } from '@element-plus/icons-vue';
 import type { Ref } from 'vue';
-import type { ChatUpdate, SubMessageCreate, AIModel } from '@/api/types';
+import type { ChatUpdate, SubMessageCreate, AIModel, Resource } from '@/api/types';
 import { uploadFile } from '@/api/chatService';
 
 // --- Stores & Composables ---
@@ -181,11 +196,14 @@ const {
   singlePartDraft,
   multiPartDraft,
   uploadedFiles,
+  attachedSubmessageResources,
   isReadyToSend,
   toggleMultiPartMode,
   currentUserInputText,
   addUploadedFile,
   removeUploadedFile,
+  addAttachedResource,
+  removeAttachedResource,
   undo,
   redo,
   resetDraft,
@@ -218,18 +236,23 @@ const isSendButtonDisabled = computed(() => isGenerating.value || !isReadyToSend
 // --- Methods ---
 
 /**
- * Handles appending content from the resource selector to the current input draft
- * and focuses the input area.
- * @param content The string content to append.
+ * Handles the selection of a resource from the resource selector dialog.
+ * Appends content for system prompts or attaches submessage templates.
+ * @param resource The selected resource object.
  */
-async function handleAppendResourceContent(content: string) {
-  appendContentToDraft(content);
-
-  await nextTick();
-  if (isMultiPartMode.value) {
-    multiPartInputRef.value?.focus();
-  } else {
-    inputRef.value?.focus();
+async function handleResourceSelected(resource: Resource) {
+  if (resource.resourceType === 'system_prompt') {
+    if (resource.latest_version?.content) {
+      appendContentToDraft(resource.latest_version.content);
+      await nextTick();
+      if (isMultiPartMode.value) {
+        multiPartInputRef.value?.focus();
+      } else {
+        inputRef.value?.focus();
+      }
+    }
+  } else if (resource.resourceType === 'submessage_template') {
+    addAttachedResource(resource);
   }
 }
 
@@ -277,7 +300,8 @@ async function handleSendMessage() {
   }));
 
   if (finalSubMessages.length > 0) {
-    await chatInteractionStore.sendMessage(finalSubMessages);
+    const attachedResourceIds = attachedSubmessageResources.value.map(r => r.id);
+    await chatInteractionStore.sendMessage(finalSubMessages, attachedResourceIds);
     resetDraft();
   }
 }
@@ -394,6 +418,14 @@ watch(currentChatId, (newId) => {
 .message-list-wrapper { padding: 20px; }
 .input-container-wrapper { flex-shrink: 0; position: relative; display: flex; flex-direction: column; border-top: 1px solid var(--color-border); }
 .resize-handle { position: absolute; top: -3px; left: 0; width: 100%; height: 6px; cursor: ns-resize; z-index: 10; }
+
+.attached-templates-preview {
+  padding: 8px 20px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  background-color: var(--color-background-soft);
+}
 
 .uploaded-files-preview {
   padding: 8px 20px 0;

@@ -65,7 +65,7 @@
   <ResourceSelectorDialog
     v-model:visible="promptDialogVisible"
     resource-type-filter="system_prompt"
-    @append-content="handleAppendSystemPrompt"
+    @select-resource="handleAppendSystemPrompt"
   />
 </template>
 
@@ -73,7 +73,7 @@
 import { reactive, watch, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { QuestionFilled } from '@element-plus/icons-vue';
-import type { Chat, ChatUpdate, AIModel } from '@/api/types.ts';
+import type { Chat, ChatUpdate, AIModel, Resource } from '@/api/types.ts';
 import ResourceSelectorDialog from './dialogs/ResourceSelectorDialog.vue';
 
 interface GroupedModels {
@@ -128,7 +128,10 @@ watch(() => props.chatData, (newChat) => {
 }, { immediate: true, deep: true });
 
 // --- Methods ---
-function handleAppendSystemPrompt(content: string) {
+function handleAppendSystemPrompt(resource: Resource) {
+  const content = resource.latest_version?.content;
+  if (!content) return;
+
   const currentPrompt = chatSettingsForm.systemPrompt || '';
   const separator = currentPrompt.trim().length > 0 ? '\n' : '';
 
