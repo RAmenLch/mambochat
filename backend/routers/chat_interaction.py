@@ -211,7 +211,7 @@ async def prepare_to_generate(
         db: AsyncSession = Depends(get_db)
 ):
     user_message, assistant_placeholder = await generation_service.create_user_message_and_prepare_generation(
-        db=db, chat_id=chat_id, user_sub_messages=request.sub_messages
+        db=db, chat_id=chat_id, request=request
     )
     await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id)
 
@@ -278,3 +278,4 @@ async def stream_response(
         generation_service.subscribe_to_stream(db, assistant_message_id),
         media_type="text/event-stream"
     )
+

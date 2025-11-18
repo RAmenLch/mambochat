@@ -66,6 +66,7 @@ class ChatReorderItem(BaseModel):
 
 class GenerateRequest(BaseModel):
     sub_messages: List[SubMessageCreate]
+    attachedSubmessageResourceIds: Optional[List[str]] = Field(None, description="本次发送时要附加的Submessage模板资源ID列表")
 
 
 class PrepareGenerateResponse(BaseModel):

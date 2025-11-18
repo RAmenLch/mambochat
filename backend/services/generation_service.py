@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import AsyncGenerator, List, Optional, Tuple
 
 from .stream_manager_service import stream_manager
-from ..crud import chat_crud, message_crud, file_crud
+from ..crud import chat_crud, message_crud, file_crud, resource_crud
 from .. import schemas
 from ..models import chat_model
 from ..database import AsyncSessionLocal
@@ -88,14 +88,36 @@ async def prepare_for_regeneration(
 async def create_user_message_and_prepare_generation(
         db: AsyncSession,
         chat_id: str,
-        user_sub_messages: List[schemas.SubMessageCreate],
+        request: schemas.GenerateRequest,
 ) -> Tuple[chat_model.Message, chat_model.Message]:
     """
     处理发送新消息的场景：创建用户消息，然后准备生成AI回复。
     返回一个元组 (新创建的用户消息, AI占位符消息)。
     """
-    # 在创建消息前，处理文件类型的子消息
-    for sub_message in user_sub_messages:
+    injected_sub_messages = []
+    if request.attachedSubmessageResourceIds:
+        for resource_id in request.attachedSubmessageResourceIds:
+            resource = await resource_crud.get_resource(db, resource_id=resource_id)
+            if resource and resource.latest_version and resource.resourceType == 'submessage_template':
+                latest_version = resource.latest_version
+                config_data = latest_version.attributes or {}
+
+                template_sub_message = schemas.SubMessageCreate(
+                    content=latest_version.content or "",
+                    sortOrder=-1,  # 临时值，稍后重新排序
+                    type=schemas.SubMessageType.NORMAL,
+                    config=schemas.SubMessageConfig(**config_data),
+                    status=schemas.MessageStatus.COMPLETED
+                )
+                injected_sub_messages.append(template_sub_message)
+
+    # 组合注入的模板和用户输入的内容，并重新排序
+    all_sub_messages = injected_sub_messages + request.sub_messages
+    for i, sub_msg in enumerate(all_sub_messages):
+        sub_msg.sortOrder = i
+
+    # 在创建消息前，处理用户原始提交的文件类型子消息
+    for sub_message in request.sub_messages:
         if sub_message.type == 'File':
             file_id = sub_message.content
             # 将文件管理类型从 'temporary' 更新为 'sub_message'
@@ -107,7 +129,7 @@ async def create_user_message_and_prepare_generation(
 
     user_message_create = schemas.MessageCreate(
         role=schemas.MessageRole.USER,
-        sub_messages=user_sub_messages
+        sub_messages=all_sub_messages
     )
     user_message = await message_crud.create_message(db, message=user_message_create, chat_id=chat_id)
 
@@ -239,3 +261,4 @@ async def subscribe_to_stream(
         print(f"[Subscriber] Client disconnected for message '{assistant_message_id}'.")
     finally:
         await stream_manager.unsubscribe(assistant_message_id, queue)
+

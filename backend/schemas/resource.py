@@ -1,8 +1,10 @@
 # backend/schemas/resource.py
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from datetime import datetime
 from typing import Optional, List, Dict, Any
+
+from .message import SubMessageConfig
 
 
 # --- ResourceVersion Schemas ---
@@ -42,13 +44,24 @@ class ResourceBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = None
     itemType: str = Field('resource', description="项目类型: 'resource' 或 'folder'")
-    resourceType: Optional[str] = Field(None, description="资源类型, 例如 'system_prompt'")
+    resourceType: Optional[str] = Field(None, description="资源类型, 例如 'system_prompt', 'submessage_template'")
     parentId: Optional[str] = None
     sortOrder: int = 0
 
 
 class ResourceCreate(ResourceBase):
-    pass
+    initial_content: Optional[str] = Field(None, description="创建资源时，为其初始版本设置的内容")
+    initial_attributes: Optional[Dict[str, Any]] = Field(None, description="创建资源时，为其初始版本设置的属性")
+
+    @model_validator(mode='after')
+    def check_template_attributes(self) -> 'ResourceCreate':
+        if self.resourceType == 'submessage_template' and self.initial_attributes is not None:
+            try:
+                # 验证 'submessage_template' 类型的 attributes 字段是否符合 SubMessageConfig 规范
+                SubMessageConfig.model_validate(self.initial_attributes)
+            except Exception as e:
+                raise ValueError(f"Attributes for submessage_template are invalid: {e}")
+        return self
 
 
 class ResourceUpdate(BaseModel):
