@@ -169,6 +169,11 @@ export interface Chat {
   lastOpenedAt: string | null;
 }
 
+/**
+ * 前端专用的、带有子节点层级的会话树节点类型。
+ */
+export type ChatNode = Chat & { children?: ChatNode[] };
+
 export interface ChatCreate {
   name: string;
   systemPrompt?: string | null;
@@ -265,3 +270,101 @@ export type GlobalNotification =
       payload: ZipHistoryUpdateNotificationPayload;
     };
 
+// --- Resource Center Types ---
+
+export type ResourceItemType = 'resource' | 'folder';
+export type ResourceType = 'system_prompt';
+
+/**
+ * 代表一个资源版本快照。
+ */
+export interface ResourceVersion {
+  id: string;
+  resourceId: string;
+  name: string;
+  commitMessage: string | null;
+  content: string | null;
+  attributes: Record<string, any> | null;
+  sortOrder: number;
+  createdAt: string; // ISO 8601 date string
+  updatedAt: string; // ISO 8601 date string
+}
+
+/**
+ * 代表一个资源或文件夹的目录项。
+ */
+export interface Resource {
+  id: string;
+  name: string;
+  description: string | null;
+  itemType: ResourceItemType;
+  resourceType: ResourceType | null;
+  parentId: string | null;
+  sortOrder: number;
+  createdAt: string; // ISO 8601 date string
+  updatedAt: string; // ISO 8601 date string
+  latest_version: ResourceVersion | null;
+}
+
+/**
+ * 前端专用的、带有子节点层级的资源树节点类型。
+ */
+export type ResourceNode = Resource & { children?: ResourceNode[] };
+
+/**
+ * 代表一个包含其所有版本列表的资源详情。
+ */
+export interface ResourceWithVersions extends Resource {
+  versions: ResourceVersion[];
+}
+
+/**
+ * 用于创建新资源或文件夹的请求体。
+ */
+export interface ResourceCreate {
+  name: string;
+  description?: string | null;
+  itemType: ResourceItemType;
+  resourceType?: ResourceType | null;
+  parentId?: string | null;
+  sortOrder: number;
+  initial_content?: string | null; // 创建资源时可附带初始版本内容
+}
+
+/**
+ * 用于更新资源基本信息的请求体。
+ */
+export interface ResourceUpdate {
+  name?: string;
+  description?: string | null;
+  parentId?: string | null;
+}
+
+/**
+ * 用于批量更新资源排序和层级的请求体。
+ */
+export interface ResourceReorderItem {
+  id: string;
+  parentId: string | null;
+  sortOrder: number;
+}
+
+/**
+ * 用于创建新资源版本的请求体。
+ */
+export interface ResourceVersionCreate {
+  name: string;
+  commitMessage?: string | null;
+  content?: string | null;
+  attributes?: Record<string, any> | null;
+}
+
+/**
+ * 用于更新已存在资源版本的请求体。
+ */
+export interface ResourceVersionUpdate {
+  name?: string;
+  commitMessage?: string | null;
+  content?: string | null;
+  attributes?: Record<string, any> | null;
+}

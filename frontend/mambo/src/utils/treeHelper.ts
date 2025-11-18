@@ -1,26 +1,35 @@
 // frontend/mambo/src/utils/treeHelper.ts
 
-import type { Chat } from '@/api/types';
-
 /**
- * 带有子节点层级的会话/文件夹树节点类型。
+ * 定义一个通用的、可被构造成树形结构的基础类型。
+ * 任何希望被构造成树的数组元素都应至少包含这些属性。
  */
-export type ChatNode = Chat & { children?: ChatNode[] };
+interface TreeItem {
+  id: string;
+  parentId: string | null;
+  sortOrder: number;
+}
 
 /**
- * 将扁平的会话/文件夹列表构建成一个层级分明的树形结构。
- * 该函数会进行深拷贝以避免修改原始数组，并按 sortOrder 对每个层级的节点进行排序。
+ * 定义一个通用的、带有子节点层级的树节点类型。
+ */
+type TreeNode<T> = T & { children?: TreeNode<T>[] };
+
+/**
+ * 将一个扁平的、实现了 TreeItem 接口的列表构建成一个层级分明的树形结构。
+ * 该函数是通用的，可用于构建会话树、资源树等。
+ * 它会进行深拷贝以避免修改原始数组，并按 sortOrder 对每个层级的节点进行排序。
  *
- * @param flatList - 从API获取的原始扁平会话/文件夹列表。
- * @returns 返回一个表示层级结构的 ChatNode 数组。
+ * @param flatList - 从API获取的原始扁平列表。
+ * @returns 返回一个表示层级结构的 TreeNode 数组。
  */
-export function buildChatTree(flatList: readonly Chat[]): ChatNode[] {
+export function buildChatTree<T extends TreeItem>(flatList: readonly T[]): TreeNode<T>[] {
   // 使用深拷贝来避免对原始 store state 的副作用
-  const list: ChatNode[] = JSON.parse(JSON.stringify(flatList));
-  const map: Record<string, ChatNode> = {};
+  const list: TreeNode<T>[] = JSON.parse(JSON.stringify(flatList));
+  const map: Record<string, TreeNode<T>> = {};
   list.forEach(item => (map[item.id] = item));
 
-  const tree: ChatNode[] = [];
+  const tree: TreeNode<T>[] = [];
   list.forEach(item => {
     if (item.parentId && map[item.parentId]) {
       // 如果存在父节点，则将当前项添加到父节点的 children 数组中
@@ -32,7 +41,7 @@ export function buildChatTree(flatList: readonly Chat[]): ChatNode[] {
   });
 
   // 递归函数，用于对树的每个层级进行排序
-  const sortNodes = (nodes: ChatNode[]) => {
+  const sortNodes = (nodes: TreeNode<T>[]) => {
     nodes.sort((a, b) => a.sortOrder - b.sortOrder);
     nodes.forEach(node => {
       if (node.children) {

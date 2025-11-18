@@ -19,3 +19,10 @@ from .chat import (
 from .setting import GlobalSetting, GlobalSettingsUpdate
 
 from .file import File,FileBase
+
+from .resource import (Resource, ResourceVersion,
+                       ResourceVersionBase,ResourceBase,
+                       ResourceCreate,ResourceUpdate,
+                       ResourceVersionCreate,ResourceWithVersions,
+                       ResourceVersionUpdate,ResourceReorderItem
+                       )

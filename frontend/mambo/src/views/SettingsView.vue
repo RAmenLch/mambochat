@@ -16,6 +16,10 @@
           <el-tab-pane label="全局配置" name="globalSettings">
             <GlobalSettings />
           </el-tab-pane>
+          <!-- 新增：资源中心标签页 -->
+          <el-tab-pane label="资源中心" name="resourceManager">
+            <ResourceManager />
+          </el-tab-pane>
         </el-tabs>
       </div>
     </el-main>
@@ -26,6 +30,7 @@
 import { ref } from 'vue';
 import ProviderModelManager from '@/components/settings/ProviderModelManager.vue';
 import GlobalSettings from '@/components/settings/GlobalSettings.vue';
+import ResourceManager from '@/components/settings/ResourceManager.vue'; // 新增引入
 
 const activeTab = ref('providerModel');
 </script>

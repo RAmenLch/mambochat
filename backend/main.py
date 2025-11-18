@@ -15,7 +15,8 @@ from .routers import (
     provider_actions,
     settings,
     notifications,
-    file_management
+    file_management,
+    resource_management  # 新增: 导入资源管理路由
 )
 from .services.cleanup_service import cleanup_zombie_files
 
@@ -27,6 +28,7 @@ async def lifespan(app: FastAPI):
     # --- 应用启动时执行 ---
     async with engine.begin() as conn:
         # 确保所有定义的模型表都已在数据库中创建
+        # 注意: 新的 resource_model 中的模型需要被 Base 正确识别
         await conn.run_sync(Base.metadata.create_all)
 
     # 添加并启动僵尸文件清理的定时任务
@@ -51,6 +53,7 @@ app.add_middleware(
 
 # 包含各个模块的路由
 app.include_router(chat_management.router, prefix="/api", tags=["Chat Management"])
+app.include_router(resource_management.router, prefix="/api", tags=["Resource Management"])  # 新增: 注册资源管理路由
 app.include_router(chat_interaction.router, prefix="/api", tags=["Chat Interaction"])
 app.include_router(provider_management.router, prefix="/api", tags=["Provider & Model Management"])
 app.include_router(provider_actions.router, prefix="/api", tags=["Provider Actions"])
