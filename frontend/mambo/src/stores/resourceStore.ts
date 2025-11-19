@@ -14,6 +14,7 @@ import {
   getResourceDetails,
 } from '@/api/resourceService';
 import { buildChatTree } from '@/utils/treeHelper';
+import { useTreeStoreActions } from '@/composables/useTreeStoreActions';
 import type {
   Resource,
   ResourceCreate,
@@ -31,58 +32,43 @@ import type {
 export const useResourceStore = defineStore('resource', () => {
   // --- State ---
   const resources = ref<ResourceWithVersions[]>([]);
-  const isResourcesLoading = ref(false);
 
   // --- Getters ---
   const resourceTree = computed((): ResourceNode[] => {
-    return buildChatTree(resources.value);
+    // NOTE: The type assertion is safe because ResourceWithVersions includes all properties of Resource.
+    return buildChatTree(resources.value as Resource[]);
   });
 
   // --- Actions ---
 
-  /**
-   * 从服务器获取完整的资源列表。
-   */
-  async function fetchResources() {
-    isResourcesLoading.value = true;
-    try {
-      const fetchedResources = await getResources();
-      resources.value = fetchedResources.map(r => ({ ...r, versions: [] }));
-    } catch (error) {
-      console.error('Failed to fetch resources:', error);
-    } finally {
-      isResourcesLoading.value = false;
-    }
-  }
+  // 使用通用 Composable 封装树形数据操作
+  const {
+    isLoading: isResourcesLoading,
+    fetchItems: fetchResources,
+    createItem: addResourceItem,
+    updateItem: updateResourceItem,
+    deleteItem: deleteResourceItem,
+    reorderItems: reorderResourceItems,
+  } = useTreeStoreActions<Resource, ResourceCreate, ResourceUpdate>({
+    items: resources,
+    api: {
+      fetchAll: getResources,
+      create: createResource,
+      update: updateResource,
+      // 适配 remove 函数。调用原始 API，但忽略其 Resource 返回值，以匹配 Promise<void>
+      remove: async (id: string): Promise<void> => {
+        await deleteResource(id);
+      },
+      // 适配 reorder 函数。调用原始 API，但忽略其 { message: string } 返回值，以匹配 Promise<void>
+      reorder: async (updates: ResourceReorderItem[]): Promise<void> => {
+        await reorderResources(updates);
+      },
+    },
+    // onDeleteItem is not needed here as there are no store-level side effects.
+    // UI-related side effects (like clearing the selected ID) will be handled in the component.
+  });
 
-  /**
-   * 创建一个新的资源或文件夹。
-   */
-  async function addResourceItem(itemData: ResourceCreate): Promise<Resource | null> {
-    try {
-      const newItem = await createResource(itemData);
-      resources.value.push({ ...newItem, versions: [] });
-      return newItem;
-    } catch (error) {
-      console.error('Failed to create new resource item:', error);
-      return null;
-    }
-  }
-
-  /**
-   * 更新资源或文件夹的基本设置（例如名称、描述）。
-   */
-  async function updateResourceItem(resourceId: string, settings: ResourceUpdate) {
-    try {
-      const updatedItem = await updateResource(resourceId, settings);
-      const index = resources.value.findIndex(r => r.id === resourceId);
-      if (index !== -1) {
-        Object.assign(resources.value[index], updatedItem);
-      }
-    } catch (error) {
-      console.error(`Failed to update settings for resource ${resourceId}:`, error);
-    }
-  }
+  // --- Resource-Specific Actions (Versioning, etc.) ---
 
   /**
    * 更新指定资源当前活跃版本的内容。
@@ -129,43 +115,6 @@ export const useResourceStore = defineStore('resource', () => {
   }
 
   /**
-   * 删除一个资源或文件夹。
-   */
-  async function deleteResourceItem(resourceId: string) {
-    const index = resources.value.findIndex(r => r.id === resourceId);
-    if (index === -1) return;
-    const backup = resources.value[index];
-    resources.value.splice(index, 1);
-    try {
-      await deleteResource(resourceId);
-    } catch (error) {
-      console.error(`Failed to delete resource ${resourceId}:`, error);
-      resources.value.splice(index, 0, backup);
-    }
-  }
-
-  /**
-   * 对资源列表项进行重新排序。
-   */
-  async function reorderResourceItems(updates: ResourceReorderItem[]) {
-    updates.forEach(update => {
-      const item = resources.value.find(r => r.id === update.id);
-      if (item) {
-        item.parentId = update.parentId;
-        item.sortOrder = update.sortOrder;
-      }
-    });
-    resources.value.sort((a, b) => a.sortOrder - b.sortOrder);
-    try {
-      await reorderResources(updates);
-    } catch (error)
-    {
-      console.error('Failed to reorder resources:', error);
-      await fetchResources();
-    }
-  }
-
-  /**
    * 为指定资源创建新版本。
    */
   async function createNewVersion(resourceId: string, versionData: ResourceVersionCreate) {
@@ -185,12 +134,10 @@ export const useResourceStore = defineStore('resource', () => {
       const updatedResource = await setActiveVersion(resourceId, versionId);
       const index = resources.value.findIndex(r => r.id === resourceId);
       if (index !== -1) {
-        // 这是解决问题的关键：精准更新，而不是全局替换。
         resources.value[index].latest_version = updatedResource.latest_version;
       }
     } catch (error) {
       console.error(`Failed to set active version for resource ${resourceId}:`, error);
-      // 发生错误时，刷新一次详情作为回滚/同步策略是合理的。
       await fetchResourceDetails(resourceId);
     }
   }
@@ -211,16 +158,20 @@ export const useResourceStore = defineStore('resource', () => {
   }
 
   return {
+    // State
     resources,
     isResourcesLoading,
+    // Getters
     resourceTree,
+    // Actions from Composable
     fetchResources,
     addResourceItem,
     updateResourceItem,
-    updateVersionContent,
-    updateActiveVersionDetails,
     deleteResourceItem,
     reorderResourceItems,
+    // Resource-specific Actions
+    updateVersionContent,
+    updateActiveVersionDetails,
     createNewVersion,
     setActiveResourceVersion,
     fetchResourceDetails,

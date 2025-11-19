@@ -133,11 +133,12 @@ const {
 } = useTreeController<Chat, ChatCreate, ChatUpdate>({
   items: chatList,
   crudHandlers: {
-    create: chatListStore.createNewItem,
-    update: chatListStore.updateChatSettings,
-    remove: chatListStore.deleteItem,
-    reorder: chatListStore.reorderChatItems,
-    duplicate: chatListStore.duplicateChat,
+    // 更新：将 store actions 映射到 useTreeController 的新接口
+    createItem: chatListStore.createNewItem,
+    updateItem: chatListStore.updateChatSettings,
+    deleteItem: chatListStore.deleteItem,
+    reorderItems: chatListStore.reorderChatItems,
+    duplicateItem: chatListStore.duplicateChat,
   },
   getDialogProps: (payload: DialogPayload<Chat>) => {
     switch (payload.type) {
@@ -170,6 +171,7 @@ const {
     formPayload: DialogConfirmPayload
   ): Promise<Chat | null> => {
     if (dialogPayload.type === 'rename' && dialogPayload.targetItem) {
+      // 注意：此处调用的 store action 名称未变，因为在 store 中做了别名处理
       await chatListStore.updateChatSettings(dialogPayload.targetItem.id, { name: formPayload.name });
       return null;
     }

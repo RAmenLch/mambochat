@@ -9,6 +9,7 @@ import {
 import { subscribeToGlobalNotifications } from '@/services/notificationService';
 import type { Chat, ChatCreate, ChatUpdate, ChatReorderItem, GlobalNotification } from '@/api/types';
 import { useChatSessionStore } from './chatSessionStore';
+import { useTreeStoreActions } from '@/composables/useTreeStoreActions';
 
 /**
  * 管理会话列表（包括文件夹和聊天）的全局状态。
@@ -17,119 +18,42 @@ import { useChatSessionStore } from './chatSessionStore';
 export const useChatListStore = defineStore('chatList', () => {
   // --- State ---
   const chatList = ref<Chat[]>([]);
-  const isChatListLoading = ref(false);
   const refreshingTitleChatId = ref<string | null>(null);
 
   // --- Actions ---
 
-  /**
-   * 从服务器获取完整的会话列表。
-   */
-  async function fetchChatList() {
-    isChatListLoading.value = true;
-    try {
-      chatList.value = await getChats();
-    } catch (error) {
-      // 错误消息已由全局拦截器处理
-      console.error('Failed to fetch chat list:', error);
-    } finally {
-      isChatListLoading.value = false;
-    }
-  }
+  // 使用通用 Composable 封装树形数据操作
+  const {
+    isLoading: isChatListLoading,
+    fetchItems: fetchChatList,
+    createItem: createNewItem,
+    updateItem: updateChatSettings,
+    deleteItem,
+    reorderItems: reorderChatItems,
+    duplicateItem: duplicateChat
+  } = useTreeStoreActions<Chat, ChatCreate, ChatUpdate>({
+    items: chatList,
+    api: {
+      fetchAll: getChats,
+      create: createChat,
+      update: updateChatSettingsAPI,
+      remove: async (id: string): Promise<void> => {
+        await deleteChat(id);
+      },
 
-  /**
-   * 创建一个新的会话或文件夹。
-   * @param itemData - 创建项所需的数据。
-   * @returns 创建成功后的新项，或在失败时返回null。
-   */
-  async function createNewItem(itemData: ChatCreate): Promise<Chat | null> {
-    try {
-      const newItem = await createChat(itemData);
-      chatList.value.push(newItem);
-      return newItem;
-    } catch (error) {
-      console.error('Failed to create new item:', error);
-      return null;
-    }
-  }
-
-  /**
-   * 更新会话或文件夹的设置（例如名称）。
-   * @param itemId - 要更新的项的ID。
-   * @param settings - 要更新的设置。
-   */
-  async function updateChatSettings(itemId: string, settings: ChatUpdate) {
-    try {
-      const updatedChat = await updateChatSettingsAPI(itemId, settings);
-      const index = chatList.value.findIndex(c => c.id === itemId);
-      if (index !== -1) {
-        // 使用Object.assign确保响应性
-        Object.assign(chatList.value[index], updatedChat);
-      }
-    } catch (error) {
-      console.error(`Failed to update settings for item ${itemId}:`, error);
-    }
-  }
-
-  /**
-   * 删除一个会话或文件夹。
-   * 如果删除的是当前打开的会话，则会清空会话状态。
-   * @param itemId - 要删除的项的ID。
-   */
-  async function deleteItem(itemId: string) {
-    try {
-      await deleteChat(itemId);
-      // 重新获取整个列表以确保数据一致性，特别是子项也被删除的情况
-      await fetchChatList();
-
+      reorder: async (updates: ChatReorderItem[]): Promise<void> => {
+        await reorderChats(updates);
+      },
+      duplicate: duplicateChatAPI,
+    },
+    onDeleteItem: (deletedItem: Chat) => {
       const sessionStore = useChatSessionStore();
-      if (sessionStore.currentChatId === itemId || !chatList.value.some(c => c.id === sessionStore.currentChatId)) {
+      // 如果删除的是当前打开的会话，则清空会话状态。
+      if (sessionStore.currentChatId === deletedItem.id) {
         sessionStore.clearSession();
       }
-    } catch (error) {
-      console.error(`Failed to delete item ${itemId}:`, error);
-    }
-  }
-
-  /**
-   * 对会话列表项进行重新排序（例如拖拽后）。
-   * @param updates - 包含排序更新信息的数组。
-   */
-  async function reorderChatItems(updates: ChatReorderItem[]) {
-    // 乐观更新UI
-    updates.forEach(update => {
-      const item = chatList.value.find(c => c.id === update.id);
-      if (item) {
-        Object.assign(item, { parentId: update.parentId, sortOrder: update.sortOrder });
-      }
-    });
-    // 重新排序以反映UI
-    chatList.value.sort((a, b) => a.sortOrder - b.sortOrder);
-
-    try {
-      await reorderChats(updates);
-    } catch (error) {
-      console.error('Failed to reorder items:', error);
-      // 如果API调用失败，则重新获取列表以回滚更改
-      await fetchChatList();
-    }
-  }
-
-  /**
-   * 复制一个现有的会话。
-   * @param itemId - 要复制的会话ID。
-   * @returns 复制成功后的新会话，或在失败时返回null。
-   */
-  async function duplicateChat(itemId: string): Promise<Chat | null> {
-    try {
-      const newChat: Chat = await duplicateChatAPI(itemId);
-      chatList.value.push(newChat);
-      return newChat;
-    } catch (error) {
-      console.error(`Failed to duplicate chat ${itemId}:`, error);
-      return null;
-    }
-  }
+    },
+  });
 
   /**
    * 请求后端为指定会话自动生成标题。
@@ -189,13 +113,15 @@ export const useChatListStore = defineStore('chatList', () => {
     isChatListLoading,
     refreshingTitleChatId,
 
-    // Actions
+    // Actions from Composable
     fetchChatList,
     createNewItem,
     updateChatSettings,
     deleteItem,
     reorderChatItems,
     duplicateChat,
+
+    // Store-specific Actions
     refreshChatTitle,
     initializeNotificationListener,
   };

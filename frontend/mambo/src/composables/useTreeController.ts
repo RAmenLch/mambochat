@@ -34,15 +34,15 @@ export interface EntityFormDialogProps {
  */
 export interface CrudHandlers<T, TCreate, TUpdate> {
   /** 创建一个新条目 */
-  create: (data: TCreate) => Promise<T | null>;
+  createItem: (data: TCreate) => Promise<T | null>;
   /** 更新一个现有条目 */
-  update: (id: string, data: TUpdate) => Promise<void>;
+  updateItem: (id: string, data: TUpdate) => Promise<void>;
   /** 删除一个条目 */
-  remove: (id: string) => Promise<void>;
+  deleteItem: (id: string) => Promise<void>;
   /** 批量更新条目的排序和层级 */
-  reorder: (updates: TreeReorderEvent[]) => Promise<void>;
+  reorderItems: (updates: TreeReorderEvent[]) => Promise<void>;
   /** (可选) 复制一个条目 */
-  duplicate?: (id: string) => Promise<T | null>;
+  duplicateItem?: (id: string) => Promise<T | null>;
 }
 
 /**
@@ -138,7 +138,7 @@ export function useTreeController<T extends BaseTreeItem, TCreate, TUpdate>(
         cancelButtonText: '取消',
         type: 'warning',
       });
-      await crudHandlers.remove(item.id);
+      await crudHandlers.deleteItem(item.id);
       ElMessage.success('删除成功');
     } catch {
       /* User canceled the action */
@@ -146,11 +146,11 @@ export function useTreeController<T extends BaseTreeItem, TCreate, TUpdate>(
   };
 
   const handleDuplicate = async (item: T) => {
-    if (!crudHandlers.duplicate) {
+    if (!crudHandlers.duplicateItem) {
       console.warn('Duplicate handler is not implemented.');
       return;
     }
-    const newItem = await crudHandlers.duplicate(item.id);
+    const newItem = await crudHandlers.duplicateItem(item.id);
     if (newItem) {
       ElMessage.success('复制成功');
       await treeRef.value?.scrollToKey(newItem.id);
@@ -159,7 +159,7 @@ export function useTreeController<T extends BaseTreeItem, TCreate, TUpdate>(
 
   // --- Event Handlers for Template Binding ---
   const handleReorder = async (updates: TreeReorderEvent[]) => {
-    await crudHandlers.reorder(updates);
+    await crudHandlers.reorderItems(updates);
   };
 
   const openContextMenu = (event: MouseEvent, data: T | null) => {

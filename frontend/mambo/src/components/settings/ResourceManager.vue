@@ -289,15 +289,17 @@ const {
 } = useTreeController<Resource, ResourceCreate, ResourceUpdate>({
   items: resources,
   crudHandlers: {
-    create: resourceStore.addResourceItem,
-    update: resourceStore.updateResourceItem,
-    remove: async (id: string) => {
+    // 更新：将 store actions 映射到 useTreeController 的新接口
+    createItem: resourceStore.addResourceItem,
+    updateItem: resourceStore.updateResourceItem,
+    deleteItem: async (id: string) => {
+      // 此处包含 UI 特有的副作用逻辑，因此在组件层处理
       await resourceStore.deleteResourceItem(id);
       if (selectedResourceId.value === id) {
         selectedResourceId.value = undefined;
       }
     },
-    reorder: resourceStore.reorderResourceItems,
+    reorderItems: resourceStore.reorderResourceItems,
   },
   getDialogProps: (payload: DialogPayload<Resource>) => {
     switch (payload.type) {
