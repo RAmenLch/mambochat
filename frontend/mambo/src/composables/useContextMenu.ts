@@ -1,6 +1,6 @@
 // frontend/mambo/src/composables/useContextMenu.ts
 
-import { ref, reactive, nextTick } from 'vue';
+import { ref, reactive } from 'vue';
 import type { Ref, CSSProperties, UnwrapNestedRefs } from 'vue';
 
 /**
@@ -35,7 +35,7 @@ interface UseContextMenuReturn<T> {
  * @returns 返回一个包含菜单项、位置和事件处理函数的对象。
  */
 export function useContextMenu<T>(): UseContextMenuReturn<T> {
-  // 核心修复：使用类型断言来解决泛型 T 导致的 ref 类型推断不匹配问题。
+  // 使用类型断言来解决泛型 T 导致的 ref 类型推断不匹配问题
   const contextMenuItem = ref<T | null>(null) as Ref<T | null>;
 
   const contextMenuPosition = reactive<CSSProperties>({
@@ -45,7 +45,7 @@ export function useContextMenu<T>(): UseContextMenuReturn<T> {
     zIndex: 9999,
   });
 
-  const handleContextMenu = async (
+  const handleContextMenu = (
     event: MouseEvent,
     item: T | null,
     menuRef: Ref<ContextMenuInstance | undefined>
@@ -56,22 +56,27 @@ export function useContextMenu<T>(): UseContextMenuReturn<T> {
     if (!menuRef.value) return;
 
     // 如果在已有菜单的组件上右键，但没有获取到具体的数据项，则判定为无效操作
+    // 注意：配合 ExplorerTree 的 @root-contextmenu 使用时，item 为 null 是合法的（代表点击了空白处）
+    // 因此这里只过滤掉点击了节点但没有传 item 的异常情况
     if (!item && (event.target as HTMLElement).closest('.el-tree-node')) {
       return;
     }
 
-    // 立即关闭任何已打开的菜单以重置其状态
+    // 1. 立即关闭任何已打开的菜单以重置其状态
     menuRef.value.handleClose();
 
-    await nextTick();
-
-    // 更新菜单所需的数据和锚点位置
+    // 2. 立即更新数据和位置
+    // 此时响应式数据已变，但 DOM (span style) 尚未更新
     contextMenuItem.value = item;
     contextMenuPosition.left = `${event.clientX}px`;
     contextMenuPosition.top = `${event.clientY}px`;
 
-    // 将打开操作推迟到DOM更新后，确保 Popper.js 能在正确的位置上重新计算并打开菜单
-    menuRef.value.handleOpen();
+    // 3. 使用 setTimeout 强制推迟打开操作
+    // 这确保了 Vue 完成 DOM 更新周期，且浏览器完成了样式的重绘
+    // 此时 span 元素已确实移动到了新坐标，Popper.js 才能计算出正确的位置
+    setTimeout(() => {
+      menuRef.value?.handleOpen();
+    }, 0);
   };
 
   return {

@@ -1,5 +1,28 @@
 // frontend/mambo/src/api/types.ts
 
+// --- Common / Tree Types ---
+
+/**
+ * 定义树形结构数据的基本接口。
+ * 任何需要使用通用树组件 (ExplorerTree) 的数据模型都应满足此结构。
+ */
+export interface BaseTreeItem {
+  id: string;
+  name: string;
+  parentId: string | null;
+  sortOrder: number;
+  itemType: string;
+}
+
+/**
+ * 定义树节点拖拽排序事件的数据载荷。
+ */
+export interface TreeReorderEvent {
+  id: string;
+  parentId: string | null;
+  sortOrder: number;
+}
+
 export type MessageRole = 'user' | 'assistant' | 'system';
 export type ChatItemType = 'chat' | 'folder';
 export type MessageStatus = 'generating' | 'completed' | 'failed';

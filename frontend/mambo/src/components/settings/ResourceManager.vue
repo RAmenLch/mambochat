@@ -2,44 +2,33 @@
 <template>
   <el-container class="resource-manager-container">
     <!-- Left Panel: Resource Tree -->
-    <el-aside width="300px" class="resource-tree-panel" @contextmenu.prevent="openContextMenu($event, null)">
-      <div class="panel-header">
-        <h4>资源列表</h4>
-      </div>
-      <el-scrollbar class="tree-scrollbar">
-        <div v-if="isResourcesLoading" class="loading-container">
-          <el-skeleton :rows="8" animated />
-        </div>
-        <el-tree
-          v-else-if="resourceTree.length > 0"
-          ref="treeRef"
-          :data="resourceTree"
-          node-key="id"
-          highlight-current
-          :current-node-key="selectedResourceId"
-          :expand-on-click-node="false"
-          draggable
-          :allow-drop="allowDrop"
-          :indent="12"
-          @node-click="handleNodeClick"
-          @node-drop="handleNodeDrop"
-          @node-contextmenu="openContextMenu"
-          class="resource-tree"
-          :props="{ label: 'name', children: 'children' }"
-        >
-          <template #default="{ data }">
-            <span class="custom-tree-node">
-              <el-icon class="node-icon">
-                <Folder v-if="data.itemType === 'folder'" />
-                <Memo v-else-if="data.resourceType === 'submessage_template'" />
-                <Document v-else />
-              </el-icon>
-              <span class="node-label">{{ data.name }}</span>
-            </span>
-          </template>
-        </el-tree>
-        <el-empty v-else description="右键新建资源或文件夹" />
-      </el-scrollbar>
+    <el-aside width="300px" class="resource-tree-panel">
+      <ExplorerTree
+        ref="treeRef"
+        :data="treeData"
+        :current-id="selectedResourceId"
+        :is-loading="isResourcesLoading"
+        folder-item-type="folder"
+        persistence-key="mambo_resource_folder_expanded_state"
+        @node-click="handleNodeClick"
+        @node-contextmenu="handleNodeContextMenu"
+        @root-contextmenu="openContextMenu($event, null)"
+        @reorder="handleReorder"
+      >
+        <template #header>
+          <div class="panel-header">
+            <h4>资源列表</h4>
+          </div>
+        </template>
+
+        <template #item-icon="{ data }">
+          <el-icon>
+            <Folder v-if="data.itemType === 'folder'" />
+            <Memo v-else-if="data.resourceType === 'submessage_template'" />
+            <Document v-else />
+          </el-icon>
+        </template>
+      </ExplorerTree>
     </el-aside>
 
     <!-- Right Panel: Editor & Version History -->
@@ -73,7 +62,7 @@
                 <el-form-item>
                    <template #label>
                     <span>上下文参与长度 (Context Participation Length)</span>
-                    <el-tooltip effect="dark" content="0代表参与所有上下文, 1代表仅参与最新一轮对话" placement="top">
+                    <el-tooltip effect="dark" content="0代表不参与所有上下文, 1代表仅参与最新一轮对话" placement="top">
                       <el-icon class="label-icon"><QuestionFilled /></el-icon>
                     </el-tooltip>
                   </template>
@@ -152,24 +141,16 @@
       </template>
     </el-dropdown>
 
-    <!-- Dialog for Rename and New Folder -->
-    <ItemNameDialog
-      v-model:visible="itemNameDialog.visible"
-      :title="itemNameDialog.title"
-      :initial-name="itemNameDialog.initialName"
-      :item-type="itemNameDialog.itemType"
-      @confirm="handleItemNameConfirm"
+    <!-- Unified Entity Form Dialog -->
+    <EntityFormDialog
+      v-model:visible="dialogState.visible.value"
+      :title="dialogProps.title"
+      :initial-name="dialogProps.initialName"
+      :select-config="dialogProps.selectConfig"
+      @confirm="handleDialogConfirm"
     />
 
-    <!-- Dialog for New Resource -->
-    <ResourceCreateDialog
-      v-model:visible="resourceCreateDialog.visible"
-      title="新建资源"
-      :resource-types="creatableResourceTypes"
-      @confirm="handleResourceCreateConfirm"
-    />
-
-    <!-- Dialog for New Version -->
+    <!-- Dialog for New Version (Specific to Resource, kept separate) -->
     <el-dialog v-model="newVersionDialog.visible" title="另存为新版本" width="500px">
       <el-form :model="newVersionDialog.form" label-position="top" ref="newVersionFormRef">
         <el-form-item label="版本名称" prop="name" :rules="{ required: true, message: '版本名称不能为空', trigger: 'blur' }">
@@ -190,16 +171,26 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed, watch } from 'vue';
 import { storeToRefs } from 'pinia';
-import { ElMessage, ElMessageBox, ElTree, type FormInstance } from 'element-plus';
-import type { AllowDropType, NodeDropType } from 'element-plus/es/components/tree/src/tree.type';
+import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus';
 import type Node from 'element-plus/es/components/tree/src/model/node';
 import { Folder, Document, DocumentAdd, FolderAdd, EditPen, Delete, Memo, QuestionFilled } from '@element-plus/icons-vue';
 
 import { useResourceStore } from '@/stores/resourceStore';
 import { useContextMenu } from '@/composables/useContextMenu';
-import ItemNameDialog from '@/components/chat/dialogs/ItemNameDialog.vue';
-import ResourceCreateDialog from './dialogs/ResourceCreateDialog.vue';
-import type { Resource, ResourceReorderItem, ResourceWithVersions, ResourceType, ResourceVersion, ResourceVersionCreate, ResourceItemType } from '@/api/types';
+import { useDialogState } from '@/composables/useDialogState';
+import ExplorerTree from '@/components/common/ExplorerTree.vue';
+import EntityFormDialog from '@/components/common/EntityFormDialog.vue';
+
+import type {
+  Resource,
+  ResourceReorderItem,
+  ResourceWithVersions,
+  ResourceType,
+  ResourceVersion,
+  ResourceVersionCreate,
+  BaseTreeItem,
+  TreeReorderEvent
+} from '@/api/types';
 
 // --- Local Type Definitions ---
 interface SubMessageTemplateAttributes {
@@ -207,23 +198,29 @@ interface SubMessageTemplateAttributes {
   is_collapsed: boolean;
 }
 
+type DialogType = 'rename' | 'newResource' | 'newFolder';
+interface DialogPayload {
+  type: DialogType;
+  targetItem?: Resource;
+}
+
 // --- Store ---
 const resourceStore = useResourceStore();
 const { isResourcesLoading, resources, resourceTree } = storeToRefs(resourceStore);
 
-// --- Constants for Extensibility ---
+// --- Constants ---
 const creatableResourceTypes: { value: ResourceType, label: string }[] = [
   { value: 'system_prompt', label: 'System Prompt' },
   { value: 'submessage_template', label: 'SubMessage 模板' },
 ];
 
 const DEFAULT_SUBMESSAGE_ATTRIBUTES: SubMessageTemplateAttributes = {
-  context_participation_length: 1, // 默认值已修改为 1
+  context_participation_length: 1,
   is_collapsed: false,
 };
 
 // --- Refs and Reactive State ---
-const treeRef = ref<InstanceType<typeof ElTree>>();
+const treeRef = ref<InstanceType<typeof ExplorerTree>>();
 const formRef = ref<FormInstance>();
 const newVersionFormRef = ref<FormInstance>();
 const selectedResourceId = ref<string | undefined>(undefined);
@@ -236,17 +233,6 @@ const form = reactive({
   attributes: { ...DEFAULT_SUBMESSAGE_ATTRIBUTES },
 });
 
-const itemNameDialog = reactive({
-  visible: false,
-  title: '',
-  initialName: '',
-  itemType: 'folder' as ResourceItemType,
-});
-
-const resourceCreateDialog = reactive({
-  visible: false,
-});
-
 const newVersionDialog = reactive({
   visible: false,
   form: {
@@ -255,11 +241,14 @@ const newVersionDialog = reactive({
   },
 });
 
-// --- Context Menu ---
+// --- Context Menu & Dialog State ---
 const contextMenuRef = ref();
 const { contextMenuItem, contextMenuPosition, handleContextMenu } = useContextMenu<Resource>();
+const dialogState = useDialogState<DialogPayload>();
 
 // --- Computed Properties ---
+const treeData = computed(() => resourceTree.value as unknown as BaseTreeItem[]);
+
 const activeResourceDetails = computed((): ResourceWithVersions | null => {
   if (!selectedResourceId.value) return null;
   return resources.value.find(r => r.id === selectedResourceId.value) || null;
@@ -294,6 +283,36 @@ const contentEditorLabel = computed(() => {
   return '内容 (当前版本)';
 });
 
+const dialogProps = computed(() => {
+  const payload = dialogState.payload.value;
+  if (!payload) return { title: '', initialName: '' };
+
+  switch (payload.type) {
+    case 'rename':
+      return {
+        title: '重命名',
+        initialName: payload.targetItem?.name || '',
+      };
+    case 'newResource':
+      return {
+        title: '新建资源',
+        initialName: '新的资源',
+        selectConfig: {
+          label: '资源类型',
+          options: creatableResourceTypes,
+          initialValue: creatableResourceTypes[0].value,
+        },
+      };
+    case 'newFolder':
+      return {
+        title: '新建文件夹',
+        initialName: '新的文件夹',
+      };
+    default:
+      return { title: '', initialName: '' };
+  }
+});
+
 // --- Lifecycle ---
 onMounted(() => {
   resourceStore.fetchResources();
@@ -322,7 +341,7 @@ watch(activeResourceDetails, (newSelection) => {
 });
 
 // --- Methods ---
-async function handleNodeClick(data: ResourceWithVersions) {
+async function handleNodeClick(data: BaseTreeItem) {
   selectedResourceId.value = data.id;
   if (data.itemType === 'resource') {
     await resourceStore.fetchResourceDetails(data.id);
@@ -374,34 +393,15 @@ async function handleSaveChanges() {
 }
 
 // --- Tree Drag & Drop ---
-const allowDrop = (draggingNode: Node, dropNode: Node, dropType: AllowDropType) => {
-  return !((dropNode.data as Resource).itemType === 'resource' && dropType  === 'inner');
-};
-
-const handleNodeDrop = async (draggingNode: Node, dropNode: Node, dropType: NodeDropType) => {
-  let parentId: string | null = null;
-  let siblings: Node[] = [];
-
-  if (dropType === 'inner') {
-    parentId = (dropNode.data as Resource).id;
-    siblings = dropNode.childNodes || [];
-  } else {
-    parentId = (dropNode.data as Resource).parentId;
-    siblings = dropNode.parent?.childNodes || treeRef.value?.root.childNodes || [];
-  }
-
-  const updates: ResourceReorderItem[] = siblings.map((node, index) => ({
-    id: (node.data as Resource).id,
-    parentId,
-    sortOrder: index,
-  }));
-
-  if (updates.length > 0) {
-    await resourceStore.reorderResourceItems(updates);
-  }
+const handleReorder = async (updates: TreeReorderEvent[]) => {
+  await resourceStore.reorderResourceItems(updates as ResourceReorderItem[]);
 };
 
 // --- Context Menu & Dialog Logic ---
+const handleNodeContextMenu = (event: MouseEvent, data: BaseTreeItem, node: Node) => {
+  openContextMenu(event, data as unknown as Resource);
+};
+
 const openContextMenu = (event: MouseEvent, data: Resource | null) => {
   handleContextMenu(event, data, contextMenuRef);
 };
@@ -410,21 +410,13 @@ const handleCommand = (command: 'newResource' | 'newFolder' | 'rename' | 'delete
   const item = contextMenuItem.value;
   switch (command) {
     case 'newResource':
-      resourceCreateDialog.visible = true;
+      dialogState.open({ type: 'newResource' });
       break;
     case 'newFolder':
-      itemNameDialog.title = '新建文件夹';
-      itemNameDialog.initialName = '新的文件夹';
-      itemNameDialog.itemType = 'folder';
-      itemNameDialog.visible = true;
+      dialogState.open({ type: 'newFolder' });
       break;
     case 'rename':
-      if (item) {
-        itemNameDialog.title = '重命名';
-        itemNameDialog.initialName = item.name;
-        itemNameDialog.itemType = item.itemType;
-        itemNameDialog.visible = true;
-      }
+      if (item) dialogState.open({ type: 'rename', targetItem: item });
       break;
     case 'delete':
       if (item) handleDelete(item);
@@ -432,40 +424,57 @@ const handleCommand = (command: 'newResource' | 'newFolder' | 'rename' | 'delete
   }
 };
 
-async function handleResourceCreateConfirm(payload: { name: string; resourceType: ResourceType }) {
-  const { name, resourceType } = payload;
-  const parentId = contextMenuItem.value?.itemType === 'folder'
-    ? contextMenuItem.value.id
-    : contextMenuItem.value?.parentId ?? null;
-  const sortOrder = resourceStore.resources.filter(r => r.parentId === parentId).length;
+async function handleDialogConfirm(payload: { name: string; selectValue?: string }) {
+  const state = dialogState.payload.value;
+  if (!state) return;
 
-  let initial_attributes: Partial<SubMessageTemplateAttributes> | undefined;
-  if (resourceType === 'submessage_template') {
-      initial_attributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES };
+  if (state.type === 'rename' && state.targetItem) {
+    await resourceStore.updateResourceItem(state.targetItem.id, { name: payload.name });
+  } else if (state.type === 'newResource') {
+    const parentId = getContextParentId();
+    const sortOrder = calculateSortOrder(parentId);
+
+    let initial_attributes: Partial<SubMessageTemplateAttributes> | undefined;
+    if (payload.selectValue === 'submessage_template') {
+        initial_attributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES };
+    }
+
+    const newItem = await resourceStore.addResourceItem({
+      name: payload.name,
+      itemType: 'resource',
+      resourceType: payload.selectValue as ResourceType,
+      parentId,
+      sortOrder,
+      initial_content: '',
+      initial_attributes,
+    });
+    if (newItem) {
+      selectedResourceId.value = newItem.id;
+      await resourceStore.fetchResourceDetails(newItem.id);
+      await treeRef.value?.scrollToKey(newItem.id);
+    }
+  } else if (state.type === 'newFolder') {
+    const parentId = getContextParentId();
+    const sortOrder = calculateSortOrder(parentId);
+    await resourceStore.addResourceItem({
+      name: payload.name,
+      itemType: 'folder',
+      parentId,
+      sortOrder
+    });
   }
-
-  await resourceStore.addResourceItem({
-    name,
-    itemType: 'resource',
-    resourceType,
-    parentId,
-    sortOrder,
-    initial_content: '',
-    initial_attributes,
-  });
 }
 
-async function handleItemNameConfirm(name: string) {
-  if (itemNameDialog.title === '重命名' && contextMenuItem.value) {
-    await resourceStore.updateResourceItem(contextMenuItem.value.id, { name });
-  } else if (itemNameDialog.itemType === 'folder') {
-    const parentId = contextMenuItem.value?.itemType === 'folder'
-      ? contextMenuItem.value.id
-      : contextMenuItem.value?.parentId ?? null;
-    const sortOrder = resourceStore.resources.filter(r => r.parentId === parentId).length;
-    await resourceStore.addResourceItem({ name, itemType: 'folder', parentId, sortOrder });
-  }
-}
+// 辅助函数：获取当前上下文（右键菜单选中项）的父级ID
+const getContextParentId = (): string | null => {
+  const item = contextMenuItem.value;
+  if (!item) return null;
+  return item.itemType === 'folder' ? item.id : (item.parentId ?? null);
+};
+
+const calculateSortOrder = (parentId: string | null): number => {
+  return resourceStore.resources.filter(r => r.parentId === parentId).length;
+};
 
 const handleDelete = async (item: Resource) => {
   try {
@@ -542,34 +551,11 @@ async function handleConfirmNewVersion() {
   padding: 16px;
   flex-shrink: 0;
   border-bottom: 1px solid var(--el-border-color-lighter);
+  cursor: default;
 }
 .panel-header h4 {
   margin: 0;
   font-size: 16px;
-}
-.tree-scrollbar {
-  flex-grow: 1;
-  padding: 8px;
-}
-.loading-container {
-  padding: 10px;
-}
-.resource-tree {
-  background-color: transparent;
-}
-.custom-tree-node {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  overflow: hidden;
-}
-.node-icon {
-  margin-right: 8px;
-}
-.node-label {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .resource-editor-panel {
   padding: 0;
@@ -674,5 +660,11 @@ async function handleConfirmNewVersion() {
 }
 .version-actions .el-button {
   padding: 0;
+}
+</style>
+<style>
+.no-animation-popper {
+  transition: none !important;
+  animation: none !important;
 }
 </style>
