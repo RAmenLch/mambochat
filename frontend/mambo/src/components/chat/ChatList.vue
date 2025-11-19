@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/chat/ChatList.vue -->
 <template>
   <div class="chat-list-container">
     <ExplorerTree
@@ -9,7 +10,7 @@
       persistence-key="mambo_chat_folder_expanded_state"
       @node-click="handleNodeClick"
       @node-contextmenu="handleNodeContextMenu"
-      @root-contextmenu="openContextMenu($event, null)"
+      @root-contextmenu="openRootContextMenu"
       @reorder="handleReorder"
     >
       <template #header>
@@ -35,22 +36,25 @@
     <el-dropdown
       ref="contextMenuRef"
       trigger="contextmenu"
-      @command="handleCommand"
+      @command="handleMenuCommand"
       popper-class="no-animation-popper"
     >
       <span :style="contextMenuPosition" />
       <template #dropdown>
         <el-dropdown-menu>
+          <!-- When right-clicking a folder -->
           <template v-if="contextMenuItem?.itemType === 'folder'">
-            <el-dropdown-item command="newChatInFolder"><el-icon><Plus /></el-icon>新建会话</el-dropdown-item>
-            <el-dropdown-item command="newFolderInFolder"><el-icon><FolderAdd /></el-icon>新建文件夹</el-dropdown-item>
+            <el-dropdown-item command="newChat"><el-icon><Plus /></el-icon>新建会话</el-dropdown-item>
+            <el-dropdown-item command="newFolder"><el-icon><FolderAdd /></el-icon>新建文件夹</el-dropdown-item>
           </template>
 
+          <!-- When right-clicking the root area -->
           <template v-if="!contextMenuItem">
-            <el-dropdown-item command="newRootChat"><el-icon><Plus /></el-icon>新建会话</el-dropdown-item>
-            <el-dropdown-item command="newRootFolder"><el-icon><FolderAdd /></el-icon>新建文件夹</el-dropdown-item>
+            <el-dropdown-item command="newChat"><el-icon><Plus /></el-icon>新建会话</el-dropdown-item>
+            <el-dropdown-item command="newFolder"><el-icon><FolderAdd /></el-icon>新建文件夹</el-dropdown-item>
           </template>
 
+          <!-- Common actions for any item -->
           <template v-if="contextMenuItem">
             <el-dropdown-item command="rename" :divided="contextMenuItem.itemType === 'folder'"><el-icon><EditPen /></el-icon>重命名</el-dropdown-item>
             <el-dropdown-item v-if="contextMenuItem.itemType === 'chat'" command="duplicate"><el-icon><CopyDocument /></el-icon>复制会话</el-dropdown-item>
@@ -65,40 +69,28 @@
       :title="dialogProps.title"
       :initial-name="dialogProps.initialName"
       :select-config="dialogProps.selectConfig"
-      @confirm="handleDialogConfirm"
+      @confirm="onDialogConfirm"
     />
   </div>
 </template>
 
 <script setup lang="ts">
-// ... (Script 部分保持不变)
-import { ref, onMounted, computed } from 'vue';
+import { onMounted, computed } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRouter } from 'vue-router';
-import { ElMessage, ElMessageBox } from 'element-plus';
-import type Node from 'element-plus/es/components/tree/src/model/node';
 import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, EditPen, CopyDocument } from '@element-plus/icons-vue';
 
-import type { Chat, ChatReorderItem, BaseTreeItem, TreeReorderEvent } from '@/api/types';
+import type { Chat, ChatCreate, ChatUpdate, BaseTreeItem } from '@/api/types';
 import { useChatListStore } from '@/stores/chatListStore';
 import { useChatSessionStore } from '@/stores/chatSessionStore';
 import { useProviderStore } from '@/stores/providerStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 
 import { buildChatTree } from '@/utils/treeHelper';
-import { useContextMenu } from '@/composables/useContextMenu';
-import { useDialogState } from '@/composables/useDialogState';
+import { useTreeController, type DialogPayload, type DialogConfirmPayload } from '@/composables/useTreeController';
 
 import ExplorerTree from '@/components/common/ExplorerTree.vue';
-import EntityFormDialog, {type SelectConfigOption} from '@/components/common/EntityFormDialog.vue';
-
-// --- Types ---
-type DialogType = 'rename' | 'newChat' | 'newFolder';
-interface DialogPayload {
-  type: DialogType;
-  parentId?: string | null;
-  targetItem?: Chat;
-}
+import EntityFormDialog, { type SelectConfigOption } from '@/components/common/EntityFormDialog.vue';
 
 // -- Store Instances & State --
 const chatListStore = useChatListStore();
@@ -112,54 +104,106 @@ const { currentChatId } = storeToRefs(chatSessionStore);
 const { providers } = storeToRefs(providerStore);
 const { globalSettings } = storeToRefs(settingsStore);
 
-// -- Local Component State --
-const treeRef = ref<InstanceType<typeof ExplorerTree>>();
-const contextMenuRef = ref();
-const { contextMenuItem, contextMenuPosition, handleContextMenu } = useContextMenu<Chat>();
-const dialogState = useDialogState<DialogPayload>();
-
 // -- Data Transformation --
 const treeData = computed(() => buildChatTree(chatList.value) as unknown as BaseTreeItem[]);
 
 const modelOptions = computed((): SelectConfigOption[] => {
   return providers.value.map(p => ({
-    label: p.name, // 分组标题 (如 OpenAI)
+    label: p.name,
     options: p.models.map(m => ({
-      label: m.name, // 选项标题 (如 gpt-4o)
-      value: m.id    // 选项值
+      label: m.name,
+      value: m.id
     }))
   }));
 });
 
-const dialogProps = computed(() => {
-  const payload = dialogState.payload.value;
-  if (!payload) return { title: '', initialName: '' };
+// -- Tree Controller Logic --
+const {
+  treeRef,
+  contextMenuRef,
+  contextMenuItem,
+  contextMenuPosition,
+  dialogState,
+  dialogProps,
+  handleReorder,
+  handleNodeContextMenu,
+  openRootContextMenu,
+  handleMenuCommand,
+  onDialogConfirm,
+} = useTreeController<Chat, ChatCreate, ChatUpdate>({
+  items: chatList,
+  crudHandlers: {
+    create: chatListStore.createNewItem,
+    update: chatListStore.updateChatSettings,
+    remove: chatListStore.deleteItem,
+    reorder: chatListStore.reorderChatItems,
+    duplicate: chatListStore.duplicateChat,
+  },
+  getDialogProps: (payload: DialogPayload<Chat>) => {
+    switch (payload.type) {
+      case 'rename':
+        return {
+          title: '重命名',
+          initialName: payload.targetItem?.name || '',
+        };
+      case 'newChat':
+        return {
+          title: '新建会话',
+          initialName: '新的会话',
+          selectConfig: {
+            label: '模型',
+            options: modelOptions.value,
+            initialValue: globalSettings.value.default_model_id || undefined,
+          },
+        };
+      case 'newFolder':
+        return {
+          title: '新建文件夹',
+          initialName: '新的文件夹',
+        };
+      default:
+        return { title: '', initialName: '' };
+    }
+  },
+  handleDialogConfirm: async (
+    dialogPayload: DialogPayload<Chat>,
+    formPayload: DialogConfirmPayload
+  ): Promise<Chat | null> => {
+    if (dialogPayload.type === 'rename' && dialogPayload.targetItem) {
+      await chatListStore.updateChatSettings(dialogPayload.targetItem.id, { name: formPayload.name });
+      return null;
+    }
 
-  switch (payload.type) {
-    case 'rename':
-      return {
-        title: '重命名',
-        initialName: payload.targetItem?.name || '',
-      };
-    case 'newChat':
-      return {
-        title: '新建会话',
-        initialName: '新的会话',
-        selectConfig: {
-          label: '模型',
-          options: modelOptions.value,
-          initialValue: globalSettings.value.default_model_id || undefined,
-        },
-      };
-    case 'newFolder':
-      return {
-        title: '新建文件夹',
-        initialName: '新的文件夹',
-      };
-    default:
-      return { title: '', initialName: '' };
-  }
+    const sortOrder = calculateSortOrder(dialogPayload.parentId);
+    let newItem: Chat | null = null;
+
+    if (dialogPayload.type === 'newChat') {
+      newItem = await chatListStore.createNewItem({
+        name: formPayload.name,
+        aiModelId: formPayload.selectValue,
+        itemType: 'chat',
+        parentId: dialogPayload.parentId || null,
+        sortOrder,
+      });
+      if (newItem) {
+        await handleSelectChat(newItem.id);
+      }
+    } else if (dialogPayload.type === 'newFolder') {
+      newItem = await chatListStore.createNewItem({
+        name: formPayload.name,
+        itemType: 'folder',
+        parentId: dialogPayload.parentId || null,
+        sortOrder,
+      });
+    }
+    return newItem;
+  },
 });
+
+// -- Helper Functions --
+const calculateSortOrder = (parentId?: string | null): number => {
+  return chatList.value.filter(item => item.parentId === (parentId || null)).length;
+};
 
 // -- Lifecycle --
 onMounted(async () => {
@@ -175,7 +219,7 @@ onMounted(async () => {
   }
 });
 
-// -- Tree Operations --
+// -- Component-Specific Actions --
 const handleNodeClick = (data: BaseTreeItem) => {
   if (data.itemType === 'chat') {
     handleSelectChat(data.id);
@@ -186,102 +230,6 @@ const handleSelectChat = async (chatId: string) => {
   await chatSessionStore.selectChat(chatId);
   if (chatSessionStore.currentChat) {
     router.push(`/chat/${chatId}`);
-  }
-};
-
-const handleReorder = async (updates: TreeReorderEvent[]) => {
-  await chatListStore.reorderChatItems(updates as ChatReorderItem[]);
-};
-
-// -- Context Menu --
-const handleNodeContextMenu = (event: MouseEvent, data: BaseTreeItem, node: Node) => {
-  openContextMenu(event, data as unknown as Chat);
-};
-
-const openContextMenu = (event: MouseEvent, data: Chat | null) => {
-  handleContextMenu(event, data, contextMenuRef);
-};
-
-const handleCommand = (command: string) => {
-  const item = contextMenuItem.value;
-  switch (command) {
-    case 'rename':
-      if (item) dialogState.open({ type: 'rename', targetItem: item });
-      break;
-    case 'delete':
-      if (item) handleDelete(item);
-      break;
-    case 'duplicate':
-      if (item) handleDuplicateChat(item);
-      break;
-    case 'newChatInFolder':
-      dialogState.open({ type: 'newChat', parentId: item?.id });
-      break;
-    case 'newFolderInFolder':
-      dialogState.open({ type: 'newFolder', parentId: item?.id });
-      break;
-    case 'newRootChat':
-      dialogState.open({ type: 'newChat', parentId: null });
-      break;
-    case 'newRootFolder':
-      dialogState.open({ type: 'newFolder', parentId: null });
-      break;
-  }
-};
-
-// -- Dialog Handling --
-const handleDialogConfirm = async (payload: { name: string; selectValue?: string }) => {
-  const state = dialogState.payload.value;
-  if (!state) return;
-
-  if (state.type === 'rename' && state.targetItem) {
-    await chatListStore.updateChatSettings(state.targetItem.id, { name: payload.name });
-  } else if (state.type === 'newChat') {
-    const sortOrder = calculateSortOrder(state.parentId);
-    const newChat = await chatListStore.createNewItem({
-      name: payload.name,
-      aiModelId: payload.selectValue,
-      itemType: 'chat',
-      parentId: state.parentId || null,
-      sortOrder,
-    });
-    if (newChat) {
-      ElMessage.success('创建成功');
-      await handleSelectChat(newChat.id);
-      await treeRef.value?.scrollToKey(newChat.id);
-    }
-  } else if (state.type === 'newFolder') {
-    const sortOrder = calculateSortOrder(state.parentId);
-    await chatListStore.createNewItem({
-      name: payload.name,
-      itemType: 'folder',
-      parentId: state.parentId || null,
-      sortOrder,
-    });
-  }
-};
-
-const calculateSortOrder = (parentId?: string | null): number => {
-  return chatList.value.filter(item => item.parentId === (parentId || null)).length;
-};
-
-// -- Other Actions --
-const handleDelete = async (item: Chat) => {
-  try {
-    await ElMessageBox.confirm(`确定要删除 "${item.name}" 吗？此操作不可恢复。`, '警告', {
-      confirmButtonText: '确定删除', cancelButtonText: '取消', type: 'warning'
-    });
-    await chatListStore.deleteItem(item.id);
-    ElMessage.success('删除成功');
-  } catch { /* User canceled */ }
-};
-
-const handleDuplicateChat = async (item: Chat) => {
-  if (item.itemType !== 'chat') return;
-  const newChat = await chatListStore.duplicateChat(item.id);
-  if (newChat) {
-    ElMessage.success('复制成功');
-    await treeRef.value?.scrollToKey(newChat.id);
   }
 };
 
@@ -297,6 +245,7 @@ const goToSettings = () => router.push('/settings');
 .footer { flex-shrink: 0; display: flex; justify-content: flex-end; align-items: center; padding: 8px 12px; }
 </style>
 <style>
+/* This style remains global as it targets a popper rendered outside the component scope */
 .no-animation-popper {
   transition: none !important;
   animation: none !important;

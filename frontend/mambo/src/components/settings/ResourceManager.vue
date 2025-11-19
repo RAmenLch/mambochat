@@ -12,7 +12,7 @@
         persistence-key="mambo_resource_folder_expanded_state"
         @node-click="handleNodeClick"
         @node-contextmenu="handleNodeContextMenu"
-        @root-contextmenu="openContextMenu($event, null)"
+        @root-contextmenu="openRootContextMenu"
         @reorder="handleReorder"
       >
         <template #header>
@@ -125,16 +125,20 @@
     <el-dropdown
       ref="contextMenuRef"
       trigger="contextmenu"
-      @command="handleCommand"
+      @command="handleMenuCommand"
       popper-class="no-animation-popper"
     >
       <span :style="contextMenuPosition" />
       <template #dropdown>
         <el-dropdown-menu>
-          <el-dropdown-item command="newResource"><el-icon><DocumentAdd /></el-icon>新建资源</el-dropdown-item>
-          <el-dropdown-item command="newFolder"><el-icon><FolderAdd /></el-icon>新建文件夹</el-dropdown-item>
+          <!-- When right-clicking a folder or root -->
+          <template v-if="!contextMenuItem || contextMenuItem.itemType === 'folder'">
+            <el-dropdown-item command="newResource"><el-icon><DocumentAdd /></el-icon>新建资源</el-dropdown-item>
+            <el-dropdown-item command="newFolder"><el-icon><FolderAdd /></el-icon>新建文件夹</el-dropdown-item>
+          </template>
+          <!-- Common actions for any item -->
           <template v-if="contextMenuItem">
-            <el-dropdown-item command="rename" divided><el-icon><EditPen /></el-icon>重命名</el-dropdown-item>
+            <el-dropdown-item command="rename" :divided="!contextMenuItem || contextMenuItem.itemType === 'folder'"><el-icon><EditPen /></el-icon>重命名</el-dropdown-item>
             <el-dropdown-item command="delete" class="delete-item"><el-icon><Delete /></el-icon>删除</el-dropdown-item>
           </template>
         </el-dropdown-menu>
@@ -147,7 +151,7 @@
       :title="dialogProps.title"
       :initial-name="dialogProps.initialName"
       :select-config="dialogProps.selectConfig"
-      @confirm="handleDialogConfirm"
+      @confirm="onDialogConfirm"
     />
 
     <!-- Dialog for New Version (Specific to Resource, kept separate) -->
@@ -172,24 +176,22 @@
 import { ref, reactive, onMounted, computed, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus';
-import type Node from 'element-plus/es/components/tree/src/model/node';
 import { Folder, Document, DocumentAdd, FolderAdd, EditPen, Delete, Memo, QuestionFilled } from '@element-plus/icons-vue';
 
 import { useResourceStore } from '@/stores/resourceStore';
-import { useContextMenu } from '@/composables/useContextMenu';
-import { useDialogState } from '@/composables/useDialogState';
+import { useTreeController, type DialogPayload, type DialogConfirmPayload } from '@/composables/useTreeController';
 import ExplorerTree from '@/components/common/ExplorerTree.vue';
 import EntityFormDialog from '@/components/common/EntityFormDialog.vue';
 
 import type {
   Resource,
-  ResourceReorderItem,
+  ResourceCreate,
+  ResourceUpdate,
   ResourceWithVersions,
   ResourceType,
   ResourceVersion,
   ResourceVersionCreate,
   BaseTreeItem,
-  TreeReorderEvent
 } from '@/api/types';
 
 // --- Local Type Definitions ---
@@ -198,15 +200,9 @@ interface SubMessageTemplateAttributes {
   is_collapsed: boolean;
 }
 
-type DialogType = 'rename' | 'newResource' | 'newFolder';
-interface DialogPayload {
-  type: DialogType;
-  targetItem?: Resource;
-}
-
 // --- Store ---
 const resourceStore = useResourceStore();
-const { isResourcesLoading, resources, resourceTree } = storeToRefs(resourceStore);
+const { isResourcesLoading, resources } = storeToRefs(resourceStore);
 
 // --- Constants ---
 const creatableResourceTypes: { value: ResourceType, label: string }[] = [
@@ -219,8 +215,7 @@ const DEFAULT_SUBMESSAGE_ATTRIBUTES: SubMessageTemplateAttributes = {
   is_collapsed: false,
 };
 
-// --- Refs and Reactive State ---
-const treeRef = ref<InstanceType<typeof ExplorerTree>>();
+// --- Editor-Specific State (Not part of TreeController) ---
 const formRef = ref<FormInstance>();
 const newVersionFormRef = ref<FormInstance>();
 const selectedResourceId = ref<string | undefined>(undefined);
@@ -241,13 +236,8 @@ const newVersionDialog = reactive({
   },
 });
 
-// --- Context Menu & Dialog State ---
-const contextMenuRef = ref();
-const { contextMenuItem, contextMenuPosition, handleContextMenu } = useContextMenu<Resource>();
-const dialogState = useDialogState<DialogPayload>();
-
 // --- Computed Properties ---
-const treeData = computed(() => resourceTree.value as unknown as BaseTreeItem[]);
+const treeData = computed(() => resources.value as unknown as BaseTreeItem[]);
 
 const activeResourceDetails = computed((): ResourceWithVersions | null => {
   if (!selectedResourceId.value) return null;
@@ -283,42 +273,101 @@ const contentEditorLabel = computed(() => {
   return '内容 (当前版本)';
 });
 
-const dialogProps = computed(() => {
-  const payload = dialogState.payload.value;
-  if (!payload) return { title: '', initialName: '' };
+// --- Tree Controller Logic ---
+const {
+  treeRef,
+  contextMenuRef,
+  contextMenuItem,
+  contextMenuPosition,
+  dialogState,
+  dialogProps,
+  handleReorder,
+  handleNodeContextMenu,
+  openRootContextMenu,
+  handleMenuCommand,
+  onDialogConfirm,
+} = useTreeController<Resource, ResourceCreate, ResourceUpdate>({
+  items: resources,
+  crudHandlers: {
+    create: resourceStore.addResourceItem,
+    update: resourceStore.updateResourceItem,
+    remove: async (id: string) => {
+      await resourceStore.deleteResourceItem(id);
+      if (selectedResourceId.value === id) {
+        selectedResourceId.value = undefined;
+      }
+    },
+    reorder: resourceStore.reorderResourceItems,
+  },
+  getDialogProps: (payload: DialogPayload<Resource>) => {
+    switch (payload.type) {
+      case 'rename':
+        return { title: '重命名', initialName: payload.targetItem?.name || '' };
+      case 'newResource':
+        return {
+          title: '新建资源',
+          initialName: '新的资源',
+          selectConfig: {
+            label: '资源类型',
+            options: creatableResourceTypes,
+            initialValue: creatableResourceTypes[0].value,
+          },
+        };
+      case 'newFolder':
+        return { title: '新建文件夹', initialName: '新的文件夹' };
+      default:
+        return { title: '', initialName: '' };
+    }
+  },
+  handleDialogConfirm: async (
+    dialogPayload: DialogPayload<Resource>,
+    formPayload: DialogConfirmPayload
+  ): Promise<Resource | null> => {
+    if (dialogPayload.type === 'rename' && dialogPayload.targetItem) {
+      await resourceStore.updateResourceItem(dialogPayload.targetItem.id, { name: formPayload.name });
+      return null;
+    }
 
-  switch (payload.type) {
-    case 'rename':
-      return {
-        title: '重命名',
-        initialName: payload.targetItem?.name || '',
-      };
-    case 'newResource':
-      return {
-        title: '新建资源',
-        initialName: '新的资源',
-        selectConfig: {
-          label: '资源类型',
-          options: creatableResourceTypes,
-          initialValue: creatableResourceTypes[0].value,
-        },
-      };
-    case 'newFolder':
-      return {
-        title: '新建文件夹',
-        initialName: '新的文件夹',
-      };
-    default:
-      return { title: '', initialName: '' };
+    const sortOrder = calculateSortOrder(dialogPayload.parentId);
+    let newItem: Resource | null = null;
+
+    if (dialogPayload.type === 'newResource') {
+      newItem = await resourceStore.addResourceItem({
+        name: formPayload.name,
+        itemType: 'resource',
+        resourceType: formPayload.selectValue as ResourceType,
+        parentId: dialogPayload.parentId,
+        sortOrder,
+        initial_content: '',
+        initial_attributes: formPayload.selectValue === 'submessage_template' ? { ...DEFAULT_SUBMESSAGE_ATTRIBUTES } : undefined,
+      });
+      if (newItem) {
+        selectedResourceId.value = newItem.id;
+        await resourceStore.fetchResourceDetails(newItem.id);
+      }
+    } else if (dialogPayload.type === 'newFolder') {
+      newItem = await resourceStore.addResourceItem({
+        name: formPayload.name,
+        itemType: 'folder',
+        parentId: dialogPayload.parentId,
+        sortOrder
+      });
+    }
+    return newItem;
   }
 });
+
+// --- Helper Functions ---
+const calculateSortOrder = (parentId: string | null = null): number => {
+  return resources.value.filter(r => r.parentId === parentId).length;
+};
 
 // --- Lifecycle ---
 onMounted(() => {
   resourceStore.fetchResources();
 });
 
-// --- Watchers ---
+// --- Watchers for Editor Panel ---
 watch(activeResourceDetails, (newSelection) => {
   if (newSelection) {
     form.name = newSelection.name;
@@ -336,11 +385,15 @@ watch(activeResourceDetails, (newSelection) => {
 
     loadedVersionInEditor.value = null;
   } else {
-    resetForm();
+    // Clear form if no resource is selected
+    form.name = '';
+    form.description = '';
+    form.content = '';
+    form.attributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES };
   }
 });
 
-// --- Methods ---
+// --- Component-Specific Methods for Editor Panel ---
 async function handleNodeClick(data: BaseTreeItem) {
   selectedResourceId.value = data.id;
   if (data.itemType === 'resource') {
@@ -362,11 +415,6 @@ function resetForm() {
     }
 
     loadedVersionInEditor.value = null;
-  } else {
-    form.name = '';
-    form.description = '';
-    form.content = '';
-    form.attributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES };
   }
 }
 
@@ -391,103 +439,6 @@ async function handleSaveChanges() {
   ElMessage.success('保存成功');
   loadedVersionInEditor.value = null;
 }
-
-// --- Tree Drag & Drop ---
-const handleReorder = async (updates: TreeReorderEvent[]) => {
-  await resourceStore.reorderResourceItems(updates as ResourceReorderItem[]);
-};
-
-// --- Context Menu & Dialog Logic ---
-const handleNodeContextMenu = (event: MouseEvent, data: BaseTreeItem, node: Node) => {
-  openContextMenu(event, data as unknown as Resource);
-};
-
-const openContextMenu = (event: MouseEvent, data: Resource | null) => {
-  handleContextMenu(event, data, contextMenuRef);
-};
-
-const handleCommand = (command: 'newResource' | 'newFolder' | 'rename' | 'delete') => {
-  const item = contextMenuItem.value;
-  switch (command) {
-    case 'newResource':
-      dialogState.open({ type: 'newResource' });
-      break;
-    case 'newFolder':
-      dialogState.open({ type: 'newFolder' });
-      break;
-    case 'rename':
-      if (item) dialogState.open({ type: 'rename', targetItem: item });
-      break;
-    case 'delete':
-      if (item) handleDelete(item);
-      break;
-  }
-};
-
-async function handleDialogConfirm(payload: { name: string; selectValue?: string }) {
-  const state = dialogState.payload.value;
-  if (!state) return;
-
-  if (state.type === 'rename' && state.targetItem) {
-    await resourceStore.updateResourceItem(state.targetItem.id, { name: payload.name });
-  } else if (state.type === 'newResource') {
-    const parentId = getContextParentId();
-    const sortOrder = calculateSortOrder(parentId);
-
-    let initial_attributes: Partial<SubMessageTemplateAttributes> | undefined;
-    if (payload.selectValue === 'submessage_template') {
-        initial_attributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES };
-    }
-
-    const newItem = await resourceStore.addResourceItem({
-      name: payload.name,
-      itemType: 'resource',
-      resourceType: payload.selectValue as ResourceType,
-      parentId,
-      sortOrder,
-      initial_content: '',
-      initial_attributes,
-    });
-    if (newItem) {
-      selectedResourceId.value = newItem.id;
-      await resourceStore.fetchResourceDetails(newItem.id);
-      await treeRef.value?.scrollToKey(newItem.id);
-    }
-  } else if (state.type === 'newFolder') {
-    const parentId = getContextParentId();
-    const sortOrder = calculateSortOrder(parentId);
-    await resourceStore.addResourceItem({
-      name: payload.name,
-      itemType: 'folder',
-      parentId,
-      sortOrder
-    });
-  }
-}
-
-// 辅助函数：获取当前上下文（右键菜单选中项）的父级ID
-const getContextParentId = (): string | null => {
-  const item = contextMenuItem.value;
-  if (!item) return null;
-  return item.itemType === 'folder' ? item.id : (item.parentId ?? null);
-};
-
-const calculateSortOrder = (parentId: string | null): number => {
-  return resourceStore.resources.filter(r => r.parentId === parentId).length;
-};
-
-const handleDelete = async (item: Resource) => {
-  try {
-    await ElMessageBox.confirm(`确定要删除 "${item.name}" 吗？此操作不可恢复。`, '警告', {
-      confirmButtonText: '确定删除', cancelButtonText: '取消', type: 'warning'
-    });
-    await resourceStore.deleteResourceItem(item.id);
-    if (selectedResourceId.value === item.id) {
-      selectedResourceId.value = undefined;
-    }
-    ElMessage.success('删除成功');
-  } catch { /* User canceled */ }
-};
 
 // --- Versioning Methods ---
 function loadVersionIntoEditor(version: ResourceVersion) {
