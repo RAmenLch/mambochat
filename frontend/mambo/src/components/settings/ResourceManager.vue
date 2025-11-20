@@ -202,7 +202,7 @@ interface SubMessageTemplateAttributes {
 
 // --- Store ---
 const resourceStore = useResourceStore();
-const { isResourcesLoading, resources } = storeToRefs(resourceStore);
+const { isResourcesLoading, resources, resourceTree } = storeToRefs(resourceStore);
 
 // --- Constants ---
 const creatableResourceTypes: { value: ResourceType, label: string }[] = [
@@ -237,7 +237,7 @@ const newVersionDialog = reactive({
 });
 
 // --- Computed Properties ---
-const treeData = computed(() => resources.value as unknown as BaseTreeItem[]);
+const treeData = resourceTree;
 
 const activeResourceDetails = computed((): ResourceWithVersions | null => {
   if (!selectedResourceId.value) return null;
@@ -289,11 +289,9 @@ const {
 } = useTreeController<Resource, ResourceCreate, ResourceUpdate>({
   items: resources,
   crudHandlers: {
-    // 更新：将 store actions 映射到 useTreeController 的新接口
     createItem: resourceStore.addResourceItem,
     updateItem: resourceStore.updateResourceItem,
     deleteItem: async (id: string) => {
-      // 此处包含 UI 特有的副作用逻辑，因此在组件层处理
       await resourceStore.deleteResourceItem(id);
       if (selectedResourceId.value === id) {
         selectedResourceId.value = undefined;
