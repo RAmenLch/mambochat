@@ -128,14 +128,20 @@ watch(() => props.chatData, (newChat) => {
 }, { immediate: true, deep: true });
 
 // --- Methods ---
-function handleAppendSystemPrompt(resource: Resource) {
-  const content = resource.latest_version?.content;
-  if (!content) return;
+function handleAppendSystemPrompt(resources: Resource[]) {
+  if (resources.length === 0) return;
+
+  const contentsToAppend = resources
+    .map(res => res.latest_version?.content)
+    .filter((content): content is string => !!content)
+    .join('\n');
+
+  if (!contentsToAppend) return;
 
   const currentPrompt = chatSettingsForm.systemPrompt || '';
   const separator = currentPrompt.trim().length > 0 ? '\n' : '';
 
-  chatSettingsForm.systemPrompt = currentPrompt + separator + content;
+  chatSettingsForm.systemPrompt = currentPrompt + separator + contentsToAppend;
 }
 
 function handleSaveSettings() {

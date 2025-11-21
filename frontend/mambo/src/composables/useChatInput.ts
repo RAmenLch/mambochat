@@ -36,6 +36,7 @@ export function useChatInput(currentChatId: Ref<string | null>) {
   const isMultiPartMode = ref(false);
   const singlePartDraft = ref('');
   const multiPartDraft = ref<Partition[]>([{ id: Date.now(), content: '' }]);
+  const activePartitionIndex = ref(0); // 新增：当前激活分区的索引
   const uploadedFiles = ref<FileResponse[]>([]);
   const attachedSubmessageResources = ref<Resource[]>([]);
 
@@ -87,6 +88,7 @@ export function useChatInput(currentChatId: Ref<string | null>) {
       uploadedFiles.value = [];
       attachedSubmessageResources.value = [];
       isMultiPartMode.value = chatInputModeState[newId] ?? false;
+      activePartitionIndex.value = 0; // 重置激活分区索引
       const draft = rawDraftFromHistory.value;
 
       if (isMultiPartMode.value) {
@@ -117,6 +119,7 @@ export function useChatInput(currentChatId: Ref<string | null>) {
     }
     isMultiPartMode.value = nextMode;
     chatInputModeState[currentChatId.value] = nextMode;
+    activePartitionIndex.value = 0; // 切换模式后重置激活分区
 
     debouncedSave.cancel();
     debouncedSave(nextMode ? JSON.stringify(multiPartDraft.value) : singlePartDraft.value);
@@ -134,6 +137,7 @@ export function useChatInput(currentChatId: Ref<string | null>) {
   const resetDraft = () => {
     singlePartDraft.value = '';
     multiPartDraft.value = [{ id: Date.now(), content: '' }];
+    activePartitionIndex.value = 0; // 重置草稿时，同样重置激活分区
     uploadedFiles.value = [];
     // Note: attachedSubmessageResources is NOT reset here, as per requirement.
     debouncedSave('');
@@ -173,11 +177,15 @@ export function useChatInput(currentChatId: Ref<string | null>) {
     if (isMultiPartMode.value) {
       if (multiPartDraft.value.length === 0) {
         multiPartDraft.value.push({ id: Date.now(), content: '' });
+        activePartitionIndex.value = 0;
       }
-      const lastPartition = multiPartDraft.value[multiPartDraft.value.length - 1];
-      const currentContent = lastPartition.content.trim();
-      const separator = currentContent.length > 0 ? '\n' : '';
-      lastPartition.content += separator + content;
+      // 修改：定位到当前激活的分区，而非最后一个
+      const currentPartition = multiPartDraft.value[activePartitionIndex.value];
+      if (currentPartition) {
+        const currentContent = currentPartition.content.trim();
+        const separator = currentContent.length > 0 ? '\n' : '';
+        currentPartition.content += separator + content;
+      }
     } else {
       const currentContent = singlePartDraft.value.trim();
       const separator = currentContent.length > 0 ? '\n' : '';
@@ -192,6 +200,7 @@ export function useChatInput(currentChatId: Ref<string | null>) {
     isMultiPartMode,
     singlePartDraft,
     multiPartDraft,
+    activePartitionIndex, // 导出状态
     uploadedFiles,
     attachedSubmessageResources,
 

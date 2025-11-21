@@ -5,7 +5,9 @@
       v-if="isMultiPartMode"
       ref="multiPartInputRef"
       :model-value="multiPartDraft"
+      :active-index="activePartitionIndex"
       @update:model-value="val => $emit('update:multiPartDraft', val)"
+      @update:active-index="val => $emit('update:activePartitionIndex', val)"
       class="input-field"
       @send="$emit('send')"
     />
@@ -70,11 +72,16 @@ const props = defineProps({
     type: Array as PropType<Partition[]>,
     required: true,
   },
+  activePartitionIndex: {
+    type: Number,
+    required: true,
+  },
 });
 
 const emit = defineEmits<{
   (e: 'update:singlePartDraft', value: string): void;
   (e: 'update:multiPartDraft', value: Partition[]): void;
+  (e: 'update:activePartitionIndex', value: number): void;
   (e: 'send'): void;
   (e: 'stop-generation'): void;
   (e: 'undo'): void;

@@ -48,17 +48,19 @@ interface Partition {
 // 接收 modelValue prop (用于 v-model)
 const props = defineProps<{
   modelValue: Partition[];
+  activeIndex: number;
 }>();
 
 // 定义组件可发出的事件
 const emit = defineEmits<{
   (e: 'update:modelValue', value: Partition[]): void;
+  (e: 'update:activeIndex', index: number): void;
   (e: 'send'): void;
 }>();
 
 
 const localPartitions = ref<Partition[]>([]);
-const activeIndex = ref(0);
+// 移除本地 activeIndex 状态
 const textareaRef = ref<InstanceType<typeof ElInput>>();
 
 // --- 数据同步 ---
@@ -68,10 +70,6 @@ watch(() => props.modelValue, (newVal) => {
   if (JSON.stringify(newVal) !== JSON.stringify(localPartitions.value)) {
     const partitionsToSet = newVal && newVal.length > 0 ? newVal : [{ id: Date.now(), content: '' }];
     localPartitions.value = JSON.parse(JSON.stringify(partitionsToSet));
-
-    if (activeIndex.value >= localPartitions.value.length) {
-      activeIndex.value = Math.max(0, localPartitions.value.length - 1);
-    }
   }
 }, { deep: true, immediate: true });
 
@@ -84,23 +82,32 @@ watch(localPartitions, (newVal) => {
 // --- UI 交互方法 ---
 
 const selectPartition = (index: number) => {
-  activeIndex.value = index;
+  // 不再修改本地状态，而是发出事件
+  emit('update:activeIndex', index);
   textareaRef.value?.focus();
 };
 
 const addPartition = async () => {
   localPartitions.value.push({ id: Date.now(), content: '' });
+  const newIndex = localPartitions.value.length - 1;
+  // 发出事件以更新父组件中的 activeIndex
+  emit('update:activeIndex', newIndex);
   await nextTick();
-  selectPartition(localPartitions.value.length - 1);
+  textareaRef.value?.focus();
 };
 
 const removePartition = (index: number) => {
   if (localPartitions.value.length <= 1) return;
 
+  const currentActiveIndex = props.activeIndex;
   localPartitions.value.splice(index, 1);
 
-  if (activeIndex.value >= localPartitions.value.length) {
-    activeIndex.value = localPartitions.value.length - 1;
+  // 如果删除的是当前激活的分区或其之前的分区，则需要调整激活索引
+  if (index <= currentActiveIndex) {
+    const newIndex = Math.max(0, currentActiveIndex - 1);
+    if (newIndex !== currentActiveIndex) {
+      emit('update:activeIndex', newIndex);
+    }
   }
 };
 
@@ -119,7 +126,7 @@ const handleKeydown = (event: Event) => {
  */
 const getData = (): SubMessageCreate[] => {
   return localPartitions.value
-    .map((part, index): SubMessageCreate => ({ // <-- FIX: Explicitly type the returned object
+    .map((part, index): SubMessageCreate => ({
       content: part.content,
       sortOrder: index,
       type: 'Normal',
@@ -132,7 +139,8 @@ const getData = (): SubMessageCreate[] => {
  */
 const reset = () => {
   localPartitions.value = [{ id: Date.now(), content: '' }];
-  activeIndex.value = 0;
+  // 重置时，通知父组件将索引也重置为0
+  emit('update:activeIndex', 0);
 };
 
 /**

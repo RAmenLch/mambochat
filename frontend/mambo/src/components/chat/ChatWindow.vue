@@ -51,6 +51,8 @@
           :is-send-button-disabled="isSendButtonDisabled"
           v-model:singlePartDraft="singlePartDraft"
           v-model:multiPartDraft="multiPartDraft"
+          :active-partition-index="activePartitionIndex"
+          @update:active-partition-index="index => activePartitionIndex = index"
           @send="handleSendMessage"
           @stop-generation="handleStopGeneration"
           @undo="undo"
@@ -117,6 +119,7 @@ const {
   isMultiPartMode,
   singlePartDraft,
   multiPartDraft,
+  activePartitionIndex,
   uploadedFiles,
   attachedSubmessageResources,
   isReadyToSend,
@@ -154,20 +157,27 @@ const isSendButtonDisabled = computed(() => isGenerating.value || !isReadyToSend
 // --- Methods ---
 
 /**
- * Handles the selection of a resource from the resource selector dialog.
+ * Handles the selection of resources from the resource selector dialog.
  * Appends content for system prompts or attaches submessage templates.
- * @param resource The selected resource object.
+ * @param resources The array of selected resource objects.
  */
-async function handleResourceSelected(resource: Resource) {
-  if (resource.resourceType === 'system_prompt') {
-    if (resource.latest_version?.content) {
-      appendContentToDraft(resource.latest_version.content);
-      await nextTick();
-      // Assuming ChatInputBox exposes a focus method
-      chatInputBoxRef.value?.focus();
+async function handleResourceSelected(resources: Resource[]) {
+  const promptContents: string[] = [];
+
+  for (const resource of resources) {
+    if (resource.resourceType === 'system_prompt') {
+      if (resource.latest_version?.content) {
+        promptContents.push(resource.latest_version.content);
+      }
+    } else if (resource.resourceType === 'submessage_template') {
+      addAttachedResource(resource);
     }
-  } else if (resource.resourceType === 'submessage_template') {
-    addAttachedResource(resource);
+  }
+
+  if (promptContents.length > 0) {
+    appendContentToDraft(promptContents.join('\n'));
+    await nextTick();
+    chatInputBoxRef.value?.focus();
   }
 }
 
@@ -284,7 +294,6 @@ watch(currentChatId, (newId) => {
       if (!loading) {
         scrollToBottom(true);
         nextTick(() => {
-            // Assuming ChatInputBox exposes a focus method
             chatInputBoxRef.value?.focus();
         });
         stopWatch();
