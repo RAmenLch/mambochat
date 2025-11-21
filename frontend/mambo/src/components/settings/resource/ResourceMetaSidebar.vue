@@ -31,7 +31,7 @@
         </template>
         <el-input-number
           :model-value="attributes.context_participation_length"
-          @update:model-value="$emit('update:attributes', { ...attributes, context_participation_length: $event })"
+          @update:model-value="$emit('update:attributes', { ...attributes, context_participation_length: $event ?? 0})"
           :min="0"
           :step="1"
           controls-position="right"
@@ -47,7 +47,7 @@
         </template>
         <el-switch
           :model-value="attributes.is_collapsed"
-          @update:model-value="$emit('update:attributes', { ...attributes, is_collapsed: $event })"
+          @update:model-value="$emit('update:attributes', { ...attributes, is_collapsed: Boolean($event)})"
         />
       </el-form-item>
     </template>
