@@ -8,34 +8,12 @@
     </div>
 
     <template v-else>
-      <div class="chat-window-header">
-        <div v-if="!isEditingTitle" class="title-display-area">
-          <h3 class="chat-title">{{ currentChat.name }}</h3>
-          <div class="title-actions">
-            <el-tooltip content="编辑标题" placement="bottom" :show-after="500">
-              <el-button :icon="Edit" circle text @click="startTitleEdit" />
-            </el-tooltip>
-            <el-tooltip content="刷新标题" placement="bottom" :show-after="500">
-              <el-button
-                :icon="Refresh"
-                circle
-                text
-                @click="handleRefreshTitle"
-                :loading="isTitleRefreshing"
-              />
-            </el-tooltip>
-          </div>
-        </div>
-        <div v-else class="title-edit-area">
-          <el-input
-            ref="titleInputRef"
-            v-model="titleInput"
-            @blur="saveTitle"
-            @keydown.enter.prevent="saveTitle"
-            class="title-input"
-          />
-        </div>
-      </div>
+      <ChatHeader
+        :current-chat="currentChat"
+        :is-title-refreshing="isTitleRefreshing"
+        @save-title="(newTitle) => chatListStore.updateChatSettings(currentChat!.id, { name: newTitle })"
+        @refresh-title="handleRefreshTitle"
+      />
 
       <el-scrollbar ref="scrollbarRef" class="message-list-scrollbar" v-loading="isChatHistoryLoading" @scroll="handleScroll">
         <div class="message-list-wrapper">
@@ -59,82 +37,25 @@
           @open-resource-selector="resourceSelectorVisible = true"
         />
 
-        <!-- Attached Templates Preview Area -->
-        <div v-if="attachedSubmessageResources.length > 0" class="attached-templates-preview">
-          <el-tag
-            v-for="resource in attachedSubmessageResources"
-            :key="resource.id"
-            closable
-            disable-transitions
-            type="info"
-            @close="removeAttachedResource(resource.id)"
-          >
-            {{ resource.name }}
-          </el-tag>
-        </div>
+        <AttachmentPreview
+          :uploaded-files="uploadedFiles"
+          :attached-resources="attachedSubmessageResources"
+          @remove-file="removeUploadedFile"
+          @remove-resource="removeAttachedResource"
+        />
 
-        <!-- Uploaded Files Preview Area -->
-        <div v-if="uploadedFiles.length > 0" class="uploaded-files-preview">
-          <div v-for="file in uploadedFiles" :key="file.id" class="file-item">
-            <el-image
-              v-if="file.mime_type.startsWith('image/')"
-              :src="file.url"
-              fit="cover"
-              class="file-thumbnail"
-            >
-              <template #error>
-                <div class="image-slot-error">
-                  <el-icon><Picture /></el-icon>
-                </div>
-              </template>
-            </el-image>
-            <div v-else class="file-icon">
-              <el-icon><Document /></el-icon>
-            </div>
-            <span class="file-name" :title="file.filename">{{ file.filename }}</span>
-            <el-button
-              :icon="Close"
-              circle
-              text
-              class="remove-file-btn"
-              @click="removeUploadedFile(file.id)"
-            />
-          </div>
-        </div>
-
-        <div class="chat-input-area" @keydown="handleGlobalKeydown">
-          <MultiPartInput
-            v-if="isMultiPartMode"
-            ref="multiPartInputRef"
-            v-model="multiPartDraft"
-            class="input-field"
-            @send="handleSendMessage"
-          />
-          <el-input
-            v-else
-            ref="inputRef"
-            v-model="singlePartDraft"
-            type="textarea"
-            :autosize="false"
-            resize="none"
-            placeholder="输入消息... (Shift + Enter 换行)"
-            :disabled="isGenerating"
-            @keydown="handleSingleInputKeydown"
-            class="input-field"
-          />
-          <el-button
-            v-if="!isGenerating"
-            type="primary"
-            class="action-button"
-            :disabled="isSendButtonDisabled"
-            @click="handleSendMessage"
-          >
-            <el-icon><Promotion /></el-icon>
-          </el-button>
-          <el-button v-else type="warning" class="action-button" @click="handleStopGeneration">
-            <el-icon><VideoPause /></el-icon>
-          </el-button>
-        </div>
+        <ChatInputBox
+          ref="chatInputBoxRef"
+          :is-multi-part-mode="isMultiPartMode"
+          :is-generating="isGenerating"
+          :is-send-button-disabled="isSendButtonDisabled"
+          v-model:singlePartDraft="singlePartDraft"
+          v-model:multiPartDraft="multiPartDraft"
+          @send="handleSendMessage"
+          @stop-generation="handleStopGeneration"
+          @undo="undo"
+          @redo="redo"
+        />
       </div>
     </template>
 
@@ -155,8 +76,7 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from 'vue';
 import { storeToRefs } from 'pinia';
-import { ElScrollbar, ElInput, ElMessage } from 'element-plus';
-import { Promotion, VideoPause, Edit, Refresh, Document, Picture, Close } from '@element-plus/icons-vue';
+import { ElScrollbar, ElMessage } from 'element-plus';
 import type { Ref } from 'vue';
 import type { ChatUpdate, SubMessageCreate, AIModel, Resource } from '@/api/types';
 import { uploadFile } from '@/api/chatService';
@@ -173,9 +93,11 @@ import { useTokenEstimator } from '@/composables/useTokenEstimator';
 // --- Components ---
 import MessageItem from './MessageItem.vue';
 import ChatToolbar from './ChatToolbar.vue';
-import MultiPartInput from './MultiPartInput.vue';
 import ChatSettingsDrawer from './ChatSettingsDrawer.vue';
 import ResourceSelectorDialog from './dialogs/ResourceSelectorDialog.vue';
+import ChatHeader from './ChatHeader.vue';
+import AttachmentPreview from './AttachmentPreview.vue';
+import ChatInputBox from './ChatInputBox.vue';
 
 interface GroupedModels { label: string; options: AIModel[]; }
 
@@ -219,14 +141,10 @@ const { estimatedTokens } = useTokenEstimator(contextForTokenEstimation, current
 
 // --- Local Component State ---
 const scrollbarRef = ref<InstanceType<typeof ElScrollbar>>();
-const inputRef = ref<InstanceType<typeof ElInput>>();
-const multiPartInputRef = ref<InstanceType<typeof MultiPartInput>>();
 const fileInputRef = ref<HTMLInputElement | null>(null);
+const chatInputBoxRef = ref<InstanceType<typeof ChatInputBox>>();
 const settingsDrawerVisible = ref(false);
 const resourceSelectorVisible = ref(false);
-const isEditingTitle = ref(false);
-const titleInput = ref('');
-const titleInputRef = ref<InstanceType<typeof ElInput>>();
 const userHasScrolledUp = ref(false);
 
 // --- Computed Properties ---
@@ -245,11 +163,8 @@ async function handleResourceSelected(resource: Resource) {
     if (resource.latest_version?.content) {
       appendContentToDraft(resource.latest_version.content);
       await nextTick();
-      if (isMultiPartMode.value) {
-        multiPartInputRef.value?.focus();
-      } else {
-        inputRef.value?.focus();
-      }
+      // Assuming ChatInputBox exposes a focus method
+      chatInputBoxRef.value?.focus();
     }
   } else if (resource.resourceType === 'submessage_template') {
     addAttachedResource(resource);
@@ -282,11 +197,18 @@ async function onFileSelected(event: Event) {
 async function handleSendMessage() {
   if (isSendButtonDisabled.value) return;
 
-  const textSubMessages: SubMessageCreate[] = isMultiPartMode.value
-    ? (multiPartInputRef.value?.getData() || [])
-    : singlePartDraft.value.trim() !== ''
-      ? [{ content: singlePartDraft.value, sortOrder: 0, type: 'Normal' }]
-      : [];
+  const textParts = isMultiPartMode.value
+    ? multiPartDraft.value.map(p => p.content)
+    : [singlePartDraft.value];
+
+  const textSubMessages: SubMessageCreate[] = textParts
+    .map(content => content.trim())
+    .filter(content => content !== '')
+    .map((content, index) => ({
+      content,
+      sortOrder: index,
+      type: 'Normal',
+    }));
 
   const fileSubMessages: SubMessageCreate[] = uploadedFiles.value.map(file => ({
     content: file.id,
@@ -312,22 +234,6 @@ function handleStopGeneration() {
 }
 
 // Title Actions
-function startTitleEdit() {
-  if (!currentChat.value) return;
-  isEditingTitle.value = true;
-  titleInput.value = currentChat.value.name;
-  nextTick(() => titleInputRef.value?.focus());
-}
-
-function saveTitle() {
-  if (!currentChat.value || !isEditingTitle.value) return;
-  const newName = titleInput.value.trim();
-  if (newName && newName !== currentChat.value.name) {
-    chatListStore.updateChatSettings(currentChat.value.id, { name: newName });
-  }
-  isEditingTitle.value = false;
-}
-
 function handleRefreshTitle() {
   if (currentChat.value) {
     chatListStore.refreshChatTitle(currentChat.value.id);
@@ -342,25 +248,7 @@ async function handleSaveSettings(settings: ChatUpdate) {
   ElMessage.success('设置已保存');
 }
 
-// Keyboard & Scroll
-function handleGlobalKeydown(event: KeyboardEvent) {
-  if (event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === 'z') {
-    event.preventDefault();
-    undo();
-  } else if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'z') {
-    event.preventDefault();
-    redo();
-  }
-}
-
-function handleSingleInputKeydown(event: Event) {
-  if (!(event instanceof KeyboardEvent)) return;
-  if (event.key === 'Enter' && !event.shiftKey) {
-    event.preventDefault();
-    handleSendMessage();
-  }
-}
-
+// Scroll
 const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
   const el = scrollbarRef.value?.wrapRef;
   if (!el) return;
@@ -390,14 +278,14 @@ watch(
 
 watch(currentChatId, (newId) => {
   if (newId) {
-    isEditingTitle.value = false;
     userHasScrolledUp.value = false;
 
     const stopWatch = watch(isChatHistoryLoading, (loading) => {
       if (!loading) {
         scrollToBottom(true);
         nextTick(() => {
-            inputRef.value?.focus();
+            // Assuming ChatInputBox exposes a focus method
+            chatInputBoxRef.value?.focus();
         });
         stopWatch();
       }
@@ -409,82 +297,8 @@ watch(currentChatId, (newId) => {
 <style scoped>
 .chat-window-container { height: 100%; display: flex; flex-direction: column; background-color: var(--color-background); overflow: hidden; }
 .welcome-view { display: flex; justify-content: center; align-items: center; height: 100%; }
-.chat-window-header { flex-shrink: 0; padding: 0 20px; height: 60px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--color-border); }
-.title-display-area { display: flex; align-items: center; gap: 8px; overflow: hidden; }
-.chat-title { margin: 0; font-size: 18px; font-weight: 600; color: var(--color-heading); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.title-actions { display: flex; align-items: center; }
-.title-edit-area { width: 100%; }
 .message-list-scrollbar { flex-grow: 1; }
 .message-list-wrapper { padding: 20px; }
 .input-container-wrapper { flex-shrink: 0; position: relative; display: flex; flex-direction: column; border-top: 1px solid var(--color-border); }
 .resize-handle { position: absolute; top: -3px; left: 0; width: 100%; height: 6px; cursor: ns-resize; z-index: 10; }
-
-.attached-templates-preview {
-  padding: 8px 20px 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  background-color: var(--color-background-soft);
-}
-
-.uploaded-files-preview {
-  padding: 8px 20px 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  background-color: var(--color-background-soft);
-  max-height: 100px; /* Example max height */
-  overflow-y: auto;
-}
-.file-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  border-radius: 4px;
-  background-color: var(--color-background);
-  border: 1px solid var(--color-border);
-  font-size: 13px;
-}
-.file-thumbnail {
-  width: 24px;
-  height: 24px;
-  border-radius: 3px;
-}
-.image-slot-error {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  width: 100%;
-  height: 100%;
-  background: var(--el-fill-color-light);
-  color: var(--el-text-color-secondary);
-  font-size: 14px;
-}
-.file-icon {
-  font-size: 18px;
-  color: var(--el-text-color-secondary);
-  display: flex;
-  align-items: center;
-}
-.file-name {
-  max-width: 150px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.remove-file-btn {
-  margin-left: 4px;
-  font-size: 14px;
-  --el-button-text-color: var(--el-text-color-placeholder);
-}
-.remove-file-btn:hover {
-  --el-button-text-color: var(--el-color-danger);
-  background-color: transparent;
-}
-
-.chat-input-area { flex-grow: 1; padding: 10px 20px; background-color: var(--color-background-soft); display: flex; align-items: stretch; min-height: 0; }
-.input-field { flex-grow: 1; margin-right: 10px; }
-.input-field:deep(.el-textarea__inner) { height: 100% !important; }
-.action-button { width: 54px; font-size: 20px; flex-shrink: 0; align-self: flex-end; height: calc(100% - 2px); }
 </style>

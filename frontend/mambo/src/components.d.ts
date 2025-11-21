@@ -8,7 +8,10 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AttachmentPreview: typeof import('./components/chat/AttachmentPreview.vue')['default']
     AvatarUploader: typeof import('./components/settings/AvatarUploader.vue')['default']
+    ChatHeader: typeof import('./components/chat/ChatHeader.vue')['default']
+    ChatInputBox: typeof import('./components/chat/ChatInputBox.vue')['default']
     ChatList: typeof import('./components/chat/ChatList.vue')['default']
     ChatSettingsDrawer: typeof import('./components/chat/ChatSettingsDrawer.vue')['default']
     ChatToolbar: typeof import('./components/chat/ChatToolbar.vue')['default']
