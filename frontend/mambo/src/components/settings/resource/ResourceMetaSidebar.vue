@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/settings/resource/ResourceMetaSidebar.vue -->
 <template>
   <div class="meta-column">
     <div class="meta-header">基本信息</div>
@@ -50,13 +51,25 @@
           @update:model-value="$emit('update:attributes', { ...attributes, is_collapsed: Boolean($event)})"
         />
       </el-form-item>
+      <el-form-item>
+        <template #label>
+          <span>默认最小化</span>
+          <el-tooltip effect="dark" content="在对话中注入时, 该模板内容是否默认最小化" placement="top">
+            <el-icon class="label-icon"><QuestionFilled /></el-icon>
+          </el-tooltip>
+        </template>
+        <el-switch
+          :model-value="attributes.is_minimal"
+          @update:model-value="$emit('update:attributes', { ...attributes, is_minimal: Boolean($event)})"
+        />
+      </el-form-item>
     </template>
 
     <el-divider class="meta-divider" />
     <div class="meta-info">
         <div class="info-row">
           <span>类型</span>
-          <el-tag size="small" type="info">{{ resource.resourceType || 'folder' }}</el-tag>
+          <el-tag size="small" type="info">{{ displayResourceType }}</el-tag>
         </div>
         <div class="info-row">
           <span>ID</span>
@@ -71,6 +84,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue';
 import { QuestionFilled } from '@element-plus/icons-vue';
 import type { ResourceWithVersions } from '@/api/types';
 
@@ -78,10 +92,11 @@ import type { ResourceWithVersions } from '@/api/types';
 interface SubMessageTemplateAttributes {
   context_participation_length: number;
   is_collapsed: boolean;
+  is_minimal: boolean;
 }
 
 // --- Props & Emits ---
-defineProps<{
+const props = defineProps<{
   resource: ResourceWithVersions;
   name: string;
   description: string;
@@ -93,6 +108,18 @@ defineEmits<{
   (e: 'update:description', value: string): void;
   (e: 'update:attributes', value: SubMessageTemplateAttributes): void;
 }>();
+
+// --- Computed Properties ---
+const displayResourceType = computed(() => {
+  switch (props.resource.resourceType) {
+    case 'system_prompt':
+      return '系统提示词';
+    case 'submessage_template':
+      return '消息模板';
+    default:
+      return 'folder';
+  }
+});
 </script>
 
 <style scoped>

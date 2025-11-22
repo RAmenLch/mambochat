@@ -98,13 +98,14 @@ const { resources } = storeToRefs(resourceStore);
 
 // --- Constants ---
 const creatableResourceTypes: { value: ResourceType, label: string }[] = [
-  { value: 'system_prompt', label: 'System Prompt' },
-  { value: 'submessage_template', label: 'SubMessage 模板' },
+  { value: 'system_prompt', label: '系统提示词' },
+  { value: 'submessage_template', label: '消息模板' },
 ];
 
 const DEFAULT_SUBMESSAGE_ATTRIBUTES = {
   context_participation_length: 1,
   is_collapsed: false,
+  is_minimal: true,
 };
 
 // --- Tree Controller Logic ---

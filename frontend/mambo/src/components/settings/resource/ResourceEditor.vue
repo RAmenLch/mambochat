@@ -2,48 +2,14 @@
 <template>
   <div class="editor-container">
     <!-- Top Region: Version History (Horizontal) -->
-    <div v-if="resource.itemType === 'resource'" class="version-top-bar">
-      <div class="version-bar-header">
-        <span class="version-bar-title">版本历史</span>
-      </div>
-      <el-scrollbar>
-        <div class="version-list-horizontal">
-          <template v-if="resource.versions && resource.versions.length > 0">
-            <div
-              v-for="version in resource.versions"
-              :key="version.id"
-              class="version-card-horizontal"
-              :class="{
-                'is-active': resource.latest_version?.id === version.id,
-                'is-viewing': loadedVersionInEditor?.id === version.id
-              }"
-              @click="loadVersionIntoEditor(version)"
-            >
-              <div class="version-card-header">
-                <span class="version-name">{{ version.name }}</span>
-                <span class="version-date">{{ new Date(version.createdAt).toLocaleDateString() }}</span>
-              </div>
-              <div class="version-card-body">
-                  <p class="version-msg" :title="version.commitMessage ?? undefined">{{ version.commitMessage || '无描述' }}</p>
-              </div>
-              <div class="version-card-footer">
-                <el-button
-                  v-if="resource.latest_version?.id !== version.id"
-                  type="primary"
-                  link
-                  size="small"
-                  @click.stop="handleSetActiveVersion(version.id)"
-                >
-                  设为当前
-                </el-button>
-                <el-tag v-else type="success" size="small" effect="plain">当前版本</el-tag>
-              </div>
-            </div>
-          </template>
-          <div v-else class="no-versions">暂无历史版本</div>
-        </div>
-      </el-scrollbar>
-    </div>
+    <ResourceVersionBar
+      v-if="resource.itemType === 'resource'"
+      :versions="resource.versions || []"
+      :active-version-id="resource.latest_version?.id || null"
+      :viewing-version-id="loadedVersionInEditor?.id || null"
+      @select-version="loadVersionIntoEditor"
+      @set-active="handleSetActiveVersion"
+    />
 
     <!-- Bottom Region: Split View (Content Left, Meta Right) -->
     <el-form :model="form" label-position="top" ref="formRef" class="editor-split-layout">
@@ -76,75 +42,12 @@
       </div>
 
       <!-- Right: Meta Sidebar -->
-      <div class="meta-column">
-        <div class="meta-header">基本信息</div>
-        <el-form-item label="名称" prop="name">
-          <el-input v-model="form.name" placeholder="资源名称" />
-        </el-form-item>
-        <el-form-item label="描述" prop="description">
-          <el-input
-            v-model="form.description"
-            type="textarea"
-            :rows="4"
-            placeholder="资源描述"
-            resize="none"
-          />
-        </el-form-item>
-
-        <template v-if="resource.itemType === 'resource' && resource.resourceType === 'submessage_template'">
-          <el-divider class="meta-divider" />
-          <div class="meta-header">模板配置</div>
-          <el-form-item>
-              <template #label>
-              <span>参与长度</span>
-              <el-tooltip effect="dark" content="上下文参与长度 (Context Participation Length)" placement="top">
-                <el-icon class="label-icon"><QuestionFilled /></el-icon>
-              </el-tooltip>
-            </template>
-            <el-input-number
-              v-model="form.attributes.context_participation_length"
-              :min="0"
-              :step="1"
-              controls-position="right"
-              style="width: 100%;"
-            />
-          </el-form-item>
-          <el-form-item>
-            <template #label>
-              <span>默认折叠</span>
-              <el-tooltip effect="dark" content="在对话中注入时, 该模板内容是否默认折叠" placement="top">
-                <el-icon class="label-icon"><QuestionFilled /></el-icon>
-              </el-tooltip>
-            </template>
-            <el-switch v-model="form.attributes.is_collapsed" />
-          </el-form-item>
-          <el-form-item>
-            <template #label>
-              <span>默认最小化</span>
-              <el-tooltip effect="dark" content="在对话中注入时, 该模板内容是否默认最小化" placement="top">
-                <el-icon class="label-icon"><QuestionFilled /></el-icon>
-              </el-tooltip>
-            </template>
-            <el-switch v-model="form.attributes.is_minimal" />
-          </el-form-item>
-        </template>
-
-        <el-divider class="meta-divider" />
-        <div class="meta-info">
-            <div class="info-row">
-              <span>类型</span>
-              <el-tag size="small" type="info">{{ resource.resourceType || 'folder' }}</el-tag>
-            </div>
-            <div class="info-row">
-              <span>ID</span>
-              <span class="info-value" :title="resource.id">{{ resource.id.slice(0, 8) }}...</span>
-            </div>
-            <div class="info-row" v-if="resource.updatedAt">
-              <span>更新时间</span>
-              <span class="info-value">{{ new Date(resource.updatedAt).toLocaleDateString() }}</span>
-            </div>
-        </div>
-      </div>
+      <ResourceMetaSidebar
+        :resource="resource"
+        v-model:name="form.name"
+        v-model:description="form.description"
+        v-model:attributes="form.attributes"
+      />
 
     </el-form>
   </div>
@@ -168,10 +71,11 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue';
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus';
-import { QuestionFilled } from '@element-plus/icons-vue';
 
 import { useResourceStore } from '@/stores/resourceStore';
 import type { ResourceWithVersions, ResourceVersion, ResourceVersionCreate } from '@/api/types';
+import ResourceVersionBar from './ResourceVersionBar.vue';
+import ResourceMetaSidebar from './ResourceMetaSidebar.vue';
 
 // --- Local Type Definitions ---
 interface SubMessageTemplateAttributes {
@@ -361,100 +265,6 @@ async function handleConfirmNewVersion() {
   height: 100%;
 }
 
-/* --- Top Version Bar --- */
-.version-top-bar {
-  flex-shrink: 0;
-  height: 140px;
-  border-bottom: 1px solid var(--el-border-color);
-  background-color: var(--el-fill-color-lighter);
-  display: flex;
-  flex-direction: column;
-}
-
-.version-bar-header {
-  padding: 8px 16px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--el-text-color-secondary);
-  text-transform: uppercase;
-}
-
-.version-list-horizontal {
-  display: flex;
-  padding: 0 12px 12px 12px;
-  gap: 12px;
-}
-
-.version-card-horizontal {
-  flex-shrink: 0;
-  width: 200px;
-  height: 90px;
-  background-color: #fff;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 4px;
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  cursor: pointer;
-  transition: all 0.2s;
-  position: relative;
-}
-
-.version-card-horizontal:hover {
-  border-color: var(--el-color-primary-light-5);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-}
-
-.version-card-horizontal.is-active {
-  border-color: var(--el-color-success);
-  background-color: var(--el-color-success-light-9);
-}
-
-.version-card-horizontal.is-viewing {
-  border-color: var(--el-color-primary);
-  box-shadow: 0 0 0 1px var(--el-color-primary);
-}
-
-.version-card-header {
-  display: flex;
-  justify-content: space-between;
-  font-size: 13px;
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-
-.version-date {
-  font-weight: normal;
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-}
-
-.version-card-body {
-  flex-grow: 1;
-  overflow: hidden;
-}
-
-.version-msg {
-  margin: 0;
-  font-size: 11px;
-  color: var(--el-text-color-regular);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.version-card-footer {
-  margin-top: auto;
-  display: flex;
-  justify-content: flex-end;
-}
-
-.no-versions {
-  padding: 16px;
-  color: var(--el-text-color-secondary);
-  font-size: 13px;
-}
-
 /* --- Split Layout --- */
 .editor-split-layout {
   flex-grow: 1;
@@ -524,51 +334,5 @@ async function handleConfirmNewVersion() {
   padding: 16px 20px;
   border-top: 1px solid var(--el-border-color-lighter);
   background-color: #fff;
-}
-
-/* Right: Meta Sidebar */
-.meta-column {
-  width: 320px;
-  flex-shrink: 0;
-  border-left: 1px solid var(--el-border-color);
-  background-color: var(--el-fill-color-extra-light);
-  padding: 20px;
-  overflow-y: auto;
-}
-
-.meta-header {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--el-text-color-secondary);
-  margin-bottom: 16px;
-  text-transform: uppercase;
-}
-
-.meta-divider {
-  margin: 24px 0 16px 0;
-}
-
-.meta-info {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.info-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-
-.info-value {
-  color: var(--el-text-color-regular);
-  font-family: monospace;
-}
-
-.label-icon {
-  margin-left: 6px;
-  color: #909399;
-  cursor: help;
 }
 </style>
