@@ -14,6 +14,24 @@
     </div>
 
     <div class="message-body">
+      <!-- Minimized SubMessages Area -->
+      <div v-if="minimizedSubMessages.length > 0" class="minimized-sub-messages-container">
+        <el-tooltip
+          v-for="subMessage in minimizedSubMessages"
+          :key="subMessage.id"
+          placement="top"
+          :show-after="300"
+        >
+          <template #content>
+            {{ subMessage.content.substring(0, 20) + (subMessage.content.length > 20 ? '...' : '') }}
+          </template>
+          <div class="minimized-item" @click="restoreSubMessage(subMessage.id)">
+            <el-icon><Document /></el-icon>
+            <span class="minimized-item-title">{{ getPartitionTitleForMinimized(subMessage) }}</span>
+          </div>
+        </el-tooltip>
+      </div>
+
       <div
         class="sub-messages-container"
         :class="{
@@ -22,7 +40,7 @@
         }"
       >
         <!-- Display a loading indicator when the message is generating but has no sub-messages yet -->
-        <div v-if="message.status === 'generating' && displayableSubMessages.length === 0" class="initial-loading-placeholder">
+        <div v-if="message.status === 'generating' && normalSubMessages.length === 0" class="initial-loading-placeholder">
           <div class="typing-indicator">
             <span></span><span></span><span></span>
           </div>
@@ -37,6 +55,7 @@
               :sub-message="subMessage"
               :parent-message="message"
               :index="index + 1"
+              :is-minimize-disabled="isLastVisibleSubMessage"
               @edit="(payload) => handleEditRequest(subMessage, payload)"
               @copy="handleCopySingle(subMessage)"
             />
@@ -49,6 +68,7 @@
             :parent-message="message"
             :show-header="!useSinglePartitionView"
             :index="group.sub_messages[0].sortOrder + 1"
+            :is-minimize-disabled="isLastVisibleSubMessage"
             @edit="(payload) => handleEditRequest(group.sub_messages[0], payload)"
             @copy="handleCopySingle(group.sub_messages[0])"
           />
@@ -119,7 +139,7 @@ import type { Message, SubMessage, SubMessageCreate, MessageStatus } from '@/api
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { User, Cpu, Refresh, RefreshLeft, Delete, Edit, CopyDocument, ArrowUpBold, ArrowDownBold, Clock } from '@element-plus/icons-vue';
+import { User, Cpu, Refresh, RefreshLeft, Delete, Edit, CopyDocument, ArrowUpBold, ArrowDownBold, Clock, Document } from '@element-plus/icons-vue';
 import SubMessageItem from './SubMessageItem.vue';
 import MessageEditDialog from './dialogs/MessageEditDialog.vue';
 import UsageInfo from './UsageInfo.vue';
@@ -152,6 +172,25 @@ const displayableSubMessages = computed(() =>
 );
 
 /**
+ * 筛选出被最小化的子消息
+ */
+const minimizedSubMessages = computed(() =>
+  displayableSubMessages.value.filter(sm => sm.config?.is_minimal === true)
+);
+
+/**
+ * 筛选出正常显示的子消息
+ */
+const normalSubMessages = computed(() =>
+  displayableSubMessages.value.filter(sm => !sm.config?.is_minimal)
+);
+
+/**
+ * 判断当前是否只剩下一个可见的子消息
+ */
+const isLastVisibleSubMessage = computed(() => normalSubMessages.value.length === 1);
+
+/**
  * 提取出 'Usage' 类型的子消息，用于在工具栏中显示。
  */
 const usageSubMessage = computed(() =>
@@ -165,19 +204,19 @@ const zipHistorySubMessage = computed(() =>
   props.message.sub_messages.find(sm => sm.type === 'ZipHistory')
 );
 
-const isSingleSubMessage = computed(() => displayableSubMessages.value.length === 1);
-const firstSubMessage = computed(() => displayableSubMessages.value[0]);
+const isSingleSubMessage = computed(() => normalSubMessages.value.length === 1);
+const firstSubMessage = computed(() => normalSubMessages.value[0]);
 
 // Groups consecutive file sub-messages for grid layout, while keeping others separate.
 const groupedSubMessages = computed((): SubMessageGroup[] => {
-  if (!displayableSubMessages.value || displayableSubMessages.value.length === 0) {
+  if (!normalSubMessages.value || normalSubMessages.value.length === 0) {
     return [];
   }
 
   const result: SubMessageGroup[] = [];
   let lastGroup: SubMessageGroup | null = null;
 
-  for (const subMessage of displayableSubMessages.value) {
+  for (const subMessage of normalSubMessages.value) {
     if (subMessage.type === 'File') {
       if (lastGroup && lastGroup.type === 'file') {
         lastGroup.sub_messages.push(subMessage);
@@ -197,7 +236,7 @@ const groupedSubMessages = computed((): SubMessageGroup[] => {
 
 // 决定是否使用简化的单分区视图（无头部，有特殊背景和折叠效果）
 const useSinglePartitionView = computed(() => {
-  return displayableSubMessages.value.length === 1 && firstSubMessage.value?.type === 'Normal';
+  return normalSubMessages.value.length === 1 && firstSubMessage.value?.type === 'Normal';
 });
 
 const roleClass = computed(() => ({
@@ -361,12 +400,78 @@ function handleCompressHistory() {
   interactionStore.initiateHistoryCompression(props.message.id);
   ElMessage.info('已开始在后台压缩历史对话，您可以继续聊天。');
 }
+
+/**
+ * 恢复一个最小化的子消息
+ */
+function restoreSubMessage(subMessageId: string) {
+  const subMessage = props.message.sub_messages.find(sm => sm.id === subMessageId);
+  if (!subMessage) return;
+
+  interactionStore.updateSubMessage({
+    subMessageId: subMessageId,
+    data: { config: { ...subMessage.config, is_minimal: false } },
+  });
+}
+
+/**
+ * 为最小化按钮获取一个简短的标题
+ */
+function getPartitionTitleForMinimized(subMessage: SubMessage): string {
+  if (subMessage.type === 'Reasoning') return '思考';
+  if (subMessage.type === 'File') return '文件';
+  if (subMessage.type === 'Normal') {
+      const normalSubMessages = displayableSubMessages.value.filter(sm => sm.type === 'Normal');
+      if (normalSubMessages.length <= 1) return '正文';
+      const normalIndex = normalSubMessages.findIndex(sm => sm.id === subMessage.id);
+      if (normalIndex !== -1) {
+        return `正文(${normalIndex + 1})`;
+      }
+  }
+  return '分区';
+}
+
 </script>
 
 <style scoped>
 .message-item-container { display: flex; align-items: flex-start; margin-bottom: 20px; max-width: 90%; }
 .message-avatar { flex-shrink: 0; margin-right: 12px; margin-top: 2px; }
 .message-body { display: flex; flex-direction: column; min-width: 80px; width: 100%; }
+
+.minimized-sub-messages-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.minimized-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background-color: var(--color-background-soft);
+  border: 1px solid var(--el-border-color-light);
+  color: var(--el-text-color-regular);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.minimized-item:hover {
+  border-color: var(--el-color-primary);
+  color: var(--el-color-primary);
+}
+.is-user .minimized-item {
+  background-color: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary-light-8);
+}
+.is-user .minimized-item:hover {
+  border-color: var(--el-color-primary);
+  color: var(--el-color-primary);
+}
+.minimized-item-title {
+  white-space: nowrap;
+}
 
 .sub-messages-container {
   display: flex;
@@ -453,6 +558,7 @@ function handleCompressHistory() {
 .message-item-container.is-user { flex-direction: row-reverse; margin-left: auto; }
 .is-user .message-avatar { margin-right: 0; margin-left: 12px; }
 .is-user .sub-messages-container { align-items: flex-end; }
+.is-user .minimized-sub-messages-container { justify-content: flex-end; }
 .is-user .file-group-container { justify-content: flex-end; }
 .is-user .message-actions { justify-content: flex-end; }
 

@@ -58,6 +58,16 @@
           <el-tooltip content="复制" placement="top" :show-after="500">
             <el-button :icon="CopyDocument" circle text size="small" @click="emit('copy')" :disabled="isGenerating" />
           </el-tooltip>
+          <el-tooltip content="最小化" placement="top" :show-after="500">
+            <el-button
+              :icon="Minus"
+              circle
+              text
+              size="small"
+              @click="toggleMinimize"
+              :disabled="isGenerating || isMinimizeDisabled"
+            />
+          </el-tooltip>
           <el-tooltip :content="isCollapsed ? '展开' : '折叠'" placement="top" :show-after="500">
             <el-button
               :icon="isCollapsed ? ArrowDownBold : ArrowUpBold"
@@ -108,7 +118,7 @@ import { computed, ref, watch } from 'vue';
 import type { SubMessage, Message, SubMessageConfig } from '@/api/types';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { ElMessage } from 'element-plus';
-import { Edit, CopyDocument, ArrowUpBold, ArrowDownBold, Download, Picture } from '@element-plus/icons-vue';
+import { Edit, CopyDocument, ArrowUpBold, ArrowDownBold, Download, Picture, Minus } from '@element-plus/icons-vue';
 import CodeBlock from './CodeBlock.vue';
 import { copyToClipboard } from '@/utils/clipboard';
 import { parseMarkdown } from '@/utils/markdownParser';
@@ -119,9 +129,11 @@ const props = withDefaults(defineProps<{
   parentMessage: Message;
   showHeader?: boolean;
   index?: number;
+  isMinimizeDisabled?: boolean;
 }>(), {
   showHeader: false,
   index: 1,
+  isMinimizeDisabled: false,
 });
 
 const emit = defineEmits<{
@@ -201,6 +213,16 @@ function toggleCollapse() {
   const newCollapsedState = !isCollapsed.value;
   isCollapsed.value = newCollapsedState;
   const newConfig: SubMessageConfig = { ...props.subMessage.config, is_collapsed: newCollapsedState };
+  interactionStore.updateSubMessage({
+    subMessageId: props.subMessage.id,
+    data: {
+      config: newConfig,
+    },
+  });
+}
+
+function toggleMinimize() {
+  const newConfig: SubMessageConfig = { ...props.subMessage.config, is_minimal: true };
   interactionStore.updateSubMessage({
     subMessageId: props.subMessage.id,
     data: {

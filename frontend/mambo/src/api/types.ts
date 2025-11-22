@@ -41,6 +41,7 @@ export type SubMessageType = 'Normal' | 'Reasoning' | 'File' | 'Usage' | 'ZipHis
 
 export interface SubMessageConfig {
   is_collapsed: boolean;
+  is_minimal?: boolean;
   context_participation_length?: number;
   zip_enable?: boolean | null; // 压缩历史是否启用
 }

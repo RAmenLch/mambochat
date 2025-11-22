@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/settings/resource/ResourceEditor.vue -->
 <template>
   <div class="editor-container">
     <!-- Top Region: Version History (Horizontal) -->
@@ -117,6 +118,15 @@
             </template>
             <el-switch v-model="form.attributes.is_collapsed" />
           </el-form-item>
+          <el-form-item>
+            <template #label>
+              <span>默认最小化</span>
+              <el-tooltip effect="dark" content="在对话中注入时, 该模板内容是否默认最小化" placement="top">
+                <el-icon class="label-icon"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </template>
+            <el-switch v-model="form.attributes.is_minimal" />
+          </el-form-item>
         </template>
 
         <el-divider class="meta-divider" />
@@ -167,6 +177,7 @@ import type { ResourceWithVersions, ResourceVersion, ResourceVersionCreate } fro
 interface SubMessageTemplateAttributes {
   context_participation_length: number;
   is_collapsed: boolean;
+  is_minimal: boolean;
 }
 
 // --- Props ---
@@ -181,6 +192,7 @@ const resourceStore = useResourceStore();
 const DEFAULT_SUBMESSAGE_ATTRIBUTES: SubMessageTemplateAttributes = {
   context_participation_length: 1,
   is_collapsed: false,
+  is_minimal: false,
 };
 
 // --- State ---

@@ -13,6 +13,7 @@ from .file import File as FileSchema  # 导入文件模型以供类型提示
 
 class SubMessageConfig(BaseModel):
     is_collapsed: bool = Field(False, description="分区是否折叠")
+    is_minimal: bool = Field(False, description="分区是否处于最小化状态")
     context_participation_length: Optional[int] = Field(None,
                                                         description="参加上下文长度: None(默认)-参与; 0-不参与; N>0-在倒数N条内参与")
     zip_enable: Optional[bool] = Field(None, description="【仅用于ZipHistory类型】标记此压缩历史是否已启用")
