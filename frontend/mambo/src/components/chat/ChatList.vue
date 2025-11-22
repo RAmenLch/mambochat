@@ -8,6 +8,7 @@
       :is-loading="isChatListLoading"
       folder-item-type="folder"
       persistence-key="mambo_chat_folder_expanded_state"
+      class="chat-tree"
       @node-click="handleNodeClick"
       @node-contextmenu="handleNodeContextMenu"
       @root-contextmenu="openRootContextMenu"
@@ -240,6 +241,7 @@ const goToSettings = () => router.push('/settings');
 
 <style scoped>
 .chat-list-container { height: 100%; display: flex; flex-direction: column; box-sizing: border-box; }
+.chat-tree { flex-grow: 1; min-height: 0; }
 .chat-list-header { cursor: default; }
 .chat-list-header h4 { margin: 0; font-size: 16px; font-weight: 600; color: var(--el-text-color-primary); }
 .el-divider { margin: 0; flex-shrink: 0; }
