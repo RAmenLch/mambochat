@@ -38,6 +38,7 @@
         />
 
         <AttachmentPreview
+          ref="attachmentPreviewRef"
           :uploaded-files="uploadedFiles"
           :attached-resources="attachedSubmessageResources"
           @remove-file="removeUploadedFile"
@@ -135,9 +136,12 @@ const {
   appendContentToDraft,
 } = useChatInput(currentChatId);
 
+// --- Resizable Input Area Logic ---
 const inputAreaHeight = ref(150);
+const MIN_INPUT_HEIGHT = 100;
+const MAX_INPUT_HEIGHT = 600;
 const { startResize: startResizeInputArea } = useResizablePanels(inputAreaHeight, {
-  min: 100, max: 600, orientation: 'vertical', inverted: true
+  min: MIN_INPUT_HEIGHT, max: MAX_INPUT_HEIGHT, orientation: 'vertical', inverted: true
 });
 
 const { estimatedTokens } = useTokenEstimator(contextForTokenEstimation, currentUserInputText);
@@ -146,9 +150,11 @@ const { estimatedTokens } = useTokenEstimator(contextForTokenEstimation, current
 const scrollbarRef = ref<InstanceType<typeof ElScrollbar>>();
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const chatInputBoxRef = ref<InstanceType<typeof ChatInputBox>>();
+const attachmentPreviewRef = ref<InstanceType<typeof AttachmentPreview> | null>(null);
 const settingsDrawerVisible = ref(false);
 const resourceSelectorVisible = ref(false);
 const userHasScrolledUp = ref(false);
+const previousPreviewHeight = ref(0);
 
 // --- Computed Properties ---
 const isTitleRefreshing = computed(() => refreshingTitleChatId.value === currentChat.value?.id);
@@ -277,6 +283,23 @@ const scrollToBottom = (force = false) => {
 
 // --- Watchers ---
 
+// Watch for attachment changes to auto-resize the input area
+watch([uploadedFiles, attachedSubmessageResources], async () => {
+  await nextTick();
+
+  const previewEl = (attachmentPreviewRef.value?.$el as HTMLDivElement);
+  const currentPreviewHeight = previewEl?.offsetHeight ?? 0;
+  const heightDifference = currentPreviewHeight - previousPreviewHeight.value;
+
+  if (heightDifference !== 0) {
+    const newTotalHeight = inputAreaHeight.value + heightDifference;
+    // Clamp the new height within the defined min/max bounds
+    inputAreaHeight.value = Math.max(MIN_INPUT_HEIGHT, Math.min(newTotalHeight, MAX_INPUT_HEIGHT));
+  }
+
+  previousPreviewHeight.value = currentPreviewHeight;
+}, { deep: true });
+
 watch(
   () => currentChatMessages.value[currentChatMessages.value.length - 1]?.sub_messages.slice(-1)[0]?.content,
   (newContent, oldContent) => {
@@ -289,6 +312,8 @@ watch(
 watch(currentChatId, (newId) => {
   if (newId) {
     userHasScrolledUp.value = false;
+    // Reset preview height on chat switch for accurate calculations
+    previousPreviewHeight.value = 0;
 
     const stopWatch = watch(isChatHistoryLoading, (loading) => {
       if (!loading) {

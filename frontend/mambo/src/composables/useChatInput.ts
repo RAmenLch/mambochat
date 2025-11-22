@@ -200,7 +200,7 @@ export function useChatInput(currentChatId: Ref<string | null>) {
     multiPartDraft.value = [{ id: Date.now(), content: '' }];
     activePartitionIndex.value = 0;
     uploadedFiles.value = [];
-    attachedSubmessageResources.value = [];
+    // attachedSubmessageResources.value = []; //消息模板是不会在发送后清空的,以后记住
     debouncedSave('');
   };
 
