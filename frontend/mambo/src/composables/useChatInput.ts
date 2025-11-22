@@ -15,6 +15,17 @@ interface Partition {
 }
 
 /**
+ * 定义持久化到 localStorage 的单个会话输入状态的结构。
+ */
+interface ChatInputState {
+  isMultiPartMode: boolean;
+  uploadedFiles: FileResponse[];
+  attachedSubmessageResources: Resource[];
+}
+
+const CACHE_STORAGE_KEY = 'mambo_chatInputCache';
+
+/**
  * 管理聊天输入的复杂逻辑，包括多模式切换、草稿状态和撤销/重做功能。
  * 这是一个与UI紧密相关的Composable，旨在简化ChatWindow组件的逻辑。
  *
@@ -24,7 +35,7 @@ interface Partition {
 export function useChatInput(currentChatId: Ref<string | null>) {
   // --- 内部状态 ---
 
-  // 1. 底层历史记录引擎 (仅用于文本草稿)
+  // 1. 底层历史记录引擎 (仅用于文本草稿)，已配置为使用 localStorage
   const {
     saveDraft: saveHistory,
     undo: undoHistory,
@@ -36,16 +47,53 @@ export function useChatInput(currentChatId: Ref<string | null>) {
   const isMultiPartMode = ref(false);
   const singlePartDraft = ref('');
   const multiPartDraft = ref<Partition[]>([{ id: Date.now(), content: '' }]);
-  const activePartitionIndex = ref(0); // 新增：当前激活分区的索引
+  const activePartitionIndex = ref(0);
   const uploadedFiles = ref<FileResponse[]>([]);
   const attachedSubmessageResources = ref<Resource[]>([]);
 
-  // 3. 跨会话记住用户的输入模式偏好
-  const chatInputModeState = reactive<Record<string, boolean>>({});
+  // 3. 用于持久化输入状态的缓存对象
+  const chatInputCache = reactive<Record<string, ChatInputState>>({});
+
+  // 初始化时从 localStorage 加载缓存
+  try {
+    const storedCache = localStorage.getItem(CACHE_STORAGE_KEY);
+    if (storedCache) {
+      Object.assign(chatInputCache, JSON.parse(storedCache));
+    }
+  } catch (error) {
+    console.error('Failed to load chat input cache from localStorage:', error);
+    localStorage.removeItem(CACHE_STORAGE_KEY);
+  }
 
   // --- 核心逻辑 ---
 
-  // 4. 防抖保存，避免过于频繁地写入历史记录
+  /**
+   * 将当前会话的输入状态（模式、文件、资源）保存到缓存和 localStorage。
+   */
+  const _saveCurrentChatState = () => {
+    const id = currentChatId.value;
+    if (!id) return;
+
+    if (!chatInputCache[id]) {
+      chatInputCache[id] = {
+        isMultiPartMode: false,
+        uploadedFiles: [],
+        attachedSubmessageResources: [],
+      };
+    }
+
+    chatInputCache[id].isMultiPartMode = isMultiPartMode.value;
+    chatInputCache[id].uploadedFiles = JSON.parse(JSON.stringify(uploadedFiles.value));
+    chatInputCache[id].attachedSubmessageResources = JSON.parse(JSON.stringify(attachedSubmessageResources.value));
+
+    try {
+      localStorage.setItem(CACHE_STORAGE_KEY, JSON.stringify(chatInputCache));
+    } catch (error) {
+      console.error('Failed to save chat input cache to localStorage:', error);
+    }
+  };
+
+  // 4. 防抖保存文本草稿，避免过于频繁地写入历史记录
   const debouncedSave = debounce((content: string) => {
     if (currentChatId.value) {
       saveHistory(currentChatId.value, content);
@@ -82,13 +130,22 @@ export function useChatInput(currentChatId: Ref<string | null>) {
     }
   });
 
-  // 7. 监听会话ID变化，加载新会话的草稿和输入模式
+  // 7. 监听会话ID变化，加载新会话的草稿和输入状态
   watch(currentChatId, (newId, oldId) => {
     if (newId && newId !== oldId) {
-      uploadedFiles.value = [];
-      attachedSubmessageResources.value = [];
-      isMultiPartMode.value = chatInputModeState[newId] ?? false;
-      activePartitionIndex.value = 0; // 重置激活分区索引
+      const cachedState = chatInputCache[newId];
+
+      if (cachedState) {
+        isMultiPartMode.value = cachedState.isMultiPartMode;
+        uploadedFiles.value = cachedState.uploadedFiles;
+        attachedSubmessageResources.value = cachedState.attachedSubmessageResources;
+      } else {
+        isMultiPartMode.value = false;
+        uploadedFiles.value = [];
+        attachedSubmessageResources.value = [];
+      }
+
+      activePartitionIndex.value = 0;
       const draft = rawDraftFromHistory.value;
 
       if (isMultiPartMode.value) {
@@ -101,13 +158,18 @@ export function useChatInput(currentChatId: Ref<string | null>) {
         } else {
           multiPartDraft.value = [{ id: Date.now(), content: '' }];
         }
+        singlePartDraft.value = '';
       } else {
         singlePartDraft.value = (draft && draft.startsWith('[')) ? '' : draft;
+        multiPartDraft.value = [{ id: Date.now(), content: '' }];
       }
     }
   }, { immediate: true });
 
-  // 8. 封装模式切换的业务逻辑
+  // 8. 监听输入状态的变化并自动持久化
+  watch([isMultiPartMode, uploadedFiles, attachedSubmessageResources], _saveCurrentChatState, { deep: true });
+
+  // 9. 封装模式切换的业务逻辑
   const toggleMultiPartMode = () => {
     if (!currentChatId.value) return;
 
@@ -118,14 +180,13 @@ export function useChatInput(currentChatId: Ref<string | null>) {
       singlePartDraft.value = multiPartDraft.value.map(p => p.content).join('\n--------------------------\n');
     }
     isMultiPartMode.value = nextMode;
-    chatInputModeState[currentChatId.value] = nextMode;
-    activePartitionIndex.value = 0; // 切换模式后重置激活分区
+    activePartitionIndex.value = 0;
 
     debouncedSave.cancel();
     debouncedSave(nextMode ? JSON.stringify(multiPartDraft.value) : singlePartDraft.value);
   };
 
-  // 9. 封装撤销/重做，自动绑定当前会话ID
+  // 10. 封装撤销/重做，自动绑定当前会话ID
   const undo = () => {
     if (currentChatId.value) undoHistory(currentChatId.value);
   };
@@ -133,17 +194,17 @@ export function useChatInput(currentChatId: Ref<string | null>) {
     if (currentChatId.value) redoHistory(currentChatId.value);
   };
 
-  // 10. 暴露一个重置方法，在消息发送后调用
+  // 11. 暴露一个重置方法，在消息发送后调用
   const resetDraft = () => {
     singlePartDraft.value = '';
     multiPartDraft.value = [{ id: Date.now(), content: '' }];
-    activePartitionIndex.value = 0; // 重置草稿时，同样重置激活分区
+    activePartitionIndex.value = 0;
     uploadedFiles.value = [];
-    // Note: attachedSubmessageResources is NOT reset here, as per requirement.
+    attachedSubmessageResources.value = [];
     debouncedSave('');
   };
 
-  // 11. 文件管理方法
+  // 12. 文件管理方法
   const addUploadedFile = (file: FileResponse) => {
     uploadedFiles.value.push(file);
   };
@@ -155,7 +216,7 @@ export function useChatInput(currentChatId: Ref<string | null>) {
     }
   };
 
-  // 12. SubMessage 模板管理方法
+  // 13. SubMessage 模板管理方法
   const addAttachedResource = (resource: Resource) => {
     if (!attachedSubmessageResources.value.some(r => r.id === resource.id)) {
       attachedSubmessageResources.value.push(resource);
@@ -179,7 +240,6 @@ export function useChatInput(currentChatId: Ref<string | null>) {
         multiPartDraft.value.push({ id: Date.now(), content: '' });
         activePartitionIndex.value = 0;
       }
-      // 修改：定位到当前激活的分区，而非最后一个
       const currentPartition = multiPartDraft.value[activePartitionIndex.value];
       if (currentPartition) {
         const currentContent = currentPartition.content.trim();
@@ -200,19 +260,20 @@ export function useChatInput(currentChatId: Ref<string | null>) {
     isMultiPartMode,
     singlePartDraft,
     multiPartDraft,
-    activePartitionIndex, // 导出状态
+    activePartitionIndex,
     uploadedFiles,
     attachedSubmessageResources,
 
     // 计算属性
     currentUserInputText: computed((): string => isMultiPartMode.value
       ? multiPartDraft.value.map(p => p.content).join('\n')
-      : singlePartDraft.value
+      // Fallback to empty string if singlePartDraft is null/undefined
+      : singlePartDraft.value ?? ''
     ),
     isReadyToSend: computed((): boolean =>
       (isMultiPartMode.value
         ? multiPartDraft.value.some(p => p.content.trim() !== '')
-        : singlePartDraft.value.trim() !== '')
+        : (singlePartDraft.value ?? '').trim() !== '')
       || uploadedFiles.value.length > 0
     ),
 

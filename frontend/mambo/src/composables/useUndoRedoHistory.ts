@@ -5,6 +5,7 @@ import type { Ref } from 'vue';
 
 const GLOBAL_HISTORY_LIMIT = 200;
 const CHAT_HISTORY_LIMIT = 50;
+const STORAGE_KEY = 'mambo_undoRedoHistory';
 
 /**
  * 历史记录中单个条目的结构。
@@ -29,6 +30,38 @@ export function useUndoRedoHistory(currentItemId: Ref<string | null>) {
     stack: [],
     pointer: -1,
   });
+
+  /**
+   * 将当前历史记录状态持久化到 localStorage。
+   */
+  const _persistHistory = () => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+    } catch (error) {
+      console.error('Failed to save history to localStorage:', error);
+    }
+  };
+
+  /**
+   * 从 localStorage 加载历史记录状态。
+   */
+  const _loadHistory = () => {
+    try {
+      const storedHistory = localStorage.getItem(STORAGE_KEY);
+      if (storedHistory) {
+        const parsed = JSON.parse(storedHistory);
+        history.stack = parsed.stack || [];
+        history.pointer = parsed.pointer ?? -1;
+      }
+    } catch (error) {
+      console.error('Failed to load history from localStorage:', error);
+      // 如果加载失败，清空存储以防下次出错
+      localStorage.removeItem(STORAGE_KEY);
+    }
+  };
+
+  // 初始化时加载历史记录
+  _loadHistory();
 
   /**
    * 将一个新条目推入历史堆栈。
@@ -58,6 +91,7 @@ export function useUndoRedoHistory(currentItemId: Ref<string | null>) {
 
     // 更新指针到栈顶
     history.pointer = history.stack.length - 1;
+    _persistHistory();
   };
 
   /**
@@ -88,6 +122,7 @@ export function useUndoRedoHistory(currentItemId: Ref<string | null>) {
     for (let i = history.pointer - 1; i >= 0; i--) {
       if (history.stack[i].itemId === itemId) {
         history.pointer = i;
+        _persistHistory();
         return;
       }
     }
@@ -104,6 +139,7 @@ export function useUndoRedoHistory(currentItemId: Ref<string | null>) {
     for (let i = history.pointer + 1; i < history.stack.length; i++) {
         if (history.stack[i].itemId === itemId) {
             history.pointer = i;
+            _persistHistory();
             return;
         }
     }
