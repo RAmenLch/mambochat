@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import schemas
 from ..crud import setting_crud
-from ..models import provider_model
+from ..config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 
 
 async def _get_http_client_with_proxy(
@@ -107,6 +107,9 @@ async def fetch_models_from_provider(
     }
     url = f"{api_host.rstrip('/')}/models"
 
+    # 创建一个包含所有系统支持的参数键的集合，用于高效查找
+    valid_parameter_keys = {param.key for param in SUPPORTED_LLM_PARAMETERS}
+
     async with await _get_http_client_with_proxy(db, use_proxy_flag=use_proxy, timeout=30) as client:
         response = await client.get(url, headers=headers)
         response.raise_for_status()
@@ -139,7 +142,14 @@ async def fetch_models_from_provider(
             if output_modalities: meta_dict['output_modalities'] = output_modalities
             if context_length is not None: meta_dict['context_length'] = context_length
             if max_output_tokens is not None: meta_dict['max_output_tokens'] = max_output_tokens
-            if supported_parameters: meta_dict['supported_parameters'] = supported_parameters
+
+            # 过滤服务商返回的参数列表，仅保留系统支持的参数
+            if supported_parameters and isinstance(supported_parameters, list):
+                filtered_parameters = [
+                    key for key in supported_parameters if key in valid_parameter_keys
+                ]
+                if filtered_parameters:
+                    meta_dict['supported_parameters'] = filtered_parameters
 
             # 仅当 meta_dict 非空时才创建 meta_config 对象
             meta_config_obj = schemas.AIModelMetaConfig(**meta_dict) if meta_dict else None
@@ -155,3 +165,4 @@ async def fetch_models_from_provider(
                 )
             )
         return processed_models
+

@@ -7,6 +7,7 @@ from typing import List
 from ..crud import provider_crud, setting_crud
 from .. import schemas
 from ..database import get_db
+from ..config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 
 router = APIRouter()
 
@@ -126,6 +127,18 @@ async def update_model(
     """
     更新一个已存在模型的信息（例如，显示名称或元配置）。
     """
+    # 在更新前，校验 supported_parameters 是否合法
+    if model_update.meta_config and model_update.meta_config.supported_parameters is not None:
+        valid_parameter_keys = {param.key for param in SUPPORTED_LLM_PARAMETERS}
+        invalid_keys = [
+            key for key in model_update.meta_config.supported_parameters if key not in valid_parameter_keys
+        ]
+        if invalid_keys:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid supported parameters found: {', '.join(invalid_keys)}. Please use keys available in the system configuration."
+            )
+
     updated_model = await provider_crud.update_model(db, model_id=model_id, model_update=model_update)
     if updated_model is None:
         raise HTTPException(status_code=404, detail="Model not found")
@@ -146,3 +159,4 @@ async def delete_model(model_id: str, db: AsyncSession = Depends(get_db)):
     if db_model is None:
         raise HTTPException(status_code=404, detail="Model not found")
     return db_model
+

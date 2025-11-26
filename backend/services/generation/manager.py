@@ -20,8 +20,43 @@ from ...crud import message_crud, setting_crud, file_crud
 from ...schemas import enums as schemas_enums
 from ...models import chat_model
 from ...services.storage_service import storage_service
+from ...config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 
-# 定义哪些文本类型的MIME类型可以安全地作为上下文读取
+# --- Parameter Building Utilities ---
+
+# Create a lookup map for efficient access to parameter definitions
+_param_definition_map = {param.key: param for param in SUPPORTED_LLM_PARAMETERS}
+
+
+def _build_llm_parameters(flat_params: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Converts a flat parameter dictionary from a Chat object into a structured
+    dictionary suitable for an LLM API call, based on path definitions.
+    """
+    structured_params = {}
+
+    def set_nested_value(d: dict, path: list[str], value: Any):
+        """Recursively sets a value in a nested dictionary based on a path list."""
+        for key in path[:-1]:
+            d = d.setdefault(key, {})
+        d[path[-1]] = value
+
+    if not flat_params:
+        return {}
+
+    for key, value in flat_params.items():
+        # Skip special parameters that are not sent directly to the LLM's parameter body
+        if key in ["max_context_messages", "stream"]:
+            continue
+
+        definition = _param_definition_map.get(key)
+        if definition:
+            set_nested_value(structured_params, definition.path, value)
+
+    return structured_params
+
+
+# --- Text MIME Types for Context ---
 SUPPORTED_TEXT_MIME_TYPES = {
     "text/plain", "text/markdown", "text/csv", "text/html", "text/css",
     "application/json", "text/xml", "text/x-python", "application/javascript",
@@ -181,11 +216,14 @@ class DefaultGenerateManager(AbstractGenerateManager):
 
         if last_enabled_zip_index != -1 and zip_content:
             # 构造虚拟消息来代表压缩历史
-            user_sub = SimpleNamespace(content="对之前的对话进行了总结摘要。", type=schemas_enums.SubMessageType.NORMAL.value, config='{}')
+            user_sub = SimpleNamespace(content="对之前的对话进行了总结摘要。",
+                                       type=schemas_enums.SubMessageType.NORMAL.value, config='{}')
             user_msg = SimpleNamespace(role=schemas_enums.MessageRole.USER.value, sub_messages=[user_sub])
 
-            assistant_sub = SimpleNamespace(content=zip_content, type=schemas_enums.SubMessageType.NORMAL.value, config='{}')
-            assistant_msg = SimpleNamespace(role=schemas_enums.MessageRole.ASSISTANT.value, sub_messages=[assistant_sub])
+            assistant_sub = SimpleNamespace(content=zip_content, type=schemas_enums.SubMessageType.NORMAL.value,
+                                            config='{}')
+            assistant_msg = SimpleNamespace(role=schemas_enums.MessageRole.ASSISTANT.value,
+                                            sub_messages=[assistant_sub])
 
             # 构建新的有效历史记录
             effective_history = [user_msg, assistant_msg] + history_messages[last_enabled_zip_index + 1:]
@@ -208,14 +246,20 @@ class DefaultGenerateManager(AbstractGenerateManager):
             messages_payload.insert(0, {"role": "system", "content": db_chat.systemPrompt})
 
         # 3. 准备模型参数和连接配置
-        model_params = {}
+        raw_model_params = {}
         if db_chat.modelParameters:
             try:
                 params_str = db_chat.modelParameters
-                model_params = json.loads(params_str) if isinstance(params_str, str) else params_str
+                raw_model_params = json.loads(params_str) if isinstance(params_str, str) else params_str
             except (json.JSONDecodeError, TypeError):
                 pass
-        model_params.pop('max_context_messages', None)
+
+        # Build structured parameters for the API call using the central definition
+        api_params = _build_llm_parameters(raw_model_params)
+
+        # Manually add the 'stream' parameter as it's a special case for controlling worker behavior
+        if 'stream' in raw_model_params:
+            api_params['stream'] = raw_model_params.get('stream')
 
         proxy_url = None
         if provider.use_proxy:
@@ -228,7 +272,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
         return LLMInput(
             model_id=model.modelId,
             messages=messages_payload,
-            parameters=model_params,
+            parameters=api_params,
             api_host=provider.apiHost,
             api_key=provider.apiKey,
             proxy_url=proxy_url

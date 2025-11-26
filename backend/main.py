@@ -16,7 +16,8 @@ from .routers import (
     settings,
     notifications,
     file_management,
-    resource_management  # 新增: 导入资源管理路由
+    resource_management,
+    system_config  # 导入系统配置路由
 )
 from .services.cleanup_service import cleanup_zombie_files
 
@@ -53,11 +54,12 @@ app.add_middleware(
 
 # 包含各个模块的路由
 app.include_router(chat_management.router, prefix="/api", tags=["Chat Management"])
-app.include_router(resource_management.router, prefix="/api", tags=["Resource Management"])  # 新增: 注册资源管理路由
+app.include_router(resource_management.router, prefix="/api", tags=["Resource Management"])
 app.include_router(chat_interaction.router, prefix="/api", tags=["Chat Interaction"])
 app.include_router(provider_management.router, prefix="/api", tags=["Provider & Model Management"])
 app.include_router(provider_actions.router, prefix="/api", tags=["Provider Actions"])
 app.include_router(settings.router, prefix="/api", tags=["Global Settings"])
+app.include_router(system_config.router, prefix="/api", tags=["System Configuration"])
 app.include_router(notifications.router, prefix="/api", tags=["Notifications"])
 app.include_router(file_management.router)
 
