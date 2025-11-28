@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/chat/ChatWindow.vue -->
 <template>
   <div class="chat-window-container">
     <input type="file" ref="fileInputRef" @change="onFileSelected" multiple style="display: none;" />
@@ -25,7 +26,25 @@
         </div>
       </el-scrollbar>
 
-      <div class="input-container-wrapper" :style="{ height: `${inputAreaHeight}px` }">
+      <div
+        class="input-container-wrapper"
+        :style="{ height: `${inputAreaHeight}px` }"
+        @dragenter.prevent.stop="isDraggingOver = true"
+        @dragover.prevent.stop
+      >
+        <!-- 拖拽文件时的覆盖层 -->
+        <div
+          v-if="isDraggingOver"
+          class="drag-over-overlay"
+          @dragleave.prevent.stop="isDraggingOver = false"
+          @drop.prevent.stop="handleDrop"
+        >
+          <div class="drag-over-content">
+            <el-icon size="50"><UploadFilled /></el-icon>
+            <span>松开即可上传文件</span>
+          </div>
+        </div>
+
         <div class="resize-handle" @mousedown.prevent="startResizeInputArea"></div>
         <ChatToolbar
           :current-chat="currentChat"
@@ -57,6 +76,7 @@
           @stop-generation="handleStopGeneration"
           @undo="undo"
           @redo="redo"
+          @files-pasted="handleFileUploads"
         />
       </div>
     </template>
@@ -79,6 +99,7 @@
 import { ref, watch, nextTick, computed, onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { ElScrollbar, ElMessage } from 'element-plus';
+import { UploadFilled } from '@element-plus/icons-vue';
 import type { Ref } from 'vue';
 import type { ChatUpdate, SubMessageCreate, AIModel, Resource } from '@/api/types';
 import { uploadFile } from '@/api/chatService';
@@ -156,6 +177,7 @@ const settingsDrawerVisible = ref(false);
 const resourceSelectorVisible = ref(false);
 const userHasScrolledUp = ref(false);
 const previousPreviewHeight = ref(0);
+const isDraggingOver = ref(false); // 用于控制拖拽覆盖层的显示
 
 // --- Lifecycle Hooks ---
 onMounted(() => {
@@ -193,29 +215,58 @@ async function handleResourceSelected(resources: Resource[]) {
   }
 }
 
-// File Upload Logic
-function handleTriggerFileUpload() {
-  fileInputRef.value?.click();
-}
+// --- File Upload Logic ---
 
-async function onFileSelected(event: Event) {
-  const target = event.target as HTMLInputElement;
-  if (!target.files) return;
+/**
+ * 统一处理文件上传的函数，可用于拖拽、粘贴和点击上传.
+ * @param files - 用户选择的文件列表.
+ */
+async function handleFileUploads(files: FileList) {
+  if (!files || files.length === 0) return;
 
-  const files = Array.from(target.files);
-  target.value = '';
-
-  for (const file of files) {
+  for (const file of Array.from(files)) {
     try {
       const fileInfo = await uploadFile(file);
       addUploadedFile(fileInfo);
     } catch (error) {
       console.error(`Failed to upload file ${file.name}:`, error);
+      ElMessage.error(`文件 ${file.name} 上传失败`);
     }
   }
 }
 
-// Send & Stop Logic
+/**
+ * 处理文件拖拽释放事件.
+ * @param event - 拖拽事件对象.
+ */
+function handleDrop(event: DragEvent) {
+  isDraggingOver.value = false;
+  const files = event.dataTransfer?.files;
+  if (files) {
+    handleFileUploads(files);
+  }
+}
+
+/**
+ * 触发隐藏的文件输入框.
+ */
+function handleTriggerFileUpload() {
+  fileInputRef.value?.click();
+}
+
+/**
+ * 处理通过文件输入框选择的文件.
+ * @param event - change事件对象.
+ */
+async function onFileSelected(event: Event) {
+  const target = event.target as HTMLInputElement;
+  if (!target.files) return;
+
+  await handleFileUploads(target.files);
+  target.value = ''; // 清空输入框以便再次选择相同文件
+}
+
+// --- Send & Stop Logic ---
 async function handleSendMessage() {
   if (isSendButtonDisabled.value) return;
 
@@ -255,14 +306,14 @@ function handleStopGeneration() {
   if (genMsg) chatInteractionStore.cancelGeneration(genMsg.id);
 }
 
-// Title Actions
+// --- Title Actions ---
 function handleRefreshTitle() {
   if (currentChat.value) {
     chatListStore.refreshChatTitle(currentChat.value.id);
   }
 }
 
-// Settings
+// --- Settings ---
 async function handleSaveSettings(settings: ChatUpdate) {
   if (!currentChat.value) return;
   await chatListStore.updateChatSettings(currentChat.value.id, settings);
@@ -270,7 +321,7 @@ async function handleSaveSettings(settings: ChatUpdate) {
   ElMessage.success('设置已保存');
 }
 
-// Scroll
+// --- Scroll ---
 const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
   const el = scrollbarRef.value?.wrapRef;
   if (!el) return;
@@ -341,4 +392,31 @@ watch(currentChatId, (newId) => {
 .message-list-wrapper { padding: 20px; }
 .input-container-wrapper { flex-shrink: 0; position: relative; display: flex; flex-direction: column; border-top: 1px solid var(--color-border); }
 .resize-handle { position: absolute; top: -3px; left: 0; width: 100%; height: 6px; cursor: ns-resize; z-index: 10; }
+
+.drag-over-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 123, 255, 0.1);
+  border: 2px dashed var(--el-color-primary);
+  border-radius: 4px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 20;
+  pointer-events: all;
+}
+
+.drag-over-content {
+  text-align: center;
+  color: var(--el-color-primary);
+}
+
+.drag-over-content span {
+  display: block;
+  margin-top: 8px;
+  font-weight: bold;
+}
 </style>

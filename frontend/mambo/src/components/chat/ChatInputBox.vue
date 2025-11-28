@@ -1,6 +1,6 @@
 <!-- frontend/mambo/src/components/chat/ChatInputBox.vue -->
 <template>
-  <div class="chat-input-area" @keydown="handleGlobalKeydown">
+  <div class="chat-input-area" @keydown="handleGlobalKeydown" @paste="handlePaste">
     <MultiPartInput
       v-if="isMultiPartMode"
       ref="multiPartInputRef"
@@ -86,10 +86,26 @@ const emit = defineEmits<{
   (e: 'stop-generation'): void;
   (e: 'undo'): void;
   (e: 'redo'): void;
+  (e: 'files-pasted', files: FileList): void;
 }>();
 
 const inputRef = ref<InstanceType<typeof ElInput>>();
 const multiPartInputRef = ref<InstanceType<typeof MultiPartInput>>();
+
+/**
+ * 处理粘贴事件，用于捕获粘贴的文件。
+ * @param event - 剪贴板事件对象。
+ */
+function handlePaste(event: ClipboardEvent) {
+  if (!event.clipboardData) return;
+
+  const files = event.clipboardData.files;
+  if (files && files.length > 0) {
+    // 阻止默认的粘贴行为（例如，将文件名作为文本粘贴）
+    event.preventDefault();
+    emit('files-pasted', files);
+  }
+}
 
 /**
  * 处理全局键盘快捷键，如撤销和重做。
