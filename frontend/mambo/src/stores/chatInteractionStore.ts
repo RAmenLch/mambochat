@@ -2,15 +2,19 @@
 
 import { defineStore } from 'pinia';
 import {
-  updateMessageAndRegenerate, updateSubMessage as updateSubMessageAPI,
-  deleteMessage as deleteMessageAPI, prepareGenerate, prepareRegenerate,
-  stopGeneration as stopGenerationAPI, getChatWithMessages,
+  updateMessageAndRegenerate,
+  updateSubMessage as updateSubMessageAPI,
+  deleteMessage as deleteMessageAPI,
+  prepareGenerate,
+  prepareRegenerate,
+  stopGeneration as stopGenerationAPI,
+  getChatWithMessages,
   initiateHistoryCompression as initiateHistoryCompressionAPI,
 } from '@/api/chatService';
 import { subscribeToMessageStream } from '@/services/sseService';
 import { useChatSessionStore } from './chatSessionStore';
 import { useChatListStore } from './chatListStore';
-import type { Message, SubMessageCreate, SubMessageUpdate, SubMessage } from '@/api/types';
+import type { Message, SubMessageCreate, SubMessageUpdate } from '@/api/types';
 
 /**
  * 处理所有与当前会话的交互动作。
@@ -131,39 +135,43 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     const chatId = sessionStore.currentChatId;
     if (!chatId) return;
 
-    // Case 1: 仅更新消息内容，不重新生成
-    if (!payload.resend) {
-      try {
-        await updateMessageAndRegenerate(payload.messageId, { sub_messages: payload.sub_messages, resend: false });
-        await sessionStore.selectChat(chatId, true); // 强制刷新以获取最新内容
-      } catch (error) {
-        console.error('Failed to update message:', error);
-        if (chatId) await sessionStore.selectChat(chatId, true);
-      }
-      return;
-    }
-
-    // Case 2: 更新内容并重新生成
-    if (sessionStore.isGenerating) return;
-    const baseMessageIndex = sessionStore.currentChatMessages.findIndex(m => m.id === payload.messageId);
-    if (baseMessageIndex === -1) return;
+    // 如果是重新生成，则检查是否已有其他任务在运行
+    if (payload.resend && sessionStore.isGenerating) return;
 
     try {
-      const assistantPlaceholder = await updateMessageAndRegenerate(payload.messageId, { sub_messages: payload.sub_messages, resend: true });
+      // 调用更新后的API, 它会返回更新后的用户消息和可能的助手消息占位符
+      const response = await updateMessageAndRegenerate(payload.messageId, {
+        sub_messages: payload.sub_messages,
+        resend: payload.resend,
+      });
+      const { user_message, assistant_message } = response;
 
-      // 乐观更新UI
-      const userMessage = sessionStore.currentChatMessages[baseMessageIndex];
-      sessionStore._updateSubMessages(userMessage.id, payload.sub_messages as SubMessage[]);
-      sessionStore._spliceMessages(baseMessageIndex + 1, [assistantPlaceholder]);
+      // 使用API返回的权威数据更新前端状态
+      const messageIndex = sessionStore.currentChatMessages.findIndex(m => m.id === user_message.id);
+      if (messageIndex !== -1) {
+        // 直接替换整个消息对象，确保所有字段（包括sub_messages）都是最新的
+        sessionStore.currentChatMessages.splice(messageIndex, 1, user_message);
+      } else {
+        // 如果找不到，作为后备方案，刷新整个会话
+        await sessionStore.selectChat(chatId, true);
+        return;
+      }
 
-      if (assistantPlaceholder.status === 'generating') {
-        _subscribeToMessageStream(assistantPlaceholder);
+      // 如果有助手消息占位符 (即 resend: true)
+      if (assistant_message) {
+        // 从用户消息之后移除所有旧消息, 并插入新的助手消息占位符
+        sessionStore._spliceMessages(messageIndex + 1, [assistant_message]);
+        if (assistant_message.status === 'generating') {
+          _subscribeToMessageStream(assistant_message);
+        }
       }
     } catch (error) {
-      console.error('Failed to update and resend:', error);
+      console.error('Failed to update and/or resend message:', error);
+      // 发生任何错误时，都强制刷新会话以保证数据一致性
       if (chatId) await sessionStore.selectChat(chatId, true);
     }
   }
+
 
   /**
    * 更新单个子消息的元数据（如折叠状态）。
@@ -174,10 +182,20 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     for (const msg of sessionStore.currentChatMessages) {
       const subMsg = msg.sub_messages.find(sm => sm.id === payload.subMessageId);
       if (subMsg) {
-        Object.assign(subMsg, payload.data);
+        // 合并config对象而不是直接替换
+        if (payload.data.config) {
+          subMsg.config = { ...subMsg.config, ...payload.data.config };
+        }
+        if (payload.data.content) {
+          subMsg.content = payload.data.content;
+        }
+        if (payload.data.status) {
+          subMsg.status = payload.data.status;
+        }
         break;
       }
     }
+
     try {
       await updateSubMessageAPI(payload.subMessageId, payload.data);
     } catch (error) {

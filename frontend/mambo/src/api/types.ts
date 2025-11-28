@@ -90,6 +90,11 @@ export interface MessageUpdate {
   resend?: boolean;
 }
 
+export interface UpdateMessageResponse {
+  user_message: Message;
+  assistant_message: Message | null;
+}
+
 export interface GenerateRequest {
   sub_messages: SubMessageCreate[];
   attachedSubmessageResourceIds?: string[];

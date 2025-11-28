@@ -13,7 +13,7 @@ import type {
   SubMessageUpdate,
   GenerateRequest,
   PrepareGenerateResponse,
-  FileResponse
+  FileResponse, UpdateMessageResponse
 } from './types';
 
 /**
@@ -70,7 +70,7 @@ export const reorderChats = (updates: ChatReorderItem[]): Promise<{ message: str
  * @param messageId 消息ID
  * @param data 包含新的子消息列表和resend标志的对象
  */
-export const updateMessageAndRegenerate = (messageId: string, data: MessageUpdate): Promise<Message> => {
+export const updateMessageAndRegenerate = (messageId: string, data: MessageUpdate): Promise<UpdateMessageResponse> => { // <--- 修改返回值类型
   return apiClient.put(`/messages/${messageId}`, data)
 };
 

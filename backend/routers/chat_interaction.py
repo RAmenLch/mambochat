@@ -99,7 +99,7 @@ async def read_chat_with_messages(chat_id: str, db: AsyncSession = Depends(get_d
 
 @router.put(
     "/messages/{message_id}",
-    response_model=schemas.Message,
+    response_model=schemas.UpdateMessageResponse,
     summary="更新消息内容并可选择重新生成",
     response_model_exclude_none=True
 )
@@ -113,13 +113,16 @@ async def update_message_and_regenerate(
     if not db_message:
         raise HTTPException(status_code=404, detail="Message not found")
 
-    updated_message = await message_crud.update_message(db, message_id=message_id, message_update=message_update)
-    if not updated_message:
+    updated_user_message = await message_crud.update_message(db, message_id=message_id, message_update=message_update)
+    if not updated_user_message:
         raise HTTPException(status_code=500, detail="Failed to update message")
 
     if not message_update.resend:
-        hydrated_messages = await _hydrate_and_validate_messages([updated_message], db)
-        return hydrated_messages[0]
+        hydrated_user_message = (await _hydrate_and_validate_messages([updated_user_message], db))[0]
+        return schemas.UpdateMessageResponse(
+            user_message=hydrated_user_message,
+            assistant_message=None
+        )
 
     if db_message.role != schemas.MessageRole.USER:
         raise HTTPException(status_code=400, detail="Resend is only applicable to user messages.")
@@ -129,8 +132,12 @@ async def update_message_and_regenerate(
     )
     await _start_generation_task(background_tasks, db_message.chatId, assistant_placeholder.id)
 
-    hydrated_messages = await _hydrate_and_validate_messages([assistant_placeholder], db)
-    return hydrated_messages[0]
+    hydrated_messages = await _hydrate_and_validate_messages([updated_user_message, assistant_placeholder], db)
+
+    return schemas.UpdateMessageResponse(
+        user_message=hydrated_messages[0],
+        assistant_message=hydrated_messages[1]
+    )
 
 
 @router.delete(

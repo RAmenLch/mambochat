@@ -68,6 +68,12 @@ class GenerateRequest(BaseModel):
     sub_messages: List[SubMessageCreate]
     attachedSubmessageResourceIds: Optional[List[str]] = Field(None, description="本次发送时要附加的Submessage模板资源ID列表")
 
+class UpdateMessageResponse(BaseModel):
+    """
+    用于 /messages/{message_id} (PUT) 端点的响应模型。
+    """
+    user_message: Message = Field(..., description="被更新的用户消息对象。")
+    assistant_message: Optional[Message] = Field(None, description="如果触发了重新生成，则为AI回复创建的占位符消息对象。")
 
 class PrepareGenerateResponse(BaseModel):
     """
