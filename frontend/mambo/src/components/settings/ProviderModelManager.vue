@@ -128,6 +128,7 @@
 import { ref, reactive, watch, onMounted, nextTick, shallowRef, type Component } from 'vue';
 import { useProviderStore } from '@/stores/providerStore';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { useSystemConfigStore } from '@/stores/systemConfigStore';
 import { storeToRefs } from 'pinia';
 import { ElMessage, ElMessageBox, type ElTable } from 'element-plus';
 import { Plus, Document, Picture, Headset, VideoCamera, Folder, ArrowRight } from '@element-plus/icons-vue';
@@ -139,6 +140,7 @@ import FetchModelsDialog from './dialogs/FetchModelsDialog.vue';
 
 const providerStore = useProviderStore();
 const settingsStore = useSettingsStore();
+const systemConfigStore = useSystemConfigStore();
 
 const { providers, isLoading } = storeToRefs(providerStore);
 const { globalSettings } = storeToRefs(settingsStore);
@@ -163,6 +165,7 @@ const modalityIcons = shallowRef<Record<string, Component>>({
 
 // Lifecycle and Watchers
 onMounted(async () => {
+  await systemConfigStore.fetchSystemConfig();
   await settingsStore.fetchGlobalSettings();
   await providerStore.fetchProviders();
 });

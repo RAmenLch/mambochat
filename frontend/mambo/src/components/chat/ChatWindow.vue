@@ -1,4 +1,3 @@
-<!-- frontend/mambo/src/components/chat/ChatWindow.vue -->
 <template>
   <div class="chat-window-container">
     <input type="file" ref="fileInputRef" @change="onFileSelected" multiple style="display: none;" />
@@ -77,7 +76,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, computed } from 'vue';
+import { ref, watch, nextTick, computed, onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { ElScrollbar, ElMessage } from 'element-plus';
 import type { Ref } from 'vue';
@@ -89,6 +88,7 @@ import { useChatListStore } from '@/stores/chatListStore';
 import { useChatSessionStore } from '@/stores/chatSessionStore';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { useProviderStore } from '@/stores/providerStore';
+import { useSystemConfigStore } from '@/stores/systemConfigStore';
 import { useChatInput } from '@/composables/useChatInput';
 import { useResizablePanels } from '@/composables/useResizablePanels';
 import { useTokenEstimator } from '@/composables/useTokenEstimator';
@@ -109,6 +109,7 @@ const chatListStore = useChatListStore();
 const chatSessionStore = useChatSessionStore();
 const chatInteractionStore = useChatInteractionStore();
 const providerStore = useProviderStore();
+const systemConfigStore = useSystemConfigStore();
 
 // --- State from Stores ---
 const { refreshingTitleChatId } = storeToRefs(chatListStore);
@@ -155,6 +156,11 @@ const settingsDrawerVisible = ref(false);
 const resourceSelectorVisible = ref(false);
 const userHasScrolledUp = ref(false);
 const previousPreviewHeight = ref(0);
+
+// --- Lifecycle Hooks ---
+onMounted(() => {
+  systemConfigStore.fetchSystemConfig();
+});
 
 // --- Computed Properties ---
 const isTitleRefreshing = computed(() => refreshingTitleChatId.value === currentChat.value?.id);

@@ -10,7 +10,22 @@
     <div class="dialog-body-wrapper">
       <el-form ref="providerFormRef" :model="providerForm" :rules="providerFormRules" label-width="100px" class="form-section">
         <el-form-item label="服务商名称" prop="name">
-          <el-input v-model.trim="providerForm.name" placeholder="例如：OpenAI" />
+          <el-select
+            v-model="providerForm.name"
+            filterable
+            allow-create
+            default-first-option
+            placeholder="选择或输入服务商名称"
+            style="width: 100%"
+            @change="handleProviderSelect"
+          >
+            <el-option
+              v-for="item in systemConfigStore.defaultProviders"
+              :key="item.name"
+              :label="item.name"
+              :value="item.name"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="API Host" prop="apiHost">
           <el-input v-model.trim="providerForm.apiHost" placeholder="例如：https://api.openai.com/v1" />
@@ -78,6 +93,7 @@ import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
 import { Plus, Delete, Download, QuestionFilled } from '@element-plus/icons-vue';
 import { useProviderStore } from '@/stores/providerStore';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { useSystemConfigStore } from '@/stores/systemConfigStore';
 import { storeToRefs } from 'pinia';
 import type {
   AIProviderWithModels,
@@ -116,6 +132,7 @@ const API_KEY_PLACEHOLDER = '********';
 
 const providerStore = useProviderStore();
 const settingsStore = useSettingsStore();
+const systemConfigStore = useSystemConfigStore();
 const { globalSettings } = storeToRefs(settingsStore);
 
 const providerFormRef = ref<FormInstance>();
@@ -188,6 +205,13 @@ function resetAndInitializeForm() {
   } else { // 新增模式
     Object.assign(providerForm, { name: '', apiHost: '', apiKey: '', use_proxy: false, models: [] });
     initialModels = [];
+  }
+}
+
+function handleProviderSelect(selectedName: string) {
+  const selectedProvider = systemConfigStore.defaultProviders.find(p => p.name === selectedName);
+  if (selectedProvider) {
+    providerForm.apiHost = selectedProvider.apiHost;
   }
 }
 
@@ -302,7 +326,6 @@ async function handleCreateProvider() {
     apiHost: providerForm.apiHost,
     apiKey: providerForm.apiKey,
     use_proxy: providerForm.use_proxy,
-    // 确保 meta_config 被包含在内
     models: providerForm.models.map(({ name, modelId, meta_config }) => ({ name, modelId, meta_config })),
   };
   await providerStore.addProviderWithModels(createData);
@@ -333,17 +356,15 @@ async function handleUpdateProvider() {
       name: m.name,
       modelId: m.modelId,
       providerId: currentProviderId,
-      meta_config: m.meta_config // 确保 meta_config 被包含在内
+      meta_config: m.meta_config
     }) as AIModelCreate);
 
   const modelsToDelete = initialModels.filter(m => !currentModelIdsInForm.has(m.id));
 
-  // 在此对话框中不处理模型更新，仅处理增删。更新操作由 ModelFormDialog 负责
   const modelsToUpdatePromises = providerForm.models
     .filter((currentModel: ModelFormData): currentModel is AIModel => !!currentModel.id)
     .map(currentModel => {
       const initialModel = initialModels.find(m => m.id === currentModel.id);
-      // 仅当模型名称或ID发生变化时才更新，meta_config 的更新不在此处处理
       if (initialModel && (initialModel.name !== currentModel.name || initialModel.modelId !== currentModel.modelId)) {
         return providerStore.updateModel(currentModel.id, { name: currentModel.name });
       }
@@ -369,7 +390,6 @@ defineExpose({
       if (!modelExists) {
         const fullModel = fetchedModels.find(m => m.modelId === modelId);
         if (fullModel) {
-          // 将获取到的完整模型信息（包括 meta_config）添加到表单
           providerForm.models.push({
             name: fullModel.name,
             modelId: fullModel.modelId,

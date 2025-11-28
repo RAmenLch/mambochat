@@ -77,7 +77,7 @@
           clearable
           style="width: 100%"
         >
-          <el-option v-for="item in supportedParametersOptions" :key="item" :label="item" :value="item" />
+          <el-option v-for="item in systemConfigStore.parameterOptions" :key="item.key" :label="item.label" :value="item.key" />
         </el-select>
       </el-form-item>
     </el-form>
@@ -99,12 +99,12 @@ import { ref, reactive, watch, computed } from 'vue';
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
 import { Download } from '@element-plus/icons-vue';
 import { useProviderStore } from '@/stores/providerStore';
+import { useSystemConfigStore } from '@/stores/systemConfigStore';
 import type { AIModel, AIModelCreate, AIModelMetaConfig, AIModelUpdate } from '@/api/types';
 import {
   tokenizerOptions,
   inputModalitiesOptions,
   outputModalitiesOptions,
-  supportedParametersOptions,
 } from '@/constants/metaConfigOptions';
 
 interface ModelFormData {
@@ -127,6 +127,7 @@ const emit = defineEmits<{
 }>();
 
 const providerStore = useProviderStore();
+const systemConfigStore = useSystemConfigStore();
 const internalVisible = ref(false);
 const modelFormRef = ref<FormInstance>();
 
@@ -181,7 +182,6 @@ function handleClose() {
 
 function getSanitizedMetaConfig(): AIModelMetaConfig {
     const config = modelForm.meta_config;
-    // 如果 input-number 的值为 undefined 或空字符串，v-model 会将其置为 null，这里确保是 null
     return {
       ...config,
       context_length: config.context_length || null,

@@ -178,6 +178,37 @@ export interface ConnectionTestResponse {
   status: string;
   message: string;
 }
+// --- System Config Types ---
+
+/**
+ * 定义一个LLM参数的完整结构，用于API响应，供前端UI生成和校验。
+ */
+export interface LLMParameterDefinition {
+  key: string;
+  label: string;
+  path: string[];
+  description: string;
+  type: 'integer' | 'number' | 'string' | 'boolean';
+  limit?: Array<any> | { min?: number; max?: number; };
+  default_value: any;
+  default_activate: boolean;
+}
+
+/**
+ * 定义预设服务商的基本信息，用于API响应。
+ */
+export interface DefaultProviderInfo {
+  name: string;
+  apiHost: string;
+}
+
+/**
+ * GET /api/system-config 接口的响应模型。
+ */
+export interface SystemConfigResponse {
+  llm_parameters: LLMParameterDefinition[];
+  default_providers: DefaultProviderInfo[];
+}
 
 // --- Chat Types ---
 
