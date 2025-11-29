@@ -20,4 +20,4 @@ COPY . ./backend/
 # 启动命令：
 # 从 /app 目录启动，告诉 gunicorn 运行 backend 包里的 main 模块的 app 实例
 # 这就解决了相对导入的问题
-CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "backend.main:app", "--bind", "0.0.0.0:8000"]
+CMD ["gunicorn", "-w", "1", "-k", "uvicorn.workers.UvicornWorker", "backend.main:app", "--bind", "0.0.0.0:8000"]
