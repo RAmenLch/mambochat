@@ -85,6 +85,27 @@ SUPPORTED_LLM_PARAMETERS: List[LLMParameter] = [
         default_value="1:1",
         default_activate=False
     ),
+    LLMParameter(
+        key="gemini::reasoning_effort",
+        label="reasoning_effort(Gemini)",
+        path=["reasoning_effort"],
+        description="（示例）用于控制思考思考预算",
+        type="string",
+        limit=["minimal","low","medium","high"],
+        default_value="medium",
+        default_activate=False
+    ),
+    LLMParameter(
+        key="reasoning",
+        label="reasoning.effort(Openrouter)",
+        path=["reasoning","effort"],
+        description="（示例）用于控制思考思考预算",
+        type="string",
+        limit=["minimal","low","medium","high"],
+        default_value="medium",
+        default_activate=False
+    ),
+
 ]
 
 
