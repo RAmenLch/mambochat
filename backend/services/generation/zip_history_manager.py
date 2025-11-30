@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .base import AbstractGenerateManager
 from .instructions import BaseInstruction, UpdateZipHistorySubMessage, SetFinalStatus
 from .llm_io import LLMInput, WorkerOutput
-from .manager import _build_llm_messages_payload
+from .manager import _build_llm_messages_payload, _build_zip_history_messages_payload
 from ..stream_manager_service import stream_manager
 from ...crud import setting_crud, message_crud, chat_crud
 from ...models import chat_model
@@ -81,16 +81,18 @@ class ZipHistoryGenerateManager(AbstractGenerateManager):
         prompt_setting = await setting_crud.get_setting(self.db_session, "zip_history_system_prompt")
         system_prompt = prompt_setting.value if prompt_setting and prompt_setting.value else DEFAULT_ZIP_HISTORY_PROMPT
 
+
         # 2. 使用共享函数构建消息负载
-        meta_config = json.loads(model.meta_config) if model.meta_config and isinstance(model.meta_config, str) else {}
-        is_multimodal_enabled = 'image' in (meta_config.get('input_modalities') or [])
+
+        effective_history = await _build_zip_history_messages_payload(history_messages)
+
         messages_payload = await _build_llm_messages_payload(
-            self.db_session, history_messages, is_multimodal_enabled
+            self.db_session, effective_history, False
         )
         messages_payload.insert(0, {"role": "system", "content": system_prompt})
         messages_payload.append({"role": "user", "content": "请输出历史摘要:"})
         # 3. 准备模型参数和连接配置
-        parameters = {'stream': True} # 强制流式以获得更好的体验
+        parameters = {'stream': False} # 强制流式以获得更好的体验
         proxy_url = None
         if provider.use_proxy:
             proxy_enabled_setting = await setting_crud.get_setting(self.db_session, "proxy_enabled")

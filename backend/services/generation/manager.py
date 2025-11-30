@@ -64,6 +64,41 @@ SUPPORTED_TEXT_MIME_TYPES = {
     "text/x-c++src", "text/x-go", "text/x-ruby", "application/sql", "application/x-sh"
 }
 
+async def _build_zip_history_messages_payload(history_messages:List[chat_model.Message]) -> List[chat_model.Message]:
+    effective_history = history_messages
+    last_enabled_zip_index = -1
+    zip_content = None
+
+    for i in range(len(history_messages) - 1, -1, -1):
+        msg = history_messages[i]
+        for sub in msg.sub_messages:
+            if sub.type == schemas_enums.SubMessageType.ZIP_HISTORY.value:
+                try:
+                    config = json.loads(sub.config) if isinstance(sub.config, str) else sub.config
+                    if config and config.get('zip_enable') is True:
+                        last_enabled_zip_index = i
+                        zip_content = sub.content
+                        break
+                except (json.JSONDecodeError, TypeError):
+                    continue
+        if last_enabled_zip_index != -1:
+            break
+
+    if last_enabled_zip_index != -1 and zip_content:
+        # 构造虚拟消息来代表压缩历史
+        user_sub = SimpleNamespace(content="对之前的对话进行了总结摘要。",
+                                   type=schemas_enums.SubMessageType.NORMAL.value, config='{}')
+        user_msg = SimpleNamespace(role=schemas_enums.MessageRole.USER.value, sub_messages=[user_sub])
+
+        assistant_sub = SimpleNamespace(content=zip_content, type=schemas_enums.SubMessageType.NORMAL.value,
+                                        config='{}')
+        assistant_msg = SimpleNamespace(role=schemas_enums.MessageRole.ASSISTANT.value,
+                                        sub_messages=[assistant_sub])
+
+        # 构建新的有效历史记录
+        effective_history = [user_msg, assistant_msg] + history_messages[last_enabled_zip_index + 1:]
+    return effective_history
+
 
 async def _build_llm_messages_payload(
         db_session: AsyncSession,
@@ -195,38 +230,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
         model = db_chat.ai_model
 
         # 1. 查找并应用已启用的压缩历史
-        effective_history = history_messages
-        last_enabled_zip_index = -1
-        zip_content = None
-
-        for i in range(len(history_messages) - 1, -1, -1):
-            msg = history_messages[i]
-            for sub in msg.sub_messages:
-                if sub.type == schemas_enums.SubMessageType.ZIP_HISTORY.value:
-                    try:
-                        config = json.loads(sub.config) if isinstance(sub.config, str) else sub.config
-                        if config and config.get('zip_enable') is True:
-                            last_enabled_zip_index = i
-                            zip_content = sub.content
-                            break
-                    except (json.JSONDecodeError, TypeError):
-                        continue
-            if last_enabled_zip_index != -1:
-                break
-
-        if last_enabled_zip_index != -1 and zip_content:
-            # 构造虚拟消息来代表压缩历史
-            user_sub = SimpleNamespace(content="对之前的对话进行了总结摘要。",
-                                       type=schemas_enums.SubMessageType.NORMAL.value, config='{}')
-            user_msg = SimpleNamespace(role=schemas_enums.MessageRole.USER.value, sub_messages=[user_sub])
-
-            assistant_sub = SimpleNamespace(content=zip_content, type=schemas_enums.SubMessageType.NORMAL.value,
-                                            config='{}')
-            assistant_msg = SimpleNamespace(role=schemas_enums.MessageRole.ASSISTANT.value,
-                                            sub_messages=[assistant_sub])
-
-            # 构建新的有效历史记录
-            effective_history = [user_msg, assistant_msg] + history_messages[last_enabled_zip_index + 1:]
+        effective_history = await _build_zip_history_messages_payload(history_messages)
 
         # 2. 准备多模态和消息负载
         meta_config = {}
