@@ -436,7 +436,7 @@ function getPartitionTitleForMinimized(subMessage: SubMessage): string {
 <style scoped>
 .message-item-container { display: flex; align-items: flex-start; margin-bottom: 20px; max-width: 90%; }
 .message-avatar { flex-shrink: 0; margin-right: 12px; margin-top: 2px; }
-.message-body { display: flex; flex-direction: column; min-width: 80px; width: 100%; }
+.message-body { display: flex; flex-direction: column; min-width: 80px; }
 
 .minimized-sub-messages-container {
   display: flex;
