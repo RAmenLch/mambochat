@@ -243,8 +243,8 @@ const zipBookmarkIcon = computed(() => {
 const zipBookmarkText = computed(() => {
   switch (zipStatus.value) {
     case 'generating': return '摘要生成中...';
-    case 'enabled': return '历史摘要 (已启用)';
-    case 'disabled': return '历史摘要 (未启用)';
+    case 'enabled': return '历史摘要';
+    case 'disabled': return '历史摘要';
     default: return '历史摘要';
   }
 });
