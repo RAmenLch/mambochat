@@ -20,6 +20,7 @@
           <MessageItem
             v-for="(message, index) in currentChatMessages"
             :key="message.id"
+            :id="'msg-' + message.id"
             :message="message"
             :is-last-message="index === currentChatMessages.length - 1"
           />
@@ -48,11 +49,13 @@
         <div class="resize-handle" @mousedown.prevent="startResizeInputArea"></div>
         <ChatToolbar
           :current-chat="currentChat"
+          :messages="currentChatMessages"
           :estimated-tokens="estimatedTokens"
           @open-settings="settingsDrawerVisible = true"
           @toggle-multi-part-mode="toggleMultiPartMode"
           @trigger-file-upload="handleTriggerFileUpload"
           @open-resource-selector="resourceSelectorVisible = true"
+          @jump-to-message="handleJumpToMessage"
         />
 
         <AttachmentPreview
@@ -321,7 +324,7 @@ async function handleSaveSettings(settings: ChatUpdate) {
   ElMessage.success('设置已保存');
 }
 
-// --- Scroll ---
+// --- Scroll & Navigation ---
 const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
   const el = scrollbarRef.value?.wrapRef;
   if (!el) return;
@@ -337,6 +340,21 @@ const scrollToBottom = (force = false) => {
     }
   });
 };
+
+/**
+ * 处理从 Toolbar 触发的跳转到指定消息的事件。
+ * 通过 ID 定位 DOM 元素并控制 Scrollbar 滚动。
+ */
+function handleJumpToMessage(messageId: string) {
+  const elementId = `msg-${messageId}`;
+  const element = document.getElementById(elementId);
+
+  if (element && scrollbarRef.value) {
+    // 减去一定的偏移量，给顶部留出呼吸空间
+    const offset = element.offsetTop - 10;
+    scrollbarRef.value.setScrollTop(offset);
+  }
+}
 
 // --- Watchers ---
 

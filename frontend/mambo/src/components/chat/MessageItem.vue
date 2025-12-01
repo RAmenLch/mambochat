@@ -77,12 +77,18 @@
 
       <!-- Zip History Bookmark and Card -->
       <div v-if="zipHistorySubMessage" class="zip-history-section">
-        <div class="zip-history-bookmark" @click="isZipCardVisible = !isZipCardVisible">
-          <el-icon><Clock /></el-icon>
-          <span>历史摘要</span>
+        <div
+          class="zip-history-bookmark"
+          :class="zipBookmarkClass"
+          @click="handleZipBookmarkClick"
+        >
+          <el-icon :class="{ 'is-loading': zipStatus === 'generating' }">
+            <component :is="zipBookmarkIcon" />
+          </el-icon>
+          <span>{{ zipBookmarkText }}</span>
         </div>
         <ZipHistoryCard
-          v-if="isZipCardVisible"
+          v-if="isZipCardVisible && zipStatus !== 'generating'"
           :sub-message="zipHistorySubMessage"
           class="zip-history-card"
         />
@@ -139,7 +145,10 @@ import type { Message, SubMessage, SubMessageCreate, MessageStatus } from '@/api
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { User, Cpu, Refresh, RefreshLeft, Delete, Edit, CopyDocument, ArrowUpBold, ArrowDownBold, Clock, Document } from '@element-plus/icons-vue';
+import {
+  User, Cpu, Refresh, RefreshLeft, Delete, Edit, CopyDocument,
+  ArrowUpBold, ArrowDownBold, Clock, Document, Loading, CircleCheck
+} from '@element-plus/icons-vue';
 import SubMessageItem from './SubMessageItem.vue';
 import MessageEditDialog from './dialogs/MessageEditDialog.vue';
 import UsageInfo from './UsageInfo.vue';
@@ -203,6 +212,49 @@ const usageSubMessage = computed(() =>
 const zipHistorySubMessage = computed(() =>
   props.message.sub_messages.find(sm => sm.type === 'ZipHistory')
 );
+
+/**
+ * 计算历史摘要的当前状态
+ */
+const zipStatus = computed(() => {
+  if (!zipHistorySubMessage.value) return null;
+  if (zipHistorySubMessage.value.status === 'generating') return 'generating';
+  if (zipHistorySubMessage.value.config.zip_enable) return 'enabled';
+  return 'disabled';
+});
+
+/**
+ * 根据状态返回对应的图标组件
+ */
+const zipBookmarkIcon = computed(() => {
+  switch (zipStatus.value) {
+    case 'generating': return Loading;
+    case 'enabled': return CircleCheck;
+    case 'disabled': return Clock;
+    default: return Clock;
+  }
+});
+
+/**
+ * 根据状态返回显示的文本
+ */
+const zipBookmarkText = computed(() => {
+  switch (zipStatus.value) {
+    case 'generating': return '摘要生成中...';
+    case 'enabled': return '历史摘要 (已启用)';
+    case 'disabled': return '历史摘要 (未启用)';
+    default: return '历史摘要';
+  }
+});
+
+/**
+ * 根据状态返回 CSS 类名
+ */
+const zipBookmarkClass = computed(() => ({
+  'is-generating': zipStatus.value === 'generating',
+  'is-enabled': zipStatus.value === 'enabled',
+  'is-disabled': zipStatus.value === 'disabled',
+}));
 
 const isSingleSubMessage = computed(() => normalSubMessages.value.length === 1);
 const firstSubMessage = computed(() => normalSubMessages.value[0]);
@@ -401,6 +453,11 @@ function handleCompressHistory() {
   ElMessage.info('已开始在后台压缩历史对话，您可以继续聊天。');
 }
 
+function handleZipBookmarkClick() {
+  if (zipStatus.value === 'generating') return;
+  isZipCardVisible.value = !isZipCardVisible.value;
+}
+
 /**
  * 恢复一个最小化的子消息
  */
@@ -533,22 +590,54 @@ function getPartitionTitleForMinimized(subMessage: SubMessage): string {
 .zip-history-section {
   margin-top: 8px;
 }
+
 .zip-history-bookmark {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
   border-radius: 6px;
-  background-color: var(--el-color-info-light-9);
-  border: 1px solid var(--el-color-info-light-7);
-  color: var(--el-color-info-dark-2);
+  background-color: var(--color-background-soft);
+  border: 1px solid var(--el-border-color);
+  color: var(--el-text-color-regular);
   font-size: 13px;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: all 0.2s;
 }
-.zip-history-bookmark:hover {
+
+/* Enabled State (Green) */
+.zip-history-bookmark.is-enabled {
+  background-color: var(--el-color-success-light-9);
+  border-color: var(--el-color-success-light-5);
+  color: var(--el-color-success);
+}
+.zip-history-bookmark.is-enabled:hover {
+  background-color: var(--el-color-success-light-8);
+}
+
+/* Disabled State (Gray/Info) */
+.zip-history-bookmark.is-disabled {
+  background-color: var(--el-color-info-light-9);
+  border-color: var(--el-color-info-light-7);
+  color: var(--el-color-info);
+}
+.zip-history-bookmark.is-disabled:hover {
   background-color: var(--el-color-info-light-8);
 }
+
+/* Generating State (Blue/Primary) */
+.zip-history-bookmark.is-generating {
+  background-color: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary-light-5);
+  color: var(--el-color-primary);
+  cursor: default;
+}
+
+/* Loading Icon Animation */
+.zip-history-bookmark .el-icon.is-loading {
+  animation: rotating 2s linear infinite;
+}
+
 .zip-history-card {
   margin-top: 8px;
 }
