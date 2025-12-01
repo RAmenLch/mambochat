@@ -92,7 +92,7 @@ class ZipHistoryGenerateManager(AbstractGenerateManager):
         messages_payload.insert(0, {"role": "system", "content": system_prompt})
         messages_payload.append({"role": "user", "content": "请输出历史摘要:"})
         # 3. 准备模型参数和连接配置
-        parameters = {'stream': False} # 强制流式以获得更好的体验
+        parameters = {'stream': False}
         proxy_url = None
         if provider.use_proxy:
             proxy_enabled_setting = await setting_crud.get_setting(self.db_session, "proxy_enabled")
@@ -213,7 +213,40 @@ class ZipHistoryGenerateManager(AbstractGenerateManager):
             assistant_message_id: str
     ) -> schemas_enums.MessageStatus:
         """
-        重写run方法以在内部传递 target_message_id。
+        重写run方法以在内部传递 target_message_id，并在生成前禁用目标消息上已启用的压缩历史。
         """
+        target_message = await message_crud.get_message(self.db_session, assistant_message_id)
+        if target_message:
+            for sub in target_message.sub_messages:
+                if sub.type == schemas_enums.SubMessageType.ZIP_HISTORY.value:
+                    try:
+                        config_obj = json.loads(sub.config) if isinstance(sub.config, str) else sub.config
+                        # 仅当目标消息的压缩历史处于启用状态时，才将其禁用
+                        # 这样做是为了防止上下文构建逻辑在遇到当前消息的压缩历史时停止回溯，
+                        # 从而确保本次生成能获取到完整的上文（包括更早的压缩历史）。
+                        if config_obj and config_obj.get('zip_enable') is True:
+                            config_obj['zip_enable'] = False
+
+                            update_schema = schemas_message.SubMessageUpdate(
+                                config=schemas_message.SubMessageConfig.model_validate(config_obj)
+                            )
+                            updated_sub_message = await message_crud.update_sub_message(
+                                self.db_session, sub.id, update_schema
+                            )
+
+                            if updated_sub_message:
+                                notification_payload = {
+                                    "type": "zip_history_update",
+                                    "payload": {
+                                        "chat_id": chat_id,
+                                        "message_id": assistant_message_id,
+                                        "sub_message": schemas_message.SubMessage.model_validate(updated_sub_message).model_dump(mode='json')
+                                    }
+                                }
+                                await stream_manager.publish(GLOBAL_NOTIFICATIONS_STREAM_ID, notification_payload)
+                            break
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+
         self.temp_ref_id_map['__assistant_message_id__'] = assistant_message_id
         return await super().run(worker, chat_id, assistant_message_id)
