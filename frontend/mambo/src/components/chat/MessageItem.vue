@@ -1,6 +1,7 @@
 <!-- frontend/mambo/src/components/chat/MessageItem.vue -->
 <template>
   <div
+    :id="id"
     class="message-item-container"
     :class="roleClass"
     @mouseenter="showActions = true"
@@ -162,6 +163,7 @@ interface SubMessageGroup {
 }
 
 const props = defineProps<{
+  id: string;
   message: Message;
   isLastMessage: boolean;
 }>();

@@ -6,11 +6,6 @@
         <el-icon><Cpu /></el-icon>
         <span>当前模型: <strong>{{ displayModelName }}</strong></span>
       </div>
-      <div class="token-counter" v-if="estimatedTokens > 0">
-
-        <span>预估 Tokens: <strong>{{ estimatedTokens }}</strong></span>
-      </div>
-      <!-- History Summary List Popover -->
       <div class="zip-history-list-trigger" v-if="zipHistoryItems.length > 0">
         <el-popover
           placement="top"
@@ -49,6 +44,18 @@
           </div>
         </el-popover>
       </div>
+      <div class="token-counter" v-if="estimatedTokens > 0">
+        <span>预估 Tokens: <strong>{{ estimatedTokens }}</strong></span>
+        <!-- 添加的提示信息 -->
+        <el-tooltip
+          content="仅供参考,实际消耗以usage或服务商账单为准"
+          placement="top"
+          effect="dark"
+        >
+          <el-icon class="token-tooltip-icon"><QuestionFilled /></el-icon>
+        </el-tooltip>
+      </div>
+      <!-- History Summary List Popover -->
     </div>
 
     <div class="actions">
@@ -85,7 +92,8 @@ import { computed } from 'vue';
 import { useProviderStore } from '@/stores/providerStore';
 import type { Chat, Message } from '@/api/types';
 import type { PropType } from 'vue';
-import { Cpu, Setting, Files, Tickets, Upload, Collection } from '@element-plus/icons-vue';
+// 导入 QuestionFilled 图标
+import { Cpu, Setting, Files, Tickets, Upload, Collection, QuestionFilled } from '@element-plus/icons-vue';
 
 const props = defineProps({
   currentChat: {
@@ -150,7 +158,7 @@ const zipHistoryItems = computed(() => {
 .toolbar-left {
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 6px;
 }
 
 .model-display,
@@ -172,6 +180,13 @@ const zipHistoryItems = computed(() => {
   color: var(--el-text-color-primary);
   font-weight: 600;
   margin-left: 4px;
+}
+
+/* 为提示图标添加样式 */
+.token-tooltip-icon {
+  margin-left: 6px;
+  cursor: help;
+  color: var(--el-text-color-placeholder);
 }
 
 .zip-trigger-btn {
