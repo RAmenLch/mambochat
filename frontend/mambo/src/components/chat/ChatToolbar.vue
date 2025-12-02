@@ -6,11 +6,58 @@
         <el-icon><Cpu /></el-icon>
         <span>当前模型: <strong>{{ displayModelName }}</strong></span>
       </div>
-      <div class="token-counter" v-if="estimatedTokens > 0">
-        <el-icon><Tickets /></el-icon>
-        <span>预估 Tokens: <strong>{{ estimatedTokens }}</strong></span>
+      <div class="zip-history-list-trigger" v-if="zipHistoryItems.length > 0">
+        <el-popover
+          placement="top"
+          :width="240"
+          trigger="click"
+          popper-class="zip-history-popover"
+        >
+          <template #reference>
+            <el-button size="small" text bg class="zip-trigger-btn">
+              <el-icon><Tickets /></el-icon>
+            </el-button>
+          </template>
+
+          <div class="zip-list-container">
+            <div class="zip-list-header">历史摘要列表</div>
+            <el-scrollbar max-height="300px">
+              <div
+                v-for="item in zipHistoryItems"
+                :key="item.messageId"
+                class="zip-list-item"
+                @click="$emit('jumpToMessage', item.messageId)"
+              >
+                <div class="zip-item-info">
+                  <span class="zip-item-title">第 {{ item.index }} 条消息</span>
+                  <el-tag
+                    size="small"
+                    :type="item.isEnabled ? 'success' : 'info'"
+                    effect="plain"
+                    class="zip-item-tag"
+                  >
+                    {{ item.isEnabled ? '已启用' : '未启用' }}
+                  </el-tag>
+                </div>
+              </div>
+            </el-scrollbar>
+          </div>
+        </el-popover>
       </div>
+      <div class="token-counter" v-if="estimatedTokens > 0">
+        <span>预估 Tokens: <strong>{{ estimatedTokens }}</strong></span>
+        <!-- 添加的提示信息 -->
+        <el-tooltip
+          content="仅供参考,实际消耗以usage或服务商账单为准"
+          placement="top"
+          effect="dark"
+        >
+          <el-icon class="token-tooltip-icon"><QuestionFilled /></el-icon>
+        </el-tooltip>
+      </div>
+      <!-- History Summary List Popover -->
     </div>
+
     <div class="actions">
       <el-button
         :icon="Upload"
@@ -43,14 +90,19 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useProviderStore } from '@/stores/providerStore';
-import type { Chat } from '@/api/types';
+import type { Chat, Message } from '@/api/types';
 import type { PropType } from 'vue';
-import { Cpu, Setting, Files, Tickets, Upload, Collection } from '@element-plus/icons-vue';
+// 导入 QuestionFilled 图标
+import { Cpu, Setting, Files, Tickets, Upload, Collection, QuestionFilled } from '@element-plus/icons-vue';
 
 const props = defineProps({
   currentChat: {
     type: Object as PropType<Chat>,
     required: true,
+  },
+  messages: {
+    type: Array as PropType<Message[]>,
+    default: () => [],
   },
   estimatedTokens: {
     type: Number,
@@ -58,7 +110,7 @@ const props = defineProps({
   },
 });
 
-defineEmits(['openSettings', 'toggleMultiPartMode', 'triggerFileUpload', 'openResourceSelector']);
+defineEmits(['openSettings', 'toggleMultiPartMode', 'triggerFileUpload', 'openResourceSelector', 'jumpToMessage']);
 
 const providerStore = useProviderStore();
 
@@ -68,6 +120,27 @@ const displayModelName = computed(() => {
   }
   const model = providerStore.allModels.find(m => m.id === props.currentChat.aiModelId);
   return model ? model.name : '未知模型';
+});
+
+/**
+ * Computed property to extract messages containing ZipHistory sub-messages.
+ * Used to render the history summary list in the toolbar.
+ */
+const zipHistoryItems = computed(() => {
+  const items: Array<{ messageId: string; index: number; isEnabled: boolean }> = [];
+
+  props.messages.forEach((msg, index) => {
+    const zipSub = msg.sub_messages.find(sm => sm.type === 'ZipHistory');
+    if (zipSub) {
+      items.push({
+        messageId: msg.id,
+        index: index + 1,
+        isEnabled: zipSub.config.zip_enable === true,
+      });
+    }
+  });
+
+  return items;
 });
 </script>
 
@@ -85,11 +158,12 @@ const displayModelName = computed(() => {
 .toolbar-left {
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 6px;
 }
 
 .model-display,
-.token-counter {
+.token-counter,
+.zip-history-list-trigger {
   display: flex;
   align-items: center;
   font-size: 14px;
@@ -108,8 +182,68 @@ const displayModelName = computed(() => {
   margin-left: 4px;
 }
 
+/* 为提示图标添加样式 */
+.token-tooltip-icon {
+  margin-left: 6px;
+  cursor: help;
+  color: var(--el-text-color-placeholder);
+}
+
+.zip-trigger-btn {
+  padding: 5px 10px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.zip-trigger-btn .el-icon {
+  margin-right: 0;
+}
+
 .actions {
   display: flex;
   gap: 8px;
+}
+
+/* Popover Styles */
+.zip-list-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.zip-list-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  padding: 0 8px 8px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  margin-bottom: 4px;
+}
+
+.zip-list-item {
+  padding: 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.zip-list-item:hover {
+  background-color: var(--el-fill-color-light);
+}
+
+.zip-item-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.zip-item-title {
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+}
+
+.zip-item-tag {
+  margin-left: 8px;
 }
 </style>

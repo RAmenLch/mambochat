@@ -14,7 +14,7 @@ import {
 import { subscribeToMessageStream } from '@/services/sseService';
 import { useChatSessionStore } from './chatSessionStore';
 import { useChatListStore } from './chatListStore';
-import type { Message, SubMessageCreate, SubMessageUpdate } from '@/api/types';
+import type { Message, SubMessage, SubMessageCreate, SubMessageUpdate, MessageStatus } from '@/api/types';
 
 /**
  * 处理所有与当前会话的交互动作。
@@ -250,11 +250,58 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
    * @param messageId - 作为压缩起点的助手消息ID。
    */
   async function initiateHistoryCompression(messageId: string) {
+    const parentMessage = sessionStore.currentChatMessages.find(m => m.id === messageId);
+    if (!parentMessage) return;
+
+    const existingZip = parentMessage.sub_messages.find(sm => sm.type === 'ZipHistory');
+    let backupZip: SubMessage | null = null;
+    let tempId: string | null = null;
+
+    if (existingZip) {
+      // 1. 如果已存在，备份并乐观更新状态为 generating
+      // 使用 JSON.parse/stringify 进行深拷贝备份
+      backupZip = JSON.parse(JSON.stringify(existingZip));
+
+      const updatedZip = { ...existingZip, status: 'generating' as MessageStatus };
+      sessionStore._addOrUpdateSubMessage(messageId, updatedZip);
+    } else {
+      // 2. 如果不存在，创建临时占位符
+      tempId = `temp_zip_${Date.now()}`;
+      const optimisticSubMessage: SubMessage = {
+        id: tempId,
+        content: '',
+        createdAt: new Date().toISOString(),
+        messageId: messageId,
+        sortOrder: 999, // 临时赋予一个较大的排序值
+        type: 'ZipHistory',
+        config: {
+          is_collapsed: false,
+          zip_enable: false
+        },
+        status: 'generating'
+      };
+      sessionStore._addOrUpdateSubMessage(messageId, optimisticSubMessage);
+    }
+
     try {
       await initiateHistoryCompressionAPI(messageId);
     } catch (error) {
       console.error(`Failed to initiate history compression for message ${messageId}:`, error);
-      // 错误消息将由全局API拦截器显示
+
+      // 回滚逻辑
+      if (existingZip && backupZip) {
+        // 恢复原有的子消息状态
+        sessionStore._addOrUpdateSubMessage(messageId, backupZip);
+      } else if (tempId) {
+        // 移除临时创建的消息
+        const currentParent = sessionStore.currentChatMessages.find(m => m.id === messageId);
+        if (currentParent) {
+          const index = currentParent.sub_messages.findIndex(sm => sm.id === tempId);
+          if (index !== -1) {
+            currentParent.sub_messages.splice(index, 1);
+          }
+        }
+      }
     }
   }
 

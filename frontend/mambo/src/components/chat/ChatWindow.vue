@@ -20,6 +20,7 @@
           <MessageItem
             v-for="(message, index) in currentChatMessages"
             :key="message.id"
+            :id="'msg-' + message.id"
             :message="message"
             :is-last-message="index === currentChatMessages.length - 1"
           />
@@ -48,11 +49,13 @@
         <div class="resize-handle" @mousedown.prevent="startResizeInputArea"></div>
         <ChatToolbar
           :current-chat="currentChat"
+          :messages="currentChatMessages"
           :estimated-tokens="estimatedTokens"
           @open-settings="settingsDrawerVisible = true"
           @toggle-multi-part-mode="toggleMultiPartMode"
           @trigger-file-upload="handleTriggerFileUpload"
           @open-resource-selector="resourceSelectorVisible = true"
+          @jump-to-message="handleJumpToMessage"
         />
 
         <AttachmentPreview
@@ -166,7 +169,44 @@ const { startResize: startResizeInputArea } = useResizablePanels(inputAreaHeight
   min: MIN_INPUT_HEIGHT, max: MAX_INPUT_HEIGHT, orientation: 'vertical', inverted: true
 });
 
-const { estimatedTokens } = useTokenEstimator(contextForTokenEstimation, currentUserInputText);
+/**
+ * 计算即将发送的完整消息内容，用于 Token 预估。
+ * 包含：
+ * 1. 用户在输入框中的文本 (currentUserInputText)
+ * 2. 附加的消息模板 (SubMessage Template)，需根据 context_participation_length (CPL) 过滤
+ *    - 待发送消息的新旧程度排名 (Recency Rank) 为 1。
+ *    - 因此，仅当 CPL >= 1 或 CPL 未定义时，模板内容才被计入。
+ *    - 若 CPL = 0，则不计入。
+ */
+const pendingMessageTextForTokenEstimation = computed(() => {
+  const parts: string[] = [];
+
+  // 1. 输入框文本
+  if (currentUserInputText.value) {
+    parts.push(currentUserInputText.value);
+  }
+
+  // 2. 附加的消息模板
+  attachedSubmessageResources.value.forEach(resource => {
+    if (resource.resourceType === 'submessage_template' && resource.latest_version) {
+      // 修复：ResourceVersion 使用 attributes 存储配置，而不是 config
+      const cpl = resource.latest_version.attributes?.context_participation_length;
+
+      // 逻辑：CPL 未定义(默认参与) 或 CPL >= 1 (当前消息排名为1) 时计入
+      // 显式排除 CPL === 0 的情况
+      if (cpl === undefined || cpl === null || (typeof cpl === 'number' && cpl >= 1)) {
+        if (resource.latest_version.content) {
+          parts.push(resource.latest_version.content);
+        }
+      }
+    }
+  });
+
+  return parts.join('\n');
+});
+
+// 使用聚合后的待发送内容进行 Token 估算
+const { estimatedTokens } = useTokenEstimator(contextForTokenEstimation, pendingMessageTextForTokenEstimation);
 
 // --- Local Component State ---
 const scrollbarRef = ref<InstanceType<typeof ElScrollbar>>();
@@ -321,7 +361,7 @@ async function handleSaveSettings(settings: ChatUpdate) {
   ElMessage.success('设置已保存');
 }
 
-// --- Scroll ---
+// --- Scroll & Navigation ---
 const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
   const el = scrollbarRef.value?.wrapRef;
   if (!el) return;
@@ -337,6 +377,21 @@ const scrollToBottom = (force = false) => {
     }
   });
 };
+
+/**
+ * 处理从 Toolbar 触发的跳转到指定消息的事件。
+ * 通过 ID 定位 DOM 元素并控制 Scrollbar 滚动。
+ */
+function handleJumpToMessage(messageId: string) {
+  const elementId = `msg-${messageId}`;
+  const element = document.getElementById(elementId);
+
+  if (element && scrollbarRef.value) {
+    // 减去一定的偏移量，给顶部留出呼吸空间
+    const offset = element.offsetTop - 10;
+    scrollbarRef.value.setScrollTop(offset);
+  }
+}
 
 // --- Watchers ---
 

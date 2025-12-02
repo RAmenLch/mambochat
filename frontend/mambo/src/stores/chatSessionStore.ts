@@ -7,6 +7,7 @@ import { useChatListStore } from './chatListStore';
 import { useChatInteractionStore } from './chatInteractionStore';
 import type { Chat, Message, SubMessage } from '@/api/types';
 import type { StreamedChunk } from '@/services/sseService';
+
 /**
  * 管理当前激活会话的数据状态。
  * 这个 Store 扮演着当前会话的响应式“数据库”角色，
@@ -41,16 +42,90 @@ export const useChatSessionStore = defineStore('chatSession', () => {
 
   /**
    * 为 Token 估算器提供上下文。
-   * 包含系统提示和最近的消息历史。
+   * 包含系统提示和经过`context_participation_length`规则筛选的最近消息历史。
+   *
+   * 逻辑：
+   * 1. 优先寻找最后一个已启用的 ZipHistory 子消息作为锚点。
+   * 2. 如果找到锚点，上下文 = SystemPrompt + ZipContent + 锚点之后且符合CPL规则的消息。
+   * 3. 如果未找到，上下文 = SystemPrompt + 所有符合CPL规则的消息 (受 max_context_messages 限制)。
+   * 4. CPL规则：对每条历史消息计算其“新旧程度排名”，并根据其子消息的CPL值决定是否包含其内容。
    */
   const contextForTokenEstimation = computed((): string => {
     const chat = currentChat.value;
     if (!chat) return '';
     const systemPrompt = chat.systemPrompt || '';
-    const maxContext = chat.modelParameters?.max_context_messages ?? 0;
-    const messages = maxContext > 0 ? currentChatMessages.value.slice(-maxContext) : currentChatMessages.value;
-    const history = messages.map(msg => msg.sub_messages.map(sm => sm.content).join('\n')).join('\n');
-    return [systemPrompt, history].filter(Boolean).join('\n');
+
+    let anchorIndex = -1;
+    let anchorContent = '';
+
+    // 倒序遍历寻找有效的历史摘要锚点
+    for (let i = currentChatMessages.value.length - 1; i >= 0; i--) {
+      const msg = currentChatMessages.value[i];
+      const zipSub = msg.sub_messages.find(
+        sm => sm.type === 'ZipHistory' && sm.status === 'completed' && sm.config?.zip_enable === true
+      );
+
+      if (zipSub) {
+        anchorIndex = i;
+        anchorContent = zipSub.content;
+        break;
+      }
+    }
+
+    let messagesToInclude: Message[] = [];
+
+    if (anchorIndex !== -1) {
+      // 方案 A: 存在历史摘要锚点
+      messagesToInclude = currentChatMessages.value.slice(anchorIndex + 1);
+    } else {
+      // 方案 B: 无历史摘要锚点，使用原有逻辑
+      const maxContext = chat.modelParameters?.max_context_messages ?? 0;
+      messagesToInclude = maxContext > 0 ? currentChatMessages.value.slice(-maxContext) : currentChatMessages.value;
+    }
+
+    // 提取消息文本内容，并根据 context_participation_length (CPL) 规则进行过滤
+    const history = messagesToInclude.flatMap((msg, msgIndex) => {
+      // +1 是因为要算上当前正在输入、还未发送的新消息
+      const totalPotentialMessages = messagesToInclude.length + 1;
+      // 新旧程度排名: 1=最新, 2=次新...
+      // 最终发送给LLM的消息列表是 [messagesToInclude..., newMessage]
+      // 所以 msg 在该列表中的索引就是 msgIndex, 其排名为 total - index
+      const messageRecencyRank = totalPotentialMessages - msgIndex;
+
+      return msg.sub_messages
+        .filter(sm => {
+          // 始终从历史记录中排除非文本内容和特殊类型
+          if (sm.type !== 'Normal' && sm.type !== 'File') { // 假设File类型是文本文件
+            return false;
+          }
+
+          const cpl = sm.config?.context_participation_length;
+
+          // 规则1: cpl 为 0, 则此 sub-message 不参与上下文
+          if (cpl === 0) {
+            return false;
+          }
+
+          // 规则2: cpl 是正整数, 检查当前 message 是否在指定的“新”范围内
+          if (typeof cpl === 'number' && cpl > 0) {
+            return messageRecencyRank <= cpl;
+          }
+
+          // 规则3: cpl 未定义或为其他值, 按默认逻辑(参与上下文)处理
+          return true;
+        })
+        .map(sm => sm.content);
+    }).join('\n');
+
+
+    // 组装最终上下文
+    const parts = [systemPrompt];
+    if (anchorIndex !== -1) {
+      parts.push(anchorContent);
+    }
+    parts.push(history);
+
+    return parts.filter(Boolean).join('\n');
   });
 
   // --- Actions ---
@@ -182,6 +257,17 @@ export const useChatSessionStore = defineStore('chatSession', () => {
     if (!parentMessage) {
       console.warn(`[chatSessionStore] 未找到ID为 ${messageId} 的父消息以添加/更新子消息。`);
       return;
+    }
+
+    // 冲突处理：如果接收到的是正式的 ZipHistory 消息（非临时ID），
+    // 则先移除该消息下所有临时的 ZipHistory 占位符，防止出现重复。
+    if (subMessage.type === 'ZipHistory' && !subMessage.id.startsWith('temp_zip_')) {
+      const tempIndex = parentMessage.sub_messages.findIndex(
+        sm => sm.type === 'ZipHistory' && sm.id.startsWith('temp_zip_')
+      );
+      if (tempIndex !== -1) {
+        parentMessage.sub_messages.splice(tempIndex, 1);
+      }
     }
 
     const subMessageIndex = parentMessage.sub_messages.findIndex(sm => sm.id === subMessage.id);
