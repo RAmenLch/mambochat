@@ -6,10 +6,10 @@ from typing import List
 import httpx
 import json
 
-from ..services import provider_service
-from ..crud import provider_crud
-from .. import schemas
-from ..database import get_db
+from backend.services import provider_service
+from backend.crud import provider_crud
+from backend import schemas
+from backend.database import get_db
 
 router = APIRouter()
 

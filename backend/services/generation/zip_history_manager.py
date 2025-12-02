@@ -4,16 +4,16 @@ from typing import AsyncGenerator, List, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .base import AbstractGenerateManager
-from .instructions import BaseInstruction, UpdateZipHistorySubMessage, SetFinalStatus
-from .llm_io import LLMInput, WorkerOutput
-from .manager import _build_llm_messages_payload, _build_zip_history_messages_payload
-from ..stream_manager_service import stream_manager
-from ...crud import setting_crud, message_crud, chat_crud
-from ...models import chat_model
-from ...schemas import enums as schemas_enums
-from ...schemas import message as schemas_message
-from ...routers.notifications import GLOBAL_NOTIFICATIONS_STREAM_ID
+from backend.services.generation.base import AbstractGenerateManager
+from backend.services.generation.instructions import BaseInstruction, UpdateZipHistorySubMessage, SetFinalStatus
+from backend.services.generation.llm_io import LLMInput, WorkerOutput
+from backend.services.generation.manager import _build_llm_messages_payload, _build_zip_history_messages_payload
+from backend.services.stream_manager_service import stream_manager
+from backend.crud import setting_crud, message_crud, chat_crud
+from backend.models import chat_model
+from backend.schemas import enums as schemas_enums
+from backend.schemas import message as schemas_message
+from backend.routers.notifications import GLOBAL_NOTIFICATIONS_STREAM_ID
 
 DEFAULT_ZIP_HISTORY_PROMPT = (
     "你是一个对话历史压缩工具。请根据用户提供的对话历史，生成一段简洁、精确、信息完整的摘要。"

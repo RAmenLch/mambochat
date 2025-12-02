@@ -5,16 +5,16 @@ import json
 import traceback  # +++ 新增导入 +++
 from typing import AsyncGenerator, List, Dict, Any, Optional, Tuple
 
-from .llm_io import LLMInput, WorkerOutput
-from .instructions import (
+from backend.services.generation.llm_io import LLMInput, WorkerOutput
+from backend.services.generation.instructions import (
     BaseInstruction, CreateSubMessage, AppendToSubMessage,
     UpdateSubMessageStatus, SetFinalStatus
 )
-from ...models import chat_model
-from ...schemas import enums as schemas_enums
-from ...schemas import message as schemas_message
-from ...services.stream_manager_service import stream_manager
-from ...crud import message_crud, chat_crud, setting_crud
+from backend.models import chat_model
+from backend.schemas import enums as schemas_enums
+from backend.schemas import message as schemas_message
+from backend.services.stream_manager_service import stream_manager
+from backend.crud import message_crud, chat_crud, setting_crud
 
 
 class AbstractGenerateWorker(ABC):

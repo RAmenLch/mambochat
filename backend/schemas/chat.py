@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Optional, List, Dict
 import json
 
-from .message import Message, SubMessageCreate
+from backend.schemas.message import Message, SubMessageCreate
 
 
 # --- Chat Schemas ---

@@ -2,7 +2,7 @@
 from pydantic import BaseModel
 from typing import Optional, Dict
 
-from ...schemas.enums import MessageStatus, SubMessageType
+from backend.schemas.enums import MessageStatus, SubMessageType
 
 class BaseInstruction(BaseModel):
     """所有生成指令的基类。"""

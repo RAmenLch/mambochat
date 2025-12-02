@@ -2,14 +2,14 @@
 import json
 from typing import AsyncGenerator, List, Optional
 
-from .base import AbstractGenerateManager
-from .instructions import SetFinalStatus, UpdateChatName, BaseInstruction
-from .llm_io import LLMInput, WorkerOutput
-from ..stream_manager_service import stream_manager
-from ...crud import setting_crud, provider_crud, chat_crud
-from ...models import chat_model
-from ... import schemas
-from ...routers.notifications import GLOBAL_NOTIFICATIONS_STREAM_ID
+from backend.services.generation.base import AbstractGenerateManager
+from backend.services.generation.instructions import SetFinalStatus, UpdateChatName, BaseInstruction
+from backend.services.generation.llm_io import LLMInput, WorkerOutput
+from backend.services.stream_manager_service import stream_manager
+from backend.crud import setting_crud, provider_crud, chat_crud
+from backend.models import chat_model
+from backend import schemas
+from backend.routers.notifications import GLOBAL_NOTIFICATIONS_STREAM_ID
 
 
 class TitleGenerateManager(AbstractGenerateManager):

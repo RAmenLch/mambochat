@@ -5,9 +5,9 @@ import json
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import schemas
-from ..crud import setting_crud
-from ..config.llm_parameters import SUPPORTED_LLM_PARAMETERS
+from backend import schemas
+from backend.crud import setting_crud
+from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 
 
 async def _get_http_client_with_proxy(

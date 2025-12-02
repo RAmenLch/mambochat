@@ -7,16 +7,16 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import AsyncGenerator, List, Optional, Tuple
 
-from .stream_manager_service import stream_manager
-from ..crud import chat_crud, message_crud, file_crud, resource_crud
-from .. import schemas
-from ..models import chat_model
-from ..database import AsyncSessionLocal
-from .generation.manager import DefaultGenerateManager
-from .generation.title_manager import TitleGenerateManager
-from .generation.zip_history_manager import ZipHistoryGenerateManager
-from .generation.openai_worker import OpenAIGenerateWorker
-from ..schemas.enums import FileManagementType
+from backend.services.stream_manager_service import stream_manager
+from backend.crud import chat_crud, message_crud, file_crud, resource_crud
+from backend import schemas
+from backend.models import chat_model
+from backend.database import AsyncSessionLocal
+from backend.services.generation.manager import DefaultGenerateManager
+from backend.services.generation.title_manager import TitleGenerateManager
+from backend.services.generation.zip_history_manager import ZipHistoryGenerateManager
+from backend.services.generation.openai_worker import OpenAIGenerateWorker
+from backend.schemas.enums import FileManagementType
 
 # 定义生成任务启动的超时阈值
 GENERATION_START_TIMEOUT = timedelta(minutes=10)

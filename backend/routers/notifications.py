@@ -3,7 +3,7 @@ import asyncio
 import json
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
-from ..services.stream_manager_service import stream_manager
+from backend.services.stream_manager_service import stream_manager
 
 router = APIRouter()
 

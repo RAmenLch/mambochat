@@ -7,20 +7,20 @@ from types import SimpleNamespace
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .base import AbstractGenerateManager
-from .instructions import (
+from backend.services.generation.base import AbstractGenerateManager
+from backend.services.generation.instructions import (
     CreateSubMessage,
     AppendToSubMessage,
     UpdateSubMessageStatus,
     SetFinalStatus,
     BaseInstruction
 )
-from .llm_io import LLMInput, WorkerOutput
-from ...crud import message_crud, setting_crud, file_crud
-from ...schemas import enums as schemas_enums
-from ...models import chat_model
-from ...services.storage_service import storage_service
-from ...config.llm_parameters import SUPPORTED_LLM_PARAMETERS
+from backend.services.generation.llm_io import LLMInput, WorkerOutput
+from backend.crud import message_crud, setting_crud, file_crud
+from backend.schemas import enums as schemas_enums
+from backend.models import chat_model
+from backend.services.storage_service import storage_service
+from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 
 # --- Parameter Building Utilities ---
 

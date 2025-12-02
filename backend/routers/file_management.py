@@ -4,11 +4,11 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..services.storage_service import storage_service, LocalStorageService
-from ..database import get_db
-from ..crud import file_crud
-from .. import schemas
-from ..schemas.enums import FileManagementType
+from backend.services.storage_service import storage_service, LocalStorageService
+from backend.database import get_db
+from backend.crud import file_crud
+from backend import schemas
+from backend.schemas.enums import FileManagementType
 
 router = APIRouter(
     prefix="/api/files",

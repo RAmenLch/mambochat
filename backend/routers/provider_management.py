@@ -4,10 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
-from ..crud import provider_crud, setting_crud
-from .. import schemas
-from ..database import get_db
-from ..config.llm_parameters import SUPPORTED_LLM_PARAMETERS
+from backend.crud import provider_crud, setting_crud
+from backend import schemas
+from backend.database import get_db
+from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 
 router = APIRouter()
 

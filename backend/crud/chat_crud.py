@@ -7,8 +7,8 @@ from sqlalchemy import func
 from typing import List, Optional
 import json
 
-from ..models import chat_model, provider_model
-from .. import schemas
+from backend.models import chat_model, provider_model
+from backend import schemas
 
 async def get_chat(db: AsyncSession, chat_id: str) -> Optional[chat_model.Chat]:
     """通过ID获取单个聊天会话（包含其所有消息、子消息、模型和提供商信息）"""

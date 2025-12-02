@@ -4,8 +4,8 @@ from datetime import datetime
 from typing import Optional, List
 import json
 
-from .enums import MessageRole, MessageStatus, SubMessageType
-from .file import File as FileSchema  # 导入文件模型以供类型提示
+from backend.schemas.enums import MessageRole, MessageStatus, SubMessageType
+from backend.schemas.file import File as FileSchema  # 导入文件模型以供类型提示
 
 
 # --- SubMessage Schemas ---

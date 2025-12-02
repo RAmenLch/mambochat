@@ -2,7 +2,7 @@
 
 from sqlalchemy import Column, String, TEXT, DateTime, ForeignKey, func, Integer, JSON
 from sqlalchemy.orm import relationship
-from .base_model import Base, generate_uuid
+from backend.models.base_model import Base, generate_uuid
 
 
 class ResourceVersionFileAssociation(Base):

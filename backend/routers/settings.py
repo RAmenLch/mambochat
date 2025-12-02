@@ -5,13 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import Any, Optional
 
-from ..crud import setting_crud, provider_crud, file_crud
-from ..services import provider_service
-from ..services.storage_service import storage_service
-from ..models import setting_model
-from .. import schemas
-from ..database import get_db
-from ..schemas.enums import FileManagementType
+from backend.crud import setting_crud, provider_crud, file_crud
+from backend.services import provider_service
+from backend.services.storage_service import storage_service
+from backend.models import setting_model
+from backend import schemas
+from backend.database import get_db
+from backend.schemas.enums import FileManagementType
 
 router = APIRouter()
 

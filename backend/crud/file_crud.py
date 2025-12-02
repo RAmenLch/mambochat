@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import Optional, List
 
-from ..models import file_model
+from backend.models import file_model
 
 
 # --- 修改函数 ---

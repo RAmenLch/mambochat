@@ -6,9 +6,9 @@ from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import pytz
 
-from .database import engine
-from .models.base_model import Base
-from .routers import (
+from backend.database import engine
+from backend.models.base_model import Base
+from backend.routers import (
     chat_management,
     chat_interaction,
     provider_management,
@@ -19,7 +19,7 @@ from .routers import (
     resource_management,
     system_config  # 导入系统配置路由
 )
-from .services.cleanup_service import cleanup_zombie_files
+from backend.services.cleanup_service import cleanup_zombie_files
 
 scheduler = AsyncIOScheduler(timezone=pytz.timezone("Asia/Shanghai"))
 

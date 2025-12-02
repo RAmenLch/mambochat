@@ -1,7 +1,7 @@
 # backend/models/setting_model.py
 
 from sqlalchemy import Column, String, TEXT
-from .base_model import Base
+from backend.models.base_model import Base
 
 class GlobalSettings(Base):
     __tablename__ = "GlobalSettings"

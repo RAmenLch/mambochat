@@ -7,9 +7,9 @@ from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy import update
 from typing import List, Optional
 
-from ..models import provider_model, chat_model
-from ..models.base_model import generate_uuid
-from .. import schemas
+from backend.models import provider_model, chat_model
+from backend.models.base_model import generate_uuid
+from backend import schemas
 
 
 async def get_provider(db: AsyncSession, provider_id: str) -> Optional[provider_model.AIProvider]:

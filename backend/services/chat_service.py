@@ -5,9 +5,9 @@ from sqlalchemy import func, select
 from typing import Optional
 import json
 
-from ..crud import chat_crud
-from .. import schemas
-from ..models import chat_model
+from backend.crud import chat_crud
+from backend import schemas
+from backend.models import chat_model
 
 async def duplicate_chat_with_messages(db: AsyncSession, chat_id: str) -> Optional[chat_model.Chat]:
     """

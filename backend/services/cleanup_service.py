@@ -5,10 +5,10 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from ..database import AsyncSessionLocal
-from ..models import file_model, chat_model, setting_model
-from ..schemas.enums import FileManagementType
-from ..services.storage_service import storage_service
+from backend.database import AsyncSessionLocal
+from backend.models import file_model, chat_model, setting_model
+from backend.schemas.enums import FileManagementType
+from backend.services.storage_service import storage_service
 
 # 配置日志记录
 logging.basicConfig(level=logging.INFO)

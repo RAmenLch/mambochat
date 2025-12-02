@@ -5,8 +5,8 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload, joinedload
 from typing import List, Optional
 
-from ..models import resource_model
-from .. import schemas
+from backend.models import resource_model
+from backend import schemas
 
 
 async def get_resource(db: AsyncSession, resource_id: str) -> Optional[resource_model.Resource]:

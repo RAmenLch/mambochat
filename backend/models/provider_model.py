@@ -2,7 +2,7 @@
 
 from sqlalchemy import Column, String, ForeignKey, Boolean,TEXT
 from sqlalchemy.orm import relationship
-from .base_model import Base, generate_uuid
+from backend.models.base_model import Base, generate_uuid
 
 class AIProvider(Base):
     __tablename__ = "AIProvider"

@@ -4,9 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
-from ..crud import resource_crud
-from .. import schemas
-from ..database import get_db
+from backend.crud import resource_crud
+from backend import schemas
+from backend.database import get_db
 
 router = APIRouter(prefix="/resources", tags=["Resource Management"])
 

@@ -3,17 +3,16 @@
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.responses import StreamingResponse
-import json
 from typing import List
 
-from ..services import generation_service
-from ..services.stream_manager_service import stream_manager
-from ..services.storage_service import storage_service
-from ..crud import chat_crud, message_crud, setting_crud, file_crud
-from .. import schemas
-from ..models import chat_model
-from ..database import get_db
-from .chat_management import _apply_default_model_to_chat_object
+from backend.services import generation_service
+from backend.services.stream_manager_service import stream_manager
+from backend.services.storage_service import storage_service
+from backend.crud import chat_crud, message_crud, setting_crud, file_crud
+from backend import schemas
+from backend.models import chat_model
+from backend.database import get_db
+from backend.routers.chat_management import _apply_default_model_to_chat_object
 
 router = APIRouter()
 

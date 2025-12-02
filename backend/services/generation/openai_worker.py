@@ -4,8 +4,8 @@ import json
 import traceback # +++ 新增导入 +++
 from typing import AsyncGenerator, Dict, Any, List
 
-from .base import AbstractGenerateWorker
-from .llm_io import LLMInput, WorkerOutput
+from backend.services.generation.base import AbstractGenerateWorker
+from backend.services.generation.llm_io import LLMInput, WorkerOutput
 
 
 def get_reason(delta: dict) -> str:

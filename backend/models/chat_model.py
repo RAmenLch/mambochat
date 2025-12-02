@@ -2,9 +2,8 @@
 
 from sqlalchemy import Column, String, TEXT, DateTime, ForeignKey, func, Integer
 from sqlalchemy.orm import relationship
-from enum import Enum
-from .base_model import Base, generate_uuid
-from ..schemas.enums import MessageStatus,SubMessageType
+from backend.models.base_model import Base, generate_uuid
+from backend.schemas.enums import MessageStatus,SubMessageType
 
 
 class Chat(Base):

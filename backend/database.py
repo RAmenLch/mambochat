@@ -1,8 +1,6 @@
 # backend/database.py
-import asyncio
 import os
 
-from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import declarative_base
 from pathlib import Path

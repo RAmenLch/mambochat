@@ -4,13 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional, Dict, Any
 
-from ..crud import chat_crud, setting_crud, provider_crud
-from ..services import chat_service
-from .. import schemas
-from ..models import chat_model
-from ..database import get_db
-from .settings import get_global_settings
-from ..config.llm_parameters import SUPPORTED_LLM_PARAMETERS
+from backend.crud import chat_crud, setting_crud, provider_crud
+from backend.services import chat_service
+from backend import schemas
+from backend.models import chat_model
+from backend.database import get_db
+from backend.routers.settings import get_global_settings
+from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 
 router = APIRouter()
 

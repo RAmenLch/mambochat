@@ -4,8 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import Optional
 
-from ..models import setting_model
-from .. import schemas
+from backend.models import setting_model
+from backend import schemas
 
 async def get_setting(db: AsyncSession, key: str) -> Optional[setting_model.GlobalSettings]:
     """通过键获取单个全局配置项"""

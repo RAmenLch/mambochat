@@ -2,8 +2,8 @@
 
 from fastapi import APIRouter
 
-from ..schemas.system import SystemConfigResponse, LLMParameterDefinition, DefaultProviderInfo
-from ..config.llm_parameters import SUPPORTED_LLM_PARAMETERS, DEFAULT_PROVIDERS
+from backend.schemas.system import SystemConfigResponse, LLMParameterDefinition, DefaultProviderInfo
+from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS, DEFAULT_PROVIDERS
 
 router = APIRouter()
 
