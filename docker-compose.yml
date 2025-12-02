@@ -4,8 +4,8 @@ services:
   # 1. 后端 FastAPI 服务
   backend:
     build:
-      context: ./backend  # Dockerfile 所在的目录
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     environment:
         - TZ=Asia/Shanghai
         - STORAGE_PATH=/app/uploads # 指定容器内的文件存储路径

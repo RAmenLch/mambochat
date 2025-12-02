@@ -1,33 +1,39 @@
-# backend/Dockerfile
+# backend/Dockerfile (支持 MCP 扩展版)
 
-# 使用官方 Python 3.11 slim 镜像作为基础
 FROM python:3.11-slim
 
 # 1. 安装 uv
 RUN pip install --no-cache-dir uv
 
-# 2. 设置工作目录为 /app/backend
-# 这样我们可以直接复制文件到正确的位置
-WORKDIR /app/backend
+# 2. 准备环境依赖
+# --- 分层构建技巧：先复制依赖文件，利用 Docker 缓存 ---
 
-# 3. 复制 pyproject.toml 并安装依赖
-# 这是利用层缓存的关键。只要 pyproject.toml 不变，这一层就会被缓存。
-COPY pyproject.toml .
-
-# --- 修正点 ---
-# 使用 uv 安装 pyproject.toml 中定义的依赖。
-# `.` 代表当前目录，uv 会自动寻找 pyproject.toml 并安装其定义的项目依赖。
-RUN uv pip install --system --no-cache .
-
-# 4. 复制应用代码
-# 将宿主机的 backend/ 目录内容复制到容器的 /app/backend/ 目录
-COPY . .
-
-# 5. 将工作目录切换回 /app
-# 这是为了让 gunicorn 的启动命令能正确解析 `backend.main:app`
 WORKDIR /app
 
-# 启动命令：
-# 从 /app 目录启动，告诉 gunicorn 运行 backend 包里的 main 模块的 app 实例
-# 这就解决了相对导入的问题
+# 2.1 安装 Backend 依赖
+COPY backend/pyproject.toml /app/backend/pyproject.toml
+# 注意：这里显式指定路径安装
+RUN uv pip install --system --no-cache -r /app/backend/pyproject.toml
+
+# 2.2 安装 Bing MCP 依赖
+# 如果未来有更多 MCP，可以在这里继续追加
+COPY MCP_SERVER/bing/pyproject.toml /app/MCP_SERVER/bing/pyproject.toml
+RUN uv pip install --system --no-cache -r /app/MCP_SERVER/bing/pyproject.toml
+
+# 3. 复制源代码
+# --- 此时依赖已安完，复制具体代码 ---
+
+# 3.1 复制 Backend 代码
+COPY backend /app/backend
+
+# 3.2 复制 MCP 代码
+COPY MCP_SERVER /app/MCP_SERVER
+
+# 4. 设置 PYTHONPATH
+# 确保 python 能找到 backend 模块，也能找到 MCP 模块（如果需要 import 的话）
+ENV PYTHONPATH=/app
+
+WORKDIR /app
+
+# 5. 启动命令
 CMD ["gunicorn", "-w", "1", "-k", "uvicorn.workers.UvicornWorker", "backend.main:app", "--bind", "0.0.0.0:8000"]
