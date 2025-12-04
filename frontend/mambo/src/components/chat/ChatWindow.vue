@@ -56,6 +56,7 @@
           @trigger-file-upload="handleTriggerFileUpload"
           @open-resource-selector="resourceSelectorVisible = true"
           @jump-to-message="handleJumpToMessage"
+          @toggle-bing-search="handleToggleBingSearch"
         />
 
         <AttachmentPreview
@@ -169,31 +170,16 @@ const { startResize: startResizeInputArea } = useResizablePanels(inputAreaHeight
   min: MIN_INPUT_HEIGHT, max: MAX_INPUT_HEIGHT, orientation: 'vertical', inverted: true
 });
 
-/**
- * 计算即将发送的完整消息内容，用于 Token 预估。
- * 包含：
- * 1. 用户在输入框中的文本 (currentUserInputText)
- * 2. 附加的消息模板 (SubMessage Template)，需根据 context_participation_length (CPL) 过滤
- *    - 待发送消息的新旧程度排名 (Recency Rank) 为 1。
- *    - 因此，仅当 CPL >= 1 或 CPL 未定义时，模板内容才被计入。
- *    - 若 CPL = 0，则不计入。
- */
 const pendingMessageTextForTokenEstimation = computed(() => {
   const parts: string[] = [];
 
-  // 1. 输入框文本
   if (currentUserInputText.value) {
     parts.push(currentUserInputText.value);
   }
 
-  // 2. 附加的消息模板
   attachedSubmessageResources.value.forEach(resource => {
     if (resource.resourceType === 'submessage_template' && resource.latest_version) {
-      // 修复：ResourceVersion 使用 attributes 存储配置，而不是 config
       const cpl = resource.latest_version.attributes?.context_participation_length;
-
-      // 逻辑：CPL 未定义(默认参与) 或 CPL >= 1 (当前消息排名为1) 时计入
-      // 显式排除 CPL === 0 的情况
       if (cpl === undefined || cpl === null || (typeof cpl === 'number' && cpl >= 1)) {
         if (resource.latest_version.content) {
           parts.push(resource.latest_version.content);
@@ -205,7 +191,6 @@ const pendingMessageTextForTokenEstimation = computed(() => {
   return parts.join('\n');
 });
 
-// 使用聚合后的待发送内容进行 Token 估算
 const { estimatedTokens } = useTokenEstimator(contextForTokenEstimation, pendingMessageTextForTokenEstimation);
 
 // --- Local Component State ---
@@ -217,7 +202,7 @@ const settingsDrawerVisible = ref(false);
 const resourceSelectorVisible = ref(false);
 const userHasScrolledUp = ref(false);
 const previousPreviewHeight = ref(0);
-const isDraggingOver = ref(false); // 用于控制拖拽覆盖层的显示
+const isDraggingOver = ref(false);
 
 // --- Lifecycle Hooks ---
 onMounted(() => {
@@ -230,11 +215,6 @@ const isSendButtonDisabled = computed(() => isGenerating.value || !isReadyToSend
 
 // --- Methods ---
 
-/**
- * Handles the selection of resources from the resource selector dialog.
- * Appends content for system prompts or attaches submessage templates.
- * @param resources The array of selected resource objects.
- */
 async function handleResourceSelected(resources: Resource[]) {
   const promptContents: string[] = [];
 
@@ -257,10 +237,6 @@ async function handleResourceSelected(resources: Resource[]) {
 
 // --- File Upload Logic ---
 
-/**
- * 统一处理文件上传的函数，可用于拖拽、粘贴和点击上传.
- * @param files - 用户选择的文件列表.
- */
 async function handleFileUploads(files: FileList) {
   if (!files || files.length === 0) return;
 
@@ -275,10 +251,6 @@ async function handleFileUploads(files: FileList) {
   }
 }
 
-/**
- * 处理文件拖拽释放事件.
- * @param event - 拖拽事件对象.
- */
 function handleDrop(event: DragEvent) {
   isDraggingOver.value = false;
   const files = event.dataTransfer?.files;
@@ -287,23 +259,16 @@ function handleDrop(event: DragEvent) {
   }
 }
 
-/**
- * 触发隐藏的文件输入框.
- */
 function handleTriggerFileUpload() {
   fileInputRef.value?.click();
 }
 
-/**
- * 处理通过文件输入框选择的文件.
- * @param event - change事件对象.
- */
 async function onFileSelected(event: Event) {
   const target = event.target as HTMLInputElement;
   if (!target.files) return;
 
   await handleFileUploads(target.files);
-  target.value = ''; // 清空输入框以便再次选择相同文件
+  target.value = '';
 }
 
 // --- Send & Stop Logic ---
@@ -353,13 +318,40 @@ function handleRefreshTitle() {
   }
 }
 
-// --- Settings ---
+// --- Settings & Tools ---
 async function handleSaveSettings(settings: ChatUpdate) {
   if (!currentChat.value) return;
   await chatListStore.updateChatSettings(currentChat.value.id, settings);
   settingsDrawerVisible.value = false;
   ElMessage.success('设置已保存');
 }
+
+/**
+ * 处理 Bing 搜索工具的启用/停用切换。
+ */
+async function handleToggleBingSearch() {
+  if (!currentChat.value) return;
+
+  const BING_SEARCH_ID = 'bing-search';
+  const currentParams = currentChat.value.modelParameters || {};
+  const currentMcpIds: string[] = currentParams.enabled_mcp_ids || [];
+
+  const isEnabled = currentMcpIds.includes(BING_SEARCH_ID);
+  const newMcpIds = isEnabled
+    ? currentMcpIds.filter(id => id !== BING_SEARCH_ID)
+    : [...currentMcpIds, BING_SEARCH_ID];
+
+  const updatedSettings: ChatUpdate = {
+    modelParameters: {
+      ...currentParams,
+      enabled_mcp_ids: newMcpIds,
+    },
+  };
+
+  await chatListStore.updateChatSettings(currentChat.value.id, updatedSettings);
+  ElMessage.success(`联网搜索已${isEnabled ? '禁用' : '启用'}`);
+}
+
 
 // --- Scroll & Navigation ---
 const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
@@ -378,16 +370,11 @@ const scrollToBottom = (force = false) => {
   });
 };
 
-/**
- * 处理从 Toolbar 触发的跳转到指定消息的事件。
- * 通过 ID 定位 DOM 元素并控制 Scrollbar 滚动。
- */
 function handleJumpToMessage(messageId: string) {
   const elementId = `msg-${messageId}`;
   const element = document.getElementById(elementId);
 
   if (element && scrollbarRef.value) {
-    // 减去一定的偏移量，给顶部留出呼吸空间
     const offset = element.offsetTop - 10;
     scrollbarRef.value.setScrollTop(offset);
   }
@@ -395,7 +382,6 @@ function handleJumpToMessage(messageId: string) {
 
 // --- Watchers ---
 
-// Watch for attachment changes to auto-resize the input area
 watch([uploadedFiles, attachedSubmessageResources], async () => {
   await nextTick();
 
@@ -405,7 +391,6 @@ watch([uploadedFiles, attachedSubmessageResources], async () => {
 
   if (heightDifference !== 0) {
     const newTotalHeight = inputAreaHeight.value + heightDifference;
-    // Clamp the new height within the defined min/max bounds
     inputAreaHeight.value = Math.max(MIN_INPUT_HEIGHT, Math.min(newTotalHeight, MAX_INPUT_HEIGHT));
   }
 
@@ -424,7 +409,6 @@ watch(
 watch(currentChatId, (newId) => {
   if (newId) {
     userHasScrolledUp.value = false;
-    // Reset preview height on chat switch for accurate calculations
     previousPreviewHeight.value = 0;
 
     const stopWatch = watch(isChatHistoryLoading, (loading) => {

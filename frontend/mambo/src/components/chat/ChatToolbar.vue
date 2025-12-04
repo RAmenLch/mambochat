@@ -46,7 +46,6 @@
       </div>
       <div class="token-counter" v-if="estimatedTokens > 0">
         <span>预估 Tokens: <strong>{{ estimatedTokens }}</strong></span>
-        <!-- 添加的提示信息 -->
         <el-tooltip
           content="仅供参考,实际消耗以usage或服务商账单为准"
           placement="top"
@@ -55,10 +54,16 @@
           <el-icon class="token-tooltip-icon"><QuestionFilled /></el-icon>
         </el-tooltip>
       </div>
-      <!-- History Summary List Popover -->
     </div>
 
     <div class="actions">
+      <el-button
+        :icon="Search"
+        :type="isBingSearchEnabled ? 'primary' : ''"
+        circle
+        title="联网搜索"
+        @click="$emit('toggleBingSearch')"
+      />
       <el-button
         :icon="Upload"
         circle
@@ -92,8 +97,7 @@ import { computed } from 'vue';
 import { useProviderStore } from '@/stores/providerStore';
 import type { Chat, Message } from '@/api/types';
 import type { PropType } from 'vue';
-// 导入 QuestionFilled 图标
-import { Cpu, Setting, Files, Tickets, Upload, Collection, QuestionFilled } from '@element-plus/icons-vue';
+import { Cpu, Setting, Files, Tickets, Upload, Collection, QuestionFilled, Search } from '@element-plus/icons-vue';
 
 const props = defineProps({
   currentChat: {
@@ -110,7 +114,14 @@ const props = defineProps({
   },
 });
 
-defineEmits(['openSettings', 'toggleMultiPartMode', 'triggerFileUpload', 'openResourceSelector', 'jumpToMessage']);
+defineEmits([
+  'openSettings',
+  'toggleMultiPartMode',
+  'triggerFileUpload',
+  'openResourceSelector',
+  'jumpToMessage',
+  'toggleBingSearch'
+]);
 
 const providerStore = useProviderStore();
 
@@ -120,6 +131,14 @@ const displayModelName = computed(() => {
   }
   const model = providerStore.allModels.find(m => m.id === props.currentChat.aiModelId);
   return model ? model.name : '未知模型';
+});
+
+/**
+ * 检查当前会话是否已启用 Bing 搜索工具。
+ */
+const isBingSearchEnabled = computed((): boolean => {
+  const mcpIds = props.currentChat?.modelParameters?.enabled_mcp_ids;
+  return Array.isArray(mcpIds) && mcpIds.includes('bing-search');
 });
 
 /**
@@ -182,7 +201,6 @@ const zipHistoryItems = computed(() => {
   margin-left: 4px;
 }
 
-/* 为提示图标添加样式 */
 .token-tooltip-icon {
   margin-left: 6px;
   cursor: help;

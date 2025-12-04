@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { onMounted } from 'vue';
 import { RouterView } from 'vue-router';
-// 从新的 chatListStore 导入
 import { useChatListStore } from '@/stores/chatListStore';
+import { useMcpStore } from '@/stores/mcpStore';
 
-// 实例化 chatListStore
 const chatListStore = useChatListStore();
+const mcpStore = useMcpStore();
 
 onMounted(() => {
-  // 调用 chatListStore 中的方法来初始化全局通知监听器
+  // 初始化全局通知监听器
   chatListStore.initializeNotificationListener();
+  // 获取可用的 MCP 服务列表
+  mcpStore.fetchAvailableServices();
 });
 </script>
 

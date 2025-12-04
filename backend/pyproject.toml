@@ -30,6 +30,7 @@ dependencies = [
     "uvicorn==0.37.0",
     "apscheduler==3.11.1",
     "pytz",
+    "mcp"
 ]
 
 [tool.uv]

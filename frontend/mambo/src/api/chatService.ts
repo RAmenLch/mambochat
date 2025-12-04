@@ -13,7 +13,7 @@ import type {
   SubMessageUpdate,
   GenerateRequest,
   PrepareGenerateResponse,
-  FileResponse, UpdateMessageResponse
+  FileResponse, UpdateMessageResponse, McpService
 } from './types';
 
 /**
@@ -144,4 +144,7 @@ export const initiateHistoryCompression = (messageId: string): Promise<{ message
  */
 export const generateChatTitle = (chatId: string): Promise<{ message: string }> => {
   return apiClient.post(`/chats/${chatId}/generate-title`)
+};
+export const getAvailableMcpServices = (): Promise<McpService[]> => { // <--- 2. 添加这个新函数
+  return apiClient.get('/mcp/available');
 };

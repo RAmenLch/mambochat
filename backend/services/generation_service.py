@@ -16,7 +16,7 @@ from backend.services.generation.manager import DefaultGenerateManager
 from backend.services.generation.title_manager import TitleGenerateManager
 from backend.services.generation.zip_history_manager import ZipHistoryGenerateManager
 from backend.services.generation.openai_worker import OpenAIGenerateWorker
-from backend.schemas.enums import FileManagementType
+from backend.schemas.enums import FileManagementType, MessageStatus, MessageRole, SubMessageType
 
 # 定义生成任务启动的超时阈值
 GENERATION_START_TIMEOUT = timedelta(minutes=10)
@@ -26,8 +26,8 @@ async def _calculate_message_status(message: chat_model.Message) -> schemas.Mess
     """
     根据消息的角色、子消息状态和活跃流状态，动态计算消息的聚合状态。
     """
-    if message.role != schemas.MessageRole.ASSISTANT:
-        return schemas.MessageStatus.COMPLETED
+    if message.role != MessageRole.ASSISTANT:
+        return MessageStatus.COMPLETED
 
     # 检查内存中是否存在针对此消息的取消请求
     cancellation_requested = await stream_manager.is_cancellation_requested(message.id)
@@ -35,25 +35,25 @@ async def _calculate_message_status(message: chat_model.Message) -> schemas.Mess
     # 1. 基于子消息状态判断
     if message.sub_messages:
         sub_statuses = {sm.status for sm in message.sub_messages}
-        if schemas.MessageStatus.GENERATING.value in sub_statuses:
+        if MessageStatus.GENERATING.value in sub_statuses:
             # 如果仍在生成但已请求取消，则乐观地返回最终状态
-            return schemas.MessageStatus.COMPLETED if cancellation_requested else schemas.MessageStatus.GENERATING
-        if schemas.MessageStatus.FAILED.value in sub_statuses:
-            return schemas.MessageStatus.FAILED
-        return schemas.MessageStatus.COMPLETED
+            return MessageStatus.COMPLETED if cancellation_requested else MessageStatus.GENERATING
+        if MessageStatus.FAILED.value in sub_statuses:
+            return MessageStatus.FAILED
+        return MessageStatus.COMPLETED
 
     # 2. 无子消息时的判断
     # 检查是否有活跃的流，有则说明正在生成
     if await stream_manager.is_stream_active(message.id):
-        return schemas.MessageStatus.COMPLETED if cancellation_requested else schemas.MessageStatus.GENERATING
+        return MessageStatus.COMPLETED if cancellation_requested else MessageStatus.GENERATING
 
     # 无活跃流，检查是否超时（后台任务可能启动失败）
     time_since_creation = datetime.now(timezone.utc) - message.createdAt.replace(tzinfo=timezone.utc)
     if time_since_creation > GENERATION_START_TIMEOUT:
-        return schemas.MessageStatus.FAILED
+        return MessageStatus.FAILED
 
     # 未超时，但无子消息和活跃流，可能处于任务启动的短暂间隙
-    return schemas.MessageStatus.COMPLETED if cancellation_requested else schemas.MessageStatus.GENERATING
+    return MessageStatus.COMPLETED if cancellation_requested else MessageStatus.GENERATING
 
 
 async def prepare_for_regeneration(
@@ -74,11 +74,11 @@ async def prepare_for_regeneration(
     if not ref_message or ref_message.chatId != chat_id:
         raise HTTPException(status_code=404, detail="Reference message not found in the specified chat.")
 
-    include_self = (ref_message.role == schemas.MessageRole.ASSISTANT)
+    include_self = (ref_message.role == MessageRole.ASSISTANT)
     await message_crud.delete_messages_after(db, chat_id=chat_id, message_id=base_message_id, include_self=include_self)
 
     assistant_message_create = schemas.MessageCreate(
-        role=schemas.MessageRole.ASSISTANT,
+        role=MessageRole.ASSISTANT,
         sub_messages=[]
     )
     assistant_placeholder = await message_crud.create_message(db, message=assistant_message_create, chat_id=chat_id)
@@ -105,9 +105,9 @@ async def create_user_message_and_prepare_generation(
                 template_sub_message = schemas.SubMessageCreate(
                     content=latest_version.content or "",
                     sortOrder=-1,  # 临时值，稍后重新排序
-                    type=schemas.SubMessageType.NORMAL,
+                    type=SubMessageType.NORMAL,
                     config=schemas.SubMessageConfig(**config_data),
-                    status=schemas.MessageStatus.COMPLETED
+                    status=MessageStatus.COMPLETED
                 )
                 injected_sub_messages.append(template_sub_message)
 
@@ -128,7 +128,7 @@ async def create_user_message_and_prepare_generation(
             )
 
     user_message_create = schemas.MessageCreate(
-        role=schemas.MessageRole.USER,
+        role=MessageRole.USER,
         sub_messages=all_sub_messages
     )
     user_message = await message_crud.create_message(db, message=user_message_create, chat_id=chat_id)
@@ -167,8 +167,8 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
                 error_sub_message_create = schemas.SubMessageCreate(
                     content=f"生成流程启动失败: {e}",
                     sortOrder=0,
-                    type=schemas.SubMessageType.NORMAL,
-                    status=schemas.MessageStatus.FAILED
+                    type=SubMessageType.NORMAL,
+                    status=MessageStatus.FAILED
                 )
                 await message_crud.create_sub_message(db, assistant_message_id, error_sub_message_create)
             except Exception as inner_e:
@@ -236,6 +236,7 @@ async def subscribe_to_stream(
     calculated_status = await _calculate_message_status(message)
 
     # 准备并发送初始的替换事件，包含子消息和聚合状态
+    # Pydantic 的 model_dump(mode='json') 会确保 MCP_TOOL 的 content (JSON字符串) 被正确序列化为字符串
     sub_messages_data = [schemas.SubMessage.model_validate(sm).model_dump(mode='json') for sm in message.sub_messages]
     initial_event_data = {
         "type": "replace",
@@ -245,7 +246,7 @@ async def subscribe_to_stream(
     yield f"data: {json.dumps(initial_event_data)}\n\n"
 
     # 如果生成任务已经明确结束（完成或失败），则无需继续订阅
-    if calculated_status in [schemas.MessageStatus.COMPLETED, schemas.MessageStatus.FAILED]:
+    if calculated_status in [MessageStatus.COMPLETED, MessageStatus.FAILED]:
         return
 
     # 订阅实时事件流
@@ -261,4 +262,3 @@ async def subscribe_to_stream(
         print(f"[Subscriber] Client disconnected for message '{assistant_message_id}'.")
     finally:
         await stream_manager.unsubscribe(assistant_message_id, queue)
-

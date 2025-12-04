@@ -17,7 +17,8 @@ from backend.routers import (
     notifications,
     file_management,
     resource_management,
-    system_config  # 导入系统配置路由
+    system_config,
+    mcp_management
 )
 from backend.services.cleanup_service import cleanup_zombie_files
 
@@ -61,10 +62,10 @@ app.include_router(provider_actions.router, prefix="/api", tags=["Provider Actio
 app.include_router(settings.router, prefix="/api", tags=["Global Settings"])
 app.include_router(system_config.router, prefix="/api", tags=["System Configuration"])
 app.include_router(notifications.router, prefix="/api", tags=["Notifications"])
+app.include_router(mcp_management.router, prefix="/api/mcp", tags=["MCP Management"])
 app.include_router(file_management.router)
 
 
 @app.get("/")
 async def root():
     return {"message": "LLM-API Client Backend is running."}
-

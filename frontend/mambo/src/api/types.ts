@@ -37,7 +37,7 @@ export type MessageStatus = 'generating' | 'completed' | 'failed';
  * - Usage: 包含本次生成的Token用量信息。
  * - ZipHistory: 对话历史的压缩摘要。
  */
-export type SubMessageType = 'Normal' | 'Reasoning' | 'File' | 'Usage' | 'ZipHistory';
+export type SubMessageType = 'Normal' | 'Reasoning' | 'File' | 'Usage' | 'ZipHistory'| 'McpTool';
 
 export interface SubMessageConfig {
   is_collapsed: boolean;
@@ -432,4 +432,22 @@ export interface ResourceVersionUpdate {
   commitMessage?: string | null;
   content?: string | null;
   attributes?: Record<string, any> | null;
+}
+
+export interface McpService {
+  id: string;
+  name: string;
+  description: string;
+  is_active: boolean;
+}
+
+/**
+ * McpTool 类型 SubMessage 的 content 字段解析后的结构。
+ */
+export interface McpToolContent {
+  tool_call_id: string;
+  name: string;
+  arguments: string;
+  result: string | null;
+  is_error: boolean;
 }

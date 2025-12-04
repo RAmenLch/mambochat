@@ -1,7 +1,6 @@
-# backend/services/generation/openai_worker.py
 import httpx
 import json
-import traceback # +++ 新增导入 +++
+import traceback
 from typing import AsyncGenerator, Dict, Any, List
 
 from backend.services.generation.base import AbstractGenerateWorker
@@ -16,7 +15,7 @@ def get_reason(delta: dict) -> str:
 class OpenAIGenerateWorker(AbstractGenerateWorker):
     """
     OpenAI 生成工作者，负责与 OpenAI 兼容的 API 交互。
-    能够处理文本和图片等多模态内容的输入与输出，并生成标准化的 WorkerOutput 流。
+    能够处理文本、图片和工具调用等多模态内容的输入与输出，并生成标准化的 WorkerOutput 流。
     """
 
     async def _process_images(self, images: List[Dict[str, Any]]) -> AsyncGenerator[WorkerOutput, None]:
@@ -41,13 +40,17 @@ class OpenAIGenerateWorker(AbstractGenerateWorker):
     ) -> AsyncGenerator[WorkerOutput, None]:
         """处理流式API响应，并生成 WorkerOutput 流。"""
         payload["stream"] = True
+
+        # 工具调用缓冲池，用于拼接流式传输的片段
+        # Key: index (int), Value: Dict (构建中的 tool_call 对象)
+        tool_calls_buffer = {}
+
         async with client.stream("POST", url, headers=headers, json=payload, timeout=timeout) as response:
             if not response.is_success:
                 await response.aread()
                 error_content = response.text
                 try:
                     error_data = response.json()
-                    # +++ 修正点 1: 增加类型检查, 使其更健壮 +++
                     if isinstance(error_data, dict):
                         error_content = error_data.get("error", {}).get("message", error_content)
                 except json.JSONDecodeError:
@@ -73,26 +76,66 @@ class OpenAIGenerateWorker(AbstractGenerateWorker):
                     if not (choices and len(choices) > 0):
                         continue
 
-                    delta = choices[0].get("delta", {})
-                    if not delta:
-                        continue
+                    choice = choices[0]
+                    delta = choice.get("delta", {})
+                    finish_reason = choice.get("finish_reason")
 
-                    reason_chunk = get_reason(delta)
-                    if reason_chunk:
-                        yield WorkerOutput(type="reasoning", content=reason_chunk)
+                    # 1. 处理工具调用片段
+                    tool_calls_chunks = delta.get("tool_calls")
+                    if tool_calls_chunks:
+                        for tc_chunk in tool_calls_chunks:
+                            index = tc_chunk.get("index")
+                            if index is not None:
+                                if index not in tool_calls_buffer:
+                                    tool_calls_buffer[index] = {
+                                        "index": index,
+                                        "id": "",
+                                        "type": "function",
+                                        "function": {"name": "", "arguments": ""}
+                                    }
 
-                    content_chunk = delta.get("content")
-                    if content_chunk:
-                        yield WorkerOutput(type="content", content=content_chunk)
+                                current_buffer = tool_calls_buffer[index]
+                                if tc_chunk.get("id"):
+                                    current_buffer["id"] = tc_chunk["id"]
 
-                    images_chunk = delta.get("images")
-                    if images_chunk:
-                        async for image_output in self._process_images(images_chunk):
-                            yield image_output
+                                if tc_chunk.get("function"):
+                                    fn_chunk = tc_chunk["function"]
+                                    if fn_chunk.get("name"):
+                                        current_buffer["function"]["name"] += fn_chunk["name"]
+                                    if fn_chunk.get("arguments"):
+                                        current_buffer["function"]["arguments"] += fn_chunk["arguments"]
+
+                    # 2. 处理常规内容
+                    if not tool_calls_chunks:
+                        reason_chunk = get_reason(delta)
+                        if reason_chunk:
+                            yield WorkerOutput(type="reasoning", content=reason_chunk)
+
+                        content_chunk = delta.get("content")
+                        if content_chunk:
+                            yield WorkerOutput(type="content", content=content_chunk)
+
+                        images_chunk = delta.get("images")
+                        if images_chunk:
+                            async for image_output in self._process_images(images_chunk):
+                                yield image_output
+
+                    # 3. 检查是否因工具调用结束
+                    if finish_reason == "tool_calls" or (finish_reason and tool_calls_buffer):
+                        if tool_calls_buffer:
+                            # 将 buffer 转换为列表并排序
+                            final_tool_calls = sorted(tool_calls_buffer.values(), key=lambda x: x["index"])
+                            yield WorkerOutput(type="tool_call", tool_calls=final_tool_calls)
+                            tool_calls_buffer = {}
 
                 except json.JSONDecodeError:
                     print(f"Warning: Could not decode JSON from stream line: {data_str}")
                     continue
+
+            # 流结束后的兜底检查：如果 buffer 中还有数据（例如异常中断），尝试输出
+            if tool_calls_buffer:
+                final_tool_calls = sorted(tool_calls_buffer.values(), key=lambda x: x["index"])
+                yield WorkerOutput(type="tool_call", tool_calls=final_tool_calls)
 
     async def _generate_non_stream(
             self,
@@ -111,8 +154,15 @@ class OpenAIGenerateWorker(AbstractGenerateWorker):
         if "usage" in data and data["usage"]:
             yield WorkerOutput(type="usage", usage=data["usage"])
 
-        message_data = data.get("choices", [{}])[0].get("message", {})
+        choice = data.get("choices", [{}])[0]
+        message_data = choice.get("message", {})
 
+        # 处理工具调用
+        tool_calls = message_data.get("tool_calls")
+        if tool_calls:
+            yield WorkerOutput(type="tool_call", tool_calls=tool_calls)
+
+        # 处理常规内容
         full_reasoning_content = get_reason(message_data)
         if full_reasoning_content:
             yield WorkerOutput(type="reasoning", content=full_reasoning_content)
@@ -131,7 +181,7 @@ class OpenAIGenerateWorker(AbstractGenerateWorker):
             llm_input: LLMInput
     ) -> AsyncGenerator[WorkerOutput, None]:
         """
-        与 OpenAI 兼容的 API 通信，解析其文本和图片响应，并生成统一的 WorkerOutput 流。
+        与 OpenAI 兼容的 API 通信，解析其文本、图片和工具调用响应，并生成统一的 WorkerOutput 流。
         """
         headers = {
             "Authorization": f"Bearer {llm_input.api_key}",
@@ -142,6 +192,13 @@ class OpenAIGenerateWorker(AbstractGenerateWorker):
             "messages": llm_input.messages,
             **llm_input.parameters
         }
+
+        # 注入工具定义
+        if llm_input.tools:
+            payload["tools"] = llm_input.tools
+        if llm_input.tool_choice:
+            payload["tool_choice"] = llm_input.tool_choice
+
         url = f"{llm_input.api_host.rstrip('/')}/chat/completions"
         use_stream = llm_input.parameters.get('stream', True)
 
@@ -158,15 +215,12 @@ class OpenAIGenerateWorker(AbstractGenerateWorker):
             error_content = e.response.text
             try:
                 error_data = e.response.json()
-                # +++ 修正点 2: 同样增加类型检查 +++
                 if isinstance(error_data, dict):
                     error_content = error_data.get("error", {}).get("message", error_content)
             except json.JSONDecodeError:
                 pass
             yield WorkerOutput(type="error", content=f"API Error {e.response.status_code}: {error_content}")
         except Exception as e:
-            # +++ 修正点 3: 打印原始堆栈, 方便调试 +++
             print(f"[OpenAIGenerateWorker] Caught unexpected exception:")
             traceback.print_exc()
             yield WorkerOutput(type="error", content=f"An unexpected error occurred: {str(e)}")
-

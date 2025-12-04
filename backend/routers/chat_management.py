@@ -26,8 +26,8 @@ def _validate_model_parameters(params: Dict[str, Any]):
     Raises HTTPException for any validation failures.
     """
     for key, value in params.items():
-        # These two parameters are managed by the system but not defined in the central config
-        if key in ["max_context_messages", "stream"]:
+        # These parameters are managed by the system but not defined in the central config
+        if key in ["max_context_messages", "stream", "enabled_mcp_ids"]:
             continue
 
         definition = _param_definition_map.get(key)

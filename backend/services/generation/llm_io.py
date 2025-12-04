@@ -1,6 +1,7 @@
 # backend/services/generation/llm_io.py
 from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
+
 
 class LLMInput(BaseModel):
     """
@@ -16,6 +17,8 @@ class LLMInput(BaseModel):
     api_key: str
     proxy_url: Optional[str] = None
     timeout: int = 300
+    tools: Optional[List[Dict[str, Any]]] = None
+    tool_choice: Optional[Union[str, Dict]] = None
 
 class WorkerOutput(BaseModel):
     """
@@ -25,4 +28,4 @@ class WorkerOutput(BaseModel):
     type: str  # 例如: 'content', 'reasoning', 'error', 'done', 'usage'
     content: Optional[str] = None
     usage: Optional[Dict[str, Any]] = None
-
+    tool_calls: Optional[List[Dict[str, Any]]] = None
