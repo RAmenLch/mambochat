@@ -312,6 +312,13 @@ export const useChatSessionStore = defineStore('chatSession', () => {
         if (subMsg) subMsg.status = data.status;
         break;
       }
+      case 'content_update': {
+        const subMsg = msgToUpdate.sub_messages.find(sm => sm.id === data.sub_message_id);
+        if (subMsg) {
+          subMsg.content = data.content;
+        }
+        break;
+      }
     }
   }
 

@@ -14,6 +14,7 @@ from backend.services.generation.instructions import (
     CreateSubMessage,
     AppendToSubMessage,
     UpdateSubMessageStatus,
+    UpdateSubMessageContent,
     SetFinalStatus,
     BaseInstruction
 )
@@ -563,33 +564,19 @@ class DefaultGenerateManager(AbstractGenerateManager):
                         tool_data["result"] = f"Error executing tool: {str(e)}"
                         tool_data["is_error"] = True
 
-                    # 更新 SubMessage
                     updated_content = json.dumps(tool_data, ensure_ascii=False)
-
-                    # 这里我们直接复用 _process_instruction 来更新内容和状态
-                    # 注意：CreateSubMessage 的 initial_content 已经写入了 DB
-                    # 我们需要一种方式更新 SubMessage 的 content。
-                    # 现有的 AppendToSubMessage 是追加，不适合替换 JSON。
-                    # 但我们知道 SubMessage ID，可以直接调用 CRUD。
 
                     sub_message_id = self.temp_ref_id_map.get(temp_ref_id)
                     if sub_message_id:
-                        # 更新内容
-                        await message_crud.update_sub_message(
-                            self.db_session,
-                            sub_message_id,
-                            schemas.SubMessageUpdate(content=updated_content)
+                        # 发出指令来更新内容和状态，而不是直接调用CRUD
+                        await self._process_instruction(
+                            UpdateSubMessageContent(temp_ref_id=temp_ref_id, content=updated_content),
+                            assistant_message_id
                         )
-                        # 更新状态
                         await self._process_instruction(
                             UpdateSubMessageStatus(temp_ref_id=temp_ref_id, status=schemas_enums.MessageStatus.COMPLETED),
                             assistant_message_id
                         )
-
-                        # 推送更新事件 (Hack: 模拟 append 事件来触发前端刷新，或者前端监听 status_update 后重新拉取)
-                        # 更佳做法是 stream_manager 支持 update 类型，但这里简化处理
-                        # 实际上 _process_instruction 中的 UpdateSubMessageStatus 已经推送了 status_update
-                        # 我们再推送一个自定义事件或者利用前端对 status_update 的响应
 
                     # 记录到 buffer 以备下一轮上下文构建
                     current_assistant_tool_calls_buffer.append({
@@ -630,29 +617,11 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 )
 
                 # B. 将虚拟 Assistant 消息加入历史
-                # 注意：如果是第一轮之后的轮次，我们需要替换掉上一次循环添加的 Assistant 消息吗？
-                # ReAct 模式下，通常是：
-                # User -> Assistant (Call Tool) -> Tool (Result) -> Assistant (Answer)
-                # 我们的 current_history 初始包含 User。
-                # 第一轮后：User, Assistant(Call)
-                # 第二轮前：我们需要 User, Assistant(Call), Tool(Result)
-                # 所以我们只需要追加即可。
-
-                # 但是，current_assistant_content_buffer 在多轮中可能会累积？
-                # 不，每一轮 worker 输出的是 *增量* 或者是 *新的* 思考。
-                # 如果模型在第二轮继续输出文本，那是新的文本。
-                # 所以我们需要把本轮产生的 Assistant 消息固定下来加入历史。
-
                 current_history.append(virtual_assistant_msg)
 
                 # 重置 buffer，因为下一轮是新的 Assistant 消息
                 current_assistant_content_buffer = []
                 current_assistant_tool_calls_buffer = []
-
-                # C. 构造 Tool 消息 (Results) 并不需要显式作为 Message 对象加入，
-                # 因为 _build_llm_messages_payload 会根据 Assistant 消息中的 MCP_TOOL SubMessage
-                # 自动生成后续的 Tool Role 消息。
-                # 只要我们在 virtual_assistant_msg 中包含了带 result 的 MCP_TOOL SubMessage 即可。
 
                 # 继续下一轮循环
                 continue

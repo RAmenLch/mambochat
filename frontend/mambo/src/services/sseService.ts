@@ -9,12 +9,14 @@ import type { SubMessage, MessageStatus } from '@/api/types';
  * 'create': 指示在前端创建一个新的子消息。
  * 'append': 将内容追加到指定的子消息末尾。
  * 'status_update': 更新指定子消息的状态 (例如从 'generating' 到 'completed')。
+ * 'content_update': 用新的完整内容替换指定子消息的内容。
  */
 export type StreamedChunk =
   | { type: 'replace'; sub_messages: SubMessage[]; status: MessageStatus }
   | { type: 'create'; sub_message: SubMessage }
   | { type: 'append'; sub_message_id: string; content: string }
-  | { type: 'status_update'; sub_message_id: string; status: MessageStatus };
+  | { type: 'status_update'; sub_message_id: string; status: MessageStatus }
+  | { type: 'content_update'; sub_message_id: string; content: string };
 
 /**
  * SSE 订阅服务的参数配置。

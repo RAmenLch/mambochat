@@ -35,6 +35,15 @@ class AppendToSubMessage(BaseInstruction):
     temp_ref_id: str
     content: str
 
+class UpdateSubMessageContent(BaseInstruction):
+    """指令：完全替换指定子消息的内容。
+
+    temp_ref_id: 临时引用ID，指示要更新哪个子消息。
+    content: 新的完整内容。
+    """
+    temp_ref_id: str
+    content: str
+
 class UpdateSubMessageStatus(BaseInstruction):
     """指令：更新指定子消息的状态。
 
@@ -61,4 +70,3 @@ class UpdateZipHistorySubMessage(BaseInstruction):
     target_message_id: str
     content: str
     status: MessageStatus
-

@@ -2,13 +2,13 @@
 from abc import ABC, abstractmethod
 import asyncio
 import json
-import traceback  # +++ 新增导入 +++
+import traceback
 from typing import AsyncGenerator, List, Dict, Any, Optional, Tuple
 
 from backend.services.generation.llm_io import LLMInput, WorkerOutput
 from backend.services.generation.instructions import (
     BaseInstruction, CreateSubMessage, AppendToSubMessage,
-    UpdateSubMessageStatus, SetFinalStatus
+    UpdateSubMessageStatus, SetFinalStatus, UpdateSubMessageContent
 )
 from backend.models import chat_model
 from backend.schemas import enums as schemas_enums
@@ -176,6 +176,18 @@ class AbstractGenerateManager(ABC):
                     assistant_message_id,
                     {"type": "append", "sub_message_id": sub_message_id, "content": instruction.content}
                 )
+        elif isinstance(instruction, UpdateSubMessageContent):
+            sub_message_id = self.temp_ref_id_map.get(instruction.temp_ref_id)
+            if sub_message_id:
+                await message_crud.update_sub_message(
+                    self.db_session,
+                    sub_message_id,
+                    schemas_message.SubMessageUpdate(content=instruction.content)
+                )
+                await stream_manager.publish(
+                    assistant_message_id,
+                    {"type": "content_update", "sub_message_id": sub_message_id, "content": instruction.content}
+                )
         elif isinstance(instruction, UpdateSubMessageStatus):
             sub_message_id = self.temp_ref_id_map.get(instruction.temp_ref_id)
             if sub_message_id:
@@ -239,13 +251,11 @@ class AbstractGenerateManager(ABC):
                 print(f"[AbstractGenerateManager] Task cancelled for message '{assistant_message_id}'.")
                 overall_status = schemas_enums.MessageStatus.COMPLETED
             else:
-                # --- 修改点: 打印完整错误堆栈 ---
                 print(
                     f"[AbstractGenerateManager] Unhandled error in run loop for message '{assistant_message_id}': {e}")
-                traceback.print_exc()  # 在后端日志中输出完整堆栈
+                traceback.print_exc()
                 overall_status = schemas_enums.MessageStatus.FAILED
 
-            # 将异常传递给清理方法，以便在SubMessage中向用户显示
             await self._cleanup_on_exception(assistant_message_id, overall_status, e)
 
         return overall_status
