@@ -32,9 +32,15 @@
     <!-- 2. 模型管理区域 -->
     <div class="header">
       <h2>模型 (Models)</h2>
-      <el-button type="primary" :icon="Plus" @click="openAddModelDialog" :disabled="!selectedProvider">
-        新增模型
-      </el-button>
+      <div>
+        <el-button type="primary" :icon="Plus" @click="openAddModelDialog" :disabled="!selectedProvider">
+          新增模型
+        </el-button>
+        <el-button @click="handleFetchModelsForProvider" :loading="isFetchingModels" :disabled="!selectedProvider">
+          <el-icon><Download /></el-icon>
+          从API获取
+        </el-button>
+      </div>
     </div>
     <div v-if="selectedProvider">
       <p class="provider-info">
@@ -110,9 +116,7 @@
       v-model:visible="modelDialog.visible"
       :model-data="modelDialog.data"
       :provider-id="selectedProvider?.id ?? null"
-      :is-fetching="isFetchingModels"
       @submitted="onDialogSubmitted"
-      @fetch-models="handleFetchModelsForProvider"
     />
 
     <FetchModelsDialog
@@ -131,7 +135,7 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { useSystemConfigStore } from '@/stores/systemConfigStore';
 import { storeToRefs } from 'pinia';
 import { ElMessage, ElMessageBox, type ElTable } from 'element-plus';
-import { Plus, Document, Picture, Headset, VideoCamera, Folder, ArrowRight } from '@element-plus/icons-vue';
+import { Plus, Document, Picture, Headset, VideoCamera, Folder, ArrowRight, Download } from '@element-plus/icons-vue';
 import type { AIProviderWithModels, AIModel, AIModelBase, AIModelCreate } from '@/api/types';
 
 import ProviderFormDialog from './dialogs/ProviderFormDialog.vue';
@@ -255,9 +259,11 @@ const handleFetchModelsForProvider = async () => {
 };
 
 const onConfirmAddFetchedModels = (selectedIds: string[]) => {
+  // 场景1: 在“新增/编辑服务商”弹窗中获取模型后确认
   if (providerDialog.visible) {
     providerFormDialogRef.value?.addFetchedModels(selectedIds, fetchModelsDialog.data);
-  } else if (modelDialog.visible && selectedProvider.value) {
+  // 场景2: 在主界面点击“从API获取”后确认
+  } else if (selectedProvider.value) {
     const modelsToAdd: AIModelCreate[] = selectedIds
       .filter(id => !selectedProvider.value!.models.some(m => m.modelId === id))
       .map(id => {

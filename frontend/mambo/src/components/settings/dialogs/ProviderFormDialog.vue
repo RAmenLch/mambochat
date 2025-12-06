@@ -10,22 +10,14 @@
     <div class="dialog-body-wrapper">
       <el-form ref="providerFormRef" :model="providerForm" :rules="providerFormRules" label-width="100px" class="form-section">
         <el-form-item label="服务商名称" prop="name">
-          <el-select
+          <el-autocomplete
             v-model="providerForm.name"
-            filterable
-            allow-create
-            default-first-option
+            :fetch-suggestions="querySearchProviders"
             placeholder="选择或输入服务商名称"
             style="width: 100%"
-            @change="handleProviderSelect"
-          >
-            <el-option
-              v-for="item in systemConfigStore.defaultProviders"
-              :key="item.name"
-              :label="item.name"
-              :value="item.name"
-            />
-          </el-select>
+            @select="(item) => handleProviderSelect(item as AutocompleteSuggestion)"
+            :trigger-on-focus="true"
+          />
         </el-form-item>
         <el-form-item label="API Host" prop="apiHost">
           <el-input v-model.trim="providerForm.apiHost" placeholder="例如：https://api.openai.com/v1" />
@@ -115,6 +107,10 @@ interface ProviderFormData {
   apiKey: string;
   use_proxy: boolean;
   models: ModelFormData[];
+}
+// Autocomplete 组件建议项的类型
+interface AutocompleteSuggestion {
+  value: string;
 }
 
 const props = defineProps<{
@@ -208,8 +204,18 @@ function resetAndInitializeForm() {
   }
 }
 
-function handleProviderSelect(selectedName: string) {
-  const selectedProvider = systemConfigStore.defaultProviders.find(p => p.name === selectedName);
+const querySearchProviders = (queryString: string, cb: (results: AutocompleteSuggestion[]) => void) => {
+  const allProviders = systemConfigStore.defaultProviders;
+  const results = queryString
+    ? allProviders.filter(p =>
+        p.name.toLowerCase().includes(queryString.toLowerCase())
+      )
+    : allProviders;
+  cb(results.map(p => ({ value: p.name })));
+};
+
+function handleProviderSelect(item: AutocompleteSuggestion) {
+  const selectedProvider = systemConfigStore.defaultProviders.find(p => p.name === item.value);
   if (selectedProvider) {
     providerForm.apiHost = selectedProvider.apiHost;
   }

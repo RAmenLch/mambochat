@@ -82,11 +82,6 @@
       </el-form-item>
     </el-form>
 
-    <div v-if="!isEditing" class="add-model-actions">
-      <el-button @click="emit('fetch-models')" :loading="isFetching">
-        <el-icon><Download /></el-icon>从API获取并选择
-      </el-button>
-    </div>
     <template #footer>
       <el-button @click="handleClose">取消</el-button>
       <el-button type="primary" @click="submitForm">确认</el-button>
@@ -97,7 +92,6 @@
 <script setup lang="ts">
 import { ref, reactive, watch, computed } from 'vue';
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
-import { Download } from '@element-plus/icons-vue';
 import { useProviderStore } from '@/stores/providerStore';
 import { useSystemConfigStore } from '@/stores/systemConfigStore';
 import type { AIModel, AIModelCreate, AIModelMetaConfig, AIModelUpdate } from '@/api/types';
@@ -117,13 +111,11 @@ const props = defineProps<{
   visible: boolean;
   modelData: AIModel | null;
   providerId: string | null;
-  isFetching: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void;
   (e: 'submitted'): void;
-  (e: 'fetch-models'): void;
 }>();
 
 const providerStore = useProviderStore();
@@ -224,11 +216,5 @@ async function submitForm() {
 </script>
 
 <style scoped>
-.add-model-actions {
-  display: flex;
-  justify-content: flex-end;
-  padding-top: 10px;
-  border-top: 1px solid var(--el-border-color-lighter);
-  margin-top: 20px;
-}
+/* 样式可以保持不变，以备将来使用，或根据需要删除 */
 </style>
