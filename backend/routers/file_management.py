@@ -17,6 +17,7 @@ router = APIRouter(
 
 # 定义允许上传的文件类型和最大大小
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
+
 # 扩展后的文件MIME类型白名单
 ALLOWED_MIME_TYPES = {
     # --- 文本与标记语言 (Text & Markup) ---
@@ -80,6 +81,33 @@ ALLOWED_MIME_TYPES = {
 }
 
 
+async def correct_ts_mime_type(file: UploadFile) -> str:
+    """
+    修正 .ts 文件的 MIME 类型。
+    由于 .ts 既可以是 TypeScript 代码，也可以是 MPEG 传输流视频，
+    此函数通过检查文件头是否包含二进制数据来区分两者。
+    """
+    original_content_type = file.content_type or "application/octet-stream"
+
+    # 仅针对 .ts 后缀且被识别为视频流的文件进行检查
+    if file.filename and file.filename.lower().endswith(".ts"):
+        # 读取文件前 1KB 数据进行嗅探
+        chunk = await file.read(1024)
+        await file.seek(0)  # 重置文件指针，确保后续保存文件完整
+
+        # 检查是否包含空字节 (二进制文件通常包含 0x00)
+        if b'\x00' in chunk:
+            return original_content_type
+
+        # 尝试 UTF-8 解码，成功则认为是文本代码
+        try:
+            chunk.decode('utf-8')
+            return "text/typescript"
+        except UnicodeDecodeError:
+            return original_content_type
+
+    return original_content_type
+
 
 @router.post(
     "/upload",
@@ -90,17 +118,21 @@ async def upload_temporary_file(
         file: UploadFile = File(...),
         db: AsyncSession = Depends(get_db)
 ):
-    # ... (此函数内容不变)
     if file.size > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=f"文件过大。最大允许 {MAX_FILE_SIZE // 1024 // 1024} MB。"
         )
-    if file.content_type not in ALLOWED_MIME_TYPES:
+
+    # 获取修正后的 MIME 类型（解决 .ts 文件被识别为视频的问题）
+    final_mime_type = await correct_ts_mime_type(file)
+
+    if final_mime_type not in ALLOWED_MIME_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"不支持的文件类型: {file.content_type}。"
+            detail=f"不支持的文件类型: {final_mime_type}。"
         )
+
     try:
         storage_path = await storage_service.save(file, sub_path="chat_attachments")
     except Exception as e:
@@ -108,14 +140,16 @@ async def upload_temporary_file(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"文件存储失败: {e}"
         )
+
     db_file = await file_crud.create_file(
         db=db,
         filename=file.filename,
         storage_path=storage_path,
-        mime_type=file.content_type,
+        mime_type=final_mime_type,  # 存入数据库的是修正后的类型
         size=file.size,
         management_type=FileManagementType.TEMPORARY.value
     )
+
     return schemas.File(
         id=db_file.id,
         filename=db_file.filename,
@@ -138,7 +172,7 @@ async def download_file(storage_path: str, db: AsyncSession = Depends(get_db)):
     """
     根据文件的存储路径提供文件访问，并使用原始文件名进行下载。
     """
-    # 1. 使用新的 CRUD 函数通过 storage_path 获取文件元数据
+    # 1. 使用 CRUD 函数通过 storage_path 获取文件元数据
     db_file = await file_crud.get_file_by_storage_path(db, path=storage_path)
     if not db_file:
         raise HTTPException(
@@ -168,4 +202,3 @@ async def download_file(storage_path: str, db: AsyncSession = Depends(get_db)):
         media_type=db_file.mime_type,
         filename=db_file.filename  # FastAPI 会自动处理 Content-Disposition
     )
-
