@@ -10,6 +10,7 @@ dependencies = [
     "httpx",            # 对应 import httpx
     "beautifulsoup4",   # 对应 from bs4 import BeautifulSoup
     "python-dotenv",    # 对应 from dotenv import load_dotenv
+    "trafilatura"
 ]
 
 [tool.uv]
