@@ -1,3 +1,4 @@
+# backend/services/generation/openai_worker.py
 import httpx
 import json
 import traceback
@@ -84,26 +85,28 @@ class OpenAIGenerateWorker(AbstractGenerateWorker):
                     tool_calls_chunks = delta.get("tool_calls")
                     if tool_calls_chunks:
                         for tc_chunk in tool_calls_chunks:
-                            index = tc_chunk.get("index")
-                            if index is not None:
-                                if index not in tool_calls_buffer:
-                                    tool_calls_buffer[index] = {
-                                        "index": index,
-                                        "id": "",
-                                        "type": "function",
-                                        "function": {"name": "", "arguments": ""}
-                                    }
+                            # 兼容处理：如果块内没有 index，则默认为 0。
+                            # 这能兼容那些只流式传输单个工具调用且不提供 index 的模型。
+                            index = tc_chunk.get("index", 0)
 
-                                current_buffer = tool_calls_buffer[index]
-                                if tc_chunk.get("id"):
-                                    current_buffer["id"] = tc_chunk["id"]
+                            if index not in tool_calls_buffer:
+                                tool_calls_buffer[index] = {
+                                    "index": index,
+                                    "id": "",
+                                    "type": "function",
+                                    "function": {"name": "", "arguments": ""}
+                                }
 
-                                if tc_chunk.get("function"):
-                                    fn_chunk = tc_chunk["function"]
-                                    if fn_chunk.get("name"):
-                                        current_buffer["function"]["name"] += fn_chunk["name"]
-                                    if fn_chunk.get("arguments"):
-                                        current_buffer["function"]["arguments"] += fn_chunk["arguments"]
+                            current_buffer = tool_calls_buffer[index]
+                            if tc_chunk.get("id"):
+                                current_buffer["id"] = tc_chunk["id"]
+
+                            if tc_chunk.get("function"):
+                                fn_chunk = tc_chunk["function"]
+                                if fn_chunk.get("name"):
+                                    current_buffer["function"]["name"] += fn_chunk["name"]
+                                if fn_chunk.get("arguments"):
+                                    current_buffer["function"]["arguments"] += fn_chunk["arguments"]
 
                     # 2. 处理常规内容
                     if not tool_calls_chunks:
@@ -167,9 +170,11 @@ class OpenAIGenerateWorker(AbstractGenerateWorker):
         if full_reasoning_content:
             yield WorkerOutput(type="reasoning", content=full_reasoning_content)
 
-        full_main_content = message_data.get("content")
-        if full_main_content:
-            yield WorkerOutput(type="content", content=full_main_content)
+        # content 和 tool_calls 通常是互斥的
+        if not tool_calls:
+            full_main_content = message_data.get("content")
+            if full_main_content:
+                yield WorkerOutput(type="content", content=full_main_content)
 
         images = message_data.get("images")
         if images:

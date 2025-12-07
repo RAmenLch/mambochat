@@ -24,11 +24,23 @@
           :show-after="300"
         >
           <template #content>
-            {{ subMessage.content.substring(0, 20) + (subMessage.content.length > 20 ? '...' : '') }}
+            <div style="max-width: 300px; white-space: pre-wrap;">{{ getMinimizedTooltipContent(subMessage) }}</div>
           </template>
           <div class="minimized-item" @click="restoreSubMessage(subMessage.id)">
-            <el-icon><Document /></el-icon>
-            <span class="minimized-item-title">{{ getPartitionTitleForMinimized(subMessage) }}</span>
+            <!-- MCP Tool Specific Minimized View -->
+            <template v-if="subMessage.type === 'McpTool'">
+              <el-icon>
+                <Loading v-if="getMinimizedMcpInfo(subMessage).status === 'generating'" class="is-loading" />
+                <CircleCheck v-else-if="getMinimizedMcpInfo(subMessage).status === 'success'" style="color: var(--el-color-success);" />
+                <CircleClose v-else style="color: var(--el-color-error);" />
+              </el-icon>
+              <span class="minimized-item-title">工具调用</span>
+            </template>
+            <!-- Generic Minimized View -->
+            <template v-else>
+              <el-icon><Document /></el-icon>
+              <span class="minimized-item-title">{{ getPartitionTitleForMinimized(subMessage) }}</span>
+            </template>
           </div>
         </el-tooltip>
       </div>
@@ -142,13 +154,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
-import type { Message, SubMessage, SubMessageCreate, MessageStatus } from '@/api/types';
+import type { Message, SubMessage, SubMessageCreate, MessageStatus, McpToolContent } from '@/api/types';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
   User, Cpu, Refresh, RefreshLeft, Delete, Edit, CopyDocument,
-  ArrowUpBold, ArrowDownBold, Clock, Document, Loading, CircleCheck
+  ArrowUpBold, ArrowDownBold, Clock, Document, Loading, CircleCheck, CircleClose
 } from '@element-plus/icons-vue';
 import SubMessageItem from './SubMessageItem.vue';
 import MessageEditDialog from './dialogs/MessageEditDialog.vue';
@@ -160,6 +172,10 @@ import { parseMarkdown } from '@/utils/markdownParser';
 interface SubMessageGroup {
   type: 'file' | 'normal';
   sub_messages: SubMessage[];
+}
+
+interface MinimizedMcpInfo {
+  status: 'generating' | 'success' | 'error';
 }
 
 const props = defineProps<{
@@ -490,6 +506,35 @@ function getPartitionTitleForMinimized(subMessage: SubMessage): string {
   return '分区';
 }
 
+/**
+ * 解析最小化的 McpTool 子消息以获取其状态。
+ */
+function getMinimizedMcpInfo(subMessage: SubMessage): MinimizedMcpInfo {
+  if (subMessage.status === 'generating') {
+    return { status: 'generating' };
+  }
+  try {
+    const content: McpToolContent = JSON.parse(subMessage.content);
+    return {
+      status: content.is_error ? 'error' : 'success',
+    };
+  } catch (e) {
+    return { status: 'error' };
+  }
+}
+
+/**
+ * 为最小化的子消息生成工具提示内容。
+ */
+function getMinimizedTooltipContent(subMessage: SubMessage): string {
+  if (subMessage.type === 'McpTool') {
+      const content: McpToolContent = JSON.parse(subMessage.content);
+      const args = content.arguments ? `参数: ${content.arguments}` : '';
+      return `工具: ${content.name || '未知'}\n${args}`.trim();
+  }
+  return subMessage.content.substring(0, 100) + (subMessage.content.length > 100 ? '...' : '');
+}
+
 </script>
 
 <style scoped>
@@ -515,6 +560,9 @@ function getPartitionTitleForMinimized(subMessage: SubMessage): string {
   font-size: 13px;
   cursor: pointer;
   transition: all 0.2s;
+}
+.minimized-item .el-icon.is-loading {
+  animation: rotating 2s linear infinite;
 }
 .minimized-item:hover {
   border-color: var(--el-color-primary);

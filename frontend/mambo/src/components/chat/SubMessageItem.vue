@@ -47,7 +47,18 @@
     <!-- MCP 工具调用类型 或 其他带头部的类型 -->
     <template v-else>
       <div v-if="showHeader || subMessage.type === 'McpTool'" class="sub-message-header">
-        <span class="partition-title">{{ partitionTitle }}</span>
+        <!-- MCP Tool Collapsed Header View -->
+        <div v-if="subMessage.type === 'McpTool' && isCollapsed" class="mcp-collapsed-summary">
+          <div class="mcp-tool-status-icon">
+            <el-icon v-if="isGenerating" class="is-loading"><Loading /></el-icon>
+            <el-icon v-else-if="mcpContent && mcpContent.is_error" color="var(--el-color-error)"><CircleClose /></el-icon>
+            <el-icon v-else color="var(--el-color-success)"><CircleCheck /></el-icon>
+          </div>
+          <span class="mcp-collapsed-text" :title="mcpSummaryText">{{ mcpSummaryText }}</span>
+        </div>
+        <!-- Default Header View -->
+        <span v-else class="partition-title">{{ partitionTitle }}</span>
+
         <div class="actions">
           <!-- 编辑和复制按钮不适用于 McpTool -->
           <template v-if="subMessage.type !== 'McpTool'">
@@ -82,7 +93,7 @@
       </div>
 
       <!-- MCP 工具调用内容 -->
-      <div v-if="subMessage.type === 'McpTool'" class="message-content mcp-tool-content" :class="{ collapsed: isCollapsed }">
+      <div v-if="subMessage.type === 'McpTool' && !isCollapsed" class="message-content mcp-tool-content">
         <div v-if="mcpContent" class="mcp-tool-body">
           <div class="mcp-tool-summary">
             <div class="mcp-tool-status-icon">
@@ -111,7 +122,7 @@
       </div>
 
       <!-- 普通文本内容 -->
-      <div v-else class="message-content" :class="{ collapsed: isCollapsed }">
+      <div v-else-if="subMessage.type !== 'McpTool'" class="message-content" :class="{ collapsed: isCollapsed }">
         <div v-if="isGenerating && subMessage.content === ''" class="typing-indicator">
           <span></span><span></span><span></span>
         </div>
@@ -332,21 +343,23 @@ async function handleBlockCopy(contentToCopy: string) {
 .mcp-tool-error-message { color: var(--el-color-error); font-size: 14px; }
 
 /* Styles for text-based and MCP sub-messages */
-.sub-message-header { display: flex; justify-content: space-between; align-items: center; padding: 2px 12px; background-color: rgba(0, 0, 0, 0.03); height: 32px; flex-shrink: 0; }
+.sub-message-header { display: flex; justify-content: space-between; align-items: center; padding: 2px 12px; background-color: rgba(0, 0, 0, 0.03); height: 32px; flex-shrink: 0; gap: 8px; }
 .is-user .sub-message-header { background-color: rgba(64, 158, 255, 0.1); }
-.partition-title { font-size: 12px; color: var(--el-text-color-secondary); font-weight: bold; }
-.actions { display: flex; align-items: center; gap: 4px; }
+.partition-title { font-size: 12px; color: var(--el-text-color-secondary); font-weight: bold; flex-grow: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .actions .el-button { color: var(--el-text-color-secondary); }
 .actions .el-button:hover { color: var(--el-text-color-primary); background-color: rgba(0, 0, 0, 0.05); }
+
+.mcp-collapsed-summary { display: flex; align-items: center; gap: 8px; flex-grow: 1; min-width: 0; }
+.mcp-collapsed-summary .mcp-tool-status-icon { flex-shrink: 0; }
+.mcp-collapsed-text { font-size: 13px; color: var(--el-text-color-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 .message-content { position: relative; word-break: break-word; line-height: 1.7; color: var(--color-text); min-height: 20px; transition: max-height 0.25s ease-out; max-height: 10000px; overflow: hidden; }
 .message-content:not(.mcp-tool-content) { padding: 10px 15px; }
 .is-user .message-content { color: var(--el-color-primary-dark-2); }
 .message-content.collapsed { max-height: 5em; }
-.message-content.collapsed:not(.mcp-tool-content) { max-height: 5em; }
-.mcp-tool-content.collapsed { max-height: 0; padding-top: 0; padding-bottom: 0; }
 .message-content::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 3em; background: linear-gradient(to bottom, transparent, var(--sub-message-bg)); pointer-events: none; opacity: 0; transition: opacity 0.25s ease-out; }
 .message-content.collapsed::after { opacity: 1; }
-.mcp-tool-content.collapsed::after { display: none; }
 
 .rendered-image { max-width: 100%; border-radius: 6px; margin: 0.5em 0; }
 .content-block :deep(p) { margin: 0 0 0.5em; }
