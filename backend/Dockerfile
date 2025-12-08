@@ -7,7 +7,7 @@ FROM python:3.11-slim
 ARG PYPI_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 1. 安装 uv
-RUN pip install --no-cache-dir uv
+RUN pip install --no-cache-dir uv -i  ${PYPI_INDEX_URL}
 
 # 2. 准备环境依赖
 WORKDIR /app
