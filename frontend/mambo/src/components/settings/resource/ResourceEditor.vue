@@ -202,14 +202,27 @@ async function handleSaveChanges() {
   }
 
   if (resource.itemType === 'resource') {
-    await resourceStore.updateActiveVersionDetails(resource.id, {
-      content: form.content,
-      attributes: form.attributes,
-    });
+    // 优先使用当前编辑器中加载的历史版本ID，如果未加载历史版本，则使用最新版本ID
+    const targetVersionId = loadedVersionInEditor.value?.id ?? resource.latest_version?.id;
+
+    if (targetVersionId) {
+      await resourceStore.updateResourceVersionItem(resource.id, targetVersionId, {
+        content: form.content,
+        attributes: form.attributes,
+      });
+
+      // 如果当前正在编辑历史版本，保存后更新本地引用，确保 isFormDirty 计算正确
+      if (loadedVersionInEditor.value) {
+        const updatedVersion = resource.versions.find(v => v.id === targetVersionId);
+        if (updatedVersion) {
+          loadedVersionInEditor.value = updatedVersion;
+        }
+      }
+    }
   }
 
   ElMessage.success('保存成功');
-  loadedVersionInEditor.value = null;
+  // 保存后保持在当前编辑的版本视图，不强制重置为最新版本
 }
 
 function loadVersionIntoEditor(version: ResourceVersion) {

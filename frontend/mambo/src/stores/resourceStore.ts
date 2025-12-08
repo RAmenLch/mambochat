@@ -78,37 +78,40 @@ export const useResourceStore = defineStore('resource', () => {
       console.error(`Resource ${resource.id} has no active version to update.`);
       return;
     }
-    const versionId = resource.latest_version.id;
-    try {
-      const updatedVersion = await updateResourceVersion(versionId, { content: newContent });
-      const res = resources.value.find(r => r.id === resource.id);
-      if (res && res.latest_version) {
-        res.latest_version.content = updatedVersion.content;
-      }
-    } catch (error) {
-      console.error(`Failed to update content for version ${versionId}:`, error);
-      await fetchResourceDetails(resource.id);
-    }
+    // 复用通用的更新逻辑，确保 versions 列表和 latest_version 都被更新
+    await updateResourceVersionItem(resource.id, resource.latest_version.id, { content: newContent });
   }
 
   /**
-   * 更新指定资源当前活跃版本的内容和属性。
+   * 更新指定资源的特定版本（内容、属性等）。
+   *
+   * 此方法替代了原有的 updateActiveVersionDetails，支持指定 versionId，
+   * 并确保同时更新 versions 列表中的对应项和 latest_version（如果匹配）。
    */
-  async function updateActiveVersionDetails(resourceId: string, data: ResourceVersionUpdate) {
+  async function updateResourceVersionItem(resourceId: string, versionId: string, data: ResourceVersionUpdate) {
     const resource = resources.value.find(r => r.id === resourceId);
-    if (!resource || !resource.latest_version) {
-      console.error(`Resource ${resourceId} or its active version not found.`);
+    if (!resource) {
+      console.error(`Resource ${resourceId} not found.`);
       return;
     }
-    const versionId = resource.latest_version.id;
+
     try {
       const updatedVersion = await updateResourceVersion(versionId, data);
-      if (resource.latest_version) {
-        // 使用返回的完整版本对象进行更新，确保数据同步
+
+      // 1. 同步更新 versions 列表中的对应项
+      if (resource.versions) {
+        const vIndex = resource.versions.findIndex(v => v.id === versionId);
+        if (vIndex !== -1) {
+          Object.assign(resource.versions[vIndex], updatedVersion);
+        }
+      }
+
+      // 2. 如果更新的是当前活跃版本，同步更新 latest_version
+      if (resource.latest_version && resource.latest_version.id === versionId) {
         Object.assign(resource.latest_version, updatedVersion);
       }
     } catch (error) {
-      console.error(`Failed to update details for version ${versionId}:`, error);
+      console.error(`Failed to update version ${versionId}:`, error);
       // 发生错误时，从服务器获取最新状态以保证一致性
       await fetchResourceDetails(resourceId);
     }
@@ -171,7 +174,7 @@ export const useResourceStore = defineStore('resource', () => {
     reorderResourceItems,
     // Resource-specific Actions
     updateVersionContent,
-    updateActiveVersionDetails,
+    updateResourceVersionItem,
     createNewVersion,
     setActiveResourceVersion,
     fetchResourceDetails,
