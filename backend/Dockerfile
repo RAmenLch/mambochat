@@ -3,8 +3,8 @@
 # 使用清华大学的镜像源，你也可以换成其他的，比如：
 # 阿里云: https://mirrors.aliyun.com/pypi/simple/
 # 豆瓣: http://pypi.douban.com/simple/
-ARG PYPI_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 FROM python:3.11-slim
+ARG PYPI_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 1. 安装 uv
 RUN pip install --no-cache-dir uv
@@ -16,7 +16,7 @@ WORKDIR /app
 COPY backend/pyproject.toml /app/backend/pyproject.toml
 RUN uv pip install --system --no-cache -r /app/backend/pyproject.toml -i ${PYPI_INDEX_URL}
 
-# 2.2 安装 Bing MCP 依赖
+# 2.2 安装 Bing MCP 依赖 (这是超时的那一步)
 COPY MCP_SERVER/bing/pyproject.toml /app/MCP_SERVER/bing/pyproject.toml
 RUN uv pip install --system --no-cache -r /app/MCP_SERVER/bing/pyproject.toml -i ${PYPI_INDEX_URL}
 
