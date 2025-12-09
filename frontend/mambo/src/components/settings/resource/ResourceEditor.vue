@@ -47,6 +47,8 @@
         v-model:name="form.name"
         v-model:description="form.description"
         v-model:attributes="form.attributes"
+        v-model:versionName="form.versionName"
+        v-model:versionCommitMessage="form.versionCommitMessage"
       />
 
     </el-form>
@@ -109,6 +111,8 @@ const form = reactive({
   description: '',
   content: '',
   attributes: { ...DEFAULT_SUBMESSAGE_ATTRIBUTES },
+  versionName: '',
+  versionCommitMessage: '',
 });
 
 const newVersionDialog = reactive({
@@ -127,14 +131,15 @@ const isFormDirty = computed(() => {
   const originalVersion = loadedVersionInEditor.value ?? original.latest_version;
   const isMetaDirty = form.name !== original.name || form.description !== (original.description || '');
 
-  if (original.itemType === 'resource') {
+  if (original.itemType === 'resource' && originalVersion) {
+    const isVersionMetaDirty = form.versionName !== originalVersion.name || form.versionCommitMessage !== (originalVersion.commitMessage || '');
     const isContentDirty = form.content !== (originalVersion?.content || '');
     let isAttributesDirty = false;
     if (original.resourceType === 'submessage_template') {
       const originalAttributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES, ...(originalVersion?.attributes as Partial<SubMessageTemplateAttributes> || {}) };
       isAttributesDirty = JSON.stringify(form.attributes) !== JSON.stringify(originalAttributes);
     }
-    return isMetaDirty || isContentDirty || isAttributesDirty;
+    return isMetaDirty || isVersionMetaDirty || isContentDirty || isAttributesDirty;
   }
 
   return isMetaDirty;
@@ -150,25 +155,15 @@ const contentEditorLabel = computed(() => {
 // --- Watchers ---
 watch(() => props.resource, (newSelection) => {
   if (newSelection) {
-    form.name = newSelection.name;
-    form.description = newSelection.description || '';
-    form.content = newSelection.latest_version?.content || '';
-
-    if (newSelection.resourceType === 'submessage_template') {
-      form.attributes = {
-        ...DEFAULT_SUBMESSAGE_ATTRIBUTES,
-        ...(newSelection.latest_version?.attributes as Partial<SubMessageTemplateAttributes> || {}),
-      };
-    } else {
-      form.attributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES };
-    }
-    loadedVersionInEditor.value = null;
+    resetForm();
   } else {
     // Reset form when resource becomes null (handled by parent)
     form.name = '';
     form.description = '';
     form.content = '';
     form.attributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES };
+    form.versionName = '';
+    form.versionCommitMessage = '';
   }
 }, { immediate: true });
 
@@ -177,16 +172,22 @@ watch(() => props.resource, (newSelection) => {
 function resetForm() {
   const selection = props.resource;
   if (selection) {
+    const versionToLoad = selection.latest_version;
     form.name = selection.name;
     form.description = selection.description || '';
-    form.content = selection.latest_version?.content || '';
+    form.content = versionToLoad?.content || '';
+    form.versionName = versionToLoad?.name || '';
+    form.versionCommitMessage = versionToLoad?.commitMessage || '';
 
     if (selection.resourceType === 'submessage_template') {
-      form.attributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES, ...(selection.latest_version?.attributes as Partial<SubMessageTemplateAttributes> || {}) };
+      form.attributes = {
+        ...DEFAULT_SUBMESSAGE_ATTRIBUTES,
+        ...(versionToLoad?.attributes as Partial<SubMessageTemplateAttributes> || {}),
+      };
     } else {
       form.attributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES };
     }
-    loadedVersionInEditor.value = null;
+    loadedVersionInEditor.value = null; // Reset to viewing latest version
   }
 }
 
@@ -202,20 +203,24 @@ async function handleSaveChanges() {
   }
 
   if (resource.itemType === 'resource') {
-    // 优先使用当前编辑器中加载的历史版本ID，如果未加载历史版本，则使用最新版本ID
+    //优先使用当前编辑器中加载的历史版本ID，如果未加载历史版本，则使用最新版本ID
     const targetVersionId = loadedVersionInEditor.value?.id ?? resource.latest_version?.id;
 
     if (targetVersionId) {
-      await resourceStore.updateResourceVersionItem(resource.id, targetVersionId, {
+      const payload = {
+        name: form.versionName,
+        commitMessage: form.versionCommitMessage,
         content: form.content,
         attributes: form.attributes,
-      });
+      };
+      await resourceStore.updateResourceVersionItem(resource.id, targetVersionId, payload);
 
-      // 如果当前正在编辑历史版本，保存后更新本地引用，确保 isFormDirty 计算正确
+      //如果当前正在编辑历史版本，保存后更新本地引用，确保 isFormDirty 计算正确
       if (loadedVersionInEditor.value) {
         const updatedVersion = resource.versions.find(v => v.id === targetVersionId);
         if (updatedVersion) {
-          loadedVersionInEditor.value = updatedVersion;
+          // Manually update the local ref to reflect the saved state for isFormDirty logic
+          loadedVersionInEditor.value = { ...updatedVersion, ...payload };
         }
       }
     }
@@ -227,6 +232,9 @@ async function handleSaveChanges() {
 
 function loadVersionIntoEditor(version: ResourceVersion) {
   form.content = version.content || '';
+  form.versionName = version.name;
+  form.versionCommitMessage = version.commitMessage || '';
+
   if (props.resource?.resourceType === 'submessage_template') {
     form.attributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES, ...(version.attributes as Partial<SubMessageTemplateAttributes> || {}) };
   } else {

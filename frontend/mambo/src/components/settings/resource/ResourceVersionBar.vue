@@ -17,11 +17,8 @@
             @click="$emit('select-version', version)"
           >
             <div class="version-card-header">
-              <span class="version-name">{{ version.name }}</span>
+              <span class="version-name" :title="version.name">{{ version.name }}</span>
               <span class="version-date">{{ new Date(version.createdAt).toLocaleDateString() }}</span>
-            </div>
-            <div class="version-card-body">
-                <p class="version-msg" :title="version.commitMessage ?? undefined">{{ version.commitMessage || '无描述' }}</p>
             </div>
             <div class="version-card-footer">
               <el-button
@@ -61,7 +58,7 @@ defineEmits<{
 <style scoped>
 .version-top-bar {
   flex-shrink: 0;
-  height: 140px;
+  height: 110px; /* Reduced height */
   border-bottom: 1px solid var(--el-border-color);
   background-color: var(--el-fill-color-lighter);
   display: flex;
@@ -85,13 +82,14 @@ defineEmits<{
 .version-card-horizontal {
   flex-shrink: 0;
   width: 200px;
-  height: 90px;
+  height: 62px; /* Reduced height */
   background-color: #fff;
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 4px;
   padding: 8px;
   display: flex;
   flex-direction: column;
+  justify-content: space-between; /* Space out header and footer */
   cursor: pointer;
   transition: all 0.2s;
   position: relative;
@@ -117,31 +115,23 @@ defineEmits<{
   justify-content: space-between;
   font-size: 13px;
   font-weight: 600;
-  margin-bottom: 4px;
+}
+
+.version-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 8px;
 }
 
 .version-date {
   font-weight: normal;
   font-size: 11px;
   color: var(--el-text-color-secondary);
-}
-
-.version-card-body {
-  flex-grow: 1;
-  overflow: hidden;
-}
-
-.version-msg {
-  margin: 0;
-  font-size: 11px;
-  color: var(--el-text-color-regular);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex-shrink: 0;
 }
 
 .version-card-footer {
-  margin-top: auto;
   display: flex;
   justify-content: flex-end;
 }
