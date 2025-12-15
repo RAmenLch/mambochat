@@ -81,16 +81,22 @@ ALLOWED_MIME_TYPES = {
 }
 
 
-async def correct_ts_mime_type(file: UploadFile) -> str:
+async def correct_mime_type(file: UploadFile) -> str:
     """
-    修正 .ts 文件的 MIME 类型。
-    由于 .ts 既可以是 TypeScript 代码，也可以是 MPEG 传输流视频，
-    此函数通过检查文件头是否包含二进制数据来区分两者。
+    修正文件的 MIME 类型。
+    主要处理以下情况：
+    1. .sql 文件常被识别为 application/octet-stream，需修正为 application/sql。
+    2. .ts 文件既可能是 TypeScript 也可能是 MPEG 视频流，需通过嗅探文件头区分。
     """
     original_content_type = file.content_type or "application/octet-stream"
+    filename = file.filename.lower() if file.filename else ""
 
-    # 仅针对 .ts 后缀且被识别为视频流的文件进行检查
-    if file.filename and file.filename.lower().endswith(".ts"):
+    # 修正 SQL 文件类型
+    if original_content_type == "application/octet-stream" and filename.endswith(".sql"):
+        return "application/sql"
+
+    # 修正 .ts 文件类型
+    if filename.endswith(".ts"):
         # 读取文件前 1KB 数据进行嗅探
         chunk = await file.read(1024)
         await file.seek(0)  # 重置文件指针，确保后续保存文件完整
@@ -124,8 +130,8 @@ async def upload_temporary_file(
             detail=f"文件过大。最大允许 {MAX_FILE_SIZE // 1024 // 1024} MB。"
         )
 
-    # 获取修正后的 MIME 类型（解决 .ts 文件被识别为视频的问题）
-    final_mime_type = await correct_ts_mime_type(file)
+    # 获取修正后的 MIME 类型
+    final_mime_type = await correct_mime_type(file)
 
     if final_mime_type not in ALLOWED_MIME_TYPES:
         raise HTTPException(
