@@ -5,17 +5,20 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import AsyncGenerator, List, Optional, Tuple
+from typing import AsyncGenerator, Tuple
 
 from backend.services.stream_manager_service import stream_manager
 from backend.crud import chat_crud, message_crud, file_crud, resource_crud
 from backend import schemas
 from backend.models import chat_model
 from backend.database import AsyncSessionLocal
-from backend.services.generation.manager import DefaultGenerateManager
-from backend.services.generation.title_manager import TitleGenerateManager
-from backend.services.generation.zip_history_manager import ZipHistoryGenerateManager
-from backend.services.generation.openai_worker import OpenAIGenerateWorker
+from backend.services.generation import (
+    DefaultGenerateManager,
+    TitleGenerateManager,
+    ZipHistoryGenerateManager,
+    OpenAIGenerateWorker,
+    InstructionExecutor
+)
 from backend.schemas.enums import FileManagementType, MessageStatus, MessageRole, SubMessageType
 
 # 定义生成任务启动的超时阈值
@@ -140,29 +143,30 @@ async def create_user_message_and_prepare_generation(
 
 async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
     """
-    后台任务：协调整个生成过程。它实例化适当的 Worker 和 Manager，
-    然后调用 manager.run() 来执行生成流程。
+    后台任务：协调整个生成过程。它实例化 Executor、Worker 和 Manager，
+    通过指令流驱动生成。
     """
     async with AsyncSessionLocal() as db:
         try:
-            # 根据模型类型选择合适的Worker，目前只有OpenAI Worker
+            # 1. 实例化核心组件
             worker = OpenAIGenerateWorker()
             manager = DefaultGenerateManager(db_session=db)
+            executor = InstructionExecutor(db_session=db)
 
-            # 调用Manager的run方法，它现在负责准备上下文和执行所有生成逻辑
-            await manager.run(
-                worker=worker,
-                chat_id=chat_id,
-                assistant_message_id=assistant_message_id
-            )
+            # 2. 执行生成循环：Manager 产出指令 -> Executor 执行指令
+            async for instruction in manager.run(worker, chat_id, assistant_message_id):
+                await executor.execute(
+                    instruction=instruction,
+                    chat_id=chat_id,
+                    assistant_message_id=assistant_message_id
+                )
 
         except asyncio.CancelledError:
             print(f"[Generation Service] Task cancelled for message '{assistant_message_id}'.")
-            # Manager内部已处理了取消，这里仅作记录。
+            # Manager 内部已处理了取消并生成了清理指令，此处只需记录
         except Exception as e:
             print(f"[Generation Service Error] for message {assistant_message_id}: {e}")
-            # Manager内部已经处理了大部分异常，这里捕获的是Manager初始化或运行前可能发生的错误。
-            # 尝试更新占位符消息以反映错误。
+            # Manager 内部已处理大部分异常。如果异常抛出到这里，说明 Manager 初始化失败或严重崩溃。
             try:
                 error_sub_message_create = schemas.SubMessageCreate(
                     content=f"生成流程启动失败: {e}",
@@ -172,7 +176,7 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
                 )
                 await message_crud.create_sub_message(db, assistant_message_id, error_sub_message_create)
             except Exception as inner_e:
-                 print(f"Failed to even create an error message for {assistant_message_id}: {inner_e}")
+                print(f"Failed to even create an error message for {assistant_message_id}: {inner_e}")
 
         finally:
             await stream_manager.close_stream(assistant_message_id)
@@ -187,11 +191,15 @@ async def run_title_generation_task(chat_id: str):
         try:
             worker = OpenAIGenerateWorker()
             manager = TitleGenerateManager(db_session=db)
-            await manager.run(
-                worker=worker,
-                chat_id=chat_id,
-                assistant_message_id=task_id
-            )
+            executor = InstructionExecutor(db_session=db)
+
+            async for instruction in manager.run(worker, chat_id, task_id):
+                await executor.execute(
+                    instruction=instruction,
+                    chat_id=chat_id,
+                    assistant_message_id=task_id
+                )
+
         except Exception as e:
             print(f"[Title Generation Service Error] for chat {chat_id}: {e}")
         finally:
@@ -208,12 +216,16 @@ async def run_zip_history_generation_task(chat_id: str, target_message_id: str):
         try:
             worker = OpenAIGenerateWorker()
             manager = ZipHistoryGenerateManager(db_session=db)
-            # 在ZipHistoryManager中，assistant_message_id被用作target_message_id
-            await manager.run(
-                worker=worker,
-                chat_id=chat_id,
-                assistant_message_id=target_message_id
-            )
+            executor = InstructionExecutor(db_session=db)
+
+            # 在 ZipHistoryManager 中，assistant_message_id 被用作 target_message_id
+            async for instruction in manager.run(worker, chat_id, target_message_id):
+                await executor.execute(
+                    instruction=instruction,
+                    chat_id=chat_id,
+                    assistant_message_id=target_message_id
+                )
+
         except Exception as e:
             print(f"[Zip History Generation Service Error] for message {target_message_id}: {e}")
         finally:
@@ -236,7 +248,6 @@ async def subscribe_to_stream(
     calculated_status = await _calculate_message_status(message)
 
     # 准备并发送初始的替换事件，包含子消息和聚合状态
-    # Pydantic 的 model_dump(mode='json') 会确保 MCP_TOOL 的 content (JSON字符串) 被正确序列化为字符串
     sub_messages_data = [schemas.SubMessage.model_validate(sm).model_dump(mode='json') for sm in message.sub_messages]
     initial_event_data = {
         "type": "replace",

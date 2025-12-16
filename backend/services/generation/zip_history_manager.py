@@ -4,16 +4,23 @@ from typing import AsyncGenerator, List, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.services.generation.base import AbstractGenerateManager
-from backend.services.generation.instructions import BaseInstruction, UpdateZipHistorySubMessage, SetFinalStatus
+from backend.services.generation.simple_manager import SimpleChatGenerateManager
+from backend.services.generation.instructions import (
+    BaseInstruction,
+    UpdateZipHistorySubMessage,
+    SetFinalStatus,
+    UpdateSubMessageConfig
+)
 from backend.services.generation.llm_io import LLMInput, WorkerOutput
-from backend.services.generation.manager import _build_llm_messages_payload, _build_zip_history_messages_payload
-from backend.services.stream_manager_service import stream_manager
+from backend.services.generation.default_manager import (
+    _build_llm_messages_payload,
+    _build_zip_history_messages_payload
+)
 from backend.crud import setting_crud, message_crud, chat_crud
 from backend.models import chat_model
 from backend.schemas import enums as schemas_enums
 from backend.schemas import message as schemas_message
-from backend.routers.notifications import GLOBAL_NOTIFICATIONS_STREAM_ID
+from backend.models.base_model import generate_uuid
 
 DEFAULT_ZIP_HISTORY_PROMPT = (
     "你是一个对话历史压缩工具。请根据用户提供的对话历史，生成一段简洁、精确、信息完整的摘要。"
@@ -21,7 +28,7 @@ DEFAULT_ZIP_HISTORY_PROMPT = (
 )
 
 
-class ZipHistoryGenerateManager(AbstractGenerateManager):
+class ZipHistoryGenerateManager(SimpleChatGenerateManager):
     """
     负责为对话历史生成压缩摘要的管理器。
     它准备一个特殊的LLM输入，请求模型生成摘要，然后将结果作为一种新的子消息类型附加到目标消息上。
@@ -32,37 +39,41 @@ class ZipHistoryGenerateManager(AbstractGenerateManager):
         self.target_message_id: Optional[str] = None
         self._accumulated_content: str = ""
         self.chat_id: Optional[str] = None
+        self.sub_message_id: Optional[str] = None  # 用于 ZipHistory 子消息的 ID
 
     async def _prepare_context(
-        self,
-        chat_id: str,
-        target_message_id: str
+            self,
+            chat_id: str,
+            assistant_message_id: str
     ) -> Tuple[chat_model.Chat, List[chat_model.Message]]:
         """
         重写基类方法，以准备用于压缩的特定历史消息范围。
+        注意：这里的 assistant_message_id 实际上是 target_message_id。
         """
         db_chat = await chat_crud.get_chat(self.db_session, chat_id=chat_id)
         if not db_chat:
             raise ValueError(f"Chat with id {chat_id} not found.")
 
+        # 获取所有消息用于切片
         all_messages = await message_crud.get_messages_by_chat(self.db_session, chat_id=chat_id)
 
         target_index = -1
         for i, msg in enumerate(all_messages):
-            if msg.id == target_message_id:
+            if msg.id == assistant_message_id:
                 target_index = i
                 break
 
         if target_index == -1:
-            raise ValueError(f"Target message {target_message_id} not found in chat history.")
+            raise ValueError(f"Target message {assistant_message_id} not found in chat history.")
 
+        # 仅使用目标消息（含）之前的消息作为上下文
         messages_to_compress = all_messages[:target_index + 1]
         return db_chat, messages_to_compress
 
     async def _prepare_llm_input(
-        self,
-        db_chat: chat_model.Chat,
-        history_messages: List[chat_model.Message]
+            self,
+            db_chat: chat_model.Chat,
+            history_messages: List[chat_model.Message]
     ) -> LLMInput:
         """
         准备用于生成历史摘要的LLM输入。
@@ -70,10 +81,7 @@ class ZipHistoryGenerateManager(AbstractGenerateManager):
         if not db_chat.ai_model or not db_chat.ai_model.provider:
             raise ValueError("会话未配置有效的AI模型或服务商。")
 
-        # 在 manager.run() 中，assistant_message_id 就是我们传入的 target_message_id
-        self.target_message_id = self.temp_ref_id_map.get('__assistant_message_id__')
         self.chat_id = db_chat.id
-
         provider = db_chat.ai_model.provider
         model = db_chat.ai_model
 
@@ -81,9 +89,7 @@ class ZipHistoryGenerateManager(AbstractGenerateManager):
         prompt_setting = await setting_crud.get_setting(self.db_session, "zip_history_system_prompt")
         system_prompt = prompt_setting.value if prompt_setting and prompt_setting.value else DEFAULT_ZIP_HISTORY_PROMPT
 
-
         # 2. 使用共享函数构建消息负载
-
         effective_history = await _build_zip_history_messages_payload(history_messages)
 
         messages_payload = await _build_llm_messages_payload(
@@ -91,6 +97,7 @@ class ZipHistoryGenerateManager(AbstractGenerateManager):
         )
         messages_payload.insert(0, {"role": "system", "content": system_prompt})
         messages_payload.append({"role": "user", "content": "请输出历史摘要:"})
+
         # 3. 准备模型参数和连接配置
         parameters = {'stream': False}
         proxy_url = None
@@ -111,17 +118,23 @@ class ZipHistoryGenerateManager(AbstractGenerateManager):
         )
 
     async def _translate_worker_output_to_instructions(
-        self,
-        output: WorkerOutput
+            self,
+            output: WorkerOutput
     ) -> AsyncGenerator[BaseInstruction, None]:
         """
         将Worker的输出翻译成更新ZipHistory子消息的指令。
+        覆盖 SimpleChatGenerateManager 的默认行为。
         """
         if output.type == "content" and output.content:
             self._accumulated_content += output.content
 
         elif output.type == "done":
+            # 确保有 ID
+            if not self.sub_message_id:
+                self.sub_message_id = generate_uuid()
+
             yield UpdateZipHistorySubMessage(
+                sub_message_id=self.sub_message_id,
                 target_message_id=self.target_message_id,
                 content=self._accumulated_content.strip(),
                 status=schemas_enums.MessageStatus.COMPLETED
@@ -130,123 +143,79 @@ class ZipHistoryGenerateManager(AbstractGenerateManager):
 
         elif output.type == "error":
             error_message = f"生成历史摘要时出错: {output.content}"
+            if not self.sub_message_id:
+                self.sub_message_id = generate_uuid()
+
             yield UpdateZipHistorySubMessage(
+                sub_message_id=self.sub_message_id,
                 target_message_id=self.target_message_id,
                 content=error_message,
                 status=schemas_enums.MessageStatus.FAILED
             )
-            yield SetFinalStatus(status=schemas_enums.MessageStatus.FAILED)
+            # 这里抛出异常以便触发清理逻辑或直接结束
+            raise RuntimeError(error_message)
 
-    async def _process_custom_instruction(
-        self,
-        instruction: BaseInstruction,
-        assistant_message_id: str
-    ) -> Optional[schemas_enums.MessageStatus]:
-        """
-        处理自定义的 UpdateZipHistorySubMessage 指令，并发布全局通知。
-        """
-        if isinstance(instruction, UpdateZipHistorySubMessage):
-            target_message = await message_crud.get_message(self.db_session, instruction.target_message_id)
-            if not target_message:
-                print(f"[ZipHistoryManager] Target message {instruction.target_message_id} not found. Cannot update zip history.")
-                return
-
-            existing_sub_message = None
-            for sub in target_message.sub_messages:
-                if sub.type == schemas_enums.SubMessageType.ZIP_HISTORY.value:
-                    existing_sub_message = sub
-                    break
-
-            updated_sub_message = None
-            if existing_sub_message:
-                update_schema = schemas_message.SubMessageUpdate(
-                    content=instruction.content,
-                    status=instruction.status
-                )
-                updated_sub_message = await message_crud.update_sub_message(
-                    self.db_session, existing_sub_message.id, update_schema
-                )
-            else:
-                create_schema = schemas_message.SubMessageCreate(
-                    content=instruction.content,
-                    sortOrder=999, # 确保在末尾
-                    type=schemas_enums.SubMessageType.ZIP_HISTORY.value,
-                    status=instruction.status,
-                    config=schemas_message.SubMessageConfig(zip_enable=False, context_participation_length=0)
-                )
-                updated_sub_message = await message_crud.create_sub_message(
-                    self.db_session, instruction.target_message_id, create_schema
-                )
-
-            # 发布通知，告知前端压缩任务已完成
-            if updated_sub_message:
-                notification_payload = {
-                    "type": "zip_history_update",
-                    "payload": {
-                        "chat_id": self.chat_id,
-                        "message_id": instruction.target_message_id,
-                        "sub_message": schemas_message.SubMessage.model_validate(updated_sub_message).model_dump(mode='json')
-                    }
-                }
-                await stream_manager.publish(GLOBAL_NOTIFICATIONS_STREAM_ID, notification_payload)
-
-            return None # 不影响最终状态
-        return await super()._process_custom_instruction(instruction, assistant_message_id)
-
-    async def _cleanup_on_exception(self, assistant_message_id: str, final_status: schemas_enums.MessageStatus,
-                                    exception: Optional[Exception] = None):
+    async def _cleanup_on_exception(
+            self,
+            assistant_message_id: str,
+            final_status: schemas_enums.MessageStatus,
+            exception: Optional[Exception] = None
+    ) -> AsyncGenerator[BaseInstruction, None]:
         """
         在发生未捕获的异常时，创建一个表示失败的ZipHistory子消息。
         """
         error_message = f"生成历史摘要时发生内部错误: {str(exception)}"
-        fail_instruction = UpdateZipHistorySubMessage(
+
+        # 确保有 ID
+        if not self.sub_message_id:
+            self.sub_message_id = generate_uuid()
+
+        yield UpdateZipHistorySubMessage(
+            sub_message_id=self.sub_message_id,
             target_message_id=assistant_message_id,
             content=error_message,
             status=schemas_enums.MessageStatus.FAILED
         )
-        await self._process_custom_instruction(fail_instruction, assistant_message_id)
 
     async def run(
             self,
             worker: 'AbstractGenerateWorker',
             chat_id: str,
             assistant_message_id: str
-    ) -> schemas_enums.MessageStatus:
+    ) -> AsyncGenerator[BaseInstruction, None]:
         """
-        重写run方法以在内部传递 target_message_id，并在生成前禁用目标消息上已启用的压缩历史。
+        重写 run 方法。
+        在开始生成前，先检查目标消息是否已启用压缩历史。
+        如果是，发出指令将其禁用，并获取现有的 sub_message_id 以便进行更新而不是创建。
         """
+        self.target_message_id = assistant_message_id
+
         target_message = await message_crud.get_message(self.db_session, assistant_message_id)
         if target_message:
             for sub in target_message.sub_messages:
                 if sub.type == schemas_enums.SubMessageType.ZIP_HISTORY.value:
+                    # 找到了现有的 ZipHistory
+                    self.sub_message_id = sub.id
+
                     try:
                         config_obj = json.loads(sub.config) if isinstance(sub.config, str) else sub.config
                         # 仅当目标消息的压缩历史处于启用状态时，才将其禁用
-                        # 这样做是为了防止上下文构建逻辑在遇到当前消息的压缩历史时停止回溯，
-                        # 从而确保本次生成能获取到完整的上文（包括更早的压缩历史）。
+                        # 这样做是为了防止上下文构建逻辑在遇到当前消息的压缩历史时停止回溯
                         if config_obj and config_obj.get('zip_enable') is True:
                             config_obj['zip_enable'] = False
 
-                            update_schema = schemas_message.SubMessageUpdate(
-                                config=schemas_message.SubMessageConfig.model_validate(config_obj)
+                            # 发出指令更新配置
+                            yield UpdateSubMessageConfig(
+                                sub_message_id=sub.id,
+                                config=config_obj
                             )
-                            updated_sub_message = await message_crud.update_sub_message(
-                                self.db_session, sub.id, update_schema
-                            )
-
-                            if updated_sub_message:
-                                notification_payload = {
-                                    "type": "zip_history_update",
-                                    "payload": {
-                                        "chat_id": chat_id,
-                                        "message_id": assistant_message_id,
-                                        "sub_message": schemas_message.SubMessage.model_validate(updated_sub_message).model_dump(mode='json')
-                                    }
-                                }
-                                await stream_manager.publish(GLOBAL_NOTIFICATIONS_STREAM_ID, notification_payload)
+                            # 注意：Executor 执行此指令后，DB 更新完成。
+                            # 随后调用的 super().run() -> _prepare_context 将能读取到更新后的状态。
                             break
                     except (json.JSONDecodeError, TypeError):
                         continue
 
-        self.temp_ref_id_map['__assistant_message_id__'] = assistant_message_id
-        return await super().run(worker, chat_id, assistant_message_id)
+        # 执行基类的生成流程
+        async for instruction in super().run(worker, chat_id, assistant_message_id):
+            yield instruction
+

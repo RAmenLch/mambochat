@@ -5,6 +5,7 @@ from sqlalchemy.future import select
 from typing import Optional, List
 
 from backend.models import file_model
+from backend.models.base_model import generate_uuid
 
 
 # --- 修改函数 ---
@@ -14,7 +15,8 @@ async def create_file(
         storage_path: str,
         mime_type: str,
         size: int,
-        management_type: str
+        management_type: str,
+        file_id: Optional[str] = None
 ) -> file_model.File:
     """
     在数据库中创建一条新的文件元数据记录。
@@ -27,7 +29,9 @@ async def create_file(
     :param management_type: 文件的管理类型 (e.g., 'temporary', 'sub_message')。
     :return: 创建的File对象。
     """
+    final_id = file_id or generate_uuid()
     db_file = file_model.File(
+        id=final_id,
         filename=filename,
         storage_path=storage_path,
         mime_type=mime_type,

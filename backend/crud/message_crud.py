@@ -163,9 +163,17 @@ async def delete_last_assistant_message(db: AsyncSession, chat_id: str) -> Optio
     return last_message
 
 
-async def create_sub_message(db: AsyncSession, message_id: str, sub_message_data: schemas.SubMessageCreate) -> chat_model.SubMessage:
+async def create_sub_message(
+        db: AsyncSession,
+        message_id: str,
+        sub_message_data: schemas.SubMessageCreate,
+        sub_message_id: Optional[str] = None  # 新增可选参数
+) -> chat_model.SubMessage:
     """在指定消息下创建一个新的子消息。"""
+    # 优先使用函数参数传入的 ID，其次使用 schema 中的 ID (如果有)，最后自动生成
+    final_id = sub_message_id or sub_message_data.id or chat_model.generate_uuid()
     db_sub_message = chat_model.SubMessage(
+        id=final_id,  # 显式赋值 ID
         messageId=message_id,
         content=sub_message_data.content,
         sortOrder=sub_message_data.sortOrder,

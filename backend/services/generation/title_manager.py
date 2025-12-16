@@ -2,23 +2,27 @@
 import json
 from typing import AsyncGenerator, List, Optional
 
-from backend.services.generation.base import AbstractGenerateManager
-from backend.services.generation.instructions import SetFinalStatus, UpdateChatName, BaseInstruction
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.services.generation.simple_manager import SimpleChatGenerateManager
+from backend.services.generation.instructions import (
+    BaseInstruction,
+    SetFinalStatus,
+    UpdateChatName
+)
 from backend.services.generation.llm_io import LLMInput, WorkerOutput
-from backend.services.stream_manager_service import stream_manager
 from backend.crud import setting_crud, provider_crud, chat_crud
 from backend.models import chat_model
 from backend import schemas
-from backend.routers.notifications import GLOBAL_NOTIFICATIONS_STREAM_ID
 
 
-class TitleGenerateManager(AbstractGenerateManager):
+class TitleGenerateManager(SimpleChatGenerateManager):
     """
     负责为会话自动生成标题的管理器。
     它准备一个特殊的LLM输入，请求模型生成标题，然后解析响应并更新会话名称。
     """
 
-    def __init__(self, db_session):
+    def __init__(self, db_session: AsyncSession):
         super().__init__(db_session)
         self.chat_id: Optional[str] = None
         self.error_occurred = False
@@ -108,6 +112,7 @@ class TitleGenerateManager(AbstractGenerateManager):
     ) -> AsyncGenerator[BaseInstruction, None]:
         """
         将Worker的输出翻译成更新会话名称的指令。
+        覆盖 SimpleChatGenerateManager 的默认行为。
         """
         if self.error_occurred:
             return
@@ -136,38 +141,17 @@ class TitleGenerateManager(AbstractGenerateManager):
             print(f"[TitleGenerateManager] Worker error: {output.content}")
             yield SetFinalStatus(status=schemas.enums.MessageStatus.FAILED)
 
-    async def _process_custom_instruction(
-        self,
-        instruction: BaseInstruction,
-        assistant_message_id: str
-    ) -> Optional[schemas.enums.MessageStatus]:
+    async def _cleanup_on_exception(
+            self,
+            assistant_message_id: str,
+            final_status: schemas.enums.MessageStatus,
+            exception: Optional[Exception] = None
+    ) -> AsyncGenerator[BaseInstruction, None]:
         """
-        处理自定义的 UpdateChatName 指令，并在成功后发布通知。
-        """
-        if isinstance(instruction, UpdateChatName):
-            await chat_crud.update_chat(
-                self.db_session,
-                chat_id=instruction.chat_id,
-                chat_update=schemas.ChatUpdate(name=instruction.new_name)
-            )
-            print(f"[TitleGenerateManager] Successfully updated chat '{instruction.chat_id}' name to '{instruction.new_name}'.")
-
-            notification_payload = {
-                "type": "chat_update",
-                "payload": {
-                    "id": instruction.chat_id,
-                    "name": instruction.new_name
-                }
-            }
-            await stream_manager.publish(GLOBAL_NOTIFICATIONS_STREAM_ID, notification_payload)
-
-            return None
-        return await super()._process_custom_instruction(instruction, assistant_message_id)
-
-    async def _cleanup_on_exception(self, assistant_message_id: str, final_status: schemas.enums.MessageStatus):
-        """
-        此管理器不创建子消息，因此无需清理。
+        此管理器不创建子消息，因此无需复杂的清理，仅记录日志。
         """
         print(f"[TitleGenerateManager] Cleanup for task '{assistant_message_id}' with status {final_status.value}.")
-        pass
+        # 空的生成器
+        if False:
+            yield
 

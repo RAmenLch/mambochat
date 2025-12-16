@@ -2,6 +2,7 @@
 
 from pydantic import BaseModel
 from datetime import datetime
+from typing import Optional
 
 class FileBase(BaseModel):
     """文件共享的基本字段"""
@@ -9,12 +10,16 @@ class FileBase(BaseModel):
     mime_type: str
     size: int
 
+class FileCreate(FileBase):
+    """[新增] 用于创建文件的Schema，支持预生成ID"""
+    id: Optional[str] = None
+    management_type: str
+
 class File(FileBase):
     """用于API响应的文件模型"""
     id: str
     created_at: datetime
-    url: str  # 文件的可访问URL，将在服务层动态生成
+    url: str
 
     class Config:
         from_attributes = True
-

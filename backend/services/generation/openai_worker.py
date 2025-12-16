@@ -4,7 +4,7 @@ import json
 import traceback
 from typing import AsyncGenerator, Dict, Any, List
 
-from backend.services.generation.base import AbstractGenerateWorker
+from backend.services.generation.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.llm_io import LLMInput, WorkerOutput
 
 

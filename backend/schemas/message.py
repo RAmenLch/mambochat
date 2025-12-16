@@ -28,7 +28,7 @@ class SubMessageBase(BaseModel):
 
 class SubMessageCreate(SubMessageBase):
     sortOrder: int = Field(..., description="分区的排序权重")
-
+    id: Optional[str] = Field(None, description="预生成的UUID，如果未提供则自动生成")
 
 class SubMessageUpdate(BaseModel):
     content: Optional[str] = None
