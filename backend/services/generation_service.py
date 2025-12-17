@@ -235,6 +235,25 @@ async def run_zip_history_generation_task(chat_id: str, target_message_id: str):
             manager = ZipHistoryGenerateManager(db_session=db)
             executor = InstructionExecutor(db_session=db)
 
+            # 状态检查与初始化
+            target_message = await message_crud.get_message(db, target_message_id)
+            if target_message:
+                for sub in target_message.sub_messages:
+                    if sub.type == SubMessageType.ZIP_HISTORY.value:
+                        manager.sub_message_id = sub.id
+
+                        try:
+                            config_obj = json.loads(sub.config) if isinstance(sub.config, str) else sub.config or {}
+                            if config_obj.get('zip_enable') is True:
+                                config_obj['zip_enable'] = False
+                                update_schema = schemas.message.SubMessageUpdate(
+                                    config=schemas.message.SubMessageConfig(**config_obj)
+                                )
+                                await message_crud.update_sub_message(db, sub.id, update_schema)
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                        break
+
             # 在 ZipHistoryManager 中，assistant_message_id 被用作 target_message_id
             async for instruction in manager.run(worker, chat_id, target_message_id):
                 await executor.execute(

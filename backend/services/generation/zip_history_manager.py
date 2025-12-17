@@ -185,37 +185,10 @@ class ZipHistoryGenerateManager(SimpleChatGenerateManager):
     ) -> AsyncGenerator[BaseInstruction, None]:
         """
         重写 run 方法。
-        在开始生成前，先检查目标消息是否已启用压缩历史。
-        如果是，发出指令将其禁用，并获取现有的 sub_message_id 以便进行更新而不是创建。
+        记录 target_message_id。
         """
         self.target_message_id = assistant_message_id
-
-        target_message = await message_crud.get_message(self.db_session, assistant_message_id)
-        if target_message:
-            for sub in target_message.sub_messages:
-                if sub.type == schemas_enums.SubMessageType.ZIP_HISTORY.value:
-                    # 找到了现有的 ZipHistory
-                    self.sub_message_id = sub.id
-
-                    try:
-                        config_obj = json.loads(sub.config) if isinstance(sub.config, str) else sub.config
-                        # 仅当目标消息的压缩历史处于启用状态时，才将其禁用
-                        # 这样做是为了防止上下文构建逻辑在遇到当前消息的压缩历史时停止回溯
-                        if config_obj and config_obj.get('zip_enable') is True:
-                            config_obj['zip_enable'] = False
-
-                            # 发出指令更新配置
-                            yield UpdateSubMessageConfig(
-                                sub_message_id=sub.id,
-                                config=config_obj
-                            )
-                            # 注意：Executor 执行此指令后，DB 更新完成。
-                            # 随后调用的 super().run() -> _prepare_context 将能读取到更新后的状态。
-                            break
-                    except (json.JSONDecodeError, TypeError):
-                        continue
 
         # 执行基类的生成流程
         async for instruction in super().run(worker, chat_id, assistant_message_id):
             yield instruction
-

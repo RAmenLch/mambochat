@@ -153,6 +153,7 @@ async def _build_llm_messages_payload(
             if merged_parts:
                 content = merged_parts[0]['text'] if len(merged_parts) == 1 and merged_parts[0][
                     'type'] == 'text' else merged_parts
+                message_obj["content"] = content
             else:
                 # 某些模型（如OpenAI）允许只发tool_calls不发content，但通常需要content不为None
                 if not current_tool_calls:
