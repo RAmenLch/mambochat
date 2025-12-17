@@ -1,12 +1,14 @@
 # backend/services/generation/instruction_executor.py
 
 import json
-from typing import Optional, Dict, Any
+import base64
+from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend import schemas
 from backend.crud import message_crud, chat_crud, file_crud
 from backend.services.stream_manager_service import stream_manager
+from backend.services.storage_service import storage_service
 from backend.services.generation.instructions import (
     BaseInstruction,
     CreateSubMessage,
@@ -16,7 +18,7 @@ from backend.services.generation.instructions import (
     UpdateSubMessageConfig,
     SetFinalStatus,
     UpdateChatName,
-    PersistFileRecord,
+    SaveAndPersistFile,
     UpdateZipHistorySubMessage
 )
 from backend.routers.notifications import GLOBAL_NOTIFICATIONS_STREAM_ID
@@ -25,7 +27,7 @@ from backend.routers.notifications import GLOBAL_NOTIFICATIONS_STREAM_ID
 class InstructionExecutor:
     """
     指令执行器。
-    负责接收来自 Manager 的纯数据指令，执行相应的数据库 CRUD 操作，
+    负责接收来自 Manager 的纯数据指令，执行相应的 IO 操作或数据库 CRUD 操作，
     并向 stream_manager 推送实时更新事件。
     """
 
@@ -65,8 +67,8 @@ class InstructionExecutor:
         elif isinstance(instruction, UpdateSubMessageConfig):
             await self._execute_update_sub_message_config(instruction, assistant_message_id)
 
-        elif isinstance(instruction, PersistFileRecord):
-            await self._execute_persist_file_record(instruction)
+        elif isinstance(instruction, SaveAndPersistFile):
+            await self._execute_save_and_persist_file(instruction)
 
         elif isinstance(instruction, UpdateChatName):
             await self._execute_update_chat_name(instruction)
@@ -176,17 +178,30 @@ class InstructionExecutor:
         except Exception as e:
             print(f"[InstructionExecutor] Failed to update config for {instruction.sub_message_id}: {e}")
 
-    async def _execute_persist_file_record(self, instruction: PersistFileRecord):
+    async def _execute_save_and_persist_file(self, instruction: SaveAndPersistFile):
+        """处理文件保存逻辑：解码 Base64 -> IO 存储 -> 数据库记录"""
+        # 1. 解码 Base64 数据
+        file_bytes = base64.b64decode(instruction.base64_data)
+        size = len(file_bytes)
+
+        # 2. 执行物理存储 IO
+        # 如果此处发生异常，执行器会抛出异常中断流程，防止后续的 CreateSubMessage 被执行
+        storage_path = await storage_service.save_from_bytes(
+            data=file_bytes,
+            filename=instruction.filename,
+            sub_path="chat_attachments"
+        )
+
+        # 3. 创建数据库记录
         await file_crud.create_file(
             db=self.db_session,
             filename=instruction.filename,
-            storage_path=instruction.storage_path,
+            storage_path=storage_path,
             mime_type=instruction.mime_type,
-            size=instruction.size,
+            size=size,
             management_type=instruction.management_type,
-            file_id=instruction.file_id  # 使用预生成的 ID
+            file_id=instruction.file_id  # 使用指令预生成的 ID
         )
-        # 此操作不直接推送流，通常由随后的 CreateSubMessage 触发 UI 更新
 
     async def _execute_update_chat_name(self, instruction: UpdateChatName):
         await chat_crud.update_chat(
@@ -208,13 +223,6 @@ class InstructionExecutor:
     async def _execute_update_zip_history(self, instruction: UpdateZipHistorySubMessage, chat_id: str,
                                           assistant_message_id: str):
         # 处理 ZipHistory 的特殊逻辑：存在则更新，不存在则创建
-        # 这是一个兼容旧逻辑的复合操作
-
-        # 1. 尝试查找现有的 ZipHistory (通过遍历 assistant_message 的子消息)
-        # 由于我们这里只接收到 sub_message_id (可能是新的)，我们假设 Manager 已经决定了是 update 还是 create。
-        # 但为了兼容旧的 ZipHistoryManager 逻辑（它只知道 target_message_id），我们需要更灵活一点。
-        # 如果 instruction.sub_message_id 指向已存在的记录，则更新；否则创建。
-
         existing = await message_crud.get_sub_message(self.db_session, instruction.sub_message_id)
 
         updated_sub_message = None

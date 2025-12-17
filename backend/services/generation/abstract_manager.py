@@ -11,7 +11,7 @@ from backend.services.generation.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.instructions import BaseInstruction
 from backend.services.generation.llm_io import LLMInput, WorkerOutput
 from backend.models import chat_model
-from backend.crud import chat_crud, setting_crud, message_crud
+from backend.crud import chat_crud, message_crud
 from backend.schemas import enums as schemas_enums
 from backend.services.stream_manager_service import stream_manager
 
@@ -84,15 +84,10 @@ class AbstractGenerateManager(ABC):
         if not db_chat:
             raise ValueError(f"Chat with id {chat_id} not found.")
 
+        # 如果会话未配置模型，抛出错误。
+        # 补全默认模型的逻辑已移至 Service 层处理，此处仅做校验。
         if not db_chat.aiModelId:
-            default_model_setting = await setting_crud.get_setting(self.db_session, key="default_model_id")
-            if default_model_setting and default_model_setting.value:
-                db_chat.aiModelId = default_model_setting.value
-                await self.db_session.commit()
-                await self.db_session.refresh(db_chat)
-                db_chat = await chat_crud.get_chat(self.db_session, chat_id=chat_id)
-            else:
-                raise ValueError("当前会话未指定模型，且未设置全局默认模型。")
+            raise ValueError("当前会话未指定模型，且系统未能自动应用默认模型。")
 
         model_params = {}
         if db_chat.modelParameters:
@@ -160,4 +155,3 @@ class AbstractGenerateManager(ABC):
             # 发生异常时，调用子类的清理逻辑生成指令
             async for instruction in self._cleanup_on_exception(assistant_message_id, overall_status, e):
                 yield instruction
-

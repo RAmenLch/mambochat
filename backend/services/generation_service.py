@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import AsyncGenerator, Tuple
 
 from backend.services.stream_manager_service import stream_manager
-from backend.crud import chat_crud, message_crud, file_crud, resource_crud
+from backend.crud import chat_crud, message_crud, file_crud, resource_crud, setting_crud
 from backend import schemas
 from backend.models import chat_model
 from backend.database import AsyncSessionLocal
@@ -141,6 +141,20 @@ async def create_user_message_and_prepare_generation(
     return user_message, assistant_placeholder
 
 
+async def _ensure_chat_model_configured(db: AsyncSession, chat_id: str) -> None:
+    """确保会话配置了 AI 模型，如果没有，尝试使用全局默认配置进行修补"""
+    db_chat = await chat_crud.get_chat(db, chat_id=chat_id)
+    if not db_chat:
+        return
+
+    if not db_chat.aiModelId:
+        default_model_setting = await setting_crud.get_setting(db, key="default_model_id")
+        if default_model_setting and default_model_setting.value:
+            db_chat.aiModelId = default_model_setting.value
+            await db.commit()
+            await db.refresh(db_chat)
+
+
 async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
     """
     后台任务：协调整个生成过程。它实例化 Executor、Worker 和 Manager，
@@ -148,6 +162,9 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
     """
     async with AsyncSessionLocal() as db:
         try:
+            # 在实例化 Manager 之前，确保 Chat 数据是就绪的 (AI Model ID 已配置)
+            await _ensure_chat_model_configured(db, chat_id)
+
             # 1. 实例化核心组件
             worker = OpenAIGenerateWorker()
             manager = DefaultGenerateManager(db_session=db)

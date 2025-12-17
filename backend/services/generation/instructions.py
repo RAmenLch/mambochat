@@ -15,7 +15,7 @@ class CreateSubMessage(BaseInstruction):
 
     Manager 必须在发出此指令前预先生成 UUID 并赋值给 sub_message_id。
     """
-    sub_message_id: str = Field(..., description="预生成的子消息UUID (原 temp_ref_id)")
+    sub_message_id: str = Field(..., description="预生成的子消息UUID")
     type: str = SubMessageType.NORMAL.value
     sortOrder: int
     status: MessageStatus = MessageStatus.GENERATING
@@ -25,7 +25,7 @@ class CreateSubMessage(BaseInstruction):
 
 class AppendToSubMessage(BaseInstruction):
     """指令：向指定的子消息追加内容。"""
-    sub_message_id: str = Field(..., description="目标子消息UUID (原 temp_ref_id)")
+    sub_message_id: str = Field(..., description="目标子消息UUID")
     content: str
 
 
@@ -58,18 +58,18 @@ class UpdateChatName(BaseInstruction):
     new_name: str
 
 
-class PersistFileRecord(BaseInstruction):
-    """指令：在数据库中持久化一个文件记录。
+class SaveAndPersistFile(BaseInstruction):
+    """指令：保存物理文件并在数据库创建记录。
 
-    通常在 Manager 处理生成图片等二进制资源时使用。
-    Manager 负责 IO 保存，然后发出此指令在 DB 创建记录。
+    通常在 Worker 生成图片等二进制资源后使用。
+    Manager 负责提供预生成的 file_id 和 base64 数据。
+    Executor 负责解码、IO 保存，并在 DB 创建记录。
     此指令通常紧随一个引用此 file_id 的 CreateSubMessage 指令。
     """
     file_id: str = Field(..., description="预生成的文件UUID")
     filename: str
-    storage_path: str
+    base64_data: str = Field(..., description="文件的Base64编码字符串（不含Header）")
     mime_type: str
-    size: int
     management_type: str = FileManagementType.SUB_MESSAGE.value
 
 

@@ -12,7 +12,7 @@ from backend.services.generation.instructions import (
     BaseInstruction,
     CreateSubMessage,
     AppendToSubMessage,
-    PersistFileRecord
+    SaveAndPersistFile
 )
 from backend.services.generation.llm_io import LLMInput, WorkerOutput
 from backend.crud import setting_crud, file_crud
@@ -153,7 +153,6 @@ async def _build_llm_messages_payload(
             if merged_parts:
                 content = merged_parts[0]['text'] if len(merged_parts) == 1 and merged_parts[0][
                     'type'] == 'text' else merged_parts
-                message_obj["content"] = content
             else:
                 # 某些模型（如OpenAI）允许只发tool_calls不发content，但通常需要content不为None
                 if not current_tool_calls:
@@ -162,10 +161,18 @@ async def _build_llm_messages_payload(
                 else:
                     message_obj["content"] = None
 
+            if "content" in message_obj or current_tool_calls:
+                # 再次确认content存在，上面逻辑可能导致KeyError如果content未设置
+                if "content" in message_obj:
+                    pass
+                else:
+                    # 补全 content 为 None
+                    message_obj["content"] = None
+
             if current_tool_calls:
                 message_obj["tool_calls"] = current_tool_calls
 
-            if "content" in message_obj or "tool_calls" in message_obj:
+            if message_obj.get("content") is not None or "tool_calls" in message_obj:
                 messages_payload.append(message_obj)
 
             # 2. 紧随其后添加工具结果消息 (Role: Tool)
@@ -264,7 +271,7 @@ async def _build_llm_messages_payload(
         if current_tool_calls:
             message_obj["tool_calls"] = current_tool_calls
 
-        if "content" in message_obj or "tool_calls" in message_obj:
+        if message_obj.get("content") is not None or "tool_calls" in message_obj:
             messages_payload.append(message_obj)
 
         if pending_tool_results:
@@ -353,39 +360,34 @@ class DefaultGenerateManager(ReActAgentChatGenerateManager):
     async def _handle_custom_worker_output(self, output: WorkerOutput) -> AsyncGenerator[BaseInstruction, None]:
         """
         处理基类不支持的自定义输出类型，例如生成的图片。
+        不再执行IO操作，而是发出 SaveAndPersistFile 指令交由 Executor 处理。
         """
         if output.type == "image_content":
             try:
+                # 解析 Base64 数据字符串
+                # 格式通常为: data:image/png;base64,iVBORw0KGgo...
                 header, encoded_data = output.content.split(',', 1)
                 mime_type = header.split(';')[0].split(':')[1]
                 file_extension = mime_type.split('/')[-1] if '/' in mime_type else 'bin'
 
-                image_bytes = base64.b64decode(encoded_data)
-
                 filename = f"generated_image.{file_extension}"
 
-                # 1. 保存文件到物理存储 (IO操作允许在Manager中执行)
-                storage_path = await storage_service.save_from_bytes(
-                    data=image_bytes,
-                    filename=filename,
-                    sub_path="chat_attachments"
-                )
-
-                # 2. 预生成 ID
+                # 1. 预生成 ID
                 file_id = generate_uuid()
                 sub_message_id = generate_uuid()
 
-                # 3. 发出持久化文件记录的指令
-                yield PersistFileRecord(
+                # 2. 发出保存并持久化文件的指令 (包含完整数据负载)
+                # Executor 将负责解码、物理存储 IO 和数据库记录创建
+                yield SaveAndPersistFile(
                     file_id=file_id,
                     filename=filename,
-                    storage_path=storage_path,
+                    base64_data=encoded_data,
                     mime_type=mime_type,
-                    size=len(image_bytes),
                     management_type=schemas_enums.FileManagementType.SUB_MESSAGE.value
                 )
 
-                # 4. 发出创建子消息的指令 (引用文件ID)
+                # 3. 发出创建子消息的指令 (引用文件ID)
+                # 只有上一条指令成功执行，这一条才会被处理
                 yield CreateSubMessage(
                     sub_message_id=sub_message_id,
                     type=schemas_enums.SubMessageType.FILE.value,
@@ -396,13 +398,12 @@ class DefaultGenerateManager(ReActAgentChatGenerateManager):
                 )
 
             except Exception as e:
-                print(f"Error processing generated image: {e}")
+                print(f"Error processing generated image instruction: {e}")
                 # 如果主内容正在生成，尝试将错误追加进去
                 if self._content_id:
                     yield AppendToSubMessage(
                         sub_message_id=self._content_id,
-                        content=f"\n\n**处理生成图片时出错: {e}**"
+                        content=f"\n\n**处理生成图片指令时出错: {e}**"
                     )
-                # 否则（虽然在 DefaultManager 中很少见），可以抛出让基类清理
                 else:
                     raise e

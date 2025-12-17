@@ -37,7 +37,7 @@ class SimpleChatGenerateManager(AbstractGenerateManager):
     ) -> AsyncGenerator[BaseInstruction, None]:
         """
         将 Worker 输出转换为指令。
-        维护内部 ID 状态，不再依赖外部的 temp_ref_id_map。
+        维护内部 ID 状态。
         """
         if output.type == "reasoning":
             if not self._reasoning_id:
