@@ -3,7 +3,7 @@ import asyncio
 import json
 import traceback
 from types import SimpleNamespace
-from typing import AsyncGenerator, List, Dict, Optional, Any
+from typing import AsyncGenerator, List, Dict, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,8 +17,9 @@ from backend.services.generation.instructions import (
     UpdateSubMessageContent,
     SetFinalStatus
 )
-from backend.services.generation.llm_io import WorkerOutput
-from backend.schemas import enums as schemas_enums
+from backend.services.generation.llm_io import WorkerOutput, LLMInput
+from backend.services.generation.llm_input_builder import LLMInputBuilder
+from backend.schemas import enums as schemas_enums, SubMessageType
 from backend.models.base_model import generate_uuid
 from backend.config.mcp_config import MCP_SERVER_ENABLED, BING_MCP_SERVER_PATH
 from backend.services.mcp_service import McpClientService
@@ -43,6 +44,50 @@ class ReActAgentChatGenerateManager(AbstractGenerateManager):
         # 工具调用 ID 到 SubMessage ID 的映射，用于后续更新执行结果
         self._tool_sub_msg_map: Dict[str, str] = {}
 
+    def _create_builder(self, chat_id: str, assistant_message_id: str) -> LLMInputBuilder:
+        """
+        创建并配置 LLMInputBuilder 的辅助方法。
+        集中了通用的上下文过滤和多模态配置逻辑。
+        """
+        builder = LLMInputBuilder(self.db_session, chat_id=chat_id)
+        (
+            builder
+            .slice_until_message(assistant_message_id)
+            .filter_sub_message_types(SubMessageType.NORMAL,SubMessageType.MCP_TOOL,SubMessageType.FILE)
+            .enable_image_with_model()
+            .enable_cpl_filter()
+        )
+        return builder
+
+    async def _prepare_llm_input(
+            self,
+            chat_id: str,
+            assistant_message_id: str
+    ) -> LLMInput:
+        """
+        实现基类抽象方法。
+        注意：在 run 方法的 ReAct 循环中，我们会直接操作 builder，
+        此方法主要用于满足接口契约或单次生成的场景。
+        """
+        builder = self._create_builder(chat_id, assistant_message_id)
+
+        # 初次构建以加载 Chat 和配置
+        llm_input = await builder.build()
+
+        # 处理 max_context_messages
+        if builder.chat and builder.chat.modelParameters:
+            try:
+                params = json.loads(builder.chat.modelParameters) if isinstance(builder.chat.modelParameters,
+                                                                                str) else builder.chat.modelParameters
+                limit = params.get('max_context_messages')
+                if isinstance(limit, int) and limit > 0:
+                    builder.slice(start=-limit)
+                    llm_input = await builder.build()
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        return llm_input
+
     async def run(
             self,
             worker: AbstractGenerateWorker,
@@ -56,10 +101,28 @@ class ReActAgentChatGenerateManager(AbstractGenerateManager):
         mcp_service = None
 
         try:
-            # 1. 准备初始上下文
-            db_chat, history_messages = await self._prepare_context(chat_id, assistant_message_id)
+            # 1. 初始化 Builder 并进行初次构建
+            builder = self._create_builder(chat_id, assistant_message_id)
+            llm_input = await builder.build()
 
-            # 2. 初始化 MCP 服务
+            # 2. 获取 Chat 对象及配置 (Builder 已加载)
+            db_chat = builder.chat
+
+            # 3. 处理 max_context_messages
+            # 注意：这将影响后续所有循环的上下文窗口
+            if db_chat.modelParameters:
+                try:
+                    params = json.loads(db_chat.modelParameters) if isinstance(db_chat.modelParameters,
+                                                                               str) else db_chat.modelParameters
+                    limit = params.get('max_context_messages')
+                    if isinstance(limit, int) and limit > 0:
+                        builder.slice(start=-limit)
+                        # 重新构建以应用切片
+                        llm_input = await builder.build()
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # 4. 初始化 MCP 服务
             enabled_mcp_ids = []
             if db_chat.modelParameters:
                 try:
@@ -71,35 +134,35 @@ class ReActAgentChatGenerateManager(AbstractGenerateManager):
 
             openai_tools = None
             if MCP_SERVER_ENABLED and enabled_mcp_ids:
-                # 目前仅支持单一 Bing MCP Server，未来可根据 IDs 动态加载
                 mcp_service = McpClientService(str(BING_MCP_SERVER_PATH))
                 await mcp_service.connect()
                 openai_tools = await mcp_service.get_openai_tools()
 
-            # 3. ReAct 循环
-            current_history = list(history_messages)
+            # 5. ReAct 循环准备
+            # 使用 Builder 加载的原始历史记录作为基准 (不受 slice 影响，slice 仅在 build 时应用)
+            current_history = list(builder.history)
 
-            # 用于在循环中累积当前 Assistant 消息的生成内容，以便在下一轮作为上下文
+            # 用于在循环中累积当前 Assistant 消息的生成内容
             current_assistant_content_buffer = []
 
-            # 循环计数器，防止无限循环
             loop_count = 0
             MAX_LOOPS = 10
 
             while loop_count < MAX_LOOPS:
-                # 在每轮 ReAct 循环开始前检查取消
+                # 检查取消
                 if await stream_manager.is_cancellation_requested(assistant_message_id):
                     raise asyncio.CancelledError("Generation was cancelled by user request.")
 
                 loop_count += 1
 
-                # 准备 LLM 输入
-                llm_input = await self._prepare_llm_input(db_chat, current_history)
+                # 如果不是第一轮，或者历史记录发生了变化，需要更新 Builder
+                if loop_count > 1:
+                    builder.set_history_override(current_history)
+                    llm_input = await builder.build()
 
                 # 注入工具
                 if openai_tools:
                     llm_input.tools = openai_tools
-                    # llm_input.tool_choice = "auto" # 默认通常是 auto
 
                 # 生成
                 worker_output_generator = worker.generate(llm_input)
@@ -108,30 +171,22 @@ class ReActAgentChatGenerateManager(AbstractGenerateManager):
                 self._current_turn_tool_calls = []
 
                 async for output in worker_output_generator:
-                    # 在流式接收过程中检查取消
                     if await stream_manager.is_cancellation_requested(assistant_message_id):
                         raise asyncio.CancelledError("Generation was cancelled by user request.")
 
-                    # 翻译指令并 Yield
                     async for instruction in self._translate_worker_output_to_instructions(output):
                         yield instruction
 
-                    # 累积内容用于上下文回填
                     if output.type == "content" and output.content:
                         current_assistant_content_buffer.append(output.content)
 
                 # 检查是否有工具调用需要执行
                 if not self._current_turn_tool_calls:
-                    # 没有工具调用，生成结束
                     break
 
-                    # --- 执行阶段 (Acting) ---
-
-                # 1. 执行工具并更新 SubMessage
-                current_turn_executed_tools = []
+                # --- 执行阶段 (Acting) ---
 
                 for tool_item in self._current_turn_tool_calls:
-                    # 在执行每个工具前检查取消
                     if await stream_manager.is_cancellation_requested(assistant_message_id):
                         raise asyncio.CancelledError("Generation was cancelled by user request.")
 
@@ -141,29 +196,19 @@ class ReActAgentChatGenerateManager(AbstractGenerateManager):
 
                     try:
                         args = json.loads(tool_data["arguments"])
-                        # 执行工具
                         result_str = await mcp_service.call_tool(tool_data["name"], args)
                         tool_data["result"] = result_str
                     except Exception as e:
                         tool_data["result"] = f"Error executing tool: {str(e)}"
                         tool_data["is_error"] = True
 
-                    # 更新 SubMessage 内容和状态
                     if sub_msg_id:
                         updated_content = json.dumps(tool_data, ensure_ascii=False)
                         yield UpdateSubMessageContent(sub_message_id=sub_msg_id, content=updated_content)
                         yield UpdateSubMessageStatus(sub_message_id=sub_msg_id,
                                                      status=schemas_enums.MessageStatus.COMPLETED)
 
-                    # 记录执行结果，用于构建上下文
-                    current_turn_executed_tools.append({
-                        "id": tool_call_id,
-                        "data": tool_data  # 包含 result
-                    })
-
-                # 2. 更新上下文 (current_history) 以便下一轮生成
-
-                # A. 构造上一轮的 Assistant 消息 (包含文本和工具调用请求)
+                # 更新上下文
                 assistant_content = "".join(
                     current_assistant_content_buffer) if current_assistant_content_buffer else None
 
@@ -177,7 +222,6 @@ class ReActAgentChatGenerateManager(AbstractGenerateManager):
                     ))
 
                 for tool_item in self._current_turn_tool_calls:
-                    # 历史记录中的 MCP_TOOL sub_message 应该包含原始调用信息
                     virtual_assistant_subs.append(SimpleNamespace(
                         type=schemas_enums.SubMessageType.MCP_TOOL.value,
                         content=json.dumps(tool_item["data"], ensure_ascii=False),
@@ -190,12 +234,7 @@ class ReActAgentChatGenerateManager(AbstractGenerateManager):
                     sub_messages=virtual_assistant_subs
                 )
                 current_history.append(virtual_assistant_msg)
-
-                # 重置 buffer，因为下一轮是新的 Assistant 消息
                 current_assistant_content_buffer = []
-                # `_current_turn_tool_calls` 会在循环开始时重置
-
-                # 继续下一轮循环...
 
         except (asyncio.CancelledError, Exception) as e:
             if isinstance(e, asyncio.CancelledError):
@@ -247,7 +286,6 @@ class ReActAgentChatGenerateManager(AbstractGenerateManager):
         elif output.type == "tool_call":
             if output.tool_calls:
                 for tool_call in output.tool_calls:
-                    # 构造工具调用的存储结构
                     tool_data = {
                         "tool_call_id": tool_call.get("id"),
                         "name": tool_call.get("function", {}).get("name"),
@@ -257,21 +295,18 @@ class ReActAgentChatGenerateManager(AbstractGenerateManager):
                     }
                     json_content = json.dumps(tool_data, ensure_ascii=False)
 
-                    # 生成 ID
                     sub_id = generate_uuid()
                     self._tool_sub_msg_map[tool_data["tool_call_id"]] = sub_id
 
-                    # 记录到内存以便后续执行 (ReAct 循环使用)
                     self._current_turn_tool_calls.append({
                         "data": tool_data,
-                        "temp_ref_id": sub_id  # 这里的 key 其实用不到了，主要是 data
+                        "temp_ref_id": sub_id
                     })
 
-                    # 发出创建子消息指令
                     yield CreateSubMessage(
                         sub_message_id=sub_id,
                         type=schemas_enums.SubMessageType.MCP_TOOL.value,
-                        sortOrder=2,  # 放在内容之后
+                        sortOrder=2,
                         status=schemas_enums.MessageStatus.GENERATING,
                         initial_content=json_content,
                         config={"is_minimal": True}
@@ -282,14 +317,11 @@ class ReActAgentChatGenerateManager(AbstractGenerateManager):
                 self._final_usage_data = output.usage
 
         elif output.type == "done":
-            # 如果本轮有工具调用，Manager 的 run 循环会继续，这里不结束整个消息
-            # 仅结束当前 Content/Reasoning 分区状态
             if self._content_id:
                 yield UpdateSubMessageStatus(
                     sub_message_id=self._content_id,
                     status=schemas_enums.MessageStatus.COMPLETED
                 )
-                # 为了支持下一轮生成新的 Content，重置 ID
                 self._content_id = None
 
             if self._reasoning_id:
@@ -300,7 +332,6 @@ class ReActAgentChatGenerateManager(AbstractGenerateManager):
                 self._reasoning_id = None
 
             if not self._current_turn_tool_calls:
-                # 只有当没有工具调用时，才生成 Usage 和 FinalStatus
                 if self._final_usage_data:
                     self._usage_id = generate_uuid()
                     usage_content = json.dumps(self._final_usage_data)
@@ -317,7 +348,6 @@ class ReActAgentChatGenerateManager(AbstractGenerateManager):
         elif output.type == "error":
             raise RuntimeError(output.content)
 
-        # 允许子类扩展其他类型的处理（如 DefaultManager 处理 image_content）
         else:
             async for instruction in self._handle_custom_worker_output(output):
                 yield instruction
@@ -348,20 +378,12 @@ class ReActAgentChatGenerateManager(AbstractGenerateManager):
                 else:
                     error_content = f"发生未处理的异常: {str(exception)}"
 
-        # 1. 更新活跃的 Reasoning/Content 分区状态
-        # 注意：ReAct 循环中 ID 可能被重置，但这里只能尝试清理当前持有的 ID
         if self._reasoning_id:
             yield UpdateSubMessageStatus(sub_message_id=self._reasoning_id, status=final_status)
         if self._content_id:
             yield UpdateSubMessageStatus(sub_message_id=self._content_id, status=final_status)
 
-        # 2. 更新活跃的 Tool 分区状态
-        for tool_id, sub_id in self._tool_sub_msg_map.items():
-            pass  # 简单跳过，不强制更新所有 Tool 状态，依赖 FinalStatus
-
-        # 3. 展示错误信息
         if error_content:
-            # 如果有正在生成的 Content，追加错误
             if self._content_id:
                 yield AppendToSubMessage(
                     sub_message_id=self._content_id,
@@ -376,4 +398,3 @@ class ReActAgentChatGenerateManager(AbstractGenerateManager):
                     status=final_status,
                     initial_content=error_content
                 )
-

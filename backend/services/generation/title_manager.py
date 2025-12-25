@@ -1,9 +1,10 @@
 # backend/services/generation/title_manager.py
 import json
-from typing import AsyncGenerator, List, Optional
+from typing import AsyncGenerator, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.schemas import SubMessageType
 from backend.services.generation.simple_manager import SimpleChatGenerateManager
 from backend.services.generation.instructions import (
     BaseInstruction,
@@ -11,8 +12,7 @@ from backend.services.generation.instructions import (
     UpdateChatName
 )
 from backend.services.generation.llm_io import LLMInput, WorkerOutput
-from backend.crud import setting_crud, provider_crud, chat_crud
-from backend.models import chat_model
+from backend.services.generation.llm_input_builder import LLMInputBuilder
 from backend import schemas
 
 
@@ -29,82 +29,44 @@ class TitleGenerateManager(SimpleChatGenerateManager):
 
     async def _prepare_llm_input(
         self,
-        db_chat: chat_model.Chat,
-        history_messages: List[chat_model.Message]
+        chat_id: str,
+        assistant_message_id: str
     ) -> LLMInput:
         """
         准备用于生成标题的LLM输入。
+        使用 LLMInputBuilder 替代原有的 CRUD 读取和构建逻辑。
         """
-        self.chat_id = db_chat.id
+        self.chat_id = chat_id
 
-        # 1. 获取标题生成模型ID，如果未设置则回退到全局默认模型
-        model_id_to_use = None
-        title_model_setting = await setting_crud.get_setting(self.db_session, "title_generation_model_id")
-        if title_model_setting and title_model_setting.value:
-            model_id_to_use = title_model_setting.value
-        else:
-            default_model_setting = await setting_crud.get_setting(self.db_session, "default_model_id")
-            if default_model_setting and default_model_setting.value:
-                model_id_to_use = default_model_setting.value
-
-        if not model_id_to_use:
-            raise ValueError("未配置标题生成模型, 且未设置全局默认模型作为备选。")
-
-        # 2. 获取模型及其提供商信息
-        model = await provider_crud.get_model(self.db_session, model_id=model_id_to_use)
-        if not model or not model.provider:
-            raise ValueError(f"用于生成标题的模型ID '{model_id_to_use}' 未找到或未关联提供商。")
-        provider = model.provider
-
-        # 3. 构建Prompt
         system_prompt = (
             "你是一个对话标题生成器。请根据以下对话内容, "
             "为其生成一个简洁、精确、不超过12个字[len(title)<12]的标题。"
             "请仅以JSON格式返回, 格式为: {\"title\": \"生成的标题\"}"
         )
 
-        # 提取对话历史用于摘要
-        context_messages = []
-        if len(history_messages) <= 4:
-            context_messages = history_messages
-        else:
-            context_messages.extend(history_messages[:2])
-            context_messages.extend(history_messages[-2:])
+        # 初始化构建器
+        builder = LLMInputBuilder(self.db_session, chat_id=chat_id)
 
-        dialogue_summary = []
-        for msg in context_messages:
-            content = " ".join([sub.content[:200] for sub in msg.sub_messages])
-            dialogue_summary.append(f"{msg.role}: {content}")
-
-        user_content = "\n".join(dialogue_summary)
-
-        messages_payload = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content}
-        ]
-
-        # 4. 准备模型参数和代理配置
-        parameters = {
-            'response_format': {'type': 'json_object'},
-            'stream': False
-        }
-
-        proxy_url = None
-        if provider.use_proxy:
-            proxy_enabled_setting = await setting_crud.get_setting(self.db_session, "proxy_enabled")
-            if proxy_enabled_setting and proxy_enabled_setting.value == 'True':
-                proxy_url_setting = await setting_crud.get_setting(self.db_session, "proxy_url")
-                if proxy_url_setting and proxy_url_setting.value:
-                    proxy_url = proxy_url_setting.value
-
-        return LLMInput(
-            model_id=model.modelId,
-            messages=messages_payload,
-            parameters=parameters,
-            api_host=provider.apiHost,
-            api_key=provider.apiKey,
-            proxy_url=proxy_url
+        # 配置构建器：
+        # 1. 优先使用全局配置的标题生成模型，其次是默认模型
+        # 2. 覆盖 System Prompt
+        # 3. 仅截取头尾各2条消息作为摘要依据
+        # 4. 禁用 ZipHistory (标题生成不需要递归处理历史压缩)
+        llm_input = await (
+            builder
+            .use_global_model(["title_generation_model_id", "default_model_id"])
+            .set_system_prompt(system_prompt)
+            .slice_head_tail(head=2, tail=2)
+            .disable_zip_history()
+            .filter_sub_message_types(SubMessageType.NORMAL)
+            .build()
         )
+        llm_input.messages.append({"role": "user", "content": "请输出标题json"}) # todo bug fix
+        # 强制覆盖特定参数
+        llm_input.set_parameter('response_format', {'type': 'json_object'})
+        llm_input.set_parameter('stream', False)
+
+        return llm_input
 
     async def _translate_worker_output_to_instructions(
         self,
@@ -154,4 +116,3 @@ class TitleGenerateManager(SimpleChatGenerateManager):
         # 空的生成器
         if False:
             yield
-

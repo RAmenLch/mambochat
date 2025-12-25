@@ -1,10 +1,13 @@
 # backend/services/generation/simple_manager.py
+import asyncio
 import json
+import traceback
+from abc import abstractmethod
 from typing import AsyncGenerator, Optional, Dict
 
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from backend.services.generation.abstract_manager import AbstractGenerateManager
+from backend.services.generation.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.instructions import (
     BaseInstruction,
     CreateSubMessage,
@@ -12,9 +15,10 @@ from backend.services.generation.instructions import (
     UpdateSubMessageStatus,
     SetFinalStatus
 )
-from backend.services.generation.llm_io import WorkerOutput
+from backend.services.generation.llm_io import WorkerOutput, LLMInput
 from backend.schemas import enums as schemas_enums
 from backend.models.base_model import generate_uuid
+from backend.services.stream_manager_service import stream_manager
 
 
 class SimpleChatGenerateManager(AbstractGenerateManager):
@@ -30,6 +34,20 @@ class SimpleChatGenerateManager(AbstractGenerateManager):
         self._content_id: Optional[str] = None
         self._usage_id: Optional[str] = None
         self._final_usage_data: Optional[Dict] = None
+
+    @abstractmethod
+    async def _prepare_llm_input(
+            self,
+            chat_id: str,
+            assistant_message_id: str
+    ) -> LLMInput:
+        """
+        【业务逻辑插槽 1】
+        将数据库对象转换为标准化的 LLM 输入。
+        这是实现者定义“如何提问”的地方 (例如，构建 prompt)。
+        """
+        pass
+
 
     async def _translate_worker_output_to_instructions(
             self,
@@ -143,3 +161,44 @@ class SimpleChatGenerateManager(AbstractGenerateManager):
                     initial_content=error_content
                 )
 
+    async def run(
+            self,
+            worker: AbstractGenerateWorker,
+            chat_id: str,
+            assistant_message_id: str
+    ) -> AsyncGenerator[BaseInstruction, None]:
+        """
+        模板方法：执行由工作者生成的指令流，并内置上下文准备、取消和错误处理逻辑。
+        Manager 不再直接执行指令，而是产出指令流供 Executor 执行。
+        """
+        try:
+            # 不再由基类直接读取数据库 (_prepare_context 已移除)，
+            # 而是将 ID 传递给子类，由子类利用 LLMInputBuilder 进行数据的读取和构建。
+            llm_input = await self._prepare_llm_input(chat_id,assistant_message_id)
+
+            worker_output_generator = worker.generate(llm_input)
+
+            async for output in worker_output_generator:
+                if await stream_manager.is_cancellation_requested(assistant_message_id):
+                    raise asyncio.CancelledError("Generation was cancelled by user request.")
+
+                instruction_generator = self._translate_worker_output_to_instructions(output)
+
+                async for instruction in instruction_generator:
+                    yield instruction
+
+        except (asyncio.CancelledError, Exception) as e:
+            overall_status = schemas_enums.MessageStatus.FAILED
+
+            if isinstance(e, asyncio.CancelledError):
+                print(f"[AbstractGenerateManager] Task cancelled for message '{assistant_message_id}'.")
+                overall_status = schemas_enums.MessageStatus.COMPLETED
+            else:
+                print(
+                    f"[AbstractGenerateManager] Unhandled error in run loop for message '{assistant_message_id}': {e}")
+                traceback.print_exc()
+                overall_status = schemas_enums.MessageStatus.FAILED
+
+            # 发生异常时，调用子类的清理逻辑生成指令
+            async for instruction in self._cleanup_on_exception(assistant_message_id, overall_status, e):
+                yield instruction

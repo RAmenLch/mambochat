@@ -1,6 +1,5 @@
 # backend/services/generation/zip_history_manager.py
-import json
-from typing import AsyncGenerator, List, Optional, Tuple
+from typing import AsyncGenerator, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,18 +7,11 @@ from backend.services.generation.simple_manager import SimpleChatGenerateManager
 from backend.services.generation.instructions import (
     BaseInstruction,
     UpdateZipHistorySubMessage,
-    SetFinalStatus,
-    UpdateSubMessageConfig
+    SetFinalStatus
 )
 from backend.services.generation.llm_io import LLMInput, WorkerOutput
-from backend.services.generation.default_manager import (
-    _build_llm_messages_payload,
-    _build_zip_history_messages_payload
-)
-from backend.crud import setting_crud, message_crud, chat_crud
-from backend.models import chat_model
+from backend.services.generation.llm_input_builder import LLMInputBuilder
 from backend.schemas import enums as schemas_enums
-from backend.schemas import message as schemas_message
 from backend.models.base_model import generate_uuid
 
 DEFAULT_ZIP_HISTORY_PROMPT = (
@@ -38,84 +30,44 @@ class ZipHistoryGenerateManager(SimpleChatGenerateManager):
         super().__init__(db_session)
         self.target_message_id: Optional[str] = None
         self._accumulated_content: str = ""
-        self.chat_id: Optional[str] = None
         self.sub_message_id: Optional[str] = None  # 用于 ZipHistory 子消息的 ID
-
-    async def _prepare_context(
-            self,
-            chat_id: str,
-            assistant_message_id: str
-    ) -> Tuple[chat_model.Chat, List[chat_model.Message]]:
-        """
-        重写基类方法，以准备用于压缩的特定历史消息范围。
-        注意：这里的 assistant_message_id 实际上是 target_message_id。
-        """
-        db_chat = await chat_crud.get_chat(self.db_session, chat_id=chat_id)
-        if not db_chat:
-            raise ValueError(f"Chat with id {chat_id} not found.")
-
-        # 获取所有消息用于切片
-        all_messages = await message_crud.get_messages_by_chat(self.db_session, chat_id=chat_id)
-
-        target_index = -1
-        for i, msg in enumerate(all_messages):
-            if msg.id == assistant_message_id:
-                target_index = i
-                break
-
-        if target_index == -1:
-            raise ValueError(f"Target message {assistant_message_id} not found in chat history.")
-
-        # 仅使用目标消息（含）之前的消息作为上下文
-        messages_to_compress = all_messages[:target_index + 1]
-        return db_chat, messages_to_compress
 
     async def _prepare_llm_input(
             self,
-            db_chat: chat_model.Chat,
-            history_messages: List[chat_model.Message]
+            chat_id: str,
+            assistant_message_id: str
     ) -> LLMInput:
         """
         准备用于生成历史摘要的LLM输入。
+        使用 LLMInputBuilder 替代原有的 CRUD 读取和构建逻辑。
         """
-        if not db_chat.ai_model or not db_chat.ai_model.provider:
-            raise ValueError("会话未配置有效的AI模型或服务商。")
+        # 1. 初始化构建器
+        builder = LLMInputBuilder(self.db_session, chat_id=chat_id)
 
-        self.chat_id = db_chat.id
-        provider = db_chat.ai_model.provider
-        model = db_chat.ai_model
+        # 2. 预加载素材以获取设置 (替代 setting_crud.get_setting)
+        # 注意：_load_materials 是内部方法，此处调用是为了在 build 前获取 settings
+        await builder._load_materials()
 
-        # 1. 获取压缩任务的System Prompt
-        prompt_setting = await setting_crud.get_setting(self.db_session, "zip_history_system_prompt")
-        system_prompt = prompt_setting.value if prompt_setting and prompt_setting.value else DEFAULT_ZIP_HISTORY_PROMPT
+        # 3. 获取 System Prompt
+        system_prompt = builder.settings.get("zip_history_system_prompt")
+        if not system_prompt:
+            system_prompt = DEFAULT_ZIP_HISTORY_PROMPT
 
-        # 2. 使用共享函数构建消息负载
-        effective_history = await _build_zip_history_messages_payload(history_messages)
-
-        messages_payload = await _build_llm_messages_payload(
-            self.db_session, effective_history, False
+        # 4. 配置构建器
+        # slice_until_message: 截断到目标消息之前 (不包含目标消息)
+        # 保持默认的 zip_history 逻辑开启，以便基于已有的压缩历史进行增量压缩 (与原逻辑一致)
+        llm_input = await (
+            builder
+            .slice_until_message(self.target_message_id,include_target=True)
+            .set_system_prompt(system_prompt)
+            .build()
         )
-        messages_payload.insert(0, {"role": "system", "content": system_prompt})
-        messages_payload.append({"role": "user", "content": "请输出历史摘要:"})
 
-        # 3. 准备模型参数和连接配置
-        parameters = {'stream': False}
-        proxy_url = None
-        if provider.use_proxy:
-            proxy_enabled_setting = await setting_crud.get_setting(self.db_session, "proxy_enabled")
-            if proxy_enabled_setting and proxy_enabled_setting.value == 'True':
-                proxy_url_setting = await setting_crud.get_setting(self.db_session, "proxy_url")
-                if proxy_url_setting and proxy_url_setting.value:
-                    proxy_url = proxy_url_setting.value
+        # 5. 后处理：追加触发提示和参数
+        llm_input.messages.append({"role": "user", "content": "请输出历史摘要:"})
+        llm_input.set_parameter('stream', False)
 
-        return LLMInput(
-            model_id=model.modelId,
-            messages=messages_payload,
-            parameters=parameters,
-            api_host=provider.apiHost,
-            api_key=provider.apiKey,
-            proxy_url=proxy_url
-        )
+        return llm_input
 
     async def _translate_worker_output_to_instructions(
             self,
