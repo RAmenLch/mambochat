@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.crud import chat_crud, message_crud, setting_crud, file_crud, provider_crud
 from backend.services.storage_service import storage_service
 from backend.schemas import enums as schemas_enums, AIModel
+from backend.schemas.message import McpToolContent
 from backend.services.generation.llm_io import LLMInput
 from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 
@@ -101,8 +102,6 @@ class LLMInputBuilder:
         """启用多模态图片处理。"""
         self._enable_image_with_model = True
         return self
-
-
 
     def disable_zip_history(self) -> "LLMInputBuilder":
         """禁用压缩历史逻辑，则直接忽略ZipHistory。"""
@@ -304,11 +303,34 @@ class LLMInputBuilder:
 
         for i, msg in enumerate(history):
             recency_rank = total_count - i
+
+            # 1. 转换主消息
             llm_msg = await self._convert_message_to_llm_dict(msg, recency_rank)
             if llm_msg:
                 payload.append(llm_msg)
 
+            # 2. 如果是 Assistant 消息，检查并提取关联的工具执行结果（Role: Tool）
+            # 这确保了数据库中存储的完整工具交互能被正确地拆分为 LLM 所需的 Request -> Result 序列
+            if msg.role == schemas_enums.MessageRole.ASSISTANT.value:
+                tool_results = self._extract_tool_results(msg)
+                if tool_results:
+                    payload.extend(tool_results)
+
         return self._merge_consecutive_roles(payload)
+
+    def _extract_tool_results(self, msg: Any) -> List[Dict[str, Any]]:
+        """从消息的子消息中提取工具执行结果，生成 role: tool 的消息列表。"""
+        results = []
+        for sub in msg.sub_messages:
+            if sub.type == schemas_enums.SubMessageType.MCP_TOOL.value:
+                try:
+                    tool_content = McpToolContent.from_json_string(sub.content)
+                    result_msg = tool_content.to_openai_tool_result_message()
+                    if result_msg:
+                        results.append(result_msg)
+                except (ValueError, TypeError):
+                    continue
+        return results
 
     async def _convert_message_to_llm_dict(self, msg: Any, recency_rank: int) -> Optional[Dict[str, Any]]:
         """将单条消息转换为 LLM 字典格式，包含工具调用解析。"""
@@ -321,19 +343,12 @@ class LLMInputBuilder:
                 continue
 
             # 2. 特殊类型处理：工具调用 (MCP_TOOL)
-            # 将存储的 JSON 转换为 OpenAI 标准 tool_calls 结构
             if sub.type == schemas_enums.SubMessageType.MCP_TOOL.value:
                 try:
-                    tool_data = json.loads(sub.content)
-                    tool_calls.append({
-                        "id": tool_data.get("tool_call_id"),
-                        "type": "function",
-                        "function": {
-                            "name": tool_data.get("name"),
-                            "arguments": tool_data.get("arguments")
-                        }
-                    })
-                except (json.JSONDecodeError, TypeError):
+                    # 使用 McpToolContent 解析并生成 OpenAI 格式的工具调用请求
+                    tool_content = McpToolContent.from_json_string(sub.content)
+                    tool_calls.append(tool_content.to_openai_tool_call())
+                except (ValueError, TypeError):
                     continue
                 continue
 
@@ -347,6 +362,10 @@ class LLMInputBuilder:
             return None
 
         res = {"role": msg.role}
+
+        # 如果是 tool 类型的消息（通常由 ReAct 循环虚拟生成），必须携带 tool_call_id
+        if msg.role == "tool" and hasattr(msg, "tool_call_id"):
+            res["tool_call_id"] = msg.tool_call_id
 
         # 处理 Content
         if content_parts:

@@ -1,7 +1,7 @@
 # backend/schemas/message.py
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Union, Dict, Any
 import json
 
 from backend.schemas.enums import MessageRole, MessageStatus, SubMessageType
@@ -9,7 +9,75 @@ from backend.schemas.file import File as FileSchema  # 导入文件模型以供�
 
 
 # --- SubMessage Schemas ---
+class McpToolContent(BaseModel):
+    """
+    专门用于处理 SubMessageType.MCP_TOOL 的 content 字段结构。
+    """
+    tool_call_id: str
+    name: str
+    # arguments 可能是 JSON 字符串（来自 LLM 原始输出）或已解析的字典
+    arguments: Union[str, Dict[str, Any]]
 
+    # 执行结果，None 表示尚未执行
+    result: Optional[str] = None
+    is_error: bool = False
+
+    @property
+    def is_executed(self) -> bool:
+        """判断工具是否已执行完成"""
+        return self.result is not None
+
+    def get_argument_dict(self) -> Dict[str, Any]:
+        """安全地获取参数字典"""
+        if isinstance(self.arguments, dict):
+            return self.arguments
+        try:
+            return json.loads(self.arguments)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+    def to_openai_tool_call(self) -> Dict[str, Any]:
+        """生成发送给 LLM 的 Assistant tool_calls 部分"""
+        # OpenAI 要求 arguments 必须是 JSON 字符串
+        if isinstance(self.arguments, str):
+            args_str = self.arguments
+        else:
+            args_str = json.dumps(self.arguments, ensure_ascii=False)
+
+        return {
+            "id": self.tool_call_id,
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "arguments": args_str
+            }
+        }
+
+    def to_openai_tool_result_message(self) -> Optional[Dict[str, Any]]:
+        """生成发送给 LLM 的 Role: tool 消息部分"""
+        if not self.is_executed:
+            return None
+
+        return {
+            "role": "tool",
+            "tool_call_id": self.tool_call_id,
+            "content": self.result
+        }
+
+    def to_json_string(self) -> str:
+        """序列化为存储在 DB content 字段的 JSON 字符串"""
+        return self.model_dump_json(exclude_none=False)
+
+    @classmethod
+    def from_json_string(cls, json_str: str) -> 'McpToolContent':
+        """从 DB content 字符串反序列化"""
+        if not json_str:
+            raise ValueError("Empty content")
+        try:
+            data = json.loads(json_str)
+            return cls(**data)
+        except (json.JSONDecodeError, TypeError) as e:
+            raise ValueError(f"Invalid JSON for McpToolContent: {e}")
 
 class SubMessageConfig(BaseModel):
     is_collapsed: bool = Field(False, description="分区是否折叠")

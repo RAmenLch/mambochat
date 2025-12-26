@@ -20,6 +20,7 @@ from backend.services.generation.instructions import (
 from backend.services.generation.llm_io import WorkerOutput, LLMInput
 from backend.services.generation.llm_input_builder import LLMInputBuilder
 from backend.schemas import enums as schemas_enums, SubMessageType
+from backend.schemas.message import McpToolContent
 from backend.models.base_model import generate_uuid
 from backend.config.mcp_config import MCP_SERVER_ENABLED, BING_MCP_SERVER_PATH
 from backend.services.mcp_service import McpClientService
@@ -40,6 +41,7 @@ class ReActAgentChatGenerateManager(AbstractGenerateManager):
         self._final_usage_data: Optional[Dict] = None
 
         # 每一轮生成的工具调用暂存
+        # 列表元素结构: {"data": McpToolContent, "temp_ref_id": str}
         self._current_turn_tool_calls: List[Dict] = []
         # 工具调用 ID 到 SubMessage ID 的映射，用于后续更新执行结果
         self._tool_sub_msg_map: Dict[str, str] = {}
@@ -53,7 +55,7 @@ class ReActAgentChatGenerateManager(AbstractGenerateManager):
         (
             builder
             .slice_until_message(assistant_message_id)
-            .filter_sub_message_types(SubMessageType.NORMAL,SubMessageType.MCP_TOOL,SubMessageType.FILE)
+            .filter_sub_message_types(SubMessageType.NORMAL, SubMessageType.MCP_TOOL, SubMessageType.FILE)
             .enable_image_with_model()
             .enable_cpl_filter()
         )
@@ -190,25 +192,29 @@ class ReActAgentChatGenerateManager(AbstractGenerateManager):
                     if await stream_manager.is_cancellation_requested(assistant_message_id):
                         raise asyncio.CancelledError("Generation was cancelled by user request.")
 
-                    tool_data = tool_item["data"]
-                    tool_call_id = tool_data["tool_call_id"]
-                    sub_msg_id = self._tool_sub_msg_map.get(tool_call_id)
+                    # tool_content 是 McpToolContent 实例
+                    tool_content: McpToolContent = tool_item["data"]
+                    sub_msg_id = self._tool_sub_msg_map.get(tool_content.tool_call_id)
 
                     try:
-                        args = json.loads(tool_data["arguments"])
-                        result_str = await mcp_service.call_tool(tool_data["name"], args)
-                        tool_data["result"] = result_str
+                        args = tool_content.get_argument_dict()
+                        result_str = await mcp_service.call_tool(tool_content.name, args)
+                        tool_content.result = result_str
+                        tool_content.is_error = False
                     except Exception as e:
-                        tool_data["result"] = f"Error executing tool: {str(e)}"
-                        tool_data["is_error"] = True
+                        tool_content.result = f"Error executing tool: {str(e)}"
+                        tool_content.is_error = True
 
                     if sub_msg_id:
-                        updated_content = json.dumps(tool_data, ensure_ascii=False)
+                        # 使用 McpToolContent 标准化序列化
+                        updated_content = tool_content.to_json_string()
                         yield UpdateSubMessageContent(sub_message_id=sub_msg_id, content=updated_content)
                         yield UpdateSubMessageStatus(sub_message_id=sub_msg_id,
                                                      status=schemas_enums.MessageStatus.COMPLETED)
 
-                # 更新上下文
+                # --- 上下文更新阶段 (Update Context) ---
+
+                # 1. 构建本轮的 Assistant 消息 (包含文本内容和工具调用请求)
                 assistant_content = "".join(
                     current_assistant_content_buffer) if current_assistant_content_buffer else None
 
@@ -222,9 +228,10 @@ class ReActAgentChatGenerateManager(AbstractGenerateManager):
                     ))
 
                 for tool_item in self._current_turn_tool_calls:
+                    tool_content: McpToolContent = tool_item["data"]
                     virtual_assistant_subs.append(SimpleNamespace(
                         type=schemas_enums.SubMessageType.MCP_TOOL.value,
-                        content=json.dumps(tool_item["data"], ensure_ascii=False),
+                        content=tool_content.to_json_string(),
                         config={},
                         sortOrder=2
                     ))
@@ -234,6 +241,30 @@ class ReActAgentChatGenerateManager(AbstractGenerateManager):
                     sub_messages=virtual_assistant_subs
                 )
                 current_history.append(virtual_assistant_msg)
+
+                # 2. 构建并追加本轮的 Tool 消息 (包含工具执行结果)
+                # 这一步至关重要，确保下一轮 Builder 构建 Payload 时能提取到 'role': 'tool' 的消息
+                for tool_item in self._current_turn_tool_calls:
+                    tool_content: McpToolContent = tool_item["data"]
+
+                    if tool_content.is_executed:
+                        # 创建一个虚拟的 Tool 消息
+                        # 这里 content 是结果字符串，tool_call_id 必须匹配
+                        virtual_tool_msg = SimpleNamespace(
+                            role="tool",
+                            tool_call_id=tool_content.tool_call_id,
+                            sub_messages=[
+                                SimpleNamespace(
+                                    type=schemas_enums.SubMessageType.NORMAL.value,
+                                    content=tool_content.result,
+                                    config={},
+                                    sortOrder=1
+                                )
+                            ]
+                        )
+                        current_history.append(virtual_tool_msg)
+
+                # 重置缓冲区
                 current_assistant_content_buffer = []
 
         except (asyncio.CancelledError, Exception) as e:
@@ -286,29 +317,29 @@ class ReActAgentChatGenerateManager(AbstractGenerateManager):
         elif output.type == "tool_call":
             if output.tool_calls:
                 for tool_call in output.tool_calls:
-                    tool_data = {
-                        "tool_call_id": tool_call.get("id"),
-                        "name": tool_call.get("function", {}).get("name"),
-                        "arguments": tool_call.get("function", {}).get("arguments"),
-                        "result": None,
-                        "is_error": False
-                    }
-                    json_content = json.dumps(tool_data, ensure_ascii=False)
+                    # 使用 McpToolContent 构建对象
+                    tool_content = McpToolContent(
+                        tool_call_id=tool_call.get("id"),
+                        name=tool_call.get("function", {}).get("name"),
+                        arguments=tool_call.get("function", {}).get("arguments")
+                    )
 
                     sub_id = generate_uuid()
-                    self._tool_sub_msg_map[tool_data["tool_call_id"]] = sub_id
+                    self._tool_sub_msg_map[tool_content.tool_call_id] = sub_id
 
+                    # 存储强类型的 tool_content
                     self._current_turn_tool_calls.append({
-                        "data": tool_data,
+                        "data": tool_content,
                         "temp_ref_id": sub_id
                     })
 
+                    # 使用标准化 JSON 字符串创建子消息
                     yield CreateSubMessage(
                         sub_message_id=sub_id,
                         type=schemas_enums.SubMessageType.MCP_TOOL.value,
                         sortOrder=2,
                         status=schemas_enums.MessageStatus.GENERATING,
-                        initial_content=json_content,
+                        initial_content=tool_content.to_json_string(),
                         config={"is_minimal": True}
                     )
 
