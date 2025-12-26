@@ -53,10 +53,10 @@ class OpenAIGenerateWorker(AbstractGenerateWorker):
                 try:
                     error_data = response.json()
                     if isinstance(error_data, dict):
-                        error_content = error_data.get("error", {}).get("message", error_content)
+                        error_content = json.dumps(error_data, indent=4, ensure_ascii=False)
                 except json.JSONDecodeError:
                     pass
-                yield WorkerOutput(type="error", content=f"API Error {response.status_code}: {error_content}")
+                yield WorkerOutput(type="error", content=f"\nAPI Error {response.status_code}:\n ```\n{error_content}\n```")
                 return
 
             async for line in response.aiter_lines():

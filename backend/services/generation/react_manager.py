@@ -304,6 +304,10 @@ class ReActAgentChatGenerateManager(AbstractGenerateManager):
             yield AppendToSubMessage(sub_message_id=self._reasoning_id, content=output.content)
 
         elif output.type == "content":
+            # 如果内容为空且尚未创建子消息，则跳过，避免创建空的子消息
+            if not output.content and not self._content_id:
+                return
+
             if not self._content_id:
                 self._content_id = generate_uuid()
                 yield CreateSubMessage(
@@ -348,33 +352,46 @@ class ReActAgentChatGenerateManager(AbstractGenerateManager):
                 self._final_usage_data = output.usage
 
         elif output.type == "done":
-            if self._content_id:
-                yield UpdateSubMessageStatus(
-                    sub_message_id=self._content_id,
-                    status=schemas_enums.MessageStatus.COMPLETED
-                )
-                self._content_id = None
+            # 判断是否还有工具需要执行（意味着这只是 ReAct 循环的一个中间步骤）
+            has_pending_tools = bool(self._current_turn_tool_calls)
 
-            if self._reasoning_id:
-                yield UpdateSubMessageStatus(
-                    sub_message_id=self._reasoning_id,
-                    status=schemas_enums.MessageStatus.COMPLETED
-                )
-                self._reasoning_id = None
+            if has_pending_tools:
+                # 中间状态：不结束当前的 Reasoning/Content SubMessage，而是追加换行符。
+                # 这样下一轮循环生成的文本会接在同一个消息气泡里。
+                if self._content_id:
+                    yield AppendToSubMessage(sub_message_id=self._content_id, content="\n")
 
-            if not self._current_turn_tool_calls:
-                if self._final_usage_data:
-                    self._usage_id = generate_uuid()
-                    usage_content = json.dumps(self._final_usage_data)
-                    yield CreateSubMessage(
-                        sub_message_id=self._usage_id,
-                        type=schemas_enums.SubMessageType.USAGE.value,
-                        sortOrder=99,
-                        status=schemas_enums.MessageStatus.COMPLETED,
-                        initial_content=usage_content,
-                        config={"context_participation_length": 0}
+                if self._reasoning_id:
+                    yield AppendToSubMessage(sub_message_id=self._reasoning_id, content="\n")
+            else:
+                # 真正结束：没有工具要调用了，结束所有打开的 SubMessage 并发送最终状态。
+                if self._content_id:
+                    yield UpdateSubMessageStatus(
+                        sub_message_id=self._content_id,
+                        status=schemas_enums.MessageStatus.COMPLETED
                     )
-                yield SetFinalStatus(status=schemas_enums.MessageStatus.COMPLETED)
+                    self._content_id = None
+
+                if self._reasoning_id:
+                    yield UpdateSubMessageStatus(
+                        sub_message_id=self._reasoning_id,
+                        status=schemas_enums.MessageStatus.COMPLETED
+                    )
+                    self._reasoning_id = None
+
+                if not self._current_turn_tool_calls:
+                    if self._final_usage_data:
+                        self._usage_id = generate_uuid()
+                        usage_content = json.dumps(self._final_usage_data)
+                        yield CreateSubMessage(
+                            sub_message_id=self._usage_id,
+                            type=schemas_enums.SubMessageType.USAGE.value,
+                            sortOrder=99,
+                            status=schemas_enums.MessageStatus.COMPLETED,
+                            initial_content=usage_content,
+                            config={"context_participation_length": 0}
+                        )
+                    yield SetFinalStatus(status=schemas_enums.MessageStatus.COMPLETED)
 
         elif output.type == "error":
             raise RuntimeError(output.content)
