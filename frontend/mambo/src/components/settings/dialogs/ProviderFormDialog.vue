@@ -15,7 +15,7 @@
             :fetch-suggestions="querySearchProviders"
             placeholder="选择或输入服务商名称"
             style="width: 100%"
-            @select="(item) => handleProviderSelect(item as AutocompleteSuggestion)"
+            @select="(item:Record<string,any>) => handleProviderSelect(item as AutocompleteSuggestion)"
             :trigger-on-focus="true"
           />
         </el-form-item>
