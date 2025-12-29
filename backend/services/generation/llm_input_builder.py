@@ -53,6 +53,11 @@ class LLMInputBuilder:
         self._system_prompt_override: Optional[str] = None
         self._history_override: Optional[List[Any]] = None
 
+        # 新增配置项
+        self._content_limit: Optional[int] = None
+        self._flatten_history: bool = False
+        self._append_prompt: Optional[str] = None
+
         # 内部数据缓存 (用于减少 I/O)
         self._cached_chat = None
         self._cached_settings = None
@@ -130,6 +135,33 @@ class LLMInputBuilder:
         适用于 ReAct 循环中包含未持久化消息的场景。
         """
         self._history_override = history
+        return self
+
+    def limit_sub_message_content(self, max_length: int) -> "LLMInputBuilder":
+        """
+        限制每个子消息文本内容的长度。
+        超过长度将被截断并追加 '...'。
+        """
+        self._content_limit = max_length
+        return self
+
+    def flatten_history_to_single_user_message(self) -> "LLMInputBuilder":
+        """
+        将所有历史记录聚合成一条 User 消息。
+        格式通常为:
+        User: xxx
+        Assistant: xxx
+        ...
+        """
+        self._flatten_history = True
+        return self
+
+    def append_user_message(self, content: str) -> "LLMInputBuilder":
+        """
+        在历史记录末尾追加一条 User 消息（通常作为 Trigger Prompt）。
+        Builder 会自动处理与上一条 User 消息的合并。
+        """
+        self._append_prompt = content
         return self
 
     # --- 核心构建方法 ---
@@ -316,6 +348,35 @@ class LLMInputBuilder:
                 if tool_results:
                     payload.extend(tool_results)
 
+        # 3. 处理历史聚合 (Flatten)
+        if self._flatten_history and payload:
+            flattened_content = ""
+            for msg in payload:
+                role_label = "User" if msg["role"] == "user" else "Assistant"
+                # 处理内容可能是字符串也可能是 list (多模态)
+                content_str = ""
+                raw_content = msg.get("content")
+
+                if isinstance(raw_content, str):
+                    content_str = raw_content
+                elif isinstance(raw_content, list):
+                    # 简化处理：如果是 flatten 模式，只取文本部分
+                    texts = [item["text"] for item in raw_content if item.get("type") == "text"]
+                    content_str = "\n".join(texts)
+
+                if content_str:
+                    flattened_content += f"{role_label}: {content_str}\n\n"
+
+            # 重置 payload 为单条消息
+            payload = [{"role": "user", "content": flattened_content.strip()}]
+
+        # 4. 处理追加提示词 (Append Prompt)
+        if self._append_prompt:
+            payload.append({"role": "user", "content": self._append_prompt})
+
+        # 5. 合并连续角色消息
+        # 这会自动处理 Flatten 后的 User 消息与 append_prompt 的合并，
+        # 或者在非 Flatten 模式下处理最后的 History(User) 与 append_prompt(User) 的合并。
         return self._merge_consecutive_roles(payload)
 
     def _extract_tool_results(self, msg: Any) -> List[Dict[str, Any]]:
@@ -401,13 +462,21 @@ class LLMInputBuilder:
 
     async def _convert_sub_message_to_part(self, sub: Any) -> Optional[Dict[str, Any]]:
         """将子消息转换为 LLM 内容分片。"""
+        part = None
         if sub.type == schemas_enums.SubMessageType.FILE.value:
-            return await self._process_file_part(sub.content)
+            part = await self._process_file_part(sub.content)
+        elif sub.type == schemas_enums.SubMessageType.ZIP_HISTORY.value:
+            part = None
+        else:
+            part = {"type": "text", "text": sub.content}
 
-        if sub.type == schemas_enums.SubMessageType.ZIP_HISTORY.value:
-            return None
+        # 应用内容截断
+        if part and part.get("type") == "text" and self._content_limit:
+            text = part["text"]
+            if len(text) > self._content_limit:
+                part["text"] = text[:self._content_limit] + "..."
 
-        return {"type": "text", "text": sub.content}
+        return part
 
     def _model_supports_images(self) -> bool:
         """检查已解析的模型元配置中是否包含 image 模态。"""

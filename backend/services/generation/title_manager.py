@@ -44,6 +44,8 @@ class TitleGenerateManager(SimpleChatGenerateManager):
             "请仅以JSON格式返回, 格式为: {\"title\": \"生成的标题\"}"
         )
 
+        trigger_prompt = "请根据上述对话内容，输出标题json。"
+
         # 初始化构建器
         builder = LLMInputBuilder(self.db_session, chat_id=chat_id)
 
@@ -51,17 +53,23 @@ class TitleGenerateManager(SimpleChatGenerateManager):
         # 1. 优先使用全局配置的标题生成模型，其次是默认模型
         # 2. 覆盖 System Prompt
         # 3. 仅截取头尾各2条消息作为摘要依据
-        # 4. 禁用 ZipHistory (标题生成不需要递归处理历史压缩)
+        # 4. 限制单条消息内容长度，防止长文涌入
+        # 5. 禁用 ZipHistory (标题生成不需要递归处理历史压缩)
+        # 6. 将历史聚合为单条 User 消息
+        # 7. 追加触发提示词
         llm_input = await (
             builder
             .use_global_model(["title_generation_model_id", "default_model_id"])
             .set_system_prompt(system_prompt)
             .slice_head_tail(head=2, tail=2)
+            .limit_sub_message_content(max_length=500)
             .disable_zip_history()
             .filter_sub_message_types(SubMessageType.NORMAL)
+            .flatten_history_to_single_user_message()
+            .append_user_message(trigger_prompt)
             .build()
         )
-        llm_input.messages.append({"role": "user", "content": "请输出标题json"}) # todo bug fix
+
         # 强制覆盖特定参数
         llm_input.set_parameter('response_format', {'type': 'json_object'})
         llm_input.set_parameter('stream', False)
