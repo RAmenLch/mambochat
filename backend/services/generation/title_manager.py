@@ -2,6 +2,7 @@
 import json
 from typing import AsyncGenerator, Optional
 
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.schemas import SubMessageType
@@ -9,11 +10,17 @@ from backend.services.generation.simple_manager import SimpleChatGenerateManager
 from backend.services.generation.instructions import (
     BaseInstruction,
     SetFinalStatus,
-    UpdateChatName
+    UpdateChatName,
+    NotifyUser
 )
 from backend.services.generation.llm_io import LLMInput, WorkerOutput
 from backend.services.generation.llm_input_builder import LLMInputBuilder
 from backend import schemas
+
+
+class TitleGenerationContext(BaseModel):
+    """标题生成任务的上下文信息"""
+    chat_id: str
 
 
 class TitleGenerateManager(SimpleChatGenerateManager):
@@ -28,9 +35,9 @@ class TitleGenerateManager(SimpleChatGenerateManager):
         self.error_occurred = False
 
     async def _prepare_llm_input(
-        self,
-        chat_id: str,
-        assistant_message_id: str
+            self,
+            chat_id: str,
+            assistant_message_id: str
     ) -> LLMInput:
         """
         准备用于生成标题的LLM输入。
@@ -77,8 +84,8 @@ class TitleGenerateManager(SimpleChatGenerateManager):
         return llm_input
 
     async def _translate_worker_output_to_instructions(
-        self,
-        output: WorkerOutput
+            self,
+            output: WorkerOutput
     ) -> AsyncGenerator[BaseInstruction, None]:
         """
         将Worker的输出翻译成更新会话名称的指令。
@@ -96,10 +103,24 @@ class TitleGenerateManager(SimpleChatGenerateManager):
                 else:
                     self.error_occurred = True
                     print(f"[TitleGenerateManager] Invalid title format or length: {title}")
+
+                    yield NotifyUser(
+                        category="title_generation_error",
+                        context=TitleGenerationContext(chat_id=self.chat_id or "unknown"),
+                        level="error",
+                        message="生成的标题格式无效或长度不符合要求"
+                    )
                     yield SetFinalStatus(status=schemas.enums.MessageStatus.FAILED)
             except json.JSONDecodeError:
                 self.error_occurred = True
                 print(f"[TitleGenerateManager] Failed to decode JSON from LLM: {output.content}")
+
+                yield NotifyUser(
+                    category="title_generation_error",
+                    context=TitleGenerationContext(chat_id=self.chat_id or "unknown"),
+                    level="error",
+                    message="模型返回的标题格式解析失败 (非JSON格式)"
+                )
                 yield SetFinalStatus(status=schemas.enums.MessageStatus.FAILED)
 
         elif output.type == "done":
@@ -109,6 +130,13 @@ class TitleGenerateManager(SimpleChatGenerateManager):
         elif output.type == "error":
             self.error_occurred = True
             print(f"[TitleGenerateManager] Worker error: {output.content}")
+
+            yield NotifyUser(
+                category="title_generation_error",
+                context=TitleGenerationContext(chat_id=self.chat_id or "unknown"),
+                level="error",
+                message=f"API调用失败: {output.content}"
+            )
             yield SetFinalStatus(status=schemas.enums.MessageStatus.FAILED)
 
     async def _cleanup_on_exception(
@@ -118,9 +146,18 @@ class TitleGenerateManager(SimpleChatGenerateManager):
             exception: Optional[Exception] = None
     ) -> AsyncGenerator[BaseInstruction, None]:
         """
-        此管理器不创建子消息，因此无需复杂的清理，仅记录日志。
+        异常清理逻辑：记录日志并发送全局通知。
         """
+        # 产出错误通知
+        if exception:
+            yield NotifyUser(
+                category="title_generation_error",
+                context=TitleGenerationContext(chat_id=self.chat_id or "unknown"),
+                level="error",
+                message=f"生成标题时发生系统异常: {str(exception)}"
+            )
+
+        # 记录日志
         print(f"[TitleGenerateManager] Cleanup for task '{assistant_message_id}' with status {final_status.value}.")
-        # 空的生成器
-        if False:
-            yield
+        if exception:
+            print(f"Exception details: {exception}")

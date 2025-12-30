@@ -2,6 +2,7 @@
 
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
+import { ElMessage } from 'element-plus';
 import {
   getChats, createChat, deleteChat, updateChatSettings as updateChatSettingsAPI,
   reorderChats, duplicateChat as duplicateChatAPI, generateChatTitle as generateChatTitleAPI
@@ -75,7 +76,7 @@ export const useChatListStore = defineStore('chatList', () => {
 
   /**
    * 初始化并监听来自服务器的全局通知（SSE）。
-   * 用于实时更新会话标题、接收历史压缩结果等。
+   * 用于实时更新会话标题、接收历史压缩结果以及处理异步任务错误。
    */
   function initializeNotificationListener() {
     subscribeToGlobalNotifications({
@@ -99,6 +100,17 @@ export const useChatListStore = defineStore('chatList', () => {
               notification.payload.sub_message
             );
           }
+        } else if (notification.type === 'notification' && notification.category === 'title_generation_error') {
+          // 处理标题生成任务异常
+          const errorChatId = notification.context.chat_id;
+
+          // 如果当前正在刷新的正是这个出错的会话，停止 Loading 状态
+          if (refreshingTitleChatId.value === errorChatId) {
+            refreshingTitleChatId.value = null;
+          }
+
+          // 弹出错误提示，展示后端返回的具体错误信息
+          ElMessage.error(notification.message);
         }
       },
       onError: (error: unknown) => {

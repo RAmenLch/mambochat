@@ -19,7 +19,8 @@ from backend.services.generation.instructions import (
     SetFinalStatus,
     UpdateChatName,
     SaveAndPersistFile,
-    UpdateZipHistorySubMessage
+    UpdateZipHistorySubMessage,
+    NotifyUser
 )
 from backend.routers.notifications import GLOBAL_NOTIFICATIONS_STREAM_ID
 
@@ -75,6 +76,9 @@ class InstructionExecutor:
 
         elif isinstance(instruction, UpdateZipHistorySubMessage):
             await self._execute_update_zip_history(instruction, chat_id, assistant_message_id)
+
+        elif isinstance(instruction, NotifyUser):
+            await self._execute_notify_user(instruction)
 
         elif isinstance(instruction, SetFinalStatus):
             return instruction.status
@@ -261,4 +265,21 @@ class InstructionExecutor:
                 }
             }
             await stream_manager.publish(GLOBAL_NOTIFICATIONS_STREAM_ID, notification_payload)
+
+    async def _execute_notify_user(self, instruction: NotifyUser):
+        """
+        执行用户通知指令。
+        将结构化的通知信息广播到全局通知流，供前端消费。
+        """
+        # serializes the generic BaseModel context to a dictionary
+        context_data = instruction.context.model_dump(mode='json') if instruction.context else {}
+
+        notification_payload = {
+            "type": "notification",
+            "category": instruction.category,
+            "context": context_data,
+            "level": instruction.level,
+            "message": instruction.message
+        }
+        await stream_manager.publish(GLOBAL_NOTIFICATIONS_STREAM_ID, notification_payload)
 

@@ -310,6 +310,14 @@ export interface ChatUpdateNotificationPayload {
 }
 
 /**
+ * 标题生成错误通知的上下文数据
+ */
+export interface TitleGenerationErrorContext {
+  chat_id: string;
+}
+
+
+/**
  * `zip_history_update` 事件的载荷，在历史压缩完成后触发。
  */
 export interface ZipHistoryUpdateNotificationPayload {
@@ -329,7 +337,15 @@ export type GlobalNotification =
   | {
       type: 'zip_history_update';
       payload: ZipHistoryUpdateNotificationPayload;
+    }
+  | {
+      type: 'notification';
+      category: 'title_generation_error';
+      context: TitleGenerationErrorContext;
+      level: string;
+      message: string;
     };
+
 
 // --- Resource Center Types ---
 

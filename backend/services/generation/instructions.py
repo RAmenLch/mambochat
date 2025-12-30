@@ -1,6 +1,6 @@
 # backend/services/generation/instructions.py
 from pydantic import BaseModel, Field
-from typing import Optional, Dict
+from typing import Optional, Dict, Generic, TypeVar
 
 from backend.schemas.enums import MessageStatus, SubMessageType, FileManagementType
 
@@ -42,7 +42,7 @@ class UpdateSubMessageStatus(BaseInstruction):
 
 
 class UpdateSubMessageConfig(BaseInstruction):
-    """指令：更新指定子消息的配置项 (Config)。"""
+    """指令：更新指定子消息的配置项。"""
     sub_message_id: str = Field(..., description="目标子消息UUID")
     config: Dict = Field(..., description="新的配置字典")
 
@@ -56,6 +56,33 @@ class UpdateChatName(BaseInstruction):
     """指令：更新指定会话的名称。"""
     chat_id: str
     new_name: str
+
+
+
+T = TypeVar('T', bound=BaseModel)
+class NotifyUser(BaseInstruction, Generic[T]):
+    """
+    指令：向前端发送全局通知。
+
+    使用泛型设计以支持类型安全的上下文传递。
+    不同业务场景应定义具体的 Context 模型，例如 TitleGenerationContext。
+
+    示例用法:
+        class TitleErrorContext(BaseModel):
+            chat_id: str
+            failed_step: str
+
+        yield NotifyUser(
+            category="title_generation_error",
+            context=TitleErrorContext(chat_id="xxx", failed_step="parse_json"),
+            level="error",
+            message="标题解析失败"
+        )
+    """
+    category: str = Field(..., description="业务事件分类，例如 'title_generation_error'")
+    context: T = Field(..., description="结构化的上下文数据模型，必须继承自 BaseModel")
+    level: str = Field(..., description="通知级别，例如 'error', 'warning', 'info'")
+    message: str = Field(..., description="显示给用户的详细错误或提示信息")
 
 
 class SaveAndPersistFile(BaseInstruction):
@@ -83,4 +110,3 @@ class UpdateZipHistorySubMessage(BaseInstruction):
     target_message_id: str = Field(..., description="挂载的目标父消息ID")
     content: str
     status: MessageStatus
-
