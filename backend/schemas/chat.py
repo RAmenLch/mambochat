@@ -68,12 +68,14 @@ class GenerateRequest(BaseModel):
     sub_messages: List[SubMessageCreate]
     attachedSubmessageResourceIds: Optional[List[str]] = Field(None, description="本次发送时要附加的Submessage模板资源ID列表")
 
+
 class UpdateMessageResponse(BaseModel):
     """
     用于 /messages/{message_id} (PUT) 端点的响应模型。
     """
     user_message: Message = Field(..., description="被更新的用户消息对象。")
     assistant_message: Optional[Message] = Field(None, description="如果触发了重新生成，则为AI回复创建的占位符消息对象。")
+
 
 class PrepareGenerateResponse(BaseModel):
     """
@@ -82,3 +84,27 @@ class PrepareGenerateResponse(BaseModel):
     user_message: Message = Field(..., description="新创建的用户消息对象。")
     assistant_message: Message = Field(..., description="为AI回复创建的占位符消息对象。")
 
+
+# --- Search Schemas ---
+
+class SearchRequest(BaseModel):
+    keyword: str = Field(..., description="搜索关键词或正则模式")
+    root_id: Optional[str] = Field(None, description="搜索范围的根目录ID，不传则搜索全局")
+    enable_regex: bool = Field(False, description="是否启用正则匹配")
+    page_num: int = Field(1, ge=1, description="页码")
+    page_size: int = Field(20, ge=1, le=100, description="每页数量")
+
+
+class SearchResultItem(BaseModel):
+    chat_id: str
+    chat_name: str
+    chat_path: str
+    match_type: str = Field(..., description="匹配类型: 'content', 'title', 'system_prompt'")
+    context_text: str = Field(..., description="包含关键词的高亮上下文片段")
+    sub_message_id: Optional[str] = Field(None, description="如果是内容匹配，提供跳转到对应子消息的ID")
+    created_at: datetime
+
+
+class SearchResponse(BaseModel):
+    total: int
+    items: List[SearchResultItem]

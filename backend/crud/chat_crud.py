@@ -3,11 +3,12 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload, joinedload
-from sqlalchemy import func
-from typing import List, Optional
+from sqlalchemy import func, literal, union_all, null, case, literal_column
+from typing import List, Optional, Tuple, Any
 import json
 
 from backend.models import chat_model, provider_model
+from backend.schemas.enums import SubMessageType
 from backend import schemas
 
 async def get_chat(db: AsyncSession, chat_id: str) -> Optional[chat_model.Chat]:
@@ -103,3 +104,133 @@ async def batch_update_chats_order(db: AsyncSession, updates: List[schemas.ChatR
     await db.commit()
     return True
 
+
+async def search_chats_and_messages(
+    db: AsyncSession,
+    keyword: str,
+    root_id: Optional[str],
+    enable_regex: bool,
+    skip: int,
+    limit: int
+) -> Tuple[List[Any], int]:
+    """
+    全局搜索会话和消息内容。
+    返回: (结果列表, 总数)
+    结果列表中的每一项包含: chat_id, chat_name, sub_message_id, raw_content, match_type, created_at
+    """
+
+    # 1. 准备过滤条件
+    if enable_regex:
+        # 使用 SQLite 自定义函数 REGEXP
+        def match_op(column):
+            return column.op("REGEXP")(keyword)
+    else:
+        # 使用 LIKE 模糊匹配
+        search_pattern = f"%{keyword}%"
+        def match_op(column):
+            return column.like(search_pattern)
+
+    # 2. 如果指定了 root_id，构建递归 CTE 以获取所有子孙 Chat ID
+    target_chat_ids_query = None
+    if root_id:
+        hierarchy_cte = select(chat_model.Chat.id).where(chat_model.Chat.id == root_id).cte(name="hierarchy", recursive=True)
+        hierarchy_cte = hierarchy_cte.union_all(
+            select(chat_model.Chat.id).join(hierarchy_cte, chat_model.Chat.parentId == hierarchy_cte.c.id)
+        )
+        target_chat_ids_query = select(hierarchy_cte.c.id)
+
+    # 3. 构建 SubMessage 内容搜索查询
+    # 筛选条件: SubMessage 类型为 Normal/Reasoning, Chat 类型为 chat, 且满足 keyword 和 root_id
+    q_sub = select(
+        chat_model.Chat.id.label("chat_id"),
+        chat_model.Chat.name.label("chat_name"),
+        chat_model.SubMessage.id.label("sub_message_id"),
+        chat_model.SubMessage.content.label("raw_content"),
+        literal("content").label("match_type"),
+        chat_model.SubMessage.createdAt.label("created_at")
+    ).join(
+        chat_model.Message, chat_model.SubMessage.messageId == chat_model.Message.id
+    ).join(
+        chat_model.Chat, chat_model.Message.chatId == chat_model.Chat.id
+    ).where(
+        chat_model.SubMessage.type.in_([SubMessageType.NORMAL, SubMessageType.REASONING]),
+        chat_model.Chat.itemType == 'chat',
+        match_op(chat_model.SubMessage.content)
+    )
+
+    if target_chat_ids_query is not None:
+        q_sub = q_sub.where(chat_model.Chat.id.in_(target_chat_ids_query))
+
+    # 4. 构建 Chat 元数据 (Title, SystemPrompt) 搜索查询
+    # 逻辑: 优先匹配 Title，如果 Title 不匹配则认为匹配的是 SystemPrompt
+    name_match = match_op(chat_model.Chat.name)
+    sys_prompt_match = match_op(chat_model.Chat.systemPrompt)
+
+    q_chat = select(
+        chat_model.Chat.id.label("chat_id"),
+        chat_model.Chat.name.label("chat_name"),
+        null().label("sub_message_id"), # Chat 匹配没有 sub_message_id
+        case(
+            (name_match, chat_model.Chat.name),
+            else_=chat_model.Chat.systemPrompt
+        ).label("raw_content"),
+        case(
+            (name_match, literal("title")),
+            else_=literal("system_prompt")
+        ).label("match_type"),
+        chat_model.Chat.createdAt.label("created_at")
+    ).where(
+        chat_model.Chat.itemType == 'chat',
+        (name_match | sys_prompt_match)
+    )
+
+    if target_chat_ids_query is not None:
+        q_chat = q_chat.where(chat_model.Chat.id.in_(target_chat_ids_query))
+
+    # 5. 合并查询 (Union All)
+    union_query = union_all(q_sub, q_chat).subquery()
+
+    # 6. 获取总数 (Count)
+    count_stmt = select(func.count()).select_from(union_query)
+    count_result = await db.execute(count_stmt)
+    total_count = count_result.scalar() or 0
+
+    if total_count == 0:
+        return [], 0
+
+    # 7. 获取分页结果
+    stmt = select(union_query).order_by(union_query.c.created_at.desc()).offset(skip).limit(limit)
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    return rows, total_count
+
+
+async def get_batch_chat_ancestors(db: AsyncSession, chat_ids: List[str]) -> List[chat_model.Chat]:
+    """
+    批量获取指定 Chat 列表的所有祖先节点（包括自身），用于构建路径。
+    使用递归 CTE 向上查找。
+    """
+    if not chat_ids:
+        return []
+
+    # 递归 CTE: 从给定的 chat_ids 开始，向上查找 parentId
+    ancestors_cte = select(
+        chat_model.Chat.id,
+        chat_model.Chat.parentId,
+        chat_model.Chat.name,
+        chat_model.Chat.itemType
+    ).where(chat_model.Chat.id.in_(chat_ids)).cte(name="ancestors", recursive=True)
+
+    ancestors_cte = ancestors_cte.union_all(
+        select(
+            chat_model.Chat.id,
+            chat_model.Chat.parentId,
+            chat_model.Chat.name,
+            chat_model.Chat.itemType
+        ).join(ancestors_cte, chat_model.Chat.id == ancestors_cte.c.parentId)
+    )
+
+    stmt = select(ancestors_cte)
+    result = await db.execute(stmt)
+    return result.all()

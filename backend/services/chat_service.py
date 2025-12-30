@@ -2,8 +2,9 @@
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
-from typing import Optional
+from typing import Optional, List, Dict
 import json
+import re
 
 from backend.crud import chat_crud
 from backend import schemas
@@ -69,3 +70,82 @@ async def duplicate_chat_with_messages(db: AsyncSession, chat_id: str) -> Option
 
     return new_chat
 
+
+def extract_context_snippet(content: str, keyword: str, enable_regex: bool, window_size: int = 50) -> str:
+    """
+    从文本中截取包含关键词的上下文片段。
+    """
+    if not content:
+        return ""
+
+    flags = re.IGNORECASE
+    if enable_regex:
+        pattern = keyword
+    else:
+        pattern = re.escape(keyword)
+
+    try:
+        match = re.search(pattern, content, flags)
+    except re.error:
+        # 如果正则无效，返回开头部分
+        return content[:window_size * 2]
+
+    if not match:
+        return content[:window_size * 2]
+
+    start, end = match.span()
+    total_len = len(content)
+
+    # 计算截取范围
+    snippet_start = max(0, start - window_size)
+    snippet_end = min(total_len, end + window_size)
+
+    snippet = content[snippet_start:snippet_end]
+
+    # 添加省略号
+    if snippet_start > 0:
+        snippet = "..." + snippet
+    if snippet_end < total_len:
+        snippet = snippet + "..."
+
+    return snippet
+
+
+async def build_chat_paths(db: AsyncSession, chat_ids: List[str]) -> Dict[str, str]:
+    """
+    批量构建会话的路径字符串（例如：Folder A / Folder B）。
+    返回字典: {chat_id: path_string}
+    """
+    if not chat_ids:
+        return {}
+
+    # 获取所有相关的祖先节点
+    rows = await chat_crud.get_batch_chat_ancestors(db, chat_ids)
+
+    # 构建节点查找表: id -> {name, parentId}
+    node_map = {row.id: {"name": row.name, "parentId": row.parentId} for row in rows}
+
+    paths = {}
+    for start_id in chat_ids:
+        if start_id not in node_map:
+            continue
+
+        current_id = start_id
+        path_segments = []
+
+        # 向上遍历直到根节点
+        while current_id:
+            node = node_map.get(current_id)
+            if not node:
+                break
+            path_segments.append(node["name"])
+            current_id = node["parentId"]
+
+        # 移除自身节点（路径通常指父级目录结构）
+        if path_segments:
+            path_segments.pop(0)
+
+        # 反转列表并拼接，形成 Root / Folder / ...
+        paths[start_id] = " / ".join(reversed(path_segments))
+
+    return paths

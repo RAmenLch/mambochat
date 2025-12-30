@@ -151,6 +151,57 @@ async def read_chats(skip: int = 0, limit: int = 100, db: AsyncSession = Depends
     return chats
 
 
+@router.post(
+    "/chats/search",
+    response_model=schemas.SearchResponse,
+    summary="全局搜索会话和消息"
+)
+async def search_chats(request: schemas.SearchRequest, db: AsyncSession = Depends(get_db)):
+    """
+    在会话标题、系统提示词和消息内容中进行全局搜索。
+    支持模糊查询和正则查询，支持指定目录范围。
+    """
+    skip = (request.page_num - 1) * request.page_size
+
+    rows, total = await chat_crud.search_chats_and_messages(
+        db,
+        keyword=request.keyword,
+        root_id=request.root_id,
+        enable_regex=request.enable_regex,
+        skip=skip,
+        limit=request.page_size
+    )
+
+    if not rows:
+        return schemas.SearchResponse(total=0, items=[])
+
+    # 提取所有涉及的 chat_id，批量构建路径
+    chat_ids = list({row.chat_id for row in rows})
+    path_map = await chat_service.build_chat_paths(db, chat_ids)
+
+    items = []
+    for row in rows:
+        # 截取上下文
+        context = chat_service.extract_context_snippet(
+            content=row.raw_content,
+            keyword=request.keyword,
+            enable_regex=request.enable_regex
+        )
+
+        item = schemas.SearchResultItem(
+            chat_id=row.chat_id,
+            chat_name=row.chat_name,
+            chat_path=path_map.get(row.chat_id, ""),
+            match_type=row.match_type,
+            context_text=context,
+            sub_message_id=row.sub_message_id,
+            created_at=row.created_at
+        )
+        items.append(item)
+
+    return schemas.SearchResponse(total=total, items=items)
+
+
 @router.get("/chats/{chat_id}", response_model=schemas.Chat, summary="获取单个会话或文件夹的配置")
 async def read_chat(chat_id: str, db: AsyncSession = Depends(get_db)):
     db_chat = await chat_crud.get_chat(db, chat_id=chat_id)
