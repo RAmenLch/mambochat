@@ -134,6 +134,9 @@ class OpenAIGenerateWorker(AbstractGenerateWorker):
                 except json.JSONDecodeError:
                     print(f"Warning: Could not decode JSON from stream line: {data_str}")
                     continue
+                except IndexError as e:
+                    print(f"IndexError: {traceback.format_exc()},data_str: {data_str}")
+                    raise e
 
             # 流结束后的兜底检查：如果 buffer 中还有数据（例如异常中断），尝试输出
             if tool_calls_buffer:
