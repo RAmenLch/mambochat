@@ -43,17 +43,15 @@
       <span :style="contextMenuPosition" />
       <template #dropdown>
         <el-dropdown-menu>
-          <!-- When right-clicking a folder -->
-          <template v-if="contextMenuItem?.itemType === 'folder'">
-            <el-dropdown-item command="newChat"><el-icon><Plus /></el-icon>新建会话</el-dropdown-item>
-            <el-dropdown-item command="newFolder"><el-icon><FolderAdd /></el-icon>新建文件夹</el-dropdown-item>
-          </template>
+          <!-- Search option for root, folder, and chat -->
+          <el-dropdown-item command="search"><el-icon><Search /></el-icon>搜索</el-dropdown-item>
 
-          <!-- When right-clicking the root area -->
-          <template v-if="!contextMenuItem">
-            <el-dropdown-item command="newChat"><el-icon><Plus /></el-icon>新建会话</el-dropdown-item>
-            <el-dropdown-item command="newFolder"><el-icon><FolderAdd /></el-icon>新建文件夹</el-dropdown-item>
-          </template>
+          <el-dropdown-item v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'" command="newChat" :divided="true">
+            <el-icon><Plus /></el-icon>新建会话
+          </el-dropdown-item>
+          <el-dropdown-item v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'" command="newFolder">
+            <el-icon><FolderAdd /></el-icon>新建文件夹
+          </el-dropdown-item>
 
           <!-- Common actions for any item -->
           <template v-if="contextMenuItem">
@@ -72,6 +70,14 @@
       :select-config="dialogProps.selectConfig"
       @confirm="onDialogConfirm"
     />
+
+    <SearchDialog
+      v-model:visible="searchDialogVisible"
+      :root-id="searchRootId"
+      :root-name="searchRootName"
+      :root-path="searchRootPath"
+      @select-result="handleSearchResultSelect"
+    />
   </div>
 </template>
 
@@ -79,7 +85,7 @@
 import { onMounted, computed } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRouter } from 'vue-router';
-import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, EditPen, CopyDocument } from '@element-plus/icons-vue';
+import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, EditPen, CopyDocument, Search } from '@element-plus/icons-vue';
 
 import type { Chat, ChatCreate, ChatUpdate, BaseTreeItem } from '@/api/types';
 import { useChatListStore } from '@/stores/chatListStore';
@@ -92,6 +98,7 @@ import { useTreeController, type DialogPayload, type DialogConfirmPayload } from
 
 import ExplorerTree from '@/components/common/ExplorerTree.vue';
 import EntityFormDialog, { type SelectConfigOption } from '@/components/common/EntityFormDialog.vue';
+import SearchDialog from '@/components/dialogs/SearchDialog.vue';
 
 // -- Store Instances & State --
 const chatListStore = useChatListStore();
@@ -129,7 +136,7 @@ const {
   handleReorder,
   handleNodeContextMenu,
   openRootContextMenu,
-  handleMenuCommand,
+  handleMenuCommand: originalHandleMenuCommand,
   onDialogConfirm,
 } = useTreeController<Chat, ChatCreate, ChatUpdate>({
   items: chatList,
@@ -237,6 +244,70 @@ const handleSelectChat = async (chatId: string) => {
 };
 
 const goToSettings = () => router.push('/settings');
+
+// -- Search Dialog --
+const searchDialogVisible = ref(false);
+const searchRootId = ref<string | null>(null);
+const searchRootName = ref<string | null>(null);
+const searchRootPath = ref<string | null>(null);
+
+// Helper function to get the full path of a chat/folder
+function getItemPath(itemId: string): string {
+  const path: string[] = [];
+  let currentId: string | null = itemId;
+
+  while (currentId) {
+    const item = chatList.value.find(c => c.id === currentId);
+    if (!item) break;
+
+    path.unshift(item.name);
+    currentId = item.parentId;
+  }
+
+  return path.join(' / ');
+}
+
+// Wrapper function to handle search command
+async function handleMenuCommand(command: string) {
+  if (command === 'search') {
+    const selectedItem = contextMenuItem.value;
+
+    if (selectedItem) {
+      // Set search root info
+      searchRootId.value = selectedItem.id;
+      searchRootName.value = selectedItem.name;
+
+      // Calculate full path (excluding the current item)
+      const fullPath = getItemPath(selectedItem.id);
+      const pathParts = fullPath.split(' / ');
+      const pathWithoutCurrent = pathParts.slice(0, -1).join(' / ');
+      searchRootPath.value = pathWithoutCurrent || null;
+    } else {
+      // Global search
+      searchRootId.value = null;
+      searchRootName.value = null;
+      searchRootPath.value = null;
+    }
+
+    searchDialogVisible.value = true;
+    return;
+  }
+
+  // Delegate other commands to original handler
+  await originalHandleMenuCommand(command);
+}
+
+async function handleSearchResultSelect(data: { chatId: string; subMessageId: string | null }) {
+  // [修复] 1. 先设置目标ID，确保 ChatWindow 在监听到会话切换并加载完成时，能第一时间读到这个值
+  if (data.subMessageId) {
+    chatSessionStore.setSearchTarget(data.subMessageId);
+  }
+
+  // [修复] 2. 再切换会话
+  await handleSelectChat(data.chatId);
+
+  // 注意：原先在这里设置 setSearchTarget 会因为 await 的存在导致设置得太晚
+}
 </script>
 
 <style scoped>

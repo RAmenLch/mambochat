@@ -467,3 +467,37 @@ export interface McpToolContent {
   result: string | null;
   is_error: boolean;
 }
+
+// --- Search Types ---
+
+/**
+ * 搜索请求参数
+ */
+export interface SearchRequest {
+  keyword: string;
+  root_id?: string | null;
+  enable_regex?: boolean;
+  page_num?: number;
+  page_size?: number;
+}
+
+/**
+ * 搜索响应结果
+ */
+export interface SearchResponse {
+  total: number;
+  items: SearchResultItem[];
+}
+
+/**
+ * 搜索结果项
+ */
+export interface SearchResultItem {
+  chat_id: string;
+  chat_name: string;
+  chat_path: string;
+  match_type: 'content' | 'title' | 'system_prompt';
+  context_text: string;
+  sub_message_id: string | null;
+  created_at: string;
+}

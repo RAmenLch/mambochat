@@ -13,7 +13,8 @@ import type {
   SubMessageUpdate,
   GenerateRequest,
   PrepareGenerateResponse,
-  FileResponse, UpdateMessageResponse, McpService
+  FileResponse, UpdateMessageResponse, McpService,
+  SearchRequest, SearchResponse
 } from './types';
 
 /**
@@ -147,4 +148,13 @@ export const generateChatTitle = (chatId: string): Promise<{ message: string }> 
 };
 export const getAvailableMcpServices = (): Promise<McpService[]> => { // <--- 2. 添加这个新函数
   return apiClient.get('/mcp/available');
+};
+
+/**
+ * 全局搜索会话和消息内容
+ * @param data 搜索请求参数
+ * @returns 返回搜索结果
+ */
+export const searchChats = (data: SearchRequest): Promise<SearchResponse> => {
+  return apiClient.post('/chats/search', data);
 };

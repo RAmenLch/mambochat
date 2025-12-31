@@ -65,6 +65,7 @@
             <SubMessageItem
               v-for="(subMessage, index) in group.sub_messages"
               :key="subMessage.id"
+              :id="`sub-msg-${subMessage.id}`"
               :sub-message="subMessage"
               :parent-message="message"
               :index="index + 1"
@@ -77,6 +78,7 @@
           <SubMessageItem
             v-else
             :key="group.sub_messages[0].id"
+            :id="`sub-msg-${group.sub_messages[0].id}`"
             :sub-message="group.sub_messages[0]"
             :parent-message="message"
             :show-header="!useSinglePartitionView"

@@ -138,7 +138,7 @@ const systemConfigStore = useSystemConfigStore();
 
 // --- State from Stores ---
 const { refreshingTitleChatId } = storeToRefs(chatListStore);
-const { currentChat, currentChatId, currentChatMessages, isChatHistoryLoading, isGenerating, contextForTokenEstimation } = storeToRefs(chatSessionStore);
+const { currentChat, currentChatId, currentChatMessages, isChatHistoryLoading, isGenerating, contextForTokenEstimation, searchTargetSubMessageId } = storeToRefs(chatSessionStore);
 const { groupedModels } = storeToRefs(providerStore) as { groupedModels: Ref<GroupedModels[]>};
 
 // --- State from Composables ---
@@ -380,6 +380,48 @@ function handleJumpToMessage(messageId: string) {
   }
 }
 
+function handleJumpToSubMessage(subMessageId: string) {
+  // 找到包含该subMessage的message
+  const message = currentChatMessages.value.find(msg =>
+    msg.sub_messages.some(sm => sm.id === subMessageId)
+  );
+
+  if (message) {
+    // 1. 先尝试跳转到父消息位置，让滚动条大致到位
+    handleJumpToMessage(message.id);
+
+    // 2. 使用双重 nextTick 确保子组件（如 SubMessageItem）已完全展开并渲染
+    nextTick(() => {
+      nextTick(() => {
+        const subMessageElement = document.getElementById(`sub-msg-${subMessageId}`);
+        const scrollbarWrap = scrollbarRef.value?.wrapRef;
+
+        if (subMessageElement && scrollbarWrap) {
+          // 获取subMessage相对于滚动容器的实际位置
+          // 注意：这里需要减去容器的 offsetTop 或者使用相对坐标计算
+          const elementRect = subMessageElement.getBoundingClientRect();
+          const containerRect = scrollbarWrap.getBoundingClientRect();
+
+          // 计算相对位移
+          const relativeTop = elementRect.top - containerRect.top;
+          const currentScrollTop = scrollbarWrap.scrollTop;
+
+          // 目标位置 = 当前滚动位置 + 相对位移 - 顶部留白(20px)
+          const offset = currentScrollTop + relativeTop - 20;
+
+          scrollbarRef.value!.setScrollTop(offset);
+
+          // 高亮显示该subMessage
+          subMessageElement.classList.add('search-highlight-target');
+          setTimeout(() => {
+            subMessageElement.classList.remove('search-highlight-target');
+          }, 3000);
+        }
+      });
+    });
+  }
+}
+
 // --- Watchers ---
 
 watch([uploadedFiles, attachedSubmessageResources], async () => {
@@ -413,10 +455,18 @@ watch(currentChatId, (newId) => {
 
     const stopWatch = watch(isChatHistoryLoading, (loading) => {
       if (!loading) {
-        scrollToBottom(true);
+        if (searchTargetSubMessageId.value) {
+          // 场景 A: 有搜索目标，执行精准跳转，不滚动到底部
+          handleJumpToSubMessage(searchTargetSubMessageId.value);
+          chatSessionStore.setSearchTarget(null); // 跳转后清除目标
+        } else {
+          // 场景 B: 普通切换，滚动到底部
+          scrollToBottom(true);
+        }
         nextTick(() => {
             chatInputBoxRef.value?.focus();
         });
+
         stopWatch();
       }
     }, { immediate: true });
@@ -457,5 +507,24 @@ watch(currentChatId, (newId) => {
   display: block;
   margin-top: 8px;
   font-weight: bold;
+}
+
+/* 搜索高亮目标样式 */
+:deep(.search-highlight-target) {
+  animation: highlight-pulse 0.5s ease-in-out 3;
+  background-color: var(--el-color-warning-light-9);
+  border-radius: 6px;
+  box-shadow: 0 0 8px var(--el-color-warning-light-5);
+}
+
+@keyframes highlight-pulse {
+  0%, 100% {
+    background-color: var(--el-color-warning-light-9);
+    box-shadow: 0 0 8px var(--el-color-warning-light-7);
+  }
+  50% {
+    background-color: var(--el-color-warning-light-7);
+    box-shadow: 0 0 12px var(--el-color-warning-light-5);
+  }
 }
 </style>

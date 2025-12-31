@@ -1,6 +1,7 @@
 <!-- frontend/mambo/src/components/chat/SubMessageItem.vue -->
 <template>
   <div
+    :id="id"
     class="sub-message-item"
     :class="{
       'is-user': parentMessage.role === 'user',
@@ -165,12 +166,14 @@ import { parseMarkdown } from '@/utils/markdownParser';
 import { getIconForMimeType } from '@/utils/fileIcons';
 
 const props = withDefaults(defineProps<{
+  id?: string;
   subMessage: SubMessage;
   parentMessage: Message;
   showHeader?: boolean;
   index?: number;
   isMinimizeDisabled?: boolean;
 }>(), {
+  id: '',
   showHeader: false,
   index: 1,
   isMinimizeDisabled: false,

@@ -19,6 +19,7 @@ export const useChatSessionStore = defineStore('chatSession', () => {
   const currentChatMessages = ref<Message[]>([]);
   const isChatHistoryLoading = ref(false);
   const activeSubscriptions = new Map<string, AbortController>();
+  const searchTargetSubMessageId = ref<string | null>(null);
 
   // --- Getters ---
 
@@ -185,7 +186,15 @@ export const useChatSessionStore = defineStore('chatSession', () => {
     currentChatId.value = null;
     currentChatMessages.value = [];
     isChatHistoryLoading.value = false;
+    searchTargetSubMessageId.value = null;
     _clearAllSubscriptions();
+  }
+
+  /**
+   * 设置搜索目标子消息ID，用于跳转
+   */
+  function setSearchTarget(subMessageId: string | null) {
+    searchTargetSubMessageId.value = subMessageId;
   }
 
   // --- Internal Methods (供 chatInteractionStore 调用) ---
@@ -328,6 +337,7 @@ export const useChatSessionStore = defineStore('chatSession', () => {
     currentChatMessages,
     isChatHistoryLoading,
     activeSubscriptions,
+    searchTargetSubMessageId,
 
     // Getters
     currentChat,
@@ -337,6 +347,7 @@ export const useChatSessionStore = defineStore('chatSession', () => {
     // Actions
     selectChat,
     clearSession,
+    setSearchTarget,
 
     // Internal methods for friend stores
     _addMessage,
