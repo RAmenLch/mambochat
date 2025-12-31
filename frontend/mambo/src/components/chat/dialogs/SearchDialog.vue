@@ -3,7 +3,7 @@
   <el-dialog
     v-model="dialogVisible"
     title="会话搜索"
-    width="700px"
+    width="800px"
     :close-on-click-modal="false"
     @open="handleOpen"
     @close="handleClose"
@@ -115,8 +115,8 @@ import { ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { Search, Loading, DocumentDelete, ChatDotRound, FolderOpened, ArrowRight, Monitor } from '@element-plus/icons-vue';
-import { searchChats } from '@/api/chatService';
-import type { SearchResultItem } from '@/api/types';
+import { searchChats } from '@/api/chatService.ts';
+import type { SearchResultItem } from '@/api/types.ts';
 
 interface Props {
   visible: boolean;

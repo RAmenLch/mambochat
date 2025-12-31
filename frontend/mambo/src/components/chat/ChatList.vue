@@ -98,7 +98,7 @@ import { useTreeController, type DialogPayload, type DialogConfirmPayload } from
 
 import ExplorerTree from '@/components/common/ExplorerTree.vue';
 import EntityFormDialog, { type SelectConfigOption } from '@/components/common/EntityFormDialog.vue';
-import SearchDialog from '@/components/dialogs/SearchDialog.vue';
+import SearchDialog from '@/components/chat/dialogs/SearchDialog.vue';
 
 // -- Store Instances & State --
 const chatListStore = useChatListStore();
