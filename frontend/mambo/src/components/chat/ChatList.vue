@@ -43,10 +43,7 @@
       <span :style="contextMenuPosition" />
       <template #dropdown>
         <el-dropdown-menu>
-          <!-- Search option for root, folder, and chat -->
-          <el-dropdown-item command="search"><el-icon><Search /></el-icon>搜索</el-dropdown-item>
-
-          <el-dropdown-item v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'" command="newChat" :divided="true">
+          <el-dropdown-item v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'" command="newChat">
             <el-icon><Plus /></el-icon>新建会话
           </el-dropdown-item>
           <el-dropdown-item v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'" command="newFolder">
@@ -59,6 +56,9 @@
             <el-dropdown-item v-if="contextMenuItem.itemType === 'chat'" command="duplicate"><el-icon><CopyDocument /></el-icon>复制会话</el-dropdown-item>
             <el-dropdown-item command="delete" class="delete-item"><el-icon><Delete /></el-icon>删除</el-dropdown-item>
           </template>
+
+          <!-- Search option at the bottom -->
+          <el-dropdown-item command="search" :divided="true"><el-icon><Search /></el-icon>搜索</el-dropdown-item>
         </el-dropdown-menu>
       </template>
     </el-dropdown>
