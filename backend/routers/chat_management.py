@@ -139,7 +139,7 @@ async def reorder_chats(updates: List[schemas.ChatReorderItem], db: AsyncSession
 
 
 @router.get("/chats/", response_model=List[schemas.Chat], summary="获取会话和文件夹列表")
-async def read_chats(skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)):
+async def read_chats(skip: int = 0, limit: int = 1000, db: AsyncSession = Depends(get_db)):
     chats = await chat_crud.get_chats(db, skip=skip, limit=limit)
 
     default_model_setting = await setting_crud.get_setting(db, key="default_model_id")
