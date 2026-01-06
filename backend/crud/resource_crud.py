@@ -3,9 +3,11 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload, joinedload
+from sqlalchemy import func, or_, update
 from typing import List, Optional
 
 from backend.models import resource_model
+from backend.schemas.enums import MoveAction
 from backend import schemas
 
 
@@ -24,6 +26,35 @@ async def get_resources(db: AsyncSession) -> List[resource_model.Resource]:
     result = await db.execute(
         select(resource_model.Resource)
         .options(joinedload(resource_model.Resource.latest_version))
+        .order_by(resource_model.Resource.sortOrder.asc())
+    )
+    return result.scalars().all()
+
+
+async def get_resources_by_parent_ids(db: AsyncSession, parent_ids: List[str]) -> List[resource_model.Resource]:
+    """
+    根据父节点ID列表批量获取子资源和文件夹。
+    如果列表中包含 "root"，则同时获取根目录下的项目。
+    注意：此方法不加载 latest_version 的详细内容。
+    """
+    if not parent_ids:
+        return []
+
+    conditions = []
+    valid_uuids = [pid for pid in parent_ids if pid != "root"]
+
+    if valid_uuids:
+        conditions.append(resource_model.Resource.parentId.in_(valid_uuids))
+
+    if "root" in parent_ids:
+        conditions.append(resource_model.Resource.parentId.is_(None))
+
+    if not conditions:
+        return []
+
+    result = await db.execute(
+        select(resource_model.Resource)
+        .filter(or_(*conditions))
         .order_by(resource_model.Resource.sortOrder.asc())
     )
     return result.scalars().all()
@@ -177,3 +208,61 @@ async def batch_update_resources_order(db: AsyncSession, updates: List[schemas.R
     await db.commit()
     return True
 
+
+async def move_resources(db: AsyncSession, move_request: schemas.ResourceMoveRequest) -> bool:
+    """
+    移动资源或文件夹到指定位置（Inside, Before, After）。
+    处理目标位置的排序挤占逻辑。
+    """
+    if not move_request.item_ids:
+        return True
+
+    target_parent_id = None
+    target_sort_order = 0
+
+    if move_request.action == MoveAction.INSIDE:
+        if move_request.reference_id != "root":
+            target_parent_id = move_request.reference_id
+
+        stmt = select(func.max(resource_model.Resource.sortOrder)).filter(resource_model.Resource.parentId == target_parent_id)
+        result = await db.execute(stmt)
+        max_order = result.scalar()
+        target_sort_order = (max_order if max_order is not None else -1) + 1
+
+    else:
+        if move_request.reference_id == "root":
+            return False
+
+        ref_resource = await db.get(resource_model.Resource, move_request.reference_id)
+        if not ref_resource:
+            return False
+
+        target_parent_id = ref_resource.parentId
+        base_order = ref_resource.sortOrder
+
+        if move_request.action == MoveAction.BEFORE:
+            target_sort_order = base_order
+        else:  # AFTER
+            target_sort_order = base_order + 1
+
+        shift_stmt = (
+            update(resource_model.Resource)
+            .where(resource_model.Resource.parentId == target_parent_id)
+            .where(resource_model.Resource.sortOrder >= target_sort_order)
+            .values(sortOrder=resource_model.Resource.sortOrder + len(move_request.item_ids))
+        )
+        await db.execute(shift_stmt)
+
+    for index, item_id in enumerate(move_request.item_ids):
+        stmt = (
+            update(resource_model.Resource)
+            .where(resource_model.Resource.id == item_id)
+            .values(
+                parentId=target_parent_id,
+                sortOrder=target_sort_order + index
+            )
+        )
+        await db.execute(stmt)
+
+    await db.commit()
+    return True

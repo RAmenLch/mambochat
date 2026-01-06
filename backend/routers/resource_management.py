@@ -1,6 +1,6 @@
 # backend/routers/resource_management.py
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
@@ -20,6 +20,18 @@ async def read_resources(db: AsyncSession = Depends(get_db)):
     return await resource_crud.get_resources(db=db)
 
 
+@router.get("/children", response_model=List[schemas.Resource], summary="批量获取子资源和文件夹")
+async def read_resource_children(
+    parentIds: List[str] = Query(..., description="父节点ID列表，'root'代表根目录"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    根据父节点ID列表并行加载子节点内容。
+    注意：此接口不加载资源的详细版本内容，仅返回元数据。
+    """
+    return await resource_crud.get_resources_by_parent_ids(db, parent_ids=parentIds)
+
+
 # MODIFIED: Changed path from "/" to "" to respond at /api/resources without a trailing slash.
 @router.post("", response_model=schemas.Resource, status_code=status.HTTP_201_CREATED, summary="创建新资源或文件夹")
 async def create_resource(resource: schemas.ResourceCreate, db: AsyncSession = Depends(get_db)):
@@ -28,6 +40,17 @@ async def create_resource(resource: schemas.ResourceCreate, db: AsyncSession = D
     如果创建的是资源，会自动为其生成一个初始的默认版本。
     """
     return await resource_crud.create_resource(db=db, resource=resource)
+
+
+@router.post("/move", status_code=status.HTTP_200_OK, summary="移动资源或文件夹")
+async def move_resources(move_request: schemas.ResourceMoveRequest, db: AsyncSession = Depends(get_db)):
+    """
+    移动资源或文件夹到指定位置（Inside, Before, After）。
+    """
+    success = await resource_crud.move_resources(db, move_request=move_request)
+    if not success:
+        raise HTTPException(status_code=400, detail="Move operation failed")
+    return {"message": "Move successful"}
 
 
 @router.get("/{resource_id}", response_model=schemas.ResourceWithVersions, summary="获取单个资源的详细信息")
@@ -96,12 +119,11 @@ async def set_active_version(resource_id: str, version_id: str, db: AsyncSession
     return updated_resource
 
 
-@router.post("/reorder", status_code=status.HTTP_200_OK, summary="批量更新资源排序")
+@router.post("/reorder", status_code=status.HTTP_200_OK, summary="批量更新资源排序 (Deprecated)")
 async def reorder_resources(updates: List[schemas.ResourceReorderItem], db: AsyncSession = Depends(get_db)):
     """
-
     接收一个包含ID、新父ID和新排序顺序的列表，以批量更新项目层级和顺序。
+    Note: This endpoint is deprecated in favor of /resources/move.
     """
     await resource_crud.batch_update_resources_order(db, updates=updates)
     return {"message": "Reorder successful"}
-

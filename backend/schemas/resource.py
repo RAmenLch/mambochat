@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 from backend.schemas.message import SubMessageConfig
+from backend.schemas.enums import MoveAction
 
 
 # --- ResourceVersion Schemas ---
@@ -91,3 +92,8 @@ class ResourceReorderItem(BaseModel):
     parentId: Optional[str]
     sortOrder: int
 
+
+class ResourceMoveRequest(BaseModel):
+    item_ids: List[str] = Field(..., description="被移动的资源或文件夹ID列表")
+    reference_id: str = Field(..., description="参考目标ID，'root'代表根目录")
+    action: MoveAction = Field(..., description="移动行为: before, after, inside")

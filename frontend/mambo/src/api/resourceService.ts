@@ -9,14 +9,25 @@ import type {
   ResourceReorderItem,
   ResourceVersion,
   ResourceVersionCreate,
-  ResourceVersionUpdate
+  ResourceVersionUpdate,
+  MoveRequest
 } from './types';
 
 /**
- * 获取所有资源和文件夹的列表。
+ * [新增] 懒加载获取资源/文件夹子节点
+ * @param parentIds 父节点ID列表，传 "root" 获取根目录
  */
-export const getResources = (): Promise<Resource[]> => {
-  return apiClient.get('/resources');
+export const getResourceChildren = (parentIds: string[]): Promise<Resource[]> => {
+  const params = new URLSearchParams();
+  parentIds.forEach(id => params.append('parentIds', id));
+  return apiClient.get('/resources/children', { params });
+};
+
+/**
+ * [新增] 移动资源/文件夹节点
+ */
+export const moveResource = (data: MoveRequest): Promise<void> => {
+  return apiClient.post('/resources/move', data);
 };
 
 /**

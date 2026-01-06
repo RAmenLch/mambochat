@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/settings/resource/ResourceTreePanel.vue -->
 <template>
   <el-aside width="300px" class="resource-tree-panel">
     <ExplorerTree
@@ -5,12 +6,14 @@
       :data="data"
       :current-id="currentId"
       :is-loading="isLoading"
+      :loading-folder-ids="loadingFolders"
       folder-item-type="folder"
       persistence-key="mambo_resource_folder_expanded_state"
       @node-click="handleNodeClick"
       @node-contextmenu="handleNodeContextMenu"
       @root-contextmenu="openRootContextMenu"
-      @reorder="handleReorder"
+      @move="handleMove"
+      @node-expand="handleNodeExpand"
     >
       <template #header>
         <div class="panel-header">
@@ -61,7 +64,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { Folder, Document, DocumentAdd, FolderAdd, EditPen, Delete, Memo } from '@element-plus/icons-vue';
 
@@ -94,7 +97,7 @@ const emit = defineEmits<{
 
 // --- Store ---
 const resourceStore = useResourceStore();
-const { resources } = storeToRefs(resourceStore);
+const { resources, loadingFolders } = storeToRefs(resourceStore);
 
 // --- Constants ---
 const creatableResourceTypes: { value: ResourceType, label: string }[] = [
@@ -116,7 +119,8 @@ const {
   contextMenuPosition,
   dialogState,
   dialogProps,
-  handleReorder,
+  handleMove,
+  handleNodeExpand,
   handleNodeContextMenu,
   openRootContextMenu,
   handleMenuCommand,
@@ -130,8 +134,9 @@ const {
       await resourceStore.deleteResourceItem(id);
       emit('item-deleted', id);
     },
-    reorderItems: resourceStore.reorderResourceItems,
+    moveItem: resourceStore.moveResourceItem,
   },
+  onExpand: resourceStore.fetchResourceChildren,
   getDialogProps: (payload: DialogPayload<Resource>) => {
     switch (payload.type) {
       case 'rename':
@@ -161,7 +166,7 @@ const {
       return null;
     }
 
-    const sortOrder = calculateSortOrder(dialogPayload.parentId);
+    const sortOrder = 0; // 懒加载模式下由后端决定顺序
     let newItem: Resource | null = null;
 
     if (dialogPayload.type === 'newResource') {
@@ -189,10 +194,11 @@ const {
   }
 });
 
-// --- Helper Functions ---
-const calculateSortOrder = (parentId: string | null = null): number => {
-  return resources.value.filter(r => r.parentId === parentId).length;
-};
+// --- Lifecycle ---
+onMounted(() => {
+  // 初始化资源列表（加载根节点）
+  resourceStore.initializeList();
+});
 
 // --- Handlers ---
 function handleNodeClick(data: BaseTreeItem) {

@@ -3,12 +3,12 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload, joinedload
-from sqlalchemy import func, literal, union_all, null, case, literal_column
+from sqlalchemy import func, literal, union_all, null, case, literal_column, or_, update
 from typing import List, Optional, Tuple, Any
 import json
 
 from backend.models import chat_model, provider_model
-from backend.schemas.enums import SubMessageType
+from backend.schemas.enums import SubMessageType, MoveAction
 from backend import schemas
 
 async def get_chat(db: AsyncSession, chat_id: str) -> Optional[chat_model.Chat]:
@@ -31,6 +31,34 @@ async def get_chats(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[c
         .order_by(chat_model.Chat.sortOrder.asc())
         .offset(skip)
         .limit(limit)
+    )
+    return result.scalars().all()
+
+
+async def get_chats_by_parent_ids(db: AsyncSession, parent_ids: List[str]) -> List[chat_model.Chat]:
+    """
+    根据父节点ID列表批量获取子会话和文件夹。
+    如果列表中包含 "root"，则同时获取根目录下的项目。
+    """
+    if not parent_ids:
+        return []
+
+    conditions = []
+    valid_uuids = [pid for pid in parent_ids if pid != "root"]
+
+    if valid_uuids:
+        conditions.append(chat_model.Chat.parentId.in_(valid_uuids))
+
+    if "root" in parent_ids:
+        conditions.append(chat_model.Chat.parentId.is_(None))
+
+    if not conditions:
+        return []
+
+    result = await db.execute(
+        select(chat_model.Chat)
+        .filter(or_(*conditions))
+        .order_by(chat_model.Chat.sortOrder.asc())
     )
     return result.scalars().all()
 
@@ -100,6 +128,74 @@ async def batch_update_chats_order(db: AsyncSession, updates: List[schemas.ChatR
         if chat_to_update:
             chat_to_update.parentId = update_item.parentId
             chat_to_update.sortOrder = update_item.sortOrder
+
+    await db.commit()
+    return True
+
+
+async def move_chats(db: AsyncSession, move_request: schemas.ChatMoveRequest) -> bool:
+    """
+    移动会话或文件夹到指定位置（Inside, Before, After）。
+    处理目标位置的排序挤占逻辑。
+    """
+    if not move_request.item_ids:
+        return True
+
+    target_parent_id = None
+    target_sort_order = 0
+
+    # 1. 计算目标父节点和起始排序值
+    if move_request.action == MoveAction.INSIDE:
+        # 移入文件夹内部，作为最后一个子节点
+        if move_request.reference_id != "root":
+            target_parent_id = move_request.reference_id
+
+        # 获取目标文件夹内当前最大的 sortOrder
+        stmt = select(func.max(chat_model.Chat.sortOrder)).filter(chat_model.Chat.parentId == target_parent_id)
+        result = await db.execute(stmt)
+        max_order = result.scalar()
+        target_sort_order = (max_order if max_order is not None else -1) + 1
+
+    else:
+        # Before 或 After，需要参考节点
+        if move_request.reference_id == "root":
+            # 根节点不能作为 Before/After 的参考对象，除非业务逻辑允许将项目放在“根”之前/之后（通常无意义）
+            # 这里假设 reference_id 必须是具体的 item ID
+            return False
+
+        ref_chat = await db.get(chat_model.Chat, move_request.reference_id)
+        if not ref_chat:
+            return False
+
+        target_parent_id = ref_chat.parentId
+        base_order = ref_chat.sortOrder
+
+        if move_request.action == MoveAction.BEFORE:
+            target_sort_order = base_order
+        else:  # AFTER
+            target_sort_order = base_order + 1
+
+        # 2. 挤占位移：将插入点之后的同级节点 sortOrder 向后推
+        shift_stmt = (
+            update(chat_model.Chat)
+            .where(chat_model.Chat.parentId == target_parent_id)
+            .where(chat_model.Chat.sortOrder >= target_sort_order)
+            .values(sortOrder=chat_model.Chat.sortOrder + len(move_request.item_ids))
+        )
+        await db.execute(shift_stmt)
+
+    # 3. 更新被移动的节点
+    # 保持 item_ids 原有的相对顺序
+    for index, item_id in enumerate(move_request.item_ids):
+        stmt = (
+            update(chat_model.Chat)
+            .where(chat_model.Chat.id == item_id)
+            .values(
+                parentId=target_parent_id,
+                sortOrder=target_sort_order + index
+            )
+        )
+        await db.execute(stmt)
 
     await db.commit()
     return True

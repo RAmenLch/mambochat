@@ -6,8 +6,8 @@ import type {
   ChatCreate,
   ChatWithMessages,
   ChatUpdate,
-  ChatReorderItem,
   Message,
+  MoveRequest,
   MessageUpdate,
   SubMessage,
   SubMessageUpdate,
@@ -16,12 +16,27 @@ import type {
   FileResponse, UpdateMessageResponse, McpService,
   SearchRequest, SearchResponse
 } from './types';
+/**
+ * [新增] 懒加载获取会话/文件夹子节点
+ * @param parentIds 父节点ID列表，传 "root" 获取根目录
+ */
+export const getChatChildren = (parentIds: string[]): Promise<Chat[]> => {
+  const params = new URLSearchParams();
+  parentIds.forEach(id => params.append('parentIds', id));
+  return apiClient.get('/chats/children', { params });
+};
+/**
+ * [新增] 移动会话/文件夹节点
+ */
+export const moveChat = (data: MoveRequest): Promise<void> => {
+  return apiClient.post('/chats/move', data);
+};
 
 /**
- * 获取会话和文件夹列表
+ * [新增] 获取会话链路 (用于深层链接回溯)
  */
-export const getChats = (): Promise<Chat[]> => {
-  return apiClient.get('/chats/')
+export const getChatLineage = (chatId: string): Promise<Chat[]> => {
+  return apiClient.get(`/chats/${chatId}/lineage`);
 };
 
 /**
@@ -59,12 +74,6 @@ export const duplicateChat = (chatId: string): Promise<Chat> => {
   return apiClient.post(`/chats/${chatId}/duplicate`)
 };
 
-/**
- * 批量更新会话和文件夹的排序与层级
- */
-export const reorderChats = (updates: ChatReorderItem[]): Promise<{ message: string }> => {
-  return apiClient.post('/chats/reorder', updates)
-}
 
 /**
  * 更新整条消息（替换其所有子消息），并可选择触发重新生成。

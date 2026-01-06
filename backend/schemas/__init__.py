@@ -15,7 +15,7 @@ from .provider import (
 from .chat import (
     ChatBase, ChatCreate, Chat, ChatUpdate, ChatWithMessages,
     ChatReorderItem, GenerateRequest,UpdateMessageResponse,PrepareGenerateResponse,
-    SearchRequest,SearchResultItem,SearchResponse
+    SearchRequest,SearchResultItem,SearchResponse,MoveAction,ChatMoveRequest
 )
 from .setting import GlobalSetting, GlobalSettingsUpdate
 
@@ -25,5 +25,5 @@ from .resource import (Resource, ResourceVersion,
                        ResourceVersionBase,ResourceBase,
                        ResourceCreate,ResourceUpdate,
                        ResourceVersionCreate,ResourceWithVersions,
-                       ResourceVersionUpdate,ResourceReorderItem
+                       ResourceVersionUpdate,ResourceReorderItem,MoveAction,ResourceMoveRequest
                        )

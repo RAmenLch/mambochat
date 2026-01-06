@@ -5,6 +5,7 @@ from typing import Optional, List, Dict
 import json
 
 from backend.schemas.message import Message, SubMessageCreate
+from backend.schemas.enums import MoveAction
 
 
 # --- Chat Schemas ---
@@ -62,6 +63,12 @@ class ChatReorderItem(BaseModel):
     id: str
     parentId: Optional[str]
     sortOrder: int
+
+
+class ChatMoveRequest(BaseModel):
+    item_ids: List[str] = Field(..., description="被移动的会话或文件夹ID列表")
+    reference_id: str = Field(..., description="参考目标ID，'root'代表根目录")
+    action: MoveAction = Field(..., description="移动行为: before, after, inside")
 
 
 class GenerateRequest(BaseModel):

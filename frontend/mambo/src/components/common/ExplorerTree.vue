@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/common/ExplorerTree.vue -->
 <template>
   <div class="explorer-tree-container" @contextmenu.prevent="handleRootContextMenu">
     <div class="explorer-tree-header" v-if="$slots.header">
@@ -5,11 +6,11 @@
     </div>
 
     <el-scrollbar class="explorer-tree-scrollbar">
-      <div v-if="isLoading" class="loading-container">
+      <div v-if="isLoading && data.length === 0" class="loading-container">
         <el-skeleton :rows="5" animated />
       </div>
       <el-tree
-        v-else-if="data.length > 0"
+        v-else-if="data.length > 0 || !isLoading"
         ref="treeRef"
         :data="data"
         node-key="id"
@@ -25,7 +26,7 @@
         @node-expand="handleNodeExpand"
         @node-collapse="handleNodeCollapse"
         class="custom-tree"
-        :props="{ label: 'name', children: 'children' }"
+        :props="treeProps"
       >
         <template #default="{ node, data }">
           <span class="custom-tree-node">
@@ -44,6 +45,11 @@
                 <span class="node-label">{{ node.label }}</span>
               </el-tooltip>
             </slot>
+
+            <!-- Loading Indicator for Lazy Loading -->
+            <el-icon v-if="loadingNodes.has(data.id)" class="is-loading loading-icon">
+              <Loading />
+            </el-icon>
           </span>
         </template>
       </el-tree>
@@ -53,11 +59,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted } from 'vue';
+import { ref, watch, nextTick, onMounted, computed } from 'vue';
 import { ElTree } from 'element-plus';
+import { Loading } from '@element-plus/icons-vue';
 import type { AllowDropType, NodeDropType } from 'element-plus/es/components/tree/src/tree.type';
 import type Node from 'element-plus/es/components/tree/src/model/node';
-import type { BaseTreeItem, TreeReorderEvent } from '@/api/types';
+import type { BaseTreeItem, MoveRequest, MoveAction } from '@/api/types';
 
 // --- Props & Emits ---
 
@@ -68,6 +75,8 @@ interface Props {
   emptyText?: string;
   folderItemType?: string;
   persistenceKey?: string;
+  // 外部传入的正在加载的文件夹ID集合，用于显示局部 Loading
+  loadingFolderIds?: Set<string>;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -76,20 +85,38 @@ const props = withDefaults(defineProps<Props>(), {
   emptyText: '暂无数据',
   folderItemType: 'folder',
   persistenceKey: undefined,
+  loadingFolderIds: () => new Set(),
 });
 
 const emit = defineEmits<{
   (e: 'node-click', data: BaseTreeItem): void;
   (e: 'node-contextmenu', event: MouseEvent, data: BaseTreeItem, node: Node): void;
-  // 新增：根区域右键事件
   (e: 'root-contextmenu', event: MouseEvent): void;
-  (e: 'reorder', updates: TreeReorderEvent[]): void;
+  // 替换原有的 reorder 事件，改为 move 事件
+  (e: 'move', req: MoveRequest): void;
+  // 新增：节点展开事件，用于触发懒加载
+  (e: 'node-expand', data: BaseTreeItem): void;
 }>();
 
 // --- State ---
 
 const treeRef = ref<InstanceType<typeof ElTree>>();
 const expandedState = ref<Record<string, boolean>>({});
+
+// 计算属性：合并本地 loading 状态（如果有）和 props 传入的状态
+const loadingNodes = computed(() => props.loadingFolderIds);
+
+const treeProps = {
+  label: 'name',
+  children: 'children',
+  // 在手动管理数据的懒加载模式下，我们不需要 el-tree 的 load 方法
+  // 而是通过 data 的动态变化来驱动
+  isLeaf: (data: BaseTreeItem, node: Node) => {
+    // 只有非文件夹类型才被视为叶子节点
+    // 文件夹即使当前没有 children，也被视为非叶子（可展开），以便触发加载
+    return data.itemType !== props.folderItemType;
+  }
+};
 
 // --- Tree Event Handlers ---
 
@@ -98,45 +125,55 @@ const handleNodeClick = (data: BaseTreeItem) => {
 };
 
 const handleNodeContextMenu = (event: MouseEvent, data: BaseTreeItem, node: Node) => {
-  // ElTree 的 node-contextmenu 会阻止冒泡，所以这里只处理节点上的右键
   emit('node-contextmenu', event, data, node);
 };
 
-// 新增：处理容器背景的右键点击
 const handleRootContextMenu = (event: MouseEvent) => {
   emit('root-contextmenu', event);
 };
 
-// --- Drag & Drop Logic ---
+// --- Drag & Drop Logic (Refactored for Move API) ---
 
 const allowDrop = (draggingNode: Node, dropNode: Node, dropType: AllowDropType) => {
-  return !((dropNode.data as BaseTreeItem).itemType !== props.folderItemType && dropType === 'inner');
+  // 不允许将节点拖入非文件夹节点内部
+  if ((dropNode.data as BaseTreeItem).itemType !== props.folderItemType && dropType === 'inner') {
+    return false;
+  }
+  return true;
 };
 
 const handleNodeDrop = (draggingNode: Node, dropNode: Node, dropType: NodeDropType) => {
-  let parentId: string | null = null;
-  let siblings: Node[] = [];
+  // 将 el-tree 的 dropType 映射为后端的 MoveAction
+  let action: MoveAction;
+  let referenceId: string;
+
+  const draggingData = draggingNode.data as BaseTreeItem;
+  const dropData = dropNode.data as BaseTreeItem;
 
   if (dropType === 'inner') {
-    parentId = (dropNode.data as BaseTreeItem).id;
-    siblings = dropNode.childNodes || [];
+    action = 'inside';
+    referenceId = dropData.id;
+  } else if (dropType === 'before') {
+    action = 'before';
+    referenceId = dropData.id;
+  } else if (dropType === 'after') {
+    action = 'after';
+    referenceId = dropData.id;
   } else {
-    parentId = (dropNode.data as BaseTreeItem).parentId;
-    siblings = dropNode.parent?.childNodes || treeRef.value?.root.childNodes || [];
+    // Should not happen given allowDrop
+    return;
   }
 
-  const updates: TreeReorderEvent[] = siblings.map((node, index) => ({
-    id: (node.data as BaseTreeItem).id,
-    parentId,
-    sortOrder: index,
-  }));
+  const req: MoveRequest = {
+    item_ids: [draggingData.id],
+    reference_id: referenceId,
+    action: action,
+  };
 
-  if (updates.length > 0) {
-    emit('reorder', updates);
-  }
+  emit('move', req);
 };
 
-// --- Expansion Persistence Logic ---
+// --- Expansion & Lazy Loading Logic ---
 
 const loadExpandedState = () => {
   if (!props.persistenceKey) return;
@@ -157,10 +194,14 @@ const saveExpandedState = () => {
 };
 
 const handleNodeExpand = (data: BaseTreeItem) => {
+  // 1. 记录展开状态
   if (data.itemType === props.folderItemType) {
     expandedState.value[data.id] = true;
     saveExpandedState();
   }
+
+  // 2. 触发懒加载事件
+  emit('node-expand', data);
 };
 
 const handleNodeCollapse = (data: BaseTreeItem) => {
@@ -170,38 +211,14 @@ const handleNodeCollapse = (data: BaseTreeItem) => {
   }
 };
 
-watch(() => props.data, (newData) => {
-  if (!props.persistenceKey) return;
-
-  const getAllFolderIds = (nodes: any[]): Set<string> => {
-    let ids = new Set<string>();
-    for (const node of nodes) {
-      if (node.itemType === props.folderItemType) {
-        ids.add(node.id);
-        if (node.children) {
-          const childIds = getAllFolderIds(node.children);
-          childIds.forEach(id => ids.add(id));
-        }
-      }
-    }
-    return ids;
-  };
-
-  const folderIds = getAllFolderIds(newData);
-  const hasChanged = Object.keys(expandedState.value).some(id => !folderIds.has(id));
-
-  if (hasChanged) {
-    expandedState.value = Object.fromEntries(
-      Object.entries(expandedState.value).filter(([key]) => folderIds.has(key))
-    );
-    saveExpandedState();
-  }
-}, { deep: true });
-
+// 监听数据变化，恢复展开状态
+// 注意：在懒加载模式下，数据是增量到来的。
+// 当新数据到来时，如果它包含在 expandedState 中，我们需要确保它是展开的。
 watch(() => props.data, (newData) => {
   if (newData.length > 0 && treeRef.value && Object.keys(expandedState.value).length > 0) {
     nextTick(() => {
       Object.keys(expandedState.value).forEach(key => {
+        // 只有当节点存在于当前树中时才尝试展开
         const node = treeRef.value!.getNode(key);
         if (node && !node.expanded) {
           node.expand();
@@ -209,7 +226,7 @@ watch(() => props.data, (newData) => {
       });
     });
   }
-}, { flush: 'post' });
+}, { deep: true, flush: 'post' });
 
 // --- Lifecycle ---
 
@@ -306,5 +323,16 @@ defineExpose({
   text-overflow: ellipsis;
   min-width: 0;
   margin-right: 8px;
+}
+
+.loading-icon {
+  animation: rotating 2s linear infinite;
+  color: var(--el-text-color-secondary);
+  margin-left: 4px;
+}
+
+@keyframes rotating {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 </style>

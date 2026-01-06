@@ -7,20 +7,24 @@
 interface TreeItem {
   id: string;
   parentId: string | null;
+  // sortOrder 仍然保留用于同级排序，但在懒加载模式下，
+  // 它的值由后端返回的列表顺序决定，前端不再主动计算它。
   sortOrder: number;
 }
 
 /**
  * 定义一个通用的、带有子节点层级的树节点类型。
  */
-type TreeNode<T> = T & { children?: TreeNode<T>[] };
+export type TreeNode<T> = T & { children?: TreeNode<T>[] };
 
 /**
  * 将一个扁平的、实现了 TreeItem 接口的列表构建成一个层级分明的树形结构。
  * 该函数是通用的，可用于构建会话树、资源树等。
- * 它会进行深拷贝以避免修改原始数组，并按 sortOrder 对每个层级的节点进行排序。
  *
- * @param flatList - 从API获取的原始扁平列表。
+ * 在懒加载模式下，此函数处理的是“当前已加载的增量数据”。
+ * 如果一个文件夹的子节点尚未加载，它将没有 children 属性（或为空数组）。
+ *
+ * @param flatList - 从 Store 获取的扁平列表（包含已加载的所有节点）。
  * @returns 返回一个表示层级结构的 TreeNode 数组。
  */
 export function buildChatTree<T extends TreeItem>(flatList: readonly T[]): TreeNode<T>[] {
@@ -32,10 +36,10 @@ export function buildChatTree<T extends TreeItem>(flatList: readonly T[]): TreeN
   const tree: TreeNode<T>[] = [];
   list.forEach(item => {
     if (item.parentId && map[item.parentId]) {
-      // 如果存在父节点，则将当前项添加到父节点的 children 数组中
+      // 如果存在父节点且父节点也在当前列表中，则将当前项添加到父节点的 children 数组中
       (map[item.parentId].children = map[item.parentId].children || []).push(item);
     } else {
-      // 否则，该项为根节点
+      // 否则，该项为根节点（或者其父节点尚未加载/不存在于当前列表中）
       tree.push(item);
     }
   });

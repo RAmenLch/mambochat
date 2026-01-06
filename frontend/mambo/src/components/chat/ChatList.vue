@@ -6,13 +6,15 @@
       :data="treeData"
       :current-id="currentChatId"
       :is-loading="isChatListLoading"
+      :loading-folder-ids="loadingFolders"
       folder-item-type="folder"
       persistence-key="mambo_chat_folder_expanded_state"
       class="chat-tree"
       @node-click="handleNodeClick"
       @node-contextmenu="handleNodeContextMenu"
       @root-contextmenu="openRootContextMenu"
-      @reorder="handleReorder"
+      @move="handleMove"
+      @node-expand="handleNodeExpand"
     >
       <template #header>
         <div class="chat-list-header">
@@ -82,9 +84,9 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, computed } from 'vue';
+import { onMounted, computed, ref } from 'vue';
 import { storeToRefs } from 'pinia';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, EditPen, CopyDocument, Search } from '@element-plus/icons-vue';
 
 import type { Chat, ChatCreate, ChatUpdate, BaseTreeItem } from '@/api/types';
@@ -106,8 +108,9 @@ const chatSessionStore = useChatSessionStore();
 const providerStore = useProviderStore();
 const settingsStore = useSettingsStore();
 const router = useRouter();
+const route = useRoute();
 
-const { chatList, isChatListLoading } = storeToRefs(chatListStore);
+const { chatList, isChatListLoading, loadingFolders } = storeToRefs(chatListStore);
 const { currentChatId } = storeToRefs(chatSessionStore);
 const { providers } = storeToRefs(providerStore);
 const { globalSettings } = storeToRefs(settingsStore);
@@ -133,7 +136,8 @@ const {
   contextMenuPosition,
   dialogState,
   dialogProps,
-  handleReorder,
+  handleMove,
+  handleNodeExpand,
   handleNodeContextMenu,
   openRootContextMenu,
   handleMenuCommand: originalHandleMenuCommand,
@@ -141,13 +145,14 @@ const {
 } = useTreeController<Chat, ChatCreate, ChatUpdate>({
   items: chatList,
   crudHandlers: {
-    // 更新：将 store actions 映射到 useTreeController 的新接口
     createItem: chatListStore.createNewItem,
     updateItem: chatListStore.updateChatSettings,
     deleteItem: chatListStore.deleteItem,
-    reorderItems: chatListStore.reorderChatItems,
+    moveItem: chatListStore.moveChatItem,
     duplicateItem: chatListStore.duplicateChat,
   },
+  // 绑定懒加载 Action
+  onExpand: chatListStore.fetchChatChildren,
   getDialogProps: (payload: DialogPayload<Chat>) => {
     switch (payload.type) {
       case 'rename':
@@ -179,12 +184,13 @@ const {
     formPayload: DialogConfirmPayload
   ): Promise<Chat | null> => {
     if (dialogPayload.type === 'rename' && dialogPayload.targetItem) {
-      // 注意：此处调用的 store action 名称未变，因为在 store 中做了别名处理
       await chatListStore.updateChatSettings(dialogPayload.targetItem.id, { name: formPayload.name });
       return null;
     }
 
-    const sortOrder = calculateSortOrder(dialogPayload.parentId);
+    // 在懒加载模式下，新创建的节点默认排在最后，具体顺序由后端决定
+    // 前端不再负责计算 sortOrder，传递 0 或由后端处理默认值
+    const sortOrder = 0;
     let newItem: Chat | null = null;
 
     if (dialogPayload.type === 'newChat') {
@@ -210,22 +216,29 @@ const {
   },
 });
 
-// -- Helper Functions --
-const calculateSortOrder = (parentId?: string | null): number => {
-  return chatList.value.filter(item => item.parentId === (parentId || null)).length;
-};
-
 // -- Lifecycle --
 onMounted(async () => {
   await providerStore.fetchProviders();
-  await chatListStore.fetchChatList();
+  // 初始化加载根节点
+  await chatListStore.initializeList();
 
-  const lastOpenedChat = chatList.value
-    .filter(c => c.itemType === 'chat' && c.lastOpenedAt)
-    .sort((a, b) => new Date(b.lastOpenedAt!).getTime() - new Date(a.lastOpenedAt!).getTime())[0];
+  // 处理深层链接或默认选中
+  const routeChatId = route.params.id as string;
+  if (routeChatId) {
+    // 如果 URL 中有 ID，先解析路径以确保树结构完整，再选中
+    await chatListStore.resolvePath(routeChatId);
+    await handleSelectChat(routeChatId);
+    // 确保树节点展开并滚动到视图
+    await treeRef.value?.scrollToKey(routeChatId);
+  } else {
+    // 否则尝试选中最近打开的（仅限当前已加载的列表）
+    const lastOpenedChat = chatList.value
+      .filter(c => c.itemType === 'chat' && c.lastOpenedAt)
+      .sort((a, b) => new Date(b.lastOpenedAt!).getTime() - new Date(a.lastOpenedAt!).getTime())[0];
 
-  if (lastOpenedChat) {
-    await handleSelectChat(lastOpenedChat.id);
+    if (lastOpenedChat) {
+      await handleSelectChat(lastOpenedChat.id);
+    }
   }
 });
 
@@ -256,6 +269,8 @@ function getItemPath(itemId: string): string {
   const path: string[] = [];
   let currentId: string | null = itemId;
 
+  // 注意：在懒加载模式下，如果父节点未加载，此路径可能不完整
+  // 但对于已加载的上下文菜单项，其祖先通常已存在于列表中
   while (currentId) {
     const item = chatList.value.find(c => c.id === currentId);
     if (!item) break;
@@ -298,15 +313,19 @@ async function handleMenuCommand(command: string) {
 }
 
 async function handleSearchResultSelect(data: { chatId: string; subMessageId: string | null }) {
-  // [修复] 1. 先设置目标ID，确保 ChatWindow 在监听到会话切换并加载完成时，能第一时间读到这个值
+  // 1. 设置目标ID
   if (data.subMessageId) {
     chatSessionStore.setSearchTarget(data.subMessageId);
   }
 
-  // [修复] 2. 再切换会话
+  // 2. 确保目标节点在树中可见（加载路径）
+  await chatListStore.resolvePath(data.chatId);
+
+  // 3. 切换会话
   await handleSelectChat(data.chatId);
 
-  // 注意：原先在这里设置 setSearchTarget 会因为 await 的存在导致设置得太晚
+  // 4. 滚动定位树节点
+  await treeRef.value?.scrollToKey(data.chatId);
 }
 </script>
 

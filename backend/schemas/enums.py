@@ -30,3 +30,9 @@ class FileManagementType(str, Enum):
     SUB_MESSAGE = "sub_message"      # 已被聊天消息引用的文件
     GLOBAL_SETTING = "global_setting"  # 被全局设置（如头像）引用的文件
 
+
+class MoveAction(str, Enum):
+    """定义节点移动的操作类型"""
+    BEFORE = "before"  # 放置在参考节点之前
+    AFTER = "after"    # 放置在参考节点之后
+    INSIDE = "inside"  # 放置在参考文件夹内部

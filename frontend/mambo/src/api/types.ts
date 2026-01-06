@@ -1,6 +1,13 @@
 // frontend/mambo/src/api/types.ts
 
 // --- Common / Tree Types ---
+export type MoveAction = 'before' | 'after' | 'inside';
+
+export interface MoveRequest {
+  item_ids: string[];
+  reference_id: string;
+  action: MoveAction;
+}
 
 /**
  * 定义树形结构数据的基本接口。
@@ -228,6 +235,7 @@ export interface Chat {
   parentId: string | null;
   sortOrder: number;
   lastOpenedAt: string | null;
+  isLoaded?: boolean; // 标记该节点的子节点是否已加载
 }
 
 /**
@@ -384,6 +392,7 @@ export interface Resource {
   createdAt: string; // ISO 8601 date string
   updatedAt: string; // ISO 8601 date string
   latest_version: ResourceVersion | null;
+  isLoaded?: boolean; // 标记该节点的子节点是否已加载
 }
 
 /**

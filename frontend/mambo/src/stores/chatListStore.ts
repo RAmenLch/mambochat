@@ -4,17 +4,23 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import {
-  getChats, createChat, deleteChat, updateChatSettings as updateChatSettingsAPI,
-  reorderChats, duplicateChat as duplicateChatAPI, generateChatTitle as generateChatTitleAPI
+  getChatChildren,
+  createChat,
+  deleteChat,
+  updateChatSettings as updateChatSettingsAPI,
+  moveChat,
+  duplicateChat as duplicateChatAPI,
+  generateChatTitle as generateChatTitleAPI,
+  getChatLineage
 } from '@/api/chatService';
 import { subscribeToGlobalNotifications } from '@/services/notificationService';
-import type { Chat, ChatCreate, ChatUpdate, ChatReorderItem, GlobalNotification } from '@/api/types';
+import type { Chat, ChatCreate, ChatUpdate, MoveRequest, GlobalNotification } from '@/api/types';
 import { useChatSessionStore } from './chatSessionStore';
 import { useTreeStoreActions } from '@/composables/useTreeStoreActions';
 
 /**
  * 管理会话列表（包括文件夹和聊天）的全局状态。
- * 这是应用中所有会话元数据的唯一事实来源。
+ * 采用增量懒加载模式管理会话数据。
  */
 export const useChatListStore = defineStore('chatList', () => {
   // --- State ---
@@ -23,27 +29,31 @@ export const useChatListStore = defineStore('chatList', () => {
 
   // --- Actions ---
 
-  // 使用通用 Composable 封装树形数据操作
+  // 使用通用 Composable 封装树形数据操作 (适配懒加载与移动接口)
   const {
     isLoading: isChatListLoading,
-    fetchItems: fetchChatList,
+    loadedFolderIds,
+    loadingFolders,
+    initializeList,
+    fetchChildren,
     createItem: createNewItem,
     updateItem: updateChatSettings,
     deleteItem,
-    reorderItems: reorderChatItems,
-    duplicateItem: duplicateChat
+    moveItem: moveChatItem,
+    duplicateItem: duplicateChat,
+    resolvePath
   } = useTreeStoreActions<Chat, ChatCreate, ChatUpdate>({
     items: chatList,
     api: {
-      fetchAll: getChats,
+      fetchChildren: getChatChildren,
+      fetchLineage: getChatLineage,
       create: createChat,
       update: updateChatSettingsAPI,
       remove: async (id: string): Promise<void> => {
         await deleteChat(id);
       },
-
-      reorder: async (updates: ChatReorderItem[]): Promise<void> => {
-        await reorderChats(updates);
+      move: async (req: MoveRequest): Promise<void> => {
+        await moveChat(req);
       },
       duplicate: duplicateChatAPI,
     },
@@ -55,6 +65,42 @@ export const useChatListStore = defineStore('chatList', () => {
       }
     },
   });
+
+  /**
+   * 预测加载子文件夹内容。
+   * 在父文件夹加载完成后触发，静默加载其包含的子文件夹的下一级内容。
+   */
+  async function prefetchSubFolders(parentId: string) {
+    // 找出当前父节点下的所有子文件夹
+    const subFolders = chatList.value.filter(
+      item => item.parentId === parentId && item.itemType === 'folder'
+    );
+
+    if (subFolders.length === 0) return;
+
+    // 使用 setTimeout 将预测加载放入宏任务队列，避免阻塞当前 UI 渲染
+    setTimeout(() => {
+      subFolders.forEach(folder => {
+        // 如果该文件夹未加载且未处于加载中，则发起请求
+        if (!loadedFolderIds.value.has(folder.id) && !loadingFolders.value.has(folder.id)) {
+          // 调用 fetchChildren 但不等待其结果，实现静默加载
+          fetchChildren(folder.id).catch(err => {
+            console.warn(`[Prefetch] Failed to prefetch folder ${folder.id}:`, err);
+          });
+        }
+      });
+    }, 200);
+  }
+
+  /**
+   * 包装 fetchChildren 以集成预测加载逻辑。
+   * 组件应调用此方法而非直接调用 composable 的 fetchChildren。
+   */
+  async function fetchChatChildren(parentId: string) {
+    await fetchChildren(parentId);
+    // 加载成功后，触发预测加载
+    prefetchSubFolders(parentId);
+  }
 
   /**
    * 请求后端为指定会话自动生成标题。
@@ -124,14 +170,18 @@ export const useChatListStore = defineStore('chatList', () => {
     chatList,
     isChatListLoading,
     refreshingTitleChatId,
+    loadedFolderIds,
+    loadingFolders,
 
-    // Actions from Composable
-    fetchChatList,
+    // Actions
+    initializeList,
+    fetchChatChildren, // Exposed wrapper with prefetch
     createNewItem,
     updateChatSettings,
     deleteItem,
-    reorderChatItems,
+    moveChatItem,
     duplicateChat,
+    resolvePath,
 
     // Store-specific Actions
     refreshChatTitle,

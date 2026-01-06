@@ -18,7 +18,7 @@
       <el-container class="resource-selector-container">
         <el-aside width="280px" class="resource-tree-aside">
           <el-scrollbar>
-            <div v-if="isResourcesLoading" class="loading-state">
+            <div v-if="isResourcesLoading && resourceTree.length === 0" class="loading-state">
               <el-skeleton :rows="5" animated />
             </div>
             <el-tree
@@ -26,9 +26,10 @@
               ref="treeRef"
               :data="filteredTreeData"
               node-key="id"
-              :props="{ label: 'name', children: 'children' }"
+              :props="treeProps"
               :filter-node-method="filterNode"
               @node-click="handleNodeClick"
+              @node-expand="handleNodeExpand"
             >
               <template #default="{ data }">
                 <span
@@ -45,6 +46,10 @@
                       <Document v-else />
                     </el-icon>
                     <span class="node-label">{{ data.name }}</span>
+                    <!-- 显示局部加载状态 -->
+                    <el-icon v-if="loadingFolders.has(data.id)" class="is-loading loading-icon">
+                      <Loading />
+                    </el-icon>
                   </span>
 
                   <!-- 仅显示中文类型的 Tag -->
@@ -71,7 +76,7 @@
                 <strong>预览: {{ selectedResources[0].name }}</strong>
               </div>
             </template>
-            <el-scrollbar class="preview-scrollbar">
+            <el-scrollbar class="preview-scrollbar" v-loading="isPreviewLoading">
               <pre class="preview-content">{{ selectedResources[0].latest_version?.content || '该资源没有内容' }}</pre>
             </el-scrollbar>
           </el-card>
@@ -111,7 +116,8 @@
 import { ref, computed, watch, onMounted } from 'vue';
 import { ElTree } from 'element-plus';
 import type { TreeNodeData } from 'element-plus/es/components/tree/src/tree.type';
-import { Folder, Document, Memo } from '@element-plus/icons-vue';
+import type Node from 'element-plus/es/components/tree/src/model/node';
+import { Folder, Document, Memo, Loading } from '@element-plus/icons-vue';
 import { storeToRefs } from 'pinia';
 import { useResourceStore } from '@/stores/resourceStore';
 import type { Resource, ResourceNode, ResourceType } from '@/api/types';
@@ -129,7 +135,7 @@ const emit = defineEmits<{
 
 // --- Store ---
 const resourceStore = useResourceStore();
-const { resourceTree, isResourcesLoading } = storeToRefs(resourceStore);
+const { resourceTree, isResourcesLoading, loadingFolders, resources } = storeToRefs(resourceStore);
 
 // --- Local State ---
 const searchText = ref('');
@@ -137,6 +143,7 @@ const treeRef = ref<InstanceType<typeof ElTree>>();
 const selectedResources = ref<Resource[]>([]);
 const isMultiSelectMode = ref(false);
 const selectionType = ref<ResourceType | null>(null);
+const isPreviewLoading = ref(false);
 const STORAGE_KEY = 'resource_selector_multi_select_mode';
 
 // --- Lifecycle ---
@@ -148,13 +155,21 @@ onMounted(() => {
 // --- Computed ---
 const filteredTreeData = computed(() => filterTreeByType(resourceTree.value));
 
+const treeProps = {
+  label: 'name',
+  children: 'children',
+  // 确保文件夹即使没有子节点时也能显示展开箭头，触发懒加载
+  isLeaf: (data: ResourceNode, node: Node) => data.itemType !== 'folder'
+};
+
 function filterTreeByType(nodes: ResourceNode[]): ResourceNode[] {
   if (!props.resourceTypeFilter) return nodes;
   const result: ResourceNode[] = [];
   for (const node of nodes) {
     if (node.itemType === 'folder') {
       const children = filterTreeByType(node.children || []);
-      if (children.length > 0) result.push({ ...node, children });
+      // 即使文件夹为空，也保留它，以便用户可以展开加载更多
+      result.push({ ...node, children });
     } else if (node.resourceType === props.resourceTypeFilter) {
       result.push(node);
     }
@@ -164,7 +179,10 @@ function filterTreeByType(nodes: ResourceNode[]): ResourceNode[] {
 
 // --- Watchers ---
 watch(() => props.visible, (isVisible) => {
-  if (isVisible) resourceStore.fetchResources();
+  if (isVisible) {
+    // 每次打开时初始化根列表
+    resourceStore.initializeList();
+  }
 });
 
 watch(searchText, (val) => {
@@ -203,13 +221,20 @@ const filterNode = (value: string, data: TreeNodeData): boolean => {
   return (data as ResourceNode).name.toLowerCase().includes(value.toLowerCase());
 };
 
-const handleNodeClick = (data: TreeNodeData) => {
+const handleNodeExpand = (data: ResourceNode) => {
+  if (data.itemType === 'folder') {
+    resourceStore.fetchResourceChildren(data.id);
+  }
+};
+
+const handleNodeClick = async (data: TreeNodeData) => {
   const resource = data as ResourceNode;
   // 如果不是资源，或者被禁用了，直接返回
   if (resource.itemType !== 'resource' || isNodeDisabled(resource)) return;
 
   if (!isMultiSelectMode.value) {
     selectedResources.value = [resource];
+    await loadResourcePreview(resource.id);
     return;
   }
 
@@ -217,14 +242,14 @@ const handleNodeClick = (data: TreeNodeData) => {
   if (selectedResources.value.length === 0) {
     selectedResources.value.push(resource);
     selectionType.value = resource.resourceType;
+    // 多选模式下通常不预览详细内容，或者只预览最后选中的，这里暂不触发详情加载
   } else {
-    // 双重检查类型，虽然 isNodeDisabled 已经防住了
+    // 双重检查类型
     if (resource.resourceType !== selectionType.value) return;
 
     const index = selectedResources.value.findIndex(r => r.id === resource.id);
     if (index > -1) {
       selectedResources.value.splice(index, 1);
-      // 如果清空了选择，重置类型限制
       if (selectedResources.value.length === 0) {
         selectionType.value = null;
       }
@@ -233,6 +258,29 @@ const handleNodeClick = (data: TreeNodeData) => {
     }
   }
 };
+
+/**
+ * 加载资源详情以供预览
+ * 由于懒加载列表不包含 content，需要单独请求
+ */
+async function loadResourcePreview(resourceId: string) {
+  isPreviewLoading.value = true;
+  try {
+    await resourceStore.fetchResourceDetails(resourceId);
+
+    // 详情加载完成后，Store 中的对象已被更新。
+    // 我们需要更新 selectedResources 中的引用，或者利用 Vue 的响应性。
+    // 由于 resourceTree 是 computed 的深拷贝，selectedResources 中的对象可能不会自动更新 content。
+    // 因此我们需要重新从 Store 的 resources 列表中查找该对象。
+    const updatedResource = resources.value.find(r => r.id === resourceId);
+    if (updatedResource) {
+      // 替换当前选中的对象以显示内容
+      selectedResources.value = [updatedResource];
+    }
+  } finally {
+    isPreviewLoading.value = false;
+  }
+}
 
 function handleConfirmSelection() {
   if (selectedResources.value.length === 0) return;
@@ -244,6 +292,7 @@ function handleDialogClose() {
   searchText.value = '';
   selectedResources.value = [];
   selectionType.value = null;
+  isPreviewLoading.value = false;
 }
 </script>
 
@@ -291,6 +340,12 @@ function handleDialogClose() {
   text-overflow: ellipsis;
 }
 
+.loading-icon {
+  animation: rotating 2s linear infinite;
+  color: var(--el-text-color-secondary);
+  margin-left: 4px;
+}
+
 .resource-type-tag {
   flex-shrink: 0;
   margin-left: 8px;
@@ -307,4 +362,9 @@ function handleDialogClose() {
 .selection-list { list-style-type: none; padding-left: 0; margin: 0; }
 .selection-list li { padding: 4px 0; font-size: 14px; border-bottom: 1px solid var(--el-border-color-lighter); }
 .selection-list li:last-child { border-bottom: none; }
+
+@keyframes rotating {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
 </style>

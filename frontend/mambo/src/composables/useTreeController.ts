@@ -6,16 +6,12 @@ import type Node from 'element-plus/es/components/tree/src/model/node';
 
 import { useContextMenu } from '@/composables/useContextMenu';
 import { useDialogState } from '@/composables/useDialogState';
-import type { BaseTreeItem, TreeReorderEvent } from '@/api/types';
+import type { BaseTreeItem, MoveRequest } from '@/api/types';
 import type ExplorerTree from '@/components/common/ExplorerTree.vue';
 import type { SelectConfigOption } from '@/components/common/EntityFormDialog.vue';
 
 // --- Interface Definitions ---
 
-/**
- * 在此 Composable 内部定义与 EntityFormDialog.vue props 匹配的类型接口。
- * 这避免了修改 EntityFormDialog.vue 文件来导出类型，从而遵循了重构计划。
- */
 export interface EntityFormDialogProps {
   title: string;
   initialName?: string;
@@ -28,68 +24,40 @@ export interface EntityFormDialogProps {
 
 /**
  * 定义了一套标准的 CRUD 操作接口，Composable 将通过此接口与外部 Store 交互。
- * @template T - 树节点的数据类型 (e.g., Chat, Resource)。
- * @template TCreate - 创建新条目时 API 需要的数据类型。
- * @template TUpdate - 更新条目时 API 需要的数据类型。
+ * 适配懒加载与节点移动。
  */
 export interface CrudHandlers<T, TCreate, TUpdate> {
-  /** 创建一个新条目 */
   createItem: (data: TCreate) => Promise<T | null>;
-  /** 更新一个现有条目 */
   updateItem: (id: string, data: TUpdate) => Promise<void>;
-  /** 删除一个条目 */
   deleteItem: (id: string) => Promise<void>;
-  /** 批量更新条目的排序和层级 */
-  reorderItems: (updates: TreeReorderEvent[]) => Promise<void>;
-  /** (可选) 复制一个条目 */
+  /** 移动节点 (替代 reorderItems) */
+  moveItem: (req: MoveRequest) => Promise<void>;
   duplicateItem?: (id: string) => Promise<T | null>;
 }
 
-/**
- * 定义了弹窗载荷的数据结构。
- * @template T - 树节点的数据类型。
- */
 export interface DialogPayload<T> {
-  type: string; // e.g., 'rename', 'newChat', 'newFolder'
+  type: string;
   targetItem?: T;
   parentId?: string | null;
 }
 
-/**
- * 定义了 EntityFormDialog 组件 'confirm' 事件的载荷结构。
- */
 export interface DialogConfirmPayload {
   name: string;
   selectValue?: string;
 }
 
-/**
- * `useTreeController` Composable 的配置选项接口。
- * @template T - 树节点的数据类型。
- * @template TCreate - 创建新条目时 API 需要的数据类型。
- * @template TUpdate - 更新条目时 API 需要的数据类型。
- */
 export interface TreeControllerOptions<T extends BaseTreeItem, TCreate, TUpdate> {
-  /** 树形数据的扁平化列表源 */
   items: Ref<T[]>;
-  /** CRUD 操作的处理器集合 */
   crudHandlers: CrudHandlers<T, TCreate, TUpdate>;
-  /** 根据弹窗载荷动态生成弹窗属性的回调函数 */
   getDialogProps: (payload: DialogPayload<T>) => EntityFormDialogProps;
-  /**
-   * 处理弹窗确认逻辑的回调函数。
-   * @returns 返回创建成功的新条目，用于后续的 UI 操作（如滚动到视图）。
-   */
   handleDialogConfirm: (
     dialogPayload: DialogPayload<T>,
     formPayload: DialogConfirmPayload
   ) => Promise<T | null | void>;
+  /** (可选) 节点展开时的回调，用于触发懒加载 */
+  onExpand?: (parentId: string) => Promise<void>;
 }
 
-/**
- * `useTreeController` Composable 的返回值接口。
- * @template T - 树节点的数据类型。
- */
 export interface UseTreeControllerReturn<T> {
   treeRef: Ref<InstanceType<typeof ExplorerTree> | undefined>;
   contextMenuRef: Ref<InstanceType<typeof ElDropdown> | undefined>;
@@ -97,7 +65,12 @@ export interface UseTreeControllerReturn<T> {
   contextMenuPosition: CSSProperties;
   dialogState: ReturnType<typeof useDialogState<DialogPayload<T>>>;
   dialogProps: ComputedRef<EntityFormDialogProps>;
-  handleReorder: (updates: TreeReorderEvent[]) => Promise<void>;
+
+  /** 处理节点拖拽移动事件 */
+  handleMove: (req: MoveRequest) => Promise<void>;
+  /** 处理节点展开事件 (懒加载) */
+  handleNodeExpand: (data: BaseTreeItem) => void;
+
   handleNodeContextMenu: (event: MouseEvent, data: BaseTreeItem, node: Node) => void;
   openRootContextMenu: (event: MouseEvent) => void;
   handleMenuCommand: (command: string) => void;
@@ -106,15 +79,12 @@ export interface UseTreeControllerReturn<T> {
 
 /**
  * 一个通用的 Composable，封装了树形结构数据的标准交互逻辑。
- * 包括右键菜单、新建/重命名/删除弹窗、拖拽排序等功能。
- *
- * @param options - Composable 的配置对象，用于将其与具体的业务逻辑（Store）解耦。
- * @returns 返回一组响应式状态和事件处理器，可直接在组件模板和脚本中使用。
+ * 包括右键菜单、新建/重命名/删除弹窗、节点移动、懒加载触发等功能。
  */
 export function useTreeController<T extends BaseTreeItem, TCreate, TUpdate>(
   options: TreeControllerOptions<T, TCreate, TUpdate>
 ): UseTreeControllerReturn<T> {
-  const { items, crudHandlers, getDialogProps, handleDialogConfirm: handleDialogConfirmCallback } = options;
+  const { items, crudHandlers, getDialogProps, handleDialogConfirm: handleDialogConfirmCallback, onExpand } = options;
 
   // --- Refs & State ---
   const treeRef = ref<InstanceType<typeof ExplorerTree>>();
@@ -158,8 +128,21 @@ export function useTreeController<T extends BaseTreeItem, TCreate, TUpdate>(
   };
 
   // --- Event Handlers for Template Binding ---
-  const handleReorder = async (updates: TreeReorderEvent[]) => {
-    await crudHandlers.reorderItems(updates);
+
+  /**
+   * 处理从 ExplorerTree 传来的移动请求。
+   */
+  const handleMove = async (req: MoveRequest) => {
+    await crudHandlers.moveItem(req);
+  };
+
+  /**
+   * 处理节点展开，触发外部提供的懒加载逻辑。
+   */
+  const handleNodeExpand = (data: BaseTreeItem) => {
+    if (onExpand) {
+      onExpand(data.id);
+    }
   };
 
   const openContextMenu = (event: MouseEvent, data: T | null) => {
@@ -176,10 +159,8 @@ export function useTreeController<T extends BaseTreeItem, TCreate, TUpdate>(
 
   const handleMenuCommand = (command: string) => {
     const item = contextMenuItem.value;
-    // 统一确定 parentId：右键文件夹时，新项在其内部；右键文件时，新项与其同级；右键空白处，新项在根级。
     const parentId = item ? (item.itemType === 'folder' ? item.id : item.parentId) : null;
 
-    // 命令分发
     switch (command) {
       case 'rename':
         if (item) dialogState.open({ type: 'rename', targetItem: item });
@@ -190,9 +171,7 @@ export function useTreeController<T extends BaseTreeItem, TCreate, TUpdate>(
       case 'duplicate':
         if (item) handleDuplicate(item);
         break;
-      // 动态处理所有 'new' 类型的命令
       default:
-        // 约定：所有新建操作的 command 都以 'new' 开头
         if (command.startsWith('new')) {
           dialogState.open({ type: command, parentId });
         } else {
@@ -208,13 +187,10 @@ export function useTreeController<T extends BaseTreeItem, TCreate, TUpdate>(
 
     const newItem = await handleDialogConfirmCallback(state, formPayload);
 
-    // 只有当回调返回一个有效的 item 对象时，才执行后续 UI 操作
     if (newItem && typeof newItem === 'object' && 'id' in newItem) {
       ElMessage.success('创建成功');
       await treeRef.value?.scrollToKey(newItem.id);
     }
-
-    // 对于重命名等不返回新条目的操作，成功消息应在具体实现的回调中处理
   };
 
   return {
@@ -224,7 +200,8 @@ export function useTreeController<T extends BaseTreeItem, TCreate, TUpdate>(
     contextMenuPosition,
     dialogState,
     dialogProps,
-    handleReorder,
+    handleMove,
+    handleNodeExpand,
     handleNodeContextMenu,
     openRootContextMenu,
     handleMenuCommand,

@@ -1,6 +1,6 @@
 # backend/routers/chat_management.py
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional, Dict, Any
 
@@ -128,19 +128,58 @@ async def create_chat(chat: schemas.ChatCreate, db: AsyncSession = Depends(get_d
 @router.post(
     "/chats/reorder",
     status_code=status.HTTP_200_OK,
-    summary="批量更新会话和文件夹排序"
+    summary="批量更新会话和文件夹排序 (Deprecated)"
 )
 async def reorder_chats(updates: List[schemas.ChatReorderItem], db: AsyncSession = Depends(get_db)):
     """
     Receives a list of items with ID, new parent ID, and new sort order to perform a batch update.
+    Note: This endpoint is deprecated in favor of /chats/move.
     """
     await chat_crud.batch_update_chats_order(db, updates=updates)
     return {"message": "Reorder successful"}
 
 
+@router.post(
+    "/chats/move",
+    status_code=status.HTTP_200_OK,
+    summary="移动会话或文件夹"
+)
+async def move_chats(move_request: schemas.ChatMoveRequest, db: AsyncSession = Depends(get_db)):
+    """
+    移动会话或文件夹到指定位置（Inside, Before, After）。
+    """
+    success = await chat_crud.move_chats(db, move_request=move_request)
+    if not success:
+        raise HTTPException(status_code=400, detail="Move operation failed")
+    return {"message": "Move successful"}
+
+
 @router.get("/chats/", response_model=List[schemas.Chat], summary="获取会话和文件夹列表")
 async def read_chats(skip: int = 0, limit: int = 1000, db: AsyncSession = Depends(get_db)):
     chats = await chat_crud.get_chats(db, skip=skip, limit=limit)
+
+    default_model_setting = await setting_crud.get_setting(db, key="default_model_id")
+    default_model_id = default_model_setting.value if default_model_setting else None
+
+    for chat in chats:
+        _apply_default_model_to_chat_object(chat, default_model_id)
+
+    return chats
+
+
+@router.get(
+    "/chats/children",
+    response_model=List[schemas.Chat],
+    summary="批量获取子会话和文件夹"
+)
+async def read_chat_children(
+    parentIds: List[str] = Query(..., description="父节点ID列表，'root'代表根目录"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    根据父节点ID列表并行加载子节点内容。
+    """
+    chats = await chat_crud.get_chats_by_parent_ids(db, parent_ids=parentIds)
 
     default_model_setting = await setting_crud.get_setting(db, key="default_model_id")
     default_model_id = default_model_setting.value if default_model_setting else None
@@ -213,6 +252,15 @@ async def read_chat(chat_id: str, db: AsyncSession = Depends(get_db)):
     _apply_default_model_to_chat_object(db_chat, default_model_id)
 
     return db_chat
+
+
+@router.get("/chats/{chat_id}/lineage", response_model=List[schemas.Chat], summary="获取会话链路")
+async def get_chat_lineage(chat_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    获取指定会话的所有祖先节点（包括自身），用于展开目录树。
+    """
+    ancestors = await chat_crud.get_batch_chat_ancestors(db, chat_ids=[chat_id])
+    return ancestors
 
 
 @router.put(

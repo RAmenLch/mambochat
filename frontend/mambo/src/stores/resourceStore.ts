@@ -3,11 +3,11 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import {
-  getResources,
+  getResourceChildren,
   createResource,
   updateResource,
   deleteResource,
-  reorderResources,
+  moveResource,
   updateResourceVersion,
   createResourceVersion,
   setActiveVersion,
@@ -19,7 +19,7 @@ import type {
   Resource,
   ResourceCreate,
   ResourceUpdate,
-  ResourceReorderItem,
+  MoveRequest,
   ResourceNode,
   ResourceVersionCreate,
   ResourceWithVersions,
@@ -28,6 +28,7 @@ import type {
 
 /**
  * 管理资源中心（提示词、角色卡等）的全局状态。
+ * 采用增量懒加载模式管理资源数据。
  */
 export const useResourceStore = defineStore('resource', () => {
   // --- State ---
@@ -36,37 +37,69 @@ export const useResourceStore = defineStore('resource', () => {
   // --- Getters ---
   const resourceTree = computed((): ResourceNode[] => {
     // NOTE: The type assertion is safe because ResourceWithVersions includes all properties of Resource.
+    // buildChatTree 能够处理增量列表，未加载子节点的文件夹将作为叶子节点显示（直到被展开）
     return buildChatTree(resources.value as Resource[]);
   });
 
   // --- Actions ---
 
-  // 使用通用 Composable 封装树形数据操作
+  // 使用通用 Composable 封装树形数据操作 (适配懒加载与移动接口)
   const {
     isLoading: isResourcesLoading,
-    fetchItems: fetchResources,
+    loadedFolderIds,
+    loadingFolders,
+    initializeList,
+    fetchChildren,
     createItem: addResourceItem,
     updateItem: updateResourceItem,
     deleteItem: deleteResourceItem,
-    reorderItems: reorderResourceItems,
+    moveItem: moveResourceItem,
   } = useTreeStoreActions<Resource, ResourceCreate, ResourceUpdate>({
     items: resources,
     api: {
-      fetchAll: getResources,
+      fetchChildren: getResourceChildren,
       create: createResource,
       update: updateResource,
       // 适配 remove 函数。调用原始 API，但忽略其 Resource 返回值，以匹配 Promise<void>
       remove: async (id: string): Promise<void> => {
         await deleteResource(id);
       },
-      // 适配 reorder 函数。调用原始 API，但忽略其 { message: string } 返回值，以匹配 Promise<void>
-      reorder: async (updates: ResourceReorderItem[]): Promise<void> => {
-        await reorderResources(updates);
+      move: async (req: MoveRequest): Promise<void> => {
+        await moveResource(req);
       },
     },
     // onDeleteItem is not needed here as there are no store-level side effects.
-    // UI-related side effects (like clearing the selected ID) will be handled in the component.
   });
+
+  /**
+   * 预测加载子文件夹内容。
+   * 在父文件夹加载完成后触发，静默加载其包含的子文件夹的下一级内容。
+   */
+  async function prefetchSubFolders(parentId: string) {
+    const subFolders = resources.value.filter(
+      item => item.parentId === parentId && item.itemType === 'folder'
+    );
+
+    if (subFolders.length === 0) return;
+
+    setTimeout(() => {
+      subFolders.forEach(folder => {
+        if (!loadedFolderIds.value.has(folder.id) && !loadingFolders.value.has(folder.id)) {
+          fetchChildren(folder.id).catch(err => {
+            console.warn(`[Prefetch] Failed to prefetch resource folder ${folder.id}:`, err);
+          });
+        }
+      });
+    }, 200);
+  }
+
+  /**
+   * 包装 fetchChildren 以集成预测加载逻辑。
+   */
+  async function fetchResourceChildren(parentId: string) {
+    await fetchChildren(parentId);
+    prefetchSubFolders(parentId);
+  }
 
   // --- Resource-Specific Actions (Versioning, etc.) ---
 
@@ -84,9 +117,6 @@ export const useResourceStore = defineStore('resource', () => {
 
   /**
    * 更新指定资源的特定版本（内容、属性等）。
-   *
-   * 此方法替代了原有的 updateActiveVersionDetails，支持指定 versionId，
-   * 并确保同时更新 versions 列表中的对应项和 latest_version（如果匹配）。
    */
   async function updateResourceVersionItem(resourceId: string, versionId: string, data: ResourceVersionUpdate) {
     const resource = resources.value.find(r => r.id === resourceId);
@@ -147,13 +177,18 @@ export const useResourceStore = defineStore('resource', () => {
 
   /**
    * 获取单个资源的完整信息，包括所有版本。
+   * 在懒加载模式下，列表项不包含详细内容，点击资源时需调用此方法。
    */
   async function fetchResourceDetails(resourceId: string) {
     try {
       const detailedResource = await getResourceDetails(resourceId);
       const index = resources.value.findIndex(r => r.id === resourceId);
       if (index !== -1) {
+        // 替换列表中的简略对象为详细对象
         resources.value[index] = detailedResource;
+      } else {
+        // 如果资源不在当前列表中（理论上不应发生，除非直接通过URL访问），则添加到列表
+        resources.value.push(detailedResource);
       }
     } catch (error) {
       console.error(`Failed to fetch details for resource ${resourceId}:`, error);
@@ -164,14 +199,17 @@ export const useResourceStore = defineStore('resource', () => {
     // State
     resources,
     isResourcesLoading,
+    loadedFolderIds,
+    loadingFolders,
     // Getters
     resourceTree,
     // Actions from Composable
-    fetchResources,
+    initializeList,
+    fetchResourceChildren, // Exposed wrapper with prefetch
     addResourceItem,
     updateResourceItem,
     deleteResourceItem,
-    reorderResourceItems,
+    moveResourceItem,
     // Resource-specific Actions
     updateVersionContent,
     updateResourceVersionItem,
