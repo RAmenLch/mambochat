@@ -41,7 +41,7 @@ export const useResourceStore = defineStore('resource', () => {
     isLoading: isResourcesLoading,
     loadedFolderIds,
     loadingFolders,
-    initializeList,
+    initializeList: _initializeList,
     fetchChildren,
     createItem: addResourceItem,
     updateItem: updateResourceItem,
@@ -93,6 +93,14 @@ export const useResourceStore = defineStore('resource', () => {
         }
       });
     }, 200);
+  }
+
+  /**
+   * 初始化列表，并触发根目录下的子文件夹预加载。
+   */
+  async function initializeList() {
+    await _initializeList();
+    prefetchSubFolders('root');
   }
 
   /**
@@ -218,4 +226,3 @@ export const useResourceStore = defineStore('resource', () => {
     fetchResourceDetails,
   };
 });
-

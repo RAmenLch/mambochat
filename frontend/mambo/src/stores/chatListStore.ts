@@ -34,7 +34,7 @@ export const useChatListStore = defineStore('chatList', () => {
     isLoading: isChatListLoading,
     loadedFolderIds,
     loadingFolders,
-    initializeList,
+    initializeList: _initializeList,
     fetchChildren,
     createItem: createNewItem,
     updateItem: updateChatSettings,
@@ -90,6 +90,14 @@ export const useChatListStore = defineStore('chatList', () => {
         }
       });
     }, 200);
+  }
+
+  /**
+   * 初始化列表，并触发根目录下的子文件夹预加载。
+   */
+  async function initializeList() {
+    await _initializeList();
+    prefetchSubFolders('root');
   }
 
   /**
@@ -188,4 +196,3 @@ export const useChatListStore = defineStore('chatList', () => {
     initializeNotificationListener,
   };
 });
-

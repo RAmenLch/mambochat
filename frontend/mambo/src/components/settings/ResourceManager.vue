@@ -46,11 +46,11 @@ const activeResourceDetails: ComputedRef<ResourceWithVersions | null> = computed
   return resources.value.find(r => r.id === selectedResourceId.value) || null;
 });
 
-// // --- Lifecycle ---
-// onMounted(() => {
-//   // [修复] 使用 initializeList 替代原有的 fetchResources
-//   resourceStore.initializeList();
-// });
+// --- Lifecycle ---
+onMounted(() => {
+  // [修复] 使用 initializeList 替代原有的 fetchResources
+  resourceStore.initializeList();
+});
 
 // --- Handlers ---
 
