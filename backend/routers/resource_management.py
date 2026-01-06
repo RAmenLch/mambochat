@@ -20,14 +20,14 @@ async def read_resources(db: AsyncSession = Depends(get_db)):
     return await resource_crud.get_resources(db=db)
 
 
-@router.get("/children", response_model=List[schemas.Resource], summary="批量获取子资源和文件夹")
+@router.get("/children", response_model=List[schemas.ResourceSimple], summary="批量获取子资源和文件夹")
 async def read_resource_children(
     parentIds: List[str] = Query(..., description="父节点ID列表，'root'代表根目录"),
     db: AsyncSession = Depends(get_db)
 ):
     """
     根据父节点ID列表并行加载子节点内容。
-    注意：此接口不加载资源的详细版本内容，仅返回元数据。
+    注意：此接口返回轻量级对象，不包含 latest_version 信息。
     """
     return await resource_crud.get_resources_by_parent_ids(db, parent_ids=parentIds)
 

@@ -110,13 +110,13 @@ const settingsStore = useSettingsStore();
 const router = useRouter();
 const route = useRoute();
 
-const { chatList, isChatListLoading, loadingFolders } = storeToRefs(chatListStore);
+const { chatList, isChatListLoading, loadingFolders, loadedFolderIds } = storeToRefs(chatListStore);
 const { currentChatId } = storeToRefs(chatSessionStore);
 const { providers } = storeToRefs(providerStore);
 const { globalSettings } = storeToRefs(settingsStore);
 
 // -- Data Transformation --
-const treeData = computed(() => buildChatTree(chatList.value) as unknown as BaseTreeItem[]);
+const treeData = computed(() => buildChatTree(chatList.value, loadedFolderIds.value) as unknown as BaseTreeItem[]);
 
 const modelOptions = computed((): SelectConfigOption[] => {
   return providers.value.map(p => ({

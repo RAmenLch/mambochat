@@ -25,5 +25,5 @@ from .resource import (Resource, ResourceVersion,
                        ResourceVersionBase,ResourceBase,
                        ResourceCreate,ResourceUpdate,
                        ResourceVersionCreate,ResourceWithVersions,
-                       ResourceVersionUpdate,ResourceReorderItem,MoveAction,ResourceMoveRequest
+                       ResourceVersionUpdate,ResourceReorderItem,MoveAction,ResourceMoveRequest,ResourceSimple
                        )

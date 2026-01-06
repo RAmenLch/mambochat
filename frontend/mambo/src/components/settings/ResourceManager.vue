@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/settings/ResourceManager.vue -->
 <template>
   <el-container class="resource-manager-container">
     <!-- Left Panel: Resource Tree -->
@@ -45,10 +46,11 @@ const activeResourceDetails: ComputedRef<ResourceWithVersions | null> = computed
   return resources.value.find(r => r.id === selectedResourceId.value) || null;
 });
 
-// --- Lifecycle ---
-onMounted(() => {
-  resourceStore.fetchResources();
-});
+// // --- Lifecycle ---
+// onMounted(() => {
+//   // [修复] 使用 initializeList 替代原有的 fetchResources
+//   resourceStore.initializeList();
+// });
 
 // --- Handlers ---
 
@@ -59,6 +61,7 @@ async function handleNodeClick(data: BaseTreeItem) {
   selectedResourceId.value = data.id;
   if (data.itemType === 'resource') {
     // Ensure the full details including all versions are loaded.
+    // 在懒加载模式下，列表中的资源对象不包含详细内容，必须调用此接口
     await resourceStore.fetchResourceDetails(data.id);
   }
 }

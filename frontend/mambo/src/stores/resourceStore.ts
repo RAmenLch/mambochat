@@ -34,14 +34,7 @@ export const useResourceStore = defineStore('resource', () => {
   // --- State ---
   const resources = ref<ResourceWithVersions[]>([]);
 
-  // --- Getters ---
-  const resourceTree = computed((): ResourceNode[] => {
-    // NOTE: The type assertion is safe because ResourceWithVersions includes all properties of Resource.
-    // buildChatTree 能够处理增量列表，未加载子节点的文件夹将作为叶子节点显示（直到被展开）
-    return buildChatTree(resources.value as Resource[]);
-  });
-
-  // --- Actions ---
+  // --- Actions (Composable) ---
 
   // 使用通用 Composable 封装树形数据操作 (适配懒加载与移动接口)
   const {
@@ -70,6 +63,15 @@ export const useResourceStore = defineStore('resource', () => {
     },
     // onDeleteItem is not needed here as there are no store-level side effects.
   });
+
+  // --- Getters ---
+  const resourceTree = computed((): ResourceNode[] => {
+    // NOTE: The type assertion is safe because ResourceWithVersions includes all properties of Resource.
+    // buildChatTree 能够处理增量列表，并根据 loadedFolderIds 判断是否需要注入占位节点
+    return buildChatTree(resources.value as Resource[], loadedFolderIds.value);
+  });
+
+  // --- Resource-Specific Actions (Versioning, etc.) ---
 
   /**
    * 预测加载子文件夹内容。
@@ -100,8 +102,6 @@ export const useResourceStore = defineStore('resource', () => {
     await fetchChildren(parentId);
     prefetchSubFolders(parentId);
   }
-
-  // --- Resource-Specific Actions (Versioning, etc.) ---
 
   /**
    * 更新指定资源当前活跃版本的内容。
@@ -218,3 +218,4 @@ export const useResourceStore = defineStore('resource', () => {
     fetchResourceDetails,
   };
 });
+

@@ -72,14 +72,24 @@ class ResourceUpdate(BaseModel):
     sortOrder: Optional[int] = None
 
 
-class Resource(ResourceBase):
+class ResourceSimple(ResourceBase):
+    """
+    轻量级资源模型，不包含 latest_version 信息。
+    用于目录树懒加载等对性能要求较高的场景。
+    """
     id: str
     createdAt: datetime
     updatedAt: datetime
-    latest_version: Optional[ResourceVersion] = None
 
     class Config:
         from_attributes = True
+
+
+class Resource(ResourceSimple):
+    """
+    完整资源模型，包含 latest_version 信息。
+    """
+    latest_version: Optional[ResourceVersion] = None
 
 
 class ResourceWithVersions(Resource):

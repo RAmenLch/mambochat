@@ -111,10 +111,13 @@ const treeProps = {
   children: 'children',
   // 在手动管理数据的懒加载模式下，我们不需要 el-tree 的 load 方法
   // 而是通过 data 的动态变化来驱动
-  isLeaf: (data: BaseTreeItem, node: Node) => {
+  isLeaf: (data: TreeNodeData) => {
     // 只有非文件夹类型才被视为叶子节点
     // 文件夹即使当前没有 children，也被视为非叶子（可展开），以便触发加载
-    return data.itemType !== props.folderItemType;
+    return (data as BaseTreeItem).itemType !== props.folderItemType;
+  },
+  class: (data: TreeNodeData) => {
+    return (data as BaseTreeItem).itemType === 'stub' ? 'is-hidden-node' : '';
   }
 };
 
@@ -334,5 +337,12 @@ defineExpose({
 @keyframes rotating {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
+}
+</style>
+
+<style>
+/* Global style to hide stub nodes created for lazy loading triggers */
+.is-hidden-node {
+  display: none !important;
 }
 </style>
