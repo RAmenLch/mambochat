@@ -62,7 +62,11 @@
 import { ref, watch, nextTick, onMounted, computed } from 'vue';
 import { ElTree } from 'element-plus';
 import { Loading } from '@element-plus/icons-vue';
-import type { AllowDropType, NodeDropType } from 'element-plus/es/components/tree/src/tree.type';
+import type {
+  AllowDropType,
+  NodeDropType,
+  TreeNodeData
+} from 'element-plus/es/components/tree/src/tree.type';
 import type Node from 'element-plus/es/components/tree/src/model/node';
 import type { BaseTreeItem, MoveRequest, MoveAction } from '@/api/types';
 

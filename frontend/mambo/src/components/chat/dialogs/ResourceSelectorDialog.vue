@@ -159,7 +159,7 @@ const treeProps = {
   label: 'name',
   children: 'children',
   // 确保文件夹即使没有子节点时也能显示展开箭头，触发懒加载
-  isLeaf: (data: ResourceNode, node: Node) => data.itemType !== 'folder'
+  isLeaf: (data: TreeNodeData) => (data as ResourceNode).itemType !== 'folder'
 };
 
 function filterTreeByType(nodes: ResourceNode[]): ResourceNode[] {
