@@ -194,6 +194,8 @@ class OpenAIGenerateWorker(AbstractGenerateWorker):
         headers = {
             "Authorization": f"Bearer {llm_input.api_key}",
             "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/RAmenLch/mambochat",
+            "X-Title": "MamboChat",
         }
         payload = {
             "model": llm_input.model_id,
