@@ -52,14 +52,12 @@
             <el-icon><FolderAdd /></el-icon>新建文件夹
           </el-dropdown-item>
 
-          <!-- Common actions for any item -->
           <template v-if="contextMenuItem">
             <el-dropdown-item command="rename" :divided="contextMenuItem.itemType === 'folder'"><el-icon><EditPen /></el-icon>重命名</el-dropdown-item>
             <el-dropdown-item v-if="contextMenuItem.itemType === 'chat'" command="duplicate"><el-icon><CopyDocument /></el-icon>复制会话</el-dropdown-item>
             <el-dropdown-item command="delete" class="delete-item"><el-icon><Delete /></el-icon>删除</el-dropdown-item>
           </template>
 
-          <!-- Search option at the bottom -->
           <el-dropdown-item command="search" :divided="true"><el-icon><Search /></el-icon>搜索</el-dropdown-item>
         </el-dropdown-menu>
       </template>
@@ -84,14 +82,14 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, computed, ref } from 'vue';
+import { onMounted, computed, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRouter, useRoute } from 'vue-router';
 import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, EditPen, CopyDocument, Search } from '@element-plus/icons-vue';
 
 import type { Chat, ChatCreate, ChatUpdate, BaseTreeItem } from '@/api/types';
 import { useChatListStore } from '@/stores/chatListStore';
-import { useChatSessionStore } from '@/stores/chatSessionStore';
+import { useChatSessionStore, LAST_ACTIVE_CHAT_KEY } from '@/stores/chatSessionStore';
 import { useProviderStore } from '@/stores/providerStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 
@@ -151,7 +149,6 @@ const {
     moveItem: chatListStore.moveChatItem,
     duplicateItem: chatListStore.duplicateChat,
   },
-  // 绑定懒加载 Action
   onExpand: chatListStore.fetchChatChildren,
   getDialogProps: (payload: DialogPayload<Chat>) => {
     switch (payload.type) {
@@ -188,8 +185,6 @@ const {
       return null;
     }
 
-    // 在懒加载模式下，新创建的节点默认排在最后，具体顺序由后端决定
-    // 前端不再负责计算 sortOrder，传递 0 或由后端处理默认值
     const sortOrder = 0;
     let newItem: Chat | null = null;
 
@@ -219,19 +214,37 @@ const {
 // -- Lifecycle --
 onMounted(async () => {
   await providerStore.fetchProviders();
-  // 初始化加载根节点
   await chatListStore.initializeList();
 
-  // 处理深层链接或默认选中
-  const routeChatId = route.params.id as string;
-  if (routeChatId) {
-    // 如果 URL 中有 ID，先解析路径以确保树结构完整，再选中
-    await chatListStore.resolvePath(routeChatId);
-    await handleSelectChat(routeChatId);
-    // 确保树节点展开并滚动到视图
-    await treeRef.value?.scrollToKey(routeChatId);
+  // 确保路由参数已就绪
+  await router.isReady();
+
+  let targetChatId = route.params.id as string;
+
+  // 1. 如果路由参数为空，尝试从 URL 路径解析（解决刷新时 params 延迟问题）
+  if (!targetChatId) {
+    const match = window.location.pathname.match(/\/chat\/([a-zA-Z0-9-]+)/);
+    if (match && match[1]) {
+      targetChatId = match[1];
+    }
+  }
+
+  // 2. 如果 URL 中确实没有 ID，尝试从 LocalStorage 恢复上下文
+  if (!targetChatId) {
+    const lastActiveId = localStorage.getItem(LAST_ACTIVE_CHAT_KEY);
+    if (lastActiveId) {
+      targetChatId = lastActiveId;
+    }
+  }
+
+  // 3. 执行加载与选中逻辑
+  if (targetChatId) {
+    // 确保目标节点及其父级路径已加载（懒加载支持）
+    await chatListStore.resolvePath(targetChatId);
+    await handleSelectChat(targetChatId);
+    await treeRef.value?.scrollToKey(targetChatId);
   } else {
-    // 否则尝试选中最近打开的（仅限当前已加载的列表）
+    // 4. 兜底逻辑：加载 Root 层最近打开的会话
     const lastOpenedChat = chatList.value
       .filter(c => c.itemType === 'chat' && c.lastOpenedAt)
       .sort((a, b) => new Date(b.lastOpenedAt!).getTime() - new Date(a.lastOpenedAt!).getTime())[0];
@@ -241,6 +254,24 @@ onMounted(async () => {
     }
   }
 });
+
+// 监听路由变化，处理应用内导航
+watch(
+  () => route.params.id,
+  async (newId) => {
+    if (newId && typeof newId === 'string') {
+      if (currentChatId.value !== newId) {
+        // 确保树中存在该节点
+        const exists = chatList.value.some(c => c.id === newId);
+        if (!exists) {
+          await chatListStore.resolvePath(newId);
+        }
+        await handleSelectChat(newId);
+        await treeRef.value?.scrollToKey(newId);
+      }
+    }
+  }
+);
 
 // -- Component-Specific Actions --
 const handleNodeClick = (data: BaseTreeItem) => {
@@ -252,7 +283,9 @@ const handleNodeClick = (data: BaseTreeItem) => {
 const handleSelectChat = async (chatId: string) => {
   await chatSessionStore.selectChat(chatId);
   if (chatSessionStore.currentChat) {
-    router.push(`/chat/${chatId}`);
+    if (route.params.id !== chatId) {
+      router.push(`/chat/${chatId}`);
+    }
   }
 };
 
@@ -264,13 +297,10 @@ const searchRootId = ref<string | null>(null);
 const searchRootName = ref<string | null>(null);
 const searchRootPath = ref<string | null>(null);
 
-// Helper function to get the full path of a chat/folder
 function getItemPath(itemId: string): string {
   const path: string[] = [];
   let currentId: string | null = itemId;
 
-  // 注意：在懒加载模式下，如果父节点未加载，此路径可能不完整
-  // 但对于已加载的上下文菜单项，其祖先通常已存在于列表中
   while (currentId) {
     const item = chatList.value.find(c => c.id === currentId);
     if (!item) break;
@@ -282,23 +312,19 @@ function getItemPath(itemId: string): string {
   return path.join(' / ');
 }
 
-// Wrapper function to handle search command
 async function handleMenuCommand(command: string) {
   if (command === 'search') {
     const selectedItem = contextMenuItem.value;
 
     if (selectedItem) {
-      // Set search root info
       searchRootId.value = selectedItem.id;
       searchRootName.value = selectedItem.name;
 
-      // Calculate full path (excluding the current item)
       const fullPath = getItemPath(selectedItem.id);
       const pathParts = fullPath.split(' / ');
       const pathWithoutCurrent = pathParts.slice(0, -1).join(' / ');
       searchRootPath.value = pathWithoutCurrent || null;
     } else {
-      // Global search
       searchRootId.value = null;
       searchRootName.value = null;
       searchRootPath.value = null;
@@ -308,23 +334,16 @@ async function handleMenuCommand(command: string) {
     return;
   }
 
-  // Delegate other commands to original handler
   await originalHandleMenuCommand(command);
 }
 
 async function handleSearchResultSelect(data: { chatId: string; subMessageId: string | null }) {
-  // 1. 设置目标ID
   if (data.subMessageId) {
     chatSessionStore.setSearchTarget(data.subMessageId);
   }
 
-  // 2. 确保目标节点在树中可见（加载路径）
   await chatListStore.resolvePath(data.chatId);
-
-  // 3. 切换会话
   await handleSelectChat(data.chatId);
-
-  // 4. 滚动定位树节点
   await treeRef.value?.scrollToKey(data.chatId);
 }
 </script>
@@ -339,7 +358,6 @@ async function handleSearchResultSelect(data: { chatId: string; subMessageId: st
 .footer { flex-shrink: 0; display: flex; justify-content: flex-end; align-items: center; padding: 8px 12px; }
 </style>
 <style>
-/* This style remains global as it targets a popper rendered outside the component scope */
 .no-animation-popper {
   transition: none !important;
   animation: none !important;

@@ -305,28 +305,39 @@ async def search_chats_and_messages(
 async def get_batch_chat_ancestors(db: AsyncSession, chat_ids: List[str]) -> List[chat_model.Chat]:
     """
     批量获取指定 Chat 列表的所有祖先节点（包括自身），用于构建路径。
-    使用递归 CTE 向上查找。
+    先通过 CTE 获取 ID 列表，再查询完整对象以满足 Schema 要求。
     """
     if not chat_ids:
         return []
 
-    # 递归 CTE: 从给定的 chat_ids 开始，向上查找 parentId
-    ancestors_cte = select(
+    # 1. 递归 CTE: 只查询 ID 和 parentId 以建立层级关系
+    # 初始集：目标节点
+    cte = select(
         chat_model.Chat.id,
-        chat_model.Chat.parentId,
-        chat_model.Chat.name,
-        chat_model.Chat.itemType
+        chat_model.Chat.parentId
     ).where(chat_model.Chat.id.in_(chat_ids)).cte(name="ancestors", recursive=True)
 
-    ancestors_cte = ancestors_cte.union_all(
+    # 递归部分：查找父节点
+    cte = cte.union_all(
         select(
             chat_model.Chat.id,
-            chat_model.Chat.parentId,
-            chat_model.Chat.name,
-            chat_model.Chat.itemType
-        ).join(ancestors_cte, chat_model.Chat.id == ancestors_cte.c.parentId)
+            chat_model.Chat.parentId
+        ).join(cte, chat_model.Chat.id == cte.c.parentId)
     )
 
-    stmt = select(ancestors_cte)
+    # 2. 获取所有涉及的 ID
+    stmt = select(cte.c.id)
     result = await db.execute(stmt)
-    return result.all()
+    ancestor_ids = result.scalars().all()
+
+    if not ancestor_ids:
+        return []
+
+    # 3. 查询完整的 ORM 对象
+    # 这样可以确保返回包含 createdAt, sortOrder 等所有字段的完整对象
+    chats_result = await db.execute(
+        select(chat_model.Chat)
+        .where(chat_model.Chat.id.in_(ancestor_ids))
+    )
+
+    return chats_result.scalars().all()

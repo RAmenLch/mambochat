@@ -8,6 +8,8 @@ import { useChatInteractionStore } from './chatInteractionStore';
 import type { Chat, Message, SubMessage } from '@/api/types';
 import type { StreamedChunk } from '@/services/sseService';
 
+export const LAST_ACTIVE_CHAT_KEY = 'mambo_last_active_chat_id';
+
 /**
  * 管理当前激活会话的数据状态。
  * 这个 Store 扮演着当前会话的响应式“数据库”角色，
@@ -44,12 +46,6 @@ export const useChatSessionStore = defineStore('chatSession', () => {
   /**
    * 为 Token 估算器提供上下文。
    * 包含系统提示和经过`context_participation_length`规则筛选的最近消息历史。
-   *
-   * 逻辑：
-   * 1. 优先寻找最后一个已启用的 ZipHistory 子消息作为锚点。
-   * 2. 如果找到锚点，上下文 = SystemPrompt + ZipContent + 锚点之后且符合CPL规则的消息。
-   * 3. 如果未找到，上下文 = SystemPrompt + 所有符合CPL规则的消息 (受 max_context_messages 限制)。
-   * 4. CPL规则：对每条历史消息计算其“新旧程度排名”，并根据其子消息的CPL值决定是否包含其内容。
    */
   const contextForTokenEstimation = computed((): string => {
     const chat = currentChat.value;
@@ -155,6 +151,9 @@ export const useChatSessionStore = defineStore('chatSession', () => {
       return;
     }
 
+    // 记录最后一次活跃的会话ID，用于页面刷新后恢复上下文
+    localStorage.setItem(LAST_ACTIVE_CHAT_KEY, chatId);
+
     currentChatId.value = chatId;
     isChatHistoryLoading.value = true;
     currentChatMessages.value = [];
@@ -173,6 +172,10 @@ export const useChatSessionStore = defineStore('chatSession', () => {
       });
     } catch (error) {
       console.error(`Failed to fetch messages for chat ${chatId}:`, error);
+      // 如果加载失败且当前存储的ID即为该错误ID，则清除存储，防止死循环
+      if (localStorage.getItem(LAST_ACTIVE_CHAT_KEY) === chatId) {
+        localStorage.removeItem(LAST_ACTIVE_CHAT_KEY);
+      }
       clearSession();
     } finally {
       isChatHistoryLoading.value = false;
