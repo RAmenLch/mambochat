@@ -372,6 +372,25 @@ async function handleBlockCopy(contentToCopy: string) {
 .content-block :deep(code) { font-family: 'Courier New', Courier, monospace; }
 .content-block :deep(pre > code) { padding: 0; background-color: transparent; }
 .content-block :deep(:not(pre) > code) { background-color: rgba(0, 0, 0, 0.08); padding: 0.2em 0.4em; border-radius: 4px; font-size: 0.9em; }
+.content-block :deep(table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1em 0;
+  display: block; /* 允许在小屏幕上横向滚动 */
+  overflow-x: auto;
+  border-spacing: 0;
+}
+.content-block :deep(th),
+.content-block :deep(td) {
+  padding: 8px 12px;
+  border: 1px solid var(--el-border-color); /* 使用 Element Plus 的边框变量 */
+  text-align: left;
+}
+.content-block :deep(th) {
+  background-color: var(--el-fill-color-light); /* 表头背景色 */
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
 .typing-indicator { display: flex; align-items: center; justify-content: center; height: 24px; }
 .typing-indicator span { height: 8px; width: 8px; border-radius: 50%; background-color: #909399; margin: 0 3px; animation: bounce 1.4s infinite ease-in-out both; }
 .typing-indicator span:nth-of-type(1) { animation-delay: -0.32s; }
