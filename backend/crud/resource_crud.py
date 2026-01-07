@@ -72,6 +72,16 @@ async def get_resource_with_versions(db: AsyncSession, resource_id: str) -> Opti
 
 async def create_resource(db: AsyncSession, resource: schemas.ResourceCreate) -> resource_model.Resource:
     """创建一个新的资源或文件夹。如果创建的是资源，则自动为其生成一个初始版本。"""
+
+    # 如果未传 sortOrder，则计算追加到末尾的顺序值
+    if "sortOrder" not in resource.model_fields_set:
+        stmt = select(func.max(resource_model.Resource.sortOrder)).filter(
+            resource_model.Resource.parentId == resource.parentId
+        )
+        result = await db.execute(stmt)
+        max_order = result.scalar()
+        resource.sortOrder = (max_order if max_order is not None else -1) + 1
+
     # 排除非模型字段，以创建 Resource 实例
     resource_data = resource.model_dump(exclude={'initial_content', 'initial_attributes'})
     db_resource = resource_model.Resource(**resource_data)

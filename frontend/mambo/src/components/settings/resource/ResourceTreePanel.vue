@@ -166,7 +166,6 @@ const {
       return null;
     }
 
-    const sortOrder = 0; // 懒加载模式下由后端决定顺序
     let newItem: Resource | null = null;
 
     if (dialogPayload.type === 'newResource') {
@@ -175,7 +174,6 @@ const {
         itemType: 'resource',
         resourceType: formPayload.selectValue as ResourceType,
         parentId: dialogPayload.parentId,
-        sortOrder,
         initial_content: '',
         initial_attributes: formPayload.selectValue === 'submessage_template' ? { ...DEFAULT_SUBMESSAGE_ATTRIBUTES } : undefined,
       });
@@ -187,7 +185,6 @@ const {
         name: formPayload.name,
         itemType: 'folder',
         parentId: dialogPayload.parentId,
-        sortOrder
       });
     }
     return newItem;

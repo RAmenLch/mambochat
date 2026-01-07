@@ -272,7 +272,7 @@ defineExpose({ scrollToKey });
   position: relative;
   /* 这里的 margin-left 需要根据 el-tree 的 indent 属性微调，通常 indent=16 时，这里设为 12px 左右比较合适 */
   margin-left: 5px;
-  border-left: 1px solid var(--el-border-color-lighter);
+  border-left: 3px solid var(--el-border-color-lighter);
 }
 
 /* 2. 隐藏根节点的左边框（可选，如果根节点不需要线） */

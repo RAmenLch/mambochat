@@ -185,7 +185,6 @@ const {
       return null;
     }
 
-    const sortOrder = 0;
     let newItem: Chat | null = null;
 
     if (dialogPayload.type === 'newChat') {
@@ -194,7 +193,6 @@ const {
         aiModelId: formPayload.selectValue,
         itemType: 'chat',
         parentId: dialogPayload.parentId || null,
-        sortOrder,
       });
       if (newItem) {
         await handleSelectChat(newItem.id);
@@ -204,7 +202,6 @@ const {
         name: formPayload.name,
         itemType: 'folder',
         parentId: dialogPayload.parentId || null,
-        sortOrder,
       });
     }
     return newItem;

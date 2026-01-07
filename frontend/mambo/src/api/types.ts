@@ -416,7 +416,7 @@ export interface ResourceCreate {
   itemType: ResourceItemType;
   resourceType?: ResourceType | null;
   parentId?: string | null;
-  sortOrder: number;
+  sortOrder?: number;
   initial_content?: string | null;
   initial_attributes?: Record<string, any> | null;
 }
