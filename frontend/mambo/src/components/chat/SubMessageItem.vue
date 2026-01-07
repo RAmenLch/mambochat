@@ -391,6 +391,33 @@ async function handleBlockCopy(contentToCopy: string) {
   font-weight: 600;
   color: var(--el-text-color-primary);
 }
+.content-block :deep(blockquote) {
+  margin: 1em 0;
+  padding: 8px 16px;
+  border-left: 4px solid var(--el-border-color-darker); /* 左侧竖线 */
+  background-color: var(--el-fill-color-light);       /* 浅灰色背景 */
+  color: var(--el-text-color-secondary);              /* 文字颜色稍浅 */
+  border-radius: 0 4px 4px 0;                         /* 右侧圆角 */
+}
+
+/* 去除引用块内最后一个段落的底部边距，防止底部留白过多 */
+.content-block :deep(blockquote > p:last-child) {
+  margin-bottom: 0;
+}
+
+/* 处理嵌套引用 (blockquote 里的 blockquote) */
+.content-block :deep(blockquote blockquote) {
+  margin: 8px 0;
+  background-color: transparent; /* 嵌套时不再叠加背景色，保持整洁 */
+  border-left-color: var(--el-border-color); /* 嵌套的竖线颜色稍微浅一点 */
+}
+
+/* 针对用户消息气泡（蓝色背景）的特殊适配 */
+.is-user .content-block :deep(blockquote) {
+  border-left-color: var(--el-color-primary);   /* 用户消息用主色竖线 */
+  background-color: rgba(255, 255, 255, 0.2);   /* 半透明背景，融合蓝色气泡 */
+  color: var(--el-color-primary-dark-2);
+}
 .typing-indicator { display: flex; align-items: center; justify-content: center; height: 24px; }
 .typing-indicator span { height: 8px; width: 8px; border-radius: 50%; background-color: #909399; margin: 0 3px; animation: bounce 1.4s infinite ease-in-out both; }
 .typing-indicator span:nth-of-type(1) { animation-delay: -0.32s; }
