@@ -78,9 +78,16 @@ export const useResourceStore = defineStore('resource', () => {
    * 在父文件夹加载完成后触发，静默加载其包含的子文件夹的下一级内容。
    */
   async function prefetchSubFolders(parentId: string) {
-    const subFolders = resources.value.filter(
-      item => item.parentId === parentId && item.itemType === 'folder'
-    );
+    const subFolders = resources.value.filter(item => {
+      if (item.itemType !== 'folder') {
+        return false;
+      }
+      // 如果是根目录加载，需要同时匹配 parentId 为 'root' 和 null 的情况
+      if (parentId === 'root') {
+        return item.parentId === 'root' || item.parentId === null;
+      }
+      return item.parentId === parentId;
+    });
 
     if (subFolders.length === 0) return;
 

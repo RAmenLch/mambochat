@@ -72,9 +72,16 @@ export const useChatListStore = defineStore('chatList', () => {
    */
   async function prefetchSubFolders(parentId: string) {
     // 找出当前父节点下的所有子文件夹
-    const subFolders = chatList.value.filter(
-      item => item.parentId === parentId && item.itemType === 'folder'
-    );
+    const subFolders = chatList.value.filter(item => {
+      if (item.itemType !== 'folder') {
+        return false;
+      }
+      // 如果是根目录加载，需要同时匹配 parentId 为 'root' 和 null 的情况
+      if (parentId === 'root') {
+        return item.parentId === 'root' || item.parentId === null;
+      }
+      return item.parentId === parentId;
+    });
 
     if (subFolders.length === 0) return;
 
