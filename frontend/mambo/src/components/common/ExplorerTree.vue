@@ -9,6 +9,10 @@
       <div v-if="isLoading && data.length === 0" class="loading-container">
         <el-skeleton :rows="5" animated />
       </div>
+      <!--
+         [修复] 移除 lazy 属性，回归完全受控的数据驱动模式。
+         三角箭头的显示完全由数据中是否存在 children (包含 Stub) 决定。
+      -->
       <el-tree
         v-else-if="data.length > 0 || !isLoading"
         ref="treeRef"
@@ -46,7 +50,7 @@
               </el-tooltip>
             </slot>
 
-            <!-- Loading Indicator for Lazy Loading -->
+            <!-- 局部 Loading 指示器 -->
             <el-icon v-if="loadingNodes.has(data.id)" class="is-loading loading-icon">
               <Loading />
             </el-icon>
@@ -70,8 +74,6 @@ import type {
 import type Node from 'element-plus/es/components/tree/src/model/node';
 import type { BaseTreeItem, MoveRequest, MoveAction } from '@/api/types';
 
-// --- Props & Emits ---
-
 interface Props {
   data: BaseTreeItem[];
   currentId?: string | null;
@@ -79,7 +81,6 @@ interface Props {
   emptyText?: string;
   folderItemType?: string;
   persistenceKey?: string;
-  // 外部传入的正在加载的文件夹ID集合，用于显示局部 Loading
   loadingFolderIds?: Set<string>;
 }
 
@@ -96,36 +97,27 @@ const emit = defineEmits<{
   (e: 'node-click', data: BaseTreeItem): void;
   (e: 'node-contextmenu', event: MouseEvent, data: BaseTreeItem, node: Node): void;
   (e: 'root-contextmenu', event: MouseEvent): void;
-  // 替换原有的 reorder 事件，改为 move 事件
   (e: 'move', req: MoveRequest): void;
-  // 新增：节点展开事件，用于触发懒加载
   (e: 'node-expand', data: BaseTreeItem): void;
 }>();
-
-// --- State ---
 
 const treeRef = ref<InstanceType<typeof ElTree>>();
 const expandedState = ref<Record<string, boolean>>({});
 
-// 计算属性：合并本地 loading 状态（如果有）和 props 传入的状态
 const loadingNodes = computed(() => props.loadingFolderIds);
 
 const treeProps = {
   label: 'name',
   children: 'children',
-  // 在手动管理数据的懒加载模式下，我们不需要 el-tree 的 load 方法
-  // 而是通过 data 的动态变化来驱动
+  // 即使不开启 lazy，isLeaf 也能辅助 CSS 样式，但核心控制权在于 children 数组不为空
   isLeaf: (data: TreeNodeData) => {
-    // 只有非文件夹类型才被视为叶子节点
-    // 文件夹即使当前没有 children，也被视为非叶子（可展开），以便触发加载
     return (data as BaseTreeItem).itemType !== props.folderItemType;
   },
+  // 关键 CSS 类：隐藏 Stub 节点
   class: (data: TreeNodeData) => {
     return (data as BaseTreeItem).itemType === 'stub' ? 'is-hidden-node' : '';
   }
 };
-
-// --- Tree Event Handlers ---
 
 const handleNodeClick = (data: BaseTreeItem) => {
   emit('node-click', data);
@@ -139,10 +131,8 @@ const handleRootContextMenu = (event: MouseEvent) => {
   emit('root-contextmenu', event);
 };
 
-// --- Drag & Drop Logic (Refactored for Move API) ---
-
+// --- Drag & Drop ---
 const allowDrop = (draggingNode: Node, dropNode: Node, dropType: AllowDropType) => {
-  // 不允许将节点拖入非文件夹节点内部
   if ((dropNode.data as BaseTreeItem).itemType !== props.folderItemType && dropType === 'inner') {
     return false;
   }
@@ -150,10 +140,8 @@ const allowDrop = (draggingNode: Node, dropNode: Node, dropType: AllowDropType) 
 };
 
 const handleNodeDrop = (draggingNode: Node, dropNode: Node, dropType: NodeDropType) => {
-  // 将 el-tree 的 dropType 映射为后端的 MoveAction
   let action: MoveAction;
   let referenceId: string;
-
   const draggingData = draggingNode.data as BaseTreeItem;
   const dropData = dropNode.data as BaseTreeItem;
 
@@ -167,7 +155,6 @@ const handleNodeDrop = (draggingNode: Node, dropNode: Node, dropType: NodeDropTy
     action = 'after';
     referenceId = dropData.id;
   } else {
-    // Should not happen given allowDrop
     return;
   }
 
@@ -176,11 +163,10 @@ const handleNodeDrop = (draggingNode: Node, dropNode: Node, dropType: NodeDropTy
     reference_id: referenceId,
     action: action,
   };
-
   emit('move', req);
 };
 
-// --- Expansion & Lazy Loading Logic ---
+// --- Expansion Logic ---
 
 const loadExpandedState = () => {
   if (!props.persistenceKey) return;
@@ -189,7 +175,6 @@ const loadExpandedState = () => {
     try {
       expandedState.value = JSON.parse(savedState);
     } catch (e) {
-      console.error('Failed to parse expanded state', e);
       localStorage.removeItem(props.persistenceKey);
     }
   }
@@ -201,13 +186,11 @@ const saveExpandedState = () => {
 };
 
 const handleNodeExpand = (data: BaseTreeItem) => {
-  // 1. 记录展开状态
   if (data.itemType === props.folderItemType) {
     expandedState.value[data.id] = true;
     saveExpandedState();
   }
-
-  // 2. 触发懒加载事件
+  // 触发懒加载
   emit('node-expand', data);
 };
 
@@ -218,24 +201,27 @@ const handleNodeCollapse = (data: BaseTreeItem) => {
   }
 };
 
-// 监听数据变化，恢复展开状态
-// 注意：在懒加载模式下，数据是增量到来的。
-// 当新数据到来时，如果它包含在 expandedState 中，我们需要确保它是展开的。
+// [关键修复] 当数据更新（例如根目录加载完成）时，恢复展开状态
 watch(() => props.data, (newData) => {
   if (newData.length > 0 && treeRef.value && Object.keys(expandedState.value).length > 0) {
     nextTick(() => {
       Object.keys(expandedState.value).forEach(key => {
-        // 只有当节点存在于当前树中时才尝试展开
         const node = treeRef.value!.getNode(key);
+        // 如果节点存在、理论上应该展开、但实际上还没展开
         if (node && !node.expanded) {
           node.expand();
+
+          // [Fix Problem 2]: 仅仅 node.expand() 只是 UI 展开
+          // 我们必须通知上层组件去 fetch 它的子节点
+          const item = node.data as BaseTreeItem;
+          if (item && item.itemType === props.folderItemType) {
+            emit('node-expand', item);
+          }
         }
       });
     });
   }
 }, { deep: true, flush: 'post' });
-
-// --- Lifecycle ---
 
 onMounted(() => {
   loadExpandedState();
@@ -248,6 +234,13 @@ const scrollToKey = async (key: string) => {
     let parent = node.parent;
     while (parent && parent.level > 0) {
       parent.expand();
+      // 在编程式展开路径时，同样要确保触发数据加载
+      if (parent.data) {
+        const parentData = parent.data as BaseTreeItem;
+        if (parentData.itemType === props.folderItemType) {
+          emit('node-expand', parentData);
+        }
+      }
       parent = parent.parent;
     }
     await nextTick();
@@ -257,95 +250,32 @@ const scrollToKey = async (key: string) => {
   }
 };
 
-defineExpose({
-  scrollToKey,
-});
+defineExpose({ scrollToKey });
 </script>
 
 <style scoped>
-.explorer-tree-container {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-}
-
-.explorer-tree-header {
-  flex-shrink: 0;
-  padding: 16px 16px 8px 16px;
-  cursor: default;
-}
-
-.explorer-tree-scrollbar {
-  flex-grow: 1;
-  padding: 0 12px;
-}
-
-.loading-container {
-  padding: 0 10px;
-}
-
-.custom-tree {
-  background-color: transparent;
-}
-
-:deep(.el-tree-node__content) {
-  height: 40px;
-  border-radius: 6px;
-  margin: 0 4px 4px 4px;
-}
-
-:deep(.el-tree-node.is-current > .el-tree-node__content) {
-  background-color: var(--el-color-primary-light-9);
-  border: 1px solid var(--el-color-primary-light-7);
-}
-
-:deep(.el-tree-node__content:hover) {
-  background-color: var(--color-background-mute);
-}
-
-.custom-tree-node {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 14px;
-  padding-right: 8px;
-  overflow: hidden;
-  width: 100%;
-  height: 100%;
-}
-
-.node-icon-wrapper {
-  margin-right: 8px;
-  font-size: 16px;
-  display: flex;
-  align-items: center;
-}
-
-.node-label {
-  flex-grow: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-  margin-right: 8px;
-}
-
-.loading-icon {
-  animation: rotating 2s linear infinite;
-  color: var(--el-text-color-secondary);
-  margin-left: 4px;
-}
-
-@keyframes rotating {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
+/* Previous styles remain the same */
+.explorer-tree-container { height: 100%; display: flex; flex-direction: column; box-sizing: border-box; }
+.explorer-tree-header { flex-shrink: 0; padding: 16px 16px 8px 16px; cursor: default; }
+.explorer-tree-scrollbar { flex-grow: 1; padding: 0 12px; }
+.loading-container { padding: 0 10px; }
+.custom-tree { background-color: transparent; }
+:deep(.el-tree-node__content) { height: 40px; border-radius: 6px; margin: 0 4px 4px 4px; }
+:deep(.el-tree-node.is-current > .el-tree-node__content) { background-color: var(--el-color-primary-light-9); border: 1px solid var(--el-color-primary-light-7); }
+:deep(.el-tree-node__content:hover) { background-color: var(--color-background-mute); }
+.custom-tree-node { flex: 1; display: flex; align-items: center; justify-content: space-between; font-size: 14px; padding-right: 8px; overflow: hidden; width: 100%; height: 100%; }
+.node-icon-wrapper { margin-right: 8px; font-size: 16px; display: flex; align-items: center; }
+.node-label { flex-grow: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; margin-right: 8px; }
+.loading-icon { animation: rotating 2s linear infinite; color: var(--el-text-color-secondary); margin-left: 4px; }
+@keyframes rotating { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 </style>
 
 <style>
-/* Global style to hide stub nodes created for lazy loading triggers */
+/*
+  [Fix Problem 1] 隐藏 Stub 节点
+  通过 treeHelper 生成的 Stub 节点会有这个类名，从而被隐藏。
+  这样用户看到的只是一个“展开后没有内容”的文件夹，而不是一行空白。
+*/
 .is-hidden-node {
   display: none !important;
 }

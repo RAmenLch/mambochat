@@ -4,8 +4,6 @@ import { ref, type Ref } from 'vue';
 import type { BaseTreeItem, MoveRequest } from '@/api/types';
 import { ElMessage } from 'element-plus';
 
-// --- Interface Definitions ---
-
 interface TreeStoreApi<TItem, TCreate, TUpdate> {
   fetchChildren: (parentIds: string[]) => Promise<TItem[]>;
   fetchLineage?: (id: string) => Promise<TItem[]>;
@@ -36,8 +34,6 @@ interface UseTreeStoreActionsReturn<TItem, TCreate, TUpdate> {
   duplicateItem?: (id: string) => Promise<TItem | null>;
 }
 
-// --- Composable Implementation ---
-
 export function useTreeStoreActions<TItem extends BaseTreeItem, TCreate, TUpdate>(
   options: TreeStoreActionsOptions<TItem, TCreate, TUpdate>
 ): UseTreeStoreActionsReturn<TItem, TCreate, TUpdate> {
@@ -65,6 +61,7 @@ export function useTreeStoreActions<TItem extends BaseTreeItem, TCreate, TUpdate
   }
 
   async function fetchChildren(parentId: string) {
+    // 简单的防重入和防重复加载
     if (loadingFolders.value.has(parentId)) return;
     if (loadedFolderIds.value.has(parentId)) return;
 
@@ -72,7 +69,7 @@ export function useTreeStoreActions<TItem extends BaseTreeItem, TCreate, TUpdate
     try {
       const children = await api.fetchChildren([parentId]);
 
-      // [修复逻辑 1]: 增强过滤，避免重复 Key
+      // 过滤旧数据防止 ID 冲突
       const filteredItems = items.value.filter(item => {
         if (parentId === 'root') {
           return item.parentId !== 'root' && item.parentId !== null;
@@ -90,19 +87,46 @@ export function useTreeStoreActions<TItem extends BaseTreeItem, TCreate, TUpdate
     }
   }
 
+  // [Fix Problem 3]: 深层路径解析 + 完整上下文加载
   async function resolvePath(targetId: string) {
     if (!api.fetchLineage) return;
     try {
+      // 1. 获取目标 ID 回溯到 root 的所有节点
       const lineage = await api.fetchLineage(targetId);
+
+      // 2. 先把这些节点放入 list，避免 UI 报错
       const itemMap = new Map(items.value.map(i => [i.id, i]));
       lineage.forEach(node => {
         itemMap.set(node.id, node);
       });
       items.value = Array.from(itemMap.values());
+
+      // 3. 找出所有需要加载子项的“父文件夹”
+      // 如果路径是 Root -> A -> B -> Target，我们需要加载 Root, A, B 的子项
+      const parentIdsToLoad = new Set<string>();
+
+      lineage.forEach(item => {
+        // 如果它有父节点（非 Root），其父节点需要被加载（为了显示该 item 的兄弟）
+        if (item.parentId && item.parentId !== 'root' && !loadedFolderIds.value.has(item.parentId)) {
+          parentIdsToLoad.add(item.parentId);
+        }
+        // 如果它自己是文件夹，且未加载，也需要加载（为了显示它里面的内容）
+        if (item.itemType === 'folder' && !loadedFolderIds.value.has(item.id)) {
+          parentIdsToLoad.add(item.id);
+        }
+      });
+
+      // 4. 并发加载缺失的层级
+      if (parentIdsToLoad.size > 0) {
+        await Promise.all(Array.from(parentIdsToLoad).map(pid => fetchChildren(pid)));
+      }
+
     } catch (error) {
       console.error(`Failed to resolve path for ${targetId}:`, error);
     }
   }
+
+  // ... (其余 create/update/move 代码保持之前优化过的版本)
 
   async function createItem(data: TCreate): Promise<TItem | null> {
     try {
@@ -144,94 +168,48 @@ export function useTreeStoreActions<TItem extends BaseTreeItem, TCreate, TUpdate
     }
   }
 
-  /**
-   * 移动节点。
-   * 包含乐观更新逻辑：同时预判修改 parentId 和 sortOrder，确保 UI 不回弹。
-   */
   async function moveItem(req: MoveRequest) {
     const firstItemId = req.item_ids[0];
     const itemIndex = items.value.findIndex(i => i.id === firstItemId);
+    const itemRef = items.value[itemIndex];
     if (itemIndex === -1) return;
 
-    // 1. 保存旧状态用于回滚
-    const itemRef = items.value[itemIndex];
-    const originalState = {
-      parentId: itemRef.parentId,
-      sortOrder: itemRef.sortOrder
-    };
+    const originalState = { parentId: itemRef.parentId, sortOrder: itemRef.sortOrder };
 
     let targetParentId: string | null = null;
     let newSortOrder = itemRef.sortOrder;
 
-    // 2. 计算目标位置和估算新的 sortOrder
-    // 我们使用简单的数学估算（+/- 0.5）来欺骗本地排序，等后端刷新后会变成正确的整数/序号
     if (req.action === 'inside') {
       targetParentId = req.reference_id === 'root' ? null : req.reference_id;
-
-      // 移入内部通常是追加到最后，找到当前最大的 sortOrder
       const siblings = items.value.filter(i => {
         const pId = targetParentId === 'root' ? null : targetParentId;
         const iP = i.parentId === 'root' ? null : i.parentId;
         return iP === pId && i.id !== itemRef.id;
       });
-
-      if (siblings.length > 0) {
-        const maxOrder = Math.max(...siblings.map(s => s.sortOrder));
-        newSortOrder = maxOrder + 1024; // 加上一个大数确保排在最后
-      } else {
-        newSortOrder = 0;
-      }
-
+      newSortOrder = siblings.length > 0 ? Math.max(...siblings.map(s => s.sortOrder)) + 1024 : 0;
     } else {
-      // before 或 after
       const refNode = items.value.find(i => i.id === req.reference_id);
       if (refNode) {
         targetParentId = refNode.parentId;
-        if (req.action === 'before') {
-          // 插在参考节点前面：比它小一点点
-          newSortOrder = refNode.sortOrder - 0.5;
-        } else {
-          // 插在参考节点后面：比它大一点点
-          newSortOrder = refNode.sortOrder + 0.5;
-        }
-      } else {
-        targetParentId = null;
+        newSortOrder = req.action === 'before' ? refNode.sortOrder - 0.5 : refNode.sortOrder + 0.5;
       }
     }
 
-    // 3. [关键修复] 乐观更新：同时修改 parentId 和 sortOrder
     itemRef.parentId = targetParentId;
     itemRef.sortOrder = newSortOrder;
 
     try {
       await api.move(req);
-
-      // 4. API 成功后，刷新相关父节点以获取后端计算的精确 sortOrder
       const parentsToRefresh = new Set<string>();
+      parentsToRefresh.add(originalState.parentId || 'root');
+      parentsToRefresh.add(targetParentId || 'root');
 
-      const oldP = originalState.parentId ? originalState.parentId : 'root';
-      const newP = targetParentId ? targetParentId : 'root';
-
-      parentsToRefresh.add(oldP);
-      parentsToRefresh.add(newP);
-
-      const parentsArray = Array.from(parentsToRefresh);
-      parentsArray.forEach(pid => loadedFolderIds.value.delete(pid));
-
-      await Promise.all(parentsArray.map(pid => fetchChildren(pid)));
-
+      Array.from(parentsToRefresh).forEach(pid => loadedFolderIds.value.delete(pid));
+      await Promise.all(Array.from(parentsToRefresh).map(pid => fetchChildren(pid)));
     } catch (error) {
       console.error('Failed to move items:', error);
       ElMessage.error('移动失败');
-
-      // 5. 失败回滚
-      const rollbackItem = items.value.find(i => i.id === firstItemId);
-      if (rollbackItem) {
-        rollbackItem.parentId = originalState.parentId;
-        rollbackItem.sortOrder = originalState.sortOrder;
-      }
-
-      // 刷新源目录恢复 UI
+      Object.assign(itemRef, originalState); // Rollback
       const sourceParent = originalState.parentId || 'root';
       loadedFolderIds.value.delete(sourceParent);
       await fetchChildren(sourceParent);
@@ -244,29 +222,15 @@ export function useTreeStoreActions<TItem extends BaseTreeItem, TCreate, TUpdate
           const newItem = await api.duplicate!(id);
           items.value.push(newItem);
           return newItem;
-        } catch (error) {
-          console.error(`Failed to duplicate item ${id}:`, error);
-          return null;
-        }
+        } catch (error) { return null; }
       }
     : undefined;
 
   const returnObject: UseTreeStoreActionsReturn<TItem, TCreate, TUpdate> = {
-    isLoading,
-    loadedFolderIds,
-    loadingFolders,
-    initializeList,
-    fetchChildren,
-    resolvePath,
-    createItem,
-    updateItem,
-    deleteItem,
-    moveItem,
+    isLoading, loadedFolderIds, loadingFolders, initializeList, fetchChildren, resolvePath,
+    createItem, updateItem, deleteItem, moveItem,
   };
-
-  if (duplicateItem) {
-    returnObject.duplicateItem = duplicateItem;
-  }
+  if (duplicateItem) returnObject.duplicateItem = duplicateItem;
 
   return returnObject;
 }
