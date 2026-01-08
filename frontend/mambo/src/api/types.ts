@@ -357,7 +357,7 @@ export type GlobalNotification =
 
 // --- Resource Center Types ---
 
-export type ResourceItemType = 'resource' | 'folder';
+export type ResourceItemType = 'resource' | 'folder' | 'stub';
 /**
  * 定义资源的具体品类。
  */
@@ -477,10 +477,10 @@ export interface McpToolContent {
   is_error: boolean;
 }
 
-// --- Search Types ---
+// --- Search Types (Chat) ---
 
 /**
- * 搜索请求参数
+ * 会话搜索请求参数
  */
 export interface SearchRequest {
   keyword: string;
@@ -491,7 +491,7 @@ export interface SearchRequest {
 }
 
 /**
- * 搜索响应结果
+ * 会话搜索响应结果
  */
 export interface SearchResponse {
   total: number;
@@ -499,7 +499,7 @@ export interface SearchResponse {
 }
 
 /**
- * 搜索结果项
+ * 会话搜索结果项
  */
 export interface SearchResultItem {
   chat_id: string;
@@ -509,4 +509,43 @@ export interface SearchResultItem {
   context_text: string;
   sub_message_id: string | null;
   created_at: string;
+}
+
+// --- Search Types (Resource) ---
+
+/**
+ * 资源搜索请求参数
+ */
+export interface ResourceSearchRequest {
+  keyword: string;
+  root_id?: string | null;
+  enable_regex?: boolean;
+  page_num?: number;
+  page_size?: number;
+}
+
+/**
+ * 资源搜索结果匹配类型
+ */
+export type ResourceMatchType = 'name' | 'description' | 'content';
+
+/**
+ * 资源搜索结果项
+ */
+export interface ResourceSearchResultItem {
+  resource_id: string;
+  resource_name: string;
+  resource_path: string;
+  match_type: ResourceMatchType;
+  context_text: string;
+  version_id: string | null;
+  updated_at: string;
+}
+
+/**
+ * 资源搜索响应结果
+ */
+export interface ResourceSearchResponse {
+  total: number;
+  items: ResourceSearchResultItem[];
 }

@@ -144,7 +144,7 @@
 
         <el-form-item>
           <template #label>
-            <span>上下文消息数量 (Context)</span>
+            <span>上下文消息数量</span>
             <el-tooltip
               effect="dark"
               content="新会话默认携带的最近历史消息数量。0 代表不限制（发送全部历史）。"

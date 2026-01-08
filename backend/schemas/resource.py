@@ -107,3 +107,26 @@ class ResourceMoveRequest(BaseModel):
     item_ids: List[str] = Field(..., description="被移动的资源或文件夹ID列表")
     reference_id: str = Field(..., description="参考目标ID，'root'代表根目录")
     action: MoveAction = Field(..., description="移动行为: before, after, inside")
+
+
+class ResourceSearchRequest(BaseModel):
+    keyword: str = Field(..., description="搜索关键词或正则模式")
+    root_id: Optional[str] = Field(None, description="搜索范围的根目录ID，不传则搜索全局")
+    enable_regex: bool = Field(False, description="是否启用正则匹配")
+    page_num: int = Field(1, ge=1, description="页码")
+    page_size: int = Field(20, ge=1, le=100, description="每页数量")
+
+
+class ResourceSearchResultItem(BaseModel):
+    resource_id: str
+    resource_name: str
+    resource_path: str
+    match_type: str = Field(..., description="匹配类型: 'content', 'name', 'description'")
+    context_text: str = Field(..., description="包含关键词的高亮上下文片段")
+    version_id: Optional[str] = Field(None, description="如果是内容匹配，提供对应的版本ID")
+    updated_at: datetime
+
+
+class ResourceSearchResponse(BaseModel):
+    total: int
+    items: List[ResourceSearchResultItem]

@@ -10,7 +10,9 @@ import type {
   ResourceVersion,
   ResourceVersionCreate,
   ResourceVersionUpdate,
-  MoveRequest
+  MoveRequest,
+  ResourceSearchRequest,
+  ResourceSearchResponse
 } from './types';
 
 /**
@@ -84,4 +86,13 @@ export const updateResourceVersion = (versionId: string, data: ResourceVersionUp
  */
 export const setActiveVersion = (resourceId: string, versionId: string): Promise<Resource> => {
   return apiClient.put(`/resources/${resourceId}/set-active/${versionId}`);
+};
+
+/**
+ * 全局搜索资源
+ * @param data 搜索请求参数
+ * @returns 返回搜索结果
+ */
+export const searchResources = (data: ResourceSearchRequest): Promise<ResourceSearchResponse> => {
+  return apiClient.post('/resources/search', data);
 };

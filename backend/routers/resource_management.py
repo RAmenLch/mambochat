@@ -7,6 +7,7 @@ from typing import List
 from backend.crud import resource_crud
 from backend import schemas
 from backend.database import get_db
+from backend.services import chat_service, resource_service
 
 router = APIRouter(prefix="/resources", tags=["Resource Management"])
 
@@ -127,3 +128,54 @@ async def reorder_resources(updates: List[schemas.ResourceReorderItem], db: Asyn
     """
     await resource_crud.batch_update_resources_order(db, updates=updates)
     return {"message": "Reorder successful"}
+
+@router.post(
+    "/search",
+    response_model=schemas.ResourceSearchResponse,
+    summary="全局搜索资源和版本内容"
+)
+async def search_resources(request: schemas.ResourceSearchRequest, db: AsyncSession = Depends(get_db)):
+    """
+    在资源标题、描述和最新版本内容中进行全局搜索。
+    支持模糊查询和正则查询，支持指定目录范围。
+    """
+    skip = (request.page_num - 1) * request.page_size
+
+    rows, total = await resource_crud.search_resources_and_versions(
+        db,
+        keyword=request.keyword,
+        root_id=request.root_id,
+        enable_regex=request.enable_regex,
+        skip=skip,
+        limit=request.page_size
+    )
+
+    if not rows:
+        return schemas.ResourceSearchResponse(total=0, items=[])
+
+    # 提取所有涉及的 resource_id，批量构建路径
+    resource_ids = list({row.resource_id for row in rows})
+    path_map = await resource_service.build_resource_paths(db, resource_ids)
+
+    items = []
+    for row in rows:
+        # 截取上下文
+        # 复用 chat_service 中的逻辑以保持统一的高亮体验
+        context = chat_service.extract_context_snippet(
+            content=row.raw_content,
+            keyword=request.keyword,
+            enable_regex=request.enable_regex
+        )
+
+        item = schemas.ResourceSearchResultItem(
+            resource_id=row.resource_id,
+            resource_name=row.resource_name,
+            resource_path=path_map.get(row.resource_id, ""),
+            match_type=row.match_type,
+            context_text=context,
+            version_id=row.version_id,
+            updated_at=row.updated_at
+        )
+        items.append(item)
+
+    return schemas.ResourceSearchResponse(total=total, items=items)

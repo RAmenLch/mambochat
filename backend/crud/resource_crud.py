@@ -3,8 +3,8 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload, joinedload
-from sqlalchemy import func, or_, update
-from typing import List, Optional
+from sqlalchemy import func, or_, update, literal, null, case, union_all
+from typing import List, Optional, Tuple, Any
 
 from backend.models import resource_model
 from backend.schemas.enums import MoveAction
@@ -276,3 +276,145 @@ async def move_resources(db: AsyncSession, move_request: schemas.ResourceMoveReq
 
     await db.commit()
     return True
+
+
+async def search_resources_and_versions(
+        db: AsyncSession,
+        keyword: str,
+        root_id: Optional[str],
+        enable_regex: bool,
+        skip: int,
+        limit: int
+) -> Tuple[List[Any], int]:
+    """
+    全局搜索资源名称、描述以及最新版本的内容。
+    返回: (结果列表, 总数)
+    结果列表中的每一项包含: resource_id, resource_name, version_id, raw_content, match_type, updated_at
+    """
+
+    # 1. 准备过滤条件
+    if enable_regex:
+        # 使用 SQLite 自定义函数 REGEXP
+        def match_op(column):
+            return column.op("REGEXP")(keyword)
+    else:
+        # 使用 LIKE 模糊匹配
+        search_pattern = f"%{keyword}%"
+
+        def match_op(column):
+            return column.like(search_pattern)
+
+    # 2. 如果指定了 root_id，构建递归 CTE 以获取所有子孙 Resource ID
+    target_resource_ids_query = None
+    if root_id:
+        hierarchy_cte = select(resource_model.Resource.id).where(
+            resource_model.Resource.id == root_id
+        ).cte(name="hierarchy", recursive=True)
+
+        hierarchy_cte = hierarchy_cte.union_all(
+            select(resource_model.Resource.id).join(
+                hierarchy_cte, resource_model.Resource.parentId == hierarchy_cte.c.id
+            )
+        )
+        target_resource_ids_query = select(hierarchy_cte.c.id)
+
+    # 3. 构建 ResourceVersion 内容搜索查询 (仅搜索最新版本)
+    # Join Resource 表以获取 latestVersionId，并确保只搜索当前活跃的版本
+    q_content = select(
+        resource_model.Resource.id.label("resource_id"),
+        resource_model.Resource.name.label("resource_name"),
+        resource_model.ResourceVersion.id.label("version_id"),
+        resource_model.ResourceVersion.content.label("raw_content"),
+        literal("content").label("match_type"),
+        resource_model.ResourceVersion.updatedAt.label("updated_at")
+    ).join(
+        resource_model.ResourceVersion,
+        resource_model.Resource.latestVersionId == resource_model.ResourceVersion.id
+    ).where(
+        resource_model.Resource.itemType == 'resource',
+        match_op(resource_model.ResourceVersion.content)
+    )
+
+    if target_resource_ids_query is not None:
+        q_content = q_content.where(resource_model.Resource.id.in_(target_resource_ids_query))
+
+    # 4. 构建 Resource 元数据 (Name, Description) 搜索查询
+    name_match = match_op(resource_model.Resource.name)
+    desc_match = match_op(resource_model.Resource.description)
+
+    q_meta = select(
+        resource_model.Resource.id.label("resource_id"),
+        resource_model.Resource.name.label("resource_name"),
+        null().label("version_id"),
+        case(
+            (name_match, resource_model.Resource.name),
+            else_=resource_model.Resource.description
+        ).label("raw_content"),
+        case(
+            (name_match, literal("name")),
+            else_=literal("description")
+        ).label("match_type"),
+        resource_model.Resource.updatedAt.label("updated_at")
+    ).where(
+        resource_model.Resource.itemType == 'resource',
+        (name_match | desc_match)
+    )
+
+    if target_resource_ids_query is not None:
+        q_meta = q_meta.where(resource_model.Resource.id.in_(target_resource_ids_query))
+
+    # 5. 合并查询 (Union All)
+    union_query = union_all(q_content, q_meta).subquery()
+
+    # 6. 获取总数 (Count)
+    count_stmt = select(func.count()).select_from(union_query)
+    count_result = await db.execute(count_stmt)
+    total_count = count_result.scalar() or 0
+
+    if total_count == 0:
+        return [], 0
+
+    # 7. 获取分页结果
+    stmt = select(union_query).order_by(union_query.c.updated_at.desc()).offset(skip).limit(limit)
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    return rows, total_count
+
+
+async def get_batch_resource_ancestors(db: AsyncSession, resource_ids: List[str]) -> List[resource_model.Resource]:
+    """
+    批量获取指定资源列表的所有祖先节点（包括自身），用于构建路径。
+    """
+    if not resource_ids:
+        return []
+
+    # 1. 递归 CTE: 只查询 ID 和 parentId 以建立层级关系
+    cte = select(
+        resource_model.Resource.id,
+        resource_model.Resource.parentId
+    ).where(resource_model.Resource.id.in_(resource_ids)).cte(name="ancestors", recursive=True)
+
+    # 递归部分：查找父节点
+    cte = cte.union_all(
+        select(
+            resource_model.Resource.id,
+            resource_model.Resource.parentId
+        ).join(cte, resource_model.Resource.id == cte.c.parentId)
+    )
+
+    # 2. 获取所有涉及的 ID
+    stmt = select(cte.c.id)
+    result = await db.execute(stmt)
+    ancestor_ids = result.scalars().all()
+
+    if not ancestor_ids:
+        return []
+
+    # 3. 查询完整的 ORM 对象
+    resources_result = await db.execute(
+        select(resource_model.Resource)
+        .where(resource_model.Resource.id.in_(ancestor_ids))
+    )
+
+    return resources_result.scalars().all()

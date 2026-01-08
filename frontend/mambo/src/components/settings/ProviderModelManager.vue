@@ -2,7 +2,7 @@
   <div class="provider-model-manager">
     <!-- 1. 服务商管理区域 -->
     <div class="header">
-      <h2>服务商 (Providers)</h2>
+      <h2>服务商</h2>
       <el-button type="primary" :icon="Plus" @click="openAddProviderDialog">
         新增服务商
       </el-button>
@@ -31,7 +31,7 @@
 
     <!-- 2. 模型管理区域 -->
     <div class="header">
-      <h2>模型 (Models)</h2>
+      <h2>模型</h2>
       <div>
         <el-button type="primary" :icon="Plus" @click="openAddModelDialog" :disabled="!selectedProvider">
           新增模型

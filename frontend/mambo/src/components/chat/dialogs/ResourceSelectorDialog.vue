@@ -9,15 +9,83 @@
   >
     <div class="resource-selector-body">
       <div class="toolbar">
-        <el-input v-model="searchText" placeholder="搜索资源名称..." clearable class="search-input" />
+        <div class="search-wrapper">
+          <el-input
+            v-model="searchText"
+            placeholder="搜索资源名称、描述或内容..."
+            clearable
+            class="search-input"
+            @input="handleSearchInput"
+          />
+          <el-tooltip content="启用正则表达式搜索" placement="top">
+            <el-button
+              :type="enableRegex ? 'primary' : 'default'"
+              size="small"
+              class="regex-btn"
+              @click="toggleRegex"
+            >
+              .*
+            </el-button>
+          </el-tooltip>
+        </div>
+
         <div class="multi-select-switch">
           <span>多选模式</span>
           <el-switch v-model="isMultiSelectMode" />
         </div>
       </div>
       <el-container class="resource-selector-container">
+        <!-- 侧边栏：树形视图 OR 搜索结果列表 -->
         <el-aside width="280px" class="resource-tree-aside">
-          <el-scrollbar>
+          <!-- 搜索结果列表视图 -->
+          <div v-if="searchText" class="search-result-container">
+            <div v-if="isSearching" class="loading-state">
+              <el-icon class="is-loading"><Loading /></el-icon>
+              <span>正在搜索...</span>
+            </div>
+            <div v-else-if="searchResult.length === 0" class="empty-state">
+              <span class="empty-text">未找到匹配资源</span>
+            </div>
+            <el-scrollbar v-else @scroll="handleScroll">
+              <div class="search-list">
+                <div
+                  v-for="item in searchResult"
+                  :key="item.resource_id"
+                  class="search-item"
+                  :class="{ 'is-selected': isResourceSelected(item.resource_id) }"
+                  @click="handleSearchResultClick(item)"
+                >
+                  <div class="search-item-header">
+                    <span class="search-item-title">{{ item.resource_name }}</span>
+                    <el-tag
+                      size="small"
+                      effect="plain"
+                      :type="getMatchTypeTag(item.match_type)"
+                      class="match-tag"
+                    >
+                      {{ getMatchTypeLabel(item.match_type) }}
+                    </el-tag>
+                  </div>
+                  <div class="search-item-path" :title="item.resource_path">
+                    {{ item.resource_path }}
+                  </div>
+                  <div
+                    v-if="item.context_text"
+                    class="search-item-context"
+                    v-html="highlightKeyword(item.context_text)"
+                  ></div>
+                </div>
+                <div v-if="hasMore" class="load-more-wrapper">
+                  <el-button link size="small" :loading="isSearching" @click="loadMore">
+                    加载更多
+                  </el-button>
+                </div>
+              </div>
+            </el-scrollbar>
+          </div>
+
+          <!-- 默认树形视图 -->
+          <el-scrollbar v-else>
             <div v-if="isResourcesLoading && resourceTree.length === 0" class="loading-state">
               <el-skeleton :rows="5" animated />
             </div>
@@ -27,7 +95,6 @@
               :data="filteredTreeData"
               node-key="id"
               :props="treeProps"
-              :filter-node-method="filterNode"
               @node-click="handleNodeClick"
               @node-expand="handleNodeExpand"
               @node-collapse="handleNodeCollapse"
@@ -36,7 +103,7 @@
                 <span
                   class="custom-tree-node"
                   :class="{
-                    'is-selected': isNodeSelected(data),
+                    'is-selected': isResourceSelected(data.id),
                     'is-disabled': isNodeDisabled(data)
                   }"
                 >
@@ -66,6 +133,8 @@
             </el-tree>
           </el-scrollbar>
         </el-aside>
+
+        <!-- 预览区域 -->
         <el-main class="resource-preview-main">
           <el-empty v-if="selectedResources.length === 0" description="从左侧选择一个资源以预览" />
 
@@ -89,11 +158,9 @@
               </div>
             </template>
             <el-scrollbar class="preview-scrollbar" v-loading="isPreviewLoading">
-              <!-- 这里改为遍历显示内容，或者显示合并后的内容 -->
               <div v-for="(res, index) in selectedResources" :key="res.id" class="multi-preview-item">
                 <div class="multi-preview-label">#{{ index + 1 }} {{ res.name }}</div>
-                <pre class="preview-content">{{ res.latest_version?.content || '正在加载内容...' }}</pre>
-                <!-- 在项目之间显示分割线 -->
+                <pre class="preview-content">{{ res.latest_version?.content || '该资源没有内容' }}</pre>
                 <el-divider v-if="index < selectedResources.length - 1" border-style="dashed" />
               </div>
             </el-scrollbar>
@@ -116,14 +183,15 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, nextTick } from 'vue';
-import { ElTree } from 'element-plus';
+import { ElTree, ElMessage } from 'element-plus';
 import type { TreeNodeData } from 'element-plus/es/components/tree/src/tree.type';
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import type Node from 'element-plus/es/components/tree/src/model/node';
 import { Folder, Document, Memo, Loading } from '@element-plus/icons-vue';
 import { storeToRefs } from 'pinia';
 import { useResourceStore } from '@/stores/resourceStore';
-import type { Resource, ResourceNode, ResourceType } from '@/api/types';
+import { searchResources } from '@/api/resourceService';
+import type { Resource, ResourceNode, ResourceType, ResourceSearchResultItem } from '@/api/types';
 
 // --- Component Interface ---
 const props = defineProps<{
@@ -146,10 +214,18 @@ const treeRef = ref<InstanceType<typeof ElTree>>();
 const selectedResources = ref<Resource[]>([]);
 const isMultiSelectMode = ref(false);
 const selectionType = ref<ResourceType | null>(null);
-const isPreviewLoading = ref(false); // 全局 Loading 状态
+const isPreviewLoading = ref(false);
 const STORAGE_KEY = 'resource_selector_multi_select_mode';
 
 const expandedKeys = ref<Set<string>>(new Set());
+
+// --- Search State ---
+const isSearching = ref(false);
+const enableRegex = ref(false);
+const searchResult = ref<ResourceSearchResultItem[]>([]);
+const searchPage = ref(1);
+const searchTotal = ref(0);
+const searchDebounceTimer = ref<number | undefined>(undefined);
 
 // --- Lifecycle ---
 onMounted(() => {
@@ -163,8 +239,11 @@ const filteredTreeData = computed(() => filterTreeByType(resourceTree.value));
 const treeProps = {
   label: 'name',
   children: 'children',
-  isLeaf: (data: TreeNodeData) => (data as ResourceNode).itemType !== 'folder'
+  isLeaf: (data: TreeNodeData) => (data as ResourceNode).itemType !== 'folder',
+  class: (data: TreeNodeData) => (data as ResourceNode).itemType === 'stub' ? 'is-hidden-node' : ''
 };
+
+const hasMore = computed(() => searchResult.value.length < searchTotal.value);
 
 function filterTreeByType(nodes: ResourceNode[]): ResourceNode[] {
   if (!props.resourceTypeFilter) return nodes;
@@ -186,10 +265,6 @@ watch(() => props.visible, (isVisible) => {
     resourceStore.initializeList();
     expandedKeys.value.clear();
   }
-});
-
-watch(searchText, (val) => {
-  treeRef.value?.filter(val);
 });
 
 watch(isMultiSelectMode, (newMode) => {
@@ -220,8 +295,8 @@ const getReadableResourceType = (type: string | null) => {
   return map[type] || type;
 };
 
-const isNodeSelected = (data: ResourceNode): boolean => {
-  return selectedResources.value.some(r => r.id === data.id);
+const isResourceSelected = (resourceId: string): boolean => {
+  return selectedResources.value.some(r => r.id === resourceId);
 };
 
 const isNodeDisabled = (data: ResourceNode): boolean => {
@@ -230,8 +305,195 @@ const isNodeDisabled = (data: ResourceNode): boolean => {
   return data.resourceType !== selectionType.value;
 };
 
-// --- Interaction Methods ---
+// 定义符合 Element Plus Tag 组件 props 类型
+type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger';
+
+const getMatchTypeTag = (type: string): TagType => {
+  const map: Record<string, TagType> = {
+    name: 'primary',
+    description: 'info',
+    content: 'success'
+  };
+  return map[type] || 'info';
+};
+
+const getMatchTypeLabel = (type: string) => {
+  const map: Record<string, string> = {
+    name: '标题',
+    description: '描述',
+    content: '内容'
+  };
+  return map[type] || type;
+};
+
+const highlightKeyword = (text: string): string => {
+  if (!searchText.value) return text;
+  const keyword = enableRegex.value
+    ? searchText.value
+    : searchText.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  try {
+    const regex = new RegExp(`(${keyword})`, 'gi');
+    return text.replace(regex, '<span class="highlight-text">$1</span>');
+  } catch (e) {
+    return text;
+  }
+};
+
+// --- Search Methods ---
+
+const toggleRegex = () => {
+  enableRegex.value = !enableRegex.value;
+  if (searchText.value) {
+    triggerSearch();
+  }
+};
+
+const handleSearchInput = () => {
+  clearTimeout(searchDebounceTimer.value);
+  searchDebounceTimer.value = window.setTimeout(() => {
+    triggerSearch();
+  }, 300);
+};
+
+const triggerSearch = async (resetPage = true) => {
+  if (!searchText.value.trim()) {
+    searchResult.value = [];
+    searchTotal.value = 0;
+    return;
+  }
+
+  if (resetPage) {
+    searchPage.value = 1;
+    searchResult.value = [];
+  }
+
+  isSearching.value = true;
+  try {
+    const res = await searchResources({
+      keyword: searchText.value.trim(),
+      enable_regex: enableRegex.value,
+      page_num: searchPage.value,
+      page_size: 20
+    });
+
+    if (resetPage) {
+      searchResult.value = res.items;
+    } else {
+      searchResult.value = [...searchResult.value, ...res.items];
+    }
+    searchTotal.value = res.total;
+  } catch (e) {
+    console.error('Search failed:', e);
+    ElMessage.error('搜索失败，请稍后重试');
+  } finally {
+    isSearching.value = false;
+  }
+};
+
+const loadMore = () => {
+  searchPage.value++;
+  triggerSearch(false);
+};
+
+// --- Selection Logic (Shared) ---
+
+/**
+ * 统一处理资源选择逻辑，无论是来自 Tree 还是 Search List
+ */
+const selectResourceById = async (resourceId: string, resourceType?: ResourceType | null, initialResourceObj?: Resource) => {
+  // 1. 获取资源完整对象
+  // 显式声明类型为 Resource | undefined，兼容 ResourceWithVersions (从 store) 和 Resource (从 initialResourceObj)
+  let targetResource: Resource | undefined = resources.value.find(r => r.id === resourceId);
+
+  // 如果缓存没有（例如搜索结果中的深层资源），且提供了初始对象，则使用初始对象
+  if (!targetResource && initialResourceObj) {
+    targetResource = initialResourceObj;
+  }
+
+  // 如果不知道类型，且目前没有加载该资源，我们可能需要先 fetchDetails 才能判断类型校验
+  if (targetResource && props.resourceTypeFilter && targetResource.resourceType !== props.resourceTypeFilter) {
+    ElMessage.warning(`只能选择类型为 ${getReadableResourceType(props.resourceTypeFilter)} 的资源`);
+    return;
+  }
+
+  // 2. 检查多选类型限制
+  const typeToCheck = targetResource?.resourceType || resourceType;
+  if (isMultiSelectMode.value && selectionType.value && typeToCheck && typeToCheck !== selectionType.value) {
+     // 类型不匹配，跳过
+     return;
+  }
+
+  // 3. 执行选中/取消选中
+  if (!isMultiSelectMode.value) {
+    // 单选：直接替换
+    // 先放一个占位对象，如果 targetResource 存在
+    if (targetResource) {
+      selectedResources.value = [targetResource];
+    }
+
+    // 加载详情
+    await loadResourcePreview(resourceId);
+  } else {
+    // 多选
+    const index = selectedResources.value.findIndex(r => r.id === resourceId);
+    if (index > -1) {
+      // 取消选中
+      selectedResources.value.splice(index, 1);
+      if (selectedResources.value.length === 0) {
+        selectionType.value = null;
+      }
+    } else {
+      // 选中
+      // 如果是第一个，确定类型
+      if (selectedResources.value.length === 0) {
+        selectionType.value = typeToCheck || null;
+      }
+
+      // 添加到列表
+      if (targetResource) {
+        selectedResources.value.push(targetResource);
+      } else {
+        // 如果缓存里没有，根据 ID 造一个临时的，等待 fetchDetails 完善它
+        selectedResources.value.push({
+          id: resourceId,
+          name: '正在加载...',
+          description: null, // [修复] 补全 description 字段
+          itemType: 'resource',
+          resourceType: typeToCheck || null,
+          parentId: null,
+          sortOrder: 0,
+          createdAt: '',
+          updatedAt: '',
+          latest_version: null
+        });
+      }
+
+      // 异步加载内容
+      loadResourcePreview(resourceId);
+    }
+  }
+};
+
+const handleSearchResultClick = (item: ResourceSearchResultItem) => {
+  // 搜索结果点击，构造临时 Resource 对象，必须包含 Resource 接口的所有必填字段
+  selectResourceById(item.resource_id, null, {
+    id: item.resource_id,
+    name: item.resource_name,
+    description: null, // [修复] 补全 description 字段
+    itemType: 'resource',
+    resourceType: null, // 未知，待加载
+    parentId: null,
+    sortOrder: 0,
+    createdAt: item.updated_at,
+    updatedAt: item.updated_at,
+    latest_version: null
+  });
+};
+
+// --- Tree Interaction Methods ---
 const filterNode = (value: string, data: TreeNodeData): boolean => {
+  // Deprecated due to lazy loading, but kept for interface compatibility if needed
   if (!value) return true;
   return (data as ResourceNode).name.toLowerCase().includes(value.toLowerCase());
 };
@@ -250,46 +512,7 @@ const handleNodeCollapse = (data: ResourceNode) => {
 const handleNodeClick = async (data: TreeNodeData) => {
   const resource = data as ResourceNode;
   if (resource.itemType !== 'resource' || isNodeDisabled(resource)) return;
-
-  if (!isMultiSelectMode.value) {
-    // 单选逻辑
-    selectedResources.value = [resource];
-    // 强制检查并加载
-    if (!resource.latest_version?.content) {
-      await loadResourcePreview(resource.id);
-    }
-  } else {
-    // 多选逻辑
-    if (selectedResources.value.length === 0) {
-      selectedResources.value.push(resource);
-      selectionType.value = resource.resourceType;
-      // 检查第一个元素
-      if (!resource.latest_version?.content) {
-        await loadResourcePreview(resource.id);
-      }
-    } else {
-      if (resource.resourceType !== selectionType.value) return;
-
-      const index = selectedResources.value.findIndex(r => r.id === resource.id);
-      if (index > -1) {
-        // 取消选中
-        selectedResources.value.splice(index, 1);
-        if (selectedResources.value.length === 0) {
-          selectionType.value = null;
-        }
-      } else {
-        // 选中，添加到列表
-        selectedResources.value.push(resource);
-
-        // 【关键修复】: 立即检查并异步加载内容，不论这是第几个被选中的元素
-        if (!resource.latest_version?.content) {
-          // 不使用 await，让其并行请求，不阻塞 UI 继续选择
-          // 设置 isPreviewLoading 仅仅是为了让右侧显示转圈，这里简单的处理方式
-          loadResourcePreview(resource.id);
-        }
-      }
-    }
-  }
+  selectResourceById(resource.id, resource.resourceType, resource);
 };
 
 /**
@@ -307,19 +530,19 @@ async function loadResourcePreview(resourceId: string) {
       const index = selectedResources.value.findIndex(r => r.id === resourceId);
       if (index !== -1) {
         selectedResources.value.splice(index, 1, updatedResource);
+
+        // 如果是多选的第一个，更新类型约束
+        if (isMultiSelectMode.value && selectedResources.value.length === 1) {
+          selectionType.value = updatedResource.resourceType;
+        }
       } else if (selectedResources.value.length === 0 && !isMultiSelectMode.value) {
-        // 应对极端边界情况
+        // 单选模式下，如果刚才被清空了或者还在初始化
         selectedResources.value = [updatedResource];
       }
     }
   } catch(e) {
     console.error("Failed to load resource content", e);
   } finally {
-    // 改良 Loading 逻辑：检查是否还有选中项没有内容，如果有，保持 Loading
-    // 这是一个简单的防抖，防止最后一个请求结束关闭 Loading，但其他请求还在跑
-    // 这里做简化处理：每次请求结束都尝试关闭，除非我们追踪正在进行的请求数。
-    // 在多选并行请求下，UI Loading 可能会闪烁，但功能是正常的。
-    // 为了更好的体验，可以加一个计数器，但这里简化为直接 false
     isPreviewLoading.value = false;
   }
 }
@@ -336,17 +559,31 @@ function handleDialogClose() {
   selectionType.value = null;
   isPreviewLoading.value = false;
   expandedKeys.value.clear();
+  searchResult.value = [];
+  searchPage.value = 1;
+  searchTotal.value = 0;
 }
+
+// 简单的滚动处理
+const handleScroll = ({ scrollTop, scrollHeight, clientHeight }: any) => {
+  // 简易无限滚动：接近底部且不处于加载状态
+  if (scrollTop + clientHeight > scrollHeight - 50 && hasMore.value && !isSearching.value) {
+    loadMore();
+  }
+};
 </script>
 
 <style scoped>
 /* Reset & Layout */
 .resource-selector-body { display: flex; flex-direction: column; height: 60vh; }
 .toolbar { display: flex; align-items: center; gap: 20px; margin-bottom: 16px; flex-shrink: 0; }
+.search-wrapper { display: flex; align-items: center; gap: 8px; flex-grow: 1; }
 .search-input { flex-grow: 1; }
+.regex-btn { font-family: monospace; font-weight: bold; padding: 8px; }
+
 .multi-select-switch { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--el-text-color-regular); }
 .resource-selector-container { flex-grow: 1; border: 1px solid var(--el-border-color-lighter); border-radius: 4px; overflow: hidden; }
-.resource-tree-aside { border-right: 1px solid var(--el-border-color-lighter); }
+.resource-tree-aside { border-right: 1px solid var(--el-border-color-lighter); background-color: #fff; display: flex; flex-direction: column; }
 
 /* Tree Nodes */
 .custom-tree-node {
@@ -365,6 +602,29 @@ function handleDialogClose() {
 .loading-icon { animation: rotating 2s linear infinite; color: var(--el-text-color-secondary); margin-left: 4px; }
 .resource-type-tag { flex-shrink: 0; margin-left: 8px; }
 
+/* Search Results Styles */
+.search-result-container { height: 100%; display: flex; flex-direction: column; }
+.search-list { padding: 10px; }
+.search-item {
+  padding: 10px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+.search-item:hover { background-color: var(--el-fill-color-light); }
+.search-item.is-selected { background-color: var(--el-color-primary-light-9); }
+
+.search-item-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.search-item-title { font-weight: 500; font-size: 14px; color: var(--el-text-color-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; margin-right: 8px; }
+.match-tag { flex-shrink: 0; }
+.search-item-path { font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-item-context { font-size: 12px; color: var(--el-text-color-regular); background-color: var(--el-fill-color-lighter); padding: 4px; border-radius: 4px; line-height: 1.4; word-break: break-all; }
+:deep(.highlight-text) { color: var(--el-color-primary); font-weight: bold; background-color: var(--el-color-primary-light-9); }
+
+.empty-state { padding: 40px 0; text-align: center; color: var(--el-text-color-secondary); }
+.loading-state { padding: 20px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--el-text-color-secondary); }
+.load-more-wrapper { text-align: center; padding: 10px 0; }
+
 /* Preview Pane */
 .resource-preview-main { padding: 0; }
 .preview-card { height: 100%; border: none; display: flex; flex-direction: column; }
@@ -376,10 +636,14 @@ function handleDialogClose() {
 /* Multi-select Preview Styles */
 .multi-preview-item { margin-bottom: 10px; }
 .multi-preview-label { font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 4px; font-weight: bold; }
-.loading-state { padding: 20px; }
 
 @keyframes rotating {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
+}
+</style>
+<style>
+.is-hidden-node {
+  display: none !important;
 }
 </style>
