@@ -2,6 +2,7 @@
 
 import MarkdownIt from 'markdown-it';
 import markdownItLinkAttributes from 'markdown-it-link-attributes';
+import markdownItKatex from '@iktakahiro/markdown-it-katex';
 import DOMPurify from 'dompurify';
 
 /**
@@ -19,17 +20,20 @@ export interface ParsedBlock {
  * - `breaks: true`: 将单个换行符 (\n) 渲染为 <br>。
  * - `linkify: true`: 自动将 URL 文本转换为链接。
  * - `markdown-it-link-attributes`: 为所有生成的链接添加 target="_blank" 和 rel="noopener noreferrer"。
+ * - `markdown-it-katex`: 支持 LaTeX 数学公式渲染。
  */
 export const md = new MarkdownIt({
   html: false, // 禁止原始 HTML 标签以增强安全性
   breaks: true,
   linkify: true,
-}).use(markdownItLinkAttributes, {
-  attrs: {
-    target: '_blank',
-    rel: 'noopener noreferrer',
-  },
-});
+})
+  .use(markdownItLinkAttributes, {
+    attrs: {
+      target: '_blank',
+      rel: 'noopener noreferrer',
+    },
+  })
+  .use(markdownItKatex);
 
 // 正则表达式，用于匹配 Base64 图片的 Markdown 语法
 const base64ImageRegex = /!\[(.*?)\]\((data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+)\)/g;
@@ -54,9 +58,17 @@ function parseTextAndCode(text: string): ParsedBlock[] {
     if (currentHtmlTokens.length > 0) {
       const rawHtml = md.renderer.render(currentHtmlTokens, md.options, {});
       // 在插入到DOM前，使用DOMPurify清理HTML，防止XSS攻击
+      // 配置 DOMPurify 以允许 KaTeX 生成的 HTML 和 MathML 结构通过
       blocks.push({
         type: 'html',
-        content: DOMPurify.sanitize(rawHtml),
+        content: DOMPurify.sanitize(rawHtml, {
+          ADD_TAGS: [
+            'math', 'semantics', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub',
+            'mfrac', 'msqrt', 'table', 'tr', 'td', 'th', 'tbody', 'thead',
+            'annotation', 'annotation-xml'
+          ],
+          ADD_ATTR: ['xmlns', 'display', 'mathvariant', 'class', 'style', 'target', 'rel']
+        }),
       });
       currentHtmlTokens = [];
     }
