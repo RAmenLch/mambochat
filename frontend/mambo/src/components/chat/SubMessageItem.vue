@@ -367,6 +367,11 @@ async function handleBlockCopy(contentToCopy: string) {
 .rendered-image { max-width: 100%; border-radius: 6px; margin: 0.5em 0; }
 .content-block :deep(p) { margin: 0 0 0.5em; }
 .content-block :deep(p:last-child) { margin-bottom: 0; }
+.content-block :deep(strong),
+.content-block :deep(b) {
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
 .content-block :deep(ul), .content-block :deep(ol) { padding-inline-start: 25px; }
 .content-block :deep(pre) { margin: 1em 0; }
 .content-block :deep(code) { font-family: 'Courier New', Courier, monospace; }
