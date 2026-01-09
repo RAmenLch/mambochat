@@ -15,6 +15,7 @@ from backend.services.generation.instructions import (
     AppendToSubMessage,
     UpdateSubMessageStatus,
     UpdateSubMessageContent,
+    UpdateSubMessageConfig,
     SetFinalStatus
 )
 from backend.services.generation.llm_io import WorkerOutput, LLMInput
@@ -373,6 +374,11 @@ class ReActAgentChatGenerateManager(AbstractGenerateManager):
                     self._content_id = None
 
                 if self._reasoning_id:
+                    # 在标记为 COMPLETED 之前，先将其标记为最小化
+                    yield UpdateSubMessageConfig(
+                        sub_message_id=self._reasoning_id,
+                        config={"is_minimal": True}
+                    )
                     yield UpdateSubMessageStatus(
                         sub_message_id=self._reasoning_id,
                         status=schemas_enums.MessageStatus.COMPLETED
@@ -427,7 +433,13 @@ class ReActAgentChatGenerateManager(AbstractGenerateManager):
                     error_content = f"发生未处理的异常: {str(exception)}"
 
         if self._reasoning_id:
+            # 在标记为 COMPLETED/FAILED 之前，先将其标记为最小化
+            yield UpdateSubMessageConfig(
+                sub_message_id=self._reasoning_id,
+                config={"is_minimal": True}
+            )
             yield UpdateSubMessageStatus(sub_message_id=self._reasoning_id, status=final_status)
+
         if self._content_id:
             yield UpdateSubMessageStatus(sub_message_id=self._content_id, status=final_status)
 

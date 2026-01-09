@@ -159,9 +159,26 @@ class InstructionExecutor:
         )
 
     async def _execute_update_sub_message_config(self, instruction: UpdateSubMessageConfig, assistant_message_id: str):
-        # 验证并转换 config
+        # 1. 获取当前子消息以读取现有配置
+        db_sub_message = await message_crud.get_sub_message(self.db_session, instruction.sub_message_id)
+        if not db_sub_message:
+            print(f"[InstructionExecutor] SubMessage {instruction.sub_message_id} not found for config update.")
+            return
+
         try:
-            config_obj = schemas.message.SubMessageConfig.model_validate(instruction.config)
+            # 2. 解析现有配置
+            current_config = {}
+            if db_sub_message.config:
+                try:
+                    current_config = json.loads(db_sub_message.config)
+                except (json.JSONDecodeError, TypeError):
+                    current_config = {}
+
+            # 3. 合并配置 (指令中的配置优先级更高)
+            merged_config = {**current_config, **instruction.config}
+
+            # 4. 验证并转换为模型对象
+            config_obj = schemas.message.SubMessageConfig.model_validate(merged_config)
             update_schema = schemas.message.SubMessageUpdate(config=config_obj)
 
             await message_crud.update_sub_message(
@@ -170,13 +187,13 @@ class InstructionExecutor:
                 update_schema
             )
 
-            # config 更新可能不频繁，也推送到流中以便前端响应
+            # 5. 推送更新到流 (发送完整的合并后配置)
             await stream_manager.publish(
                 assistant_message_id,
                 {
                     "type": "config_update",
                     "sub_message_id": instruction.sub_message_id,
-                    "config": instruction.config
+                    "config": config_obj.model_dump(mode='json')
                 }
             )
         except Exception as e:
@@ -282,4 +299,3 @@ class InstructionExecutor:
             "message": instruction.message
         }
         await stream_manager.publish(GLOBAL_NOTIFICATIONS_STREAM_ID, notification_payload)
-
