@@ -8,7 +8,9 @@
     </div>
 
     <template v-else>
+      <!-- 仅在非折叠模式下显示 Header，折叠模式下 Header 显示在 ChatList 中 -->
       <ChatHeader
+        v-if="!isSidebarCollapsed"
         :current-chat="currentChat"
         :is-title-refreshing="isTitleRefreshing"
         @save-title="(newTitle) => chatListStore.updateChatSettings(currentChat!.id, { name: newTitle })"
@@ -129,6 +131,10 @@ import ChatInputBox from './ChatInputBox.vue';
 
 interface GroupedModels { label: string; options: AIModel[]; }
 
+const props = defineProps<{
+  isSidebarCollapsed: boolean;
+}>();
+
 // --- Store Instances ---
 const chatListStore = useChatListStore();
 const chatSessionStore = useChatSessionStore();
@@ -164,10 +170,16 @@ const {
 
 // --- Resizable Input Area Logic ---
 const inputAreaHeight = ref(150);
+const isInputAreaCollapsed = ref(false); // 用于配合 useResizablePanels，但在输入框上下调整场景下不涉及折叠逻辑
 const MIN_INPUT_HEIGHT = 100;
 const MAX_INPUT_HEIGHT = 600;
-const { startResize: startResizeInputArea } = useResizablePanels(inputAreaHeight, {
-  min: MIN_INPUT_HEIGHT, max: MAX_INPUT_HEIGHT, orientation: 'vertical', inverted: true
+
+// useResizablePanels 需要 isCollapsed 参数，即使在此场景下不使用
+const { startResize: startResizeInputArea } = useResizablePanels(inputAreaHeight, isInputAreaCollapsed, {
+  min: MIN_INPUT_HEIGHT,
+  max: MAX_INPUT_HEIGHT,
+  orientation: 'vertical',
+  inverted: true
 });
 
 const pendingMessageTextForTokenEstimation = computed(() => {
@@ -398,7 +410,6 @@ function handleJumpToSubMessage(subMessageId: string) {
 
         if (subMessageElement && scrollbarWrap) {
           // 获取subMessage相对于滚动容器的实际位置
-          // 注意：这里需要减去容器的 offsetTop 或者使用相对坐标计算
           const elementRect = subMessageElement.getBoundingClientRect();
           const containerRect = scrollbarWrap.getBoundingClientRect();
 

@@ -1,67 +1,91 @@
 <!-- frontend/mambo/src/components/chat/ChatList.vue -->
 <template>
   <div class="chat-list-container">
-    <ExplorerTree
-      ref="treeRef"
-      :data="treeData"
-      :current-id="currentChatId"
-      :is-loading="isChatListLoading"
-      :loading-folder-ids="loadingFolders"
-      folder-item-type="folder"
-      persistence-key="mambo_chat_folder_expanded_state"
-      class="chat-tree"
-      @node-click="handleNodeClick"
-      @node-contextmenu="handleNodeContextMenu"
-      @root-contextmenu="openRootContextMenu"
-      @move="handleMove"
-      @node-expand="handleNodeExpand"
-    >
-      <template #header>
-        <div class="chat-list-header">
-          <h4>会话列表</h4>
-        </div>
-      </template>
+    <!--
+      显示逻辑升级：
+      显示树形列表的条件：必须处于非折叠状态，且当前宽度大于视觉阈值。
+      否则，显示竖向 Header（提前进入视觉折叠态）。
+    -->
+    <template v-if="showTree">
+      <ExplorerTree
+        ref="treeRef"
+        :data="treeData"
+        :current-id="currentChatId"
+        :is-loading="isChatListLoading"
+        :loading-folder-ids="loadingFolders"
+        folder-item-type="folder"
+        persistence-key="mambo_chat_folder_expanded_state"
+        class="chat-tree"
+        @node-click="handleNodeClick"
+        @node-contextmenu="handleNodeContextMenu"
+        @root-contextmenu="openRootContextMenu"
+        @move="handleMove"
+        @node-expand="handleNodeExpand"
+      >
+        <template #header>
+          <!-- 添加 no-wrap 样式防止在临界宽度时换行 -->
+          <div class="chat-list-header">
+            <h4>会话列表</h4>
+          </div>
+        </template>
 
-      <template #item-icon="{ data }">
-        <el-icon>
-          <Folder v-if="data.itemType === 'folder'" />
-          <ChatDotRound v-else />
-        </el-icon>
-      </template>
-    </ExplorerTree>
+        <template #item-icon="{ data }">
+          <el-icon>
+            <Folder v-if="data.itemType === 'folder'" />
+            <ChatDotRound v-else />
+          </el-icon>
+        </template>
+      </ExplorerTree>
+
+      <el-dropdown
+        ref="contextMenuRef"
+        trigger="contextmenu"
+        @command="handleMenuCommand"
+        popper-class="no-animation-popper"
+      >
+        <span :style="contextMenuPosition" />
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'" command="newChat">
+              <el-icon><Plus /></el-icon>新建会话
+            </el-dropdown-item>
+            <el-dropdown-item v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'" command="newFolder">
+              <el-icon><FolderAdd /></el-icon>新建文件夹
+            </el-dropdown-item>
+
+            <template v-if="contextMenuItem">
+              <el-dropdown-item command="rename" :divided="contextMenuItem.itemType === 'folder'"><el-icon><EditPen /></el-icon>重命名</el-dropdown-item>
+              <el-dropdown-item v-if="contextMenuItem.itemType === 'chat'" command="duplicate"><el-icon><CopyDocument /></el-icon>复制会话</el-dropdown-item>
+              <el-dropdown-item command="delete" class="delete-item"><el-icon><Delete /></el-icon>删除</el-dropdown-item>
+            </template>
+
+            <el-dropdown-item command="search" :divided="true"><el-icon><Search /></el-icon>搜索</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+    </template>
+
+    <!-- 显示竖向 ChatHeader 的条件：已折叠 或 正在拖拽且宽度过窄 -->
+    <ChatHeader
+      v-else
+      mode="vertical"
+      :current-chat="currentChat"
+      :is-title-refreshing="isTitleRefreshing"
+      @save-title="handleSaveTitle"
+      @refresh-title="handleRefreshTitle"
+      @expand="$emit('expand')"
+      class="vertical-header"
+    />
 
     <el-divider />
 
-    <div class="footer">
-      <el-button :icon="Setting" circle @click="goToSettings" />
+    <!-- 底部按钮：在 tree 显示时靠右，在 header 显示时居中 -->
+    <div class="footer" :class="{ 'collapsed': !showTree }">
+      <el-tooltip v-if="!showTree" content="设置" placement="right">
+        <el-button :icon="Setting" circle @click="goToSettings" />
+      </el-tooltip>
+      <el-button v-else :icon="Setting" circle @click="goToSettings" />
     </div>
-
-    <el-dropdown
-      ref="contextMenuRef"
-      trigger="contextmenu"
-      @command="handleMenuCommand"
-      popper-class="no-animation-popper"
-    >
-      <span :style="contextMenuPosition" />
-      <template #dropdown>
-        <el-dropdown-menu>
-          <el-dropdown-item v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'" command="newChat">
-            <el-icon><Plus /></el-icon>新建会话
-          </el-dropdown-item>
-          <el-dropdown-item v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'" command="newFolder">
-            <el-icon><FolderAdd /></el-icon>新建文件夹
-          </el-dropdown-item>
-
-          <template v-if="contextMenuItem">
-            <el-dropdown-item command="rename" :divided="contextMenuItem.itemType === 'folder'"><el-icon><EditPen /></el-icon>重命名</el-dropdown-item>
-            <el-dropdown-item v-if="contextMenuItem.itemType === 'chat'" command="duplicate"><el-icon><CopyDocument /></el-icon>复制会话</el-dropdown-item>
-            <el-dropdown-item command="delete" class="delete-item"><el-icon><Delete /></el-icon>删除</el-dropdown-item>
-          </template>
-
-          <el-dropdown-item command="search" :divided="true"><el-icon><Search /></el-icon>搜索</el-dropdown-item>
-        </el-dropdown-menu>
-      </template>
-    </el-dropdown>
 
     <EntityFormDialog
       v-model:visible="dialogState.visible.value"
@@ -99,6 +123,26 @@ import { useTreeController, type DialogPayload, type DialogConfirmPayload } from
 import ExplorerTree from '@/components/common/ExplorerTree.vue';
 import EntityFormDialog, { type SelectConfigOption } from '@/components/common/EntityFormDialog.vue';
 import SearchDialog from '@/components/chat/dialogs/SearchDialog.vue';
+import ChatHeader from '@/components/chat/ChatHeader.vue';
+
+// -- Props & Emits --
+const props = defineProps<{
+  isCollapsed: boolean;
+  width: number; // 接收实时宽度
+}>();
+
+const emit = defineEmits<{
+  (e: 'expand'): void;
+}>();
+
+// -- Visual Threshold Logic --
+// 当宽度小于 200px 时，哪怕还没松手（isCollapsed 仍为 false），
+// 我们也认为树形列表已经无法美观展示了，直接切换到竖向 Header 模式。
+const VISUAL_COLLAPSE_THRESHOLD = 150;
+
+const showTree = computed(() => {
+  return !props.isCollapsed && props.width >= VISUAL_COLLAPSE_THRESHOLD;
+});
 
 // -- Store Instances & State --
 const chatListStore = useChatListStore();
@@ -108,8 +152,8 @@ const settingsStore = useSettingsStore();
 const router = useRouter();
 const route = useRoute();
 
-const { chatList, isChatListLoading, loadingFolders, loadedFolderIds } = storeToRefs(chatListStore);
-const { currentChatId } = storeToRefs(chatSessionStore);
+const { chatList, isChatListLoading, loadingFolders, loadedFolderIds, refreshingTitleChatId } = storeToRefs(chatListStore);
+const { currentChatId, currentChat } = storeToRefs(chatSessionStore);
 const { providers } = storeToRefs(providerStore);
 const { globalSettings } = storeToRefs(settingsStore);
 
@@ -125,6 +169,8 @@ const modelOptions = computed((): SelectConfigOption[] => {
     }))
   }));
 });
+
+const isTitleRefreshing = computed(() => refreshingTitleChatId.value === currentChat.value?.id);
 
 // -- Tree Controller Logic --
 const {
@@ -218,7 +264,6 @@ onMounted(async () => {
 
   let targetChatId = route.params.id as string;
 
-  // 1. 如果路由参数为空，尝试从 URL 路径解析（解决刷新时 params 延迟问题）
   if (!targetChatId) {
     const match = window.location.pathname.match(/\/chat\/([a-zA-Z0-9-]+)/);
     if (match && match[1]) {
@@ -226,7 +271,6 @@ onMounted(async () => {
     }
   }
 
-  // 2. 如果 URL 中确实没有 ID，尝试从 LocalStorage 恢复上下文
   if (!targetChatId) {
     const lastActiveId = localStorage.getItem(LAST_ACTIVE_CHAT_KEY);
     if (lastActiveId) {
@@ -234,14 +278,11 @@ onMounted(async () => {
     }
   }
 
-  // 3. 执行加载与选中逻辑
   if (targetChatId) {
-    // 确保目标节点及其父级路径已加载（懒加载支持）
     await chatListStore.resolvePath(targetChatId);
     await handleSelectChat(targetChatId);
     await treeRef.value?.scrollToKey(targetChatId);
   } else {
-    // 4. 兜底逻辑：加载 Root 层最近打开的会话
     const lastOpenedChat = chatList.value
       .filter(c => c.itemType === 'chat' && c.lastOpenedAt)
       .sort((a, b) => new Date(b.lastOpenedAt!).getTime() - new Date(a.lastOpenedAt!).getTime())[0];
@@ -252,13 +293,11 @@ onMounted(async () => {
   }
 });
 
-// 监听路由变化，处理应用内导航
 watch(
   () => route.params.id,
   async (newId) => {
     if (newId && typeof newId === 'string') {
       if (currentChatId.value !== newId) {
-        // 确保树中存在该节点
         const exists = chatList.value.some(c => c.id === newId);
         if (!exists) {
           await chatListStore.resolvePath(newId);
@@ -287,6 +326,20 @@ const handleSelectChat = async (chatId: string) => {
 };
 
 const goToSettings = () => router.push('/settings');
+
+// -- Vertical Header Actions --
+
+function handleSaveTitle(newTitle: string) {
+  if (currentChat.value) {
+    chatListStore.updateChatSettings(currentChat.value.id, { name: newTitle });
+  }
+}
+
+function handleRefreshTitle() {
+  if (currentChat.value) {
+    chatListStore.refreshChatTitle(currentChat.value.id);
+  }
+}
 
 // -- Search Dialog --
 const searchDialogVisible = ref(false);
@@ -346,14 +399,63 @@ async function handleSearchResultSelect(data: { chatId: string; subMessageId: st
 </script>
 
 <style scoped>
-.chat-list-container { height: 100%; display: flex; flex-direction: column; box-sizing: border-box; }
-.chat-tree { flex-grow: 1; min-height: 0; }
-.chat-list-header { cursor: default; }
-.chat-list-header h4 { margin: 0; font-size: 16px; font-weight: 600; color: var(--el-text-color-primary); }
-.el-divider { margin: 0; flex-shrink: 0; }
-.delete-item { color: var(--el-color-danger); }
-.footer { flex-shrink: 0; display: flex; justify-content: flex-end; align-items: center; padding: 8px 12px; }
+.chat-list-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 100%;
+  overflow: hidden;
+}
+
+.chat-tree {
+  flex-grow: 1;
+  min-height: 0;
+}
+
+.vertical-header {
+  flex-grow: 1;
+  min-height: 0;
+}
+
+.chat-list-header {
+  cursor: default;
+  /* 防止在切换临界点时文字换行导致闪烁 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-list-header h4 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.el-divider {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.delete-item {
+  color: var(--el-color-danger);
+}
+
+.footer {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 8px 12px;
+}
+
+.footer.collapsed {
+  justify-content: center;
+  padding: 12px 0;
+}
 </style>
+
 <style>
 .no-animation-popper {
   transition: none !important;
