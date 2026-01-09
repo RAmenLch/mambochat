@@ -144,7 +144,6 @@
   </div>
 
   <MessageEditDialog
-    v-show="editDialogVisible"
     v-model:visible="editDialogVisible"
     :initial-content="originalEditingContent"
     :is-user-message="message.role === 'user'"

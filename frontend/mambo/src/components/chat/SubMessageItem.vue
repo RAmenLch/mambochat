@@ -423,6 +423,10 @@ async function handleBlockCopy(contentToCopy: string) {
   background-color: rgba(255, 255, 255, 0.2);   /* 半透明背景，融合蓝色气泡 */
   color: var(--el-color-primary-dark-2);
 }
+.is-user .content-block :deep(strong),
+.is-user .content-block :deep(b) {
+  color: var(--el-color-primary-dark-2);
+}
 .typing-indicator { display: flex; align-items: center; justify-content: center; height: 24px; }
 .typing-indicator span { height: 8px; width: 8px; border-radius: 50%; background-color: #909399; margin: 0 3px; animation: bounce 1.4s infinite ease-in-out both; }
 .typing-indicator span:nth-of-type(1) { animation-delay: -0.32s; }
