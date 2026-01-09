@@ -527,4 +527,22 @@ watch(currentChatId, (newId) => {
     box-shadow: 0 0 12px var(--el-color-warning-light-5);
   }
 }
+
+/* 覆盖 Element Plus 滚动条样式 */
+.message-list-scrollbar :deep(.el-scrollbar__bar.is-vertical) {
+  width: 14px; /* 增加感应区域宽度 */
+}
+
+/* 默认视觉状态：细条、靠右 */
+.message-list-scrollbar :deep(.el-scrollbar__bar.is-vertical .el-scrollbar__thumb) {
+  width: 6px;
+  margin-left: auto;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 交互状态（悬停或拖动）：变宽 */
+.message-list-scrollbar :deep(.el-scrollbar__bar.is-vertical:hover .el-scrollbar__thumb),
+.message-list-scrollbar :deep(.el-scrollbar__bar.is-vertical:active .el-scrollbar__thumb) {
+  width: 14px;
+}
 </style>

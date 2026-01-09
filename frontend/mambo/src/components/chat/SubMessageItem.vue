@@ -2,6 +2,7 @@
 <template>
   <div
     :id="id"
+    ref="rootRef"
     class="sub-message-item"
     :class="{
       'is-user': parentMessage.role === 'user',
@@ -123,7 +124,12 @@
       </div>
 
       <!-- 普通文本内容 -->
-      <div v-else-if="subMessage.type !== 'McpTool'" class="message-content" :class="{ collapsed: isCollapsed }">
+      <div
+        v-else-if="subMessage.type !== 'McpTool'"
+        class="message-content"
+        :class="{ collapsed: isCollapsed }"
+        ref="contentRef"
+      >
         <div v-if="isGenerating && subMessage.content === ''" class="typing-indicator">
           <span></span><span></span><span></span>
         </div>
@@ -145,6 +151,16 @@
             />
             <div v-else v-html="block.content"></div>
           </div>
+
+          <!-- [修改] 回到顶部按钮: 增加高度判断 -->
+          <div
+            v-if="!isCollapsed && !isGenerating && showBackToTop"
+            class="back-to-top-btn"
+            @click.stop="scrollToTop"
+            title="回到顶部"
+          >
+             <el-icon size="10"><Top /></el-icon>
+          </div>
         </template>
       </div>
     </template>
@@ -152,13 +168,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import type { SubMessage, Message, SubMessageConfig, McpToolContent } from '@/api/types';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { ElMessage } from 'element-plus';
 import {
   Edit, CopyDocument, ArrowUpBold, ArrowDownBold, Download, Picture, Minus,
-  Loading, CircleClose, CircleCheck
+  Loading, CircleClose, CircleCheck, Top
 } from '@element-plus/icons-vue';
 import CodeBlock from './CodeBlock.vue';
 import { copyToClipboard } from '@/utils/clipboard';
@@ -187,6 +203,29 @@ const emit = defineEmits<{
 const interactionStore = useChatInteractionStore();
 const isCollapsed = ref(props.subMessage.config.is_collapsed || false);
 const isGenerating = computed(() => props.subMessage.status === 'generating');
+const rootRef = ref<HTMLElement | null>(null);
+const contentRef = ref<HTMLElement | null>(null);
+const showBackToTop = ref(false);
+
+let resizeObserver: ResizeObserver | null = null;
+
+onMounted(() => {
+  if (contentRef.value) {
+    resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        // 当内容高度超过 600px 时显示按钮
+        showBackToTop.value = entry.target.scrollHeight > 600;
+      }
+    });
+    resizeObserver.observe(contentRef.value);
+  }
+});
+
+onBeforeUnmount(() => {
+  if (resizeObserver) {
+    resizeObserver.disconnect();
+  }
+});
 
 // --- Computed properties for McpTool type ---
 const mcpContent = computed((): McpToolContent | null => {
@@ -306,11 +345,18 @@ async function handleBlockCopy(contentToCopy: string) {
     console.error('Could not copy text: ', err);
   }
 }
+
+function scrollToTop() {
+  if (rootRef.value) {
+    // 平滑滚动到当前组件的顶部
+    rootRef.value.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
 </script>
 
 
 <style scoped>
-.sub-message-item { display: flex; flex-direction: column; max-width: 100%; border: 1px solid var(--el-border-color-light); border-radius: 6px; background-color: var(--color-background-soft); overflow: hidden; --sub-message-bg: var(--color-background-soft); }
+.sub-message-item { display: flex; flex-direction: column; max-width: 100%; border: 1px solid var(--el-border-color-light); border-radius: 6px; background-color: var(--color-background-soft); overflow: hidden; --sub-message-bg: var(--color-background-soft); position: relative; }
 .is-user .sub-message-item { background-color: var(--el-color-primary-light-9); border-color: var(--el-color-primary-light-8); --sub-message-bg: var(--el-color-primary-light-9); }
 
 /* File type specific styles */
@@ -357,7 +403,8 @@ async function handleBlockCopy(contentToCopy: string) {
 .mcp-collapsed-summary .mcp-tool-status-icon { flex-shrink: 0; }
 .mcp-collapsed-text { font-size: 13px; color: var(--el-text-color-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.message-content { position: relative; word-break: break-word; line-height: 1.7; color: var(--color-text); min-height: 20px; transition: max-height 0.25s ease-out; max-height: 10000px; overflow: hidden; }
+/* [修改] 移除了 10000px 的 max-height 限制，改为 none，允许无限高度 */
+.message-content { position: relative; word-break: break-word; line-height: 1.7; color: var(--color-text); min-height: 20px; transition: max-height 0.25s ease-out; max-height: none; overflow: hidden; }
 .message-content:not(.mcp-tool-content) { padding: 10px 15px; }
 .is-user .message-content { color: var(--el-color-primary-dark-2); }
 .message-content.collapsed { max-height: 5em; }
@@ -432,4 +479,35 @@ async function handleBlockCopy(contentToCopy: string) {
 .typing-indicator span:nth-of-type(1) { animation-delay: -0.32s; }
 .typing-indicator span:nth-of-type(2) { animation-delay: -0.16s; }
 @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+
+/* [修改] 回到顶部按钮样式: 小尺寸，定位到 Padding 区域 */
+.back-to-top-btn {
+  position: absolute;
+  /* 位于右下角 padding (15px) 区域内，微调位置确保视觉对齐 */
+  bottom: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  background-color: var(--color-background);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.5; /* 默认透明度较低，减少视觉干扰 */
+  transition: all 0.2s;
+  z-index: 10;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  color: var(--el-text-color-regular);
+}
+.back-to-top-btn:hover {
+  opacity: 1;
+  background-color: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  border-color: var(--el-color-primary-light-5);
+}
+.is-user .back-to-top-btn {
+  background-color: rgba(255, 255, 255, 0.8);
+}
 </style>
