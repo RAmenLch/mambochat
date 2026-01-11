@@ -161,7 +161,10 @@ class OpenAIGenerateWorker(AbstractGenerateWorker):
             yield WorkerOutput(type="usage", usage=data["usage"])
 
 
-        if not data.get("choices", [{}]):
+
+        try:
+            data.get("choices", [{}])[0]
+        except IndexError:
             print(data)
         choice = data.get("choices", [{}])[0]
 
