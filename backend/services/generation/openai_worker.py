@@ -160,12 +160,10 @@ class OpenAIGenerateWorker(AbstractGenerateWorker):
         if "usage" in data and data["usage"]:
             yield WorkerOutput(type="usage", usage=data["usage"])
 
-
-
         try:
-            data.get("choices", [{}])[0]
+            choice = data.get("choices", [{}])[0]
         except IndexError:
-            print(data)
+            yield WorkerOutput(type="error", content=f"An unexpected error occurred: {str(data)}")
         choice = data.get("choices", [{}])[0]
 
         message_data = choice.get("message", {})
