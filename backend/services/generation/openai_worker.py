@@ -160,7 +160,11 @@ class OpenAIGenerateWorker(AbstractGenerateWorker):
         if "usage" in data and data["usage"]:
             yield WorkerOutput(type="usage", usage=data["usage"])
 
+
+        if not data.get("choices", [{}]):
+            print(data)
         choice = data.get("choices", [{}])[0]
+
         message_data = choice.get("message", {})
 
         # 处理工具调用
