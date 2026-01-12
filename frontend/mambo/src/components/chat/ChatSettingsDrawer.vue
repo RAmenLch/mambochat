@@ -185,10 +185,15 @@ const dynamicParameters = computed((): DynamicParameterUI[] => {
   const currentModel = providerStore.allModels.find(m => m.id === chatSettingsForm.aiModelId);
   const supportedParameters = new Set(currentModel?.meta_config?.supported_parameters ?? []);
 
+  // 核心参数：无论模型是否显式声明支持，都应显示在列表中，允许用户按需启用
+  const coreParameters = ['temperature', 'top_p'];
+
   return systemConfigStore.llmParameters
     .filter(paramDef =>
-      // 显示条件：模型支持 或 参数是默认激活的
-      supportedParameters.has(paramDef.key) || paramDef.default_activate
+      // 显示条件：核心参数 或 模型明确支持 或 参数是默认激活的
+      coreParameters.includes(paramDef.key) ||
+      supportedParameters.has(paramDef.key) ||
+      paramDef.default_activate
     )
     .map(paramDef => ({
       key: paramDef.key,
@@ -266,23 +271,21 @@ function handleSaveSettings() {
     return;
   }
 
-  const currentModel = providerStore.allModels.find(m => m.id === chatSettingsForm.aiModelId);
-  const supportedParameters = new Set(currentModel?.meta_config?.supported_parameters ?? []);
-
+  // max_context_messages 和 stream 是固定必须启用的参数
   const finalModelParameters: Record<string, any> = {
     max_context_messages: chatSettingsForm.modelParameters.max_context_messages,
     stream: chatSettingsForm.modelParameters.stream,
   };
 
+  // 处理动态参数
   for (const key in chatSettingsForm.modelParameters) {
     if (Object.prototype.hasOwnProperty.call(chatSettingsForm.modelParameters, key)) {
       if (key === 'max_context_messages' || key === 'stream') {
         continue;
       }
-      // 仅当参数被当前模型支持时，才将其包含在最终提交的数据中
-      if (supportedParameters.has(key)) {
-        finalModelParameters[key] = chatSettingsForm.modelParameters[key];
-      }
+      // 只要参数存在于 modelParameters 中（即已被用户启用），就将其包含在最终提交的数据中
+      // 不再依赖 supportedParameters 校验，以支持"按需启用"场景（特别是针对 Temperature 和 Top P）
+      finalModelParameters[key] = chatSettingsForm.modelParameters[key];
     }
   }
 

@@ -59,10 +59,10 @@ export function useChatInput(currentChatId: Ref<string | null>) {
     if (!id) return;
 
     try {
-      // 检查容量并在必要时执行淘汰
-      // 注意：这里先检查是否存在，避免将更新操作误判为新增操作
+      // 检查是否已存在记录，以区分新增还是更新
       const existingEntry = await getInputCache(id);
 
+      // 如果是新增记录，且达到容量限制，执行 LRU 淘汰
       if (!existingEntry) {
         const count = await getInputCacheCount();
         if (count >= CACHE_LIMIT) {
@@ -73,7 +73,7 @@ export function useChatInput(currentChatId: Ref<string | null>) {
         }
       }
 
-      // 保存当前状态，更新时间戳
+      // 保存当前状态，更新时间戳以刷新 LRU 顺序
       await setInputCache({
         chatId: id,
         isMultiPartMode: isMultiPartMode.value,
@@ -83,21 +83,6 @@ export function useChatInput(currentChatId: Ref<string | null>) {
       });
     } catch (error) {
       console.error('Failed to save chat input cache to IndexedDB:', error);
-    }
-  };
-
-  /**
-   * 清除当前会话的输入缓存 (发送即退出机制)。
-   * 物理删除 IndexedDB 中的记录。
-   */
-  const clearCache = async () => {
-    const id = currentChatId.value;
-    if (id) {
-      try {
-        await deleteInputCache(id);
-      } catch (error) {
-        console.error('Failed to clear chat input cache:', error);
-      }
     }
   };
 
@@ -181,6 +166,7 @@ export function useChatInput(currentChatId: Ref<string | null>) {
   }, { immediate: true });
 
   // 8. 监听输入状态的变化并自动持久化
+  // 注意：resetDraft 修改 uploadedFiles 时也会触发此 watcher，从而更新 DB
   watch([isMultiPartMode, uploadedFiles, attachedSubmessageResources], _saveCurrentChatState, { deep: true });
 
   // 9. 封装模式切换的业务逻辑
@@ -210,20 +196,19 @@ export function useChatInput(currentChatId: Ref<string | null>) {
 
   // 11. 暴露一个重置方法，在消息发送后调用
   const resetDraft = () => {
-    // 清空本地状态
+    // 清空文本草稿和文件
     singlePartDraft.value = '';
     multiPartDraft.value = [{ id: Date.now(), content: '' }];
     activePartitionIndex.value = 0;
     uploadedFiles.value = [];
 
-    // 清空输入缓存中的资源引用 (实施发送即退出策略)
-    attachedSubmessageResources.value = [];
+    // 注意：attachedSubmessageResources (消息模板) 不在此处清空，需保留以便连续使用
 
     // 清空历史记录中的当前草稿
     debouncedSave('');
 
-    // 物理清理 IndexedDB 缓存
-    clearCache();
+    // 这里的状态变更(uploadedFiles清空)会触发 watcher，
+    // 进而调用 _saveCurrentChatState 将最新的"空文件+保留模板"状态同步到 IndexedDB
   };
 
   // 12. 文件管理方法
