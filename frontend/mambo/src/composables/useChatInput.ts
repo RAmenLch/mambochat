@@ -1,10 +1,15 @@
-// frontend/mambo/src/composables/useChatInput.ts
-
-import { ref, watch, computed, reactive } from 'vue';
+import { ref, watch, computed } from 'vue';
 import { useUndoRedoHistory } from './useUndoRedoHistory';
 import { debounce } from 'lodash-es';
 import type { Ref } from 'vue';
 import type { FileResponse, Resource } from '@/api/types';
+import {
+  getInputCache,
+  setInputCache,
+  deleteInputCache,
+  getInputCacheCount,
+  getOldestInputCache
+} from '@/services/indexedDBService';
 
 /**
  * 定义多部分输入的分区结构。
@@ -15,19 +20,8 @@ interface Partition {
 }
 
 /**
- * 定义持久化到 localStorage 的单个会话输入状态的结构。
- */
-interface ChatInputState {
-  isMultiPartMode: boolean;
-  uploadedFiles: FileResponse[];
-  attachedSubmessageResources: Resource[];
-}
-
-const CACHE_STORAGE_KEY = 'mambo_chatInputCache';
-
-/**
  * 管理聊天输入的复杂逻辑，包括多模式切换、草稿状态和撤销/重做功能。
- * 这是一个与UI紧密相关的Composable，旨在简化ChatWindow组件的逻辑。
+ * 使用 IndexedDB 进行持久化存储，并实施 LRU 缓存淘汰策略。
  *
  * @param currentChatId - 一个响应式的 Ref，代表当前激活会话的ID。
  * @returns 返回一组用于驱动聊天输入区域的响应式状态和方法。
@@ -35,7 +29,7 @@ const CACHE_STORAGE_KEY = 'mambo_chatInputCache';
 export function useChatInput(currentChatId: Ref<string | null>) {
   // --- 内部状态 ---
 
-  // 1. 底层历史记录引擎 (仅用于文本草稿)，已配置为使用 localStorage
+  // 1. 底层历史记录引擎 (仅用于文本草稿)，已重构为使用 IndexedDB
   const {
     saveDraft: saveHistory,
     undo: undoHistory,
@@ -51,45 +45,59 @@ export function useChatInput(currentChatId: Ref<string | null>) {
   const uploadedFiles = ref<FileResponse[]>([]);
   const attachedSubmessageResources = ref<Resource[]>([]);
 
-  // 3. 用于持久化输入状态的缓存对象
-  const chatInputCache = reactive<Record<string, ChatInputState>>({});
-
-  // 初始化时从 localStorage 加载缓存
-  try {
-    const storedCache = localStorage.getItem(CACHE_STORAGE_KEY);
-    if (storedCache) {
-      Object.assign(chatInputCache, JSON.parse(storedCache));
-    }
-  } catch (error) {
-    console.error('Failed to load chat input cache from localStorage:', error);
-    localStorage.removeItem(CACHE_STORAGE_KEY);
-  }
+  // 3. 缓存容量限制常量
+  const CACHE_LIMIT = 10;
 
   // --- 核心逻辑 ---
 
   /**
-   * 将当前会话的输入状态（模式、文件、资源）保存到缓存和 localStorage。
+   * 将当前会话的输入状态（模式、文件、资源）保存到 IndexedDB。
+   * 包含 LRU 淘汰逻辑：若达到上限且为新记录，删除最旧记录。
    */
-  const _saveCurrentChatState = () => {
+  const _saveCurrentChatState = async () => {
     const id = currentChatId.value;
     if (!id) return;
 
-    if (!chatInputCache[id]) {
-      chatInputCache[id] = {
-        isMultiPartMode: false,
-        uploadedFiles: [],
-        attachedSubmessageResources: [],
-      };
-    }
-
-    chatInputCache[id].isMultiPartMode = isMultiPartMode.value;
-    chatInputCache[id].uploadedFiles = JSON.parse(JSON.stringify(uploadedFiles.value));
-    chatInputCache[id].attachedSubmessageResources = JSON.parse(JSON.stringify(attachedSubmessageResources.value));
-
     try {
-      localStorage.setItem(CACHE_STORAGE_KEY, JSON.stringify(chatInputCache));
+      // 检查容量并在必要时执行淘汰
+      // 注意：这里先检查是否存在，避免将更新操作误判为新增操作
+      const existingEntry = await getInputCache(id);
+
+      if (!existingEntry) {
+        const count = await getInputCacheCount();
+        if (count >= CACHE_LIMIT) {
+          const oldest = await getOldestInputCache();
+          if (oldest) {
+            await deleteInputCache(oldest.chatId);
+          }
+        }
+      }
+
+      // 保存当前状态，更新时间戳
+      await setInputCache({
+        chatId: id,
+        isMultiPartMode: isMultiPartMode.value,
+        uploadedFiles: JSON.parse(JSON.stringify(uploadedFiles.value)),
+        attachedSubmessageResources: JSON.parse(JSON.stringify(attachedSubmessageResources.value)),
+        timestamp: Date.now(),
+      });
     } catch (error) {
-      console.error('Failed to save chat input cache to localStorage:', error);
+      console.error('Failed to save chat input cache to IndexedDB:', error);
+    }
+  };
+
+  /**
+   * 清除当前会话的输入缓存 (发送即退出机制)。
+   * 物理删除 IndexedDB 中的记录。
+   */
+  const clearCache = async () => {
+    const id = currentChatId.value;
+    if (id) {
+      try {
+        await deleteInputCache(id);
+      } catch (error) {
+        console.error('Failed to clear chat input cache:', error);
+      }
     }
   };
 
@@ -130,24 +138,30 @@ export function useChatInput(currentChatId: Ref<string | null>) {
     }
   });
 
-  // 7. 监听会话ID变化，加载新会话的草稿和输入状态
-  watch(currentChatId, (newId, oldId) => {
+  // 7. 监听会话ID变化，从 IndexedDB 加载新会话的输入状态
+  watch(currentChatId, async (newId, oldId) => {
     if (newId && newId !== oldId) {
-      const cachedState = chatInputCache[newId];
+      // 重置为默认状态，等待异步加载
+      isMultiPartMode.value = false;
+      uploadedFiles.value = [];
+      attachedSubmessageResources.value = [];
+      activePartitionIndex.value = 0;
 
-      if (cachedState) {
-        isMultiPartMode.value = cachedState.isMultiPartMode;
-        uploadedFiles.value = cachedState.uploadedFiles;
-        attachedSubmessageResources.value = cachedState.attachedSubmessageResources;
-      } else {
-        isMultiPartMode.value = false;
-        uploadedFiles.value = [];
-        attachedSubmessageResources.value = [];
+      // 异步加载缓存
+      try {
+        const cachedState = await getInputCache(newId);
+        if (cachedState) {
+          isMultiPartMode.value = cachedState.isMultiPartMode;
+          uploadedFiles.value = cachedState.uploadedFiles;
+          attachedSubmessageResources.value = cachedState.attachedSubmessageResources;
+        }
+      } catch (error) {
+        console.error('Failed to load chat input cache:', error);
       }
 
-      activePartitionIndex.value = 0;
+      // 处理文本草稿（从历史记录加载）
+      // 注意：rawDraftFromHistory 会由 useUndoRedoHistory 内部的 watcher 自动更新
       const draft = rawDraftFromHistory.value;
-
       if (isMultiPartMode.value) {
         if (draft && draft.startsWith('[')) {
           try {
@@ -196,12 +210,20 @@ export function useChatInput(currentChatId: Ref<string | null>) {
 
   // 11. 暴露一个重置方法，在消息发送后调用
   const resetDraft = () => {
+    // 清空本地状态
     singlePartDraft.value = '';
     multiPartDraft.value = [{ id: Date.now(), content: '' }];
     activePartitionIndex.value = 0;
     uploadedFiles.value = [];
-    // attachedSubmessageResources.value = []; //消息模板是不会在发送后清空的,以后记住
+
+    // 清空输入缓存中的资源引用 (实施发送即退出策略)
+    attachedSubmessageResources.value = [];
+
+    // 清空历史记录中的当前草稿
     debouncedSave('');
+
+    // 物理清理 IndexedDB 缓存
+    clearCache();
   };
 
   // 12. 文件管理方法
@@ -253,7 +275,6 @@ export function useChatInput(currentChatId: Ref<string | null>) {
     }
   };
 
-
   // --- 对外暴露的API ---
   return {
     // 状态
@@ -267,7 +288,6 @@ export function useChatInput(currentChatId: Ref<string | null>) {
     // 计算属性
     currentUserInputText: computed((): string => isMultiPartMode.value
       ? multiPartDraft.value.map(p => p.content).join('\n')
-      // Fallback to empty string if singlePartDraft is null/undefined
       : singlePartDraft.value ?? ''
     ),
     isReadyToSend: computed((): boolean =>
