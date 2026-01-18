@@ -12,13 +12,11 @@ from backend.crud import chat_crud, message_crud, file_crud, resource_crud, sett
 from backend import schemas
 from backend.models import chat_model
 from backend.database import AsyncSessionLocal
-from backend.services.generation import (
-    DefaultGenerateManager,
-    TitleGenerateManager,
-    ZipHistoryGenerateManager,
-    OpenAIGenerateWorker,
-    InstructionExecutor
-)
+from backend.services.generation.instruction_executor import InstructionExecutor
+from backend.services.generationv2.default_manager import DefaultGenerateManager
+from backend.services.generationv2.title_manager import TitleGenerateManager
+from backend.services.generationv2.zip_history_manager import ZipHistoryGenerateManager
+from backend.services.generationv2.openai_worker import OpenAiWorker
 from backend.schemas.enums import FileManagementType, MessageStatus, MessageRole, SubMessageType
 
 # 定义生成任务启动的超时阈值
@@ -165,8 +163,8 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
             # 在实例化 Manager 之前，确保 Chat 数据是就绪的 (AI Model ID 已配置)
             await _ensure_chat_model_configured(db, chat_id)
 
-            # 1. 实例化核心组件
-            worker = OpenAIGenerateWorker()
+            # 1. 实例化核心组件 (使用 V2 版本)
+            worker = OpenAiWorker()
             manager = DefaultGenerateManager(db_session=db)
             executor = InstructionExecutor(db_session=db)
 
@@ -206,7 +204,8 @@ async def run_title_generation_task(chat_id: str):
     task_id = f"title-gen-{chat_id}"
     async with AsyncSessionLocal() as db:
         try:
-            worker = OpenAIGenerateWorker()
+            # 使用 V2 版本组件
+            worker = OpenAiWorker()
             manager = TitleGenerateManager(db_session=db)
             executor = InstructionExecutor(db_session=db)
 
@@ -231,7 +230,8 @@ async def run_zip_history_generation_task(chat_id: str, target_message_id: str):
     task_id = f"zip-history-gen-{target_message_id}"
     async with AsyncSessionLocal() as db:
         try:
-            worker = OpenAIGenerateWorker()
+            # 使用 V2 版本组件
+            worker = OpenAiWorker()
             manager = ZipHistoryGenerateManager(db_session=db)
             executor = InstructionExecutor(db_session=db)
 

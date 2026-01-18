@@ -175,4 +175,5 @@ async def fetch_webpage(result_id: str) -> str:
         return error_msg
 
 if __name__ == "__main__":
-    mcp.run()
+    # mcp.run()
+    mcp.run(transport="stdio")
