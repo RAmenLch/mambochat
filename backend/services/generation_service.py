@@ -5,10 +5,10 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import AsyncGenerator, Tuple
+from typing import AsyncGenerator, Tuple, List, Optional
 
 from backend.services.stream_manager_service import stream_manager
-from backend.crud import chat_crud, message_crud, file_crud, resource_crud, setting_crud
+from backend.crud import chat_crud, message_crud, file_crud, resource_crud, setting_crud, provider_crud
 from backend import schemas
 from backend.models import chat_model
 from backend.database import AsyncSessionLocal
@@ -18,7 +18,9 @@ from backend.services.generation.default_manager import DefaultGenerateManager
 from backend.services.generation.title_manager import TitleGenerateManager
 from backend.services.generation.zip_history_manager import ZipHistoryGenerateManager
 from backend.services.generation.worker.openai_worker import OpenAiWorker
-from backend.schemas.enums import FileManagementType, MessageStatus, MessageRole, SubMessageType
+from backend.services.generation.worker.google_worker import GoogleWorker
+from backend.services.generation.worker.deepseek_worker import DeepSeekWorker
+from backend.schemas.enums import FileManagementType, MessageStatus, MessageRole, SubMessageType, ProviderWorkerType
 
 # 定义生成任务启动的超时阈值
 GENERATION_START_TIMEOUT = timedelta(minutes=10)
@@ -154,6 +156,58 @@ async def _ensure_chat_model_configured(db: AsyncSession, chat_id: str) -> None:
             await db.refresh(db_chat)
 
 
+# --- Worker Factory Logic ---
+
+def _create_worker_instance(worker_type: str):
+    """Worker 工厂方法"""
+    if worker_type == ProviderWorkerType.GOOGLE:
+        return GoogleWorker()
+    elif worker_type == ProviderWorkerType.DEEPSEEK:
+        return DeepSeekWorker()
+    else:
+        return OpenAiWorker()
+
+
+async def _get_worker_for_chat(db: AsyncSession, chat_id: str):
+    """
+    根据会话配置的服务商类型，返回对应的 Worker 实例。
+    用于主对话流程。
+    """
+    db_chat = await chat_crud.get_chat(db, chat_id=chat_id)
+    worker_type = ProviderWorkerType.OPENAI
+    if db_chat and db_chat.ai_model and db_chat.ai_model.provider:
+        worker_type = db_chat.ai_model.provider.worker_type
+
+    return _create_worker_instance(worker_type)
+
+
+async def _get_worker_from_settings(db: AsyncSession, setting_keys: List[str]):
+    """
+    根据全局设置列表（按优先级）查找模型，并返回对应的 Worker 实例。
+    用于标题生成等使用全局模型配置的任务。
+    """
+    target_model_id = None
+
+    # 1. 遍历 Key 列表，找到第一个配置了有效值的设置项
+    for key in setting_keys:
+        setting = await setting_crud.get_setting(db, key)
+        if setting and setting.value:
+            target_model_id = setting.value
+            break
+
+    worker_type = ProviderWorkerType.OPENAI
+
+    # 2. 如果找到了模型ID，查询其 Provider 的 worker_type
+    if target_model_id:
+        model = await provider_crud.get_model(db, target_model_id)
+        if model and model.provider:
+            worker_type = model.provider.worker_type
+
+    return _create_worker_instance(worker_type)
+
+
+# --- Background Tasks ---
+
 async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
     """
     后台任务：协调整个生成过程。它实例化 Executor、Worker 和 Manager，
@@ -164,8 +218,8 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
             # 在实例化 Manager 之前，确保 Chat 数据是就绪的 (AI Model ID 已配置)
             await _ensure_chat_model_configured(db, chat_id)
 
-            # 1. 实例化核心组件 (使用 V2 版本)
-            worker = OpenAiWorker()
+            # 1. 实例化核心组件 (使用 Chat 绑定的模型)
+            worker = await _get_worker_for_chat(db, chat_id)
             manager = DefaultGenerateManager(db_session=db)
             executor = InstructionExecutor(db_session=db)
 
@@ -185,7 +239,7 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
             # Manager 内部已处理大部分异常。如果异常抛出到这里，说明 Manager 初始化失败或严重崩溃。
             try:
                 error_sub_message_create = schemas.SubMessageCreate(
-                    id = generate_uuid(),
+                    id=generate_uuid(),
                     content=f"生成流程启动失败: {e}",
                     sortOrder=0,
                     type=SubMessageType.NORMAL,
@@ -202,12 +256,14 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
 async def run_title_generation_task(chat_id: str):
     """
     后台任务：为指定的会话生成并更新标题。
+    使用全局配置的 'title_generation_model_id' 或 'default_model_id'。
     """
     task_id = f"title-gen-{chat_id}"
     async with AsyncSessionLocal() as db:
         try:
-            # 使用 V2 版本组件
-            worker = OpenAiWorker()
+            # 1. 根据全局配置获取 Worker
+            worker = await _get_worker_from_settings(db, ["title_generation_model_id", "default_model_id"])
+
             manager = TitleGenerateManager(db_session=db)
             executor = InstructionExecutor(db_session=db)
 
@@ -232,8 +288,8 @@ async def run_zip_history_generation_task(chat_id: str, target_message_id: str):
     task_id = f"zip-history-gen-{target_message_id}"
     async with AsyncSessionLocal() as db:
         try:
-            # 使用 V2 版本组件
-            worker = OpenAiWorker()
+            # 实例化核心组件 (此处暂时跟随 Chat 模型，如有独立配置需求可改为 _get_worker_from_settings)
+            worker = await _get_worker_for_chat(db, chat_id)
             manager = ZipHistoryGenerateManager(db_session=db)
             executor = InstructionExecutor(db_session=db)
 

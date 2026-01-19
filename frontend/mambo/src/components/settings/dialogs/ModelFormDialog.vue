@@ -14,20 +14,16 @@
       <el-form-item label="模型显示名称" prop="name">
         <el-input v-model.trim="modelForm.name" placeholder="例如：GPT-4o" />
       </el-form-item>
+      <el-form-item label="模型类型" prop="model_type">
+        <el-radio-group v-model="modelForm.model_type">
+          <el-radio-button value="chat">对话模型</el-radio-button>
+          <el-radio-button value="embedding">向量模型</el-radio-button>
+        </el-radio-group>
+      </el-form-item>
 
       <el-divider>元配置 (Meta Config)</el-divider>
 
-      <!-- 元配置信息 -->
-      <el-form-item label="分词器 (Tokenizer)">
-        <el-select
-          v-model="modelForm.meta_config.tokenizer"
-          placeholder="请选择分词器"
-          clearable
-          style="width: 100%"
-        >
-          <el-option v-for="item in tokenizerOptions" :key="item" :label="item" :value="item" />
-        </el-select>
-      </el-form-item>
+      <!-- 通用配置 -->
       <el-form-item label="上下文长度">
         <el-input-number
           v-model="modelForm.meta_config.context_length"
@@ -37,37 +33,66 @@
           style="width: 100%"
         />
       </el-form-item>
-      <el-form-item label="最大输出Token数">
-        <el-input-number
-          v-model="modelForm.meta_config.max_output_tokens"
-          :min="0"
-          :controls="false"
-          placeholder="例如: 4096"
-          style="width: 100%"
-        />
-      </el-form-item>
-      <el-form-item label="输入模态">
-        <el-select
-          v-model="modelForm.meta_config.input_modalities"
-          multiple
-          placeholder="请选择支持的输入模态"
-          clearable
-          style="width: 100%"
-        >
-          <el-option v-for="item in inputModalitiesOptions" :key="item" :label="item" :value="item" />
-        </el-select>
-      </el-form-item>
-      <el-form-item label="输出模态">
-        <el-select
-          v-model="modelForm.meta_config.output_modalities"
-          multiple
-          placeholder="请选择支持的输出模态"
-          clearable
-          style="width: 100%"
-        >
-          <el-option v-for="item in outputModalitiesOptions" :key="item" :label="item" :value="item" />
-        </el-select>
-      </el-form-item>
+
+      <!-- Chat 模型专用配置 -->
+      <template v-if="isChatModel">
+        <el-form-item label="分词器 (Tokenizer)">
+          <el-select
+            v-model="modelForm.meta_config.tokenizer"
+            placeholder="请选择分词器"
+            clearable
+            style="width: 100%"
+          >
+            <el-option v-for="item in tokenizerOptions" :key="item" :label="item" :value="item" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="最大输出Token数">
+          <el-input-number
+            v-model="modelForm.meta_config.max_output_tokens"
+            :min="0"
+            :controls="false"
+            placeholder="例如: 4096"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="输入模态">
+          <el-select
+            v-model="modelForm.meta_config.input_modalities"
+            multiple
+            placeholder="请选择支持的输入模态"
+            clearable
+            style="width: 100%"
+          >
+            <el-option v-for="item in inputModalitiesOptions" :key="item" :label="item" :value="item" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="输出模态">
+          <el-select
+            v-model="modelForm.meta_config.output_modalities"
+            multiple
+            placeholder="请选择支持的输出模态"
+            clearable
+            style="width: 100%"
+          >
+            <el-option v-for="item in outputModalitiesOptions" :key="item" :label="item" :value="item" />
+          </el-select>
+        </el-form-item>
+      </template>
+
+      <!-- Embedding 模型专用配置 -->
+      <template v-if="isEmbeddingModel">
+        <el-form-item label="向量维度">
+          <el-input-number
+            v-model="modelForm.meta_config.embedding_dimension"
+            :min="1"
+            :controls="false"
+            placeholder="例如: 1536"
+            style="width: 100%"
+          />
+        </el-form-item>
+      </template>
+
+      <!-- 通用配置 -->
       <el-form-item label="支持的参数">
         <el-select
           v-model="modelForm.meta_config.supported_parameters"
@@ -94,7 +119,7 @@ import { ref, reactive, watch, computed } from 'vue';
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
 import { useProviderStore } from '@/stores/providerStore';
 import { useSystemConfigStore } from '@/stores/systemConfigStore';
-import type { AIModel, AIModelCreate, AIModelMetaConfig, AIModelUpdate } from '@/api/types';
+import type { AIModel, AIModelCreate, AIModelMetaConfig, AIModelUpdate, ModelType } from '@/api/types';
 import {
   tokenizerOptions,
   inputModalitiesOptions,
@@ -104,6 +129,7 @@ import {
 interface ModelFormData {
   name: string;
   modelId: string;
+  model_type: ModelType;
   meta_config: AIModelMetaConfig;
 }
 
@@ -126,6 +152,7 @@ const modelFormRef = ref<FormInstance>();
 const getInitialMetaConfig = (): AIModelMetaConfig => ({
   context_length: null,
   max_output_tokens: null,
+  embedding_dimension: null,
   tokenizer: null,
   input_modalities: [],
   output_modalities: [],
@@ -135,14 +162,18 @@ const getInitialMetaConfig = (): AIModelMetaConfig => ({
 const modelForm = reactive<ModelFormData>({
   name: '',
   modelId: '',
+  model_type: 'chat',
   meta_config: getInitialMetaConfig(),
 });
 
 const isEditing = computed(() => !!props.modelData);
+const isChatModel = computed(() => modelForm.model_type === 'chat');
+const isEmbeddingModel = computed(() => modelForm.model_type === 'embedding');
 
 const modelFormRules = reactive<FormRules<Partial<ModelFormData>>>({
   name: [{ required: true, message: '请输入模型显示名称', trigger: 'blur' }],
   modelId: [{ required: true, message: '请输入模型 ID', trigger: 'blur' }],
+  model_type: [{ required: true, message: '请选择模型类型', trigger: 'change' }],
 });
 
 watch(() => props.visible, (newVal) => {
@@ -152,11 +183,13 @@ watch(() => props.visible, (newVal) => {
     if (props.modelData) { // 编辑
       modelForm.name = props.modelData.name;
       modelForm.modelId = props.modelData.modelId;
+      modelForm.model_type = props.modelData.model_type || 'chat';
       // 深拷贝 meta_config，防止直接修改 prop
       modelForm.meta_config = JSON.parse(JSON.stringify(props.modelData.meta_config || getInitialMetaConfig()));
     } else { // 新增
       modelForm.name = '';
       modelForm.modelId = '';
+      modelForm.model_type = 'chat';
       modelForm.meta_config = getInitialMetaConfig();
     }
   }
@@ -174,11 +207,31 @@ function handleClose() {
 
 function getSanitizedMetaConfig(): AIModelMetaConfig {
     const config = modelForm.meta_config;
-    return {
-      ...config,
+    const baseConfig: AIModelMetaConfig = {
       context_length: config.context_length || null,
-      max_output_tokens: config.max_output_tokens || null,
+      supported_parameters: config.supported_parameters || [],
     };
+
+    if (isChatModel.value) {
+      return {
+        ...baseConfig,
+        max_output_tokens: config.max_output_tokens || null,
+        tokenizer: config.tokenizer || null,
+        input_modalities: config.input_modalities || [],
+        output_modalities: config.output_modalities || [],
+        embedding_dimension: null,
+      };
+    } else {
+      // Embedding 模型清除不相关的 Chat 配置
+      return {
+        ...baseConfig,
+        embedding_dimension: config.embedding_dimension || null,
+        max_output_tokens: null,
+        tokenizer: null,
+        input_modalities: [],
+        output_modalities: [],
+      };
+    }
 }
 
 async function submitForm() {
@@ -191,6 +244,7 @@ async function submitForm() {
         if (isEditing.value && props.modelData) {
           const updateData: AIModelUpdate = {
             name: modelForm.name,
+            model_type: modelForm.model_type,
             meta_config: sanitizedMetaConfig
           };
           await providerStore.updateModel(props.modelData.id, updateData);
@@ -199,6 +253,7 @@ async function submitForm() {
           const createData: AIModelCreate = {
             name: modelForm.name,
             modelId: modelForm.modelId,
+            model_type: modelForm.model_type,
             providerId: props.providerId,
             meta_config: sanitizedMetaConfig
           };

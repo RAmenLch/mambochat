@@ -36,3 +36,16 @@ class MoveAction(str, Enum):
     BEFORE = "before"  # 放置在参考节点之前
     AFTER = "after"    # 放置在参考节点之后
     INSIDE = "inside"  # 放置在参考文件夹内部
+
+
+class ProviderWorkerType(str, Enum):
+    """定义服务商使用的 Worker 类型"""
+    OPENAI = "openai"
+    GOOGLE = "google"
+    DEEPSEEK = "deepseek"
+
+
+class ModelType(str, Enum):
+    """定义 AI 模型的类型"""
+    CHAT = "chat"
+    EMBEDDING = "embedding"

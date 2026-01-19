@@ -3,7 +3,7 @@ from backend.services.generation.llm_io import LLMInput
 from backend.services.generation.worker.chat_worker import ChatWorker
 
 
-class OpenAiWorker(ChatWorker):
+class GoogleWorker(ChatWorker):
     """
     基于 LangChain/LangGraph 的生成工作者。
 

@@ -118,22 +118,26 @@ export interface PrepareGenerateResponse {
 
 
 // --- AI & Provider Types ---
-
+export type ProviderWorkerType = 'openai' | 'google' | 'deepseek';
+export type ModelType = 'chat' | 'embedding';
 /**
  * 存储模型的元配置信息
  */
 export interface AIModelMetaConfig {
   context_length?: number | null;
   max_output_tokens?: number | null;
+  embedding_dimension?: number | null;
   tokenizer?: string | null;
   input_modalities?: string[] | null;
   output_modalities?: string[] | null;
   supported_parameters?: string[] | null;
 }
 
+
 export interface AIModelBase {
   modelId: string;
   name: string;
+  model_type: ModelType;
   meta_config?: AIModelMetaConfig | null;
 }
 
@@ -148,13 +152,16 @@ export interface AIModelCreate extends AIModelBase {
 
 export interface AIModelUpdate {
   name?: string;
+  model_type?: ModelType;
   meta_config?: AIModelMetaConfig | null;
 }
+
 
 export interface AIProvider {
   id: string;
   name: string;
   apiHost: string;
+  worker_type: ProviderWorkerType;
   use_proxy: boolean;
 }
 
@@ -167,6 +174,7 @@ export interface AIProviderCreate {
   name: string;
   apiHost: string;
   apiKey: string;
+  worker_type: ProviderWorkerType;
   use_proxy: boolean;
 }
 
@@ -174,6 +182,7 @@ export interface AIProviderUpdate {
   name?: string;
   apiHost?: string;
   apiKey?: string;
+  worker_type?: ProviderWorkerType;
   use_proxy?: boolean;
 }
 
@@ -212,6 +221,7 @@ export interface LLMParameterDefinition {
 export interface DefaultProviderInfo {
   name: string;
   apiHost: string;
+  worker_type: ProviderWorkerType;
 }
 
 /**

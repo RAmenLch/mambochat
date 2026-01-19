@@ -114,26 +114,37 @@ SUPPORTED_LLM_PARAMETERS: List[LLMParameter] = [
 DEFAULT_PROVIDERS: List[dict[str, str]] = [
     {
         "name": "OpenAI",
-        "apiHost": "https://api.openai.com/v1"
+        "apiHost": "https://api.openai.com/v1",
+        "worker_type": "openai"
     },
     {
-        "name": "Gemini",
-        "apiHost": "https://generativelanguage.googleapis.com/v1beta/openai"
+        "name": "Gemini (OpenAI Compatible)",
+        "apiHost": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "worker_type": "openai"
+    },
+    {
+        "name": "Gemini (Native)",
+        "apiHost": "https://generativelanguage.googleapis.com/v1beta",
+        "worker_type": "google"
     },
     {
         "name": "OpenRouter",
-        "apiHost": "https://openrouter.ai/api/v1"
+        "apiHost": "https://openrouter.ai/api/v1",
+        "worker_type": "openai"
     },
     {
         "name": "DeepSeek",
-        "apiHost": "https://api.deepseek.com/v1"
+        "apiHost": "https://api.deepseek.com/v1",
+        "worker_type": "deepseek"
     },
     {
         "name": "SiliconFlow",
-        "apiHost": "https://api.siliconflow.cn/v1/"
+        "apiHost": "https://api.siliconflow.cn/v1/",
+        "worker_type": "openai"
     },
     {
         "name": "Local LLM (LM Studio)",
-        "apiHost": "http://localhost:1234/v1"
+        "apiHost": "http://localhost:1234/v1",
+        "worker_type": "openai"
     }
 ]

@@ -3,6 +3,8 @@ import json
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Any
 
+from backend.schemas.enums import ProviderWorkerType, ModelType
+
 
 # --- AIModel Meta Config Schema ---
 
@@ -14,6 +16,8 @@ class AIModelMetaConfig(BaseModel):
     input_modalities: Optional[List[str]] = None
     output_modalities: Optional[List[str]] = None
     supported_parameters: Optional[List[str]] = None
+    embedding_dimension: Optional[int] = Field(None, description="Embeddings 模型的输出向量维度")
+    max_context_length: Optional[int] = Field(None, description="Embeddings 模型的最大上下文Token限制")
 
 
 # --- AIModel Schemas ---
@@ -22,6 +26,7 @@ class AIModelBase(BaseModel):
     modelId: str
     name: str
     meta_config: Optional[AIModelMetaConfig] = Field(None, description="模型的元配置信息")
+    model_type: ModelType = Field(ModelType.CHAT, description="模型类型: chat 或 embedding")
 
 
 class AIModelCreate(AIModelBase):
@@ -32,6 +37,7 @@ class AIModelUpdate(BaseModel):
     """用于更新AI模型信息"""
     name: Optional[str] = None
     meta_config: Optional[AIModelMetaConfig] = None
+    model_type: Optional[ModelType] = None
 
 
 class AIModel(AIModelBase):
@@ -61,6 +67,7 @@ class AIModel(AIModelBase):
 class AIProviderBase(BaseModel):
     name: str
     apiHost: str
+    worker_type: ProviderWorkerType = Field(ProviderWorkerType.OPENAI, description="后端使用的 Worker 类型")
 
 
 class AIProviderCreate(AIProviderBase):
@@ -75,6 +82,7 @@ class AIProviderUpdate(BaseModel):
     apiHost: Optional[str] = None
     apiKey: Optional[str] = None
     use_proxy: Optional[bool] = None
+    worker_type: Optional[ProviderWorkerType] = None
 
 
 class AIProvider(AIProviderBase):

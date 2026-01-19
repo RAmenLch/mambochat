@@ -18,6 +18,13 @@
       ref="providerTableRef"
     >
       <el-table-column prop="name" label="服务商名称" width="220" />
+<!--      <el-table-column prop="worker_type" label="后端类型" width="160">-->
+<!--        <template #default="{ row }">-->
+<!--          <el-tag :type="getWorkerTypeTag(row.worker_type)">-->
+<!--            {{ row.worker_type }}-->
+<!--          </el-tag>-->
+<!--        </template>-->
+<!--      </el-table-column>-->
       <el-table-column prop="apiHost" label="API Host" />
       <el-table-column label="操作" width="180" align="center">
         <template #default="{ row }">
@@ -49,22 +56,38 @@
       <el-table :data="selectedProvider.models" border style="width: 100%">
         <el-table-column prop="modelId" label="模型 ID" width="220" />
         <el-table-column prop="name" label="模型显示名称" width="200" />
-        <el-table-column label="上下文/输出" width="130" align="center">
+        <el-table-column prop="model_type" label="类型" width="50" align="center">
           <template #default="{ row }">
-            <span v-if="row.meta_config?.context_length || row.meta_config?.max_output_tokens">
-              {{ row.meta_config.context_length || 'N/A' }} / {{ row.meta_config.max_output_tokens || 'N/A' }}
-            </span>
+            <el-tooltip :content="row.model_type === 'embedding' ? '向量模型' : '对话模型'" placement="top">
+              <el-icon size="18">
+                <component :is="row.model_type === 'embedding' ? Connection : ChatDotRound" />
+              </el-icon>
+            </el-tooltip>
+          </template>
+        </el-table-column>
+        <el-table-column label="上下文 / 输出(或维度)" width="180" align="center">
+          <template #default="{ row }">
+            <div v-if="row.meta_config">
+              <span>{{ row.meta_config.context_length || '-' }}</span>
+              <span class="separator">/</span>
+              <span v-if="row.model_type === 'embedding'">
+                {{ row.meta_config.embedding_dimension ? row.meta_config.embedding_dimension + ' dim' : '-' }}
+              </span>
+              <span v-else>
+                {{ row.meta_config.max_output_tokens || '-' }}
+              </span>
+            </div>
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="分词器" width="120" align="center">
-          <template #default="{ row }">
-            <span>{{ row.meta_config?.tokenizer || '-' }}</span>
-          </template>
-        </el-table-column>
+<!--        <el-table-column label="分词器" width="120" align="center">-->
+<!--          <template #default="{ row }">-->
+<!--            <span>{{ row.meta_config?.tokenizer || '-' }}</span>-->
+<!--          </template>-->
+<!--        </el-table-column>-->
         <el-table-column label="模态能力" width="200" align="center">
           <template #default="{ row }">
-            <div class="modality-cell" v-if="row.meta_config">
+            <div class="modality-cell" v-if="row.meta_config && row.model_type !== 'embedding'">
               <div class="modality-group">
                 <el-tooltip v-for="mod in row.meta_config.input_modalities" :key="mod" :content="mod" placement="top">
                   <el-icon class="modality-icon"><component :is="modalityIcons[mod]" /></el-icon>
@@ -135,8 +158,11 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { useSystemConfigStore } from '@/stores/systemConfigStore';
 import { storeToRefs } from 'pinia';
 import { ElMessage, ElMessageBox, type ElTable } from 'element-plus';
-import { Plus, Document, Picture, Headset, VideoCamera, Folder, ArrowRight, Download } from '@element-plus/icons-vue';
-import type { AIProviderWithModels, AIModel, AIModelBase, AIModelCreate } from '@/api/types';
+import {
+  Plus, Document, Picture, Headset, VideoCamera, Folder, ArrowRight, Download,
+  ChatDotRound, Connection
+} from '@element-plus/icons-vue';
+import type { AIProviderWithModels, AIModel, AIModelBase, AIModelCreate, ProviderWorkerType } from '@/api/types';
 
 import ProviderFormDialog from './dialogs/ProviderFormDialog.vue';
 import ModelFormDialog from './dialogs/ModelFormDialog.vue';
@@ -190,6 +216,16 @@ watch(providers, (newProviders) => {
     selectedProvider.value = null;
   }
 }, { deep: true, immediate: true });
+
+// Helper
+const getWorkerTypeTag = (type: ProviderWorkerType) => {
+  switch (type) {
+    case 'openai': return 'success';
+    case 'google': return 'warning';
+    case 'deepseek': return 'primary';
+    default: return 'info';
+  }
+};
 
 // Provider Handlers
 const handleRowClick = (row: AIProviderWithModels) => {
@@ -247,7 +283,7 @@ const handleFetchModelsForProvider = async () => {
   if (!selectedProvider.value) return;
   isFetchingModels.value = true;
   try {
-    const models = await providerStore.fetchModelsForProvider(selectedProvider.value.id,selectedProvider.value.use_proxy);
+    const models = await providerStore.fetchModelsForProvider(selectedProvider.value.id, selectedProvider.value.use_proxy);
     fetchModelsDialog.data = models;
     fetchModelsDialog.existingIds = selectedProvider.value.models.map(m => m.modelId);
     fetchModelsDialog.visible = true;
@@ -268,10 +304,11 @@ const onConfirmAddFetchedModels = (selectedIds: string[]) => {
       .filter(id => !selectedProvider.value!.models.some(m => m.modelId === id))
       .map(id => {
         const modelInfo = fetchModelsDialog.data.find(m => m.modelId === id);
-        // 传递完整的模型信息，包括 meta_config
+        // 传递完整的模型信息，包括 meta_config 和 model_type
         return {
           name: modelInfo?.name || id,
           modelId: id,
+          model_type: modelInfo?.model_type || 'chat',
           providerId: selectedProvider.value!.id,
           meta_config: modelInfo?.meta_config || null
         };
@@ -298,4 +335,5 @@ const onConfirmAddFetchedModels = (selectedIds: string[]) => {
 .modality-icon { font-size: 16px; color: var(--el-text-color-regular); }
 .arrow-icon { color: var(--el-text-color-secondary); }
 .parameter-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.separator { margin: 0 4px; color: var(--el-text-color-secondary); }
 </style>

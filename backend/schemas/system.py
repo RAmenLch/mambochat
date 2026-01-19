@@ -2,6 +2,8 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional, Union, Any
 
+from backend.schemas.enums import ProviderWorkerType
+
 class LLMParameterDefinition(BaseModel):
     """
     定义一个LLM参数的结构，用于API响应，供前端UI生成和校验。
@@ -24,6 +26,7 @@ class DefaultProviderInfo(BaseModel):
     """
     name: str
     apiHost: str
+    worker_type: ProviderWorkerType = Field(..., description="后端使用的 Worker 类型")
 
 
 class SystemConfigResponse(BaseModel):
@@ -32,4 +35,3 @@ class SystemConfigResponse(BaseModel):
     """
     llm_parameters: List[LLMParameterDefinition] = Field(..., description="系统支持的所有LLM参数的定义列表。")
     default_providers: List[DefaultProviderInfo] = Field(..., description="用于快速创建的预设服务商列表。")
-

@@ -161,13 +161,17 @@ const { globalSettings } = storeToRefs(settingsStore);
 const treeData = computed(() => buildChatTree(chatList.value, loadedFolderIds.value) as unknown as BaseTreeItem[]);
 
 const modelOptions = computed((): SelectConfigOption[] => {
-  return providers.value.map(p => ({
-    label: p.name,
-    options: p.models.map(m => ({
-      label: m.name,
-      value: m.id
+  return providers.value
+    .map(p => ({
+      label: p.name,
+      options: p.models
+        .filter(m => m.model_type === 'chat')
+        .map(m => ({
+          label: m.name,
+          value: m.id
+        }))
     }))
-  }));
+    .filter(p => p.options.length > 0);
 });
 
 const isTitleRefreshing = computed(() => refreshingTitleChatId.value === currentChat.value?.id);

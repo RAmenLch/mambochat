@@ -14,7 +14,7 @@
         </el-form-item>
         <el-form-item label="AI 模型">
           <el-select v-model="chatSettingsForm.aiModelId" placeholder="请选择一个AI模型" style="width: 100%">
-            <el-option-group v-for="group in groupedModels" :key="group.label" :label="group.label">
+            <el-option-group v-for="group in filteredGroupedModels" :key="group.label" :label="group.label">
               <el-option v-for="item in group.options" :key="item.id" :label="item.name" :value="item.id" />
             </el-option-group>
           </el-select>
@@ -179,6 +179,16 @@ const chatSettingsForm = reactive<ChatSettingsForm>({
 });
 
 // --- Computed Properties ---
+
+const filteredGroupedModels = computed(() => {
+  return props.groupedModels
+    .map(group => ({
+      label: group.label,
+      options: group.options.filter(m => m.model_type === 'chat')
+    }))
+    .filter(group => group.options.length > 0);
+});
+
 const dynamicParameters = computed((): DynamicParameterUI[] => {
   if (!props.chatData) return [];
 
