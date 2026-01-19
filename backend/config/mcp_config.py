@@ -9,5 +9,4 @@ MCP_SERVER_ENABLED = True
 _current_dir = Path(__file__).resolve().parent
 _project_root = _current_dir.parent.parent
 
-BING_MCP_SERVER_PATH = _project_root / "MCP_SERVER" / "bing" / "search_mcp_server.py"
 DDGS_MCP_SERVER_PATH = _project_root / "MCP_SERVER" / "ddgs" / "search_mcp_server.py"

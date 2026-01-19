@@ -10,7 +10,6 @@ from langchain_core.messages import (
     BaseMessageChunk, AIMessageChunk
 )
 from langchain_core.tools import BaseTool
-from langgraph.prebuilt import create_react_agent
 from langchain.agents import create_agent
 from backend.services.generationv2.extended_chat_openai_model import  ExtendedChatOpenAI
 from backend.services.generationv2.base import AbstractGenerateWorker

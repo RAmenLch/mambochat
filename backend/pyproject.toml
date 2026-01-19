@@ -32,6 +32,9 @@ dependencies = [
     "pytz",
     "mcp",
     "openai>=2.15.0",
+    "langchain-mcp-adapters>=0.2.1",
+    "langchain>=1.2.6",
+    "langchain-openai>=1.1.7"
 ]
 
 [tool.uv]

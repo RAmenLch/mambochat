@@ -6,7 +6,7 @@ from contextlib import AsyncExitStack
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from backend.config.mcp_config import BING_MCP_SERVER_PATH
+from backend.config.mcp_config import DDGS_MCP_SERVER_PATH
 
 
 class McpClientService:
@@ -14,7 +14,7 @@ class McpClientService:
     封装 MCP 客户端逻辑，负责与 MCP 服务器子进程通信。
     """
 
-    def __init__(self, script_path: str = str(BING_MCP_SERVER_PATH)):
+    def __init__(self, script_path: str = str(DDGS_MCP_SERVER_PATH)):
         self.script_path = script_path
         self.session: Optional[ClientSession] = None
         self._exit_stack = AsyncExitStack()
