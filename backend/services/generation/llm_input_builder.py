@@ -1,9 +1,10 @@
 # backend/services/generation/llm_input_builder.py
 import json
 import base64
-from typing import List, Dict, Any, Optional, Set, Tuple, Union
+from typing import List, Dict, Any, Optional, Set, Tuple
 from types import SimpleNamespace
 from sqlalchemy.ext.asyncio import AsyncSession
+from langchain_core.tools import BaseTool
 
 from backend.crud import chat_crud, message_crud, setting_crud, file_crud, provider_crud
 from backend.services.storage_service import storage_service
@@ -43,6 +44,7 @@ class LLMInputBuilder:
 
         # 配置项
         self._cutoff_message_id: Optional[str] = None
+        self._cutoff_include: bool = False
         self._slice_range: Optional[slice] = None
         self._head_tail: Optional[Tuple[int, int]] = None
         self._type_filter: Optional[Set[str]] = None
@@ -57,6 +59,7 @@ class LLMInputBuilder:
         self._content_limit: Optional[int] = None
         self._flatten_history: bool = False
         self._append_prompt: Optional[str] = None
+        self._tools: Optional[List[BaseTool]] = None
 
         # 内部数据缓存 (用于减少 I/O)
         self._cached_chat = None
@@ -164,6 +167,14 @@ class LLMInputBuilder:
         self._append_prompt = content
         return self
 
+    def set_tools(self, tools: List[BaseTool]) -> "LLMInputBuilder":
+        """
+        设置 LangChain 工具列表。
+        这些工具将直接传递给 Worker (Agent)。
+        """
+        self._tools = tools
+        return self
+
     # --- 核心构建方法 ---
 
     async def build(self) -> LLMInput:
@@ -211,7 +222,9 @@ class LLMInputBuilder:
             parameters=api_params,
             api_host=provider.apiHost,
             api_key=provider.apiKey,
-            proxy_url=proxy_url
+            proxy_url=proxy_url,
+            tools=self._tools,
+            tool_choice=None
         )
 
     # --- 内部处理逻辑 ---
@@ -240,8 +253,7 @@ class LLMInputBuilder:
                     end_index = idx + 1 if self._cutoff_include else idx
                     self.history = all_msgs[:end_index]
                 except StopIteration:
-                    # 如果找不到目标ID，通常意味着数据不一致，这里选择返回全部或报错
-                    # 保持原有逻辑：返回全部
+                    # 如果找不到目标ID，通常意味着数据不一致，这里选择返回全部
                     self.history = all_msgs
             else:
                 self.history = all_msgs
@@ -342,7 +354,6 @@ class LLMInputBuilder:
                 payload.append(llm_msg)
 
             # 2. 如果是 Assistant 消息，检查并提取关联的工具执行结果（Role: Tool）
-            # 这确保了数据库中存储的完整工具交互能被正确地拆分为 LLM 所需的 Request -> Result 序列
             if msg.role == schemas_enums.MessageRole.ASSISTANT.value:
                 tool_results = self._extract_tool_results(msg)
                 if tool_results:
@@ -375,8 +386,6 @@ class LLMInputBuilder:
             payload.append({"role": "user", "content": self._append_prompt})
 
         # 5. 合并连续角色消息
-        # 这会自动处理 Flatten 后的 User 消息与 append_prompt 的合并，
-        # 或者在非 Flatten 模式下处理最后的 History(User) 与 append_prompt(User) 的合并。
         return self._merge_consecutive_roles(payload)
 
     def _extract_tool_results(self, msg: Any) -> List[Dict[str, Any]]:

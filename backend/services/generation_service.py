@@ -13,10 +13,10 @@ from backend import schemas
 from backend.models import chat_model
 from backend.database import AsyncSessionLocal
 from backend.services.generation.instruction_executor import InstructionExecutor
-from backend.services.generationv2.default_manager import DefaultGenerateManager
-from backend.services.generationv2.title_manager import TitleGenerateManager
-from backend.services.generationv2.zip_history_manager import ZipHistoryGenerateManager
-from backend.services.generationv2.openai_worker import OpenAiWorker
+from services.generation.default_manager import DefaultGenerateManager
+from services.generation.title_manager import TitleGenerateManager
+from services.generation import ZipHistoryGenerateManager
+from services.generation import OpenAiWorker
 from backend.schemas.enums import FileManagementType, MessageStatus, MessageRole, SubMessageType
 
 # 定义生成任务启动的超时阈值

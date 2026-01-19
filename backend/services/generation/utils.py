@@ -1,6 +1,4 @@
 from langchain_core.messages import AIMessageChunk,AIMessage, ToolMessage
-from openai.types.beta.threads.runs import tool_call
-
 
 class OpenAiDecode:
     @staticmethod

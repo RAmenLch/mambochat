@@ -1,18 +1,18 @@
-# backend/services/generation/zip_history_manager.py
 from typing import AsyncGenerator, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.services.generation.simple_manager import SimpleChatGenerateManager
+from backend.schemas import enums as schemas_enums
+from backend.models.base_model import generate_uuid
 from backend.services.generation.instructions import (
     BaseInstruction,
     UpdateZipHistorySubMessage,
     SetFinalStatus
 )
-from backend.services.generation.llm_io import LLMInput, WorkerOutput
+from backend.services.generation.abstract_manager import AbstractGenerateManager
+from backend.services.generation.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.llm_input_builder import LLMInputBuilder
-from backend.schemas import enums as schemas_enums
-from backend.models.base_model import generate_uuid
+from backend.services.generation.utils import OpenAiDecode
 
 DEFAULT_ZIP_HISTORY_PROMPT = (
     "你是一个对话历史压缩工具。请根据用户提供的对话历史，生成一段简洁、精确、信息完整的摘要。"
@@ -20,32 +20,31 @@ DEFAULT_ZIP_HISTORY_PROMPT = (
 )
 
 
-class ZipHistoryGenerateManager(SimpleChatGenerateManager):
+class ZipHistoryGenerateManager(AbstractGenerateManager):
     """
-    负责为对话历史生成压缩摘要的管理器。
-    它准备一个特殊的LLM输入，请求模型生成摘要，然后将结果作为一种新的子消息类型附加到目标消息上。
+    V2 历史压缩管理器。
+    负责为对话历史生成压缩摘要。
+    配置 Builder 截取目标消息之前的历史，调用 Worker 生成摘要文本，并更新 ZipHistory 子消息。
     """
 
     def __init__(self, db_session: AsyncSession):
         super().__init__(db_session)
         self.target_message_id: Optional[str] = None
-        self._accumulated_content: str = ""
         self.sub_message_id: Optional[str] = None  # 用于 ZipHistory 子消息的 ID
 
-    async def _prepare_llm_input(
+    async def _execute_generation(
             self,
+            worker: AbstractGenerateWorker,
             chat_id: str,
             assistant_message_id: str
-    ) -> LLMInput:
-        """
-        准备用于生成历史摘要的LLM输入。
-        使用 LLMInputBuilder 替代原有的 CRUD 读取和构建逻辑。
-        """
+    ) -> AsyncGenerator[BaseInstruction, None]:
+
+        self.target_message_id = assistant_message_id
+
         # 1. 初始化构建器
         builder = LLMInputBuilder(self.db_session, chat_id=chat_id)
 
-        # 2. 预加载素材以获取设置 (替代 setting_crud.get_setting)
-        # 注意：_load_materials 是内部方法，此处调用是为了在 build 前获取 settings
+        # 2. 预加载素材以获取设置
         await builder._load_materials()
 
         # 3. 获取 System Prompt
@@ -55,32 +54,28 @@ class ZipHistoryGenerateManager(SimpleChatGenerateManager):
 
         # 4. 配置构建器
         # slice_until_message: 截断到目标消息之前 (不包含目标消息)
-        # 保持默认的 zip_history 逻辑开启，以便基于已有的压缩历史进行增量压缩 (与原逻辑一致)
+        # 保持默认的 zip_history 逻辑开启，以便基于已有的压缩历史进行增量压缩
         llm_input = await (
             builder
-            .slice_until_message(self.target_message_id,include_target=True)
+            .slice_until_message(self.target_message_id, include_target=True)
             .set_system_prompt(system_prompt)
             .build()
         )
 
-        # 5. 后处理：追加触发提示和参数
+        # 5. 后处理：追加触发提示
+        # 由于 LLMInputBuilderV2 生成的是 payload 列表，直接操作 messages 列表
         llm_input.messages.append({"role": "user", "content": "请输出历史摘要:"})
-        llm_input.set_parameter('stream', False)
 
-        return llm_input
+        # 6. 执行生成并累积结果
+        accumulated_content = ""
 
-    async def _translate_worker_output_to_instructions(
-            self,
-            output: WorkerOutput
-    ) -> AsyncGenerator[BaseInstruction, None]:
-        """
-        将Worker的输出翻译成更新ZipHistory子消息的指令。
-        覆盖 SimpleChatGenerateManager 的默认行为。
-        """
-        if output.type == "content" and output.content:
-            self._accumulated_content += output.content
+        async for mode, event in worker.generate(llm_input):
+            text_chunk = OpenAiDecode.get_text_content(mode, event)
+            if text_chunk:
+                accumulated_content += text_chunk
 
-        elif output.type == "done":
+        # 7. 生成更新指令
+        if accumulated_content:
             # 确保有 ID
             if not self.sub_message_id:
                 self.sub_message_id = generate_uuid()
@@ -88,24 +83,12 @@ class ZipHistoryGenerateManager(SimpleChatGenerateManager):
             yield UpdateZipHistorySubMessage(
                 sub_message_id=self.sub_message_id,
                 target_message_id=self.target_message_id,
-                content=self._accumulated_content.strip(),
+                content=accumulated_content.strip(),
                 status=schemas_enums.MessageStatus.COMPLETED
             )
             yield SetFinalStatus(status=schemas_enums.MessageStatus.COMPLETED)
-
-        elif output.type == "error":
-            error_message = f"生成历史摘要时出错: {output.content}"
-            if not self.sub_message_id:
-                self.sub_message_id = generate_uuid()
-
-            yield UpdateZipHistorySubMessage(
-                sub_message_id=self.sub_message_id,
-                target_message_id=self.target_message_id,
-                content=error_message,
-                status=schemas_enums.MessageStatus.FAILED
-            )
-            # 这里抛出异常以便触发清理逻辑或直接结束
-            raise RuntimeError(error_message)
+        else:
+            raise RuntimeError("模型未返回任何摘要内容")
 
     async def _cleanup_on_exception(
             self,
@@ -128,19 +111,3 @@ class ZipHistoryGenerateManager(SimpleChatGenerateManager):
             content=error_message,
             status=schemas_enums.MessageStatus.FAILED
         )
-
-    async def run(
-            self,
-            worker: 'AbstractGenerateWorker',
-            chat_id: str,
-            assistant_message_id: str
-    ) -> AsyncGenerator[BaseInstruction, None]:
-        """
-        重写 run 方法。
-        记录 target_message_id。
-        """
-        self.target_message_id = assistant_message_id
-
-        # 执行基类的生成流程
-        async for instruction in super().run(worker, chat_id, assistant_message_id):
-            yield instruction

@@ -1,15 +1,6 @@
-# backend/services/generation/llm_io.py
-from pydantic import BaseModel
-from typing import List, Dict, Any, Optional, Union
-
-
-# backend/services/generation/llm_io.py
+from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional, Union
-
-from pydantic import BaseModel, Field
-from typing import List, Dict, Any, Optional, Union
-
 
 class LLMInput(BaseModel):
     """
@@ -23,7 +14,7 @@ class LLMInput(BaseModel):
     api_host: str
     api_key: str
     proxy_url: Optional[str] = None
-    tools: Optional[List[Dict[str, Any]]] = None
+    tools: Optional[List[BaseTool]] = None
     tool_choice: Optional[Union[str, Dict]] = None
     timeout: int = 60  # 默认超时时间
 
@@ -39,26 +30,3 @@ class LLMInput(BaseModel):
         """设置或覆盖模型参数"""
         self.parameters[key] = value
         return self
-
-    def to_payload(self) -> Dict[str, Any]:
-        """获取最终发送给 Worker 的完整请求体"""
-        payload = {
-            "model": self.model_id,
-            "messages": self.messages,
-            **self.parameters
-        }
-        if self.tools:
-            payload["tools"] = self.tools
-        if self.tool_choice:
-            payload["tool_choice"] = self.tool_choice
-        return payload
-
-class WorkerOutput(BaseModel):
-    """
-    一个标准化的、与具体模型无关的LLM响应块。
-    由 Worker 创建，由 Manager 消费。
-    """
-    type: str  # 例如: 'content', 'reasoning', 'error', 'done', 'usage'
-    content: Optional[str] = None
-    usage: Optional[Dict[str, Any]] = None
-    tool_calls: Optional[List[Dict[str, Any]]] = None
