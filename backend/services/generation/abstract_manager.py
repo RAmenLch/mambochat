@@ -5,7 +5,7 @@ from typing import AsyncGenerator, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.services.generation.abstract_worker import AbstractGenerateWorker
+from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.instructions import BaseInstruction
 from backend.schemas import enums as schemas_enums
 

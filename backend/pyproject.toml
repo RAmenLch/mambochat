@@ -34,7 +34,9 @@ dependencies = [
     "openai>=2.15.0",
     "langchain-mcp-adapters>=0.2.1",
     "langchain>=1.2.6",
-    "langchain-openai>=1.1.7"
+    "langchain-openai>=1.1.7",
+    "langchain-deepseek>=1.0.1",
+    "langchain-google-genai>=4.2.0"
 ]
 
 [tool.uv]

@@ -10,7 +10,7 @@ from backend.services.generation.instructions import (
     SetFinalStatus
 )
 from backend.services.generation.abstract_manager import AbstractGenerateManager
-from backend.services.generation.abstract_worker import AbstractGenerateWorker
+from services.generation.worker.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.llm_input_builder import LLMInputBuilder
 from backend.services.generation.utils import OpenAiDecode
 

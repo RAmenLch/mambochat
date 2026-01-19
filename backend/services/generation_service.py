@@ -13,10 +13,11 @@ from backend import schemas
 from backend.models import chat_model
 from backend.database import AsyncSessionLocal
 from backend.services.generation.instruction_executor import InstructionExecutor
-from services.generation.default_manager import DefaultGenerateManager
-from services.generation.title_manager import TitleGenerateManager
-from services.generation import ZipHistoryGenerateManager
-from services.generation import OpenAiWorker
+from backend.models.base_model import generate_uuid
+from backend.services.generation.default_manager import DefaultGenerateManager
+from backend.services.generation.title_manager import TitleGenerateManager
+from backend.services.generation.zip_history_manager import ZipHistoryGenerateManager
+from backend.services.generation.worker.openai_worker import OpenAiWorker
 from backend.schemas.enums import FileManagementType, MessageStatus, MessageRole, SubMessageType
 
 # 定义生成任务启动的超时阈值
@@ -184,6 +185,7 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
             # Manager 内部已处理大部分异常。如果异常抛出到这里，说明 Manager 初始化失败或严重崩溃。
             try:
                 error_sub_message_create = schemas.SubMessageCreate(
+                    id = generate_uuid(),
                     content=f"生成流程启动失败: {e}",
                     sortOrder=0,
                     type=SubMessageType.NORMAL,
