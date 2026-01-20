@@ -553,8 +553,13 @@ class LLMInputBuilder:
             has_tool_calls = "tool_calls" in msg
             last_has_tool_calls = merged and "tool_calls" in merged[-1]
 
+            # 如果是 tool 类型的消息，绝对不能合并，因为每个 tool 消息都有唯一的 tool_call_id
+            is_tool_message = msg.get("role") == "tool"
+
             if (merged and merged[-1]["role"] == msg["role"]
-                    and not has_tool_calls and not last_has_tool_calls
+                    and not has_tool_calls
+                    and not last_has_tool_calls
+                    and not is_tool_message  # <--- 新增此条件
                     and isinstance(merged[-1].get("content"), str)
                     and isinstance(msg.get("content"), str)):
 

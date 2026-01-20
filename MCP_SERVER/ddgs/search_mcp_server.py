@@ -56,7 +56,7 @@ async def ddgs_search(query: str, max_results: int = 10) -> str:
         return json.dumps({"error": error_msg}, ensure_ascii=False)
 
 
-@mcp.tool()
+# @mcp.tool()
 async def read_webpage(url: str) -> str:
     """
     直接通过 URL 获取并提取网页的正文文本内容。
@@ -104,4 +104,5 @@ async def read_webpage(url: str) -> str:
 
 if __name__ == "__main__":
     # 启动 MCP 服务器，使用 stdio 传输
-    mcp.run(transport="stdio")
+    # mcp.run(transport="stdio")
+    asyncio.run(read_webpage("https://www.leagueoflegends.com/en-us/news/game-updates/patch-26-1-notes/"))
