@@ -7,13 +7,7 @@
 
     <el-scrollbar class="kb-config-content">
       <div class="config-section">
-        <el-form
-          ref="formRef"
-          :model="form"
-          :rules="rules"
-          label-position="top"
-          class="kb-form"
-        >
+        <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="kb-form">
           <el-row :gutter="20">
             <el-col :span="16">
               <el-form-item label="知识库名称" prop="name">
@@ -36,11 +30,7 @@
                   >
                     <span style="float: left">{{ model.name }}</span>
                     <span
-                      style="
-                        float: right;
-                        color: var(--el-text-color-secondary);
-                        font-size: 12px;
-                      "
+                      style="float: right; color: var(--el-text-color-secondary); font-size: 12px"
                     >
                       {{ getProviderName(model.providerId) }}
                     </span>
@@ -61,7 +51,12 @@
           </el-form-item>
 
           <div class="form-actions">
-            <el-button type="primary" @click="handleSave" :loading="isSaving" :disabled="!isFormDirty">
+            <el-button
+              type="primary"
+              @click="handleSave"
+              :loading="isSaving"
+              :disabled="!isFormDirty"
+            >
               保存配置
             </el-button>
           </div>
@@ -75,12 +70,7 @@
           <span class="section-title">文档列表</span>
           <div class="files-actions">
             <el-button @click="refreshFiles" :icon="Refresh" circle />
-            <el-button
-              type="primary"
-              :icon="Upload"
-              @click="triggerUpload"
-              :disabled="!canUpload"
-            >
+            <el-button type="primary" :icon="Upload" @click="triggerUpload" :disabled="!canUpload">
               上传文档
             </el-button>
             <input
@@ -114,12 +104,7 @@
           </el-table-column>
           <el-table-column label="操作" width="100" align="right">
             <template #default="{ row }">
-              <el-button
-                type="danger"
-                link
-                size="small"
-                @click="handleDeleteFile(row)"
-              >
+              <el-button type="danger" link size="small" @click="handleDeleteFile(row)">
                 删除
               </el-button>
             </template>
@@ -131,73 +116,68 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted } from 'vue';
-import { storeToRefs } from 'pinia';
-import {
-  ElMessage,
-  ElMessageBox,
-  type FormInstance,
-  type FormRules
-} from 'element-plus';
-import { Refresh, Upload, Document } from '@element-plus/icons-vue';
+import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { storeToRefs } from 'pinia'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { Refresh, Upload, Document } from '@element-plus/icons-vue'
 
-import { useResourceStore } from '@/stores/resourceStore';
-import { useProviderStore } from '@/stores/providerStore';
-import { uploadKBFile } from '@/api/kbService';
-import type { Resource, ResourceWithVersions } from '@/api/types';
+import { useResourceStore } from '@/stores/resourceStore'
+import { useProviderStore } from '@/stores/providerStore'
+import { uploadKBFile } from '@/api/kbService'
+import type { Resource, ResourceWithVersions } from '@/api/types'
 
 // --- Props ---
 const props = defineProps<{
-  resource: ResourceWithVersions;
-}>();
+  resource: ResourceWithVersions
+}>()
 
 // --- Stores ---
-const resourceStore = useResourceStore();
-const providerStore = useProviderStore();
-const { providers } = storeToRefs(providerStore);
+const resourceStore = useResourceStore()
+const providerStore = useProviderStore()
+const { providers } = storeToRefs(providerStore)
 
 // --- State ---
-const formRef = ref<FormInstance>();
-const fileInputRef = ref<HTMLInputElement>();
-const isSaving = ref(false);
-const isFilesLoading = ref(false);
-const isUploading = ref(false);
+const formRef = ref<FormInstance>()
+const fileInputRef = ref<HTMLInputElement>()
+const isSaving = ref(false)
+const isFilesLoading = ref(false)
+const isUploading = ref(false)
 
 interface KBFormState {
-  name: string;
-  description: string;
-  embeddingModelId: string;
+  name: string
+  description: string
+  embeddingModelId: string
 }
 
 const form = reactive<KBFormState>({
   name: '',
   description: '',
   embeddingModelId: '',
-});
+})
 
 const rules = reactive<FormRules>({
   name: [{ required: true, message: '请输入知识库名称', trigger: 'blur' }],
   embeddingModelId: [{ required: true, message: '请选择嵌入模型', trigger: 'change' }],
-});
+})
 
 // --- Computed ---
 
 // 获取所有 Embedding 类型的模型
 const embeddingModels = computed(() => {
-  return providerStore.allModels.filter((m) => m.model_type === 'embedding');
-});
+  return providerStore.allModels.filter((m) => m.model_type === 'embedding')
+})
 
 // 获取当前知识库下的文件列表
 const kbFiles = computed(() => {
   return resourceStore.resources.filter(
-    (r) => r.parentId === props.resource.id && r.itemType === 'resource'
-  );
-});
+    (r) => r.parentId === props.resource.id && r.itemType === 'resource',
+  )
+})
 
 // 获取 attributes
 const currentAttributes = computed(() => {
-  return props.resource.latest_version?.attributes || {};
-});
+  return props.resource.latest_version?.attributes || {}
+})
 
 // 判断表单是否有变更
 const isFormDirty = computed(() => {
@@ -205,54 +185,54 @@ const isFormDirty = computed(() => {
     form.name !== props.resource.name ||
     form.description !== (props.resource.description || '') ||
     form.embeddingModelId !== (currentAttributes.value.embedding_model_id || '')
-  );
-});
+  )
+})
 
 // 只有配置了模型且未在上传中时才允许上传
 const canUpload = computed(() => {
-  const savedModelId = currentAttributes.value.embedding_model_id;
-  return !!savedModelId && !isUploading.value;
-});
+  const savedModelId = currentAttributes.value.embedding_model_id
+  return !!savedModelId && !isUploading.value
+})
 
 // --- Methods ---
 
 const getProviderName = (providerId: string) => {
-  const provider = providers.value.find((p) => p.id === providerId);
-  return provider ? provider.name : 'Unknown Provider';
-};
+  const provider = providers.value.find((p) => p.id === providerId)
+  return provider ? provider.name : 'Unknown Provider'
+}
 
 const initForm = () => {
-  form.name = props.resource.name;
-  form.description = props.resource.description || '';
-  form.embeddingModelId = currentAttributes.value.embedding_model_id || '';
-};
+  form.name = props.resource.name
+  form.description = props.resource.description || ''
+  form.embeddingModelId = currentAttributes.value.embedding_model_id || ''
+}
 
 const loadFiles = async () => {
-  isFilesLoading.value = true;
+  isFilesLoading.value = true
   try {
-    await resourceStore.fetchResourceChildren(props.resource.id);
+    await resourceStore.fetchResourceChildren(props.resource.id)
   } finally {
-    isFilesLoading.value = false;
+    isFilesLoading.value = false
   }
-};
+}
 
 const handleSave = async () => {
-  if (!formRef.value) return;
+  if (!formRef.value) return
   await formRef.value.validate(async (valid) => {
     if (valid) {
-      isSaving.value = true;
+      isSaving.value = true
       try {
         // 1. 更新基本信息 (Name/Description)
         if (form.name !== props.resource.name || form.description !== props.resource.description) {
           await resourceStore.updateResourceItem(props.resource.id, {
             name: form.name,
             description: form.description,
-          });
+          })
         }
 
         // 2. 更新版本信息 (Attributes -> embedding_model_id)
         // 只有当模型ID变更时才调用版本更新
-        const currentModelId = currentAttributes.value.embedding_model_id;
+        const currentModelId = currentAttributes.value.embedding_model_id
         if (form.embeddingModelId !== currentModelId) {
           if (props.resource.latest_version) {
             await resourceStore.updateResourceVersionItem(
@@ -261,69 +241,69 @@ const handleSave = async () => {
               {
                 attributes: {
                   ...currentAttributes.value,
-                  embedding_model_id: form.embeddingModelId
-                }
-              }
-            );
+                  embedding_model_id: form.embeddingModelId,
+                },
+              },
+            )
           }
         }
 
-        ElMessage.success('配置已保存');
+        ElMessage.success('配置已保存')
       } catch (error) {
-        console.error(error);
-        ElMessage.error('保存失败');
+        console.error(error)
+        ElMessage.error('保存失败')
       } finally {
-        isSaving.value = false;
+        isSaving.value = false
       }
     }
-  });
-};
+  })
+}
 
 const refreshFiles = () => {
-  loadFiles();
-};
+  loadFiles()
+}
 
 const triggerUpload = () => {
   if (!canUpload.value) {
-    ElMessage.warning('请先配置并保存嵌入模型');
-    return;
+    ElMessage.warning('请先配置并保存嵌入模型')
+    return
   }
-  fileInputRef.value?.click();
-};
+  fileInputRef.value?.click()
+}
 
 const handleFileChange = async (event: Event) => {
-  const input = event.target as HTMLInputElement;
-  if (!input.files || input.files.length === 0) return;
+  const input = event.target as HTMLInputElement
+  if (!input.files || input.files.length === 0) return
 
-  const file = input.files[0];
-  isUploading.value = true;
+  const file = input.files[0]
+  isUploading.value = true
   const loadingInstance = ElMessage.info({
     message: '正在上传并处理文件...',
     duration: 0,
-  });
+  })
 
   try {
     // 接收接口返回的新资源对象
-    const newFile = await uploadKBFile(props.resource.id, file);
+    const newFile = await uploadKBFile(props.resource.id, file)
 
     // 将新文件直接添加到 Store 中，以立即更新 UI 列表
     // 补充 versions 字段以符合 ResourceWithVersions 类型
     const newResourceWithVersions: ResourceWithVersions = {
       ...newFile,
-      versions: []
-    };
-    resourceStore.resources.push(newResourceWithVersions);
+      versions: [],
+    }
+    resourceStore.resources.push(newResourceWithVersions)
 
-    ElMessage.success('上传成功，后台正在进行向量化处理');
+    ElMessage.success('上传成功，后台正在进行向量化处理')
   } catch (error) {
-    console.error('Upload failed', error);
-    ElMessage.error('上传失败');
+    console.error('Upload failed', error)
+    ElMessage.error('上传失败')
   } finally {
-    loadingInstance.close();
-    isUploading.value = false;
-    input.value = '';
+    loadingInstance.close()
+    isUploading.value = false
+    input.value = ''
   }
-};
+}
 
 const handleDeleteFile = async (file: Resource) => {
   try {
@@ -334,33 +314,42 @@ const handleDeleteFile = async (file: Resource) => {
         confirmButtonText: '确定删除',
         cancelButtonText: '取消',
         type: 'warning',
-      }
-    );
-    await resourceStore.deleteResourceItem(file.id);
-    ElMessage.success('删除成功');
+      },
+    )
+    await resourceStore.deleteResourceItem(file.id)
+    ElMessage.success('删除成功')
   } catch {
     // Cancelled
   }
-};
+}
 
 // --- Lifecycle & Watchers ---
 
 onMounted(() => {
-  providerStore.fetchProviders();
-  initForm();
-  loadFiles();
-});
+  providerStore.fetchProviders()
+  initForm()
+  loadFiles()
+})
 
+// 监听资源ID变化，重置表单和文件列表
 watch(
-  () => props.resource,
-  (newVal, oldVal) => {
-    if (newVal.id !== oldVal?.id) {
-      initForm();
-      loadFiles();
+  () => props.resource.id,
+  () => {
+    initForm()
+    loadFiles()
+  },
+)
+
+// 监听嵌入模型ID变化，处理异步数据加载的情况
+// 解决刷新页面后，详情数据异步返回导致表单未更新的问题
+watch(
+  () => props.resource.latest_version?.attributes?.embedding_model_id,
+  (newVal) => {
+    if (newVal && form.embeddingModelId !== newVal) {
+      form.embeddingModelId = newVal
     }
   },
-  { deep: true }
-);
+)
 </script>
 
 <style scoped>

@@ -47,7 +47,7 @@ class TitleGenerateManager(AbstractGenerateManager):
         system_prompt = (
             "你是一个对话标题生成器。请根据以下对话内容, "
             "为其生成一个简洁、精确、不超过12个字[len(title)<12]的标题。"
-            "请仅以JSON格式返回, 格式为: {\"title\": \"生成的标题\"}"
+            "请仅以JSON格式返回, 格式为: ```{\"title\": \"生成的标题\"}```"
         )
         trigger_prompt = "请根据上述对话内容，输出标题json。"
 
@@ -75,6 +75,7 @@ class TitleGenerateManager(AbstractGenerateManager):
 
         # 强制 JSON 模式
         llm_input.set_parameter('response_format', {'type': 'json_object'})
+        llm_input.set_parameter("stream",False)
 
         # 4. 执行生成并累积结果
         accumulated_content = ""
