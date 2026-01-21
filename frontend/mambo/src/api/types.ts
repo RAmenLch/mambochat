@@ -371,7 +371,7 @@ export type ResourceItemType = 'resource' | 'folder' | 'stub';
 /**
  * 定义资源的具体品类。
  */
-export type ResourceType = 'system_prompt' | 'submessage_template' | string;
+export type ResourceType = 'system_prompt' | 'submessage_template' | 'knowledge_base'| string;
 
 /**
  * 代表一个资源版本快照。
@@ -558,4 +558,55 @@ export interface ResourceSearchResultItem {
 export interface ResourceSearchResponse {
   total: number;
   items: ResourceSearchResultItem[];
+}
+/**
+ * 知识库文件处理状态
+ */
+export type KBFileStatus = 'PENDING' | 'PROCESSING' | 'INDEXED' | 'FAILED';
+/**
+ * 知识库创建请求参数
+ */
+export interface KnowledgeBaseCreate {
+  name: string;
+  description?: string | null;
+  parent_id?: string | null;
+  embedding_model_id?: string | null;
+}
+/**
+ * 知识库文件切片状态详情
+ */
+export interface KBChunkStatus {
+  resource_id: string;
+  total_chunks: number;
+  pending_chunks: number;
+  completed_chunks: number;
+  failed_chunks: number;
+  file_status: KBFileStatus;
+}
+/**
+ * 向量检索请求参数
+ */
+export interface KBSearchRequest {
+  query_text: string;
+  kb_id?: string | null;
+  top_k?: number;
+}
+/**
+ * 向量检索结果项
+ */
+export interface KBSearchResultItem {
+  chunk_id: string;
+  chunk_content: string;
+  score: number;
+  resource_id: string;
+  resource_name: string;
+  kb_id: string;
+  kb_name: string;
+}
+/**
+ * 向量检索响应
+ */
+export interface KBSearchResponse {
+  total: number;
+  items: KBSearchResultItem[];
 }

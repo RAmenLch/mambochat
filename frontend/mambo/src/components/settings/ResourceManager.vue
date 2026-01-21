@@ -13,7 +13,26 @@
 
     <!-- Main Panel: Editor Area -->
     <el-main class="resource-editor-panel">
-      <ResourceEditor v-if="activeResourceDetails" :resource="activeResourceDetails" />
+      <template v-if="activeResourceDetails">
+        <!-- Case 1: Knowledge Base Configuration -->
+        <KnowledgeBaseConfig
+          v-if="activeResourceDetails.resourceType === 'knowledge_base'"
+          :resource="activeResourceDetails"
+        />
+
+        <!-- Case 2: Knowledge Base File Detail -->
+        <KnowledgeBaseFileDetail
+          v-else-if="isActiveResourceKBFile"
+          :resource="activeResourceDetails"
+        />
+
+        <!-- Case 3: Standard Resource Editor -->
+        <ResourceEditor
+          v-else
+          :resource="activeResourceDetails"
+        />
+      </template>
+
       <div v-else class="editor-placeholder">
         <el-empty description="从左侧选择一个资源进行编辑" />
       </div>
@@ -28,6 +47,8 @@ import { storeToRefs } from 'pinia';
 import { useResourceStore } from '@/stores/resourceStore';
 import ResourceTreePanel from './resource/ResourceTreePanel.vue';
 import ResourceEditor from './resource/ResourceEditor.vue';
+import KnowledgeBaseConfig from './kb/KnowledgeBaseConfig.vue';
+import KnowledgeBaseFileDetail from './kb/KnowledgeBaseFileDetail.vue';
 import type { Resource, ResourceWithVersions, BaseTreeItem } from '@/api/types';
 
 // --- Store ---
@@ -42,13 +63,24 @@ const treeData = computed(() => resourceTree.value);
 
 const activeResourceDetails: ComputedRef<ResourceWithVersions | null> = computed(() => {
   if (!selectedResourceId.value) return null;
-  // The store's `resources` array is of type ResourceWithVersions[], so this is safe.
   return resources.value.find(r => r.id === selectedResourceId.value) || null;
+});
+
+/**
+ * 判断当前选中的资源是否为知识库中的文件。
+ * 通过检查其父级资源的 resourceType 是否为 'knowledge_base' 来确定。
+ */
+const isActiveResourceKBFile = computed(() => {
+  const current = activeResourceDetails.value;
+  if (!current || current.itemType !== 'resource') return false;
+  if (!current.parentId) return false;
+
+  const parent = resources.value.find(r => r.id === current.parentId);
+  return parent?.resourceType === 'knowledge_base';
 });
 
 // --- Lifecycle ---
 onMounted(() => {
-  // [修复] 使用 initializeList 替代原有的 fetchResources
   resourceStore.initializeList();
 });
 
@@ -59,9 +91,13 @@ onMounted(() => {
  */
 async function handleNodeClick(data: BaseTreeItem) {
   selectedResourceId.value = data.id;
-  if (data.itemType === 'resource') {
-    // Ensure the full details including all versions are loaded.
-    // 在懒加载模式下，列表中的资源对象不包含详细内容，必须调用此接口
+
+  // Cast to Resource to access resourceType safely
+  const resource = data as unknown as Resource;
+  const isKnowledgeBase = resource.resourceType === 'knowledge_base';
+
+  // Fetch details for standard resources OR knowledge bases (which are technically folders but have config pages)
+  if (data.itemType === 'resource' || isKnowledgeBase) {
     await resourceStore.fetchResourceDetails(data.id);
   }
 }
@@ -72,7 +108,10 @@ async function handleNodeClick(data: BaseTreeItem) {
  */
 async function handleItemCreated(newItem: Resource) {
   selectedResourceId.value = newItem.id;
-  if (newItem.itemType === 'resource') {
+
+  const isKnowledgeBase = newItem.resourceType === 'knowledge_base';
+
+  if (newItem.itemType === 'resource' || isKnowledgeBase) {
     // Ensure details are fetched for the new resource to populate the editor.
     await resourceStore.fetchResourceDetails(newItem.id);
   }

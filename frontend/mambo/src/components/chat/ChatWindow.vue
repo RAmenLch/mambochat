@@ -231,7 +231,7 @@ async function handleResourceSelected(resources: Resource[]) {
   const promptContents: string[] = [];
 
   for (const resource of resources) {
-    if (resource.resourceType === 'system_prompt') {
+    if (resource.resourceType === 'system_prompt' || resource.resourceType === 'knowledge_base_chunk') {
       if (resource.latest_version?.content) {
         promptContents.push(resource.latest_version.content);
       }

@@ -9,32 +9,50 @@
   >
     <div class="resource-selector-body">
       <div class="toolbar">
-        <div class="search-wrapper">
-          <el-input
-            v-model="searchText"
-            placeholder="搜索资源名称、描述或内容..."
-            clearable
-            class="search-input"
-            @input="handleSearchInput"
-          />
-          <el-tooltip content="启用正则表达式搜索" placement="top">
-            <el-button
-              :type="enableRegex ? 'primary' : 'default'"
-              size="small"
-              class="regex-btn"
-              @click="toggleRegex"
-            >
-              .*
-            </el-button>
-          </el-tooltip>
-        </div>
+        <!-- 模式切换 -->
+        <el-radio-group v-model="selectorMode" size="small" class="mode-switch">
+          <el-radio-button label="resource">资源浏览</el-radio-button>
+          <el-radio-button label="kb">知识库检索</el-radio-button>
+        </el-radio-group>
 
-        <div class="multi-select-switch">
-          <span>多选模式</span>
-          <el-switch v-model="isMultiSelectMode" />
+        <el-divider direction="vertical" class="toolbar-divider" />
+
+        <!-- 资源浏览模式下的工具栏 -->
+        <template v-if="selectorMode === 'resource'">
+          <div class="search-wrapper">
+            <el-input
+              v-model="searchText"
+              placeholder="搜索资源名称、描述或内容..."
+              clearable
+              class="search-input"
+              @input="handleSearchInput"
+            />
+            <el-tooltip content="启用正则表达式搜索" placement="top">
+              <el-button
+                :type="enableRegex ? 'primary' : 'default'"
+                size="small"
+                class="regex-btn"
+                @click="toggleRegex"
+              >
+                .*
+              </el-button>
+            </el-tooltip>
+          </div>
+
+          <div class="multi-select-switch">
+            <span>多选模式</span>
+            <el-switch v-model="isMultiSelectMode" />
+          </div>
+        </template>
+
+        <!-- 知识库模式下的占位符 -->
+        <div v-else class="kb-toolbar-placeholder">
+          <span class="info-text">通过语义向量检索查找知识库切片，选中后内容将注入输入框</span>
         </div>
       </div>
-      <el-container class="resource-selector-container">
+
+      <!-- 模式 A: 资源树与预览 -->
+      <el-container v-if="selectorMode === 'resource'" class="resource-selector-container">
         <!-- 侧边栏：树形视图 OR 搜索结果列表 -->
         <el-aside width="280px" class="resource-tree-aside">
           <!-- 搜索结果列表视图 -->
@@ -167,8 +185,17 @@
           </el-card>
         </el-main>
       </el-container>
+
+      <!-- 模式 B: 知识库向量检索 -->
+      <KnowledgeBaseSearchDialog
+        v-else
+        @cancel="emit('update:visible', false)"
+        @confirm="handleKBSelection"
+      />
     </div>
-    <template #footer>
+
+    <!-- Footer: 仅在资源模式下显示 (KB模式有内部Footer) -->
+    <template #footer v-if="selectorMode === 'resource'">
       <el-button @click="emit('update:visible', false)">取消</el-button>
       <el-button
         type="primary"
@@ -191,7 +218,8 @@ import { Folder, Document, Memo, Loading } from '@element-plus/icons-vue';
 import { storeToRefs } from 'pinia';
 import { useResourceStore } from '@/stores/resourceStore';
 import { searchResources } from '@/api/resourceService';
-import type { Resource, ResourceNode, ResourceType, ResourceSearchResultItem } from '@/api/types';
+import type { Resource, ResourceNode, ResourceType, ResourceSearchResultItem, KBSearchResultItem } from '@/api/types';
+import KnowledgeBaseSearchDialog from './KnowledgeBaseSearchDialog.vue';
 
 // --- Component Interface ---
 const props = defineProps<{
@@ -209,6 +237,7 @@ const resourceStore = useResourceStore();
 const { resourceTree, isResourcesLoading, loadingFolders, resources } = storeToRefs(resourceStore);
 
 // --- Local State ---
+const selectorMode = ref<'resource' | 'kb'>('resource');
 const searchText = ref('');
 const treeRef = ref<InstanceType<typeof ElTree>>();
 const selectedResources = ref<Resource[]>([]);
@@ -264,6 +293,8 @@ watch(() => props.visible, (isVisible) => {
   if (isVisible) {
     resourceStore.initializeList();
     expandedKeys.value.clear();
+    // Reset mode to resource on open
+    selectorMode.value = 'resource';
   }
 });
 
@@ -290,7 +321,8 @@ const getReadableResourceType = (type: string | null) => {
   if (!type) return '未知';
   const map: Record<string, string> = {
     'system_prompt': '系统提示词',
-    'submessage_template': '消息模板'
+    'submessage_template': '消息模板',
+    'knowledge_base': '知识库'
   };
   return map[type] || type;
 };
@@ -398,67 +430,46 @@ const loadMore = () => {
 
 // --- Selection Logic (Shared) ---
 
-/**
- * 统一处理资源选择逻辑，无论是来自 Tree 还是 Search List
- */
 const selectResourceById = async (resourceId: string, resourceType?: ResourceType | null, initialResourceObj?: Resource) => {
-  // 1. 获取资源完整对象
-  // 显式声明类型为 Resource | undefined，兼容 ResourceWithVersions (从 store) 和 Resource (从 initialResourceObj)
   let targetResource: Resource | undefined = resources.value.find(r => r.id === resourceId);
 
-  // 如果缓存没有（例如搜索结果中的深层资源），且提供了初始对象，则使用初始对象
   if (!targetResource && initialResourceObj) {
     targetResource = initialResourceObj;
   }
 
-  // 如果不知道类型，且目前没有加载该资源，我们可能需要先 fetchDetails 才能判断类型校验
   if (targetResource && props.resourceTypeFilter && targetResource.resourceType !== props.resourceTypeFilter) {
     ElMessage.warning(`只能选择类型为 ${getReadableResourceType(props.resourceTypeFilter)} 的资源`);
     return;
   }
 
-  // 2. 检查多选类型限制
   const typeToCheck = targetResource?.resourceType || resourceType;
   if (isMultiSelectMode.value && selectionType.value && typeToCheck && typeToCheck !== selectionType.value) {
-     // 类型不匹配，跳过
      return;
   }
 
-  // 3. 执行选中/取消选中
   if (!isMultiSelectMode.value) {
-    // 单选：直接替换
-    // 先放一个占位对象，如果 targetResource 存在
     if (targetResource) {
       selectedResources.value = [targetResource];
     }
-
-    // 加载详情
     await loadResourcePreview(resourceId);
   } else {
-    // 多选
     const index = selectedResources.value.findIndex(r => r.id === resourceId);
     if (index > -1) {
-      // 取消选中
       selectedResources.value.splice(index, 1);
       if (selectedResources.value.length === 0) {
         selectionType.value = null;
       }
     } else {
-      // 选中
-      // 如果是第一个，确定类型
       if (selectedResources.value.length === 0) {
         selectionType.value = typeToCheck || null;
       }
-
-      // 添加到列表
       if (targetResource) {
         selectedResources.value.push(targetResource);
       } else {
-        // 如果缓存里没有，根据 ID 造一个临时的，等待 fetchDetails 完善它
         selectedResources.value.push({
           id: resourceId,
           name: '正在加载...',
-          description: null, // [修复] 补全 description 字段
+          description: null,
           itemType: 'resource',
           resourceType: typeToCheck || null,
           parentId: null,
@@ -468,21 +479,18 @@ const selectResourceById = async (resourceId: string, resourceType?: ResourceTyp
           latest_version: null
         });
       }
-
-      // 异步加载内容
       loadResourcePreview(resourceId);
     }
   }
 };
 
 const handleSearchResultClick = (item: ResourceSearchResultItem) => {
-  // 搜索结果点击，构造临时 Resource 对象，必须包含 Resource 接口的所有必填字段
   selectResourceById(item.resource_id, null, {
     id: item.resource_id,
     name: item.resource_name,
-    description: null, // [修复] 补全 description 字段
+    description: null,
     itemType: 'resource',
-    resourceType: null, // 未知，待加载
+    resourceType: null,
     parentId: null,
     sortOrder: 0,
     createdAt: item.updated_at,
@@ -493,7 +501,6 @@ const handleSearchResultClick = (item: ResourceSearchResultItem) => {
 
 // --- Tree Interaction Methods ---
 const filterNode = (value: string, data: TreeNodeData): boolean => {
-  // Deprecated due to lazy loading, but kept for interface compatibility if needed
   if (!value) return true;
   return (data as ResourceNode).name.toLowerCase().includes(value.toLowerCase());
 };
@@ -515,28 +522,19 @@ const handleNodeClick = async (data: TreeNodeData) => {
   selectResourceById(resource.id, resource.resourceType, resource);
 };
 
-/**
- * 加载资源详情
- */
 async function loadResourcePreview(resourceId: string) {
   isPreviewLoading.value = true;
   try {
     await resourceStore.fetchResourceDetails(resourceId);
-
-    // 更新后，从 Store 获取最新完整对象
     const updatedResource = resources.value.find(r => r.id === resourceId);
     if (updatedResource) {
-      // 在已选列表中找到并替换，触发响应式更新
       const index = selectedResources.value.findIndex(r => r.id === resourceId);
       if (index !== -1) {
         selectedResources.value.splice(index, 1, updatedResource);
-
-        // 如果是多选的第一个，更新类型约束
         if (isMultiSelectMode.value && selectedResources.value.length === 1) {
           selectionType.value = updatedResource.resourceType;
         }
       } else if (selectedResources.value.length === 0 && !isMultiSelectMode.value) {
-        // 单选模式下，如果刚才被清空了或者还在初始化
         selectedResources.value = [updatedResource];
       }
     }
@@ -553,6 +551,39 @@ function handleConfirmSelection() {
   emit('update:visible', false);
 }
 
+// --- KB Selection Logic ---
+
+const handleKBSelection = (items: KBSearchResultItem[]) => {
+  // 将 KB 切片转换为 Resource 对象
+  // 关键点：将切片内容放入 latest_version.content 中
+  // 父组件（聊天界面）需要读取这个 content 字段来注入输入框
+  const resources: Resource[] = items.map(item => ({
+    id: item.chunk_id, // 使用切片ID作为资源ID
+    name: `片段: ${item.resource_name}`,
+    description: `来自知识库: ${item.kb_name} (相似度: ${item.score.toFixed(4)})`,
+    itemType: 'resource',
+    resourceType: 'knowledge_base_chunk', // 标记为切片类型，方便父组件识别
+    parentId: item.kb_id,
+    sortOrder: 0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    latest_version: {
+      id: item.chunk_id,
+      resourceId: item.chunk_id,
+      name: 'v1',
+      commitMessage: null,
+      content: item.chunk_content, // 【重要】这里存放需要注入的文本内容
+      attributes: { score: item.score },
+      sortOrder: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+  }));
+
+  emit('select-resource', resources);
+  emit('update:visible', false);
+};
+
 function handleDialogClose() {
   searchText.value = '';
   selectedResources.value = [];
@@ -562,11 +593,10 @@ function handleDialogClose() {
   searchResult.value = [];
   searchPage.value = 1;
   searchTotal.value = 0;
+  selectorMode.value = 'resource';
 }
 
-// 简单的滚动处理
 const handleScroll = ({ scrollTop, scrollHeight, clientHeight }: any) => {
-  // 简易无限滚动：接近底部且不处于加载状态
   if (scrollTop + clientHeight > scrollHeight - 50 && hasMore.value && !isSearching.value) {
     loadMore();
   }
@@ -576,12 +606,18 @@ const handleScroll = ({ scrollTop, scrollHeight, clientHeight }: any) => {
 <style scoped>
 /* Reset & Layout */
 .resource-selector-body { display: flex; flex-direction: column; height: 60vh; }
-.toolbar { display: flex; align-items: center; gap: 20px; margin-bottom: 16px; flex-shrink: 0; }
+.toolbar { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; flex-shrink: 0; }
+.toolbar-divider { height: 20px; }
+.mode-switch { flex-shrink: 0; }
+
 .search-wrapper { display: flex; align-items: center; gap: 8px; flex-grow: 1; }
 .search-input { flex-grow: 1; }
 .regex-btn { font-family: monospace; font-weight: bold; padding: 8px; }
 
-.multi-select-switch { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--el-text-color-regular); }
+.multi-select-switch { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--el-text-color-regular); flex-shrink: 0; }
+.kb-toolbar-placeholder { flex-grow: 1; display: flex; align-items: center; }
+.info-text { font-size: 13px; color: var(--el-text-color-secondary); }
+
 .resource-selector-container { flex-grow: 1; border: 1px solid var(--el-border-color-lighter); border-radius: 4px; overflow: hidden; }
 .resource-tree-aside { border-right: 1px solid var(--el-border-color-lighter); background-color: #fff; display: flex; flex-direction: column; }
 

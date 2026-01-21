@@ -7,7 +7,7 @@ from sqlalchemy import func, or_, update, literal, null, case, union_all
 from typing import List, Optional, Tuple, Any
 
 from backend.models import resource_model
-from backend.schemas.enums import MoveAction
+from backend.schemas.enums import MoveAction, ResourceItemType
 from backend import schemas
 
 
@@ -83,12 +83,25 @@ async def create_resource(db: AsyncSession, resource: schemas.ResourceCreate) ->
         resource.sortOrder = (max_order if max_order is not None else -1) + 1
 
     # 排除非模型字段，以创建 Resource 实例
+    # 注意：resource.itemType 是枚举，SQLAlchemy 模型中定义为 String，但通常驱动会自动处理或我们需要取 .value
+    # Pydantic model_dump 会根据配置导出枚举值或枚举对象，这里直接传入给 Model 构造函数
+    # SQLAlchemy Model 接收枚举对象时，如果列是 String，通常会自动转换为 value，或者我们需要在 dump 时处理
+    # 这里假设 Pydantic 配置或 SQLAlchemy 能够处理 Enum -> String 的转换
     resource_data = resource.model_dump(exclude={'initial_content', 'initial_attributes'})
+
+    # 显式处理枚举转字符串，确保兼容性
+    if 'itemType' in resource_data and hasattr(resource_data['itemType'], 'value'):
+        resource_data['itemType'] = resource_data['itemType'].value
+    if 'resourceType' in resource_data and resource_data['resourceType'] and hasattr(resource_data['resourceType'],
+                                                                                     'value'):
+        resource_data['resourceType'] = resource_data['resourceType'].value
+
     db_resource = resource_model.Resource(**resource_data)
     db.add(db_resource)
     await db.flush()
 
-    if db_resource.itemType == 'resource':
+    # 使用枚举值进行判断
+    if db_resource.itemType == ResourceItemType.RESOURCE.value:
         # 使用请求中提供的初始值创建初始版本
         initial_version = resource_model.ResourceVersion(
             resourceId=db_resource.id,
@@ -138,10 +151,12 @@ async def delete_resource(db: AsyncSession, resource_id: str) -> Optional[resour
 
 
 async def create_resource_version(db: AsyncSession, resource_id: str, version_create: schemas.ResourceVersionCreate) -> \
-Optional[resource_model.ResourceVersion]:
+        Optional[resource_model.ResourceVersion]:
     """为指定资源创建一个新的版本。"""
     db_resource = await get_resource(db, resource_id=resource_id)
-    if not db_resource or db_resource.itemType != 'resource':
+
+    # 使用枚举值进行判断
+    if not db_resource or db_resource.itemType != ResourceItemType.RESOURCE.value:
         return None
 
     new_version = resource_model.ResourceVersion(
@@ -155,7 +170,7 @@ Optional[resource_model.ResourceVersion]:
 
 
 async def update_resource_version(db: AsyncSession, version_id: str, version_update: schemas.ResourceVersionUpdate) -> \
-Optional[resource_model.ResourceVersion]:
+        Optional[resource_model.ResourceVersion]:
     """更新指定版本的内容和元数据。"""
     result = await db.execute(
         select(resource_model.ResourceVersion)
@@ -234,7 +249,8 @@ async def move_resources(db: AsyncSession, move_request: schemas.ResourceMoveReq
         if move_request.reference_id != "root":
             target_parent_id = move_request.reference_id
 
-        stmt = select(func.max(resource_model.Resource.sortOrder)).filter(resource_model.Resource.parentId == target_parent_id)
+        stmt = select(func.max(resource_model.Resource.sortOrder)).filter(
+            resource_model.Resource.parentId == target_parent_id)
         result = await db.execute(stmt)
         max_order = result.scalar()
         target_sort_order = (max_order if max_order is not None else -1) + 1
@@ -331,7 +347,8 @@ async def search_resources_and_versions(
         resource_model.ResourceVersion,
         resource_model.Resource.latestVersionId == resource_model.ResourceVersion.id
     ).where(
-        resource_model.Resource.itemType == 'resource',
+        # 使用枚举值进行判断
+        resource_model.Resource.itemType == ResourceItemType.RESOURCE.value,
         match_op(resource_model.ResourceVersion.content)
     )
 
@@ -356,7 +373,8 @@ async def search_resources_and_versions(
         ).label("match_type"),
         resource_model.Resource.updatedAt.label("updated_at")
     ).where(
-        resource_model.Resource.itemType == 'resource',
+        # 使用枚举值进行判断
+        resource_model.Resource.itemType == ResourceItemType.RESOURCE.value,
         (name_match | desc_match)
     )
 

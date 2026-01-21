@@ -49,3 +49,19 @@ class ModelType(str, Enum):
     """定义 AI 模型的类型"""
     CHAT = "chat"
     EMBEDDING = "embedding"
+
+
+# --- Resource Enums ---
+
+class ResourceItemType(str, Enum):
+    """定义资源项目的基本类型"""
+    RESOURCE = "resource"
+    FOLDER = "folder"
+
+
+class ResourceType(str, Enum):
+    """定义具体的资源业务类型"""
+    KNOWLEDGE_BASE = "knowledge_base"
+    SYSTEM_PROMPT = "system_prompt"
+    SUBMESSAGE_TEMPLATE = "submessage_template"
+    KB_FILE = "kb_file"

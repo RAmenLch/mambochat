@@ -3,6 +3,7 @@
 from sqlalchemy import Column, String, TEXT, DateTime, ForeignKey, func, Integer, JSON
 from sqlalchemy.orm import relationship
 from backend.models.base_model import Base, generate_uuid
+from backend.schemas.enums import ResourceItemType
 
 
 class ResourceVersionFileAssociation(Base):
@@ -27,7 +28,8 @@ class Resource(Base):
     createdAt = Column(DateTime, nullable=False, default=func.now())
     updatedAt = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
 
-    itemType = Column(String(20), nullable=False, default='resource', index=True)
+    # 使用枚举值作为默认值
+    itemType = Column(String(20), nullable=False, default=ResourceItemType.RESOURCE.value, index=True)
     resourceType = Column(String(50), nullable=True, index=True)
 
     parentId = Column(String(36), ForeignKey("Resource.id"), nullable=True)
@@ -43,7 +45,7 @@ class Resource(Base):
         foreign_keys="[ResourceVersion.resourceId]"
     )
 
-    # MODIFIED: Added post_update=True to break the circular dependency during delete operations.
+    # post_update=True 用于解决删除操作时的循环依赖
     latest_version = relationship(
         "ResourceVersion",
         foreign_keys=[latestVersionId],
@@ -79,4 +81,3 @@ class ResourceVersion(Base):
         foreign_keys=[resourceId]
     )
     associated_files = relationship("File", secondary="ResourceVersionFileAssociation")
-

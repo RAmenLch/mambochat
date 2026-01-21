@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 from backend.schemas.message import SubMessageConfig
-from backend.schemas.enums import MoveAction
+from backend.schemas.enums import MoveAction, ResourceItemType, ResourceType
 
 
 # --- ResourceVersion Schemas ---
@@ -44,8 +44,12 @@ class ResourceVersion(ResourceVersionBase):
 class ResourceBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = None
-    itemType: str = Field('resource', description="项目类型: 'resource' 或 'folder'")
-    resourceType: Optional[str] = Field(None, description="资源类型, 例如 'system_prompt', 'submessage_template'")
+
+    itemType: ResourceItemType = Field(ResourceItemType.RESOURCE, description="项目类型: 'resource' 或 'folder'")
+
+    resourceType: Optional[ResourceType] = Field(None,
+                                                 description="资源类型, 例如 'system_prompt', 'submessage_template'")
+
     parentId: Optional[str] = None
     sortOrder: int = 0
 
@@ -56,7 +60,8 @@ class ResourceCreate(ResourceBase):
 
     @model_validator(mode='after')
     def check_template_attributes(self) -> 'ResourceCreate':
-        if self.resourceType == 'submessage_template' and self.initial_attributes is not None:
+        # 变更: 使用 ResourceType.SUBMESSAGE_TEMPLATE 枚举值进行判断
+        if self.resourceType == ResourceType.SUBMESSAGE_TEMPLATE and self.initial_attributes is not None:
             try:
                 # 验证 'submessage_template' 类型的 attributes 字段是否符合 SubMessageConfig 规范
                 SubMessageConfig.model_validate(self.initial_attributes)
