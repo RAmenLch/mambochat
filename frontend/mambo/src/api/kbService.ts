@@ -1,7 +1,7 @@
 // frontend/mambo/src/api/kbService.ts
 
-import { fetchEventSource } from '@microsoft/fetch-event-source';
-import apiClient from './index';
+import { fetchEventSource } from '@microsoft/fetch-event-source'
+import apiClient from './index'
 import type {
   Resource,
   KnowledgeBaseCreate,
@@ -9,15 +9,15 @@ import type {
   KBSearchRequest,
   KBSearchResponse,
   KBRunTaskRequest,
-  KBTaskProgressPayload
-} from './types';
+  KBTaskProgressPayload,
+} from './types'
 
 /**
  * 创建新的知识库资源
  */
 export const createKnowledgeBase = (data: KnowledgeBaseCreate): Promise<Resource> => {
-  return apiClient.post('/kb', data);
-};
+  return apiClient.post('/kb', data)
+}
 
 /**
  * 上传文件至指定知识库
@@ -26,30 +26,30 @@ export const createKnowledgeBase = (data: KnowledgeBaseCreate): Promise<Resource
  * @param file 要上传的文件对象
  */
 export const uploadKBFile = (kbId: string, file: File): Promise<Resource> => {
-  const formData = new FormData();
-  formData.append('file', file);
+  const formData = new FormData()
+  formData.append('file', file)
 
   return apiClient.post(`/kb/${kbId}/upload`, formData, {
     headers: {
       'Content-Type': 'multipart/form-data',
     },
-  });
-};
+  })
+}
 
 /**
  * 查询特定文件的切片向量化处理状态
  * @param resourceId 文件资源ID
  */
 export const getKBFileStatus = (resourceId: string): Promise<KBChunkStatus> => {
-  return apiClient.get(`/kb/chunks/${resourceId}/status`);
-};
+  return apiClient.get(`/kb/chunks/${resourceId}/status`)
+}
 
 /**
  * 在知识库中进行向量检索
  */
 export const searchKnowledgeBase = (data: KBSearchRequest): Promise<KBSearchResponse> => {
-  return apiClient.post('/kb/search', data);
-};
+  return apiClient.post('/kb/search', data)
+}
 
 /**
  * 控制知识库文件的切分与嵌入任务
@@ -58,17 +58,17 @@ export const searchKnowledgeBase = (data: KBSearchRequest): Promise<KBSearchResp
  * @param data 任务控制参数
  */
 export const runKBFileTask = (resourceId: string, data: KBRunTaskRequest): Promise<void> => {
-  return apiClient.post(`/kb/files/${resourceId}/task`, data);
-};
+  return apiClient.post(`/kb/files/${resourceId}/task`, data)
+}
 
 /**
  * 知识库文件进度订阅参数
  */
 export interface KBProgressSubscriptionParams {
-  resourceId: string;
-  onMessage: (data: KBTaskProgressPayload) => void;
-  onError: (error: unknown) => void;
-  onClose?: () => void;
+  resourceId: string
+  onMessage: (data: KBTaskProgressPayload) => void
+  onError: (error: unknown) => void
+  onClose?: () => void
 }
 
 /**
@@ -76,10 +76,12 @@ export interface KBProgressSubscriptionParams {
  * @param params 订阅配置参数
  * @returns AbortController 用于中断连接
  */
-export const subscribeToKBFileProgress = (params: KBProgressSubscriptionParams): AbortController => {
-  const { resourceId, onMessage, onError, onClose } = params;
-  const controller = new AbortController();
-  const url = `/api/kb/files/${resourceId}/progress`;
+export const subscribeToKBFileProgress = (
+  params: KBProgressSubscriptionParams,
+): AbortController => {
+  const { resourceId, onMessage, onError, onClose } = params
+  const controller = new AbortController()
+  const url = `/api/kb/files/${resourceId}/progress`
 
   fetchEventSource(url, {
     method: 'GET',
@@ -87,31 +89,40 @@ export const subscribeToKBFileProgress = (params: KBProgressSubscriptionParams):
     openWhenHidden: true,
 
     onmessage(event) {
+      // 处理服务端主动发送的结束事件
+      if (event.event === 'end') {
+        controller.abort()
+        if (onClose) {
+          onClose()
+        }
+        return
+      }
+
       try {
-        // 处理 SSE 消息
-        const data: KBTaskProgressPayload = JSON.parse(event.data);
-        onMessage(data);
+        // 处理 SSE 消息，Payload 结构与 KBChunkStatus 一致
+        const data: KBTaskProgressPayload = JSON.parse(event.data)
+        onMessage(data)
       } catch (e) {
-        console.error('Failed to parse KB progress data:', event.data, e);
-        onError(e);
+        console.error('Failed to parse KB progress data:', event.data, e)
+        onError(e)
       }
     },
 
     onclose() {
       if (onClose) {
-        onClose();
+        onClose()
       }
     },
 
     onerror(err) {
       // 如果不是手动中止，则报告错误
       if (err.name !== 'AbortError') {
-        onError(err);
+        onError(err)
       }
       // 抛出错误以停止库内部的自动重试机制，通常文件处理进度流中断后应由上层逻辑决定是否重连
-      throw err;
+      throw err
     },
-  });
+  })
 
-  return controller;
-};
+  return controller
+}

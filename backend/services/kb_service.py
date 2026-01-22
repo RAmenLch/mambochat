@@ -337,6 +337,43 @@ class KnowledgeBaseService:
         # 删除资源
         return await resource_crud.delete_resource(self.db, resource_id)
 
+    async def get_comprehensive_file_status(self, resource_id: str) -> kb_schemas.KBProcessingStatus:
+        """
+        获取文件的综合处理状态。
+        结合内存中的任务运行状态和数据库中的切片状态进行判定。
+        """
+        # 1. 获取数据库统计信息
+        stats = await kb_crud.get_chunk_stats_by_resource(self.db, resource_id)
+
+        # 2. 检查内存任务状态
+        is_running = resource_id in KnowledgeBaseService._running_tasks
+
+        # 3. 综合判定逻辑
+        final_status = "INITIAL"
+
+        if is_running:
+            # 检查任务存在, 鉴定状态为 processing
+            final_status = "PROCESSING"
+        elif stats.total_chunks == 0:
+            # 检查任务不存在, chunk不存在鉴定状态为 initial
+            final_status = "INITIAL"
+        elif stats.pending_chunks > 0:
+            # 检查任务不存在, chunk存在, 但存在状态 为pending或processing 的chunk, 状态为failed
+            # (注: processing 状态在 DB 中体现为 pending，因为只有 completed/failed/stopped 会落库为终态)
+            final_status = "FAILED"
+        elif stats.stopped_chunks > 0:
+            # 检查任务不存在, 但存在chunk的状态为stop的, 则状态为stop
+            final_status = "STOPPED"
+        elif stats.failed_chunks > 0:
+            # 补充逻辑: 如果没有 pending，但有 failed，也视为 failed
+            final_status = "FAILED"
+        else:
+            # 检查任务不存在, 但全部chunk的状态都为completed的, 则状态为completed (INDEXED)
+            final_status = "INDEXED"
+
+        stats.file_status = final_status
+        return stats
+
     async def handle_task_action(self, resource_id: str, request: kb_schemas.KBRunTaskRequest):
         """
         处理任务控制动作：Start, Resume, Stop。
@@ -345,6 +382,8 @@ class KnowledgeBaseService:
         if request.action == kb_schemas.KBTaskAction.STOP:
             if resource_id in KnowledgeBaseService._running_tasks:
                 await stream_manager.request_cancellation(resource_id)
+                # 同步更新数据库状态，将剩余 PENDING 切片标记为 STOPPED
+                await kb_crud.mark_pending_chunks_as_stopped(self.db, resource_id)
                 return {"message": "Cancellation requested."}
             else:
                 return {"message": "Task is not running."}
@@ -484,10 +523,11 @@ class KnowledgeBaseService:
 
                 # --- 阶段 2: 嵌入循环 ---
 
-                # 获取待处理 Chunks (Resume 模式可能包含 Failed)
+                # 获取待处理 Chunks (Resume 模式可能包含 Failed/Stopped)
                 target_statuses = [kb_schemas.KBChunkStatus.PENDING.value]
                 if resume:
                     target_statuses.append(kb_schemas.KBChunkStatus.FAILED.value)
+                    target_statuses.append(kb_schemas.KBChunkStatus.STOPPED.value)
 
                 pending_chunks = await kb_crud.get_chunks_by_statuses(session, resource_id, target_statuses)
                 total_count = len(pending_chunks)  # 注意：这只是剩余的，不是总数。前端可通过 status 接口查总数。
@@ -498,6 +538,8 @@ class KnowledgeBaseService:
                 for i in range(0, total_count, batch_size):
                     # 检查取消信号
                     if await stream_manager.is_cancellation_requested(resource_id):
+                        # 再次确保数据库状态被更新为 STOPPED
+                        await kb_crud.mark_pending_chunks_as_stopped(session, resource_id)
                         await stream_manager.publish(resource_id,
                                                      {"status": "cancelled", "message": "Task cancelled by user."})
                         break

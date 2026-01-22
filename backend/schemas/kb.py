@@ -9,6 +9,7 @@ class KBChunkStatus(str, Enum):
     PENDING = "PENDING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+    STOPPED = "STOPPED"
 
 
 class KBSplitterType(str, Enum):
@@ -85,7 +86,8 @@ class KBProcessingStatus(BaseModel):
     pending_chunks: int
     completed_chunks: int
     failed_chunks: int
-    # 聚合状态: PROCESSING (pending > 0), INDEXED (all completed), FAILED (failed > 0)
+    stopped_chunks: int
+    # 聚合状态: PROCESSING, INDEXED, FAILED, STOPPED, INITIAL
     file_status: str
 
 
@@ -100,4 +102,3 @@ class KBCreate(BaseModel):
     parent_id: Optional[str] = Field(None, description="父文件夹ID")
     embedding_model_id: str = Field(..., description="使用的 Embedding 模型ID")
     embedding_rate_limit: float = Field(0.0, ge=0.0, description="嵌入请求频率限制(秒)，即每次请求后的等待时间")
-

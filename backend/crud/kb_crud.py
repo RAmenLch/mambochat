@@ -5,7 +5,7 @@ from typing import List, Optional, Tuple, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import aliased
-from sqlalchemy import text, func, case, delete
+from sqlalchemy import text, func, case, delete, update
 
 from backend.models import kb_model, resource_model
 from backend.schemas import kb as kb_schemas
@@ -93,6 +93,22 @@ async def delete_chunks_by_resource(
     await db.commit()
 
 
+async def mark_pending_chunks_as_stopped(
+        db: AsyncSession,
+        resource_id: str
+) -> None:
+    """将指定资源下所有状态为 PENDING 的切片更新为 STOPPED"""
+    await db.execute(
+        update(kb_model.ResourceKBChunk)
+        .where(
+            kb_model.ResourceKBChunk.resource_id == resource_id,
+            kb_model.ResourceKBChunk.status == kb_schemas.KBChunkStatus.PENDING.value
+        )
+        .values(status=kb_schemas.KBChunkStatus.STOPPED.value)
+    )
+    await db.commit()
+
+
 async def get_vector_ids_by_resource(
         db: AsyncSession,
         resource_id: str
@@ -119,7 +135,9 @@ async def get_chunk_stats_by_resource(
         func.sum(case((kb_model.ResourceKBChunk.status == kb_schemas.KBChunkStatus.COMPLETED.value, 1), else_=0)).label(
             "completed"),
         func.sum(case((kb_model.ResourceKBChunk.status == kb_schemas.KBChunkStatus.FAILED.value, 1), else_=0)).label(
-            "failed")
+            "failed"),
+        func.sum(case((kb_model.ResourceKBChunk.status == kb_schemas.KBChunkStatus.STOPPED.value, 1), else_=0)).label(
+            "stopped")
     ).filter(kb_model.ResourceKBChunk.resource_id == resource_id)
 
     result = await db.execute(stmt)
@@ -129,13 +147,19 @@ async def get_chunk_stats_by_resource(
     pending = row.pending or 0
     completed = row.completed or 0
     failed = row.failed or 0
+    stopped = row.stopped or 0
 
+    # 基础状态判断，Service层会根据内存任务状态进行更精确的修正
     if failed > 0:
         file_status = "FAILED"
+    elif stopped > 0:
+        file_status = "STOPPED"
     elif pending > 0:
         file_status = "PROCESSING"
-    else:
+    elif total > 0 and total == completed:
         file_status = "INDEXED"
+    else:
+        file_status = "INITIAL"
 
     return kb_schemas.KBProcessingStatus(
         resource_id=resource_id,
@@ -143,6 +167,7 @@ async def get_chunk_stats_by_resource(
         pending_chunks=pending,
         completed_chunks=completed,
         failed_chunks=failed,
+        stopped_chunks=stopped,
         file_status=file_status
     )
 

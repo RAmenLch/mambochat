@@ -3,17 +3,16 @@ import asyncio
 import json
 
 from fastapi import APIRouter, Depends, UploadFile, File, status, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.database import get_db
+from backend.database import get_db, AsyncSessionLocal
 from backend import schemas
 from backend.schemas import kb as kb_schemas
 from backend.services.kb_service import KnowledgeBaseService
 from backend.crud import kb_crud
-from fastapi.responses import StreamingResponse
-import json
-import asyncio
 from backend.services.stream_manager_service import stream_manager
+
 router = APIRouter()
 
 
@@ -108,8 +107,10 @@ async def get_file_processing_status(
     """
     查询指定文件（Resource）的切片处理进度。
     返回总切片数、待处理数、完成数、失败数以及聚合状态。
+    此接口逻辑已与 SSE 订阅接口统一，均通过 Service 层进行综合状态判定。
     """
-    return await kb_crud.get_chunk_stats_by_resource(db, resource_id=resource_id)
+    service = KnowledgeBaseService(db)
+    return await service.get_comprehensive_file_status(resource_id)
 
 
 @router.post(
@@ -132,23 +133,40 @@ async def search_knowledge_base(
 async def _kb_task_stream_generator(resource_id: str):
     """
     KB 任务进度的 SSE 生成器。
+    逻辑：
+    1. 获取当前综合状态快照并立即推送。
+    2. 如果状态为 PROCESSING，则订阅消息队列持续推送进度。
+    3. 否则，发送结束信号并关闭连接。
     """
-    queue = await stream_manager.subscribe(resource_id)
-    try:
-        while True:
-            data = await queue.get()
+    # 1. 获取并推送初始状态
+    async with AsyncSessionLocal() as session:
+        service = KnowledgeBaseService(session)
+        initial_status = await service.get_comprehensive_file_status(resource_id)
 
-            if data is None:
-                # 发送结束信号，方便前端处理
-                yield f"event: end\ndata: Task finished\n\n"
-                break
+    # 推送初始状态快照
+    yield f"data: {initial_status.model_dump_json()}\n\n"
 
-            yield f"data: {json.dumps(data)}\n\n"
-            queue.task_done()
-    except asyncio.CancelledError:
-        pass
-    finally:
-        await stream_manager.unsubscribe(resource_id, queue)
+    # 2. 根据状态决定是否进入流式监听
+    if initial_status.file_status == "PROCESSING":
+        queue = await stream_manager.subscribe(resource_id)
+        try:
+            while True:
+                data = await queue.get()
+
+                if data is None:
+                    # 任务完成或停止，发送结束信号
+                    yield f"event: end\ndata: Task finished\n\n"
+                    break
+
+                yield f"data: {json.dumps(data)}\n\n"
+                queue.task_done()
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await stream_manager.unsubscribe(resource_id, queue)
+    else:
+        # 非进行中状态，直接结束
+        yield f"event: end\ndata: Task finished\n\n"
 
 
 @router.get(
@@ -159,6 +177,7 @@ async def subscribe_kb_file_progress(resource_id: str):
     """
     订阅指定文件的切分/嵌入任务进度。
     返回 Server-Sent Events (SSE) 流。
+    连接建立时会立即返回一次当前状态快照。
     """
     return StreamingResponse(
         _kb_task_stream_generator(resource_id),
