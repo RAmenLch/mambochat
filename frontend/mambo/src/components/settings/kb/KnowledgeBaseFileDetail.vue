@@ -1,3 +1,30 @@
+**Understanding the Task's Scope**
+
+I'm focused on grasping the essence of the task. Right now, I'm fully immersed in dissecting the specifications. My primary objective is to implement tooltips for those specific parameters. I'm carefully navigating the constraints to avoid extraneous features or unintended alterations. It's all about precision.
+
+
+**Formulating the Implementation Plan**
+
+I've sketched out the implementation steps. My focus is now on ensuring the chosen approach aligns perfectly with the provided constraints, especially maintaining a buildable state. I'm strategizing the most efficient way to insert the tooltips without disrupting the existing codebase. The styling needs to be precise.
+
+
+**Coding the Solution Directly**
+
+I'm now fully immersed in coding the modifications. I've successfully imported the necessary icon. I'm focusing on the `template` section, paying close attention to the structural integrity of the existing code. I'm carefully inserting the tooltip elements, ensuring each one references the correct parameter and content, with specific styling classes in place. I'm now drafting the `chunk_size` element.
+
+
+**Integrating the Tooltip Elements**
+
+I've successfully translated the planned changes into code. I'm focusing on the `el-form-item` sections for `chunk_size`, `chunk_overlap`, and `separator`, incorporating the tooltips within the template labels. I'm taking extreme care to replicate the example provided. I'm now fine-tuning the CSS classes.
+
+
+**Generating the Complete Code**
+
+I'm synthesizing the complete Vue SFC. I've successfully incorporated the icon imports and structured the `el-form-item` elements with their respective tooltips using slots, adhering to the specifications. I've removed the redundant label props and am now ensuring the code compiles, taking special care to match the original style. I will now generate the full output.
+
+
+
+--------------------------
 <!-- frontend/mambo/src/components/settings/kb/KnowledgeBaseFileDetail.vue -->
 <template>
   <div class="kb-file-detail-container">
@@ -118,12 +145,34 @@
 
             <el-row :gutter="20">
               <el-col :span="12">
-                <el-form-item label="切片大小 (Chunk Size)" prop="chunk_size">
+                <el-form-item prop="chunk_size">
+                  <template #label>
+                    <div class="label-with-tooltip">
+                      <span>切片大小 (Chunk Size)</span>
+                      <el-tooltip
+                        content="单个文本块的最大字符数量。较小的切片更精确，但可能丢失上下文；较大的切片包含更多上下文，但可能包含噪声。"
+                        placement="top"
+                      >
+                        <el-icon class="help-icon"><QuestionFilled /></el-icon>
+                      </el-tooltip>
+                    </div>
+                  </template>
                   <el-input-number v-model="taskConfig.chunk_size" :min="50" :step="50" style="width: 100%;" />
                 </el-form-item>
               </el-col>
               <el-col :span="12">
-                <el-form-item label="重叠大小 (Overlap)" prop="chunk_overlap">
+                <el-form-item prop="chunk_overlap">
+                  <template #label>
+                    <div class="label-with-tooltip">
+                      <span>重叠大小 (Overlap)</span>
+                      <el-tooltip
+                        content="相邻两个文本块之间重复的字符数量。设置重叠可以防止关键信息在切分点被截断，保持语义连贯性。建议设为切片大小的 10%-20%。"
+                        placement="top"
+                      >
+                        <el-icon class="help-icon"><QuestionFilled /></el-icon>
+                      </el-tooltip>
+                    </div>
+                  </template>
                   <el-input-number v-model="taskConfig.chunk_overlap" :min="0" :step="10" style="width: 100%;" />
                 </el-form-item>
               </el-col>
@@ -131,9 +180,19 @@
 
             <el-form-item
               v-if="taskConfig.splitter_type === 'separator'"
-              label="分隔符 (Separator)"
               prop="separator"
             >
+              <template #label>
+                <div class="label-with-tooltip">
+                  <span>分隔符 (Separator)</span>
+                  <el-tooltip
+                    content="用于识别段落边界的字符序列。系统优先使用此分隔符进行切分。常用：\n\n (双换行), \n (单换行)。"
+                    placement="top"
+                  >
+                    <el-icon class="help-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </div>
+              </template>
               <el-input
                 v-model="taskConfig.separator"
                 placeholder="例如: \n\n"
@@ -163,7 +222,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, reactive } from 'vue';
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus';
-import { Document, RefreshRight } from '@element-plus/icons-vue';
+import { Document, RefreshRight, QuestionFilled } from '@element-plus/icons-vue';
 import { getKBFileStatus, runKBFileTask, subscribeToKBFileProgress } from '@/api/kbService';
 import type { Resource, KBChunkStatus, SplitterType, KBTaskProgressPayload } from '@/api/types';
 
@@ -559,5 +618,21 @@ watch(() => props.resource.id, (newId, oldId) => {
   color: var(--el-text-color-secondary);
   margin-top: 4px;
   line-height: 1.4;
+}
+
+.label-with-tooltip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.help-icon {
+  color: var(--el-text-color-secondary);
+  cursor: help;
+  font-size: 14px;
+}
+
+.help-icon:hover {
+  color: var(--el-color-primary);
 }
 </style>
