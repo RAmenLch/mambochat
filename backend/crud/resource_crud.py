@@ -430,9 +430,13 @@ async def get_batch_resource_ancestors(db: AsyncSession, resource_ids: List[str]
         return []
 
     # 3. 查询完整的 ORM 对象
+    # === 修改开始 ===
+    # 添加 .options(joinedload(resource_model.Resource.latest_version))
     resources_result = await db.execute(
         select(resource_model.Resource)
+        .options(joinedload(resource_model.Resource.latest_version))
         .where(resource_model.Resource.id.in_(ancestor_ids))
     )
+    # === 修改结束 ===
 
     return resources_result.scalars().all()
