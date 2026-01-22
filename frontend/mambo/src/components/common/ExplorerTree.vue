@@ -60,7 +60,6 @@
 </template>
 
 <script setup lang="ts">
-// ... (Script 部分保持不变，无需修改逻辑) ...
 import { ref, watch, nextTick, onMounted, computed } from 'vue';
 import { ElTree } from 'element-plus';
 import { Loading } from '@element-plus/icons-vue';
@@ -76,6 +75,11 @@ interface Props {
   folderItemType?: string;
   persistenceKey?: string;
   loadingFolderIds?: Set<string>;
+  /**
+   * 自定义拖拽允许校验函数。
+   * 如果提供，将在默认的结构校验前执行。返回 false 则禁止拖拽。
+   */
+  customAllowDrop?: (draggingNode: Node, dropNode: Node, dropType: AllowDropType) => boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -85,6 +89,7 @@ const props = withDefaults(defineProps<Props>(), {
   folderItemType: 'folder',
   persistenceKey: undefined,
   loadingFolderIds: () => new Set(),
+  customAllowDrop: undefined,
 });
 
 const emit = defineEmits<{
@@ -124,6 +129,15 @@ const handleRootContextMenu = (event: MouseEvent) => {
 };
 
 const allowDrop = (draggingNode: Node, dropNode: Node, dropType: AllowDropType) => {
+  // 1. 优先执行外部传入的业务规则校验
+  if (props.customAllowDrop) {
+    if (!props.customAllowDrop(draggingNode, dropNode, dropType)) {
+      return false;
+    }
+  }
+
+  // 2. 执行组件内部的基础结构校验
+  // 仅允许放置到文件夹类型的节点内部
   if ((dropNode.data as BaseTreeItem).itemType !== props.folderItemType && dropType === 'inner') {
     return false;
   }

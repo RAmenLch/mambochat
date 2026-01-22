@@ -571,7 +571,9 @@ export interface KnowledgeBaseCreate {
   description?: string | null;
   parent_id?: string | null;
   embedding_model_id?: string | null;
+  embedding_rate_limit?: number;
 }
+
 /**
  * 知识库文件切片状态详情
  */
@@ -610,3 +612,40 @@ export interface KBSearchResponse {
   total: number;
   items: KBSearchResultItem[];
 }
+
+/**
+ * 文本切分方式
+ */
+export type SplitterType = 'simple' | 'separator';
+
+/**
+ * 知识库任务动作
+ */
+export type KBTaskAction = 'start' | 'resume' | 'stop';
+
+/**
+ * 切分参数配置
+ */
+export interface KBSplitterConfig {
+  splitter_type: SplitterType;
+  chunk_size: number;
+  chunk_overlap: number;
+  separator?: string; // 仅当 splitter_type 为 'separator' 时有效
+}
+
+/**
+ * 启动/控制知识库任务的请求体
+ */
+export interface KBRunTaskRequest {
+  action: KBTaskAction;
+  splitter_config?: KBSplitterConfig; // 仅 action="start" 时必填
+}
+
+/**
+ * 知识库文件处理进度的 SSE 事件载荷
+ */
+export type KBTaskProgressPayload =
+  | { status: 'processing'; processed: number; batch_total: number }
+  | { status: 'completed'; message: string }
+  | { status: 'error'; message: string }
+  | { status: 'cancelled'; message: string };

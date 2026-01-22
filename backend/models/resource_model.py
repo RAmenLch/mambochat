@@ -6,15 +6,6 @@ from backend.models.base_model import Base, generate_uuid
 from backend.schemas.enums import ResourceItemType
 
 
-class ResourceVersionFileAssociation(Base):
-    """
-    关联表，用于建立 ResourceVersion 和 File 之间的多对多关系。
-    """
-    __tablename__ = 'ResourceVersionFileAssociation'
-    resource_version_id = Column(String(36), ForeignKey('ResourceVersion.id'), primary_key=True)
-    file_id = Column(String(36), ForeignKey('File.id'), primary_key=True)
-
-
 class Resource(Base):
     """
     模型，用于存储资源中心的目录项，可以是具体资源或文件夹。
@@ -80,4 +71,3 @@ class ResourceVersion(Base):
         back_populates="versions",
         foreign_keys=[resourceId]
     )
-    associated_files = relationship("File", secondary="ResourceVersionFileAssociation")

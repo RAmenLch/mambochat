@@ -11,6 +11,26 @@ class KBChunkStatus(str, Enum):
     FAILED = "FAILED"
 
 
+class KBSplitterType(str, Enum):
+    SIMPLE = "simple"
+    SEPARATOR = "separator"
+
+
+class KBTaskAction(str, Enum):
+    START = "start"   # 覆盖更新/重新切分
+    RESUME = "resume" # 断点续连
+    STOP = "stop"     # 停止任务
+
+
+# --- Config Models ---
+
+class KBTextSplitterConfig(BaseModel):
+    splitter_type: KBSplitterType = Field(KBSplitterType.SIMPLE, description="切分器类型")
+    chunk_size: int = Field(500, ge=50, le=5000, description="切片大小 (字符数)")
+    chunk_overlap: int = Field(50, ge=0, description="切片重叠大小 (字符数)")
+    separator: Optional[str] = Field(None, description="分隔符，仅当 splitter_type 为 separator 时有效，例如 '\\n\\n'")
+
+
 # --- Chunk Models ---
 
 class KBChunkBase(BaseModel):
@@ -56,7 +76,7 @@ class KBSearchResponse(BaseModel):
     items: List[KBSearchResultItem]
 
 
-# --- Status & Ingestion Models ---
+# --- Status & Task Models ---
 
 class KBProcessingStatus(BaseModel):
     """文件处理状态统计"""
@@ -68,8 +88,16 @@ class KBProcessingStatus(BaseModel):
     # 聚合状态: PROCESSING (pending > 0), INDEXED (all completed), FAILED (failed > 0)
     file_status: str
 
+
+class KBRunTaskRequest(BaseModel):
+    action: KBTaskAction = Field(..., description="任务动作: start(覆盖), resume(续连), stop(停止)")
+    splitter_config: Optional[KBTextSplitterConfig] = Field(None, description="切分配置，Start 时必填，Resume 时若提供需与上次一致")
+
+
 class KBCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="知识库名称")
     description: Optional[str] = None
     parent_id: Optional[str] = Field(None, description="父文件夹ID")
     embedding_model_id: str = Field(..., description="使用的 Embedding 模型ID")
+    embedding_rate_limit: float = Field(0.0, ge=0.0, description="嵌入请求频率限制(秒)，即每次请求后的等待时间")
+

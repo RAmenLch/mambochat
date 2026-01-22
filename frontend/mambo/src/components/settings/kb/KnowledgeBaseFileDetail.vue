@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/settings/kb/KnowledgeBaseFileDetail.vue -->
 <template>
   <div class="kb-file-detail-container">
     <div class="detail-header">
@@ -16,7 +17,7 @@
       </div>
       <div class="header-actions">
         <el-button
-          @click="fetchStatus"
+          @click="manualRefresh"
           :loading="isLoading"
           :icon="RefreshRight"
           circle
@@ -27,20 +28,33 @@
 
     <el-scrollbar class="detail-content">
       <div class="content-wrapper">
-        <!-- 进度概览卡片 -->
+        <!-- 1. 进度概览卡片 -->
         <el-card shadow="never" class="status-card">
           <template #header>
             <div class="card-header">
               <span>向量化进度</span>
-              <el-button
-                v-if="canRetry"
-                type="primary"
-                size="small"
-                :loading="isRetrying"
-                @click="handleRetry"
-              >
-                重试任务
-              </el-button>
+              <div class="card-header-actions">
+                <!-- 停止任务 -->
+                <el-button
+                  v-if="isProcessing"
+                  type="danger"
+                  size="small"
+                  :loading="isSubmitting"
+                  @click="handleStop"
+                >
+                  停止任务
+                </el-button>
+                <!-- 继续任务 (断点续连) -->
+                <el-button
+                  v-if="canResume"
+                  type="warning"
+                  size="small"
+                  :loading="isSubmitting"
+                  @click="handleResume"
+                >
+                  继续任务
+                </el-button>
+              </div>
             </div>
           </template>
 
@@ -67,15 +81,77 @@
           <el-skeleton v-else :rows="3" animated />
         </el-card>
 
-        <!-- 详细信息 -->
+        <!-- 2. 任务配置卡片 -->
+        <el-card shadow="never" class="config-card">
+          <template #header>
+            <div class="card-header">
+              <span>切分配置</span>
+              <el-button
+                v-if="!isProcessing"
+                type="primary"
+                size="small"
+                :loading="isSubmitting"
+                @click="handleStart"
+              >
+                {{ hasIndexedData ? '重新切分并嵌入' : '启动切分任务' }}
+              </el-button>
+            </div>
+          </template>
+
+          <el-form
+            ref="configFormRef"
+            :model="taskConfig"
+            :rules="configRules"
+            label-position="top"
+            :disabled="isProcessing"
+          >
+            <el-row :gutter="20">
+              <el-col :span="24">
+                <el-form-item label="切分方式 (Splitter Type)" prop="splitter_type">
+                  <el-radio-group v-model="taskConfig.splitter_type">
+                    <el-radio-button label="simple">简单切分 (Simple)</el-radio-button>
+                    <el-radio-button label="separator">分隔符切分 (Separator)</el-radio-button>
+                  </el-radio-group>
+                </el-form-item>
+              </el-col>
+            </el-row>
+
+            <el-row :gutter="20">
+              <el-col :span="12">
+                <el-form-item label="切片大小 (Chunk Size)" prop="chunk_size">
+                  <el-input-number v-model="taskConfig.chunk_size" :min="50" :step="50" style="width: 100%;" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="重叠大小 (Overlap)" prop="chunk_overlap">
+                  <el-input-number v-model="taskConfig.chunk_overlap" :min="0" :step="10" style="width: 100%;" />
+                </el-form-item>
+              </el-col>
+            </el-row>
+
+            <el-form-item
+              v-if="taskConfig.splitter_type === 'separator'"
+              label="分隔符 (Separator)"
+              prop="separator"
+            >
+              <el-input
+                v-model="taskConfig.separator"
+                placeholder="例如: \n\n"
+              />
+              <div class="form-tip">支持输入转义字符，如 \n 代表换行。</div>
+            </el-form-item>
+          </el-form>
+        </el-card>
+
+        <!-- 3. 详细信息 -->
         <el-descriptions title="文件详情" :column="1" border class="info-descriptions">
           <el-descriptions-item label="文件名称">{{ resource.name }}</el-descriptions-item>
           <el-descriptions-item label="资源路径">{{ resource.id }}</el-descriptions-item>
           <el-descriptions-item label="最后更新">{{ new Date(resource.updatedAt).toLocaleString() }}</el-descriptions-item>
           <el-descriptions-item label="当前状态">
             {{ statusLabel }}
-            <span v-if="statusInfo?.failed_chunks && statusInfo.failed_chunks > 0" class="error-text">
-              ({{ statusInfo.failed_chunks }} 个切片处理失败)
+            <span v-if="statusInfo?.message" class="status-message">
+              ({{ statusInfo.message }})
             </span>
           </el-descriptions-item>
         </el-descriptions>
@@ -85,24 +161,60 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ref, computed, onMounted, onUnmounted, watch, reactive } from 'vue';
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus';
 import { Document, RefreshRight } from '@element-plus/icons-vue';
-import { getKBFileStatus, retryKBFile } from '@/api/kbService';
-import type { Resource, KBChunkStatus, KBFileStatus } from '@/api/types';
+import { getKBFileStatus, runKBFileTask, subscribeToKBFileProgress } from '@/api/kbService';
+import type { Resource, KBChunkStatus, SplitterType, KBTaskProgressPayload } from '@/api/types';
 
 // --- Props ---
 const props = defineProps<{
   resource: Resource;
 }>();
 
+// --- Types ---
+interface TaskConfigState {
+  splitter_type: SplitterType;
+  chunk_size: number;
+  chunk_overlap: number;
+  separator: string;
+}
+
 // --- State ---
-const statusInfo = ref<KBChunkStatus | null>(null);
+const statusInfo = ref<(KBChunkStatus & { message?: string }) | null>(null);
 const isLoading = ref(false);
-const isRetrying = ref(false);
-let pollTimer: number | null = null;
+const isSubmitting = ref(false);
+const configFormRef = ref<FormInstance>();
+let sseController: AbortController | null = null;
+
+const taskConfig = reactive<TaskConfigState>({
+  splitter_type: 'simple',
+  chunk_size: 500,
+  chunk_overlap: 50,
+  separator: '\\n\\n',
+});
+
+const configRules = reactive<FormRules>({
+  chunk_size: [{ required: true, message: '请输入切片大小', trigger: 'change' }],
+  chunk_overlap: [{ required: true, message: '请输入重叠大小', trigger: 'change' }],
+  separator: [{ required: true, message: '请输入分隔符', trigger: 'blur' }],
+});
 
 // --- Computed ---
+const isProcessing = computed(() => {
+  return statusInfo.value?.file_status === 'PROCESSING' || statusInfo.value?.file_status === 'PENDING';
+});
+
+const hasIndexedData = computed(() => {
+  return statusInfo.value?.file_status === 'INDEXED' || (statusInfo.value?.total_chunks || 0) > 0;
+});
+
+const canResume = computed(() => {
+  if (!statusInfo.value) return false;
+  // 仅当状态为 FAILED 或 PENDING 时允许续连
+  return statusInfo.value.file_status === 'FAILED' || statusInfo.value.file_status === 'PENDING';
+});
+
 const progressPercentage = computed(() => {
   if (!statusInfo.value || statusInfo.value.total_chunks === 0) return 0;
   const percent = (statusInfo.value.completed_chunks / statusInfo.value.total_chunks) * 100;
@@ -130,7 +242,7 @@ const statusLabel = computed(() => {
 const statusTagType = computed(() => {
   const status = statusInfo.value?.file_status;
   const map: Record<string, 'info' | 'primary' | 'success' | 'danger' | 'warning'> = {
-    'PENDING': 'info',
+    'PENDING': 'warning',
     'PROCESSING': 'primary',
     'INDEXED': 'success',
     'FAILED': 'danger'
@@ -138,80 +250,189 @@ const statusTagType = computed(() => {
   return status ? (map[status] || 'info') : 'info';
 });
 
-const canRetry = computed(() => {
-  if (!statusInfo.value) return false;
-  return statusInfo.value.file_status === 'FAILED' || statusInfo.value.failed_chunks > 0;
-});
-
 // --- Methods ---
 
-const stopPolling = () => {
-  if (pollTimer) {
-    window.clearInterval(pollTimer);
-    pollTimer = null;
+const stopSSE = () => {
+  if (sseController) {
+    sseController.abort();
+    sseController = null;
   }
 };
 
-const startPolling = () => {
-  stopPolling();
-  pollTimer = window.setInterval(() => {
-    fetchStatus(true);
-  }, 3000); // Poll every 3 seconds
+const startSSE = () => {
+  stopSSE();
+  sseController = subscribeToKBFileProgress({
+    resourceId: props.resource.id,
+    onMessage: (data: KBTaskProgressPayload) => {
+      if (!statusInfo.value) return;
+
+      if (data.status === 'processing') {
+        statusInfo.value.file_status = 'PROCESSING';
+        statusInfo.value.completed_chunks = data.processed;
+        statusInfo.value.total_chunks = data.batch_total;
+        statusInfo.value.pending_chunks = data.batch_total - data.processed;
+      } else if (data.status === 'completed') {
+        statusInfo.value.file_status = 'INDEXED';
+        statusInfo.value.completed_chunks = statusInfo.value.total_chunks;
+        statusInfo.value.pending_chunks = 0;
+        statusInfo.value.message = data.message;
+        ElMessage.success('任务已完成');
+        stopSSE();
+      } else if (data.status === 'error') {
+        statusInfo.value.file_status = 'FAILED';
+        statusInfo.value.message = data.message;
+        ElMessage.error(`任务失败: ${data.message}`);
+        stopSSE();
+      } else if (data.status === 'cancelled') {
+        statusInfo.value.file_status = 'FAILED';
+        statusInfo.value.message = data.message;
+        ElMessage.warning('任务已停止');
+        stopSSE();
+      }
+    },
+    onError: (err) => {
+      console.error('SSE Error:', err);
+      // SSE 连接断开通常意味着需要刷新一次完整状态以确保 UI 一致
+      fetchStatus(false);
+    }
+  });
 };
 
-const fetchStatus = async (isPolling = false) => {
-  if (!isPolling) isLoading.value = true;
+const fetchStatus = async (showLoading = true) => {
+  if (showLoading) isLoading.value = true;
   try {
     const res = await getKBFileStatus(props.resource.id);
     statusInfo.value = res;
 
-    // Determine if we should continue polling
-    const shouldPoll = res.file_status === 'PROCESSING' || res.file_status === 'PENDING';
-
-    if (shouldPoll && !pollTimer) {
-      startPolling();
-    } else if (!shouldPoll && pollTimer) {
-      stopPolling();
+    // 如果处于处理中状态，建立 SSE 连接
+    if (res.file_status === 'PROCESSING' || res.file_status === 'PENDING') {
+      startSSE();
+    } else {
+      stopSSE();
     }
   } catch (error) {
     console.error('Failed to fetch KB file status', error);
-    if (!isPolling) ElMessage.error('获取状态失败');
-    stopPolling();
+    ElMessage.error('获取状态失败');
   } finally {
-    if (!isPolling) isLoading.value = false;
+    if (showLoading) isLoading.value = false;
   }
 };
 
-const handleRetry = async () => {
-  isRetrying.value = true;
+const manualRefresh = () => {
+  fetchStatus(true);
+};
+
+const handleStart = async () => {
+  if (!configFormRef.value) return;
+  await configFormRef.value.validate(async (valid) => {
+    if (valid) {
+      if (hasIndexedData.value) {
+        try {
+          await ElMessageBox.confirm(
+            '该文件已有向量数据，重新启动将覆盖旧数据，是否继续？',
+            '确认覆盖',
+            { confirmButtonText: '覆盖并启动', cancelButtonText: '取消', type: 'warning' }
+          );
+        } catch {
+          return;
+        }
+      }
+
+      isSubmitting.value = true;
+      try {
+        await runKBFileTask(props.resource.id, {
+          action: 'start',
+          splitter_config: {
+            splitter_type: taskConfig.splitter_type,
+            chunk_size: taskConfig.chunk_size,
+            chunk_overlap: taskConfig.chunk_overlap,
+            separator: taskConfig.splitter_type === 'separator' ? taskConfig.separator : undefined
+          }
+        });
+        ElMessage.success('任务已启动');
+        // 立即刷新状态并触发 SSE
+        await fetchStatus(false);
+      } catch (error) {
+        console.error('Start task failed', error);
+        ElMessage.error('启动任务失败');
+      } finally {
+        isSubmitting.value = false;
+      }
+    }
+  });
+};
+
+const handleResume = async () => {
+  isSubmitting.value = true;
   try {
-    await retryKBFile(props.resource.id);
-    ElMessage.success('任务重试请求已发送');
-    // Immediately refresh status and ensure polling starts
-    await fetchStatus();
-    if (!pollTimer) startPolling();
+    // Resume 模式下不传配置，使用后端存储的上次配置
+    await runKBFileTask(props.resource.id, {
+      action: 'resume'
+    });
+    ElMessage.success('任务已继续');
+    await fetchStatus(false);
   } catch (error) {
-    console.error('Retry failed', error);
-    ElMessage.error('重试请求失败');
+    console.error('Resume task failed', error);
+    ElMessage.error('继续任务失败');
   } finally {
-    isRetrying.value = false;
+    isSubmitting.value = false;
+  }
+};
+
+const handleStop = async () => {
+  try {
+    await ElMessageBox.confirm('确定要停止当前任务吗？', '确认停止', {
+      confirmButtonText: '停止',
+      cancelButtonText: '取消',
+      type: 'warning'
+    });
+
+    isSubmitting.value = true;
+    await runKBFileTask(props.resource.id, {
+      action: 'stop'
+    });
+    // 停止操作后，等待 SSE 推送 cancelled 事件或手动刷新
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('Stop task failed', error);
+      ElMessage.error('停止任务失败');
+    }
+  } finally {
+    isSubmitting.value = false;
+  }
+};
+
+const loadInitialConfig = () => {
+  // 尝试从资源属性中回显上次的配置
+  // 注意：Resource 类型中 latest_version 可能为 null，需进行空值检查
+  const attrs = props.resource.latest_version?.attributes;
+  if (attrs && attrs.last_ingest_config) {
+    const savedConfig = attrs.last_ingest_config;
+    taskConfig.splitter_type = savedConfig.splitter_type || 'simple';
+    taskConfig.chunk_size = savedConfig.chunk_size || 500;
+    taskConfig.chunk_overlap = savedConfig.chunk_overlap || 50;
+    if (savedConfig.separator) {
+      taskConfig.separator = savedConfig.separator;
+    }
   }
 };
 
 // --- Lifecycle ---
 
 onMounted(() => {
+  loadInitialConfig();
   fetchStatus();
 });
 
 onUnmounted(() => {
-  stopPolling();
+  stopSSE();
 });
 
 watch(() => props.resource.id, (newId, oldId) => {
   if (newId !== oldId) {
     statusInfo.value = null;
-    stopPolling();
+    stopSSE();
+    loadInitialConfig();
     fetchStatus();
   }
 });
@@ -280,7 +501,7 @@ watch(() => props.resource.id, (newId, oldId) => {
   gap: 24px;
 }
 
-.status-card {
+.status-card, .config-card {
   border-radius: 8px;
 }
 
@@ -288,6 +509,11 @@ watch(() => props.resource.id, (newId, oldId) => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.card-header-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .progress-section {
@@ -322,8 +548,16 @@ watch(() => props.resource.id, (newId, oldId) => {
   background-color: #fff;
 }
 
-.error-text {
-  color: var(--el-color-danger);
+.status-message {
+  color: var(--el-text-color-secondary);
   margin-left: 8px;
+  font-size: 12px;
+}
+
+.form-tip {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-top: 4px;
+  line-height: 1.4;
 }
 </style>

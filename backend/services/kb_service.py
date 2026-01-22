@@ -1,17 +1,22 @@
 # backend/services/kb_service.py
 
+import asyncio
 import json
-from typing import List, Tuple
+import logging
+from abc import ABC, abstractmethod
+from typing import List, Tuple, Optional, Set
+
 from fastapi import UploadFile, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_openai import OpenAIEmbeddings
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend import schemas
 from backend.crud import kb_crud, resource_crud, file_crud, provider_crud
-from backend.models import resource_model  # 导入 ResourceModel 以便手动创建版本
+from backend.models import resource_model
 from backend.schemas import kb as kb_schemas
 from backend.schemas.enums import FileManagementType, ModelType, ResourceItemType, ResourceType, ProviderWorkerType
 from backend.services.storage_service import storage_service
+from backend.services.stream_manager_service import stream_manager
 
 # 定义支持的知识库文件 MIME 类型白名单
 SUPPORTED_KB_MIME_TYPES = {
@@ -25,15 +30,25 @@ SUPPORTED_KB_MIME_TYPES = {
     "application/x-yaml"
 }
 
+logger = logging.getLogger(__name__)
 
-class SimpleTextSplitter:
+
+# --- Text Splitters ---
+
+class AbstractTextSplitter(ABC):
+    def __init__(self, chunk_size: int, chunk_overlap: int):
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
+
+    @abstractmethod
+    def split_text(self, text: str) -> List[str]:
+        pass
+
+
+class SimpleTextSplitter(AbstractTextSplitter):
     """
     简单的文本切分器，优先按换行符切分，再按字符数切分。
     """
-
-    def __init__(self, chunk_size: int = 800, chunk_overlap: int = 100):
-        self.chunk_size = chunk_size
-        self.chunk_overlap = chunk_overlap
 
     def split_text(self, text: str) -> List[str]:
         if not text:
@@ -48,8 +63,6 @@ class SimpleTextSplitter:
 
             # 如果不是最后一段，尝试寻找最近的换行符作为切分点
             if end < text_len:
-                # 在 end 附近寻找换行符，避免截断单词
-                # 简单起见，这里只向前查找换行符
                 lookback = text.rfind('\n', start, end)
                 if lookback != -1 and lookback > start + (self.chunk_size // 2):
                     end = lookback + 1  # 包含换行符
@@ -68,7 +81,59 @@ class SimpleTextSplitter:
         return chunks
 
 
+class SepTextSplitter(AbstractTextSplitter):
+    """
+    基于特定分隔符的切分器。
+    如果切分后的段落超过 chunk_size，则回退到 SimpleTextSplitter 进行二次切分。
+    """
+
+    def __init__(self, chunk_size: int, chunk_overlap: int, separator: str):
+        super().__init__(chunk_size, chunk_overlap)
+        self.separator = separator or "\n\n"
+        self._fallback_splitter = SimpleTextSplitter(chunk_size, chunk_overlap)
+
+    def split_text(self, text: str) -> List[str]:
+        if not text:
+            return []
+
+        raw_chunks = text.split(self.separator)
+        final_chunks = []
+
+        for raw in raw_chunks:
+            if not raw.strip():
+                continue
+
+            # 如果单段长度超过限制，使用 fallback 切分
+            if len(raw) > self.chunk_size:
+                sub_chunks = self._fallback_splitter.split_text(raw)
+                final_chunks.extend(sub_chunks)
+            else:
+                final_chunks.append(raw)
+
+        return final_chunks
+
+
+class SplitterFactory:
+    @staticmethod
+    def create(config: kb_schemas.KBTextSplitterConfig) -> AbstractTextSplitter:
+        if config.splitter_type == kb_schemas.KBSplitterType.SEPARATOR:
+            return SepTextSplitter(
+                chunk_size=config.chunk_size,
+                chunk_overlap=config.chunk_overlap,
+                separator=config.separator
+            )
+        else:
+            return SimpleTextSplitter(
+                chunk_size=config.chunk_size,
+                chunk_overlap=config.chunk_overlap
+            )
+
+
+# --- Service ---
+
 class KnowledgeBaseService:
+    # 类级别集合，用于记录当前正在运行的任务ID (resource_id)，实现简单的互斥锁
+    _running_tasks: Set[str] = set()
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -84,23 +149,18 @@ class KnowledgeBaseService:
         if model.model_type != ModelType.EMBEDDING.value:
             raise ValueError(f"Model {model_id} is not an embedding model.")
 
-        # 解析元配置获取维度
         meta_config = json.loads(model.meta_config) if model.meta_config else {}
         dimension = meta_config.get("embedding_dimension")
 
         if not dimension:
             raise ValueError(f"Model {model_id} configuration is missing 'embedding_dimension'.")
 
-        # 检查维度是否在支持的列表中
         supported_dims = [384, 768, 1024, 1536, 2560, 3072, 4096]
         if dimension not in supported_dims:
             raise ValueError(f"Dimension {dimension} is not supported. Supported: {supported_dims}")
 
         provider = model.provider
 
-        # --- 修正逻辑: 根据 Worker Type 选择客户端 ---
-
-        # 1. OpenAI 和 DeepSeek (兼容 OpenAI 协议)
         if provider.worker_type in [ProviderWorkerType.OPENAI.value, ProviderWorkerType.DEEPSEEK.value]:
             client = OpenAIEmbeddings(
                 model=model.modelId,
@@ -109,27 +169,48 @@ class KnowledgeBaseService:
                 check_embedding_ctx_length=False
             )
             return client, dimension
-
-        # 2. Google (不兼容 OpenAI 协议)
         elif provider.worker_type == ProviderWorkerType.GOOGLE.value:
-            # 目前未引入 langchain-google-genai，明确抛出不支持异常
             raise ValueError("Google Embeddings are not currently supported. Please use an OpenAI-compatible provider.")
-
-        # 3. 其他未知类型
         else:
             raise ValueError(f"Unsupported provider worker type for embeddings: {provider.worker_type}")
+
+    async def _validate_kb_hierarchy(self, parent_id: str) -> schemas.Resource:
+        """
+        验证层级约束：
+        1. KB_FILE 的祖先链中必须有且仅有一个 KNOWLEDGE_BASE 类型节点。
+        2. 返回该 KB 节点资源对象。
+        """
+        if not parent_id:
+            raise HTTPException(status_code=400, detail="Parent ID is required for KB files.")
+
+        # 获取所有祖先节点
+        ancestors = await resource_crud.get_batch_resource_ancestors(self.db, [parent_id])
+
+        kb_nodes = [
+            res for res in ancestors
+            if res.resourceType == ResourceType.KNOWLEDGE_BASE.value
+        ]
+
+        if len(kb_nodes) == 0:
+            raise HTTPException(status_code=400, detail="File must be uploaded within a Knowledge Base.")
+
+        if len(kb_nodes) > 1:
+            raise HTTPException(status_code=400, detail="Nested Knowledge Bases are not allowed.")
+
+        return kb_nodes[0]
+
+    async def _cleanup_vectors(self, resource_id: str, dimension: int):
+        """清理指定资源在指定维度下的所有向量数据"""
+        vector_ids = await kb_crud.get_vector_ids_by_resource(self.db, resource_id)
+        if vector_ids:
+            await kb_crud.delete_vectors(self.db, dimension, vector_ids)
 
     async def create_knowledge_base(self, kb_data: kb_schemas.KBCreate) -> schemas.Resource:
         """
         创建知识库资源。
-        关键逻辑：
-        1. 验证模型是否存在且合法。
-        2. 创建 Resource (Folder 类型)。
-        3. 【关键修复】手动创建初始 ResourceVersion 并绑定，确保 attributes (模型配置) 被保存。
         """
-        # 1. 校验模型并获取维度
+        # 1. 校验模型
         try:
-            # 复用 _get_embedding_client 的校验逻辑，但只需要维度
             model = await provider_crud.get_model(self.db, kb_data.embedding_model_id)
             if not model or not model.provider:
                 raise ValueError(f"Model {kb_data.embedding_model_id} not found.")
@@ -150,26 +231,24 @@ class KnowledgeBaseService:
         # 2. 准备 Attributes
         attributes = {
             "embedding_model_id": kb_data.embedding_model_id,
-            "dimension": dimension
+            "dimension": dimension,
+            "embedding_rate_limit": kb_data.embedding_rate_limit
         }
 
-        # 3. 创建 Resource (ItemType='folder', ResourceType='knowledge_base')
-        # 注意：resource_crud.create_resource 对于 Folder 类型不会自动创建 Version
+        # 3. 创建 Resource
         resource_create = schemas.ResourceCreate(
             name=kb_data.name,
             description=kb_data.description,
-            itemType=ResourceItemType.FOLDER,  # 使用枚举
-            resourceType=ResourceType.KNOWLEDGE_BASE,  # 使用枚举
+            itemType=ResourceItemType.FOLDER,
+            resourceType=ResourceType.KNOWLEDGE_BASE,
             parentId=kb_data.parent_id,
-            # 这里的 initial_attributes 传给 create_resource 会被忽略，因为是 Folder
             initial_attributes=attributes,
             initial_content=""
         )
 
         new_resource = await resource_crud.create_resource(self.db, resource_create)
 
-        # 4. 【修复】手动创建初始版本并关联
-        # 知识库虽然是 Folder，但必须拥有 Version 来存储 embedding 配置
+        # 4. 手动创建初始版本并关联
         initial_version = resource_model.ResourceVersion(
             resourceId=new_resource.id,
             name="初始配置",
@@ -179,45 +258,31 @@ class KnowledgeBaseService:
         self.db.add(initial_version)
         await self.db.flush()
 
-        # 更新 Resource 的 latestVersionId
         new_resource.latestVersionId = initial_version.id
         await self.db.commit()
-
-        # 刷新以加载关联关系
         await self.db.refresh(new_resource)
         await self.db.refresh(new_resource, ['latest_version'])
 
         return new_resource
 
-    async def ingest_file(self, kb_id: str, file: UploadFile) -> schemas.Resource:
+    async def upload_file(self, kb_id: str, file: UploadFile) -> schemas.Resource:
         """
-        处理文件上传、切分并入库。
-        流程: 校验文件类型 -> 保存物理文件 -> 创建 File 记录 -> 创建 Resource (KB File) -> 切分 -> 批量保存 Chunks。
+        仅上传文件并创建元数据，不执行切分和嵌入。
         """
-        # 1. 校验文件类型 (MIME Type 白名单)
+        # 1. 校验文件类型
         if file.content_type not in SUPPORTED_KB_MIME_TYPES:
             raise HTTPException(
                 status_code=400,
                 detail=f"Unsupported file type: {file.content_type}. Only plain text formats are currently supported."
             )
 
-        # 2. 验证知识库是否存在
-        kb_resource = await resource_crud.get_resource(self.db, kb_id)
-
-        # 使用枚举值进行判断 (DB中存储的是字符串)
-        if not kb_resource or kb_resource.resourceType != ResourceType.KNOWLEDGE_BASE.value:
-            raise HTTPException(status_code=400, detail="Invalid Knowledge Base ID.")
+        # 2. 验证层级约束 (KB_FILE 必须在 KB 内，且不能嵌套)
+        # kb_id 可能是 KB 本身，也可能是 KB 下的文件夹
+        await self._validate_kb_hierarchy(kb_id)
 
         # 3. 保存物理文件
         try:
             storage_path = await storage_service.save(file, sub_path="kb_documents")
-            # 读取内容用于切分
-            content_bytes = await storage_service.read_bytes(storage_path)
-            try:
-                text_content = content_bytes.decode('utf-8')
-            except UnicodeDecodeError:
-                # 简单回退策略
-                text_content = content_bytes.decode('latin-1')
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"File storage failed: {e}")
 
@@ -228,14 +293,14 @@ class KnowledgeBaseService:
             storage_path=storage_path,
             mime_type=file.content_type or "text/plain",
             size=file.size,
-            management_type=FileManagementType.GLOBAL_SETTING.value  # 暂用，表示长期存储
+            management_type=FileManagementType.GLOBAL_SETTING.value
         )
 
         # 5. 创建 Resource (KB File)
-        # ResourceVersion.content 存储 file_id
+        # 初始状态下没有切分配置，attributes 仅存储 source_file_id
         resource_create = schemas.ResourceCreate(
             name=file.filename,
-            itemType=ResourceItemType.RESOURCE,  # 使用枚举
+            itemType=ResourceItemType.RESOURCE,
             resourceType=ResourceType.KB_FILE,
             parentId=kb_id,
             initial_content=db_file.id,
@@ -243,91 +308,251 @@ class KnowledgeBaseService:
         )
         new_resource = await resource_crud.create_resource(self.db, resource_create)
 
-        # 6. 切分文本
-        splitter = SimpleTextSplitter()
-        text_chunks = splitter.split_text(text_content)
-
-        # 7. 批量创建 Chunks (事务内)
-        chunk_schemas = []
-        for idx, chunk_text in enumerate(text_chunks):
-            chunk_schemas.append(kb_schemas.KBChunkCreate(
-                resource_id=new_resource.id,
-                content=chunk_text,
-                chunk_index=idx,
-                byte_size=len(chunk_text.encode('utf-8'))
-            ))
-
-        await kb_crud.batch_create_chunks(self.db, chunk_schemas)
-
         return new_resource
 
-    async def run_embedding_task(self, resource_id: str):
+    async def delete_kb_file(self, resource_id: str) -> schemas.Resource:
         """
-        执行指定文件的向量化任务。
-        1. 查找父知识库获取模型配置。
-        2. 获取 PENDING Chunks。
-        3. 调用 Embedding API。
-        4. 存入向量表并更新业务表。
+        删除 KB 文件资源：先清理向量数据，再删除资源记录。
         """
-        # 1. 获取资源及其父节点 (KB)
         resource = await resource_crud.get_resource(self.db, resource_id)
-        if not resource or not resource.parentId:
-            return
+        if not resource:
+            raise HTTPException(status_code=404, detail="Resource not found")
 
-        kb_resource = await resource_crud.get_resource(self.db, resource.parentId)
-        if not kb_resource or not kb_resource.latest_version:
-            return
+        # 尝试获取父 KB 以确定维度，以便清理向量
+        # 即使找不到父 KB (例如数据不一致)，也应尝试删除资源
+        try:
+            if resource.parentId:
+                kb_resource = await self._validate_kb_hierarchy(resource.parentId)
+                if kb_resource and kb_resource.latest_version and kb_resource.latest_version.attributes:
+                    dimension = kb_resource.latest_version.attributes.get("dimension")
+                    if dimension:
+                        await self._cleanup_vectors(resource_id, dimension)
+        except Exception:
+            # 忽略清理过程中的错误，确保资源能被删除
+            pass
 
-        # 2. 解析 KB 配置
+        # 删除 Chunks (级联删除可能不彻底，手动清理更安全)
+        await kb_crud.delete_chunks_by_resource(self.db, resource_id)
+
+        # 删除资源
+        return await resource_crud.delete_resource(self.db, resource_id)
+
+    async def handle_task_action(self, resource_id: str, request: kb_schemas.KBRunTaskRequest):
+        """
+        处理任务控制动作：Start, Resume, Stop。
+        """
+        # 1. 停止任务
+        if request.action == kb_schemas.KBTaskAction.STOP:
+            if resource_id in KnowledgeBaseService._running_tasks:
+                await stream_manager.request_cancellation(resource_id)
+                return {"message": "Cancellation requested."}
+            else:
+                return {"message": "Task is not running."}
+
+        # 2. 检查任务是否已在运行
+        if resource_id in KnowledgeBaseService._running_tasks:
+            raise HTTPException(status_code=409, detail="Task is already running for this file.")
+
+        # 3. 获取资源和父 KB 信息
+        resource = await resource_crud.get_resource_with_versions(self.db, resource_id)
+        if not resource:
+            raise HTTPException(status_code=404, detail="Resource not found")
+
+        kb_resource = await self._validate_kb_hierarchy(resource.parentId)
         kb_attrs = kb_resource.latest_version.attributes or {}
         embedding_model_id = kb_attrs.get("embedding_model_id")
+        dimension = kb_attrs.get("dimension")
+        rate_limit = kb_attrs.get("embedding_rate_limit", 0.0)
 
-        if not embedding_model_id:
-            # 记录错误或跳过
-            print(f"KB {kb_resource.id} missing embedding_model_id configuration.")
-            return
+        if not embedding_model_id or not dimension:
+            raise HTTPException(status_code=400, detail="Knowledge Base configuration is incomplete.")
 
-        try:
-            client, dimension = await self._get_embedding_client(embedding_model_id)
-        except ValueError as e:
-            print(f"Embedding client init failed: {e}")
-            return
+        # 4. 准备配置和状态
+        current_attributes = resource.latest_version.attributes or {}
+        last_config = current_attributes.get("last_ingest_config")
 
-        # 3. 获取待处理 Chunks
-        pending_chunks = await kb_crud.get_pending_chunks(self.db, resource_id)
-        if not pending_chunks:
-            return
+        # 5. 动作分发
+        if request.action == kb_schemas.KBTaskAction.RESUME:
+            # Resume 校验
+            if not last_config:
+                raise HTTPException(status_code=400, detail="No previous task found. Please use START.")
 
-        # 4. 批量处理 (简单循环，可优化为并发)
-        # LangChain 的 embed_documents 支持批量，但为了方便关联 ID，这里分批或逐个处理
-        batch_size = 10
-        for i in range(0, len(pending_chunks), batch_size):
-            batch = pending_chunks[i:i + batch_size]
-            texts = [c.content for c in batch]
+            # 检查配置一致性 (如果有传入新配置，必须与旧配置一致，否则报错)
+            if request.splitter_config:
+                req_config_dict = request.splitter_config.model_dump()
+                # 简单比较字典
+                if req_config_dict != last_config:
+                    raise HTTPException(status_code=400,
+                                        detail="Configuration changed. Cannot resume, please use START (Overwrite).")
 
+            # 启动后台循环 (Resume 模式)
+            asyncio.create_task(self._run_embedding_loop(
+                resource_id, embedding_model_id, dimension, rate_limit, resume=True
+            ))
+
+        elif request.action == kb_schemas.KBTaskAction.START:
+            if not request.splitter_config:
+                raise HTTPException(status_code=400, detail="Splitter config is required for START action.")
+
+            # 更新 Resource Attributes (保存配置)
+            new_config_dict = request.splitter_config.model_dump()
+            current_attributes["last_ingest_config"] = new_config_dict
+
+            # 更新版本属性
+            await resource_crud.update_resource_version(
+                self.db,
+                resource.latestVersionId,
+                schemas.ResourceVersionUpdate(attributes=current_attributes)
+            )
+
+            # 启动后台循环 (Start 模式)
+            asyncio.create_task(self._run_embedding_loop(
+                resource_id, embedding_model_id, dimension, rate_limit,
+                resume=False,
+                splitter_config=request.splitter_config,
+                file_id=current_attributes.get("source_file_id")
+            ))
+
+        return {"message": "Task started."}
+
+    async def _run_embedding_loop(
+            self,
+            resource_id: str,
+            model_id: str,
+            dimension: int,
+            rate_limit: float,
+            resume: bool,
+            splitter_config: Optional[kb_schemas.KBTextSplitterConfig] = None,
+            file_id: Optional[str] = None
+    ):
+        """
+        核心任务循环：处理切分、嵌入、存储、状态更新和取消。
+        此方法在后台任务中运行，需自行管理 DB Session 生命周期。
+        """
+        # 注册任务
+        KnowledgeBaseService._running_tasks.add(resource_id)
+
+        # 创建新的 DB Session
+        from backend.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
             try:
-                vectors = await client.aembed_documents(texts)
+                # 初始化 Embedding Client
+                # 注意：这里需要重新实例化 Service 或直接调用 helper，因为 session 不同
+                # 为了简单，直接复用 Service 实例的方法，但传入新的 session
+                temp_service = KnowledgeBaseService(session)
+                try:
+                    client, _ = await temp_service._get_embedding_client(model_id)
+                except Exception as e:
+                    await stream_manager.publish(resource_id, {"status": "error", "message": f"Model init failed: {e}"})
+                    return
 
-                for chunk, vector in zip(batch, vectors):
-                    if len(vector) != dimension:
-                        await kb_crud.update_chunk_vector_id_and_status(
-                            self.db, chunk.id, None, kb_schemas.KBChunkStatus.FAILED
+                # --- 阶段 1: 准备数据 (Start 模式需切分) ---
+                if not resume:
+                    # 1. 清理旧数据
+                    await stream_manager.publish(resource_id, {"status": "cleaning", "message": "Cleaning old data..."})
+                    await temp_service._cleanup_vectors(resource_id, dimension)
+                    await kb_crud.delete_chunks_by_resource(session, resource_id)
+
+                    # 2. 读取文件
+                    await stream_manager.publish(resource_id, {"status": "reading", "message": "Reading file..."})
+                    db_file = await file_crud.get_file(session, file_id)
+                    if not db_file:
+                        raise ValueError("Source file record not found.")
+
+                    content_bytes = await storage_service.read_bytes(db_file.storage_path)
+                    try:
+                        text_content = content_bytes.decode('utf-8')
+                    except UnicodeDecodeError:
+                        text_content = content_bytes.decode('latin-1')
+
+                    # 3. 切分
+                    await stream_manager.publish(resource_id, {"status": "splitting", "message": "Splitting text..."})
+                    splitter = SplitterFactory.create(splitter_config)
+                    text_chunks = splitter.split_text(text_content)
+
+                    # 4. 存储 Chunks
+                    chunk_schemas = [
+                        kb_schemas.KBChunkCreate(
+                            resource_id=resource_id,
+                            content=chunk,
+                            chunk_index=idx,
+                            byte_size=len(chunk.encode('utf-8'))
                         )
-                        continue
+                        for idx, chunk in enumerate(text_chunks)
+                    ]
+                    await kb_crud.batch_create_chunks(session, chunk_schemas)
 
-                    # 写入向量表
-                    rowid = await kb_crud.insert_vector(self.db, dimension, vector)
+                # --- 阶段 2: 嵌入循环 ---
 
-                    # 更新 Chunk 状态
-                    await kb_crud.update_chunk_vector_id_and_status(
-                        self.db, chunk.id, rowid, kb_schemas.KBChunkStatus.COMPLETED
-                    )
+                # 获取待处理 Chunks (Resume 模式可能包含 Failed)
+                target_statuses = [kb_schemas.KBChunkStatus.PENDING.value]
+                if resume:
+                    target_statuses.append(kb_schemas.KBChunkStatus.FAILED.value)
+
+                pending_chunks = await kb_crud.get_chunks_by_statuses(session, resource_id, target_statuses)
+                total_count = len(pending_chunks)  # 注意：这只是剩余的，不是总数。前端可通过 status 接口查总数。
+
+                batch_size = 10
+                processed_count = 0
+
+                for i in range(0, total_count, batch_size):
+                    # 检查取消信号
+                    if await stream_manager.is_cancellation_requested(resource_id):
+                        await stream_manager.publish(resource_id,
+                                                     {"status": "cancelled", "message": "Task cancelled by user."})
+                        break
+
+                    batch = pending_chunks[i:i + batch_size]
+                    texts = [c.content for c in batch]
+
+                    try:
+                        # 调用 API
+                        vectors = await client.aembed_documents(texts)
+
+                        for chunk, vector in zip(batch, vectors):
+                            if len(vector) != dimension:
+                                await kb_crud.update_chunk_vector_id_and_status(
+                                    session, chunk.id, None, kb_schemas.KBChunkStatus.FAILED
+                                )
+                                continue
+
+                            # 写入向量表
+                            rowid = await kb_crud.insert_vector(session, dimension, vector)
+
+                            # 更新 Chunk 状态
+                            await kb_crud.update_chunk_vector_id_and_status(
+                                session, chunk.id, rowid, kb_schemas.KBChunkStatus.COMPLETED
+                            )
+                    except Exception as e:
+                        logger.error(f"Embedding batch failed: {e}")
+                        for chunk in batch:
+                            await kb_crud.update_chunk_vector_id_and_status(
+                                session, chunk.id, None, kb_schemas.KBChunkStatus.FAILED
+                            )
+
+                    processed_count += len(batch)
+
+                    # 推送进度
+                    await stream_manager.publish(resource_id, {
+                        "status": "processing",
+                        "processed": processed_count,
+                        "batch_total": total_count
+                    })
+
+                    # 频率限制
+                    if rate_limit > 0:
+                        await asyncio.sleep(rate_limit)
+
+                # 任务结束
+                await stream_manager.publish(resource_id, {"status": "completed", "message": "Task finished."})
+
             except Exception as e:
-                print(f"Embedding batch failed: {e}")
-                for chunk in batch:
-                    await kb_crud.update_chunk_vector_id_and_status(
-                        self.db, chunk.id, None, kb_schemas.KBChunkStatus.FAILED
-                    )
+                logger.error(f"Task failed for resource {resource_id}: {e}")
+                await stream_manager.publish(resource_id, {"status": "error", "message": str(e)})
+            finally:
+                # 清理任务注册和取消标记
+                KnowledgeBaseService._running_tasks.discard(resource_id)
+                await stream_manager.close_stream(resource_id)
 
     async def search_kb(self, request: kb_schemas.KBSearchRequest) -> kb_schemas.KBSearchResponse:
         """
@@ -343,7 +568,6 @@ class KnowledgeBaseService:
             if kb_resource and kb_resource.latest_version:
                 embedding_model_id = (kb_resource.latest_version.attributes or {}).get("embedding_model_id")
 
-        # 如果未指定 KB 或 KB 未配置模型，尝试使用全局默认 Embedding 模型 (需 Setting 支持，此处暂略，若无则报错)
         if not embedding_model_id:
             raise HTTPException(status_code=400,
                                 detail="Embedding model not determined. Please specify a valid Knowledge Base ID.")
@@ -361,7 +585,6 @@ class KnowledgeBaseService:
             raise HTTPException(status_code=500, detail=f"Embedding generation failed: {e}")
 
         # 4. 向量检索
-        # 返回 [(rowid, distance), ...]
         vector_results = await kb_crud.search_vectors(self.db, dimension, query_vector, request.top_k)
 
         if not vector_results:
@@ -376,13 +599,12 @@ class KnowledgeBaseService:
         # 6. 格式化结果
         items = []
         for row in rows:
-            chunk = row[0]  # ResourceKBChunk object
+            chunk = row[0]
             file_id = row[1]
             file_name = row[2]
             kb_id = row[3]
             kb_name = row[4]
 
-            # 过滤掉不在 rowids 中的结果 (理论上 SQL 已经过滤，但为了顺序对应)
             if chunk.vector_id not in distance_map:
                 continue
 
@@ -396,7 +618,6 @@ class KnowledgeBaseService:
                 kb_name=kb_name
             ))
 
-        # 按分数排序
         items.sort(key=lambda x: x.score)
 
         return kb_schemas.KBSearchResponse(total=len(items), items=items)

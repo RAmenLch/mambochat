@@ -9,6 +9,7 @@
       :loading-folder-ids="loadingFolders"
       folder-item-type="folder"
       persistence-key="mambo_resource_folder_expanded_state"
+      :custom-allow-drop="checkDropPermission"
       @node-click="handleNodeClick"
       @node-contextmenu="handleNodeContextMenu"
       @root-contextmenu="openRootContextMenu"
@@ -57,19 +58,29 @@
   </el-dropdown>
 
   <!-- Dialogs -->
+
+  <!-- 1. 通用实体表单 (新建资源/文件夹/重命名) -->
   <EntityFormDialog
+    v-if="dialogState.type !== 'newKB'"
     v-model:visible="dialogState.visible.value"
     :title="dialogProps.title"
     :initial-name="dialogProps.initialName"
     :select-config="dialogProps.selectConfig"
     @confirm="onDialogConfirm"
   />
+
+  <!-- 2. 知识库专用表单 (新建知识库) -->
+  <KnowledgeBaseFormDialog
+    v-else
+    v-model:visible="dialogState.visible.value"
+    :embedding-model-options="embeddingModelOptions"
+    @confirm="handleKBConfirm"
+  />
 </template>
 
 <script setup lang="ts">
 import { onMounted, computed } from 'vue';
 import { storeToRefs } from 'pinia';
-import { ElMessage } from 'element-plus';
 import {
   Folder,
   Document,
@@ -80,6 +91,8 @@ import {
   Memo,
   Collection
 } from '@element-plus/icons-vue';
+import type { AllowDropType } from 'element-plus/es/components/tree/src/tree.type';
+import type Node from 'element-plus/es/components/tree/src/model/node';
 
 import { useResourceStore } from '@/stores/resourceStore';
 import { useProviderStore } from '@/stores/providerStore';
@@ -87,7 +100,7 @@ import { createKnowledgeBase } from '@/api/kbService';
 import { useTreeController, type DialogPayload, type DialogConfirmPayload } from '@/composables/useTreeController';
 import ExplorerTree from '@/components/common/ExplorerTree.vue';
 import EntityFormDialog from '@/components/common/EntityFormDialog.vue';
-import type { SelectConfigOption } from '@/components/common/EntityFormDialog.vue';
+import KnowledgeBaseFormDialog, { type KBConfirmPayload, type ModelGroup } from '@/components/settings/dialogs/KnowledgeBaseFormDialog.vue';
 
 import type {
   Resource,
@@ -130,10 +143,10 @@ const DEFAULT_SUBMESSAGE_ATTRIBUTES = {
 
 // --- Computed Options ---
 
-// 计算可用的 Embedding 模型选项，按服务商分组
-const embeddingModelOptions = computed<SelectConfigOption[]>(() => {
+// 计算可用的 Embedding 模型选项，按服务商分组，适配 KnowledgeBaseFormDialog 的数据结构
+const embeddingModelOptions = computed<ModelGroup[]>(() => {
   const models = providerStore.allModels.filter(m => m.model_type === 'embedding');
-  const groups: Record<string, { label: string, options: { label: string, value: string }[] }> = {};
+  const groups: Record<string, ModelGroup> = {};
 
   models.forEach(m => {
     const providerName = providerStore.providers.find(p => p.id === m.providerId)?.name || 'Unknown Provider';
@@ -145,6 +158,74 @@ const embeddingModelOptions = computed<SelectConfigOption[]>(() => {
 
   return Object.values(groups);
 });
+
+// --- Drag & Drop Validation Logic ---
+
+/**
+ * 查找节点所属的知识库 ID
+ * @param node 树节点
+ * @returns 知识库 ID，如果节点不在知识库中则返回 null
+ */
+const findKBParentId = (node: Node): string | null => {
+  let current: Node | null = node;
+  // 向上遍历，检查当前节点或其祖先是否为 knowledge_base 类型
+  while (current && current.level > 0) {
+    const data = current.data as Resource;
+    if (data.resourceType === 'knowledge_base') {
+      return data.id;
+    }
+    current = current.parent;
+  }
+  return null;
+};
+
+/**
+ * 自定义拖拽校验逻辑
+ * 1. 禁止将 KB 嵌套 (KB 放入另一个 KB)。
+ * 2. 禁止将 KB 文件移出 KB。
+ * 3. 禁止将 KB 文件移动到另一个不同的 KB (跨库移动)。
+ */
+const checkDropPermission = (draggingNode: Node, dropNode: Node, dropType: AllowDropType): boolean => {
+  const draggingData = draggingNode.data as Resource;
+  const dropData = dropNode.data as Resource;
+
+  // 场景 1: 拖拽的是知识库本身
+  if (draggingData.resourceType === 'knowledge_base') {
+    // 目标不能在另一个知识库内部
+    const targetKBId = findKBParentId(dropNode);
+    if (targetKBId) {
+      return false; // 禁止 KB 嵌套
+    }
+    // 如果目标是另一个 KB (且 dropType 是 inner)，也禁止
+    if (dropType === 'inner' && dropData.resourceType === 'knowledge_base') {
+      return false;
+    }
+    return true;
+  }
+
+  // 场景 2: 拖拽的是普通资源 (可能属于某个 KB)
+  const sourceKBId = findKBParentId(draggingNode);
+
+  // 确定目标的父级上下文 (如果是 inner，目标就是 dropNode；如果是 before/after，目标是 dropNode.parent)
+  let targetContextNode: Node | null = null;
+  if (dropType === 'inner') {
+    targetContextNode = dropNode;
+  } else {
+    targetContextNode = dropNode.parent;
+  }
+
+  // 查找目标位置所属的 KB ID
+  const targetKBId = targetContextNode ? findKBParentId(targetContextNode) : null;
+
+  // 规则: 如果源在 KB 中，必须移动到同一个 KB 中
+  if (sourceKBId) {
+    if (sourceKBId !== targetKBId) {
+      return false; // 禁止移出或跨库移动
+    }
+  }
+
+  return true;
+};
 
 // --- Tree Controller Logic ---
 const {
@@ -188,19 +269,9 @@ const {
         };
       case 'newFolder':
         return { title: '新建文件夹', initialName: '新的文件夹' };
+      // newKB 使用专用 Dialog，此处无需配置 props，但为了类型安全返回空对象
       case 'newKB':
-        return {
-          title: '新建知识库',
-          initialName: '新的知识库',
-          selectConfig: {
-            label: '嵌入模型',
-            options: embeddingModelOptions.value,
-            // 尝试自动选中第一个可用的模型
-            initialValue: embeddingModelOptions.value.length > 0
-              ? (embeddingModelOptions.value[0] as any).options?.[0]?.value
-              : undefined
-          }
-        };
+        return { title: '', initialName: '' };
       default:
         return { title: '', initialName: '' };
     }
@@ -209,6 +280,7 @@ const {
     dialogPayload: DialogPayload<Resource>,
     formPayload: DialogConfirmPayload
   ): Promise<Resource | null> => {
+    // 注意：newKB 的处理逻辑已分离到 handleKBConfirm，此处仅处理通用资源
     if (dialogPayload.type === 'rename' && dialogPayload.targetItem) {
       await resourceStore.updateResourceItem(dialogPayload.targetItem.id, { name: formPayload.name });
       return null;
@@ -231,27 +303,6 @@ const {
         itemType: 'folder',
         parentId: dialogPayload.parentId,
       });
-    } else if (dialogPayload.type === 'newKB') {
-      // 校验模型选择
-      if (!formPayload.selectValue) {
-        ElMessage.warning('创建知识库必须选择一个嵌入模型');
-        return null;
-      }
-
-      // 知识库创建逻辑：调用专用服务接口
-      newItem = await createKnowledgeBase({
-        name: formPayload.name,
-        parent_id: dialogPayload.parentId,
-        embedding_model_id: formPayload.selectValue // 必填，从 Select 获取
-      });
-
-      // 手动将新知识库同步到 Store 列表，保持视图一致性
-      if (newItem) {
-        resourceStore.resources.push(newItem);
-        if (newItem.itemType === 'folder') {
-          resourceStore.loadedFolderIds.add(newItem.id);
-        }
-      }
     }
 
     if (newItem) {
@@ -260,6 +311,36 @@ const {
     return newItem;
   }
 });
+
+// --- KB Specific Handlers ---
+
+/**
+ * 处理知识库创建确认
+ */
+const handleKBConfirm = async (payload: KBConfirmPayload) => {
+  // 获取当前上下文的父节点 ID (由 useTreeController 管理)
+  const parentId = dialogState.parentId.value;
+
+  // 调用 Service 创建知识库
+  const newItem = await createKnowledgeBase({
+    name: payload.name,
+    parent_id: parentId,
+    embedding_model_id: payload.embeddingModelId,
+    embedding_rate_limit: payload.embeddingRateLimit
+  });
+
+  // 手动同步到 Store
+  if (newItem) {
+    resourceStore.resources.push(newItem);
+    if (newItem.itemType === 'folder') {
+      resourceStore.loadedFolderIds.add(newItem.id);
+    }
+    emit('item-created', newItem);
+  }
+
+  // 关闭弹窗
+  dialogState.visible.value = false;
+};
 
 // --- Lifecycle ---
 onMounted(() => {

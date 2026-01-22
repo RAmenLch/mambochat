@@ -18,6 +18,7 @@
         <KnowledgeBaseConfig
           v-if="activeResourceDetails.resourceType === 'knowledge_base'"
           :resource="activeResourceDetails"
+          @select-file="handleFileSelected"
         />
 
         <!-- Case 2: Knowledge Base File Detail -->
@@ -67,17 +68,41 @@ const activeResourceDetails: ComputedRef<ResourceWithVersions | null> = computed
 });
 
 /**
+ * 辅助函数：向上递归查找当前资源是否属于某个 Knowledge Base
+ */
+const findKBRoot = (resource: Resource | null): Resource | null => {
+  if (!resource) return null;
+
+  // 如果当前资源本身就是 KB，返回它 (虽然这个函数主要用于查父级，但兼容一下)
+  if (resource.resourceType === 'knowledge_base') return resource;
+
+  // 如果没有父级，说明已经到了根且不是 KB
+  if (!resource.parentId) return null;
+
+  // 在 store 中查找父资源
+  const parent = resources.value.find(r => r.id === resource.parentId);
+  if (!parent) return null;
+
+  // 如果父级是 KB，找到了
+  if (parent.resourceType === 'knowledge_base') return parent;
+
+  // 否则继续向上找
+  return findKBRoot(parent);
+};
+
+/**
  * 判断当前选中的资源是否为知识库中的文件。
- * 通过检查其父级资源的 resourceType 是否为 'knowledge_base' 来确定。
+ * 支持多级文件夹嵌套，向上追溯祖先节点。
  */
 const isActiveResourceKBFile = computed(() => {
   const current = activeResourceDetails.value;
   if (!current || current.itemType !== 'resource') return false;
-  if (!current.parentId) return false;
 
-  const parent = resources.value.find(r => r.id === current.parentId);
-  return parent?.resourceType === 'knowledge_base';
+  // 查找其所属的 KB 根节点
+  const kbRoot = findKBRoot(current);
+  return !!kbRoot;
 });
+
 
 // --- Lifecycle ---
 onMounted(() => {
@@ -125,6 +150,14 @@ function handleItemDeleted(deletedId: string) {
   if (selectedResourceId.value === deletedId) {
     selectedResourceId.value = null;
   }
+}
+
+/**
+ * Handles the 'select-file' event from KnowledgeBaseConfig.
+ * Switches the view to the file detail editor.
+ */
+function handleFileSelected(file: Resource) {
+  selectedResourceId.value = file.id;
 }
 </script>
 

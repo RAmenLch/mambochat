@@ -1,24 +1,20 @@
 # backend/routers/kb_management.py
+import asyncio
+import json
 
-from fastapi import APIRouter, Depends, UploadFile, File, BackgroundTasks, status, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, status, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.database import get_db, AsyncSessionLocal
+from backend.database import get_db
 from backend import schemas
 from backend.schemas import kb as kb_schemas
 from backend.services.kb_service import KnowledgeBaseService
 from backend.crud import kb_crud
-
+from fastapi.responses import StreamingResponse
+import json
+import asyncio
+from backend.services.stream_manager_service import stream_manager
 router = APIRouter()
-
-
-async def _run_embedding_background(resource_id: str):
-    """
-    后台任务包装器：为后台 Embedding 任务创建独立的数据库会话。
-    """
-    async with AsyncSessionLocal() as db:
-        service = KnowledgeBaseService(db)
-        await service.run_embedding_task(resource_id)
 
 
 @router.post(
@@ -50,29 +46,54 @@ async def create_knowledge_base(
 )
 async def upload_file_to_kb(
         kb_id: str,
-        background_tasks: BackgroundTasks,
         file: UploadFile = File(...),
         db: AsyncSession = Depends(get_db)
 ):
     """
     上传文件到指定的知识库。
-    流程：
-    1. 校验文件类型（仅支持纯文本）。
-    2. 保存物理文件。
-    3. 在数据库中创建 File 和 Resource 记录。
-    4. 切分文本并批量存入 ResourceKBChunk 表 (状态为 PENDING)。
-    5. 触发后台任务进行向量化处理。
+    仅执行文件保存和元数据创建，不触发切分和嵌入任务。
+    后续需调用 /task 接口启动处理。
     """
     service = KnowledgeBaseService(db)
+    return await service.upload_file(kb_id=kb_id, file=file)
 
-    # 执行文件入库和切分逻辑
-    new_resource = await service.ingest_file(kb_id=kb_id, file=file)
 
-    # 添加后台向量化任务
-    # 注意：不能直接使用当前的 db 会话，因为它会在请求结束时关闭
-    background_tasks.add_task(_run_embedding_background, new_resource.id)
+@router.post(
+    "/files/{resource_id}/task",
+    status_code=status.HTTP_200_OK,
+    summary="管理文件处理任务"
+)
+async def run_kb_file_task(
+        resource_id: str,
+        request: kb_schemas.KBRunTaskRequest,
+        db: AsyncSession = Depends(get_db)
+):
+    """
+    启动、恢复或停止文件的切分与嵌入任务。
+    - Start: 覆盖更新，需提供切分配置。
+    - Resume: 断点续连，仅处理未完成的切片。
+    - Stop: 停止当前正在运行的任务。
+    """
+    service = KnowledgeBaseService(db)
+    return await service.handle_task_action(resource_id, request)
 
-    return new_resource
+
+@router.delete(
+    "/files/{resource_id}",
+    response_model=schemas.Resource,
+    status_code=status.HTTP_200_OK,
+    summary="删除知识库文件"
+)
+async def delete_kb_file(
+        resource_id: str,
+        db: AsyncSession = Depends(get_db)
+):
+    """
+    删除知识库文件。
+    会清理关联的向量数据和切片记录，然后删除资源。
+    """
+    service = KnowledgeBaseService(db)
+    return await service.delete_kb_file(resource_id)
 
 
 @router.get(
@@ -106,3 +127,40 @@ async def search_knowledge_base(
     """
     service = KnowledgeBaseService(db)
     return await service.search_kb(request)
+
+
+async def _kb_task_stream_generator(resource_id: str):
+    """
+    KB 任务进度的 SSE 生成器。
+    """
+    queue = await stream_manager.subscribe(resource_id)
+    try:
+        while True:
+            data = await queue.get()
+
+            if data is None:
+                # 发送结束信号，方便前端处理
+                yield f"event: end\ndata: Task finished\n\n"
+                break
+
+            yield f"data: {json.dumps(data)}\n\n"
+            queue.task_done()
+    except asyncio.CancelledError:
+        pass
+    finally:
+        await stream_manager.unsubscribe(resource_id, queue)
+
+
+@router.get(
+    "/files/{resource_id}/progress",
+    summary="订阅文件处理进度 (SSE)"
+)
+async def subscribe_kb_file_progress(resource_id: str):
+    """
+    订阅指定文件的切分/嵌入任务进度。
+    返回 Server-Sent Events (SSE) 流。
+    """
+    return StreamingResponse(
+        _kb_task_stream_generator(resource_id),
+        media_type="text/event-stream"
+    )

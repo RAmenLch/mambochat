@@ -5,7 +5,7 @@ from typing import List, Optional, Tuple, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import aliased
-from sqlalchemy import text, func, case
+from sqlalchemy import text, func, case, delete
 
 from backend.models import kb_model, resource_model
 from backend.schemas import kb as kb_schemas
@@ -39,11 +39,29 @@ async def get_pending_chunks(
         db: AsyncSession,
         resource_id: str
 ) -> List[kb_model.ResourceKBChunk]:
+    """获取所有状态为 PENDING 的切片"""
     result = await db.execute(
         select(kb_model.ResourceKBChunk)
         .filter(
             kb_model.ResourceKBChunk.resource_id == resource_id,
             kb_model.ResourceKBChunk.status == kb_schemas.KBChunkStatus.PENDING.value
+        )
+        .order_by(kb_model.ResourceKBChunk.chunk_index.asc())
+    )
+    return result.scalars().all()
+
+
+async def get_chunks_by_statuses(
+        db: AsyncSession,
+        resource_id: str,
+        statuses: List[str]
+) -> List[kb_model.ResourceKBChunk]:
+    """获取指定状态列表的切片，用于断点续连 (例如获取 PENDING 和 FAILED)"""
+    result = await db.execute(
+        select(kb_model.ResourceKBChunk)
+        .filter(
+            kb_model.ResourceKBChunk.resource_id == resource_id,
+            kb_model.ResourceKBChunk.status.in_(statuses)
         )
         .order_by(kb_model.ResourceKBChunk.chunk_index.asc())
     )
@@ -61,6 +79,33 @@ async def update_chunk_vector_id_and_status(
         chunk.vector_id = vector_id
         chunk.status = status.value
         await db.commit()
+
+
+async def delete_chunks_by_resource(
+        db: AsyncSession,
+        resource_id: str
+) -> None:
+    """删除指定资源的所有切片记录"""
+    await db.execute(
+        delete(kb_model.ResourceKBChunk)
+        .where(kb_model.ResourceKBChunk.resource_id == resource_id)
+    )
+    await db.commit()
+
+
+async def get_vector_ids_by_resource(
+        db: AsyncSession,
+        resource_id: str
+) -> List[int]:
+    """获取指定资源下所有已完成切片的 vector_id"""
+    result = await db.execute(
+        select(kb_model.ResourceKBChunk.vector_id)
+        .filter(
+            kb_model.ResourceKBChunk.resource_id == resource_id,
+            kb_model.ResourceKBChunk.vector_id.is_not(None)
+        )
+    )
+    return result.scalars().all()
 
 
 async def get_chunk_stats_by_resource(
@@ -123,6 +168,26 @@ async def insert_vector(
     rowid = result.lastrowid
     await db.commit()
     return rowid
+
+
+async def delete_vectors(
+        db: AsyncSession,
+        dimension: int,
+        rowids: List[int]
+) -> None:
+    """
+    从指定维度的虚拟表中批量删除向量。
+    """
+    if not rowids:
+        return
+
+    table_name = f"vec_dim_{dimension}"
+    # 将 rowids 转换为逗号分隔的字符串，注意安全，rowids 是 int 列表
+    rowids_str = ",".join(map(str, rowids))
+
+    stmt = text(f"DELETE FROM {table_name} WHERE rowid IN ({rowids_str})")
+    await db.execute(stmt)
+    await db.commit()
 
 
 async def search_vectors(

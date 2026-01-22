@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/settings/kb/KnowledgeBaseConfig.vue -->
 <template>
   <div class="kb-config-container">
     <div class="kb-config-header">
@@ -9,18 +10,19 @@
       <div class="config-section">
         <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="kb-form">
           <el-row :gutter="20">
-            <el-col :span="16">
+            <el-col :span="12">
               <el-form-item label="知识库名称" prop="name">
                 <el-input v-model="form.name" placeholder="请输入知识库名称" />
               </el-form-item>
             </el-col>
-            <el-col :span="8">
+            <el-col :span="12">
               <el-form-item label="嵌入模型 (Embedding Model)" prop="embeddingModelId">
                 <el-select
                   v-model="form.embeddingModelId"
                   placeholder="请选择嵌入模型"
                   :disabled="isSaving"
                   clearable
+                  style="width: 100%"
                 >
                   <el-option
                     v-for="model in embeddingModels"
@@ -36,6 +38,27 @@
                     </span>
                   </el-option>
                 </el-select>
+              </el-form-item>
+            </el-col>
+          </el-row>
+
+          <el-row :gutter="20">
+            <el-col :span="12">
+              <el-form-item prop="embeddingRateLimit">
+                <template #label>
+                  <span>嵌入频率限制 (秒)</span>
+                  <el-tooltip content="每次 Embedding 请求后的冷却时间，用于防止触发 API 速率限制" placement="top">
+                    <el-icon class="label-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-input-number
+                  v-model="form.embeddingRateLimit"
+                  :min="0"
+                  :step="0.1"
+                  :precision="2"
+                  style="width: 100%"
+                  placeholder="0.0"
+                />
               </el-form-item>
             </el-col>
           </el-row>
@@ -69,7 +92,7 @@
         <div class="files-header">
           <span class="section-title">文档列表</span>
           <div class="files-actions">
-            <el-button @click="refreshFiles" :icon="Refresh" circle />
+            <el-button @click="refreshFiles" :icon="Refresh" circle title="刷新列表" />
             <el-button type="primary" :icon="Upload" @click="triggerUpload" :disabled="!canUpload">
               上传文档
             </el-button>
@@ -83,33 +106,41 @@
           </div>
         </div>
 
-        <el-table
-          v-loading="isFilesLoading"
-          :data="kbFiles"
-          style="width: 100%"
-          empty-text="暂无文档，请上传"
-        >
-          <el-table-column prop="name" label="文件名" min-width="200">
-            <template #default="{ row }">
-              <div class="file-name-cell">
-                <el-icon><Document /></el-icon>
-                <span class="text-truncate" :title="row.name">{{ row.name }}</span>
+        <div v-loading="isFilesLoading" class="tree-container">
+          <el-tree
+            v-if="kbTreeData.length > 0"
+            :data="kbTreeData"
+            node-key="id"
+            :props="{ label: 'name', children: 'children' }"
+            default-expand-all
+            :expand-on-click-node="false"
+            class="kb-file-tree"
+          >
+            <template #default="{ node, data }">
+              <div class="custom-tree-node" :class="{ 'is-stub': data.itemType === 'stub' }">
+                <div class="node-content">
+                  <el-icon class="node-icon">
+                    <Folder v-if="data.itemType === 'folder'" />
+                    <Document v-else />
+                  </el-icon>
+                  <span class="node-label" :title="node.label">{{ node.label }}</span>
+                </div>
+
+                <div class="node-actions" v-if="data.itemType === 'resource'">
+                  <span class="upload-time">{{ new Date(data.updatedAt).toLocaleDateString() }}</span>
+                  <el-button type="primary" link size="small" @click="handleManageFile(data)">
+                    <el-icon class="el-icon--left"><Setting /></el-icon>
+                    配置任务
+                  </el-button>
+                  <el-button type="danger" link size="small" @click="handleDeleteFile(data)">
+                    删除
+                  </el-button>
+                </div>
               </div>
             </template>
-          </el-table-column>
-          <el-table-column prop="updatedAt" label="上传时间" width="180">
-            <template #default="{ row }">
-              {{ new Date(row.updatedAt).toLocaleString() }}
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="100" align="right">
-            <template #default="{ row }">
-              <el-button type="danger" link size="small" @click="handleDeleteFile(row)">
-                删除
-              </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
+          </el-tree>
+          <el-empty v-else description="暂无文档，请上传" :image-size="80" />
+        </div>
       </div>
     </el-scrollbar>
   </div>
@@ -119,22 +150,27 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { Refresh, Upload, Document } from '@element-plus/icons-vue'
+import { Refresh, Upload, Document, QuestionFilled, Setting, Folder } from '@element-plus/icons-vue'
 
 import { useResourceStore } from '@/stores/resourceStore'
 import { useProviderStore } from '@/stores/providerStore'
 import { uploadKBFile } from '@/api/kbService'
-import type { Resource, ResourceWithVersions } from '@/api/types'
+import type { Resource, ResourceWithVersions, ResourceNode } from '@/api/types'
 
-// --- Props ---
+// --- Props & Emits ---
 const props = defineProps<{
   resource: ResourceWithVersions
+}>()
+
+const emit = defineEmits<{
+  (e: 'select-file', resource: Resource): void
 }>()
 
 // --- Stores ---
 const resourceStore = useResourceStore()
 const providerStore = useProviderStore()
 const { providers } = storeToRefs(providerStore)
+const { resourceTree } = storeToRefs(resourceStore)
 
 // --- State ---
 const formRef = ref<FormInstance>()
@@ -147,12 +183,14 @@ interface KBFormState {
   name: string
   description: string
   embeddingModelId: string
+  embeddingRateLimit: number
 }
 
 const form = reactive<KBFormState>({
   name: '',
   description: '',
   embeddingModelId: '',
+  embeddingRateLimit: 0,
 })
 
 const rules = reactive<FormRules>({
@@ -167,11 +205,26 @@ const embeddingModels = computed(() => {
   return providerStore.allModels.filter((m) => m.model_type === 'embedding')
 })
 
-// 获取当前知识库下的文件列表
-const kbFiles = computed(() => {
-  return resourceStore.resources.filter(
-    (r) => r.parentId === props.resource.id && r.itemType === 'resource',
-  )
+/**
+ * 递归查找当前知识库节点
+ */
+const findNodeById = (nodes: ResourceNode[], id: string): ResourceNode | null => {
+  for (const node of nodes) {
+    if (node.id === id) return node
+    if (node.children) {
+      const found = findNodeById(node.children, id)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+/**
+ * 获取当前知识库的树状结构数据
+ */
+const kbTreeData = computed(() => {
+  const kbNode = findNodeById(resourceTree.value, props.resource.id)
+  return kbNode?.children || []
 })
 
 // 获取 attributes
@@ -181,10 +234,12 @@ const currentAttributes = computed(() => {
 
 // 判断表单是否有变更
 const isFormDirty = computed(() => {
+  const currentRateLimit = currentAttributes.value.embedding_rate_limit || 0
   return (
     form.name !== props.resource.name ||
     form.description !== (props.resource.description || '') ||
-    form.embeddingModelId !== (currentAttributes.value.embedding_model_id || '')
+    form.embeddingModelId !== (currentAttributes.value.embedding_model_id || '') ||
+    form.embeddingRateLimit !== currentRateLimit
   )
 })
 
@@ -205,6 +260,7 @@ const initForm = () => {
   form.name = props.resource.name
   form.description = props.resource.description || ''
   form.embeddingModelId = currentAttributes.value.embedding_model_id || ''
+  form.embeddingRateLimit = currentAttributes.value.embedding_rate_limit || 0
 }
 
 const loadFiles = async () => {
@@ -230,10 +286,14 @@ const handleSave = async () => {
           })
         }
 
-        // 2. 更新版本信息 (Attributes -> embedding_model_id)
-        // 只有当模型ID变更时才调用版本更新
+        // 2. 更新版本信息 (Attributes -> embedding_model_id, embedding_rate_limit)
         const currentModelId = currentAttributes.value.embedding_model_id
-        if (form.embeddingModelId !== currentModelId) {
+        const currentRateLimit = currentAttributes.value.embedding_rate_limit || 0
+
+        if (
+          form.embeddingModelId !== currentModelId ||
+          form.embeddingRateLimit !== currentRateLimit
+        ) {
           if (props.resource.latest_version) {
             await resourceStore.updateResourceVersionItem(
               props.resource.id,
@@ -242,6 +302,7 @@ const handleSave = async () => {
                 attributes: {
                   ...currentAttributes.value,
                   embedding_model_id: form.embeddingModelId,
+                  embedding_rate_limit: form.embeddingRateLimit,
                 },
               },
             )
@@ -278,7 +339,7 @@ const handleFileChange = async (event: Event) => {
   const file = input.files[0]
   isUploading.value = true
   const loadingInstance = ElMessage.info({
-    message: '正在上传并处理文件...',
+    message: '正在上传文件...',
     duration: 0,
   })
 
@@ -287,14 +348,13 @@ const handleFileChange = async (event: Event) => {
     const newFile = await uploadKBFile(props.resource.id, file)
 
     // 将新文件直接添加到 Store 中，以立即更新 UI 列表
-    // 补充 versions 字段以符合 ResourceWithVersions 类型
     const newResourceWithVersions: ResourceWithVersions = {
       ...newFile,
       versions: [],
     }
     resourceStore.resources.push(newResourceWithVersions)
 
-    ElMessage.success('上传成功，后台正在进行向量化处理')
+    ElMessage.success('上传成功，请点击"配置任务"以启动切分与嵌入')
   } catch (error) {
     console.error('Upload failed', error)
     ElMessage.error('上传失败')
@@ -303,6 +363,10 @@ const handleFileChange = async (event: Event) => {
     isUploading.value = false
     input.value = ''
   }
+}
+
+const handleManageFile = (file: Resource) => {
+  emit('select-file', file)
 }
 
 const handleDeleteFile = async (file: Resource) => {
@@ -340,15 +404,21 @@ watch(
   },
 )
 
-// 监听嵌入模型ID变化，处理异步数据加载的情况
-// 解决刷新页面后，详情数据异步返回导致表单未更新的问题
+// 监听属性变化，处理异步数据加载的情况
 watch(
-  () => props.resource.latest_version?.attributes?.embedding_model_id,
-  (newVal) => {
-    if (newVal && form.embeddingModelId !== newVal) {
-      form.embeddingModelId = newVal
+  () => props.resource.latest_version?.attributes,
+  (newAttrs) => {
+    if (newAttrs) {
+      if (newAttrs.embedding_model_id && form.embeddingModelId !== newAttrs.embedding_model_id) {
+        form.embeddingModelId = newAttrs.embedding_model_id
+      }
+      const rateLimit = newAttrs.embedding_rate_limit || 0
+      if (form.embeddingRateLimit !== rateLimit) {
+        form.embeddingRateLimit = rateLimit
+      }
     }
   },
+  { deep: true },
 )
 </script>
 
@@ -415,15 +485,80 @@ watch(
   gap: 12px;
 }
 
-.file-name-cell {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.label-icon {
+  margin-left: 4px;
+  color: var(--el-text-color-secondary);
+  cursor: help;
+  vertical-align: middle;
 }
 
-.text-truncate {
+/* Tree Styles */
+.tree-container {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.kb-file-tree {
+  /* Remove default padding if needed */
+}
+
+.custom-tree-node {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+  padding-right: 8px;
+  height: 40px; /* Increase row height for better button visibility */
+  width: 100%;
+}
+
+.custom-tree-node.is-stub {
+  display: none;
+}
+
+.node-content {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  flex-grow: 1;
+}
+
+.node-icon {
+  margin-right: 8px;
+  font-size: 16px;
+  color: var(--el-text-color-secondary);
+  flex-shrink: 0;
+}
+
+.node-label {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.node-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.upload-time {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-right: 8px;
+}
+
+:deep(.el-tree-node__content) {
+  height: auto; /* Allow custom height */
+  padding-top: 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+:deep(.el-tree-node__content:hover) {
+  background-color: var(--el-fill-color-light);
 }
 </style>

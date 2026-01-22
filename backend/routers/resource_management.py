@@ -47,7 +47,12 @@ async def create_resource(resource: schemas.ResourceCreate, db: AsyncSession = D
 async def move_resources(move_request: schemas.ResourceMoveRequest, db: AsyncSession = Depends(get_db)):
     """
     移动资源或文件夹到指定位置（Inside, Before, After）。
+    **包含知识库层级约束检查。**
     """
+    # 1. 执行层级约束验证
+    await resource_service.validate_move_operation(db, move_request)
+
+    # 2. 执行移动
     success = await resource_crud.move_resources(db, move_request=move_request)
     if not success:
         raise HTTPException(status_code=400, detail="Move operation failed")
