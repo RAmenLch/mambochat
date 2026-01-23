@@ -5,11 +5,11 @@ import apiClient from './index'
 import type {
   Resource,
   KnowledgeBaseCreate,
-  KBChunkStatus,
   KBSearchRequest,
   KBSearchResponse,
   KBRunTaskRequest,
   KBTaskProgressPayload,
+  KBUpdateConfigRequest,
 } from './types'
 
 /**
@@ -37,11 +37,12 @@ export const uploadKBFile = (kbId: string, file: File): Promise<Resource> => {
 }
 
 /**
- * 查询特定文件的切片向量化处理状态
+ * 更新知识库文件的切分配置
  * @param resourceId 文件资源ID
+ * @param data 配置数据
  */
-export const getKBFileStatus = (resourceId: string): Promise<KBChunkStatus> => {
-  return apiClient.get(`/kb/chunks/${resourceId}/status`)
+export const updateKBFileConfig = (resourceId: string, data: KBUpdateConfigRequest): Promise<Resource> => {
+  return apiClient.put(`/kb/files/${resourceId}/config`, data)
 }
 
 /**
@@ -54,6 +55,7 @@ export const searchKnowledgeBase = (data: KBSearchRequest): Promise<KBSearchResp
 /**
  * 控制知识库文件的切分与嵌入任务
  * 支持启动(start)、断点续连(resume)和停止(stop)
+ * 注意：不再接收配置参数，启动前请确保配置已通过 updateKBFileConfig 保存
  * @param resourceId 文件资源ID
  * @param data 任务控制参数
  */
@@ -99,7 +101,7 @@ export const subscribeToKBFileProgress = (
       }
 
       try {
-        // 处理 SSE 消息，Payload 结构与 KBChunkStatus 一致
+        // 处理 SSE 消息
         const data: KBTaskProgressPayload = JSON.parse(event.data)
         onMessage(data)
       } catch (e) {

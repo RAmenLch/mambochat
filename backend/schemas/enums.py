@@ -65,3 +65,15 @@ class ResourceType(str, Enum):
     SYSTEM_PROMPT = "system_prompt"
     SUBMESSAGE_TEMPLATE = "submessage_template"
     KB_FILE = "kb_file"
+
+
+class KBFileStatus(str, Enum):
+    """定义知识库文件的整体处理状态"""
+    INITIAL = "INITIAL"      # 初始状态，未处理
+    CLEANING = "CLEANING"    # 正在清理旧数据
+    READING = "READING"      # 正在读取文件
+    SPLITTING = "SPLITTING"  # 正在切分文本
+    EMBEDDING = "EMBEDDING"  # 正在进行向量化 (原 PROCESSING)
+    COMPLETED = "COMPLETED"  # 处理完成 (原 INDEXED)
+    FAILED = "FAILED"        # 处理失败
+    STOPPED = "STOPPED"      # 任务已停止

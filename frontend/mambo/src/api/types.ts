@@ -365,7 +365,16 @@ export type ResourceItemType = 'resource' | 'folder' | 'stub'
 /**
  * 定义资源的具体品类。
  */
-export type ResourceType = 'system_prompt' | 'submessage_template' | 'knowledge_base' | string
+export type ResourceType = 'system_prompt' | 'submessage_template' | 'knowledge_base' | 'knowledge_base_chunk' | 'kb_file' | string
+
+/**
+ * 知识库文件属性结构
+ */
+export interface KBFileAttributes {
+  splitter_config?: KBSplitterConfig
+  last_ingest_config?: KBSplitterConfig
+  [key: string]: any
+}
 
 /**
  * 代表一个资源版本快照。
@@ -376,7 +385,7 @@ export interface ResourceVersion {
   name: string
   commitMessage: string | null
   content: string | null
-  attributes: Record<string, any> | null
+  attributes: KBFileAttributes | Record<string, any> | null
   sortOrder: number
   createdAt: string // ISO 8601 date string
   updatedAt: string // ISO 8601 date string
@@ -556,7 +565,14 @@ export interface ResourceSearchResponse {
 /**
  * 知识库文件处理状态
  */
-export type KBFileStatus = 'INITIAL' | 'PENDING' | 'PROCESSING' | 'INDEXED' | 'FAILED' | 'STOPPED'
+export type KBFileStatus =   | 'INITIAL'
+  | 'CLEANING'
+  | 'READING'
+  | 'SPLITTING'
+  | 'EMBEDDING'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'STOPPED'
 /**
  * 知识库创建请求参数
  */
@@ -581,6 +597,18 @@ export interface KBChunkStatus {
   file_status: KBFileStatus
   message?: string
 }
+
+/**
+ * 实时进度事件 (对应 SSE 的 Stream Event)
+ * 用于描述当前步骤（如 EMBEDDING）的具体进度
+ */
+export interface KBTaskStreamEvent {
+  status: KBFileStatus
+  message: string
+  processed: number
+  total: number
+}
+
 /**
  * 向量检索请求参数
  */
@@ -626,18 +654,34 @@ export interface KBSplitterConfig {
   splitter_type: SplitterType
   chunk_size: number
   chunk_overlap: number
-  separator?: string // 仅当 splitter_type 为 'separator' 时有效
+  separator?: string | null // 仅当 splitter_type 为 'separator' 时有效
+}
+
+/**
+ * 更新知识库文件配置的请求体
+ */
+export interface KBUpdateConfigRequest {
+  splitter_config: KBSplitterConfig
 }
 
 /**
  * 启动/控制知识库任务的请求体
+ * 注意：Start 任务不再接收配置参数，请先调用更新配置接口
  */
 export interface KBRunTaskRequest {
   action: KBTaskAction
-  splitter_config?: KBSplitterConfig // 仅 action="start" 时必填
 }
 
 /**
  * 知识库文件处理进度的 SSE 事件载荷
  */
-export type KBTaskProgressPayload = KBChunkStatus
+export type KBTaskProgressPayload = KBChunkStatus | KBTaskStreamEvent
+/**
+ * Resume 任务冲突时的错误详情结构 (409 Conflict)
+ */
+export interface KBResumeConflictErrorDetail {
+  message: string
+  current_config: KBSplitterConfig
+  last_ingest_config: KBSplitterConfig
+}
+

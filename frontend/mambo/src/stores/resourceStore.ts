@@ -163,6 +163,20 @@ export const useResourceStore = defineStore('resource', () => {
   }
 
   /**
+   * 直接更新资源属性（用于同步后端返回的最新属性，如配置变更）
+   */
+  function updateResourceAttributes(resourceId: string, newAttributes: Record<string, any>) {
+    const resource = resources.value.find(r => r.id === resourceId);
+    if (resource && resource.latest_version) {
+      // 合并更新，确保不丢失其他属性
+      resource.latest_version.attributes = {
+        ...resource.latest_version.attributes,
+        ...newAttributes
+      };
+    }
+  }
+
+  /**
    * 为指定资源创建新版本。
    */
   async function createNewVersion(resourceId: string, versionData: ResourceVersionCreate) {
@@ -228,8 +242,10 @@ export const useResourceStore = defineStore('resource', () => {
     // Resource-specific Actions
     updateVersionContent,
     updateResourceVersionItem,
+    updateResourceAttributes,
     createNewVersion,
     setActiveResourceVersion,
     fetchResourceDetails,
   };
 });
+

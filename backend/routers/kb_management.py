@@ -51,10 +51,29 @@ async def upload_file_to_kb(
     """
     上传文件到指定的知识库。
     仅执行文件保存和元数据创建，不触发切分和嵌入任务。
-    后续需调用 /task 接口启动处理。
+    后续需调用 /config 接口保存配置，再调用 /task 接口启动处理。
     """
     service = KnowledgeBaseService(db)
     return await service.upload_file(kb_id=kb_id, file=file)
+
+
+@router.put(
+    "/files/{resource_id}/config",
+    response_model=schemas.Resource,
+    status_code=status.HTTP_200_OK,
+    summary="更新文件切分配置"
+)
+async def update_kb_file_config(
+        resource_id: str,
+        config_request: kb_schemas.KBUpdateConfigRequest,
+        db: AsyncSession = Depends(get_db)
+):
+    """
+    更新知识库文件的切分配置（Splitter Config）。
+    此操作会更新 ResourceVersion 的 attributes。
+    """
+    service = KnowledgeBaseService(db)
+    return await service.update_kb_file_config(resource_id, config_request)
 
 
 @router.post(
@@ -69,8 +88,8 @@ async def run_kb_file_task(
 ):
     """
     启动、恢复或停止文件的切分与嵌入任务。
-    - Start: 覆盖更新，需提供切分配置。
-    - Resume: 断点续连，仅处理未完成的切片。
+    - Start: 使用当前保存的配置覆盖更新，重新切分。
+    - Resume: 断点续连，仅处理未完成的切片。需确保当前配置与上次运行配置一致，否则报错。
     - Stop: 停止当前正在运行的任务。
     """
     service = KnowledgeBaseService(db)
@@ -95,24 +114,6 @@ async def delete_kb_file(
     return await service.delete_kb_file(resource_id)
 
 
-@router.get(
-    "/chunks/{resource_id}/status",
-    response_model=kb_schemas.KBProcessingStatus,
-    summary="查询文件处理状态"
-)
-async def get_file_processing_status(
-        resource_id: str,
-        db: AsyncSession = Depends(get_db)
-):
-    """
-    查询指定文件（Resource）的切片处理进度。
-    返回总切片数、待处理数、完成数、失败数以及聚合状态。
-    此接口逻辑已与 SSE 订阅接口统一，均通过 Service 层进行综合状态判定。
-    """
-    service = KnowledgeBaseService(db)
-    return await service.get_comprehensive_file_status(resource_id)
-
-
 @router.post(
     "/search",
     response_model=kb_schemas.KBSearchResponse,
@@ -135,7 +136,7 @@ async def _kb_task_stream_generator(resource_id: str):
     KB 任务进度的 SSE 生成器。
     逻辑：
     1. 获取当前综合状态快照并立即推送。
-    2. 如果状态为 PROCESSING，则订阅消息队列持续推送进度。
+    2. 如果状态为活跃状态（CLEANING, READING, SPLITTING, EMBEDDING），则订阅消息队列持续推送进度。
     3. 否则，发送结束信号并关闭连接。
     """
     # 1. 获取并推送初始状态
@@ -146,8 +147,16 @@ async def _kb_task_stream_generator(resource_id: str):
     # 推送初始状态快照
     yield f"data: {initial_status.model_dump_json()}\n\n"
 
+    # 定义需要进入流式监听的活跃状态
+    active_statuses = {
+        kb_schemas.KBFileStatus.CLEANING,
+        kb_schemas.KBFileStatus.READING,
+        kb_schemas.KBFileStatus.SPLITTING,
+        kb_schemas.KBFileStatus.EMBEDDING
+    }
+
     # 2. 根据状态决定是否进入流式监听
-    if initial_status.file_status == "PROCESSING":
+    if initial_status.file_status in active_statuses:
         queue = await stream_manager.subscribe(resource_id)
         try:
             while True:
@@ -158,7 +167,14 @@ async def _kb_task_stream_generator(resource_id: str):
                     yield f"event: end\ndata: Task finished\n\n"
                     break
 
-                yield f"data: {json.dumps(data)}\n\n"
+                # 将字典转换为 Pydantic 模型以处理 Enum 序列化
+                try:
+                    event_obj = kb_schemas.KBStreamEvent(**data)
+                    yield f"data: {event_obj.model_dump_json()}\n\n"
+                except Exception:
+                    # 兜底处理，防止序列化异常中断流
+                    yield f"data: {json.dumps(data, default=str)}\n\n"
+
                 queue.task_done()
         except asyncio.CancelledError:
             pass

@@ -9,6 +9,7 @@ from sqlalchemy import text, func, case, delete, update
 
 from backend.models import kb_model, resource_model
 from backend.schemas import kb as kb_schemas
+from backend.schemas.enums import KBFileStatus
 
 
 # --- Chunk Management ---
@@ -150,16 +151,20 @@ async def get_chunk_stats_by_resource(
     stopped = row.stopped or 0
 
     # 基础状态判断，Service层会根据内存任务状态进行更精确的修正
-    if failed > 0:
-        file_status = "FAILED"
+    if total == 0:
+        file_status = KBFileStatus.INITIAL
+    elif failed > 0:
+        file_status = KBFileStatus.FAILED
     elif stopped > 0:
-        file_status = "STOPPED"
+        file_status = KBFileStatus.STOPPED
     elif pending > 0:
-        file_status = "PROCESSING"
+        # 在数据库层面，PENDING 代表尚未处理完成，映射为 EMBEDDING
+        # Service 层如果知道正在 SPLITTING 或 READING，会覆盖此状态
+        file_status = KBFileStatus.EMBEDDING
     elif total > 0 and total == completed:
-        file_status = "INDEXED"
+        file_status = KBFileStatus.COMPLETED
     else:
-        file_status = "INITIAL"
+        file_status = KBFileStatus.INITIAL
 
     return kb_schemas.KBProcessingStatus(
         resource_id=resource_id,

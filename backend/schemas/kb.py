@@ -4,8 +4,11 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 from enum import Enum
 
+from backend.schemas.enums import KBFileStatus
+
 
 class KBChunkStatus(str, Enum):
+    """定义单个切片在数据库中的状态"""
     PENDING = "PENDING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
@@ -30,6 +33,10 @@ class KBTextSplitterConfig(BaseModel):
     chunk_size: int = Field(500, ge=50, le=5000, description="切片大小 (字符数)")
     chunk_overlap: int = Field(50, ge=0, description="切片重叠大小 (字符数)")
     separator: Optional[str] = Field(None, description="分隔符，仅当 splitter_type 为 separator 时有效，例如 '\\n\\n'")
+
+
+class KBUpdateConfigRequest(BaseModel):
+    splitter_config: KBTextSplitterConfig = Field(..., description="切分配置参数")
 
 
 # --- Chunk Models ---
@@ -80,20 +87,27 @@ class KBSearchResponse(BaseModel):
 # --- Status & Task Models ---
 
 class KBProcessingStatus(BaseModel):
-    """文件处理状态统计"""
+    """文件处理状态统计 (快照)"""
     resource_id: str
     total_chunks: int
     pending_chunks: int
     completed_chunks: int
     failed_chunks: int
     stopped_chunks: int
-    # 聚合状态: PROCESSING, INDEXED, FAILED, STOPPED, INITIAL
-    file_status: str
+    # 聚合状态，使用统一枚举
+    file_status: KBFileStatus
+
+
+class KBStreamEvent(BaseModel):
+    """SSE 流式事件数据结构"""
+    status: KBFileStatus
+    message: str
+    processed: int = 0
+    total: int = 0
 
 
 class KBRunTaskRequest(BaseModel):
     action: KBTaskAction = Field(..., description="任务动作: start(覆盖), resume(续连), stop(停止)")
-    splitter_config: Optional[KBTextSplitterConfig] = Field(None, description="切分配置，Start 时必填，Resume 时若提供需与上次一致")
 
 
 class KBCreate(BaseModel):

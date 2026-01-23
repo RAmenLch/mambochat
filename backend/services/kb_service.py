@@ -14,7 +14,14 @@ from backend import schemas
 from backend.crud import kb_crud, resource_crud, file_crud, provider_crud
 from backend.models import resource_model
 from backend.schemas import kb as kb_schemas
-from backend.schemas.enums import FileManagementType, ModelType, ResourceItemType, ResourceType, ProviderWorkerType
+from backend.schemas.enums import (
+    FileManagementType,
+    ModelType,
+    ResourceItemType,
+    ResourceType,
+    ProviderWorkerType,
+    KBFileStatus
+)
 from backend.services.storage_service import storage_service
 from backend.services.stream_manager_service import stream_manager
 
@@ -296,19 +303,61 @@ class KnowledgeBaseService:
             management_type=FileManagementType.GLOBAL_SETTING.value
         )
 
-        # 5. 创建 Resource (KB File)
-        # 初始状态下没有切分配置，attributes 仅存储 source_file_id
+        # 5. 准备默认切分配置
+        default_config = kb_schemas.KBTextSplitterConfig(
+            splitter_type=kb_schemas.KBSplitterType.SIMPLE,
+            chunk_size=500,
+            chunk_overlap=50
+        )
+
+        # 6. 创建 Resource (KB File)
+        # initial_content 存储 file_id
+        # initial_attributes 存储默认配置，不存储 source_file_id
         resource_create = schemas.ResourceCreate(
             name=file.filename,
             itemType=ResourceItemType.RESOURCE,
             resourceType=ResourceType.KB_FILE,
             parentId=kb_id,
             initial_content=db_file.id,
-            initial_attributes={"source_file_id": db_file.id}
+            initial_attributes={
+                "splitter_config": default_config.model_dump()
+            }
         )
         new_resource = await resource_crud.create_resource(self.db, resource_create)
 
         return new_resource
+
+    async def update_kb_file_config(self, resource_id: str, config_data: kb_schemas.KBUpdateConfigRequest) -> schemas.Resource:
+        """
+        更新知识库文件的切分配置。
+        同时清理冗余的 source_file_id 属性。
+        """
+        resource = await resource_crud.get_resource_with_versions(self.db, resource_id)
+        if not resource:
+            raise HTTPException(status_code=404, detail="Resource not found")
+
+        if resource.resourceType != ResourceType.KB_FILE.value:
+            raise HTTPException(status_code=400, detail="Resource is not a knowledge base file.")
+
+        current_attributes = resource.latest_version.attributes or {}
+
+        # 数据清洗：移除 source_file_id
+        if "source_file_id" in current_attributes:
+            del current_attributes["source_file_id"]
+
+        # 写入新配置
+        current_attributes["splitter_config"] = config_data.splitter_config.model_dump()
+
+        # 持久化更新
+        await resource_crud.update_resource_version(
+            self.db,
+            resource.latestVersionId,
+            schemas.ResourceVersionUpdate(attributes=current_attributes)
+        )
+
+        await self.db.refresh(resource)
+        await self.db.refresh(resource, ['latest_version'])
+        return resource
 
     async def delete_kb_file(self, resource_id: str) -> schemas.Resource:
         """
@@ -349,29 +398,10 @@ class KnowledgeBaseService:
         is_running = resource_id in KnowledgeBaseService._running_tasks
 
         # 3. 综合判定逻辑
-        final_status = "INITIAL"
-
+        # 如果任务在内存中运行，强制状态为 EMBEDDING，覆盖数据库层面的 PENDING/FAILED 等推断
         if is_running:
-            # 检查任务存在, 鉴定状态为 processing
-            final_status = "PROCESSING"
-        elif stats.total_chunks == 0:
-            # 检查任务不存在, chunk不存在鉴定状态为 initial
-            final_status = "INITIAL"
-        elif stats.pending_chunks > 0:
-            # 检查任务不存在, chunk存在, 但存在状态 为pending或processing 的chunk, 状态为failed
-            # (注: processing 状态在 DB 中体现为 pending，因为只有 completed/failed/stopped 会落库为终态)
-            final_status = "FAILED"
-        elif stats.stopped_chunks > 0:
-            # 检查任务不存在, 但存在chunk的状态为stop的, 则状态为stop
-            final_status = "STOPPED"
-        elif stats.failed_chunks > 0:
-            # 补充逻辑: 如果没有 pending，但有 failed，也视为 failed
-            final_status = "FAILED"
-        else:
-            # 检查任务不存在, 但全部chunk的状态都为completed的, 则状态为completed (INDEXED)
-            final_status = "INDEXED"
+            stats.file_status = KBFileStatus.EMBEDDING
 
-        stats.file_status = final_status
         return stats
 
     async def handle_task_action(self, resource_id: str, request: kb_schemas.KBRunTaskRequest):
@@ -408,48 +438,69 @@ class KnowledgeBaseService:
 
         # 4. 准备配置和状态
         current_attributes = resource.latest_version.attributes or {}
-        last_config = current_attributes.get("last_ingest_config")
+        splitter_config_dict = current_attributes.get("splitter_config")
+        last_config_dict = current_attributes.get("last_ingest_config")
+
+        # 数据清洗：确保运行时移除冗余字段
+        if "source_file_id" in current_attributes:
+            del current_attributes["source_file_id"]
+
+        target_splitter_config = None
 
         # 5. 动作分发
         if request.action == kb_schemas.KBTaskAction.RESUME:
             # Resume 校验
-            if not last_config:
+            if not last_config_dict:
                 raise HTTPException(status_code=400, detail="No previous task found. Please use START.")
 
-            # 检查配置一致性 (如果有传入新配置，必须与旧配置一致，否则报错)
-            if request.splitter_config:
-                req_config_dict = request.splitter_config.model_dump()
-                # 简单比较字典
-                if req_config_dict != last_config:
-                    raise HTTPException(status_code=400,
-                                        detail="Configuration changed. Cannot resume, please use START (Overwrite).")
+            # 检查配置一致性
+            if splitter_config_dict != last_config_dict:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "message": "Configuration mismatch. Cannot resume task.",
+                        "current_config": splitter_config_dict,
+                        "last_ingest_config": last_config_dict
+                    }
+                )
 
-            # 启动后台循环 (Resume 模式)
-            asyncio.create_task(self._run_embedding_loop(
-                resource_id, embedding_model_id, dimension, rate_limit, resume=True
-            ))
+            target_splitter_config = kb_schemas.KBTextSplitterConfig(**last_config_dict)
 
-        elif request.action == kb_schemas.KBTaskAction.START:
-            if not request.splitter_config:
-                raise HTTPException(status_code=400, detail="Splitter config is required for START action.")
-
-            # 更新 Resource Attributes (保存配置)
-            new_config_dict = request.splitter_config.model_dump()
-            current_attributes["last_ingest_config"] = new_config_dict
-
-            # 更新版本属性
+            # 保存可能发生的清理变更
             await resource_crud.update_resource_version(
                 self.db,
                 resource.latestVersionId,
                 schemas.ResourceVersionUpdate(attributes=current_attributes)
             )
 
+            # 启动后台循环 (Resume 模式)
+            asyncio.create_task(self._run_embedding_loop(
+                resource_id, embedding_model_id, dimension, rate_limit,
+                resume=True,
+                splitter_config=target_splitter_config
+            ))
+
+        elif request.action == kb_schemas.KBTaskAction.START:
+            if not splitter_config_dict:
+                raise HTTPException(status_code=400, detail="Splitter configuration not found. Please save configuration first.")
+
+            # 创建配置快照
+            current_attributes["last_ingest_config"] = splitter_config_dict
+
+            # 更新版本属性 (保存快照和清理结果)
+            await resource_crud.update_resource_version(
+                self.db,
+                resource.latestVersionId,
+                schemas.ResourceVersionUpdate(attributes=current_attributes)
+            )
+
+            target_splitter_config = kb_schemas.KBTextSplitterConfig(**splitter_config_dict)
+
             # 启动后台循环 (Start 模式)
             asyncio.create_task(self._run_embedding_loop(
                 resource_id, embedding_model_id, dimension, rate_limit,
                 resume=False,
-                splitter_config=request.splitter_config,
-                file_id=current_attributes.get("source_file_id")
+                splitter_config=target_splitter_config
             ))
 
         return {"message": "Task started."}
@@ -461,8 +512,7 @@ class KnowledgeBaseService:
             dimension: int,
             rate_limit: float,
             resume: bool,
-            splitter_config: Optional[kb_schemas.KBTextSplitterConfig] = None,
-            file_id: Optional[str] = None
+            splitter_config: kb_schemas.KBTextSplitterConfig
     ):
         """
         核心任务循环：处理切分、嵌入、存储、状态更新和取消。
@@ -482,18 +532,33 @@ class KnowledgeBaseService:
                 try:
                     client, _ = await temp_service._get_embedding_client(model_id)
                 except Exception as e:
-                    await stream_manager.publish(resource_id, {"status": "error", "message": f"Model init failed: {e}"})
+                    await stream_manager.publish(resource_id, {
+                        "status": KBFileStatus.FAILED,
+                        "message": f"Model init failed: {e}"
+                    })
                     return
 
                 # --- 阶段 1: 准备数据 (Start 模式需切分) ---
                 if not resume:
-                    # 1. 清理旧数据
-                    await stream_manager.publish(resource_id, {"status": "cleaning", "message": "Cleaning old data..."})
+                    # 1. 获取文件 ID (从 Resource Content 中)
+                    resource = await resource_crud.get_resource_with_versions(session, resource_id)
+                    if not resource or not resource.latest_version or not resource.latest_version.content:
+                        raise ValueError("Source file information not found in resource.")
+                    file_id = resource.latest_version.content
+
+                    # 2. 清理旧数据
+                    await stream_manager.publish(resource_id, {
+                        "status": KBFileStatus.CLEANING,
+                        "message": "Cleaning old data..."
+                    })
                     await temp_service._cleanup_vectors(resource_id, dimension)
                     await kb_crud.delete_chunks_by_resource(session, resource_id)
 
-                    # 2. 读取文件
-                    await stream_manager.publish(resource_id, {"status": "reading", "message": "Reading file..."})
+                    # 3. 读取文件
+                    await stream_manager.publish(resource_id, {
+                        "status": KBFileStatus.READING,
+                        "message": "Reading file..."
+                    })
                     db_file = await file_crud.get_file(session, file_id)
                     if not db_file:
                         raise ValueError("Source file record not found.")
@@ -504,12 +569,15 @@ class KnowledgeBaseService:
                     except UnicodeDecodeError:
                         text_content = content_bytes.decode('latin-1')
 
-                    # 3. 切分
-                    await stream_manager.publish(resource_id, {"status": "splitting", "message": "Splitting text..."})
+                    # 4. 切分
+                    await stream_manager.publish(resource_id, {
+                        "status": KBFileStatus.SPLITTING,
+                        "message": "Splitting text..."
+                    })
                     splitter = SplitterFactory.create(splitter_config)
                     text_chunks = splitter.split_text(text_content)
 
-                    # 4. 存储 Chunks
+                    # 5. 存储 Chunks
                     chunk_schemas = [
                         kb_schemas.KBChunkCreate(
                             resource_id=resource_id,
@@ -540,8 +608,10 @@ class KnowledgeBaseService:
                     if await stream_manager.is_cancellation_requested(resource_id):
                         # 再次确保数据库状态被更新为 STOPPED
                         await kb_crud.mark_pending_chunks_as_stopped(session, resource_id)
-                        await stream_manager.publish(resource_id,
-                                                     {"status": "cancelled", "message": "Task cancelled by user."})
+                        await stream_manager.publish(resource_id, {
+                            "status": KBFileStatus.STOPPED,
+                            "message": "Task cancelled by user."
+                        })
                         break
 
                     batch = pending_chunks[i:i + batch_size]
@@ -576,9 +646,9 @@ class KnowledgeBaseService:
 
                     # 推送进度
                     await stream_manager.publish(resource_id, {
-                        "status": "processing",
+                        "status": KBFileStatus.EMBEDDING,
                         "processed": processed_count,
-                        "batch_total": total_count
+                        "total": total_count
                     })
 
                     # 频率限制
@@ -586,11 +656,17 @@ class KnowledgeBaseService:
                         await asyncio.sleep(rate_limit)
 
                 # 任务结束
-                await stream_manager.publish(resource_id, {"status": "completed", "message": "Task finished."})
+                await stream_manager.publish(resource_id, {
+                    "status": KBFileStatus.COMPLETED,
+                    "message": "Task finished."
+                })
 
             except Exception as e:
                 logger.error(f"Task failed for resource {resource_id}: {e}")
-                await stream_manager.publish(resource_id, {"status": "error", "message": str(e)})
+                await stream_manager.publish(resource_id, {
+                    "status": KBFileStatus.FAILED,
+                    "message": str(e)
+                })
             finally:
                 # 清理任务注册和取消标记
                 KnowledgeBaseService._running_tasks.discard(resource_id)

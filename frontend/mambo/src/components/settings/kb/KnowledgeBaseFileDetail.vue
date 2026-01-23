@@ -30,89 +30,19 @@
 
     <el-scrollbar class="detail-content">
       <div class="content-wrapper">
-        <!-- 1. 进度概览卡片 -->
-        <el-card shadow="never" class="status-card">
-          <template #header>
-            <div class="card-header">
-              <span>向量化进度</span>
-              <div class="card-header-actions">
-                <!-- 停止任务 -->
-                <el-button
-                  v-if="isProcessing"
-                  type="danger"
-                  size="small"
-                  :loading="isSubmitting"
-                  @click="handleStop"
-                >
-                  停止任务
-                </el-button>
-                <!-- 继续任务 (断点续连) -->
-                <el-button
-                  v-if="canResume"
-                  type="warning"
-                  size="small"
-                  :loading="isSubmitting"
-                  @click="handleResume"
-                >
-                  继续任务
-                </el-button>
-              </div>
-            </div>
-          </template>
-
-          <div v-if="statusInfo" class="progress-section">
-            <el-progress
-              type="dashboard"
-              :percentage="progressPercentage"
-              :status="progressStatus"
-              :width="120"
-            >
-              <template #default="{ percentage }">
-                <span class="progress-value">{{ percentage }}%</span>
-                <span class="progress-label">完成度</span>
-              </template>
-            </el-progress>
-
-            <div class="stats-grid">
-              <el-statistic title="总切片数" :value="statusInfo.total_chunks" />
-              <el-statistic
-                title="已完成"
-                :value="statusInfo.completed_chunks"
-                value-style="color: var(--el-color-success)"
-              />
-              <el-statistic
-                title="处理中"
-                :value="statusInfo.pending_chunks"
-                value-style="color: var(--el-color-primary)"
-              />
-              <el-statistic
-                title="失败"
-                :value="statusInfo.failed_chunks"
-                value-style="color: var(--el-color-danger)"
-              />
-              <el-statistic
-                title="已停止"
-                :value="statusInfo.stopped_chunks"
-                value-style="color: var(--el-color-warning)"
-              />
-            </div>
-          </div>
-          <el-skeleton v-else :rows="3" animated />
-        </el-card>
-
-        <!-- 2. 任务配置卡片 -->
+        <!-- 1. 任务配置卡片 -->
         <el-card shadow="never" class="config-card">
           <template #header>
             <div class="card-header">
               <span>切分配置</span>
               <el-button
-                v-if="!isProcessing"
                 type="primary"
                 size="small"
+                :disabled="!isConfigDirty || isProcessing"
                 :loading="isSubmitting"
-                @click="handleStart"
+                @click="handleSaveConfig"
               >
-                {{ startButtonText }}
+                保存配置
               </el-button>
             </div>
           </template>
@@ -198,6 +128,86 @@
           </el-form>
         </el-card>
 
+        <!-- 2. 进度概览卡片 -->
+        <el-card shadow="never" class="status-card">
+          <template #header>
+            <div class="card-header">
+              <span>向量化进度</span>
+              <div class="card-header-actions">
+                <!-- 停止任务 -->
+                <el-button
+                  v-if="isProcessing"
+                  type="danger"
+                  size="small"
+                  :loading="isSubmitting"
+                  @click="handleStop"
+                >
+                  停止任务
+                </el-button>
+                <!-- 继续任务 (断点续连) -->
+                <el-button
+                  v-if="canResume"
+                  type="warning"
+                  size="small"
+                  :loading="isSubmitting"
+                  @click="handleResume"
+                >
+                  继续任务
+                </el-button>
+                <!-- 启动/重新启动任务 -->
+                <el-button
+                  v-if="!isProcessing"
+                  type="primary"
+                  size="small"
+                  :loading="isSubmitting"
+                  @click="handleStart"
+                >
+                  {{ startButtonText }}
+                </el-button>
+              </div>
+            </div>
+          </template>
+
+          <div v-if="statusInfo" class="progress-section">
+            <el-progress
+              type="dashboard"
+              :percentage="progressPercentage"
+              :status="progressStatus"
+              :width="120"
+            >
+              <template #default="{ percentage }">
+                <span class="progress-value">{{ percentage }}%</span>
+                <span class="progress-label">完成度</span>
+              </template>
+            </el-progress>
+
+            <div class="stats-grid">
+              <el-statistic title="总切片数" :value="statusInfo.total_chunks" />
+              <el-statistic
+                title="已完成"
+                :value="statusInfo.completed_chunks"
+                value-style="color: var(--el-color-success)"
+              />
+              <el-statistic
+                title="处理中"
+                :value="statusInfo.pending_chunks"
+                value-style="color: var(--el-color-primary)"
+              />
+              <el-statistic
+                title="失败"
+                :value="statusInfo.failed_chunks"
+                value-style="color: var(--el-color-danger)"
+              />
+              <el-statistic
+                title="已停止"
+                :value="statusInfo.stopped_chunks"
+                value-style="color: var(--el-color-warning)"
+              />
+            </div>
+          </div>
+          <el-skeleton v-else :rows="3" animated />
+        </el-card>
+
         <!-- 3. 详细信息 -->
         <el-descriptions title="文件详情" :column="1" border class="info-descriptions">
           <el-descriptions-item label="文件名称">{{ resource.name }}</el-descriptions-item>
@@ -221,13 +231,25 @@
 import { ref, computed, onMounted, onUnmounted, watch, reactive } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Document, RefreshRight, QuestionFilled } from '@element-plus/icons-vue'
-import { getKBFileStatus, runKBFileTask, subscribeToKBFileProgress } from '@/api/kbService'
-import type { Resource, KBChunkStatus, SplitterType, KBTaskProgressPayload } from '@/api/types'
+import { runKBFileTask, subscribeToKBFileProgress, updateKBFileConfig } from '@/api/kbService'
+import { useResourceStore } from '@/stores/resourceStore'
+import type {
+  Resource,
+  KBChunkStatus,
+  SplitterType,
+  KBTaskProgressPayload,
+  KBSplitterConfig,
+  KBResumeConflictErrorDetail,
+  KBFileStatus
+} from '@/api/types'
 
 // --- Props ---
 const props = defineProps<{
   resource: Resource
 }>()
+
+// --- Store ---
+const resourceStore = useResourceStore()
 
 // --- Types ---
 interface TaskConfigState {
@@ -258,19 +280,21 @@ const configRules = reactive<FormRules>({
 })
 
 // --- Computed ---
+
 const isProcessing = computed(() => {
-  return statusInfo.value?.file_status === 'PROCESSING'
+  const s = statusInfo.value?.file_status
+  if (!s) return false
+  return ['CLEANING', 'READING', 'SPLITTING', 'EMBEDDING'].includes(s)
 })
 
 const hasIndexedData = computed(() => {
-  return statusInfo.value?.file_status === 'INDEXED' || (statusInfo.value?.total_chunks || 0) > 0
+  return statusInfo.value?.file_status === 'COMPLETED' || (statusInfo.value?.total_chunks || 0) > 0
 })
 
 const canResume = computed(() => {
   if (!statusInfo.value) return false
-  // 仅当状态为 FAILED, STOPPED 或 PENDING 时允许续连
   const s = statusInfo.value.file_status
-  return s === 'FAILED' || s === 'STOPPED' || s === 'PENDING'
+  return s === 'FAILED' || s === 'STOPPED'
 })
 
 const startButtonText = computed(() => {
@@ -289,7 +313,7 @@ const progressStatus = computed(() => {
   const s = statusInfo.value.file_status
   if (s === 'FAILED') return 'exception'
   if (s === 'STOPPED') return 'warning'
-  if (s === 'INDEXED') return 'success'
+  if (s === 'COMPLETED') return 'success'
   return ''
 })
 
@@ -297,9 +321,11 @@ const statusLabel = computed(() => {
   const status = statusInfo.value?.file_status
   const map: Record<string, string> = {
     INITIAL: '待处理',
-    PENDING: '等待中',
-    PROCESSING: '处理中',
-    INDEXED: '已完成',
+    CLEANING: '清理中',
+    READING: '读取中',
+    SPLITTING: '切分中',
+    EMBEDDING: '向量化中',
+    COMPLETED: '已完成',
     FAILED: '失败',
     STOPPED: '已停止',
   }
@@ -310,13 +336,38 @@ const statusTagType = computed(() => {
   const status = statusInfo.value?.file_status
   const map: Record<string, 'info' | 'primary' | 'success' | 'danger' | 'warning'> = {
     INITIAL: 'info',
-    PENDING: 'warning',
-    PROCESSING: 'primary',
-    INDEXED: 'success',
+    CLEANING: 'primary',
+    READING: 'primary',
+    SPLITTING: 'primary',
+    EMBEDDING: 'primary',
+    COMPLETED: 'success',
     FAILED: 'danger',
     STOPPED: 'warning',
   }
   return status ? map[status] || 'info' : 'info'
+})
+
+// 获取当前资源保存的配置
+const savedConfig = computed<KBSplitterConfig | undefined>(() => {
+  return props.resource.latest_version?.attributes?.splitter_config
+})
+
+// 脏检查：表单值 vs 已保存的配置
+const isConfigDirty = computed(() => {
+  const saved = savedConfig.value
+  if (!saved) return true // 如果没有保存过配置，视为 Dirty (需要保存默认值)
+
+  // 比较各项值
+  if (taskConfig.splitter_type !== saved.splitter_type) return true
+  if (taskConfig.chunk_size !== saved.chunk_size) return true
+  if (taskConfig.chunk_overlap !== saved.chunk_overlap) return true
+
+  // 比较 separator (注意 null/undefined 处理)
+  const formSep = taskConfig.splitter_type === 'separator' ? taskConfig.separator : null
+  const savedSep = saved.separator || null
+  if (formSep !== savedSep) return true
+
+  return false
 })
 
 // --- Methods ---
@@ -330,114 +381,181 @@ const stopSSE = () => {
 
 const startSSE = () => {
   stopSSE()
+  // 建立连接时显示 Loading，收到第一条消息后取消
+  isLoading.value = true
+
   sseController = subscribeToKBFileProgress({
     resourceId: props.resource.id,
     onMessage: (data: KBTaskProgressPayload) => {
-      // 实时更新状态
-      statusInfo.value = data
+      isLoading.value = false
 
-      // 如果状态变为非处理中，说明任务已结束（完成、失败或停止），此时后端会发送 end 事件，
-      // 但前端也可根据状态变化进行提示并准备断开
-      if (data.file_status !== 'PROCESSING') {
-        if (data.file_status === 'INDEXED') {
-          ElMessage.success('任务已完成')
-        } else if (data.file_status === 'FAILED') {
-          ElMessage.error(`任务失败: ${data.message || '未知错误'}`)
-        } else if (data.file_status === 'STOPPED') {
-          ElMessage.warning('任务已停止')
+      // 1. 处理快照数据 (Snapshot) - 包含 total_chunks 字段
+      if ('total_chunks' in data) {
+        statusInfo.value = data
+      }
+      // 2. 处理流式事件 (Stream Event) - 包含 processed/total 字段
+      else {
+        // 确保 statusInfo 已初始化 (通常 Snapshot 会先到达)
+        if (statusInfo.value) {
+          statusInfo.value.file_status = data.status
+          statusInfo.value.message = data.message
+
+          // 如果是 Embedding 阶段，利用 processed/total 更新进度条数据
+          // 注意：不要直接覆盖 total_chunks，除非在 Embedding 阶段它代表了确切的切片总数
+          if (data.status === 'EMBEDDING') {
+             statusInfo.value.completed_chunks = data.processed
+             statusInfo.value.total_chunks = data.total
+             statusInfo.value.pending_chunks = Math.max(0, data.total - data.processed)
+          }
         }
-        // 实际上后端会发送 end 事件来触发 close，此处不做主动 abort 也可以，
-        // 但为了保险起见，若状态已终结，可视为流结束。
+      }
+
+      // 获取当前统一状态以判断是否结束
+      const currentStatus: KBFileStatus = 'file_status' in data ? data.file_status : data.status
+
+      if (currentStatus === 'COMPLETED') {
+        ElMessage.success('任务已完成')
+      } else if (currentStatus === 'FAILED') {
+        ElMessage.error(`任务失败: ${data.message || '未知错误'}`)
+      } else if (currentStatus === 'STOPPED') {
+        ElMessage.warning('任务已停止')
       }
     },
     onError: (err) => {
       console.error('SSE Error:', err)
-      // SSE 连接断开通常意味着需要刷新一次完整状态以确保 UI 一致
       stopSSE()
-      fetchStatus(false)
+      isLoading.value = false
     },
     onClose: () => {
       sseController = null
+      isLoading.value = false
     },
   })
 }
 
-const fetchStatus = async (showLoading = true) => {
-  if (showLoading) isLoading.value = true
-  try {
-    const res = await getKBFileStatus(props.resource.id)
-    statusInfo.value = res
+const manualRefresh = () => {
+  // 重新建立 SSE 连接以获取最新快照
+  startSSE()
+}
 
-    // 如果处于处理中状态，建立 SSE 连接
-    if (res.file_status === 'PROCESSING') {
-      startSSE()
-    } else {
-      stopSSE()
+const handleSaveConfig = async () => {
+  if (!configFormRef.value) return false
+
+  try {
+    await configFormRef.value.validate()
+  } catch {
+    return false
+  }
+
+  isSubmitting.value = true
+  try {
+    const configToSave: KBSplitterConfig = {
+      splitter_type: taskConfig.splitter_type,
+      chunk_size: taskConfig.chunk_size,
+      chunk_overlap: taskConfig.chunk_overlap,
+      separator: taskConfig.splitter_type === 'separator' ? taskConfig.separator : null
     }
+
+    const updatedResource = await updateKBFileConfig(props.resource.id, {
+      splitter_config: configToSave
+    })
+
+    // 同步更新本地 Store 中的资源属性，确保 Dirty Check 状态正确复位
+    if (updatedResource.latest_version?.attributes) {
+      resourceStore.updateResourceAttributes(props.resource.id, updatedResource.latest_version.attributes)
+    }
+
+    ElMessage.success('配置已保存')
+    return true
   } catch (error) {
-    console.error('Failed to fetch KB file status', error)
-    ElMessage.error('获取状态失败')
+    console.error('Save config failed', error)
+    ElMessage.error('保存配置失败')
+    return false
   } finally {
-    if (showLoading) isLoading.value = false
+    isSubmitting.value = false
   }
 }
 
-const manualRefresh = () => {
-  fetchStatus(true)
-}
-
 const handleStart = async () => {
-  if (!configFormRef.value) return
-  await configFormRef.value.validate(async (valid) => {
-    if (valid) {
-      if (hasIndexedData.value) {
-        try {
-          await ElMessageBox.confirm(
-            '该文件已有向量数据，重新启动将覆盖旧数据，是否继续？',
-            '确认覆盖',
-            { confirmButtonText: '覆盖并启动', cancelButtonText: '取消', type: 'warning' },
-          )
-        } catch {
-          return
-        }
-      }
+  // 1. 如果配置有变更，强制先保存
+  if (isConfigDirty.value) {
+    const saveSuccess = await handleSaveConfig()
+    if (!saveSuccess) return // 保存失败则终止
+  }
 
-      isSubmitting.value = true
-      try {
-        await runKBFileTask(props.resource.id, {
-          action: 'start',
-          splitter_config: {
-            splitter_type: taskConfig.splitter_type,
-            chunk_size: taskConfig.chunk_size,
-            chunk_overlap: taskConfig.chunk_overlap,
-            separator: taskConfig.splitter_type === 'separator' ? taskConfig.separator : undefined,
-          },
-        })
-        ElMessage.success('任务已启动')
-        // 启动后立即开启 SSE，利用 SSE 的初始快照更新状态
-        startSSE()
-      } catch (error) {
-        console.error('Start task failed', error)
-        ElMessage.error('启动任务失败')
-      } finally {
-        isSubmitting.value = false
-      }
+  // 2. 确认覆盖旧数据
+  if (hasIndexedData.value) {
+    try {
+      await ElMessageBox.confirm(
+        '该文件已有向量数据，重新启动将覆盖旧数据，是否继续？',
+        '确认覆盖',
+        { confirmButtonText: '覆盖并启动', cancelButtonText: '取消', type: 'warning' },
+      )
+    } catch {
+      return
     }
-  })
+  }
+
+  isSubmitting.value = true
+  try {
+    // 3. 启动任务 (不再携带配置参数)
+    await runKBFileTask(props.resource.id, {
+      action: 'start'
+    })
+    ElMessage.success('任务已启动')
+    // 任务启动后，确保 SSE 连接处于活跃状态
+    if (!sseController) {
+      startSSE()
+    }
+  } catch (error) {
+    console.error('Start task failed', error)
+    ElMessage.error('启动任务失败')
+  } finally {
+    isSubmitting.value = false
+  }
 }
 
 const handleResume = async () => {
   isSubmitting.value = true
   try {
-    // Resume 模式下不传配置，使用后端存储的上次配置
     await runKBFileTask(props.resource.id, {
       action: 'resume',
     })
     ElMessage.success('任务已继续')
-    startSSE()
-  } catch (error) {
-    console.error('Resume task failed', error)
-    ElMessage.error('继续任务失败')
+    if (!sseController) {
+      startSSE()
+    }
+  } catch (error: any) {
+    // 处理 409 Conflict (配置不一致)
+    if (error.response && error.response.status === 409) {
+      const detail = error.response.data.detail as KBResumeConflictErrorDetail
+
+      const current = detail.current_config
+      const last = detail.last_ingest_config
+
+      const msg = `
+        <p>检测到配置变更，无法继续上次任务。</p>
+        <p><strong>当前配置:</strong> Size=${current.chunk_size}, Overlap=${current.chunk_overlap}</p>
+        <p><strong>上次配置:</strong> Size=${last.chunk_size}, Overlap=${last.chunk_overlap}</p>
+        <p>请选择"重新处理"以应用新配置。</p>
+      `
+
+      try {
+        await ElMessageBox.confirm(msg, '配置冲突', {
+          confirmButtonText: '重新处理',
+          cancelButtonText: '取消',
+          type: 'warning',
+          dangerouslyUseHTMLString: true
+        })
+        // 用户选择重新处理，调用 Start 逻辑
+        handleStart()
+      } catch {
+        // 用户取消
+      }
+    } else {
+      console.error('Resume task failed', error)
+      ElMessage.error('继续任务失败')
+    }
   } finally {
     isSubmitting.value = false
   }
@@ -455,7 +573,6 @@ const handleStop = async () => {
     await runKBFileTask(props.resource.id, {
       action: 'stop',
     })
-    // 停止操作后，等待 SSE 推送 STOPPED 状态
   } catch (error) {
     if (error !== 'cancel') {
       console.error('Stop task failed', error)
@@ -467,16 +584,22 @@ const handleStop = async () => {
 }
 
 const loadInitialConfig = () => {
-  // 尝试从资源属性中回显上次的配置
-  const attrs = props.resource.latest_version?.attributes
-  if (attrs && attrs.last_ingest_config) {
-    const savedConfig = attrs.last_ingest_config
-    taskConfig.splitter_type = savedConfig.splitter_type || 'simple'
-    taskConfig.chunk_size = savedConfig.chunk_size || 500
-    taskConfig.chunk_overlap = savedConfig.chunk_overlap || 50
-    if (savedConfig.separator) {
-      taskConfig.separator = savedConfig.separator
+  // 优先从当前保存的配置回显
+  const saved = savedConfig.value
+
+  if (saved) {
+    taskConfig.splitter_type = saved.splitter_type
+    taskConfig.chunk_size = saved.chunk_size
+    taskConfig.chunk_overlap = saved.chunk_overlap
+    if (saved.separator) {
+      taskConfig.separator = saved.separator
     }
+  } else {
+    // 默认值
+    taskConfig.splitter_type = 'simple'
+    taskConfig.chunk_size = 500
+    taskConfig.chunk_overlap = 50
+    taskConfig.separator = '\\n\\n'
   }
 }
 
@@ -484,7 +607,8 @@ const loadInitialConfig = () => {
 
 onMounted(() => {
   loadInitialConfig()
-  fetchStatus()
+  // 直接启动 SSE 获取状态快照，替代已废弃的 GET 状态接口
+  startSSE()
 })
 
 onUnmounted(() => {
@@ -498,7 +622,7 @@ watch(
       statusInfo.value = null
       stopSSE()
       loadInitialConfig()
-      fetchStatus()
+      startSSE()
     }
   },
 )
