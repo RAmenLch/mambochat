@@ -92,7 +92,7 @@
         <div class="files-header">
           <span class="section-title">文档列表</span>
           <div class="files-actions">
-            <el-button @click="refreshFiles" :icon="Refresh" circle title="刷新列表" />
+            <!-- [Requirement 3] Removed Refresh Button -->
             <el-button type="primary" :icon="Upload" @click="triggerUpload" :disabled="!canUpload">
               上传文档
             </el-button>
@@ -150,7 +150,7 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { Refresh, Upload, Document, QuestionFilled, Setting, Folder } from '@element-plus/icons-vue'
+import { Upload, Document, QuestionFilled, Setting, Folder } from '@element-plus/icons-vue'
 
 import { useResourceStore } from '@/stores/resourceStore'
 import { useProviderStore } from '@/stores/providerStore'
@@ -320,9 +320,7 @@ const handleSave = async () => {
   })
 }
 
-const refreshFiles = () => {
-  loadFiles()
-}
+// [Requirement 3] refreshFiles removed
 
 const triggerUpload = () => {
   if (!canUpload.value) {

@@ -18,13 +18,6 @@
         </div>
       </div>
       <div class="header-actions">
-        <el-button
-          @click="manualRefresh"
-          :loading="isLoading"
-          :icon="RefreshRight"
-          circle
-          title="刷新状态"
-        />
       </div>
     </div>
 
@@ -230,7 +223,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, reactive } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { Document, RefreshRight, QuestionFilled } from '@element-plus/icons-vue'
+import { Document, QuestionFilled } from '@element-plus/icons-vue'
 import { runKBFileTask, subscribeToKBFileProgress, updateKBFileConfig } from '@/api/kbService'
 import { useResourceStore } from '@/stores/resourceStore'
 import type {
@@ -239,8 +232,7 @@ import type {
   SplitterType,
   KBTaskProgressPayload,
   KBSplitterConfig,
-  KBResumeConflictErrorDetail,
-  KBFileStatus
+  KBResumeConflictErrorDetail
 } from '@/api/types'
 
 // --- Props ---
@@ -261,6 +253,8 @@ interface TaskConfigState {
 
 // --- State ---
 const statusInfo = ref<KBChunkStatus | null>(null)
+const optimisticStatus = ref<'STARTING' | 'STOPPING' | null>(null)
+
 const isLoading = ref(false)
 const isSubmitting = ref(false)
 const configFormRef = ref<FormInstance>()
@@ -282,6 +276,8 @@ const configRules = reactive<FormRules>({
 // --- Computed ---
 
 const isProcessing = computed(() => {
+  if (optimisticStatus.value === 'STARTING') return true
+
   const s = statusInfo.value?.file_status
   if (!s) return false
   return ['CLEANING', 'READING', 'SPLITTING', 'EMBEDDING'].includes(s)
@@ -292,12 +288,14 @@ const hasIndexedData = computed(() => {
 })
 
 const canResume = computed(() => {
+  if (optimisticStatus.value) return false
   if (!statusInfo.value) return false
   const s = statusInfo.value.file_status
   return s === 'FAILED' || s === 'STOPPED'
 })
 
 const startButtonText = computed(() => {
+  if (optimisticStatus.value === 'STARTING') return '启动中...'
   if (statusInfo.value?.file_status === 'INITIAL') return '开始切分与嵌入'
   return hasIndexedData.value ? '重新切分并嵌入' : '启动切分任务'
 })
@@ -318,6 +316,9 @@ const progressStatus = computed(() => {
 })
 
 const statusLabel = computed(() => {
+  if (optimisticStatus.value === 'STARTING') return '启动中...'
+  if (optimisticStatus.value === 'STOPPING') return '停止中...'
+
   const status = statusInfo.value?.file_status
   const map: Record<string, string> = {
     INITIAL: '待处理',
@@ -333,6 +334,9 @@ const statusLabel = computed(() => {
 })
 
 const statusTagType = computed(() => {
+  if (optimisticStatus.value === 'STARTING') return 'primary'
+  if (optimisticStatus.value === 'STOPPING') return 'warning'
+
   const status = statusInfo.value?.file_status
   const map: Record<string, 'info' | 'primary' | 'success' | 'danger' | 'warning'> = {
     INITIAL: 'info',
@@ -388,6 +392,8 @@ const startSSE = () => {
     resourceId: props.resource.id,
     onMessage: (data: KBTaskProgressPayload) => {
       isLoading.value = false
+      // Clear optimistic status on any real data
+      optimisticStatus.value = null
 
       // 1. 处理快照数据 (Snapshot) - 包含 total_chunks 字段
       if ('total_chunks' in data) {
@@ -401,7 +407,6 @@ const startSSE = () => {
           statusInfo.value.message = data.message
 
           // 如果是 Embedding 阶段，利用 processed/total 更新进度条数据
-          // 注意：不要直接覆盖 total_chunks，除非在 Embedding 阶段它代表了确切的切片总数
           if (data.status === 'EMBEDDING') {
              statusInfo.value.completed_chunks = data.processed
              statusInfo.value.total_chunks = data.total
@@ -409,33 +414,19 @@ const startSSE = () => {
           }
         }
       }
-
-      // 获取当前统一状态以判断是否结束
-      const currentStatus: KBFileStatus = 'file_status' in data ? data.file_status : data.status
-
-      if (currentStatus === 'COMPLETED') {
-        ElMessage.success('任务已完成')
-      } else if (currentStatus === 'FAILED') {
-        ElMessage.error(`任务失败: ${data.message || '未知错误'}`)
-      } else if (currentStatus === 'STOPPED') {
-        ElMessage.warning('任务已停止')
-      }
     },
     onError: (err) => {
       console.error('SSE Error:', err)
       stopSSE()
       isLoading.value = false
+      // Clear optimistic status on error so user can retry
+      optimisticStatus.value = null
     },
     onClose: () => {
       sseController = null
       isLoading.value = false
     },
   })
-}
-
-const manualRefresh = () => {
-  // 重新建立 SSE 连接以获取最新快照
-  startSSE()
 }
 
 const handleSaveConfig = async () => {
@@ -496,7 +487,10 @@ const handleStart = async () => {
     }
   }
 
+  // Optimistic Update
+  optimisticStatus.value = 'STARTING'
   isSubmitting.value = true
+
   try {
     // 3. 启动任务 (不再携带配置参数)
     await runKBFileTask(props.resource.id, {
@@ -510,13 +504,17 @@ const handleStart = async () => {
   } catch (error) {
     console.error('Start task failed', error)
     ElMessage.error('启动任务失败')
+    optimisticStatus.value = null // Revert on failure
   } finally {
     isSubmitting.value = false
   }
 }
 
 const handleResume = async () => {
+  // Optimistic Update
+  optimisticStatus.value = 'STARTING'
   isSubmitting.value = true
+
   try {
     await runKBFileTask(props.resource.id, {
       action: 'resume',
@@ -526,6 +524,8 @@ const handleResume = async () => {
       startSSE()
     }
   } catch (error: any) {
+    optimisticStatus.value = null // Revert on failure
+
     // 处理 409 Conflict (配置不一致)
     if (error.response && error.response.status === 409) {
       const detail = error.response.data.detail as KBResumeConflictErrorDetail
@@ -569,7 +569,10 @@ const handleStop = async () => {
       type: 'warning',
     })
 
+    // Optimistic Update
+    optimisticStatus.value = 'STOPPING'
     isSubmitting.value = true
+
     await runKBFileTask(props.resource.id, {
       action: 'stop',
     })
@@ -577,6 +580,7 @@ const handleStop = async () => {
     if (error !== 'cancel') {
       console.error('Stop task failed', error)
       ElMessage.error('停止任务失败')
+      optimisticStatus.value = null // Revert on failure
     }
   } finally {
     isSubmitting.value = false
@@ -607,7 +611,7 @@ const loadInitialConfig = () => {
 
 onMounted(() => {
   loadInitialConfig()
-  // 直接启动 SSE 获取状态快照，替代已废弃的 GET 状态接口
+  // 直接启动 SSE 获取状态快照
   startSSE()
 })
 
@@ -615,11 +619,23 @@ onUnmounted(() => {
   stopSSE()
 })
 
+// 监听异步加载的配置数据，确保表单在数据到达时更新
+watch(
+  savedConfig,
+  (newConfig) => {
+    if (newConfig) {
+      loadInitialConfig()
+    }
+  },
+  { deep: true }
+)
+
 watch(
   () => props.resource.id,
   (newId, oldId) => {
     if (newId !== oldId) {
       statusInfo.value = null
+      optimisticStatus.value = null
       stopSSE()
       loadInitialConfig()
       startSSE()
