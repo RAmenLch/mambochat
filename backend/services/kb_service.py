@@ -327,7 +327,8 @@ class KnowledgeBaseService:
 
         return new_resource
 
-    async def update_kb_file_config(self, resource_id: str, config_data: kb_schemas.KBUpdateConfigRequest) -> schemas.Resource:
+    async def update_kb_file_config(self, resource_id: str,
+                                    config_data: kb_schemas.KBUpdateConfigRequest) -> schemas.Resource:
         """
         更新知识库文件的切分配置。
         同时清理冗余的 source_file_id 属性。
@@ -339,7 +340,8 @@ class KnowledgeBaseService:
         if resource.resourceType != ResourceType.KB_FILE.value:
             raise HTTPException(status_code=400, detail="Resource is not a knowledge base file.")
 
-        current_attributes = resource.latest_version.attributes or {}
+        # 创建副本以确保 SQLAlchemy 检测到变更
+        current_attributes = dict(resource.latest_version.attributes) if resource.latest_version.attributes else {}
 
         # 数据清洗：移除 source_file_id
         if "source_file_id" in current_attributes:
@@ -437,7 +439,9 @@ class KnowledgeBaseService:
             raise HTTPException(status_code=400, detail="Knowledge Base configuration is incomplete.")
 
         # 4. 准备配置和状态
-        current_attributes = resource.latest_version.attributes or {}
+        # 创建副本以确保 SQLAlchemy 检测到变更
+        current_attributes = dict(resource.latest_version.attributes) if resource.latest_version.attributes else {}
+
         splitter_config_dict = current_attributes.get("splitter_config")
         last_config_dict = current_attributes.get("last_ingest_config")
 
@@ -482,7 +486,8 @@ class KnowledgeBaseService:
 
         elif request.action == kb_schemas.KBTaskAction.START:
             if not splitter_config_dict:
-                raise HTTPException(status_code=400, detail="Splitter configuration not found. Please save configuration first.")
+                raise HTTPException(status_code=400,
+                                    detail="Splitter configuration not found. Please save configuration first.")
 
             # 创建配置快照
             current_attributes["last_ingest_config"] = splitter_config_dict
@@ -598,12 +603,15 @@ class KnowledgeBaseService:
                     target_statuses.append(kb_schemas.KBChunkStatus.STOPPED.value)
 
                 pending_chunks = await kb_crud.get_chunks_by_statuses(session, resource_id, target_statuses)
-                total_count = len(pending_chunks)  # 注意：这只是剩余的，不是总数。前端可通过 status 接口查总数。
+
+                # 获取全局统计信息以计算正确进度
+                stats = await kb_crud.get_chunk_stats_by_resource(session, resource_id)
+                total_count = stats.total_chunks
+                processed_count = stats.completed_chunks
 
                 batch_size = 10
-                processed_count = 0
 
-                for i in range(0, total_count, batch_size):
+                for i in range(0, len(pending_chunks), batch_size):
                     # 检查取消信号
                     if await stream_manager.is_cancellation_requested(resource_id):
                         # 再次确保数据库状态被更新为 STOPPED
@@ -612,7 +620,8 @@ class KnowledgeBaseService:
                             "status": KBFileStatus.STOPPED,
                             "message": "Task cancelled by user."
                         })
-                        break
+                        # 直接返回，避免执行后续的 Task finished 逻辑
+                        return
 
                     batch = pending_chunks[i:i + batch_size]
                     texts = [c.content for c in batch]
