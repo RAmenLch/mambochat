@@ -17,8 +17,7 @@
           >
         </div>
       </div>
-      <div class="header-actions">
-      </div>
+      <div class="header-actions"></div>
     </div>
 
     <el-scrollbar class="detail-content">
@@ -210,9 +209,6 @@
           }}</el-descriptions-item>
           <el-descriptions-item label="当前状态">
             {{ statusLabel }}
-            <span v-if="statusInfo?.message" class="status-message">
-              ({{ statusInfo.message }})
-            </span>
           </el-descriptions-item>
         </el-descriptions>
       </div>
@@ -232,7 +228,7 @@ import type {
   SplitterType,
   KBTaskProgressPayload,
   KBSplitterConfig,
-  KBResumeConflictErrorDetail
+  KBResumeConflictErrorDetail,
 } from '@/api/types'
 
 // --- Props ---
@@ -395,25 +391,8 @@ const startSSE = () => {
       // Clear optimistic status on any real data
       optimisticStatus.value = null
 
-      // 1. 处理快照数据 (Snapshot) - 包含 total_chunks 字段
-      if ('total_chunks' in data) {
-        statusInfo.value = data
-      }
-      // 2. 处理流式事件 (Stream Event) - 包含 processed/total 字段
-      else {
-        // 确保 statusInfo 已初始化 (通常 Snapshot 会先到达)
-        if (statusInfo.value) {
-          statusInfo.value.file_status = data.status
-          statusInfo.value.message = data.message
-
-          // 如果是 Embedding 阶段，利用 processed/total 更新进度条数据
-          if (data.status === 'EMBEDDING') {
-             statusInfo.value.completed_chunks = data.processed
-             statusInfo.value.total_chunks = data.total
-             statusInfo.value.pending_chunks = Math.max(0, data.total - data.processed)
-          }
-        }
-      }
+      // 后端已统一数据结构，无论快照还是流式事件，均为完整状态对象
+      statusInfo.value = data
     },
     onError: (err) => {
       console.error('SSE Error:', err)
@@ -444,16 +423,19 @@ const handleSaveConfig = async () => {
       splitter_type: taskConfig.splitter_type,
       chunk_size: taskConfig.chunk_size,
       chunk_overlap: taskConfig.chunk_overlap,
-      separator: taskConfig.splitter_type === 'separator' ? taskConfig.separator : null
+      separator: taskConfig.splitter_type === 'separator' ? taskConfig.separator : null,
     }
 
     const updatedResource = await updateKBFileConfig(props.resource.id, {
-      splitter_config: configToSave
+      splitter_config: configToSave,
     })
 
     // 同步更新本地 Store 中的资源属性，确保 Dirty Check 状态正确复位
     if (updatedResource.latest_version?.attributes) {
-      resourceStore.updateResourceAttributes(props.resource.id, updatedResource.latest_version.attributes)
+      resourceStore.updateResourceAttributes(
+        props.resource.id,
+        updatedResource.latest_version.attributes,
+      )
     }
 
     ElMessage.success('配置已保存')
@@ -494,7 +476,7 @@ const handleStart = async () => {
   try {
     // 3. 启动任务 (不再携带配置参数)
     await runKBFileTask(props.resource.id, {
-      action: 'start'
+      action: 'start',
     })
     ElMessage.success('任务已启动')
     // 任务启动后，确保 SSE 连接处于活跃状态
@@ -545,7 +527,7 @@ const handleResume = async () => {
           confirmButtonText: '重新处理',
           cancelButtonText: '取消',
           type: 'warning',
-          dangerouslyUseHTMLString: true
+          dangerouslyUseHTMLString: true,
         })
         // 用户选择重新处理，调用 Start 逻辑
         handleStart()
@@ -627,7 +609,7 @@ watch(
       loadInitialConfig()
     }
   },
-  { deep: true }
+  { deep: true },
 )
 
 watch(

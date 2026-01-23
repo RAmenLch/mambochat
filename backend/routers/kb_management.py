@@ -142,6 +142,7 @@ async def _kb_task_stream_generator(resource_id: str):
     # 1. 获取并推送初始状态
     async with AsyncSessionLocal() as session:
         service = KnowledgeBaseService(session)
+        # get_comprehensive_file_status 内部已处理僵尸任务检测
         initial_status = await service.get_comprehensive_file_status(resource_id)
 
     # 推送初始状态快照
@@ -167,13 +168,9 @@ async def _kb_task_stream_generator(resource_id: str):
                     yield f"event: end\ndata: Task finished\n\n"
                     break
 
-                # 将字典转换为 Pydantic 模型以处理 Enum 序列化
-                try:
-                    event_obj = kb_schemas.KBStreamEvent(**data)
-                    yield f"data: {event_obj.model_dump_json()}\n\n"
-                except Exception:
-                    # 兜底处理，防止序列化异常中断流
-                    yield f"data: {json.dumps(data, default=str)}\n\n"
+                # data 已经是 KBProcessingStatus 的字典形式 (由 Service 层生成)
+                # 直接序列化为 JSON 字符串推送给前端
+                yield f"data: {json.dumps(data, default=str)}\n\n"
 
                 queue.task_done()
         except asyncio.CancelledError:

@@ -392,6 +392,7 @@ class KnowledgeBaseService:
         """
         获取文件的综合处理状态。
         结合内存中的任务运行状态和数据库中的切片状态进行判定。
+        如果 DB 显示有 Pending 但内存无任务，视为 Failed (僵尸任务)。
         """
         # 1. 获取数据库统计信息
         stats = await kb_crud.get_chunk_stats_by_resource(self.db, resource_id)
@@ -399,12 +400,39 @@ class KnowledgeBaseService:
         # 2. 检查内存任务状态
         is_running = resource_id in KnowledgeBaseService._running_tasks
 
-        # 3. 综合判定逻辑
-        # 如果任务在内存中运行，强制状态为 EMBEDDING，覆盖数据库层面的 PENDING/FAILED 等推断
+        # 3. 状态修正逻辑
         if is_running:
+            # 正在运行，强制状态为 EMBEDDING (覆盖数据库可能滞后的状态)
             stats.file_status = KBFileStatus.EMBEDDING
+        elif stats.pending_chunks > 0:
+            # 未运行，但有 Pending -> 视为异常中断 (Crash/Restart)
+            # 将 Pending 归入 Failed，清零 Pending
+            stats.file_status = KBFileStatus.FAILED
+            stats.failed_chunks += stats.pending_chunks
+            stats.pending_chunks = 0
 
+        # 其他情况 (Completed, Stopped, Failed, Initial) 直接使用 DB 统计即可
         return stats
+
+    async def _publish_status(self, resource_id: str, status: KBFileStatus,
+                              total: int, completed: int, failed: int, stopped: int):
+        """
+        辅助方法：构建统一的 KBProcessingStatus 并推送。
+        """
+        # 计算 pending
+        pending = max(0, total - completed - failed - stopped)
+
+        data = kb_schemas.KBProcessingStatus(
+            resource_id=resource_id,
+            total_chunks=total,
+            pending_chunks=pending,
+            completed_chunks=completed,
+            failed_chunks=failed,
+            stopped_chunks=stopped,
+            file_status=status
+        )
+        # 转换为 dict 推送，Router 层会处理序列化
+        await stream_manager.publish(resource_id, data.model_dump())
 
     async def handle_task_action(self, resource_id: str, request: kb_schemas.KBRunTaskRequest):
         """
@@ -526,6 +554,12 @@ class KnowledgeBaseService:
         # 注册任务
         KnowledgeBaseService._running_tasks.add(resource_id)
 
+        # 本地计数器，避免频繁查询 DB
+        total_count = 0
+        processed_count = 0
+        failed_count = 0
+        stopped_count = 0
+
         # 创建新的 DB Session
         from backend.database import AsyncSessionLocal
         async with AsyncSessionLocal() as session:
@@ -537,10 +571,8 @@ class KnowledgeBaseService:
                 try:
                     client, _ = await temp_service._get_embedding_client(model_id)
                 except Exception as e:
-                    await stream_manager.publish(resource_id, {
-                        "status": KBFileStatus.FAILED,
-                        "message": f"Model init failed: {e}"
-                    })
+                    logger.error(f"Model init failed: {e}")
+                    await self._publish_status(resource_id, KBFileStatus.FAILED, 0, 0, 0, 0)
                     return
 
                 # --- 阶段 1: 准备数据 (Start 模式需切分) ---
@@ -552,18 +584,12 @@ class KnowledgeBaseService:
                     file_id = resource.latest_version.content
 
                     # 2. 清理旧数据
-                    await stream_manager.publish(resource_id, {
-                        "status": KBFileStatus.CLEANING,
-                        "message": "Cleaning old data..."
-                    })
+                    await self._publish_status(resource_id, KBFileStatus.CLEANING, 0, 0, 0, 0)
                     await temp_service._cleanup_vectors(resource_id, dimension)
                     await kb_crud.delete_chunks_by_resource(session, resource_id)
 
                     # 3. 读取文件
-                    await stream_manager.publish(resource_id, {
-                        "status": KBFileStatus.READING,
-                        "message": "Reading file..."
-                    })
+                    await self._publish_status(resource_id, KBFileStatus.READING, 0, 0, 0, 0)
                     db_file = await file_crud.get_file(session, file_id)
                     if not db_file:
                         raise ValueError("Source file record not found.")
@@ -575,10 +601,7 @@ class KnowledgeBaseService:
                         text_content = content_bytes.decode('latin-1')
 
                     # 4. 切分
-                    await stream_manager.publish(resource_id, {
-                        "status": KBFileStatus.SPLITTING,
-                        "message": "Splitting text..."
-                    })
+                    await self._publish_status(resource_id, KBFileStatus.SPLITTING, 0, 0, 0, 0)
                     splitter = SplitterFactory.create(splitter_config)
                     text_chunks = splitter.split_text(text_content)
 
@@ -594,6 +617,18 @@ class KnowledgeBaseService:
                     ]
                     await kb_crud.batch_create_chunks(session, chunk_schemas)
 
+                    # 初始化计数器
+                    total_count = len(chunk_schemas)
+                else:
+                    # Resume 模式：从 DB 获取当前统计
+                    # 注意：Resume 时，failed 和 stopped 会被重新处理，所以在本轮循环开始时，它们视为待处理(Pending)
+                    stats = await kb_crud.get_chunk_stats_by_resource(session, resource_id)
+                    total_count = stats.total_chunks
+                    processed_count = stats.completed_chunks
+                    # 本轮开始时，failed 和 stopped 重置为 0，因为它们将变为 pending 重新跑
+                    failed_count = 0
+                    stopped_count = 0
+
                 # --- 阶段 2: 嵌入循环 ---
 
                 # 获取待处理 Chunks (Resume 模式可能包含 Failed/Stopped)
@@ -604,23 +639,32 @@ class KnowledgeBaseService:
 
                 pending_chunks = await kb_crud.get_chunks_by_statuses(session, resource_id, target_statuses)
 
-                # 获取全局统计信息以计算正确进度
-                stats = await kb_crud.get_chunk_stats_by_resource(session, resource_id)
-                total_count = stats.total_chunks
-                processed_count = stats.completed_chunks
+                # 如果是 Resume，重新校准 total (防止 DB 数据不一致)
+                if resume:
+                    stats = await kb_crud.get_chunk_stats_by_resource(session, resource_id)
+                    total_count = stats.total_chunks
+                    processed_count = stats.completed_chunks
 
                 batch_size = 10
+
+                # 初始推送：EMBEDDING 开始
+                await self._publish_status(resource_id, KBFileStatus.EMBEDDING,
+                                           total_count, processed_count, failed_count, stopped_count)
 
                 for i in range(0, len(pending_chunks), batch_size):
                     # 检查取消信号
                     if await stream_manager.is_cancellation_requested(resource_id):
+                        # 计算剩余未处理的都变成 stopped
+                        remaining = len(pending_chunks) - i
+                        stopped_count += remaining
+
                         # 再次确保数据库状态被更新为 STOPPED
                         await kb_crud.mark_pending_chunks_as_stopped(session, resource_id)
-                        await stream_manager.publish(resource_id, {
-                            "status": KBFileStatus.STOPPED,
-                            "message": "Task cancelled by user."
-                        })
-                        # 直接返回，避免执行后续的 Task finished 逻辑
+
+                        # 推送 STOPPED 状态
+                        await self._publish_status(resource_id, KBFileStatus.STOPPED,
+                                                   total_count, processed_count, failed_count, stopped_count)
+                        # 直接返回
                         return
 
                     batch = pending_chunks[i:i + batch_size]
@@ -630,52 +674,64 @@ class KnowledgeBaseService:
                         # 调用 API
                         vectors = await client.aembed_documents(texts)
 
-                        for chunk, vector in zip(batch, vectors):
-                            if len(vector) != dimension:
+                        current_batch_success = 0
+                        current_batch_failed = 0
+
+                        for idx, vector in enumerate(vectors):
+                            if len(vector) == dimension:
+                                # 写入向量表
+                                rowid = await kb_crud.insert_vector(session, dimension, vector)
+                                # 更新 Chunk 状态
                                 await kb_crud.update_chunk_vector_id_and_status(
-                                    session, chunk.id, None, kb_schemas.KBChunkStatus.FAILED
+                                    session, batch[idx].id, rowid, kb_schemas.KBChunkStatus.COMPLETED
                                 )
-                                continue
+                                current_batch_success += 1
+                            else:
+                                # 维度不匹配
+                                await kb_crud.update_chunk_vector_id_and_status(
+                                    session, batch[idx].id, None, kb_schemas.KBChunkStatus.FAILED
+                                )
+                                current_batch_failed += 1
 
-                            # 写入向量表
-                            rowid = await kb_crud.insert_vector(session, dimension, vector)
+                        # 处理 API 返回数量少于请求数量的情况（异常）
+                        if len(vectors) < len(batch):
+                            diff = len(batch) - len(vectors)
+                            current_batch_failed += diff
+                            for k in range(len(vectors), len(batch)):
+                                await kb_crud.update_chunk_vector_id_and_status(
+                                    session, batch[k].id, None, kb_schemas.KBChunkStatus.FAILED
+                                )
 
-                            # 更新 Chunk 状态
-                            await kb_crud.update_chunk_vector_id_and_status(
-                                session, chunk.id, rowid, kb_schemas.KBChunkStatus.COMPLETED
-                            )
+                        processed_count += current_batch_success
+                        failed_count += current_batch_failed
+
                     except Exception as e:
                         logger.error(f"Embedding batch failed: {e}")
+                        # 全批次失败
                         for chunk in batch:
                             await kb_crud.update_chunk_vector_id_and_status(
                                 session, chunk.id, None, kb_schemas.KBChunkStatus.FAILED
                             )
-
-                    processed_count += len(batch)
+                        failed_count += len(batch)
 
                     # 推送进度
-                    await stream_manager.publish(resource_id, {
-                        "status": KBFileStatus.EMBEDDING,
-                        "processed": processed_count,
-                        "total": total_count
-                    })
+                    await self._publish_status(resource_id, KBFileStatus.EMBEDDING,
+                                               total_count, processed_count, failed_count, stopped_count)
 
                     # 频率限制
                     if rate_limit > 0:
                         await asyncio.sleep(rate_limit)
 
                 # 任务结束
-                await stream_manager.publish(resource_id, {
-                    "status": KBFileStatus.COMPLETED,
-                    "message": "Task finished."
-                })
+                await self._publish_status(resource_id, KBFileStatus.COMPLETED,
+                                           total_count, processed_count, failed_count, stopped_count)
 
             except Exception as e:
                 logger.error(f"Task failed for resource {resource_id}: {e}")
-                await stream_manager.publish(resource_id, {
-                    "status": KBFileStatus.FAILED,
-                    "message": str(e)
-                })
+                # 简单估算剩余的为 Failed
+                failed_count = total_count - processed_count - stopped_count
+                await self._publish_status(resource_id, KBFileStatus.FAILED,
+                                           total_count, processed_count, failed_count, stopped_count)
             finally:
                 # 清理任务注册和取消标记
                 KnowledgeBaseService._running_tasks.discard(resource_id)

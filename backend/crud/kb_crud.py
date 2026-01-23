@@ -234,7 +234,7 @@ async def search_vectors(
 
     # 使用 'AND k = {top_k}' 显式约束，解决 sqlite-vec 优化器问题
     sql = f"""
-        SELECT rowid, vec_distance_L2(vector, :query_vector) as distance
+        SELECT rowid, vec_distance_cosine(vector, :query_vector) as distance
         FROM {table_name}
         WHERE vector MATCH :query_vector
           AND k = {top_k}

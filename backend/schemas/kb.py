@@ -87,23 +87,18 @@ class KBSearchResponse(BaseModel):
 # --- Status & Task Models ---
 
 class KBProcessingStatus(BaseModel):
-    """文件处理状态统计 (快照)"""
+    """
+    文件处理状态统计 (统一模型)
+    用于 HTTP 响应快照 和 SSE 流式事件
+    """
     resource_id: str
-    total_chunks: int
-    pending_chunks: int
-    completed_chunks: int
-    failed_chunks: int
-    stopped_chunks: int
+    total_chunks: int = 0
+    pending_chunks: int = 0
+    completed_chunks: int = 0
+    failed_chunks: int = 0
+    stopped_chunks: int = 0
     # 聚合状态，使用统一枚举
     file_status: KBFileStatus
-
-
-class KBStreamEvent(BaseModel):
-    """SSE 流式事件数据结构"""
-    status: KBFileStatus
-    message: str
-    processed: int = 0
-    total: int = 0
 
 
 class KBRunTaskRequest(BaseModel):

@@ -365,7 +365,13 @@ export type ResourceItemType = 'resource' | 'folder' | 'stub'
 /**
  * 定义资源的具体品类。
  */
-export type ResourceType = 'system_prompt' | 'submessage_template' | 'knowledge_base' | 'knowledge_base_chunk' | 'kb_file' | string
+export type ResourceType =
+  | 'system_prompt'
+  | 'submessage_template'
+  | 'knowledge_base'
+  | 'knowledge_base_chunk'
+  | 'kb_file'
+  | string
 
 /**
  * 知识库文件属性结构
@@ -565,7 +571,8 @@ export interface ResourceSearchResponse {
 /**
  * 知识库文件处理状态
  */
-export type KBFileStatus =   | 'INITIAL'
+export type KBFileStatus =
+  | 'INITIAL'
   | 'CLEANING'
   | 'READING'
   | 'SPLITTING'
@@ -595,18 +602,6 @@ export interface KBChunkStatus {
   failed_chunks: number
   stopped_chunks: number
   file_status: KBFileStatus
-  message?: string
-}
-
-/**
- * 实时进度事件 (对应 SSE 的 Stream Event)
- * 用于描述当前步骤（如 EMBEDDING）的具体进度
- */
-export interface KBTaskStreamEvent {
-  status: KBFileStatus
-  message: string
-  processed: number
-  total: number
 }
 
 /**
@@ -675,7 +670,8 @@ export interface KBRunTaskRequest {
 /**
  * 知识库文件处理进度的 SSE 事件载荷
  */
-export type KBTaskProgressPayload = KBChunkStatus | KBTaskStreamEvent
+export type KBTaskProgressPayload = KBChunkStatus
+
 /**
  * Resume 任务冲突时的错误详情结构 (409 Conflict)
  */
@@ -684,4 +680,3 @@ export interface KBResumeConflictErrorDetail {
   current_config: KBSplitterConfig
   last_ingest_config: KBSplitterConfig
 }
-
