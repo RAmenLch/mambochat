@@ -61,7 +61,7 @@
 
   <!-- 1. 通用实体表单 (新建资源/文件夹/重命名) -->
   <EntityFormDialog
-    v-if="dialogState.type !== 'newKB'"
+    v-if="dialogState.payload.value?.type !== 'newKB'"
     v-model:visible="dialogState.visible.value"
     :title="dialogProps.title"
     :initial-name="dialogProps.initialName"
@@ -104,6 +104,7 @@ import KnowledgeBaseFormDialog, { type KBConfirmPayload, type ModelGroup } from 
 
 import type {
   Resource,
+  ResourceWithVersions,
   ResourceCreate,
   ResourceUpdate,
   ResourceType,
@@ -319,7 +320,7 @@ const {
  */
 const handleKBConfirm = async (payload: KBConfirmPayload) => {
   // 获取当前上下文的父节点 ID (由 useTreeController 管理)
-  const parentId = dialogState.parentId.value;
+  const parentId = dialogState.payload.value?.parentId ?? null;
 
   // 调用 Service 创建知识库
   const newItem = await createKnowledgeBase({
@@ -331,7 +332,15 @@ const handleKBConfirm = async (payload: KBConfirmPayload) => {
 
   // 手动同步到 Store
   if (newItem) {
-    resourceStore.resources.push(newItem);
+    // 构造符合 Store 要求的 ResourceWithVersions 类型
+    // 后端创建知识库时会自动创建初始版本并挂载到 latest_version
+    const newItemWithVersions: ResourceWithVersions = {
+      ...newItem,
+      versions: newItem.latest_version ? [newItem.latest_version] : []
+    };
+
+    resourceStore.resources.push(newItemWithVersions);
+
     if (newItem.itemType === 'folder') {
       resourceStore.loadedFolderIds.add(newItem.id);
     }

@@ -6,7 +6,6 @@
     width="500px"
     @update:model-value="val => emit('update:visible', val)"
     @close="handleClose"
-    @open="handleOpen"
   >
     <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
       <el-form-item label="知识库名称" prop="name">
@@ -23,6 +22,7 @@
           v-model="form.embeddingModelId"
           placeholder="请选择嵌入模型"
           style="width: 100%"
+          no-data-text="暂无可用模型，请先在设置中添加 Embedding 模型"
         >
           <template v-for="group in embeddingModelOptions" :key="group.label">
             <el-option-group :label="group.label">
@@ -63,7 +63,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, nextTick } from 'vue';
+import { ref, reactive, nextTick, watch } from 'vue';
 import { type FormInstance, type FormRules, ElMessage } from 'element-plus';
 import { QuestionFilled } from '@element-plus/icons-vue';
 
@@ -87,10 +87,13 @@ export interface KBConfirmPayload {
 
 // --- Props & Emits ---
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   visible: boolean;
   embeddingModelOptions: ModelGroup[];
-}>();
+  initialName?: string;
+}>(), {
+  initialName: '新建知识库'
+});
 
 const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void;
@@ -113,24 +116,66 @@ const rules = reactive<FormRules>({
   embeddingModelId: [{ required: true, message: '请选择嵌入模型', trigger: 'change' }],
 });
 
-// --- Handlers ---
+// --- Methods ---
 
-const handleOpen = () => {
-  form.name = '';
+/**
+ * 尝试自动选中第一个可用的模型
+ */
+const tryAutoSelectModel = () => {
+  // 如果已经选中了有效值，就不再自动覆盖
+  if (form.embeddingModelId) return;
+
+  if (props.embeddingModelOptions && props.embeddingModelOptions.length > 0) {
+    // 遍历所有分组，找到第一个包含选项的分组
+    for (const group of props.embeddingModelOptions) {
+      if (group.options && group.options.length > 0) {
+        form.embeddingModelId = group.options[0].value;
+        return;
+      }
+    }
+  }
+};
+
+/**
+ * 初始化表单数据
+ */
+const initForm = () => {
+  // 1. 设置默认名称
+  form.name = props.initialName;
   form.embeddingRateLimit = 0;
 
-  // 尝试自动选中第一个可用的模型
-  if (props.embeddingModelOptions.length > 0 && props.embeddingModelOptions[0].options.length > 0) {
-    form.embeddingModelId = props.embeddingModelOptions[0].options[0].value;
-  } else {
-    form.embeddingModelId = '';
-  }
+  // 2. 重置模型选择
+  form.embeddingModelId = '';
 
+  // 3. 尝试自动选择模型 (处理数据已加载的情况)
+  tryAutoSelectModel();
+
+  // 4. 重置校验并聚焦
   nextTick(() => {
     formRef.value?.clearValidate();
     nameInputRef.value?.focus();
   });
 };
+
+// --- Watchers ---
+
+// 1. 监听 visible 变化来触发初始化
+// 使用 immediate: true 确保组件首次挂载且 visible 为 true 时也能执行初始化
+watch(() => props.visible, (val) => {
+  if (val) {
+    initForm();
+  }
+}, { immediate: true });
+
+// 2. 监听选项数据变化
+// 处理异步数据加载：当弹窗已打开但数据还没回来时，数据回来后自动补选
+watch(() => props.embeddingModelOptions, () => {
+  if (props.visible) {
+    tryAutoSelectModel();
+  }
+}, { deep: true });
+
+// --- Handlers ---
 
 const handleClose = () => {
   emit('update:visible', false);
