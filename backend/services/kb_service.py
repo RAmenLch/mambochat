@@ -294,13 +294,14 @@ class KnowledgeBaseService:
             raise HTTPException(status_code=500, detail=f"File storage failed: {e}")
 
         # 4. 创建 File 记录
+        # 使用 KB_DOCUMENT 类型，确保 cleanup_service 能正确识别并关联到 ResourceVersion 进行清理检查
         db_file = await file_crud.create_file(
             self.db,
             filename=file.filename,
             storage_path=storage_path,
             mime_type=file.content_type or "text/plain",
             size=file.size,
-            management_type=FileManagementType.GLOBAL_SETTING.value
+            management_type=FileManagementType.KB_DOCUMENT.value
         )
 
         # 5. 准备默认切分配置

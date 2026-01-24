@@ -29,7 +29,7 @@ class FileManagementType(str, Enum):
     TEMPORARY = "temporary"          # 临时文件，等待与消息关联
     SUB_MESSAGE = "sub_message"      # 已被聊天消息引用的文件
     GLOBAL_SETTING = "global_setting"  # 被全局设置（如头像）引用的文件
-
+    KB_DOCUMENT = "kb_document"
 
 class MoveAction(str, Enum):
     """定义节点移动的操作类型"""
