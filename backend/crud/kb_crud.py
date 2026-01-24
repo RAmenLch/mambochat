@@ -9,7 +9,7 @@ from sqlalchemy import text, func, case, delete, update
 
 from backend.models import kb_model, resource_model
 from backend.schemas import kb as kb_schemas
-from backend.schemas.enums import KBFileStatus
+from backend.schemas.enums import KBFileStatus, ResourceType
 
 
 # --- Chunk Management ---
@@ -253,32 +253,64 @@ async def get_chunks_by_vector_ids(
 ) -> List[Any]:
     """
     根据 vector_id 列表反查 Chunk 及其所属 Resource 和 KB 信息。
-    如果提供了 kb_id_filter，则进行过滤。
+    支持多级目录结构 (Knowledge Base -> Folder -> File)。
     """
     if not vector_ids:
         return []
 
-    # 使用 aliased 创建真正的 SQL 别名，避免 ambiguous column name 错误
-    FileResource = aliased(resource_model.Resource, name="file_resource")
-    KBResource = aliased(resource_model.Resource, name="kb_resource")
+    # 1. CTE Base Part: 找到命中向量的文件资源
+    # 我们需要保留原始文件的 ID 和 Name (origin_file_*)，以便最后输出
+    # 同时获取其父级信息用于递归 (ancestor_*)
+    # 使用 distinct 去重，防止同一个文件的多个 chunk 导致重复的递归起始点
+    base_stmt = select(
+        resource_model.Resource.id.label("ancestor_id"),
+        resource_model.Resource.parentId.label("ancestor_parent_id"),
+        resource_model.Resource.resourceType.label("ancestor_type"),
+        resource_model.Resource.name.label("ancestor_name"),
+        resource_model.Resource.id.label("origin_file_id"),
+        resource_model.Resource.name.label("origin_file_name")
+    ).join(
+        kb_model.ResourceKBChunk, kb_model.ResourceKBChunk.resource_id == resource_model.Resource.id
+    ).where(
+        kb_model.ResourceKBChunk.vector_id.in_(vector_ids)
+    ).distinct()
 
+    cte = base_stmt.cte(name="kb_hierarchy", recursive=True)
+
+    # 2. CTE Recursive Part: 向上查找父节点
+    parent = aliased(resource_model.Resource)
+    cte = cte.union_all(
+        select(
+            parent.id,
+            parent.parentId,
+            parent.resourceType,
+            parent.name,
+            cte.c.origin_file_id,
+            cte.c.origin_file_name
+        ).join(
+            cte, parent.id == cte.c.ancestor_parent_id
+        )
+    )
+
+    # 3. 主查询: 关联 Chunk 和 CTE
+    # 筛选条件:
+    # a. Chunk 的 vector_id 必须在列表中
+    # b. CTE 中的 ancestor_type 必须是 KNOWLEDGE_BASE (找到根节点)
     query = select(
         kb_model.ResourceKBChunk,
-        FileResource.id.label("file_id"),
-        FileResource.name.label("file_name"),
-        KBResource.id.label("kb_id"),
-        KBResource.name.label("kb_name")
+        cte.c.origin_file_id.label("file_id"),
+        cte.c.origin_file_name.label("file_name"),
+        cte.c.ancestor_id.label("kb_id"),
+        cte.c.ancestor_name.label("kb_name")
     ).join(
-        FileResource, kb_model.ResourceKBChunk.resource_id == FileResource.id
-    ).join(
-        KBResource, FileResource.parentId == KBResource.id
-    ).filter(
-        kb_model.ResourceKBChunk.vector_id.in_(vector_ids)
+        cte, kb_model.ResourceKBChunk.resource_id == cte.c.origin_file_id
+    ).where(
+        kb_model.ResourceKBChunk.vector_id.in_(vector_ids),
+        cte.c.ancestor_type == ResourceType.KNOWLEDGE_BASE.value
     )
 
     if kb_id_filter:
-        # 这里使用别名 KBResource 进行过滤
-        query = query.filter(KBResource.id == kb_id_filter)
+        query = query.where(cte.c.ancestor_id == kb_id_filter)
 
     result = await db.execute(query)
     return result.all()
