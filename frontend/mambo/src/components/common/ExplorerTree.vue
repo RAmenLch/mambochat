@@ -1,6 +1,11 @@
 <!-- frontend/mambo/src/components/common/ExplorerTree.vue -->
 <template>
-  <div class="explorer-tree-container" @contextmenu.prevent="handleRootContextMenu">
+  <div
+    class="explorer-tree-container"
+    @contextmenu.prevent="handleRootContextMenu"
+    @dragover.prevent
+    @drop.prevent="handleContainerDrop"
+  >
     <div class="explorer-tree-header" v-if="$slots.header">
       <slot name="header"></slot>
     </div>
@@ -31,7 +36,14 @@
         <!-- 注意：这里将 indent 改为了 16 或更大，以便给连接线留出空间 -->
 
         <template #default="{ node, data }">
-          <span class="custom-tree-node">
+          <span
+            class="custom-tree-node"
+            :class="{ 'is-drag-over': dragOverId === data.id }"
+            @dragover.prevent
+            @dragenter.prevent="handleNodeDragEnter(data)"
+            @dragleave.prevent="handleNodeDragLeave(data)"
+            @drop.stop.prevent="handleNodeNativeDrop(data, $event)"
+          >
             <span class="node-icon-wrapper" v-if="$slots['item-icon']">
               <slot name="item-icon" :node="node" :data="data"></slot>
             </span>
@@ -60,26 +72,31 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted, computed } from 'vue';
-import { ElTree } from 'element-plus';
-import { Loading } from '@element-plus/icons-vue';
-import type { AllowDropType, NodeDropType, TreeNodeData } from 'element-plus/es/components/tree/src/tree.type';
-import type Node from 'element-plus/es/components/tree/src/model/node';
-import type { BaseTreeItem, MoveRequest, MoveAction } from '@/api/types';
+import { ref, watch, nextTick, onMounted, computed } from 'vue'
+import { ElTree, ElMessage } from 'element-plus'
+import { Loading } from '@element-plus/icons-vue'
+import type {
+  AllowDropType,
+  NodeDropType,
+  TreeNodeData,
+} from 'element-plus/es/components/tree/src/tree.type'
+import type Node from 'element-plus/es/components/tree/src/model/node'
+import type { BaseTreeItem, MoveRequest, MoveAction } from '@/api/types'
+import { uploadResourceFile } from '@/api/kbService'
 
 interface Props {
-  data: BaseTreeItem[];
-  currentId?: string | null;
-  isLoading?: boolean;
-  emptyText?: string;
-  folderItemType?: string;
-  persistenceKey?: string;
-  loadingFolderIds?: Set<string>;
+  data: BaseTreeItem[]
+  currentId?: string | null
+  isLoading?: boolean
+  emptyText?: string
+  folderItemType?: string
+  persistenceKey?: string
+  loadingFolderIds?: Set<string>
   /**
    * 自定义拖拽允许校验函数。
    * 如果提供，将在默认的结构校验前执行。返回 false 则禁止拖拽。
    */
-  customAllowDrop?: (draggingNode: Node, dropNode: Node, dropType: AllowDropType) => boolean;
+  customAllowDrop?: (draggingNode: Node, dropNode: Node, dropType: AllowDropType) => boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -90,171 +107,260 @@ const props = withDefaults(defineProps<Props>(), {
   persistenceKey: undefined,
   loadingFolderIds: () => new Set(),
   customAllowDrop: undefined,
-});
+})
 
 const emit = defineEmits<{
-  (e: 'node-click', data: BaseTreeItem): void;
-  (e: 'node-contextmenu', event: MouseEvent, data: BaseTreeItem, node: Node): void;
-  (e: 'root-contextmenu', event: MouseEvent): void;
-  (e: 'move', req: MoveRequest): void;
-  (e: 'node-expand', data: BaseTreeItem): void;
-}>();
+  (e: 'node-click', data: BaseTreeItem): void
+  (e: 'node-contextmenu', event: MouseEvent, data: BaseTreeItem, node: Node): void
+  (e: 'root-contextmenu', event: MouseEvent): void
+  (e: 'move', req: MoveRequest): void
+  (e: 'node-expand', data: BaseTreeItem): void
+  (e: 'upload-success'): void
+}>()
 
-const treeRef = ref<InstanceType<typeof ElTree>>();
-const expandedState = ref<Record<string, boolean>>({});
+const treeRef = ref<InstanceType<typeof ElTree>>()
+const expandedState = ref<Record<string, boolean>>({})
+const dragOverId = ref<string | null>(null)
 
-const loadingNodes = computed(() => props.loadingFolderIds);
+const loadingNodes = computed(() => props.loadingFolderIds)
 
 const treeProps = {
   label: 'name',
   children: 'children',
   isLeaf: (data: TreeNodeData) => {
-    return (data as BaseTreeItem).itemType !== props.folderItemType;
+    return (data as BaseTreeItem).itemType !== props.folderItemType
   },
   class: (data: TreeNodeData) => {
-    return (data as BaseTreeItem).itemType === 'stub' ? 'is-hidden-node' : '';
-  }
-};
+    return (data as BaseTreeItem).itemType === 'stub' ? 'is-hidden-node' : ''
+  },
+}
 
 const handleNodeClick = (data: BaseTreeItem) => {
-  emit('node-click', data);
-};
+  emit('node-click', data)
+}
 
 const handleNodeContextMenu = (event: MouseEvent, data: BaseTreeItem, node: Node) => {
-  emit('node-contextmenu', event, data, node);
-};
+  emit('node-contextmenu', event, data, node)
+}
 
 const handleRootContextMenu = (event: MouseEvent) => {
-  emit('root-contextmenu', event);
-};
+  emit('root-contextmenu', event)
+}
 
 const allowDrop = (draggingNode: Node, dropNode: Node, dropType: AllowDropType) => {
   // 1. 优先执行外部传入的业务规则校验
   if (props.customAllowDrop) {
     if (!props.customAllowDrop(draggingNode, dropNode, dropType)) {
-      return false;
+      return false
     }
   }
 
   // 2. 执行组件内部的基础结构校验
   // 仅允许放置到文件夹类型的节点内部
   if ((dropNode.data as BaseTreeItem).itemType !== props.folderItemType && dropType === 'inner') {
-    return false;
+    return false
   }
-  return true;
-};
+  return true
+}
 
 const handleNodeDrop = (draggingNode: Node, dropNode: Node, dropType: NodeDropType) => {
-  let action: MoveAction;
-  let referenceId: string;
-  const draggingData = draggingNode.data as BaseTreeItem;
-  const dropData = dropNode.data as BaseTreeItem;
+  let action: MoveAction
+  let referenceId: string
+  const draggingData = draggingNode.data as BaseTreeItem
+  const dropData = dropNode.data as BaseTreeItem
 
   if (dropType === 'inner') {
-    action = 'inside';
-    referenceId = dropData.id;
+    action = 'inside'
+    referenceId = dropData.id
   } else if (dropType === 'before') {
-    action = 'before';
-    referenceId = dropData.id;
+    action = 'before'
+    referenceId = dropData.id
   } else if (dropType === 'after') {
-    action = 'after';
-    referenceId = dropData.id;
+    action = 'after'
+    referenceId = dropData.id
   } else {
-    return;
+    return
   }
 
   const req: MoveRequest = {
     item_ids: [draggingData.id],
     reference_id: referenceId,
     action: action,
-  };
-  emit('move', req);
-};
+  }
+  emit('move', req)
+}
+
+// --- Native File Drop Handlers ---
+
+const processFileUpload = async (files: FileList, parentId: string) => {
+  if (files.length === 0) return
+
+  const loading = ElMessage.info({
+    message: `正在上传 ${files.length} 个文件...`,
+    duration: 0,
+  })
+
+  try {
+    const uploadPromises = Array.from(files).map((file) => {
+      // 如果 parentId 是 'root'，传递给 API 时可能需要特定处理，
+      // 但根据 kbService 的定义，parentId 是可选的。
+      // 如果业务约定 'root' 字符串代表根目录，则直接传；
+      // 如果约定不传代表根目录，则需转换。
+      // 这里假设后端能处理 'root' 或前端需转为 undefined。
+      // 根据计划：如果是根目录,则parent_id 为 'root'。直接传递。
+      return uploadResourceFile(file, parentId)
+    })
+
+    await Promise.all(uploadPromises)
+    ElMessage.success('文件上传成功')
+    emit('upload-success')
+  } catch (error) {
+    console.error('File upload failed', error)
+    ElMessage.error('部分文件上传失败，请重试')
+  } finally {
+    loading.close()
+  }
+}
+
+const handleContainerDrop = async (event: DragEvent) => {
+  dragOverId.value = null
+  const files = event.dataTransfer?.files
+  if (files && files.length > 0) {
+    await processFileUpload(files, 'root')
+  }
+}
+
+const handleNodeDragEnter = (data: BaseTreeItem) => {
+  if (data.itemType === props.folderItemType) {
+    dragOverId.value = data.id
+  } else {
+    dragOverId.value = null
+  }
+}
+
+const handleNodeDragLeave = (data: BaseTreeItem) => {
+  if (dragOverId.value === data.id) {
+    dragOverId.value = null
+  }
+}
+
+const handleNodeNativeDrop = async (data: BaseTreeItem, event: DragEvent) => {
+  dragOverId.value = null
+  const files = event.dataTransfer?.files
+  if (!files || files.length === 0) return
+
+  // 计划要求：若放置在文件夹节点上，取该节点 ID 为 parent_id；
+  // 若放置在非文件夹节点上，设置 parent_id 为 'root'。
+  const targetParentId = data.itemType === props.folderItemType ? data.id : 'root'
+  await processFileUpload(files, targetParentId)
+}
+
+// --- State Management ---
 
 const loadExpandedState = () => {
-  if (!props.persistenceKey) return;
-  const savedState = localStorage.getItem(props.persistenceKey);
+  if (!props.persistenceKey) return
+  const savedState = localStorage.getItem(props.persistenceKey)
   if (savedState) {
     try {
-      expandedState.value = JSON.parse(savedState);
+      expandedState.value = JSON.parse(savedState)
     } catch (e) {
-      localStorage.removeItem(props.persistenceKey);
+      localStorage.removeItem(props.persistenceKey)
     }
   }
-};
+}
 
 const saveExpandedState = () => {
-  if (!props.persistenceKey) return;
-  localStorage.setItem(props.persistenceKey, JSON.stringify(expandedState.value));
-};
+  if (!props.persistenceKey) return
+  localStorage.setItem(props.persistenceKey, JSON.stringify(expandedState.value))
+}
 
 const handleNodeExpand = (data: BaseTreeItem) => {
   if (data.itemType === props.folderItemType) {
-    expandedState.value[data.id] = true;
-    saveExpandedState();
+    expandedState.value[data.id] = true
+    saveExpandedState()
   }
-  emit('node-expand', data);
-};
+  emit('node-expand', data)
+}
 
 const handleNodeCollapse = (data: BaseTreeItem) => {
   if (data.itemType === props.folderItemType) {
-    delete expandedState.value[data.id];
-    saveExpandedState();
+    delete expandedState.value[data.id]
+    saveExpandedState()
   }
-};
+}
 
-watch(() => props.data, (newData) => {
-  if (newData.length > 0 && treeRef.value && Object.keys(expandedState.value).length > 0) {
-    nextTick(() => {
-      Object.keys(expandedState.value).forEach(key => {
-        const node = treeRef.value!.getNode(key);
-        if (node && !node.expanded) {
-          node.expand();
-          const item = node.data as BaseTreeItem;
-          if (item && item.itemType === props.folderItemType) {
-            emit('node-expand', item);
+watch(
+  () => props.data,
+  (newData) => {
+    if (newData.length > 0 && treeRef.value && Object.keys(expandedState.value).length > 0) {
+      nextTick(() => {
+        Object.keys(expandedState.value).forEach((key) => {
+          const node = treeRef.value!.getNode(key)
+          if (node && !node.expanded) {
+            node.expand()
+            const item = node.data as BaseTreeItem
+            if (item && item.itemType === props.folderItemType) {
+              emit('node-expand', item)
+            }
           }
-        }
-      });
-    });
-  }
-}, { deep: true, flush: 'post' });
+        })
+      })
+    }
+  },
+  { deep: true, flush: 'post' },
+)
 
 onMounted(() => {
-  loadExpandedState();
-});
+  loadExpandedState()
+})
 
 const scrollToKey = async (key: string) => {
-  await nextTick();
-  const node = treeRef.value?.getNode(key);
+  await nextTick()
+  const node = treeRef.value?.getNode(key)
   if (node) {
-    let parent = node.parent;
+    let parent = node.parent
     while (parent && parent.level > 0) {
-      parent.expand();
+      parent.expand()
       if (parent.data) {
-        const parentData = parent.data as BaseTreeItem;
+        const parentData = parent.data as BaseTreeItem
         if (parentData.itemType === props.folderItemType) {
-          emit('node-expand', parentData);
+          emit('node-expand', parentData)
         }
       }
-      parent = parent.parent;
+      parent = parent.parent
     }
-    await nextTick();
-    treeRef.value?.setCurrentKey(key);
-    const currentEl = treeRef.value?.$el.querySelector('.is-current');
-    currentEl?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    await nextTick()
+    treeRef.value?.setCurrentKey(key)
+    const currentEl = treeRef.value?.$el.querySelector('.is-current')
+    currentEl?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }
-};
+}
 
-defineExpose({ scrollToKey });
+defineExpose({ scrollToKey })
 </script>
 
 <style scoped>
-.explorer-tree-container { height: 100%; display: flex; flex-direction: column; box-sizing: border-box; }
-.explorer-tree-header { flex-shrink: 0; padding: 16px 16px 8px 16px; cursor: default; }
-.explorer-tree-scrollbar { flex-grow: 1; padding: 0 12px; }
-.loading-container { padding: 0 10px; }
-.custom-tree { background-color: transparent; }
+.explorer-tree-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+.explorer-tree-header {
+  flex-shrink: 0;
+  padding: 16px 16px 8px 16px;
+  cursor: default;
+}
+.explorer-tree-scrollbar {
+  flex-grow: 1;
+  padding: 0 12px;
+}
+.loading-container {
+  padding: 0 10px;
+}
+.custom-tree {
+  background-color: transparent;
+}
 
 /* 调整节点高度和样式 */
 :deep(.el-tree-node__content) {
@@ -264,13 +370,56 @@ defineExpose({ scrollToKey });
   position: relative;
 }
 
-:deep(.el-tree-node.is-current > .el-tree-node__content) { background-color: var(--el-color-primary-light-9); border: 1px solid var(--el-color-primary-light-7); }
-:deep(.el-tree-node__content:hover) { background-color: var(--color-background-mute); }
-.custom-tree-node { flex: 1; display: flex; align-items: center; justify-content: space-between; font-size: 14px; padding-right: 8px; overflow: hidden; width: 100%; height: 100%; }
-.node-icon-wrapper { margin-right: 8px; font-size: 16px; display: flex; align-items: center; color: var(--el-text-color-secondary); }
-.node-label { flex-grow: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; margin-right: 8px; }
-.loading-icon { animation: rotating 2s linear infinite; color: var(--el-text-color-secondary); margin-left: 4px; }
-@keyframes rotating { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+:deep(.el-tree-node.is-current > .el-tree-node__content) {
+  background-color: var(--el-color-primary-light-9);
+  border: 1px solid var(--el-color-primary-light-7);
+}
+:deep(.el-tree-node__content:hover) {
+  background-color: var(--color-background-mute);
+}
+.custom-tree-node {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+  padding-right: 8px;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+}
+.custom-tree-node.is-drag-over {
+  background-color: var(--el-color-primary-light-8);
+  outline: 1px dashed var(--el-color-primary);
+}
+.node-icon-wrapper {
+  margin-right: 8px;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  color: var(--el-text-color-secondary);
+}
+.node-label {
+  flex-grow: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  margin-right: 8px;
+}
+.loading-icon {
+  animation: rotating 2s linear infinite;
+  color: var(--el-text-color-secondary);
+  margin-left: 4px;
+}
+@keyframes rotating {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
 </style>
 
 <style>

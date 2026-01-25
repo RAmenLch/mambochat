@@ -17,7 +17,6 @@
           >
         </div>
       </div>
-      <div class="header-actions"></div>
     </div>
 
     <el-scrollbar class="detail-content">
@@ -210,6 +209,12 @@
           <el-descriptions-item label="当前状态">
             {{ statusLabel }}
           </el-descriptions-item>
+          <!-- Req 4: is_stale display -->
+          <el-descriptions-item label="内容状态" v-if="statusInfo?.is_stale">
+            <el-tag type="warning" effect="dark">
+              <el-icon><Warning /></el-icon> 内容已更新，需重新嵌入
+            </el-tag>
+          </el-descriptions-item>
         </el-descriptions>
       </div>
     </el-scrollbar>
@@ -219,7 +224,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, reactive } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { Document, QuestionFilled } from '@element-plus/icons-vue'
+import { Document, QuestionFilled, Warning } from '@element-plus/icons-vue'
 import { runKBFileTask, subscribeToKBFileProgress, updateKBFileConfig } from '@/api/kbService'
 import { useResourceStore } from '@/stores/resourceStore'
 import type {

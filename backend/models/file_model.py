@@ -14,6 +14,8 @@ class File(Base):
     storage_path = Column(String(512), nullable=False, unique=True)
     mime_type = Column(String(100), nullable=False)
     size = Column(Integer, nullable=False)
-    management_type = Column(String(50), nullable=False, index=True)
-    created_at = Column(DateTime, nullable=False, server_default=func.now())
 
+    # management_type 值域参考 FileManagementType 枚举 (e.g., 'temporary', 'sub_message', 'resource')
+    management_type = Column(String(50), nullable=False, index=True)
+
+    created_at = Column(DateTime, nullable=False, server_default=func.now())

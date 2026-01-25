@@ -47,7 +47,10 @@
               <el-form-item prop="embeddingRateLimit">
                 <template #label>
                   <span>嵌入频率限制 (秒)</span>
-                  <el-tooltip content="每次 Embedding 请求后的冷却时间，用于防止触发 API 速率限制" placement="top">
+                  <el-tooltip
+                    content="每次 Embedding 请求后的冷却时间，用于防止触发 API 速率限制"
+                    placement="top"
+                  >
                     <el-icon class="label-icon"><QuestionFilled /></el-icon>
                   </el-tooltip>
                 </template>
@@ -92,7 +95,6 @@
         <div class="files-header">
           <span class="section-title">文档列表</span>
           <div class="files-actions">
-            <!-- [Requirement 3] Removed Refresh Button -->
             <el-button type="primary" :icon="Upload" @click="triggerUpload" :disabled="!canUpload">
               上传文档
             </el-button>
@@ -127,7 +129,9 @@
                 </div>
 
                 <div class="node-actions" v-if="data.itemType === 'resource'">
-                  <span class="upload-time">{{ new Date(data.updatedAt).toLocaleDateString() }}</span>
+                  <span class="upload-time">{{
+                    new Date(data.updatedAt).toLocaleDateString()
+                  }}</span>
                   <el-button type="primary" link size="small" @click="handleManageFile(data)">
                     <el-icon class="el-icon--left"><Setting /></el-icon>
                     配置任务
@@ -154,7 +158,8 @@ import { Upload, Document, QuestionFilled, Setting, Folder } from '@element-plus
 
 import { useResourceStore } from '@/stores/resourceStore'
 import { useProviderStore } from '@/stores/providerStore'
-import { uploadKBFile } from '@/api/kbService'
+// [Fix] Import uploadResourceFile instead of uploadKBFile
+import { uploadResourceFile } from '@/api/kbService'
 import type { Resource, ResourceWithVersions, ResourceNode } from '@/api/types'
 
 // --- Props & Emits ---
@@ -320,8 +325,6 @@ const handleSave = async () => {
   })
 }
 
-// [Requirement 3] refreshFiles removed
-
 const triggerUpload = () => {
   if (!canUpload.value) {
     ElMessage.warning('请先配置并保存嵌入模型')
@@ -342,8 +345,8 @@ const handleFileChange = async (event: Event) => {
   })
 
   try {
-    // 接收接口返回的新资源对象
-    const newFile = await uploadKBFile(props.resource.id, file)
+    // [Fix] Use uploadResourceFile with parentId
+    const newFile = await uploadResourceFile(file, props.resource.id)
 
     // 将新文件直接添加到 Store 中，以立即更新 UI 列表
     const newResourceWithVersions: ResourceWithVersions = {

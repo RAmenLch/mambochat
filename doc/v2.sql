@@ -9,3 +9,17 @@ ALTER TABLE AIProvider ADD COLUMN worker_type VARCHAR(50) NOT NULL DEFAULT 'open
 ALTER TABLE AIModel ADD COLUMN model_type VARCHAR(50) NOT NULL DEFAULT 'chat';
 
 
+ALTER TABLE Resource ADD COLUMN kb_id VARCHAR(36);
+
+-- 为 kb_id 创建索引以优化查询
+CREATE INDEX ix_Resource_kb_id ON Resource (kb_id);
+
+-- 新增 kb_config 字段，用于存储切分配置 (JSON 序列化存储为 TEXT)
+ALTER TABLE Resource ADD COLUMN kb_config TEXT;
+
+-- 2. ResourceKBChunk 表变更
+-- 新增 created_at 字段，记录切分创建时间，默认值为当前时间
+ALTER TABLE ResourceKBChunk ADD COLUMN created_at DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00';
+
+-- 新增 processed_at 字段，记录向量化完成时间，用于过时判定
+ALTER TABLE ResourceKBChunk ADD COLUMN processed_at DATETIME;

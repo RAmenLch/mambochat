@@ -127,28 +127,31 @@ async def _cleanup_global_setting_files(db: AsyncSession):
     await db.commit()
 
 
-async def _cleanup_kb_document_files(db: AsyncSession):
+async def _cleanup_resource_files(db: AsyncSession):
     """
-    清理与任何 ResourceVersion 都不再关联的 KB_DOCUMENT 文件。
-    KB 文件的 file_id 存储在 ResourceVersion.content 字段中。
+    清理与任何 ResourceVersion 都不再关联的 RESOURCE 类型文件。
+    涵盖新的 RESOURCE 类型以及旧的 KB_DOCUMENT 类型。
     """
     # 1. 获取所有正在被 ResourceVersion 引用的文件ID
-    # 我们只关心 ResourceType 为 KB_FILE 的资源对应的版本
+    # 仅关心 ResourceType 为 FILE 或 KB_FILE 的资源
     stmt_active = (
         select(resource_model.ResourceVersion.content)
         .join(resource_model.Resource, resource_model.ResourceVersion.resourceId == resource_model.Resource.id)
         .where(
-            resource_model.Resource.resourceType == ResourceType.KB_FILE.value,
+            resource_model.Resource.resourceType.in_([ResourceType.FILE.value, ResourceType.KB_FILE.value]),
             resource_model.ResourceVersion.content.is_not(None)
         )
     )
     result_active = await db.execute(stmt_active)
-    # 注意：content 字段存储的是 file_id 字符串
+    # content 字段存储的是 file_id 字符串
     active_file_ids = {row[0] for row in result_active}
 
-    # 2. 获取所有标记为 KB_DOCUMENT 的文件ID
+    # 2. 获取所有标记为 RESOURCE 或 KB_DOCUMENT 的文件ID
     stmt_managed = select(file_model.File.id).where(
-        file_model.File.management_type == FileManagementType.KB_DOCUMENT.value
+        file_model.File.management_type.in_([
+            FileManagementType.RESOURCE.value,
+            FileManagementType.KB_DOCUMENT.value
+        ])
     )
     result_managed = await db.execute(stmt_managed)
     managed_file_ids = {row[0] for row in result_managed}
@@ -159,7 +162,7 @@ async def _cleanup_kb_document_files(db: AsyncSession):
     if not orphan_file_ids:
         return
 
-    logger.info(f"发现 {len(orphan_file_ids)} 个孤儿 KB_DOCUMENT 文件，准备清理...")
+    logger.info(f"发现 {len(orphan_file_ids)} 个孤儿 Resource/KB 文件，准备清理...")
 
     # 4. 删除孤儿文件记录和物理文件
     stmt_orphans = select(file_model.File).where(file_model.File.id.in_(orphan_file_ids))
@@ -170,9 +173,9 @@ async def _cleanup_kb_document_files(db: AsyncSession):
         try:
             await storage_service.delete(f.storage_path)
             await db.delete(f)
-            logger.info(f"已删除孤儿 KB 文件: {f.filename} (ID: {f.id})")
+            logger.info(f"已删除孤儿 Resource 文件: {f.filename} (ID: {f.id})")
         except Exception as e:
-            logger.error(f"删除孤儿 KB 文件 {f.id} 时出错: {e}")
+            logger.error(f"删除孤儿 Resource 文件 {f.id} 时出错: {e}")
 
     await db.commit()
 
@@ -196,7 +199,7 @@ async def cleanup_zombie_files():
             await _cleanup_global_setting_files(db)
 
         async with AsyncSessionLocal() as db:
-            await _cleanup_kb_document_files(db)
+            await _cleanup_resource_files(db)
 
         logger.info("僵尸文件清理任务执行完毕。")
 

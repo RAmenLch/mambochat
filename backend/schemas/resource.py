@@ -48,10 +48,14 @@ class ResourceBase(BaseModel):
     itemType: ResourceItemType = Field(ResourceItemType.RESOURCE, description="项目类型: 'resource' 或 'folder'")
 
     resourceType: Optional[ResourceType] = Field(None,
-                                                 description="资源类型, 例如 'system_prompt', 'submessage_template'")
+                                                 description="资源类型, 例如 'system_prompt', 'submessage_template', 'file'")
 
     parentId: Optional[str] = None
     sortOrder: int = 0
+
+    # 新增字段：允许在创建/更新时传递，虽然 Router 中目前是手动处理的，但保持 Schema 完整性更好
+    kb_id: Optional[str] = Field(None, description="关联的知识库ID")
+    kb_config: Optional[Dict[str, Any]] = Field(None, description="切分配置")
 
 
 class ResourceCreate(ResourceBase):
@@ -60,10 +64,8 @@ class ResourceCreate(ResourceBase):
 
     @model_validator(mode='after')
     def check_template_attributes(self) -> 'ResourceCreate':
-        # 变更: 使用 ResourceType.SUBMESSAGE_TEMPLATE 枚举值进行判断
         if self.resourceType == ResourceType.SUBMESSAGE_TEMPLATE and self.initial_attributes is not None:
             try:
-                # 验证 'submessage_template' 类型的 attributes 字段是否符合 SubMessageConfig 规范
                 SubMessageConfig.model_validate(self.initial_attributes)
             except Exception as e:
                 raise ValueError(f"Attributes for submessage_template are invalid: {e}")
@@ -75,16 +77,22 @@ class ResourceUpdate(BaseModel):
     description: Optional[str] = None
     parentId: Optional[str] = None
     sortOrder: Optional[int] = None
+    # 允许通过 PUT 更新 kb_config 或 kb_id (虽然通常由业务逻辑控制)
+    kb_id: Optional[str] = None
+    kb_config: Optional[Dict[str, Any]] = None
 
 
 class ResourceSimple(ResourceBase):
     """
     轻量级资源模型，不包含 latest_version 信息。
-    用于目录树懒加载等对性能要求较高的场景。
     """
     id: str
     createdAt: datetime
     updatedAt: datetime
+
+    # 确保响应中包含新字段
+    kb_id: Optional[str] = None
+    kb_config: Optional[Dict[str, Any]] = None
 
     class Config:
         from_attributes = True

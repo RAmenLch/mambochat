@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/settings/resource/ResourceVersionBar.vue -->
 <template>
   <div class="version-top-bar">
     <div class="version-bar-header">
@@ -5,6 +6,19 @@
     </div>
     <el-scrollbar>
       <div class="version-list-horizontal">
+        <!-- Special KB Config Card -->
+        <div
+          v-if="kbId"
+          class="version-card-horizontal special-kb-card"
+          @click="$emit('toggle-kb-view')"
+        >
+          <div class="special-card-content">
+            <el-icon :size="24" class="special-icon"><Setting /></el-icon>
+            <span class="special-label">知识库配置</span>
+          </div>
+        </div>
+
+        <!-- Version List -->
         <template v-if="versions && versions.length > 0">
           <div
             v-for="version in versions"
@@ -12,13 +26,15 @@
             class="version-card-horizontal"
             :class="{
               'is-active': activeVersionId === version.id,
-              'is-viewing': viewingVersionId === version.id
+              'is-viewing': viewingVersionId === version.id,
             }"
             @click="$emit('select-version', version)"
           >
             <div class="version-card-header">
               <span class="version-name" :title="version.name">{{ version.name }}</span>
-              <span class="version-date">{{ new Date(version.createdAt).toLocaleDateString() }}</span>
+              <span class="version-date">{{
+                new Date(version.createdAt).toLocaleDateString()
+              }}</span>
             </div>
             <div class="version-card-footer">
               <el-button
@@ -34,31 +50,34 @@
             </div>
           </div>
         </template>
-        <div v-else class="no-versions">暂无历史版本</div>
+        <div v-else-if="!kbId" class="no-versions">暂无历史版本</div>
       </div>
     </el-scrollbar>
   </div>
 </template>
 
 <script setup lang="ts">
-import type { ResourceVersion } from '@/api/types';
+import { Setting } from '@element-plus/icons-vue'
+import type { ResourceVersion } from '@/api/types'
 
 defineProps<{
-  versions: ResourceVersion[];
-  activeVersionId: string | null;
-  viewingVersionId: string | null;
-}>();
+  versions: ResourceVersion[]
+  activeVersionId: string | null
+  viewingVersionId: string | null
+  kbId?: string | null
+}>()
 
 defineEmits<{
-  (e: 'select-version', version: ResourceVersion): void;
-  (e: 'set-active', versionId: string): void;
-}>();
+  (e: 'select-version', version: ResourceVersion): void
+  (e: 'set-active', versionId: string): void
+  (e: 'toggle-kb-view'): void
+}>()
 </script>
 
 <style scoped>
 .version-top-bar {
   flex-shrink: 0;
-  height: 110px; /* Reduced height */
+  height: 110px;
   border-bottom: 1px solid var(--el-border-color);
   background-color: var(--el-fill-color-lighter);
   display: flex;
@@ -82,14 +101,14 @@ defineEmits<{
 .version-card-horizontal {
   flex-shrink: 0;
   width: 200px;
-  height: 62px; /* Reduced height */
+  height: 62px;
   background-color: #fff;
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 4px;
   padding: 8px;
   display: flex;
   flex-direction: column;
-  justify-content: space-between; /* Space out header and footer */
+  justify-content: space-between;
   cursor: pointer;
   transition: all 0.2s;
   position: relative;
@@ -97,7 +116,7 @@ defineEmits<{
 
 .version-card-horizontal:hover {
   border-color: var(--el-color-primary-light-5);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
 .version-card-horizontal.is-active {
@@ -140,5 +159,32 @@ defineEmits<{
   padding: 16px;
   color: var(--el-text-color-secondary);
   font-size: 13px;
+}
+
+/* Special KB Card Styles */
+.special-kb-card {
+  background-color: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary-light-7);
+  justify-content: center;
+  align-items: center;
+  width: 140px; /* Slightly narrower than version cards */
+}
+
+.special-kb-card:hover {
+  background-color: var(--el-color-primary-light-8);
+  border-color: var(--el-color-primary-light-5);
+}
+
+.special-card-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  color: var(--el-color-primary);
+}
+
+.special-label {
+  font-size: 12px;
+  font-weight: 600;
 }
 </style>

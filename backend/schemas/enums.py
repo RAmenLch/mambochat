@@ -29,7 +29,9 @@ class FileManagementType(str, Enum):
     TEMPORARY = "temporary"          # 临时文件，等待与消息关联
     SUB_MESSAGE = "sub_message"      # 已被聊天消息引用的文件
     GLOBAL_SETTING = "global_setting"  # 被全局设置（如头像）引用的文件
-    KB_DOCUMENT = "kb_document"
+    KB_DOCUMENT = "kb_document"      # 旧版知识库文件（保留用于兼容）
+    RESOURCE = "resource"            # 通用资源文件，统一管理所有上传到资源中心的文件
+
 
 class MoveAction(str, Enum):
     """定义节点移动的操作类型"""
@@ -64,7 +66,8 @@ class ResourceType(str, Enum):
     KNOWLEDGE_BASE = "knowledge_base"
     SYSTEM_PROMPT = "system_prompt"
     SUBMESSAGE_TEMPLATE = "submessage_template"
-    KB_FILE = "kb_file"
+    KB_FILE = "kb_file"  # 旧版知识库文件类型（保留用于兼容）
+    FILE = "file"        # 通用文件资源类型，支持向量化
 
 
 class KBFileStatus(str, Enum):

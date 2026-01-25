@@ -5,14 +5,16 @@ import json
 import logging
 from abc import ABC, abstractmethod
 from typing import List, Tuple, Optional, Set
+from datetime import datetime
 
 from fastapi import UploadFile, HTTPException
 from langchain_openai import OpenAIEmbeddings
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import func, select
 
 from backend import schemas
 from backend.crud import kb_crud, resource_crud, file_crud, provider_crud
-from backend.models import resource_model
+from backend.models import resource_model, kb_model
 from backend.schemas import kb as kb_schemas
 from backend.schemas.enums import (
     FileManagementType,
@@ -136,6 +138,57 @@ class SplitterFactory:
             )
 
 
+# --- Content Extractors ---
+
+class AbstractContentExtractor(ABC):
+    @abstractmethod
+    async def extract(self, resource: schemas.ResourceWithVersions, db: AsyncSession) -> str:
+        """从资源中提取纯文本内容"""
+        pass
+
+
+class FileExtractor(AbstractContentExtractor):
+    """适用于 FILE 和 KB_FILE 类型，从存储系统读取物理文件"""
+    async def extract(self, resource: schemas.ResourceWithVersions, db: AsyncSession) -> str:
+        if not resource.latest_version or not resource.latest_version.content:
+            raise ValueError("Resource content (file_id) is empty.")
+
+        file_id = resource.latest_version.content
+        db_file = await file_crud.get_file(db, file_id)
+        if not db_file:
+            raise ValueError(f"Physical file record not found for ID: {file_id}")
+
+        try:
+            content_bytes = await storage_service.read_bytes(db_file.storage_path)
+            # 尝试解码
+            try:
+                return content_bytes.decode('utf-8')
+            except UnicodeDecodeError:
+                return content_bytes.decode('latin-1')
+        except Exception as e:
+            raise ValueError(f"Failed to read file content: {e}")
+
+
+class TextExtractor(AbstractContentExtractor):
+    """适用于 SYSTEM_PROMPT 和 SUBMESSAGE_TEMPLATE，直接读取版本内容"""
+    async def extract(self, resource: schemas.ResourceWithVersions, db: AsyncSession) -> str:
+        if not resource.latest_version:
+            return ""
+        return resource.latest_version.content or ""
+
+
+class ExtractorFactory:
+    @staticmethod
+    def get_extractor(resource_type: str) -> AbstractContentExtractor:
+        if resource_type in [ResourceType.FILE.value, ResourceType.KB_FILE.value]:
+            return FileExtractor()
+        elif resource_type in [ResourceType.SYSTEM_PROMPT.value, ResourceType.SUBMESSAGE_TEMPLATE.value]:
+            return TextExtractor()
+        else:
+            # 默认尝试作为文本处理，或者抛出不支持的异常
+            raise ValueError(f"Unsupported resource type for extraction: {resource_type}")
+
+
 # --- Service ---
 
 class KnowledgeBaseService:
@@ -184,11 +237,11 @@ class KnowledgeBaseService:
     async def _validate_kb_hierarchy(self, parent_id: str) -> schemas.Resource:
         """
         验证层级约束：
-        1. KB_FILE 的祖先链中必须有且仅有一个 KNOWLEDGE_BASE 类型节点。
+        1. 资源必须位于 KNOWLEDGE_BASE 类型节点下。
         2. 返回该 KB 节点资源对象。
         """
         if not parent_id:
-            raise HTTPException(status_code=400, detail="Parent ID is required for KB files.")
+            raise HTTPException(status_code=400, detail="Parent ID is required for KB resources.")
 
         # 获取所有祖先节点
         ancestors = await resource_crud.get_batch_resource_ancestors(self.db, [parent_id])
@@ -199,7 +252,7 @@ class KnowledgeBaseService:
         ]
 
         if len(kb_nodes) == 0:
-            raise HTTPException(status_code=400, detail="File must be uploaded within a Knowledge Base.")
+            raise HTTPException(status_code=400, detail="Resource must be within a Knowledge Base.")
 
         if len(kb_nodes) > 1:
             raise HTTPException(status_code=400, detail="Nested Knowledge Bases are not allowed.")
@@ -275,6 +328,7 @@ class KnowledgeBaseService:
     async def upload_file(self, kb_id: str, file: UploadFile) -> schemas.Resource:
         """
         仅上传文件并创建元数据，不执行切分和嵌入。
+        注意：此方法主要用于旧版兼容或特定KB上传场景，通用上传推荐使用 Resource Management 接口。
         """
         # 1. 校验文件类型
         if file.content_type not in SUPPORTED_KB_MIME_TYPES:
@@ -283,8 +337,7 @@ class KnowledgeBaseService:
                 detail=f"Unsupported file type: {file.content_type}. Only plain text formats are currently supported."
             )
 
-        # 2. 验证层级约束 (KB_FILE 必须在 KB 内，且不能嵌套)
-        # kb_id 可能是 KB 本身，也可能是 KB 下的文件夹
+        # 2. 验证层级约束
         await self._validate_kb_hierarchy(kb_id)
 
         # 3. 保存物理文件
@@ -294,7 +347,6 @@ class KnowledgeBaseService:
             raise HTTPException(status_code=500, detail=f"File storage failed: {e}")
 
         # 4. 创建 File 记录
-        # 使用 KB_DOCUMENT 类型，确保 cleanup_service 能正确识别并关联到 ResourceVersion 进行清理检查
         db_file = await file_crud.create_file(
             self.db,
             filename=file.filename,
@@ -312,19 +364,21 @@ class KnowledgeBaseService:
         )
 
         # 6. 创建 Resource (KB File)
-        # initial_content 存储 file_id
-        # initial_attributes 存储默认配置，不存储 source_file_id
+        # 注意：不再将 splitter_config 放入 initial_attributes，而是存入 Resource.kb_config
         resource_create = schemas.ResourceCreate(
             name=file.filename,
             itemType=ResourceItemType.RESOURCE,
             resourceType=ResourceType.KB_FILE,
             parentId=kb_id,
             initial_content=db_file.id,
-            initial_attributes={
-                "splitter_config": default_config.model_dump()
-            }
+            initial_attributes={}
         )
         new_resource = await resource_crud.create_resource(self.db, resource_create)
+
+        # 手动更新 kb_config
+        new_resource.kb_config = default_config.model_dump()
+        await self.db.commit()
+        await self.db.refresh(new_resource)
 
         return new_resource
 
@@ -332,34 +386,17 @@ class KnowledgeBaseService:
                                     config_data: kb_schemas.KBUpdateConfigRequest) -> schemas.Resource:
         """
         更新知识库文件的切分配置。
-        同时清理冗余的 source_file_id 属性。
+        配置现在存储在 Resource.kb_config 中，所有版本共享。
         """
-        resource = await resource_crud.get_resource_with_versions(self.db, resource_id)
+        resource = await resource_crud.get_resource(self.db, resource_id)
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
 
-        if resource.resourceType != ResourceType.KB_FILE.value:
-            raise HTTPException(status_code=400, detail="Resource is not a knowledge base file.")
+        # 更新 Resource 表字段
+        resource.kb_config = config_data.splitter_config.model_dump()
 
-        # 创建副本以确保 SQLAlchemy 检测到变更
-        current_attributes = dict(resource.latest_version.attributes) if resource.latest_version.attributes else {}
-
-        # 数据清洗：移除 source_file_id
-        if "source_file_id" in current_attributes:
-            del current_attributes["source_file_id"]
-
-        # 写入新配置
-        current_attributes["splitter_config"] = config_data.splitter_config.model_dump()
-
-        # 持久化更新
-        await resource_crud.update_resource_version(
-            self.db,
-            resource.latestVersionId,
-            schemas.ResourceVersionUpdate(attributes=current_attributes)
-        )
-
+        await self.db.commit()
         await self.db.refresh(resource)
-        await self.db.refresh(resource, ['latest_version'])
         return resource
 
     async def delete_kb_file(self, resource_id: str) -> schemas.Resource:
@@ -370,8 +407,6 @@ class KnowledgeBaseService:
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
 
-        # 尝试获取父 KB 以确定维度，以便清理向量
-        # 即使找不到父 KB (例如数据不一致)，也应尝试删除资源
         try:
             if resource.parentId:
                 kb_resource = await self._validate_kb_hierarchy(resource.parentId)
@@ -380,20 +415,14 @@ class KnowledgeBaseService:
                     if dimension:
                         await self._cleanup_vectors(resource_id, dimension)
         except Exception:
-            # 忽略清理过程中的错误，确保资源能被删除
             pass
 
-        # 删除 Chunks (级联删除可能不彻底，手动清理更安全)
         await kb_crud.delete_chunks_by_resource(self.db, resource_id)
-
-        # 删除资源
         return await resource_crud.delete_resource(self.db, resource_id)
 
     async def get_comprehensive_file_status(self, resource_id: str) -> kb_schemas.KBProcessingStatus:
         """
-        获取文件的综合处理状态。
-        结合内存中的任务运行状态和数据库中的切片状态进行判定。
-        如果 DB 显示有 Pending 但内存无任务，视为 Failed (僵尸任务)。
+        获取文件的综合处理状态，包含过时判定 (Staleness)。
         """
         # 1. 获取数据库统计信息
         stats = await kb_crud.get_chunk_stats_by_resource(self.db, resource_id)
@@ -401,18 +430,35 @@ class KnowledgeBaseService:
         # 2. 检查内存任务状态
         is_running = resource_id in KnowledgeBaseService._running_tasks
 
-        # 3. 状态修正逻辑
+        # 3. 状态修正
         if is_running:
-            # 正在运行，强制状态为 EMBEDDING (覆盖数据库可能滞后的状态)
             stats.file_status = KBFileStatus.EMBEDDING
         elif stats.pending_chunks > 0:
-            # 未运行，但有 Pending -> 视为异常中断 (Crash/Restart)
-            # 将 Pending 归入 Failed，清零 Pending
             stats.file_status = KBFileStatus.FAILED
             stats.failed_chunks += stats.pending_chunks
             stats.pending_chunks = 0
 
-        # 其他情况 (Completed, Stopped, Failed, Initial) 直接使用 DB 统计即可
+        # 4. 过时判定 (Staleness Check)
+        # 获取资源最新版本时间
+        resource = await resource_crud.get_resource(self.db, resource_id)
+        if resource and resource.latest_version:
+            latest_version_time = resource.latest_version.updatedAt
+
+            # 获取最新的 Chunk 处理时间
+            stmt = select(func.max(kb_model.ResourceKBChunk.processed_at)).where(
+                kb_model.ResourceKBChunk.resource_id == resource_id
+            )
+            result = await self.db.execute(stmt)
+            max_processed_at = result.scalar()
+
+            # 如果版本更新时间晚于最后一次向量处理时间，标记为过时
+            if max_processed_at and latest_version_time > max_processed_at:
+                stats.is_stale = True
+            elif not max_processed_at and stats.total_chunks == 0:
+                # 如果没有处理记录且不是初始状态(通常指有内容但未处理)，也可以视为 stale
+                # 但这里保持简单，仅对比时间
+                pass
+
         return stats
 
     async def _publish_status(self, resource_id: str, status: KBFileStatus,
@@ -420,7 +466,6 @@ class KnowledgeBaseService:
         """
         辅助方法：构建统一的 KBProcessingStatus 并推送。
         """
-        # 计算 pending
         pending = max(0, total - completed - failed - stopped)
 
         data = kb_schemas.KBProcessingStatus(
@@ -432,7 +477,6 @@ class KnowledgeBaseService:
             stopped_chunks=stopped,
             file_status=status
         )
-        # 转换为 dict 推送，Router 层会处理序列化
         await stream_manager.publish(resource_id, data.model_dump())
 
     async def handle_task_action(self, resource_id: str, request: kb_schemas.KBRunTaskRequest):
@@ -443,7 +487,6 @@ class KnowledgeBaseService:
         if request.action == kb_schemas.KBTaskAction.STOP:
             if resource_id in KnowledgeBaseService._running_tasks:
                 await stream_manager.request_cancellation(resource_id)
-                # 同步更新数据库状态，将剩余 PENDING 切片标记为 STOPPED
                 await kb_crud.mark_pending_chunks_as_stopped(self.db, resource_id)
                 return {"message": "Cancellation requested."}
             else:
@@ -467,46 +510,41 @@ class KnowledgeBaseService:
         if not embedding_model_id or not dimension:
             raise HTTPException(status_code=400, detail="Knowledge Base configuration is incomplete.")
 
-        # 4. 准备配置和状态
-        # 创建副本以确保 SQLAlchemy 检测到变更
+        # 4. 获取切分配置 (从 Resource 层级)
+        kb_config_dict = resource.kb_config
+
+        # 兼容性处理：如果 Resource.kb_config 为空，尝试从 attributes 读取旧配置并迁移
+        if not kb_config_dict and resource.latest_version.attributes:
+            kb_config_dict = resource.latest_version.attributes.get("splitter_config")
+
+        if not kb_config_dict and request.action == kb_schemas.KBTaskAction.START:
+            raise HTTPException(status_code=400, detail="Splitter configuration not found.")
+
+        # 获取上次运行的配置快照 (用于 Resume 校验)
+        # 注意：last_ingest_config 仍然保存在 Version attributes 中，代表该版本最后一次处理时的配置
         current_attributes = dict(resource.latest_version.attributes) if resource.latest_version.attributes else {}
-
-        splitter_config_dict = current_attributes.get("splitter_config")
         last_config_dict = current_attributes.get("last_ingest_config")
-
-        # 数据清洗：确保运行时移除冗余字段
-        if "source_file_id" in current_attributes:
-            del current_attributes["source_file_id"]
 
         target_splitter_config = None
 
         # 5. 动作分发
         if request.action == kb_schemas.KBTaskAction.RESUME:
-            # Resume 校验
             if not last_config_dict:
                 raise HTTPException(status_code=400, detail="No previous task found. Please use START.")
 
             # 检查配置一致性
-            if splitter_config_dict != last_config_dict:
+            if kb_config_dict != last_config_dict:
                 raise HTTPException(
                     status_code=409,
                     detail={
                         "message": "Configuration mismatch. Cannot resume task.",
-                        "current_config": splitter_config_dict,
+                        "current_config": kb_config_dict,
                         "last_ingest_config": last_config_dict
                     }
                 )
 
             target_splitter_config = kb_schemas.KBTextSplitterConfig(**last_config_dict)
 
-            # 保存可能发生的清理变更
-            await resource_crud.update_resource_version(
-                self.db,
-                resource.latestVersionId,
-                schemas.ResourceVersionUpdate(attributes=current_attributes)
-            )
-
-            # 启动后台循环 (Resume 模式)
             asyncio.create_task(self._run_embedding_loop(
                 resource_id, embedding_model_id, dimension, rate_limit,
                 resume=True,
@@ -514,23 +552,17 @@ class KnowledgeBaseService:
             ))
 
         elif request.action == kb_schemas.KBTaskAction.START:
-            if not splitter_config_dict:
-                raise HTTPException(status_code=400,
-                                    detail="Splitter configuration not found. Please save configuration first.")
+            # 更新 last_ingest_config 到当前版本
+            current_attributes["last_ingest_config"] = kb_config_dict
 
-            # 创建配置快照
-            current_attributes["last_ingest_config"] = splitter_config_dict
-
-            # 更新版本属性 (保存快照和清理结果)
             await resource_crud.update_resource_version(
                 self.db,
                 resource.latestVersionId,
                 schemas.ResourceVersionUpdate(attributes=current_attributes)
             )
 
-            target_splitter_config = kb_schemas.KBTextSplitterConfig(**splitter_config_dict)
+            target_splitter_config = kb_schemas.KBTextSplitterConfig(**kb_config_dict)
 
-            # 启动后台循环 (Start 模式)
             asyncio.create_task(self._run_embedding_loop(
                 resource_id, embedding_model_id, dimension, rate_limit,
                 resume=False,
@@ -550,24 +582,17 @@ class KnowledgeBaseService:
     ):
         """
         核心任务循环：处理切分、嵌入、存储、状态更新和取消。
-        此方法在后台任务中运行，需自行管理 DB Session 生命周期。
         """
-        # 注册任务
         KnowledgeBaseService._running_tasks.add(resource_id)
 
-        # 本地计数器，避免频繁查询 DB
         total_count = 0
         processed_count = 0
         failed_count = 0
         stopped_count = 0
 
-        # 创建新的 DB Session
         from backend.database import AsyncSessionLocal
         async with AsyncSessionLocal() as session:
             try:
-                # 初始化 Embedding Client
-                # 注意：这里需要重新实例化 Service 或直接调用 helper，因为 session 不同
-                # 为了简单，直接复用 Service 实例的方法，但传入新的 session
                 temp_service = KnowledgeBaseService(session)
                 try:
                     client, _ = await temp_service._get_embedding_client(model_id)
@@ -578,35 +603,32 @@ class KnowledgeBaseService:
 
                 # --- 阶段 1: 准备数据 (Start 模式需切分) ---
                 if not resume:
-                    # 1. 获取文件 ID (从 Resource Content 中)
+                    # 1. 获取资源
                     resource = await resource_crud.get_resource_with_versions(session, resource_id)
-                    if not resource or not resource.latest_version or not resource.latest_version.content:
-                        raise ValueError("Source file information not found in resource.")
-                    file_id = resource.latest_version.content
+                    if not resource:
+                        raise ValueError("Resource not found.")
 
                     # 2. 清理旧数据
                     await self._publish_status(resource_id, KBFileStatus.CLEANING, 0, 0, 0, 0)
                     await temp_service._cleanup_vectors(resource_id, dimension)
                     await kb_crud.delete_chunks_by_resource(session, resource_id)
 
-                    # 3. 读取文件
+                    # 3. 提取文本 (使用工厂模式)
                     await self._publish_status(resource_id, KBFileStatus.READING, 0, 0, 0, 0)
-                    db_file = await file_crud.get_file(session, file_id)
-                    if not db_file:
-                        raise ValueError("Source file record not found.")
 
-                    content_bytes = await storage_service.read_bytes(db_file.storage_path)
                     try:
-                        text_content = content_bytes.decode('utf-8')
-                    except UnicodeDecodeError:
-                        text_content = content_bytes.decode('latin-1')
+                        extractor = ExtractorFactory.get_extractor(resource.resourceType)
+                        text_content = await extractor.extract(resource, session)
+                    except Exception as e:
+                        logger.error(f"Extraction failed: {e}")
+                        raise ValueError(f"Content extraction failed: {e}")
 
                     # 4. 切分
                     await self._publish_status(resource_id, KBFileStatus.SPLITTING, 0, 0, 0, 0)
                     splitter = SplitterFactory.create(splitter_config)
                     text_chunks = splitter.split_text(text_content)
 
-                    # 5. 存储 Chunks
+                    # 5. 存储 Chunks (包含 created_at)
                     chunk_schemas = [
                         kb_schemas.KBChunkCreate(
                             resource_id=resource_id,
@@ -618,21 +640,17 @@ class KnowledgeBaseService:
                     ]
                     await kb_crud.batch_create_chunks(session, chunk_schemas)
 
-                    # 初始化计数器
                     total_count = len(chunk_schemas)
                 else:
-                    # Resume 模式：从 DB 获取当前统计
-                    # 注意：Resume 时，failed 和 stopped 会被重新处理，所以在本轮循环开始时，它们视为待处理(Pending)
+                    # Resume 模式
                     stats = await kb_crud.get_chunk_stats_by_resource(session, resource_id)
                     total_count = stats.total_chunks
                     processed_count = stats.completed_chunks
-                    # 本轮开始时，failed 和 stopped 重置为 0，因为它们将变为 pending 重新跑
                     failed_count = 0
                     stopped_count = 0
 
                 # --- 阶段 2: 嵌入循环 ---
 
-                # 获取待处理 Chunks (Resume 模式可能包含 Failed/Stopped)
                 target_statuses = [kb_schemas.KBChunkStatus.PENDING.value]
                 if resume:
                     target_statuses.append(kb_schemas.KBChunkStatus.FAILED.value)
@@ -640,7 +658,6 @@ class KnowledgeBaseService:
 
                 pending_chunks = await kb_crud.get_chunks_by_statuses(session, resource_id, target_statuses)
 
-                # 如果是 Resume，重新校准 total (防止 DB 数据不一致)
                 if resume:
                     stats = await kb_crud.get_chunk_stats_by_resource(session, resource_id)
                     total_count = stats.total_chunks
@@ -648,93 +665,92 @@ class KnowledgeBaseService:
 
                 batch_size = 10
 
-                # 初始推送：EMBEDDING 开始
                 await self._publish_status(resource_id, KBFileStatus.EMBEDDING,
                                            total_count, processed_count, failed_count, stopped_count)
 
                 for i in range(0, len(pending_chunks), batch_size):
-                    # 检查取消信号
                     if await stream_manager.is_cancellation_requested(resource_id):
-                        # 计算剩余未处理的都变成 stopped
                         remaining = len(pending_chunks) - i
                         stopped_count += remaining
-
-                        # 再次确保数据库状态被更新为 STOPPED
                         await kb_crud.mark_pending_chunks_as_stopped(session, resource_id)
-
-                        # 推送 STOPPED 状态
                         await self._publish_status(resource_id, KBFileStatus.STOPPED,
                                                    total_count, processed_count, failed_count, stopped_count)
-                        # 直接返回
                         return
 
                     batch = pending_chunks[i:i + batch_size]
                     texts = [c.content for c in batch]
 
                     try:
-                        # 调用 API
                         vectors = await client.aembed_documents(texts)
 
                         current_batch_success = 0
                         current_batch_failed = 0
 
+                        # 记录当前时间作为 processed_at
+                        now = datetime.now()
+
                         for idx, vector in enumerate(vectors):
+                            chunk = batch[idx]
                             if len(vector) == dimension:
-                                # 写入向量表
                                 rowid = await kb_crud.insert_vector(session, dimension, vector)
-                                # 更新 Chunk 状态
-                                await kb_crud.update_chunk_vector_id_and_status(
-                                    session, batch[idx].id, rowid, kb_schemas.KBChunkStatus.COMPLETED
-                                )
+
+                                # 更新 Chunk 状态和时间
+                                chunk.vector_id = rowid
+                                chunk.status = kb_schemas.KBChunkStatus.COMPLETED.value
+                                chunk.processed_at = now
+
+                                # 显式提交更新 (因为 crud 方法可能只更新部分字段，这里需要更新 processed_at)
+                                # 由于 kb_crud.update_chunk_vector_id_and_status 不支持 processed_at
+                                # 我们这里直接操作 session 或需要扩展 crud。
+                                # 鉴于不能修改 crud，我们直接在 session 中 merge 或 add
+                                session.add(chunk)
+
                                 current_batch_success += 1
                             else:
-                                # 维度不匹配
-                                await kb_crud.update_chunk_vector_id_and_status(
-                                    session, batch[idx].id, None, kb_schemas.KBChunkStatus.FAILED
-                                )
+                                chunk.vector_id = None
+                                chunk.status = kb_schemas.KBChunkStatus.FAILED.value
+                                session.add(chunk)
                                 current_batch_failed += 1
 
-                        # 处理 API 返回数量少于请求数量的情况（异常）
+                        await session.commit()
+
                         if len(vectors) < len(batch):
                             diff = len(batch) - len(vectors)
                             current_batch_failed += diff
                             for k in range(len(vectors), len(batch)):
-                                await kb_crud.update_chunk_vector_id_and_status(
-                                    session, batch[k].id, None, kb_schemas.KBChunkStatus.FAILED
-                                )
+                                chunk = batch[k]
+                                chunk.vector_id = None
+                                chunk.status = kb_schemas.KBChunkStatus.FAILED.value
+                                session.add(chunk)
+                            await session.commit()
 
                         processed_count += current_batch_success
                         failed_count += current_batch_failed
 
                     except Exception as e:
                         logger.error(f"Embedding batch failed: {e}")
-                        # 全批次失败
                         for chunk in batch:
-                            await kb_crud.update_chunk_vector_id_and_status(
-                                session, chunk.id, None, kb_schemas.KBChunkStatus.FAILED
-                            )
+                            chunk.vector_id = None
+                            chunk.status = kb_schemas.KBChunkStatus.FAILED.value
+                            session.add(chunk)
+                        await session.commit()
                         failed_count += len(batch)
 
-                    # 推送进度
                     await self._publish_status(resource_id, KBFileStatus.EMBEDDING,
                                                total_count, processed_count, failed_count, stopped_count)
 
-                    # 频率限制
                     if rate_limit > 0:
                         await asyncio.sleep(rate_limit)
 
-                # 任务结束
                 await self._publish_status(resource_id, KBFileStatus.COMPLETED,
                                            total_count, processed_count, failed_count, stopped_count)
 
             except Exception as e:
                 logger.error(f"Task failed for resource {resource_id}: {e}")
-                # 简单估算剩余的为 Failed
                 failed_count = total_count - processed_count - stopped_count
                 await self._publish_status(resource_id, KBFileStatus.FAILED,
                                            total_count, processed_count, failed_count, stopped_count)
             finally:
-                # 清理任务注册和取消标记
                 KnowledgeBaseService._running_tasks.discard(resource_id)
                 await stream_manager.close_stream(resource_id)
 
@@ -742,12 +758,10 @@ class KnowledgeBaseService:
         """
         执行向量检索。
         """
-        # 1. 确定搜索范围和模型
         target_kb_id = request.kb_id
         embedding_model_id = None
 
         if target_kb_id:
-            # 如果指定了 KB，使用该 KB 的模型
             kb_resource = await resource_crud.get_resource(self.db, target_kb_id)
             if kb_resource and kb_resource.latest_version:
                 embedding_model_id = (kb_resource.latest_version.attributes or {}).get("embedding_model_id")
@@ -756,19 +770,16 @@ class KnowledgeBaseService:
             raise HTTPException(status_code=400,
                                 detail="Embedding model not determined. Please specify a valid Knowledge Base ID.")
 
-        # 2. 初始化客户端
         try:
             client, dimension = await self._get_embedding_client(embedding_model_id)
         except ValueError as e:
             raise HTTPException(status_code=500, detail=str(e))
 
-        # 3. 生成查询向量
         try:
             query_vector = await client.aembed_query(request.query_text)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Embedding generation failed: {e}")
 
-        # 4. 向量检索
         vector_results = await kb_crud.search_vectors(self.db, dimension, query_vector, request.top_k)
 
         if not vector_results:
@@ -777,10 +788,8 @@ class KnowledgeBaseService:
         rowids = [r[0] for r in vector_results]
         distance_map = {r[0]: r[1] for r in vector_results}
 
-        # 5. 反查 Chunk 详情
         rows = await kb_crud.get_chunks_by_vector_ids(self.db, rowids, kb_id_filter=target_kb_id)
 
-        # 6. 格式化结果
         items = []
         for row in rows:
             chunk = row[0]

@@ -28,6 +28,12 @@ class Resource(Base):
 
     latestVersionId = Column(String(36), ForeignKey("ResourceVersion.id"), nullable=True)
 
+    # 新增：指向所属知识库的 Resource ID
+    kb_id = Column(String(36), nullable=True, index=True)
+
+    # 新增：存储该资源的切分配置（Splitter Config），版本间共享
+    kb_config = Column(JSON, nullable=True)
+
     versions = relationship(
         "ResourceVersion",
         back_populates="resource",

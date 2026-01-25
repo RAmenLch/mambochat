@@ -99,6 +99,8 @@ class KBProcessingStatus(BaseModel):
     stopped_chunks: int = 0
     # 聚合状态，使用统一枚举
     file_status: KBFileStatus
+    # 标识资源内容是否新于向量索引
+    is_stale: bool = False
 
 
 class KBRunTaskRequest(BaseModel):

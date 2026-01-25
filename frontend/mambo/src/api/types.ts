@@ -371,6 +371,7 @@ export type ResourceType =
   | 'knowledge_base'
   | 'knowledge_base_chunk'
   | 'kb_file'
+  | 'file'
   | string
 
 /**
@@ -412,6 +413,8 @@ export interface Resource {
   updatedAt: string // ISO 8601 date string
   latest_version: ResourceVersion | null
   isLoaded?: boolean // 标记该节点的子节点是否已加载
+  kb_id: string | null
+  kb_config: KBSplitterConfig | null
 }
 
 /**
@@ -602,6 +605,7 @@ export interface KBChunkStatus {
   failed_chunks: number
   stopped_chunks: number
   file_status: KBFileStatus
+  is_stale: boolean
 }
 
 /**
