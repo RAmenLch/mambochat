@@ -15,7 +15,7 @@ router = APIRouter()
 
 
 @router.post(
-    "/",
+    "",
     response_model=schemas.Resource,
     status_code=status.HTTP_201_CREATED,
     summary="创建知识库"

@@ -9,6 +9,7 @@
       @node-click="handleNodeClick"
       @item-created="handleItemCreated"
       @item-deleted="handleItemDeleted"
+      @move-success="handleMoveSuccess"
     />
 
     <!-- Main Panel: Editor Area -->
@@ -107,11 +108,26 @@ function handleItemDeleted(deletedId: string) {
 }
 
 /**
+ * Handles the event after resources are moved successfully.
+ * Re-fetches details for the currently selected resource if it was moved.
+ */
+async function handleMoveSuccess(movedIds: string[]) {
+  if (selectedResourceId.value && movedIds.includes(selectedResourceId.value)) {
+    await resourceStore.fetchResourceDetails(selectedResourceId.value)
+  }
+}
+
+/**
  * Handles the 'select-file' event from KnowledgeBaseConfig.
  * Switches the view to the unified editor which will handle the file view.
+ * [Fix] Fetches full details to ensure versions and file info are loaded.
  */
-function handleFileSelected(file: Resource) {
+async function handleFileSelected(file: Resource) {
   selectedResourceId.value = file.id
+
+  // 关键修复：调用 fetchResourceDetails 获取完整的资源信息（包含 versions 列表）
+  // 因为从 KnowledgeBaseConfig 传过来的 file 对象来自 /children 接口，数据不完整
+  await resourceStore.fetchResourceDetails(file.id)
 }
 </script>
 

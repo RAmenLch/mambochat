@@ -317,6 +317,10 @@ watch(
         resetForm()
         viewMode.value = 'editor'
       } else {
+        // 如果 kb_id 发生变化，说明资源所属的知识库状态改变了，应强制切回编辑器视图
+        if (newSelection.kb_id !== oldSelection?.kb_id) {
+          viewMode.value = 'editor'
+        }
         // 如果是同一个资源更新（例如上传了新文件导致 latest_version 变更）
         // 我们需要同步表单的基本信息，但保留用户的编辑上下文
         if (!loadedVersionInEditor.value) {

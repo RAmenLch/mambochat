@@ -6,6 +6,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend import schemas
@@ -29,6 +30,19 @@ async def _hydrate_resources(resources: List[schemas.Resource], db: AsyncSession
     """
     if not resources:
         return
+
+    # 显式加载 latest_version 和 versions 关系
+    # 防止因 session.refresh() 或查询未包含关系时，访问属性触发懒加载报错
+    resource_ids = [r.id for r in resources]
+    if resource_ids:
+        await db.execute(
+            select(resource_model.Resource)
+            .options(
+                selectinload(resource_model.Resource.latest_version),
+                selectinload(resource_model.Resource.versions)  # 补充加载 versions
+            )
+            .filter(resource_model.Resource.id.in_(resource_ids))
+        )
 
     # 1. 收集需要查询的文件ID
     file_ids = set()
@@ -396,4 +410,3 @@ async def search_resources(request: schemas.ResourceSearchRequest, db: AsyncSess
         items.append(item)
 
     return schemas.ResourceSearchResponse(total=total, items=items)
-
