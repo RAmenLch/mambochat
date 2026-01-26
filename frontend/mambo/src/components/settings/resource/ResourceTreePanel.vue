@@ -29,6 +29,7 @@
           <Collection v-if="itemData.resourceType === 'knowledge_base'" />
           <Folder v-else-if="itemData.itemType === 'folder'" />
           <Memo v-else-if="itemData.resourceType === 'submessage_template'" />
+          <Cpu v-else-if="itemData.resourceType === 'system_prompt'" />
           <Document v-else />
         </el-icon>
       </template>
@@ -103,6 +104,7 @@ import {
   Delete,
   Memo,
   Collection,
+  Cpu,
 } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import type { AllowDropType } from 'element-plus/es/components/tree/src/tree.type'

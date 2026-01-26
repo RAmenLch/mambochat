@@ -396,6 +396,7 @@ export interface ResourceVersion {
   sortOrder: number
   createdAt: string // ISO 8601 date string
   updatedAt: string // ISO 8601 date string
+  file_info: FileResponse | null
 }
 
 /**

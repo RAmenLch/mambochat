@@ -16,7 +16,7 @@ import type {
  * 创建新的知识库资源
  */
 export const createKnowledgeBase = (data: KnowledgeBaseCreate): Promise<Resource> => {
-  return apiClient.post('/kb', data)
+  return apiClient.post('/resources/kb', data)
 }
 
 /**
@@ -97,7 +97,6 @@ export const subscribeToKBFileProgress = (
 ): AbortController => {
   const { resourceId, onMessage, onError, onClose } = params
   const controller = new AbortController()
-  // 路径更新为 /api/resources/kb/{id}/progress
   const url = `/api/resources/kb/${resourceId}/progress`
 
   fetchEventSource(url, {

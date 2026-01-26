@@ -24,33 +24,39 @@ router = APIRouter(prefix="/resources", tags=["Resource Management"])
 async def _hydrate_resources(resources: List[schemas.Resource], db: AsyncSession):
     """
     批量填充资源的 file_info 信息。
-    仅针对 ResourceType 为 FILE 或 KB_FILE 的资源，且内容不为空的情况。
+    针对 ResourceType 为 FILE 或 KB_FILE 的资源。
+    会检查 latest_version 以及 versions 列表（如果存在）。
     """
     if not resources:
         return
 
     # 1. 收集需要查询的文件ID
     file_ids = set()
-    resource_map = {}  # file_id -> list of resource versions to update
+    # 映射: file_id -> list of version objects to update
+    version_map = {}
+
+    def _collect_file_id(version_obj):
+        if not version_obj or not version_obj.content:
+            return
+        fid = version_obj.content
+        file_ids.add(fid)
+        if fid not in version_map:
+            version_map[fid] = []
+        version_map[fid].append(version_obj)
 
     for res in resources:
-        # 必须有 latest_version
-        if not hasattr(res, 'latest_version') or not res.latest_version:
-            continue
-
         # 必须是文件类型的资源
         if res.resourceType not in [ResourceType.FILE.value, ResourceType.KB_FILE.value]:
             continue
 
-        # content (file_id) 不能为空
-        file_id = res.latest_version.content
-        if not file_id:
-            continue
+        # 1. 处理最新版本
+        if hasattr(res, 'latest_version') and res.latest_version:
+            _collect_file_id(res.latest_version)
 
-        file_ids.add(file_id)
-        if file_id not in resource_map:
-            resource_map[file_id] = []
-        resource_map[file_id].append(res.latest_version)
+        # 2. 处理历史版本列表 (仅当属性存在且非空时)
+        if hasattr(res, 'versions') and res.versions:
+            for ver in res.versions:
+                _collect_file_id(ver)
 
     if not file_ids:
         return
@@ -69,9 +75,10 @@ async def _hydrate_resources(resources: List[schemas.Resource], db: AsyncSession
             url=storage_service.get_url(record.storage_path)
         )
 
-        if record.id in resource_map:
-            for version in resource_map[record.id]:
-                version.file_info = file_info
+        # 将文件信息回填到所有引用该文件的版本对象中
+        if record.id in version_map:
+            for version_obj in version_map[record.id]:
+                version_obj.file_info = file_info
 
 
 # --- Basic Resource Operations ---
@@ -106,8 +113,7 @@ async def create_resource(resource: schemas.ResourceCreate, db: AsyncSession = D
     """
     new_resource = await resource_crud.create_resource(db=db, resource=resource)
     # 如果创建时带有初始内容（文件ID），尝试填充
-    if new_resource.latest_version and new_resource.latest_version.content:
-        await _hydrate_resources([new_resource], db)
+    await _hydrate_resources([new_resource], db)
     return new_resource
 
 
@@ -241,14 +247,13 @@ async def read_resource(resource_id: str, db: AsyncSession = Depends(get_db)):
     if not db_resource:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found")
 
-    # 填充文件详情
+    # 填充文件详情 (包含 latest_version 和 versions 列表)
     await _hydrate_resources([db_resource], db)
     return db_resource
 
 
 @router.put("/{resource_id}", response_model=schemas.Resource, summary="更新资源基本信息")
-async def update_resource(resource_id: str, resource_update: schemas.ResourceUpdate,
-                          db: AsyncSession = Depends(get_db)):
+async def update_resource(resource_id: str, resource_update: schemas.ResourceUpdate, db: AsyncSession = Depends(get_db)):
     """
     更新资源的基本信息，如名称、描述。
     注意：移动操作请使用 /move 接口。
@@ -269,8 +274,7 @@ async def delete_resource(resource_id: str, db: AsyncSession = Depends(get_db)):
     会自动清理关联的向量数据和知识库切片。
     """
     # 1. 查找所有需要删除的资源ID（包括子孙节点）
-    cte = select(resource_model.Resource.id, resource_model.Resource.kb_id).where(
-        resource_model.Resource.id == resource_id).cte(name="hierarchy", recursive=True)
+    cte = select(resource_model.Resource.id, resource_model.Resource.kb_id).where(resource_model.Resource.id == resource_id).cte(name="hierarchy", recursive=True)
     child = resource_model.Resource
     cte = cte.union_all(select(child.id, child.kb_id).join(cte, child.parentId == cte.c.id))
 
@@ -308,28 +312,23 @@ async def delete_resource(resource_id: str, db: AsyncSession = Depends(get_db)):
 
 # --- Version Operations ---
 
-@router.post("/{resource_id}/versions", response_model=schemas.ResourceVersion, status_code=status.HTTP_201_CREATED,
-             summary="为资源创建新版本")
-async def create_version_for_resource(resource_id: str, version_create: schemas.ResourceVersionCreate,
-                                      db: AsyncSession = Depends(get_db)):
+@router.post("/{resource_id}/versions", response_model=schemas.ResourceVersion, status_code=status.HTTP_201_CREATED, summary="为资源创建新版本")
+async def create_version_for_resource(resource_id: str, version_create: schemas.ResourceVersionCreate, db: AsyncSession = Depends(get_db)):
     """
     为指定的资源创建一个新的版本快照。
     """
-    new_version = await resource_crud.create_resource_version(db, resource_id=resource_id,
-                                                              version_create=version_create)
+    new_version = await resource_crud.create_resource_version(db, resource_id=resource_id, version_create=version_create)
     if not new_version:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found or is a folder")
     return new_version
 
 
 @router.put("/versions/{version_id}", response_model=schemas.ResourceVersion, summary="更新指定版本")
-async def update_version(version_id: str, version_update: schemas.ResourceVersionUpdate,
-                         db: AsyncSession = Depends(get_db)):
+async def update_version(version_id: str, version_update: schemas.ResourceVersionUpdate, db: AsyncSession = Depends(get_db)):
     """
     更新指定版本快照的内容、名称或其他元数据。
     """
-    updated_version = await resource_crud.update_resource_version(db, version_id=version_id,
-                                                                  version_update=version_update)
+    updated_version = await resource_crud.update_resource_version(db, version_id=version_id, version_update=version_update)
     if not updated_version:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource version not found")
     return updated_version

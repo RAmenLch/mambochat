@@ -2,19 +2,19 @@
 <template>
   <div class="editor-container">
     <!-- Top Region: Version History (Horizontal) -->
-    <!-- Req 4: Pass kbId to enable the config button -->
     <ResourceVersionBar
       v-if="resource.itemType === 'resource'"
       :versions="resource.versions || []"
       :active-version-id="resource.latest_version?.id || null"
       :viewing-version-id="loadedVersionInEditor?.id || null"
       :kb-id="resource.kb_id"
+      :view-mode="viewMode"
       @select-version="loadVersionIntoEditor"
       @set-active="handleSetActiveVersion"
       @toggle-kb-view="toggleKbView"
     />
 
-    <!-- Region: KB Configuration View (Req 4) -->
+    <!-- Region: KB Configuration View -->
     <div v-if="viewMode === 'kb_config'" class="kb-config-view">
       <div class="config-view-header">
         <el-button link @click="viewMode = 'editor'">
@@ -30,20 +30,59 @@
       <!-- Left: Content Editor -->
       <div class="content-column">
         <template v-if="resource.itemType === 'resource'">
-          <!-- Case A: File Resource (Req 1) -->
+          <!-- Case A: File Resource -->
           <div v-if="resource.resourceType === 'file'" class="file-uploader-area">
-            <div class="file-info-card">
-              <el-icon :size="48" class="file-icon"><Document /></el-icon>
-              <div class="file-meta">
-                <h3>{{ resource.name }}</h3>
-                <p>最后更新: {{ new Date(resource.updatedAt).toLocaleString() }}</p>
-                <!-- Show download link if available in attributes, or just info -->
+            <!-- Sub-case A1: File Exists (Show Info/Preview) -->
+            <div v-if="currentFileInfo" class="file-info-card">
+              <!-- Image Preview -->
+              <div v-if="isImage" class="file-preview-image">
+                <el-image
+                  :src="fileDownloadUrl"
+                  :preview-src-list="[fileDownloadUrl]"
+                  fit="contain"
+                  class="preview-img"
+                >
+                  <template #error>
+                    <div class="image-slot">
+                      <el-icon><Picture /></el-icon>
+                      <span>加载失败</span>
+                    </div>
+                  </template>
+                </el-image>
+              </div>
+
+              <!-- Generic File Icon -->
+              <div v-else class="file-preview-icon">
+                <el-icon :size="64"><Document /></el-icon>
+              </div>
+
+              <div class="file-meta-content">
+                <h3 class="file-name" :title="currentFileInfo.filename">
+                  {{ currentFileInfo.filename }}
+                </h3>
+                <div class="file-details">
+                  <el-tag size="small" type="info">{{ currentFileInfo.mime_type }}</el-tag>
+                  <span class="file-size">{{ formatFileSize(currentFileInfo.size) }}</span>
+                </div>
+                <div class="file-actions">
+                  <a :href="fileDownloadUrl" target="_blank" class="download-link">
+                    <el-button type="primary" link icon="Download">下载文件</el-button>
+                  </a>
+                </div>
                 <p v-if="resource.kb_id" class="kb-badge">
-                  <el-tag size="small" type="info">已关联知识库</el-tag>
+                  <el-tag size="small" type="warning" effect="plain">已关联知识库</el-tag>
                 </p>
               </div>
             </div>
 
+            <!-- Sub-case A2: No File (Empty State) -->
+            <div v-else class="file-empty-state">
+              <el-icon :size="64" class="empty-icon"><DocumentAdd /></el-icon>
+              <p class="empty-text">当前版本暂无文件</p>
+              <p class="empty-subtext">请上传文件以创建内容</p>
+            </div>
+
+            <!-- Upload Action Area -->
             <div class="upload-actions">
               <el-upload
                 class="upload-demo"
@@ -51,19 +90,23 @@
                 :auto-upload="false"
                 :show-file-list="false"
                 :on-change="handleFileChange"
+                :disabled="isUploading"
               >
                 <template #trigger>
                   <el-button type="primary" :loading="isUploading">
                     <el-icon class="el-icon--left"><Upload /></el-icon>
-                    上传新版本
+                    {{ currentFileInfo ? '上传新版本' : '上传文件' }}
                   </el-button>
                 </template>
               </el-upload>
               <div class="upload-tip">
-                上传文件将自动创建一个新的版本。
-                <span v-if="resource.kb_id"
-                  >注意：更新文件内容会导致原有的向量切片失效，需重新执行任务。</span
-                >
+                <template v-if="currentFileInfo">
+                  上传新文件将自动创建一个新的版本。<br />
+                  <span v-if="resource.kb_id" class="warning-text">
+                    注意：更新文件内容会导致原有的向量切片失效，需重新执行任务。
+                  </span>
+                </template>
+                <template v-else> 支持上传图片、文档等多种格式。 </template>
               </div>
             </div>
           </div>
@@ -141,7 +184,14 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type UploadFile } from 'element-plus'
-import { Document, Upload, ArrowLeft } from '@element-plus/icons-vue'
+import {
+  Document,
+  Upload,
+  ArrowLeft,
+  Picture,
+  DocumentAdd,
+  Download,
+} from '@element-plus/icons-vue'
 
 import { useResourceStore } from '@/stores/resourceStore'
 import { uploadResourceFile } from '@/api/kbService'
@@ -197,11 +247,33 @@ const newVersionDialog = reactive({
 })
 
 // --- Computed Properties ---
+
+// 获取当前正在查看或编辑的版本对象
+const currentVersion = computed(() => {
+  return loadedVersionInEditor.value ?? props.resource.latest_version
+})
+
+// 获取当前版本关联的文件信息
+const currentFileInfo = computed(() => {
+  return currentVersion.value?.file_info ?? null
+})
+
+// 判断当前文件是否为图片
+const isImage = computed(() => {
+  const mime = currentFileInfo.value?.mime_type
+  return mime ? mime.startsWith('image/') : false
+})
+
+// 获取文件下载链接
+const fileDownloadUrl = computed(() => {
+  return currentFileInfo.value?.url ?? ''
+})
+
 const isFormDirty = computed(() => {
   const original = props.resource
   if (!original) return false
 
-  const originalVersion = loadedVersionInEditor.value ?? original.latest_version
+  const originalVersion = currentVersion.value
   const isMetaDirty =
     form.name !== original.name || form.description !== (original.description || '')
 
@@ -237,11 +309,21 @@ const contentEditorLabel = computed(() => {
 // --- Watchers ---
 watch(
   () => props.resource,
-  (newSelection) => {
+  (newSelection, oldSelection) => {
     if (newSelection) {
-      resetForm()
-      // Reset view mode when switching resources
-      viewMode.value = 'editor'
+      // 仅当资源 ID 发生变化时才重置视图状态
+      // 这样可以避免在资源更新（如移动、重命名）时丢失当前的查看状态
+      if (newSelection.id !== oldSelection?.id) {
+        resetForm()
+        viewMode.value = 'editor'
+      } else {
+        // 如果是同一个资源更新（例如上传了新文件导致 latest_version 变更）
+        // 我们需要同步表单的基本信息，但保留用户的编辑上下文
+        if (!loadedVersionInEditor.value) {
+          // 如果正在查看最新版本，则刷新表单数据以匹配最新的 latest_version
+          resetForm()
+        }
+      }
     } else {
       // Reset form when resource becomes null (handled by parent)
       form.name = ''
@@ -257,8 +339,17 @@ watch(
 
 // --- Handlers ---
 
+function formatFileSize(bytes: number): string {
+  if (bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+}
+
 function toggleKbView() {
-  viewMode.value = viewMode.value === 'editor' ? 'kb_config' : 'editor'
+  // viewMode.value = viewMode.value === 'editor' ? 'kb_config' : 'editor'
+  viewMode.value = 'kb_config'
 }
 
 function resetForm() {
@@ -320,13 +411,13 @@ async function handleSaveChanges() {
   ElMessage.success('保存成功')
 }
 
-// File Upload Handler (Req 1)
+// File Upload Handler
 async function handleFileChange(uploadFile: UploadFile) {
   if (!uploadFile.raw || !props.resource) return
 
   isUploading.value = true
   try {
-    // Call the new unified upload API with resourceId to update the existing resource
+    // Call the unified upload API with resourceId to update the existing resource
     await uploadResourceFile(uploadFile.raw, undefined, props.resource.id)
     ElMessage.success('文件上传成功，新版本已创建')
     // Refresh details to show new version info
@@ -353,6 +444,11 @@ function loadVersionIntoEditor(version: ResourceVersion) {
     form.attributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES }
   }
   loadedVersionInEditor.value = version
+
+  // [Fix] 确保在选择版本时切换回编辑器模式
+  if (viewMode.value !== 'editor') {
+    viewMode.value = 'editor'
+  }
 }
 
 async function handleSetActiveVersion(versionId: string) {
@@ -504,34 +600,109 @@ async function handleConfirmNewVersion() {
   justify-content: center;
   padding: 40px;
   gap: 32px;
+  overflow-y: auto;
 }
 
 .file-info-card {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 20px;
+  gap: 16px;
   padding: 24px;
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 8px;
   background-color: var(--el-fill-color-lighter);
   width: 100%;
-  max-width: 500px;
+  max-width: 400px;
+  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.05);
 }
 
-.file-icon {
+.file-preview-image {
+  width: 100%;
+  height: 200px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: #fff;
+  border-radius: 4px;
+  border: 1px solid var(--el-border-color-lighter);
+  overflow: hidden;
+}
+
+.preview-img {
+  width: 100%;
+  height: 100%;
+}
+
+.file-preview-icon {
+  width: 120px;
+  height: 120px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
   color: var(--el-text-color-secondary);
+  background-color: #fff;
+  border-radius: 50%;
 }
 
-.file-meta h3 {
-  margin: 0 0 8px 0;
+.file-meta-content {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-name {
+  margin: 0;
   font-size: 16px;
   color: var(--el-text-color-primary);
+  text-align: center;
+  word-break: break-all;
 }
 
-.file-meta p {
-  margin: 0;
+.file-details {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.file-size {
   font-size: 12px;
   color: var(--el-text-color-secondary);
+  font-family: monospace;
+}
+
+.file-actions {
+  margin-top: 8px;
+}
+
+.download-link {
+  text-decoration: none;
+}
+
+.file-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: var(--el-text-color-placeholder);
+}
+
+.empty-icon {
+  margin-bottom: 16px;
+  color: var(--el-text-color-secondary);
+}
+
+.empty-text {
+  font-size: 16px;
+  font-weight: 500;
+  margin: 0 0 8px 0;
+  color: var(--el-text-color-regular);
+}
+
+.empty-subtext {
+  font-size: 13px;
+  margin: 0;
 }
 
 .kb-badge {
@@ -551,5 +722,22 @@ async function handleConfirmNewVersion() {
   text-align: center;
   max-width: 400px;
   line-height: 1.5;
+}
+
+.warning-text {
+  color: var(--el-color-warning);
+}
+
+.image-slot {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  flex-direction: column;
+  gap: 8px;
 }
 </style>

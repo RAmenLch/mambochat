@@ -10,6 +10,7 @@
         <div
           v-if="kbId"
           class="version-card-horizontal special-kb-card"
+          :class="{ 'is-viewing': viewMode === 'kb_config' }"
           @click="$emit('toggle-kb-view')"
         >
           <div class="special-card-content">
@@ -26,7 +27,7 @@
             class="version-card-horizontal"
             :class="{
               'is-active': activeVersionId === version.id,
-              'is-viewing': viewingVersionId === version.id,
+              'is-viewing': viewMode === 'editor' && viewingVersionId === version.id,
             }"
             @click="$emit('select-version', version)"
           >
@@ -65,6 +66,7 @@ defineProps<{
   activeVersionId: string | null
   viewingVersionId: string | null
   kbId?: string | null
+  viewMode?: 'editor' | 'kb_config'
 }>()
 
 defineEmits<{
@@ -173,6 +175,11 @@ defineEmits<{
 .special-kb-card:hover {
   background-color: var(--el-color-primary-light-8);
   border-color: var(--el-color-primary-light-5);
+}
+
+.special-kb-card.is-viewing {
+  border-color: var(--el-color-primary);
+  box-shadow: 0 0 0 1px var(--el-color-primary);
 }
 
 .special-card-content {
