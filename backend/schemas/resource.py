@@ -6,6 +6,7 @@ from typing import Optional, List, Dict, Any
 
 from backend.schemas.message import SubMessageConfig
 from backend.schemas.enums import MoveAction, ResourceItemType, ResourceType
+from backend.schemas.file import File as FileSchema  # 导入 File Schema
 
 
 # --- ResourceVersion Schemas ---
@@ -35,6 +36,9 @@ class ResourceVersion(ResourceVersionBase):
     createdAt: datetime
     updatedAt: datetime
 
+    # [新增] 用于返回文件详细信息，不存数据库
+    file_info: Optional[FileSchema] = None
+
     class Config:
         from_attributes = True
 
@@ -53,7 +57,6 @@ class ResourceBase(BaseModel):
     parentId: Optional[str] = None
     sortOrder: int = 0
 
-    # 新增字段：允许在创建/更新时传递，虽然 Router 中目前是手动处理的，但保持 Schema 完整性更好
     kb_id: Optional[str] = Field(None, description="关联的知识库ID")
     kb_config: Optional[Dict[str, Any]] = Field(None, description="切分配置")
 
@@ -77,7 +80,6 @@ class ResourceUpdate(BaseModel):
     description: Optional[str] = None
     parentId: Optional[str] = None
     sortOrder: Optional[int] = None
-    # 允许通过 PUT 更新 kb_config 或 kb_id (虽然通常由业务逻辑控制)
     kb_id: Optional[str] = None
     kb_config: Optional[Dict[str, Any]] = None
 
@@ -90,7 +92,6 @@ class ResourceSimple(ResourceBase):
     createdAt: datetime
     updatedAt: datetime
 
-    # 确保响应中包含新字段
     kb_id: Optional[str] = None
     kb_config: Optional[Dict[str, Any]] = None
 

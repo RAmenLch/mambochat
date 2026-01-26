@@ -36,7 +36,23 @@ SUPPORTED_KB_MIME_TYPES = {
     "text/xml",
     "application/xml",
     "text/yaml",
-    "application/x-yaml"
+    "application/x-yaml",
+    "application/pdf" # 通常向量化库支持PDF，如果不支持请移除
+}
+# 注意：如果你的系统依赖纯文本读取，PDF等二进制格式可能需要专门的解析器(如PyPDF2)，
+# 这里根据你的 FileExtractor 实现（直接 read_bytes decode），目前仅支持纯文本类型。
+# 根据你的代码逻辑 (decode utf-8)，我将严格限制为文本类型。
+STRICT_TEXT_MIME_TYPES = {
+    "text/plain",
+    "text/markdown",
+    "text/csv",
+    "application/json",
+    "text/xml",
+    "application/xml",
+    "text/yaml",
+    "application/x-yaml",
+    "application/javascript",
+    "text/html"
 }
 
 logger = logging.getLogger(__name__)
@@ -157,6 +173,13 @@ class FileExtractor(AbstractContentExtractor):
         db_file = await file_crud.get_file(db, file_id)
         if not db_file:
             raise ValueError(f"Physical file record not found for ID: {file_id}")
+
+        # --- 新增：类型校验 ---
+        # 检查 MIME 类型是否在允许的文本列表中
+        if db_file.mime_type not in STRICT_TEXT_MIME_TYPES:
+             # 对于 text/plain 等通用类型，有时 mime检测可能不准，但这里严格执行要求
+             # 如果是二进制文件（如 image/png, application/zip 等），直接报错
+             raise ValueError(f"Unsupported file type for vectorization: {db_file.mime_type}. Only text files are supported.")
 
         try:
             content_bytes = await storage_service.read_bytes(db_file.storage_path)
@@ -325,62 +348,6 @@ class KnowledgeBaseService:
 
         return new_resource
 
-    async def upload_file(self, kb_id: str, file: UploadFile) -> schemas.Resource:
-        """
-        仅上传文件并创建元数据，不执行切分和嵌入。
-        注意：此方法主要用于旧版兼容或特定KB上传场景，通用上传推荐使用 Resource Management 接口。
-        """
-        # 1. 校验文件类型
-        if file.content_type not in SUPPORTED_KB_MIME_TYPES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported file type: {file.content_type}. Only plain text formats are currently supported."
-            )
-
-        # 2. 验证层级约束
-        await self._validate_kb_hierarchy(kb_id)
-
-        # 3. 保存物理文件
-        try:
-            storage_path = await storage_service.save(file, sub_path="kb_documents")
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"File storage failed: {e}")
-
-        # 4. 创建 File 记录
-        db_file = await file_crud.create_file(
-            self.db,
-            filename=file.filename,
-            storage_path=storage_path,
-            mime_type=file.content_type or "text/plain",
-            size=file.size,
-            management_type=FileManagementType.KB_DOCUMENT.value
-        )
-
-        # 5. 准备默认切分配置
-        default_config = kb_schemas.KBTextSplitterConfig(
-            splitter_type=kb_schemas.KBSplitterType.SIMPLE,
-            chunk_size=500,
-            chunk_overlap=50
-        )
-
-        # 6. 创建 Resource (KB File)
-        # 注意：不再将 splitter_config 放入 initial_attributes，而是存入 Resource.kb_config
-        resource_create = schemas.ResourceCreate(
-            name=file.filename,
-            itemType=ResourceItemType.RESOURCE,
-            resourceType=ResourceType.KB_FILE,
-            parentId=kb_id,
-            initial_content=db_file.id,
-            initial_attributes={}
-        )
-        new_resource = await resource_crud.create_resource(self.db, resource_create)
-
-        # 手动更新 kb_config
-        new_resource.kb_config = default_config.model_dump()
-        await self.db.commit()
-        await self.db.refresh(new_resource)
-
-        return new_resource
 
     async def update_kb_file_config(self, resource_id: str,
                                     config_data: kb_schemas.KBUpdateConfigRequest) -> schemas.Resource:
@@ -512,10 +479,6 @@ class KnowledgeBaseService:
 
         # 4. 获取切分配置 (从 Resource 层级)
         kb_config_dict = resource.kb_config
-
-        # 兼容性处理：如果 Resource.kb_config 为空，尝试从 attributes 读取旧配置并迁移
-        if not kb_config_dict and resource.latest_version.attributes:
-            kb_config_dict = resource.latest_version.attributes.get("splitter_config")
 
         if not kb_config_dict and request.action == kb_schemas.KBTaskAction.START:
             raise HTTPException(status_code=400, detail="Splitter configuration not found.")

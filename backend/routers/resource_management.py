@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend import schemas
 from backend.crud import resource_crud, file_crud, kb_crud
-from backend.database import get_db
+from backend.database import get_db, AsyncSessionLocal
 from backend.models import resource_model
 from backend.schemas import kb as kb_schemas
 from backend.schemas.enums import FileManagementType, ResourceType, ResourceItemType, KBFileStatus
@@ -21,6 +21,59 @@ from backend.services.storage_service import storage_service
 router = APIRouter(prefix="/resources", tags=["Resource Management"])
 
 
+async def _hydrate_resources(resources: List[schemas.Resource], db: AsyncSession):
+    """
+    批量填充资源的 file_info 信息。
+    仅针对 ResourceType 为 FILE 或 KB_FILE 的资源，且内容不为空的情况。
+    """
+    if not resources:
+        return
+
+    # 1. 收集需要查询的文件ID
+    file_ids = set()
+    resource_map = {}  # file_id -> list of resource versions to update
+
+    for res in resources:
+        # 必须有 latest_version
+        if not hasattr(res, 'latest_version') or not res.latest_version:
+            continue
+
+        # 必须是文件类型的资源
+        if res.resourceType not in [ResourceType.FILE.value, ResourceType.KB_FILE.value]:
+            continue
+
+        # content (file_id) 不能为空
+        file_id = res.latest_version.content
+        if not file_id:
+            continue
+
+        file_ids.add(file_id)
+        if file_id not in resource_map:
+            resource_map[file_id] = []
+        resource_map[file_id].append(res.latest_version)
+
+    if not file_ids:
+        return
+
+    # 2. 批量查询文件信息
+    file_records = await file_crud.get_files_by_ids(db, list(file_ids))
+
+    # 3. 填充信息
+    for record in file_records:
+        file_info = schemas.File(
+            id=record.id,
+            filename=record.filename,
+            mime_type=record.mime_type,
+            size=record.size,
+            created_at=record.created_at,
+            url=storage_service.get_url(record.storage_path)
+        )
+
+        if record.id in resource_map:
+            for version in resource_map[record.id]:
+                version.file_info = file_info
+
+
 # --- Basic Resource Operations ---
 
 @router.get("", response_model=List[schemas.Resource], summary="获取资源和文件夹列表")
@@ -28,7 +81,10 @@ async def read_resources(db: AsyncSession = Depends(get_db)):
     """
     获取所有资源和文件夹的列表，用于构建树状结构。
     """
-    return await resource_crud.get_resources(db=db)
+    resources = await resource_crud.get_resources(db=db)
+    # 填充文件详情
+    await _hydrate_resources(resources, db)
+    return resources
 
 
 @router.get("/children", response_model=List[schemas.ResourceSimple], summary="批量获取子资源和文件夹")
@@ -38,6 +94,7 @@ async def read_resource_children(
 ):
     """
     根据父节点ID列表并行加载子节点内容。
+    注意：此接口返回 ResourceSimple，不包含 latest_version，因此不进行文件详情填充。
     """
     return await resource_crud.get_resources_by_parent_ids(db, parent_ids=parentIds)
 
@@ -47,7 +104,11 @@ async def create_resource(resource: schemas.ResourceCreate, db: AsyncSession = D
     """
     创建一个新的资源项（'resource'）或文件夹（'folder'）。
     """
-    return await resource_crud.create_resource(db=db, resource=resource)
+    new_resource = await resource_crud.create_resource(db=db, resource=resource)
+    # 如果创建时带有初始内容（文件ID），尝试填充
+    if new_resource.latest_version and new_resource.latest_version.content:
+        await _hydrate_resources([new_resource], db)
+    return new_resource
 
 
 @router.post("/upload", response_model=schemas.Resource, status_code=status.HTTP_201_CREATED, summary="上传资源文件")
@@ -79,6 +140,8 @@ async def upload_resource_file(
         size=file.size,
         management_type=FileManagementType.RESOURCE.value
     )
+
+    result_resource = None
 
     # 2. 场景 A: 新建资源
     if parent_id:
@@ -116,7 +179,7 @@ async def upload_resource_file(
             await db.commit()
             await db.refresh(new_resource)
 
-        return new_resource
+        result_resource = new_resource
 
     # 3. 场景 B: 更新现有资源
     else:  # resource_id is not None
@@ -148,7 +211,13 @@ async def upload_resource_file(
             await resource_crud.set_active_version(db, resource_id, new_ver.id)
 
         await db.refresh(resource)
-        return resource
+        result_resource = resource
+
+    # 填充文件详情
+    if result_resource:
+        await _hydrate_resources([result_resource], db)
+
+    return result_resource
 
 
 @router.post("/move", status_code=status.HTTP_200_OK, summary="移动资源或文件夹")
@@ -171,11 +240,15 @@ async def read_resource(resource_id: str, db: AsyncSession = Depends(get_db)):
     db_resource = await resource_crud.get_resource_with_versions(db, resource_id=resource_id)
     if not db_resource:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found")
+
+    # 填充文件详情
+    await _hydrate_resources([db_resource], db)
     return db_resource
 
 
 @router.put("/{resource_id}", response_model=schemas.Resource, summary="更新资源基本信息")
-async def update_resource(resource_id: str, resource_update: schemas.ResourceUpdate, db: AsyncSession = Depends(get_db)):
+async def update_resource(resource_id: str, resource_update: schemas.ResourceUpdate,
+                          db: AsyncSession = Depends(get_db)):
     """
     更新资源的基本信息，如名称、描述。
     注意：移动操作请使用 /move 接口。
@@ -183,6 +256,9 @@ async def update_resource(resource_id: str, resource_update: schemas.ResourceUpd
     updated_resource = await resource_crud.update_resource(db, resource_id=resource_id, resource_update=resource_update)
     if not updated_resource:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found")
+
+    # 填充文件详情
+    await _hydrate_resources([updated_resource], db)
     return updated_resource
 
 
@@ -193,7 +269,8 @@ async def delete_resource(resource_id: str, db: AsyncSession = Depends(get_db)):
     会自动清理关联的向量数据和知识库切片。
     """
     # 1. 查找所有需要删除的资源ID（包括子孙节点）
-    cte = select(resource_model.Resource.id, resource_model.Resource.kb_id).where(resource_model.Resource.id == resource_id).cte(name="hierarchy", recursive=True)
+    cte = select(resource_model.Resource.id, resource_model.Resource.kb_id).where(
+        resource_model.Resource.id == resource_id).cte(name="hierarchy", recursive=True)
     child = resource_model.Resource
     cte = cte.union_all(select(child.id, child.kb_id).join(cte, child.parentId == cte.c.id))
 
@@ -231,23 +308,28 @@ async def delete_resource(resource_id: str, db: AsyncSession = Depends(get_db)):
 
 # --- Version Operations ---
 
-@router.post("/{resource_id}/versions", response_model=schemas.ResourceVersion, status_code=status.HTTP_201_CREATED, summary="为资源创建新版本")
-async def create_version_for_resource(resource_id: str, version_create: schemas.ResourceVersionCreate, db: AsyncSession = Depends(get_db)):
+@router.post("/{resource_id}/versions", response_model=schemas.ResourceVersion, status_code=status.HTTP_201_CREATED,
+             summary="为资源创建新版本")
+async def create_version_for_resource(resource_id: str, version_create: schemas.ResourceVersionCreate,
+                                      db: AsyncSession = Depends(get_db)):
     """
     为指定的资源创建一个新的版本快照。
     """
-    new_version = await resource_crud.create_resource_version(db, resource_id=resource_id, version_create=version_create)
+    new_version = await resource_crud.create_resource_version(db, resource_id=resource_id,
+                                                              version_create=version_create)
     if not new_version:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found or is a folder")
     return new_version
 
 
 @router.put("/versions/{version_id}", response_model=schemas.ResourceVersion, summary="更新指定版本")
-async def update_version(version_id: str, version_update: schemas.ResourceVersionUpdate, db: AsyncSession = Depends(get_db)):
+async def update_version(version_id: str, version_update: schemas.ResourceVersionUpdate,
+                         db: AsyncSession = Depends(get_db)):
     """
     更新指定版本快照的内容、名称或其他元数据。
     """
-    updated_version = await resource_crud.update_resource_version(db, version_id=version_id, version_update=version_update)
+    updated_version = await resource_crud.update_resource_version(db, version_id=version_id,
+                                                                  version_update=version_update)
     if not updated_version:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource version not found")
     return updated_version
@@ -261,6 +343,9 @@ async def set_active_version(resource_id: str, version_id: str, db: AsyncSession
     updated_resource = await resource_crud.set_active_version(db, resource_id=resource_id, version_id=version_id)
     if not updated_resource:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource or version not found")
+
+    # 填充文件详情
+    await _hydrate_resources([updated_resource], db)
     return updated_resource
 
 
@@ -313,106 +398,3 @@ async def search_resources(request: schemas.ResourceSearchRequest, db: AsyncSess
 
     return schemas.ResourceSearchResponse(total=total, items=items)
 
-
-# --- Knowledge Base & Vector Operations (Migrated) ---
-
-@router.post(
-    "/kb/{resource_id}/task",
-    status_code=status.HTTP_200_OK,
-    summary="管理向量化任务"
-)
-async def run_kb_file_task(
-        resource_id: str,
-        request: kb_schemas.KBRunTaskRequest,
-        db: AsyncSession = Depends(get_db)
-):
-    """
-    启动、恢复或停止资源的切分与嵌入任务。
-    """
-    service = KnowledgeBaseService(db)
-    return await service.handle_task_action(resource_id, request)
-
-
-@router.put(
-    "/kb/{resource_id}/config",
-    response_model=schemas.Resource,
-    status_code=status.HTTP_200_OK,
-    summary="更新切分配置"
-)
-async def update_kb_file_config(
-        resource_id: str,
-        config_request: kb_schemas.KBUpdateConfigRequest,
-        db: AsyncSession = Depends(get_db)
-):
-    """
-    更新资源的切分配置（Splitter Config）。
-    配置存储在 Resource.kb_config 中。
-    """
-    service = KnowledgeBaseService(db)
-    return await service.update_kb_file_config(resource_id, config_request)
-
-
-@router.get(
-    "/kb/{resource_id}/progress",
-    summary="订阅处理进度 (SSE)"
-)
-async def subscribe_kb_file_progress(resource_id: str):
-    """
-    订阅指定资源的处理进度。
-    返回 Server-Sent Events (SSE) 流。
-    包含 is_stale 状态以指示内容是否更新。
-    """
-    async def _stream_generator():
-        # 1. 获取并推送初始状态
-        async with AsyncSession(resource_crud.AsyncSessionLocal().bind) as session:
-            service = KnowledgeBaseService(session)
-            initial_status = await service.get_comprehensive_file_status(resource_id)
-
-        yield f"data: {initial_status.model_dump_json()}\n\n"
-
-        active_statuses = {
-            KBFileStatus.CLEANING,
-            KBFileStatus.READING,
-            KBFileStatus.SPLITTING,
-            KBFileStatus.EMBEDDING
-        }
-
-        if initial_status.file_status in active_statuses:
-            # 导入 stream_manager 需注意循环依赖，这里局部导入或使用服务层
-            from backend.services.stream_manager_service import stream_manager
-            queue = await stream_manager.subscribe(resource_id)
-            try:
-                while True:
-                    data = await queue.get()
-                    if data is None:
-                        yield f"event: end\ndata: Task finished\n\n"
-                        break
-                    yield f"data: {json.dumps(data, default=str)}\n\n"
-                    queue.task_done()
-            except Exception:
-                pass
-            finally:
-                await stream_manager.unsubscribe(resource_id, queue)
-        else:
-            yield f"event: end\ndata: Task finished\n\n"
-
-    return StreamingResponse(
-        _stream_generator(),
-        media_type="text/event-stream"
-    )
-
-
-@router.post(
-    "/kb/search",
-    response_model=kb_schemas.KBSearchResponse,
-    summary="向量检索"
-)
-async def search_knowledge_base(
-        request: kb_schemas.KBSearchRequest,
-        db: AsyncSession = Depends(get_db)
-):
-    """
-    在知识库中进行语义搜索。
-    """
-    service = KnowledgeBaseService(db)
-    return await service.search_kb(request)

@@ -75,7 +75,8 @@ app.include_router(settings.router, prefix="/api", tags=["Global Settings"])
 app.include_router(system_config.router, prefix="/api", tags=["System Configuration"])
 app.include_router(notifications.router, prefix="/api", tags=["Notifications"])
 app.include_router(mcp_management.router, prefix="/api/mcp", tags=["MCP Management"])
-app.include_router(kb_management.router, prefix="/api/kb", tags=["Knowledge Base Management"])
+# 修改路由前缀，从 /api/kb 改为 /api/resource/kb
+app.include_router(kb_management.router, prefix="/api/resources/kb", tags=["Knowledge Base Management"])
 app.include_router(file_management.router)
 
 
