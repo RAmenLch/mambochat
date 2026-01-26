@@ -22,7 +22,9 @@
         </el-button>
         <span class="view-title">知识库向量化配置</span>
       </div>
-      <KnowledgeBaseFileDetail :resource="resource" />
+      <div class="kb-detail-wrapper">
+        <KnowledgeBaseFileDetail :resource="resource" />
+      </div>
     </div>
 
     <!-- Region: Standard Editor View -->
@@ -517,6 +519,13 @@ async function handleConfirmNewVersion() {
   display: flex;
   align-items: center;
   gap: 16px;
+}
+
+.kb-detail-wrapper {
+  flex: 1; /* 占据剩余空间 */
+  min-height: 0; /* 允许 Flex 子元素内部的滚动条正常工作 */
+  position: relative;
+  width: 100%;
 }
 
 .view-title {
