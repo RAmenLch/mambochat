@@ -186,13 +186,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type UploadFile } from 'element-plus'
-import {
-  Document,
-  Upload,
-  ArrowLeft,
-  Picture,
-  DocumentAdd,
-} from '@element-plus/icons-vue'
+import { Document, Upload, ArrowLeft, Picture, DocumentAdd } from '@element-plus/icons-vue'
 import type { editor } from 'monaco-editor'
 
 import { useResourceStore } from '@/stores/resourceStore'
@@ -308,6 +302,8 @@ const editorLanguage = computed(() => {
 const editorOptions = computed<editor.IStandaloneEditorConstructionOptions>(() => ({
   minimap: { enabled: true },
   lineNumbers: 'on',
+  lineNumbersMinChars: 2,
+  lineDecorationsWidth: 0,
   folding: true,
   wordWrap: 'on',
   scrollBeyondLastLine: false,
@@ -569,7 +565,7 @@ async function handleConfirmNewVersion() {
   border-radius: 4px;
   overflow: hidden;
   background-color: #ffffff;
-  padding: 0 12px;
+  padding: 0 6px;
 }
 
 .folder-placeholder {
