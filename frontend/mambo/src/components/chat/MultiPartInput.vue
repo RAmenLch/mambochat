@@ -261,6 +261,6 @@ defineExpose({
   height: 100%;
   overflow: hidden;
   background-color: #ffffff;
-  padding: 0 12px;
+  padding: 0 2px;
 }
 </style>
