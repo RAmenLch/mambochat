@@ -125,11 +125,12 @@ async def create_user_message_and_prepare_generation(
     for sub_message in request.sub_messages:
         if sub_message.type == 'File':
             file_id = sub_message.content
-            # 将文件管理类型从 'temporary' 更新为 'sub_message'
+            # 智能更新文件管理类型：如果是临时类型则移除临时标记并加入新类型，否则合并类型
             await file_crud.update_file_management_type(
                 db,
                 file_id=file_id,
-                new_type=FileManagementType.SUB_MESSAGE.value
+                new_type=FileManagementType.SUB_MESSAGE.value,
+                merge=True  # 使用智能合并模式
             )
 
     user_message_create = schemas.MessageCreate(

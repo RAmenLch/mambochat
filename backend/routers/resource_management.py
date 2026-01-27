@@ -158,7 +158,7 @@ async def upload_resource_file(
         storage_path=storage_path,
         mime_type=file.content_type or "application/octet-stream",
         size=file.size,
-        management_type=FileManagementType.RESOURCE.value
+        management_type=[FileManagementType.RESOURCE.value]
     )
 
     result_resource = None

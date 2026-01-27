@@ -10,12 +10,11 @@ from backend.models import file_model, chat_model, setting_model, resource_model
 from backend.schemas.enums import FileManagementType, ResourceType
 from backend.services.storage_service import storage_service
 from backend.config.timezone_config import get_configured_now
+from backend.crud import file_crud
 
-# 配置日志记录
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# 定义临时文件的最长存活时间
 TEMPORARY_FILE_LIFETIME = timedelta(hours=24)
 
 
@@ -23,9 +22,9 @@ async def _cleanup_temporary_files(db: AsyncSession):
     """清理过期的临时文件"""
     cutoff_time = get_configured_now() - TEMPORARY_FILE_LIFETIME
 
-    # SQLAlchemy 2.0 style select
+    # 查找包含 temporary 类型的文件
     stmt = select(file_model.File).where(
-        file_model.File.management_type == FileManagementType.TEMPORARY.value,
+        file_model.File.management_type.contains([FileManagementType.TEMPORARY.value]),
         file_model.File.created_at < cutoff_time
     )
     result = await db.execute(stmt)
@@ -37,9 +36,15 @@ async def _cleanup_temporary_files(db: AsyncSession):
     logger.info(f"发现 {len(expired_files)} 个过期的临时文件，准备清理...")
     for f in expired_files:
         try:
-            await storage_service.delete(f.storage_path)
-            await db.delete(f)
-            logger.info(f"已删除临时文件: {f.filename} (ID: {f.id})")
+            # 如果只有 temporary 类型，直接删除
+            if len(f.management_type) == 1 and f.management_type[0] == FileManagementType.TEMPORARY.value:
+                await storage_service.delete(f.storage_path)
+                await db.delete(f)
+                logger.info(f"已删除临时文件: {f.filename} (ID: {f.id})")
+            else:
+                # 如果还有其他类型，只移除 temporary 标记
+                await file_crud.remove_file_management_type(db, f.id, FileManagementType.TEMPORARY.value)
+                logger.info(f"已移除文件 {f.filename} (ID: {f.id}) 的临时类型标记")
         except Exception as e:
             logger.error(f"删除临时文件 {f.id} 时出错: {e}")
 
@@ -48,21 +53,21 @@ async def _cleanup_temporary_files(db: AsyncSession):
 
 async def _cleanup_sub_message_files(db: AsyncSession):
     """清理与任何 SubMessage 都不再关联的文件"""
-    # 1. 获取所有正在被 SubMessage 引用的文件ID
+    # 获取所有正在被 SubMessage 引用的文件ID
     stmt_active = select(chat_model.SubMessage.content).where(
         chat_model.SubMessage.type == 'File'
     ).distinct()
     result_active = await db.execute(stmt_active)
     active_file_ids = {row[0] for row in result_active}
 
-    # 2. 获取所有标记为 SUB_MESSAGE 的文件ID
+    # 获取所有包含 sub_message 类型的文件ID
     stmt_managed = select(file_model.File.id).where(
-        file_model.File.management_type == FileManagementType.SUB_MESSAGE.value
+        file_model.File.management_type.contains([FileManagementType.SUB_MESSAGE.value])
     )
     result_managed = await db.execute(stmt_managed)
     managed_file_ids = {row[0] for row in result_managed}
 
-    # 3. 找出差集，即孤儿文件
+    # 找出差集，即孤儿文件
     orphan_file_ids = managed_file_ids - active_file_ids
 
     if not orphan_file_ids:
@@ -70,25 +75,27 @@ async def _cleanup_sub_message_files(db: AsyncSession):
 
     logger.info(f"发现 {len(orphan_file_ids)} 个孤儿 SubMessage 文件，准备清理...")
 
-    # 4. 删除孤儿文件记录和物理文件
-    stmt_orphans = select(file_model.File).where(file_model.File.id.in_(orphan_file_ids))
-    result_orphans = await db.execute(stmt_orphans)
-    files_to_delete = result_orphans.scalars().all()
-
-    for f in files_to_delete:
+    for file_id in orphan_file_ids:
         try:
-            await storage_service.delete(f.storage_path)
-            await db.delete(f)
-            logger.info(f"已删除孤儿 SubMessage 文件: {f.filename} (ID: {f.id})")
+            # 移除 sub_message 类型
+            updated_file = await file_crud.remove_file_management_type(db, file_id,
+                                                                       FileManagementType.SUB_MESSAGE.value)
+
+            # 如果类型列表为空，删除文件
+            if updated_file and not updated_file.management_type:
+                await storage_service.delete(updated_file.storage_path)
+                await db.delete(updated_file)
+                logger.info(f"已删除孤儿 SubMessage 文件: {updated_file.filename} (ID: {updated_file.id})")
+            else:
+                logger.info(f"已移除文件 {file_id} 的 sub_message 类型标记")
         except Exception as e:
-            logger.error(f"删除孤儿 SubMessage 文件 {f.id} 时出错: {e}")
+            logger.error(f"处理孤儿 SubMessage 文件 {file_id} 时出错: {e}")
 
     await db.commit()
 
 
 async def _cleanup_global_setting_files(db: AsyncSession):
     """清理与任何全局设置（如头像）都不再关联的文件"""
-    # 1. 获取所有正在被设置引用的文件ID
     avatar_keys = ["user_avatar_file_id", "ai_avatar_file_id"]
     stmt_active = select(setting_model.GlobalSettings.value).where(
         setting_model.GlobalSettings.key.in_(avatar_keys),
@@ -97,44 +104,37 @@ async def _cleanup_global_setting_files(db: AsyncSession):
     result_active = await db.execute(stmt_active)
     active_file_ids = {row[0] for row in result_active}
 
-    # 2. 获取所有标记为 GLOBAL_SETTING 的文件ID
     stmt_managed = select(file_model.File.id).where(
-        file_model.File.management_type == FileManagementType.GLOBAL_SETTING.value
+        file_model.File.management_type.contains([FileManagementType.GLOBAL_SETTING.value])
     )
     result_managed = await db.execute(stmt_managed)
     managed_file_ids = {row[0] for row in result_managed}
 
-    # 3. 找出差集，即孤儿文件
     orphan_file_ids = managed_file_ids - active_file_ids
 
     if not orphan_file_ids:
         return
 
-    logger.info(f"发现 {len(orphan_file_ids)} 个孤儿 GlobalSetting 文件（旧头像），准备清理...")
+    logger.info(f"发现 {len(orphan_file_ids)} 个孤儿 GlobalSetting 文件，准备清理...")
 
-    # 4. 删除孤儿文件记录和物理文件
-    stmt_orphans = select(file_model.File).where(file_model.File.id.in_(orphan_file_ids))
-    result_orphans = await db.execute(stmt_orphans)
-    files_to_delete = result_orphans.scalars().all()
-
-    for f in files_to_delete:
+    for file_id in orphan_file_ids:
         try:
-            await storage_service.delete(f.storage_path)
-            await db.delete(f)
-            logger.info(f"已删除孤儿 GlobalSetting 文件: {f.filename} (ID: {f.id})")
+            updated_file = await file_crud.remove_file_management_type(db, file_id,
+                                                                       FileManagementType.GLOBAL_SETTING.value)
+            if updated_file and not updated_file.management_type:
+                await storage_service.delete(updated_file.storage_path)
+                await db.delete(updated_file)
+                logger.info(f"已删除孤儿 GlobalSetting 文件: {updated_file.filename} (ID: {updated_file.id})")
+            else:
+                logger.info(f"已移除文件 {file_id} 的 global_setting 类型标记")
         except Exception as e:
-            logger.error(f"删除孤儿 GlobalSetting 文件 {f.id} 时出错: {e}")
+            logger.error(f"处理孤儿 GlobalSetting 文件 {file_id} 时出错: {e}")
 
     await db.commit()
 
 
 async def _cleanup_resource_files(db: AsyncSession):
-    """
-    清理与任何 ResourceVersion 都不再关联的 RESOURCE 类型文件。
-    涵盖新的 RESOURCE 类型以及旧的 KB_DOCUMENT 类型。
-    """
-    # 1. 获取所有正在被 ResourceVersion 引用的文件ID
-    # 仅关心 ResourceType 为 FILE 或 KB_FILE 的资源
+    """清理与任何 ResourceVersion 都不再关联的 RESOURCE 类型文件"""
     stmt_active = (
         select(resource_model.ResourceVersion.content)
         .join(resource_model.Resource, resource_model.ResourceVersion.resourceId == resource_model.Resource.id)
@@ -144,20 +144,15 @@ async def _cleanup_resource_files(db: AsyncSession):
         )
     )
     result_active = await db.execute(stmt_active)
-    # content 字段存储的是 file_id 字符串
     active_file_ids = {row[0] for row in result_active}
 
-    # 2. 获取所有标记为 RESOURCE 或 KB_DOCUMENT 的文件ID
     stmt_managed = select(file_model.File.id).where(
-        file_model.File.management_type.in_([
-            FileManagementType.RESOURCE.value,
-            FileManagementType.KB_DOCUMENT.value
-        ])
+        file_model.File.management_type.contains([FileManagementType.RESOURCE.value]) |
+        file_model.File.management_type.contains([FileManagementType.KB_DOCUMENT.value])
     )
     result_managed = await db.execute(stmt_managed)
     managed_file_ids = {row[0] for row in result_managed}
 
-    # 3. 找出差集，即孤儿文件
     orphan_file_ids = managed_file_ids - active_file_ids
 
     if not orphan_file_ids:
@@ -165,31 +160,33 @@ async def _cleanup_resource_files(db: AsyncSession):
 
     logger.info(f"发现 {len(orphan_file_ids)} 个孤儿 Resource/KB 文件，准备清理...")
 
-    # 4. 删除孤儿文件记录和物理文件
-    stmt_orphans = select(file_model.File).where(file_model.File.id.in_(orphan_file_ids))
-    result_orphans = await db.execute(stmt_orphans)
-    files_to_delete = result_orphans.scalars().all()
-
-    for f in files_to_delete:
+    for file_id in orphan_file_ids:
         try:
-            await storage_service.delete(f.storage_path)
-            await db.delete(f)
-            logger.info(f"已删除孤儿 Resource 文件: {f.filename} (ID: {f.id})")
+            # 先尝试移除 resource 类型
+            updated_file = await file_crud.remove_file_management_type(db, file_id, FileManagementType.RESOURCE.value)
+
+            # 如果没有 resource 类型，尝试移除 kb_document 类型
+            if not updated_file or FileManagementType.RESOURCE.value not in (updated_file.management_type or []):
+                updated_file = await file_crud.remove_file_management_type(db, file_id,
+                                                                           FileManagementType.KB_DOCUMENT.value)
+
+            if updated_file and not updated_file.management_type:
+                await storage_service.delete(updated_file.storage_path)
+                await db.delete(updated_file)
+                logger.info(f"已删除孤儿 Resource 文件: {updated_file.filename} (ID: {updated_file.id})")
+            else:
+                logger.info(f"已移除文件 {file_id} 的资源类型标记")
         except Exception as e:
-            logger.error(f"删除孤儿 Resource 文件 {f.id} 时出错: {e}")
+            logger.error(f"处理孤儿 Resource 文件 {file_id} 时出错: {e}")
 
     await db.commit()
 
 
 async def cleanup_zombie_files():
-    """
-    主清理函数，按顺序执行所有类型的僵尸文件清理。
-    此函数由后台调度器 (apscheduler) 定期调用。
-    """
+    """主清理函数，按顺序执行所有类型的僵尸文件清理。"""
     logger.info("开始执行僵尸文件清理任务...")
 
     try:
-        # 每个清理任务使用独立的数据库会话，以隔离潜在的失败
         async with AsyncSessionLocal() as db:
             await _cleanup_temporary_files(db)
 

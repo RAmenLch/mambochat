@@ -23,3 +23,29 @@ ALTER TABLE ResourceKBChunk ADD COLUMN created_at DATETIME NOT NULL DEFAULT '197
 
 -- 新增 processed_at 字段，记录向量化完成时间，用于过时判定
 ALTER TABLE ResourceKBChunk ADD COLUMN processed_at DATETIME;
+
+
+-- SQLite 迁移脚本
+-- 1. 创建新表
+CREATE TABLE File_new (
+    id TEXT PRIMARY KEY,
+    filename TEXT NOT NULL,
+    storage_path TEXT NOT NULL UNIQUE,
+    mime_type TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    management_type JSON NOT NULL DEFAULT '[]',
+    created_at DATETIME NOT NULL
+);
+
+-- 2. 复制数据，将字符串转换为 JSON 数组
+INSERT INTO File_new (id, filename, storage_path, mime_type, size, management_type, created_at)
+SELECT id, filename, storage_path, mime_type, size,
+       json_array(management_type) as management_type,
+       created_at
+FROM File;
+
+-- 3. 删除旧表
+DROP TABLE File;
+
+-- 4. 重命名新表
+ALTER TABLE File_new RENAME TO File;
