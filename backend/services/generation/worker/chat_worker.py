@@ -12,7 +12,7 @@ from langchain_core.messages import (
 )
 from langchain_core.tools import BaseTool
 from langchain.agents import create_agent
-from services.generation.worker.abstract_worker import AbstractGenerateWorker
+from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.llm_io import LLMInput
 
 

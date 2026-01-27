@@ -1,6 +1,6 @@
 from backend.services.generation.extended_chat_openai_model import  ExtendedChatOpenAI
 from backend.services.generation.llm_io import LLMInput
-from services.generation.worker.chat_worker import ChatWorker
+from backend.services.generation.worker.chat_worker import ChatWorker
 
 
 class OpenAiWorker(ChatWorker):
