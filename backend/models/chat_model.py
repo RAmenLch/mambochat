@@ -4,6 +4,7 @@ from sqlalchemy import Column, String, TEXT, DateTime, ForeignKey, func, Integer
 from sqlalchemy.orm import relationship
 from backend.models.base_model import Base, generate_uuid
 from backend.schemas.enums import MessageStatus,SubMessageType
+from backend.config.timezone_config import get_configured_now
 
 
 class Chat(Base):
@@ -11,7 +12,7 @@ class Chat(Base):
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
     name = Column(String(100), nullable=False)
-    createdAt = Column(DateTime, nullable=False, default=func.now())
+    createdAt = Column(DateTime, nullable=False, default=get_configured_now)
 
     itemType = Column(String(20), nullable=False, default='chat')  # 'chat' 或 'folder'
     parentId = Column(String(36), ForeignKey("Chat.id"), nullable=True)
@@ -36,7 +37,7 @@ class Message(Base):
     __tablename__ = "Message"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
-    createdAt = Column(DateTime, nullable=False, default=func.now())
+    createdAt = Column(DateTime, nullable=False, default=get_configured_now)
     role = Column(String(20), nullable=False)  # 'user', 'assistant', 'system'
     chatId = Column(String(36), ForeignKey("Chat.id"), nullable=False)
     sortOrder = Column(Integer, nullable=False)
@@ -53,7 +54,7 @@ class SubMessage(Base):
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
     content = Column(TEXT, nullable=False)
-    createdAt = Column(DateTime, nullable=False, default=func.now())
+    createdAt = Column(DateTime, nullable=False, default=get_configured_now)
     messageId = Column(String(36), ForeignKey("Message.id"), nullable=False)
     sortOrder = Column(Integer, nullable=False)
     type = Column(String(50), nullable=False, default=SubMessageType.NORMAL.value)

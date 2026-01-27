@@ -4,6 +4,7 @@ from sqlalchemy import Column, String, TEXT, DateTime, ForeignKey, func, Integer
 from sqlalchemy.orm import relationship
 from backend.models.base_model import Base, generate_uuid
 from backend.schemas.enums import ResourceItemType
+from backend.config.timezone_config import get_configured_now
 
 
 class Resource(Base):
@@ -16,8 +17,8 @@ class Resource(Base):
     id = Column(String(36), primary_key=True, default=generate_uuid)
     name = Column(String(100), nullable=False, index=True)
     description = Column(TEXT, nullable=True)
-    createdAt = Column(DateTime, nullable=False, default=func.now())
-    updatedAt = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+    createdAt = Column(DateTime, nullable=False, default=get_configured_now)
+    updatedAt = Column(DateTime, nullable=False, default=get_configured_now, onupdate=get_configured_now)
 
     # 使用枚举值作为默认值
     itemType = Column(String(20), nullable=False, default=ResourceItemType.RESOURCE.value, index=True)
@@ -66,8 +67,8 @@ class ResourceVersion(Base):
     name = Column(String(100), nullable=False, default="默认版本")
     sortOrder = Column(Integer, nullable=False, default=0)
     commitMessage = Column(String(255), nullable=True)
-    createdAt = Column(DateTime, nullable=False, default=func.now())
-    updatedAt = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+    createdAt = Column(DateTime, nullable=False, default=get_configured_now)
+    updatedAt = Column(DateTime, nullable=False, default=get_configured_now, onupdate=get_configured_now)
 
     content = Column(TEXT, nullable=True)
     attributes = Column(JSON, nullable=True)

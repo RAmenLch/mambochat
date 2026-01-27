@@ -9,6 +9,7 @@ from backend.database import AsyncSessionLocal
 from backend.models import file_model, chat_model, setting_model, resource_model
 from backend.schemas.enums import FileManagementType, ResourceType
 from backend.services.storage_service import storage_service
+from backend.config.timezone_config import get_configured_now
 
 # 配置日志记录
 logging.basicConfig(level=logging.INFO)
@@ -20,7 +21,7 @@ TEMPORARY_FILE_LIFETIME = timedelta(hours=24)
 
 async def _cleanup_temporary_files(db: AsyncSession):
     """清理过期的临时文件"""
-    cutoff_time = datetime.now(timezone.utc) - TEMPORARY_FILE_LIFETIME
+    cutoff_time = get_configured_now() - TEMPORARY_FILE_LIFETIME
 
     # SQLAlchemy 2.0 style select
     stmt = select(file_model.File).where(

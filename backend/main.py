@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import text
 import pytz
-
+from backend.config.timezone_config import TZ
 from backend.database import engine
 from backend.models.base_model import Base
 from backend.routers import (
@@ -24,7 +24,7 @@ from backend.routers import (
 )
 from backend.services.cleanup_service import cleanup_zombie_files
 
-scheduler = AsyncIOScheduler(timezone=pytz.timezone("Asia/Shanghai"))
+scheduler = AsyncIOScheduler(timezone=TZ)
 
 
 @asynccontextmanager

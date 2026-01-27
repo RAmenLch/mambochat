@@ -2,6 +2,7 @@
 
 from sqlalchemy import Column, String, Integer, TEXT, ForeignKey, DateTime, func
 from backend.models.base_model import Base, generate_uuid
+from backend.config.timezone_config import get_configured_now
 
 
 class ResourceKBChunk(Base):
@@ -24,7 +25,7 @@ class ResourceKBChunk(Base):
     vector_id = Column(Integer, nullable=True)
 
     # 新增：切分创建时间
-    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    created_at = Column(DateTime, nullable=False, default=get_configured_now)
 
     # 新增：向量化完成时间，用于过时判定
     processed_at = Column(DateTime, nullable=True)

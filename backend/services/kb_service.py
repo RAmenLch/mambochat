@@ -26,6 +26,7 @@ from backend.schemas.enums import (
 )
 from backend.services.storage_service import storage_service
 from backend.services.stream_manager_service import stream_manager
+from backend.config.timezone_config import get_configured_now
 
 # 定义支持的知识库文件 MIME 类型白名单
 SUPPORTED_KB_MIME_TYPES = {
@@ -650,7 +651,7 @@ class KnowledgeBaseService:
                         current_batch_failed = 0
 
                         # 记录当前时间作为 processed_at
-                        now = datetime.now()
+                        now = get_configured_now()
 
                         for idx, vector in enumerate(vectors):
                             chunk = batch[idx]

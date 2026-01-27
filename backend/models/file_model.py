@@ -2,6 +2,8 @@
 
 from sqlalchemy import Column, String, Integer, DateTime, func
 from backend.models.base_model import Base, generate_uuid
+from backend.config.timezone_config import get_configured_now
+
 
 class File(Base):
     """
@@ -18,4 +20,4 @@ class File(Base):
     # management_type 值域参考 FileManagementType 枚举 (e.g., 'temporary', 'sub_message', 'resource')
     management_type = Column(String(50), nullable=False, index=True)
 
-    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    created_at = Column(DateTime, nullable=False, default=get_configured_now)

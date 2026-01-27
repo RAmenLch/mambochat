@@ -10,6 +10,8 @@ import json
 from backend.models import chat_model, provider_model
 from backend.schemas.enums import SubMessageType, MoveAction
 from backend import schemas
+from backend.config.timezone_config import get_configured_now
+
 
 async def get_chat(db: AsyncSession, chat_id: str) -> Optional[chat_model.Chat]:
     """通过ID获取单个聊天会话（包含其所有消息、子消息、模型和提供商信息）"""
@@ -120,7 +122,7 @@ async def touch_chat(db: AsyncSession, chat_id: str) -> Optional[chat_model.Chat
     """更新会话的 lastOpenedAt 时间戳"""
     db_chat = await get_chat(db, chat_id=chat_id)
     if db_chat:
-        db_chat.lastOpenedAt = func.now()
+        db_chat.lastOpenedAt = get_configured_now()
         await db.commit()
         await db.refresh(db_chat)
     return db_chat
