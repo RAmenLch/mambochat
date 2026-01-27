@@ -147,6 +147,7 @@ const emit = defineEmits<{
   (e: 'node-click', data: BaseTreeItem): void
   (e: 'item-created', data: Resource): void
   (e: 'item-deleted', id: string): void
+  (e: 'move-success', item_ids: string[]): void
 }>()
 
 // --- Store ---

@@ -116,7 +116,7 @@ import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { Search, Loading, DocumentDelete, ChatDotRound, FolderOpened, ArrowRight, Monitor } from '@element-plus/icons-vue';
 import { searchChats } from '@/api/chatService.ts';
-import type { SearchResultItem } from '@/api/types.ts';
+import type { SearchResultItem } from '@/api/types';
 
 interface Props {
   visible: boolean;

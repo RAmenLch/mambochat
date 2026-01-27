@@ -561,7 +561,9 @@ const selectResourceById = async (resourceId: string, resourceType?: ResourceTyp
           sortOrder: 0,
           createdAt: '',
           updatedAt: '',
-          latest_version: null
+          latest_version: null,
+          kb_id: null,
+          kb_config: null
         });
       }
       loadResourcePreview(resourceId);
@@ -580,7 +582,9 @@ const handleSearchResultClick = (item: ResourceSearchResultItem) => {
     sortOrder: 0,
     createdAt: item.updated_at,
     updatedAt: item.updated_at,
-    latest_version: null
+    latest_version: null,
+    kb_id: null,
+    kb_config: null
   });
 };
 
@@ -662,7 +666,10 @@ const handleKBSelection = (items: KBSearchResultItem[]) => {
       sortOrder: 0,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-    }
+      file_info: null
+    },
+    kb_id: null,
+    kb_config: null
   }));
 
   emit('select-resource', resources);

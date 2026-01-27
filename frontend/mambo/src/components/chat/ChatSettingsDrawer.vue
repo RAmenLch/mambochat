@@ -127,7 +127,7 @@ import { ElMessage } from 'element-plus';
 import { QuestionFilled } from '@element-plus/icons-vue';
 import { useSystemConfigStore } from '@/stores/systemConfigStore';
 import { useProviderStore } from '@/stores/providerStore';
-import type { Chat, ChatUpdate, AIModel, Resource, LLMParameterDefinition } from '@/api/types.ts';
+import type { Chat, ChatUpdate, AIModel, Resource, LLMParameterDefinition } from '@/api/types';
 import ResourceSelectorDialog from './dialogs/ResourceSelectorDialog.vue';
 
 interface GroupedModels {
