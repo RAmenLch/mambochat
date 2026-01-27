@@ -21,7 +21,7 @@ from backend.services.generation.worker.openai_worker import OpenAiWorker
 from backend.services.generation.worker.google_worker import GoogleWorker
 from backend.services.generation.worker.deepseek_worker import DeepSeekWorker
 from backend.schemas.enums import FileManagementType, MessageStatus, MessageRole, SubMessageType, ProviderWorkerType
-from backend.config.timezone_config import get_configured_now
+from backend.config.timezone_config import get_configured_now, TZ
 
 # 定义生成任务启动的超时阈值
 GENERATION_START_TIMEOUT = timedelta(minutes=10)
@@ -53,7 +53,13 @@ async def _calculate_message_status(message: chat_model.Message) -> schemas.Mess
         return MessageStatus.COMPLETED if cancellation_requested else MessageStatus.GENERATING
 
     # 无活跃流，检查是否超时（后台任务可能启动失败）
-    time_since_creation = get_configured_now() - message.createdAt
+    created_at = message.createdAt
+    if created_at.tzinfo is None:
+        # 如果数据库返回的是不带时区的时间，我们假设它处于配置的时区
+        # 使用 pytz 的 localize 方法正确处理时区（包括可能的夏令时等）
+        created_at = TZ.localize(created_at)
+
+    time_since_creation = get_configured_now() - created_at
     if time_since_creation > GENERATION_START_TIMEOUT:
         return MessageStatus.FAILED
 
