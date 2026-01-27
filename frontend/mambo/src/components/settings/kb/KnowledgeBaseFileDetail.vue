@@ -47,7 +47,7 @@
           >
             <el-row :gutter="20">
               <el-col :span="24">
-                <el-form-item label="切分方式 (Splitter Type)" prop="splitter_type">
+                <el-form-item label="切分方式" prop="splitter_type">
                   <el-radio-group v-model="taskConfig.splitter_type">
                     <el-radio-button label="simple">简单切分 (Simple)</el-radio-button>
                     <el-radio-button label="separator">分隔符切分 (Separator)</el-radio-button>
@@ -125,7 +125,6 @@
             <div class="card-header">
               <span>向量化进度</span>
               <div class="card-header-actions">
-                <!-- 停止任务 -->
                 <el-button
                   v-if="isProcessing"
                   type="danger"
@@ -135,7 +134,6 @@
                 >
                   停止任务
                 </el-button>
-                <!-- 继续任务 (断点续连) -->
                 <el-button
                   v-if="canResume"
                   type="warning"
@@ -145,7 +143,6 @@
                 >
                   继续任务
                 </el-button>
-                <!-- 启动/重新启动任务 -->
                 <el-button
                   v-if="!isProcessing"
                   type="primary"
@@ -209,7 +206,6 @@
           <el-descriptions-item label="当前状态">
             {{ statusLabel }}
           </el-descriptions-item>
-          <!-- Req 4: is_stale display -->
           <el-descriptions-item label="内容状态" v-if="statusInfo?.is_stale">
             <el-tag type="warning" effect="dark">
               <el-icon><Warning /></el-icon> 内容已更新，需重新嵌入
@@ -222,46 +218,25 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, reactive } from 'vue'
+import { ref, computed, watch, reactive } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Document, QuestionFilled, Warning } from '@element-plus/icons-vue'
-import { runKBFileTask, subscribeToKBFileProgress, updateKBFileConfig } from '@/api/kbService'
-import { useResourceStore } from '@/stores/resourceStore'
+import { useKBFileTask } from '@/composables/useKBFileTask'
 import type {
   Resource,
   KBChunkStatus,
   SplitterType,
-  KBTaskProgressPayload,
   KBSplitterConfig,
   KBResumeConflictErrorDetail,
 } from '@/api/types'
 
-// --- Props ---
 const props = defineProps<{
   resource: Resource
 }>()
 
-// --- Store ---
-const resourceStore = useResourceStore()
-
-// --- Types ---
-interface TaskConfigState {
-  splitter_type: SplitterType
-  chunk_size: number
-  chunk_overlap: number
-  separator: string
-}
-
-// --- State ---
-const statusInfo = ref<KBChunkStatus | null>(null)
-const optimisticStatus = ref<'STARTING' | 'STOPPING' | null>(null)
-
-const isLoading = ref(false)
-const isSubmitting = ref(false)
 const configFormRef = ref<FormInstance>()
-let sseController: AbortController | null = null
 
-const taskConfig = reactive<TaskConfigState>({
+const taskConfig = reactive<KBSplitterConfig>({
   splitter_type: 'simple',
   chunk_size: 500,
   chunk_overlap: 50,
@@ -274,37 +249,25 @@ const configRules = reactive<FormRules>({
   separator: [{ required: true, message: '请输入分隔符', trigger: 'blur' }],
 })
 
-// --- Computed ---
-
-const isProcessing = computed(() => {
-  if (optimisticStatus.value === 'STARTING') return true
-
-  const s = statusInfo.value?.file_status
-  if (!s) return false
-  return ['CLEANING', 'READING', 'SPLITTING', 'EMBEDDING'].includes(s)
-})
-
-const hasIndexedData = computed(() => {
-  return statusInfo.value?.file_status === 'COMPLETED' || (statusInfo.value?.total_chunks || 0) > 0
-})
-
-const canResume = computed(() => {
-  if (optimisticStatus.value) return false
-  if (!statusInfo.value) return false
-  const s = statusInfo.value.file_status
-  return s === 'FAILED' || s === 'STOPPED'
-})
+const {
+  statusInfo,
+  optimisticStatus,
+  isSubmitting,
+  isProcessing,
+  hasIndexedData,
+  canResume,
+  progressPercentage,
+  startSSE,
+  saveConfig,
+  startTask,
+  resumeTask,
+  stopTask,
+} = useKBFileTask(props.resource.id)
 
 const startButtonText = computed(() => {
   if (optimisticStatus.value === 'STARTING') return '启动中...'
   if (statusInfo.value?.file_status === 'INITIAL') return '开始切分与嵌入'
   return hasIndexedData.value ? '重新切分并嵌入' : '启动切分任务'
-})
-
-const progressPercentage = computed(() => {
-  if (!statusInfo.value || statusInfo.value.total_chunks === 0) return 0
-  const percent = (statusInfo.value.completed_chunks / statusInfo.value.total_chunks) * 100
-  return Math.min(Math.round(percent), 100)
 })
 
 const progressStatus = computed(() => {
@@ -352,22 +315,18 @@ const statusTagType = computed(() => {
   return status ? map[status] || 'info' : 'info'
 })
 
-// 获取当前资源保存的配置
 const savedConfig = computed<KBSplitterConfig | undefined>(() => {
   return props.resource.latest_version?.attributes?.splitter_config
 })
 
-// 脏检查：表单值 vs 已保存的配置
 const isConfigDirty = computed(() => {
   const saved = savedConfig.value
-  if (!saved) return true // 如果没有保存过配置，视为 Dirty (需要保存默认值)
+  if (!saved) return true
 
-  // 比较各项值
   if (taskConfig.splitter_type !== saved.splitter_type) return true
   if (taskConfig.chunk_size !== saved.chunk_size) return true
   if (taskConfig.chunk_overlap !== saved.chunk_overlap) return true
 
-  // 比较 separator (注意 null/undefined 处理)
   const formSep = taskConfig.splitter_type === 'separator' ? taskConfig.separator : null
   const savedSep = saved.separator || null
   if (formSep !== savedSep) return true
@@ -375,42 +334,22 @@ const isConfigDirty = computed(() => {
   return false
 })
 
-// --- Methods ---
+const loadInitialConfig = () => {
+  const saved = savedConfig.value
 
-const stopSSE = () => {
-  if (sseController) {
-    sseController.abort()
-    sseController = null
+  if (saved) {
+    taskConfig.splitter_type = saved.splitter_type
+    taskConfig.chunk_size = saved.chunk_size
+    taskConfig.chunk_overlap = saved.chunk_overlap
+    if (saved.separator) {
+      taskConfig.separator = saved.separator
+    }
+  } else {
+    taskConfig.splitter_type = 'simple'
+    taskConfig.chunk_size = 500
+    taskConfig.chunk_overlap = 50
+    taskConfig.separator = '\\n\\n'
   }
-}
-
-const startSSE = () => {
-  stopSSE()
-  // 建立连接时显示 Loading，收到第一条消息后取消
-  isLoading.value = true
-
-  sseController = subscribeToKBFileProgress({
-    resourceId: props.resource.id,
-    onMessage: (data: KBTaskProgressPayload) => {
-      isLoading.value = false
-      // Clear optimistic status on any real data
-      optimisticStatus.value = null
-
-      // 后端已统一数据结构，无论快照还是流式事件，均为完整状态对象
-      statusInfo.value = data
-    },
-    onError: (err) => {
-      console.error('SSE Error:', err)
-      stopSSE()
-      isLoading.value = false
-      // Clear optimistic status on error so user can retry
-      optimisticStatus.value = null
-    },
-    onClose: () => {
-      sseController = null
-      isLoading.value = false
-    },
-  })
 }
 
 const handleSaveConfig = async () => {
@@ -422,46 +361,21 @@ const handleSaveConfig = async () => {
     return false
   }
 
-  isSubmitting.value = true
-  try {
-    const configToSave: KBSplitterConfig = {
-      splitter_type: taskConfig.splitter_type,
-      chunk_size: taskConfig.chunk_size,
-      chunk_overlap: taskConfig.chunk_overlap,
-      separator: taskConfig.splitter_type === 'separator' ? taskConfig.separator : null,
-    }
-
-    const updatedResource = await updateKBFileConfig(props.resource.id, {
-      splitter_config: configToSave,
-    })
-
-    // 同步更新本地 Store 中的资源属性，确保 Dirty Check 状态正确复位
-    if (updatedResource.latest_version?.attributes) {
-      resourceStore.updateResourceAttributes(
-        props.resource.id,
-        updatedResource.latest_version.attributes,
-      )
-    }
-
+  const success = await saveConfig(taskConfig)
+  if (success) {
     ElMessage.success('配置已保存')
-    return true
-  } catch (error) {
-    console.error('Save config failed', error)
+  } else {
     ElMessage.error('保存配置失败')
-    return false
-  } finally {
-    isSubmitting.value = false
   }
+  return success
 }
 
 const handleStart = async () => {
-  // 1. 如果配置有变更，强制先保存
   if (isConfigDirty.value) {
-    const saveSuccess = await handleSaveConfig()
-    if (!saveSuccess) return // 保存失败则终止
+    const saved = await handleSaveConfig()
+    if (!saved) return
   }
 
-  // 2. 确认覆盖旧数据
   if (hasIndexedData.value) {
     try {
       await ElMessageBox.confirm(
@@ -474,77 +388,42 @@ const handleStart = async () => {
     }
   }
 
-  // Optimistic Update
-  optimisticStatus.value = 'STARTING'
-  isSubmitting.value = true
-
   try {
-    // 3. 启动任务 (不再携带配置参数)
-    await runKBFileTask(props.resource.id, {
-      action: 'start',
-    })
+    await startTask(taskConfig, isConfigDirty.value)
     ElMessage.success('任务已启动')
-    // 任务启动后，确保 SSE 连接处于活跃状态
-    if (!sseController) {
-      startSSE()
-    }
   } catch (error) {
-    console.error('Start task failed', error)
     ElMessage.error('启动任务失败')
-    optimisticStatus.value = null // Revert on failure
-  } finally {
-    isSubmitting.value = false
   }
 }
 
 const handleResume = async () => {
-  // Optimistic Update
-  optimisticStatus.value = 'STARTING'
-  isSubmitting.value = true
-
   try {
-    await runKBFileTask(props.resource.id, {
-      action: 'resume',
-    })
+    await resumeTask()
     ElMessage.success('任务已继续')
-    if (!sseController) {
-      startSSE()
-    }
   } catch (error: any) {
-    optimisticStatus.value = null // Revert on failure
+    const detail = error as KBResumeConflictErrorDetail
 
-    // 处理 409 Conflict (配置不一致)
-    if (error.response && error.response.status === 409) {
-      const detail = error.response.data.detail as KBResumeConflictErrorDetail
+    const current = detail.current_config
+    const last = detail.last_ingest_config
 
-      const current = detail.current_config
-      const last = detail.last_ingest_config
+    const msg = `
+      <p>检测到配置变更，无法继续上次任务。</p>
+      <p><strong>当前配置:</strong> Size=${current.chunk_size}, Overlap=${current.chunk_overlap}</p>
+      <p><strong>上次配置:</strong> Size=${last.chunk_size}, Overlap=${last.chunk_overlap}</p>
+      <p>请选择"重新处理"以应用新配置。</p>
+    `
 
-      const msg = `
-        <p>检测到配置变更，无法继续上次任务。</p>
-        <p><strong>当前配置:</strong> Size=${current.chunk_size}, Overlap=${current.chunk_overlap}</p>
-        <p><strong>上次配置:</strong> Size=${last.chunk_size}, Overlap=${last.chunk_overlap}</p>
-        <p>请选择"重新处理"以应用新配置。</p>
-      `
-
-      try {
-        await ElMessageBox.confirm(msg, '配置冲突', {
-          confirmButtonText: '重新处理',
-          cancelButtonText: '取消',
-          type: 'warning',
-          dangerouslyUseHTMLString: true,
-        })
-        // 用户选择重新处理，调用 Start 逻辑
-        handleStart()
-      } catch {
-        // 用户取消
-      }
-    } else {
-      console.error('Resume task failed', error)
-      ElMessage.error('继续任务失败')
+    try {
+      await ElMessageBox.confirm(msg, '配置冲突', {
+        confirmButtonText: '重新处理',
+        cancelButtonText: '取消',
+        type: 'warning',
+        dangerouslyUseHTMLString: true,
+      })
+      handleStart()
+    } catch {
+      // User canceled
     }
-  } finally {
-    isSubmitting.value = false
   }
 }
 
@@ -556,57 +435,17 @@ const handleStop = async () => {
       type: 'warning',
     })
 
-    // Optimistic Update
-    optimisticStatus.value = 'STOPPING'
-    isSubmitting.value = true
-
-    await runKBFileTask(props.resource.id, {
-      action: 'stop',
-    })
-  } catch (error) {
-    if (error !== 'cancel') {
-      console.error('Stop task failed', error)
+    try {
+      await stopTask()
+      ElMessage.success('任务已停止')
+    } catch (error) {
       ElMessage.error('停止任务失败')
-      optimisticStatus.value = null // Revert on failure
     }
-  } finally {
-    isSubmitting.value = false
+  } catch {
+    // User canceled
   }
 }
 
-const loadInitialConfig = () => {
-  // 优先从当前保存的配置回显
-  const saved = savedConfig.value
-
-  if (saved) {
-    taskConfig.splitter_type = saved.splitter_type
-    taskConfig.chunk_size = saved.chunk_size
-    taskConfig.chunk_overlap = saved.chunk_overlap
-    if (saved.separator) {
-      taskConfig.separator = saved.separator
-    }
-  } else {
-    // 默认值
-    taskConfig.splitter_type = 'simple'
-    taskConfig.chunk_size = 500
-    taskConfig.chunk_overlap = 50
-    taskConfig.separator = '\\n\\n'
-  }
-}
-
-// --- Lifecycle ---
-
-onMounted(() => {
-  loadInitialConfig()
-  // 直接启动 SSE 获取状态快照
-  startSSE()
-})
-
-onUnmounted(() => {
-  stopSSE()
-})
-
-// 监听异步加载的配置数据，确保表单在数据到达时更新
 watch(
   savedConfig,
   (newConfig) => {
@@ -621,14 +460,14 @@ watch(
   () => props.resource.id,
   (newId, oldId) => {
     if (newId !== oldId) {
-      statusInfo.value = null
-      optimisticStatus.value = null
-      stopSSE()
       loadInitialConfig()
       startSSE()
     }
   },
 )
+
+loadInitialConfig()
+startSSE()
 </script>
 
 <style scoped>
@@ -740,12 +579,6 @@ watch(
 
 .info-descriptions {
   background-color: #fff;
-}
-
-.status-message {
-  color: var(--el-text-color-secondary);
-  margin-left: 8px;
-  font-size: 12px;
 }
 
 .form-tip {

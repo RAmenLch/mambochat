@@ -164,7 +164,45 @@
               </div>
             </template>
             <el-scrollbar class="preview-scrollbar" v-loading="isPreviewLoading">
-              <pre class="preview-content">{{ selectedResources[0].latest_version?.content || '该资源没有内容' }}</pre>
+              <!-- File Resource Preview -->
+              <template v-if="selectedResources[0].resourceType === 'file'">
+                <div v-if="currentFileInfo" class="file-preview-wrapper">
+                  <!-- Image Preview -->
+                  <div v-if="isImage" class="file-preview-image">
+                    <el-image
+                      :src="currentFileInfo.url"
+                      :preview-src-list="[currentFileInfo.url]"
+                      fit="contain"
+                      class="preview-img"
+                    >
+                      <template #error>
+                        <div class="image-slot">
+                          <el-icon><Picture /></el-icon>
+                          <span>加载失败</span>
+                        </div>
+                      </template>
+                    </el-image>
+                  </div>
+                  <!-- Generic File Icon -->
+                  <div v-else class="file-generic">
+                    <el-icon :size="48"><Document /></el-icon>
+                    <div class="file-meta">
+                      <div class="file-name">{{ currentFileInfo.filename }}</div>
+                      <div class="file-size">{{ formatFileSize(currentFileInfo.size) }}</div>
+                    </div>
+                    <a :href="currentFileInfo.url" target="_blank" class="download-link">
+                      <el-button type="primary" link icon="Download">下载文件</el-button>
+                    </a>
+                  </div>
+                </div>
+                <div v-else class="file-empty-state">
+                  <el-icon :size="48"><Document /></el-icon>
+                  <p>该资源暂无文件内容</p>
+                </div>
+              </template>
+
+              <!-- Text Resource Preview -->
+              <pre v-else class="preview-content">{{ selectedResources[0].latest_version?.content || '该资源没有内容' }}</pre>
             </el-scrollbar>
           </el-card>
 
@@ -178,7 +216,29 @@
             <el-scrollbar class="preview-scrollbar" v-loading="isPreviewLoading">
               <div v-for="(res, index) in selectedResources" :key="res.id" class="multi-preview-item">
                 <div class="multi-preview-label">#{{ index + 1 }} {{ res.name }}</div>
-                <pre class="preview-content">{{ res.latest_version?.content || '该资源没有内容' }}</pre>
+
+                <!-- Multi-select File Preview -->
+                <template v-if="res.resourceType === 'file'">
+                  <div v-if="res.latest_version?.file_info" class="file-preview-wrapper mini">
+                    <div v-if="isResourceImage(res)" class="file-preview-image mini">
+                      <el-image
+                        :src="res.latest_version.file_info.url"
+                        :preview-src-list="[res.latest_version.file_info.url]"
+                        fit="contain"
+                        style="width: 100%; height: 100%;"
+                      />
+                    </div>
+                    <div v-else class="file-generic mini">
+                      <el-icon><Document /></el-icon>
+                      <span>{{ res.latest_version.file_info.filename }}</span>
+                    </div>
+                  </div>
+                  <div v-else class="mini-empty">无文件内容</div>
+                </template>
+
+                <!-- Multi-select Text Preview -->
+                <pre v-else class="preview-content">{{ res.latest_version?.content || '该资源没有内容' }}</pre>
+
                 <el-divider v-if="index < selectedResources.length - 1" border-style="dashed" />
               </div>
             </el-scrollbar>
@@ -214,7 +274,7 @@ import { ElTree, ElMessage } from 'element-plus';
 import type { TreeNodeData } from 'element-plus/es/components/tree/src/tree.type';
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import type Node from 'element-plus/es/components/tree/src/model/node';
-import { Folder, Document, Memo, Loading } from '@element-plus/icons-vue';
+import { Folder, Document, Memo, Loading, Picture, Download } from '@element-plus/icons-vue';
 import { storeToRefs } from 'pinia';
 import { useResourceStore } from '@/stores/resourceStore';
 import { searchResources } from '@/api/resourceService';
@@ -274,6 +334,16 @@ const treeProps = {
 
 const hasMore = computed(() => searchResult.value.length < searchTotal.value);
 
+// Helper for single file preview
+const currentFileInfo = computed(() => {
+  return selectedResources.value[0]?.latest_version?.file_info || null;
+});
+
+const isImage = computed(() => {
+  const mime = currentFileInfo.value?.mime_type;
+  return mime ? mime.startsWith('image/') : false;
+});
+
 function filterTreeByType(nodes: ResourceNode[]): ResourceNode[] {
   if (!props.resourceTypeFilter) return nodes;
   const result: ResourceNode[] = [];
@@ -322,7 +392,8 @@ const getReadableResourceType = (type: string | null) => {
   const map: Record<string, string> = {
     'system_prompt': '系统提示词',
     'submessage_template': '消息模板',
-    'knowledge_base': '知识库'
+    'knowledge_base': '知识库',
+    'file': '文件'
   };
   return map[type] || type;
 };
@@ -370,6 +441,20 @@ const highlightKeyword = (text: string): string => {
   } catch (e) {
     return text;
   }
+};
+
+// Helper to check if a resource is an image (used in multi-select loop)
+const isResourceImage = (resource: Resource): boolean => {
+  const mime = resource.latest_version?.file_info?.mime_type;
+  return mime ? mime.startsWith('image/') : false;
+};
+
+const formatFileSize = (bytes: number): string => {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 };
 
 // --- Search Methods ---
@@ -668,6 +753,124 @@ const handleScroll = ({ scrollTop, scrollHeight, clientHeight }: any) => {
 :deep(.preview-card .el-card__body) { flex-grow: 1; padding: 0; overflow: hidden; }
 .preview-scrollbar { padding: 20px; }
 .preview-content { white-space: pre-wrap; word-wrap: break-word; font-family: var(--el-font-family); font-size: 14px; margin: 0; }
+
+/* --- File Preview Styles (Adapted from ResourceEditor) --- */
+.file-preview-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  gap: 16px;
+  width: 100%;
+}
+
+.file-preview-image {
+  width: 100%;
+  max-height: 400px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: #f5f5f5;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--el-border-color-lighter);
+}
+
+.preview-img {
+  width: 100%;
+  height: 100%;
+}
+
+.file-generic {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 24px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background-color: var(--el-fill-color-lighter);
+  width: 100%;
+  max-width: 300px;
+  text-align: center;
+}
+
+.file-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.file-name {
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+  word-break: break-all;
+}
+
+.file-size {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.file-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  color: var(--el-text-color-secondary);
+  gap: 12px;
+}
+
+.image-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  gap: 8px;
+}
+
+/* Mini styles for multi-select */
+.file-preview-wrapper.mini {
+  padding: 10px;
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: flex-start;
+  background-color: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 4px;
+}
+
+.file-preview-image.mini {
+  width: 80px;
+  height: 80px;
+  flex-shrink: 0;
+  margin-right: 12px;
+}
+
+.file-generic.mini {
+  flex-direction: row;
+  padding: 8px;
+  width: auto;
+  max-width: none;
+  background: none;
+  border: none;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.mini-empty {
+  color: var(--el-text-color-placeholder);
+  font-style: italic;
+  font-size: 13px;
+  padding: 8px 0;
+}
 
 /* Multi-select Preview Styles */
 .multi-preview-item { margin-bottom: 10px; }

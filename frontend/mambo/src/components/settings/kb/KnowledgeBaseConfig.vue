@@ -16,7 +16,7 @@
               </el-form-item>
             </el-col>
             <el-col :span="12">
-              <el-form-item label="嵌入模型 (Embedding Model)" prop="embeddingModelId">
+              <el-form-item label="嵌入模型" prop="embeddingModelId">
                 <el-select
                   v-model="form.embeddingModelId"
                   placeholder="请选择嵌入模型"
@@ -158,8 +158,6 @@ import { Upload, Document, QuestionFilled, Setting, Folder } from '@element-plus
 
 import { useResourceStore } from '@/stores/resourceStore'
 import { useProviderStore } from '@/stores/providerStore'
-// [Fix] Import uploadResourceFile instead of uploadKBFile
-import { uploadResourceFile } from '@/api/kbService'
 import type { Resource, ResourceWithVersions, ResourceNode } from '@/api/types'
 
 // --- Props & Emits ---
@@ -283,15 +281,15 @@ const handleSave = async () => {
     if (valid) {
       isSaving.value = true
       try {
-        // 1. 更新基本信息 (Name/Description)
-        if (form.name !== props.resource.name || form.description !== props.resource.description) {
+        // 1. 更新基本信息
+        if (form.name !== props.resource.name || form.description !== (props.resource.description || '')) {
           await resourceStore.updateResourceItem(props.resource.id, {
             name: form.name,
             description: form.description,
           })
         }
 
-        // 2. 更新版本信息 (Attributes -> embedding_model_id, embedding_rate_limit)
+        // 2. 更新版本信息
         const currentModelId = currentAttributes.value.embedding_model_id
         const currentRateLimit = currentAttributes.value.embedding_rate_limit || 0
 
@@ -345,17 +343,12 @@ const handleFileChange = async (event: Event) => {
   })
 
   try {
-    // [Fix] Use uploadResourceFile with parentId
-    const newFile = await uploadResourceFile(file, props.resource.id)
-
-    // 将新文件直接添加到 Store 中，以立即更新 UI 列表
-    const newResourceWithVersions: ResourceWithVersions = {
-      ...newFile,
-      versions: [],
-    }
-    resourceStore.resources.push(newResourceWithVersions)
+    // 调用 Store 方法上传文件，Store 负责更新本地状态
+    await resourceStore.uploadKBFile(props.resource.id, file)
 
     ElMessage.success('上传成功，请点击"配置任务"以启动切分与嵌入')
+    // 刷新文件列表以确保视图更新
+    await loadFiles()
   } catch (error) {
     console.error('Upload failed', error)
     ElMessage.error('上传失败')

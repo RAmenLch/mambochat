@@ -13,6 +13,11 @@ import {
   setActiveVersion,
   getResourceDetails,
 } from '@/api/resourceService';
+import {
+  uploadResourceFile,
+  updateKBFileConfig as apiUpdateKBFileConfig,
+  runKBFileTask as apiRunKBFileTask,
+} from '@/api/kbService';
 import { buildChatTree } from '@/utils/treeHelper';
 import { useTreeStoreActions } from '@/composables/useTreeStoreActions';
 import type {
@@ -24,6 +29,8 @@ import type {
   ResourceVersionCreate,
   ResourceWithVersions,
   ResourceVersionUpdate,
+  KBSplitterConfig,
+  KBRunTaskRequest,
 } from '@/api/types';
 
 /**
@@ -224,6 +231,59 @@ export const useResourceStore = defineStore('resource', () => {
     }
   }
 
+  // --- Knowledge Base Specific Actions ---
+
+  /**
+   * 上传文件到指定的知识库目录。
+   * @param parentId 父文件夹ID (知识库ID或其子文件夹ID)
+   * @param file 文件对象
+   * @returns 新创建的资源对象
+   */
+  async function uploadKBFile(parentId: string, file: File) {
+    try {
+      const newResource = await uploadResourceFile(file, parentId);
+
+      // 构造符合 Store 要求的 ResourceWithVersions 类型
+      const resourceWithVersions: ResourceWithVersions = {
+        ...newResource,
+        versions: [], // 上传接口通常不返回完整版本历史，初始化为空
+      };
+
+      resources.value.push(resourceWithVersions);
+
+      return newResource;
+    } catch (error) {
+      console.error('Store: Upload KB file failed', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 更新知识库文件的切分配置。
+   * @param resourceId 资源ID
+   * @param config 切分配置对象
+   */
+  async function updateKBFileConfig(resourceId: string, config: KBSplitterConfig) {
+    const updatedResource = await apiUpdateKBFileConfig(resourceId, { splitter_config: config });
+
+    // 同步更新本地状态
+    if (updatedResource.latest_version?.attributes) {
+      updateResourceAttributes(resourceId, updatedResource.latest_version.attributes);
+    }
+
+    return updatedResource;
+  }
+
+  /**
+   * 控制知识库文件的任务（启动、继续、停止）。
+   * @param resourceId 资源ID
+   * @param data 任务控制参数
+   */
+  async function runKBFileTask(resourceId: string, data: KBRunTaskRequest) {
+    await apiRunKBFileTask(resourceId, data);
+    // 注意：任务启动后的状态更新通常由 SSE 订阅或轮询处理，此处不直接修改本地状态
+  }
+
   return {
     // State
     resources,
@@ -246,6 +306,9 @@ export const useResourceStore = defineStore('resource', () => {
     createNewVersion,
     setActiveResourceVersion,
     fetchResourceDetails,
+    // KB Specific Actions
+    uploadKBFile,
+    updateKBFileConfig,
+    runKBFileTask,
   };
 });
-
