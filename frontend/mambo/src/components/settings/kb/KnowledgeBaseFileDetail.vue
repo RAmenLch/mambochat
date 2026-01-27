@@ -315,8 +315,8 @@ const statusTagType = computed(() => {
   return status ? map[status] || 'info' : 'info'
 })
 
-const savedConfig = computed<KBSplitterConfig | undefined>(() => {
-  return props.resource.latest_version?.attributes?.splitter_config
+const savedConfig = computed<KBSplitterConfig>(() => {
+  return props.resource.kb_config
 })
 
 const isConfigDirty = computed(() => {

@@ -267,10 +267,13 @@ export const useResourceStore = defineStore('resource', () => {
     const updatedResource = await apiUpdateKBFileConfig(resourceId, { splitter_config: config });
 
     // 同步更新本地状态
-    if (updatedResource.latest_version?.attributes) {
-      updateResourceAttributes(resourceId, updatedResource.latest_version.attributes);
+    const resource = resources.value.find(r => r.id === resourceId);
+    if (resource) {
+      // 同步更新根级别的 kb_config，确保 KnowledgeBaseFileDetail 能读取到最新值
+      if (updatedResource.kb_config) {
+        resource.kb_config = updatedResource.kb_config;
+      }
     }
-
     return updatedResource;
   }
 

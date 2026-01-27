@@ -383,6 +383,7 @@ const handleResourceMove = async (req: MoveRequest) => {
 
   // 4. 执行移动
   await resourceStore.moveResourceItem(req)
+  emit('move-success', req.item_ids)
 }
 
 const handleUploadSuccess = () => {
