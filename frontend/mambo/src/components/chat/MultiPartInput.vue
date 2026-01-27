@@ -19,105 +19,124 @@
       </div>
     </div>
     <div class="partition-editor">
-      <!-- 确保在 localPartitions 可用时才渲染 el-input，防止绑定错误 -->
-      <el-input
-        v-if="localPartitions.length > 0 && localPartitions[activeIndex]"
-        ref="textareaRef"
-        v-model="localPartitions[activeIndex].content"
-        type="textarea"
-        resize="none"
-        :placeholder="`输入分区 ${activeIndex + 1} 的内容... (Shift + Enter 换行)`"
-        @keydown="handleKeydown"
-      />
+      <!-- 确保在 localPartitions 可用时才渲染编辑器 -->
+      <div v-if="localPartitions.length > 0 && localPartitions[activeIndex]" class="monaco-wrapper">
+        <MonacoEditor
+          v-model="localPartitions[activeIndex].content"
+          language="markdown"
+          :options="editorOptions"
+          @submit="$emit('send')"
+          @editor-mounted="handleEditorMounted"
+        />
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue';
-import { Plus, Close } from '@element-plus/icons-vue';
-import type { SubMessageCreate } from '@/api/types';
-import type { ElInput } from 'element-plus';
+import { ref, watch, nextTick, computed } from 'vue'
+import { Plus, Close } from '@element-plus/icons-vue'
+import type { SubMessageCreate } from '@/api/types'
+import type { editor } from 'monaco-editor'
+import MonacoEditor from '@/components/common/MonacoEditor.vue'
 
 // 分区对象的本地UI表示
 interface Partition {
-  id: number;
-  content: string;
+  id: number
+  content: string
 }
 
 // 接收 modelValue prop (用于 v-model)
 const props = defineProps<{
-  modelValue: Partition[];
-  activeIndex: number;
-}>();
+  modelValue: Partition[]
+  activeIndex: number
+}>()
 
 // 定义组件可发出的事件
 const emit = defineEmits<{
-  (e: 'update:modelValue', value: Partition[]): void;
-  (e: 'update:activeIndex', index: number): void;
-  (e: 'send'): void;
-}>();
+  (e: 'update:modelValue', value: Partition[]): void
+  (e: 'update:activeIndex', index: number): void
+  (e: 'send'): void
+}>()
 
+const localPartitions = ref<Partition[]>([])
+let editorInstance: editor.IStandaloneCodeEditor | null = null
 
-const localPartitions = ref<Partition[]>([]);
-// 移除本地 activeIndex 状态
-const textareaRef = ref<InstanceType<typeof ElInput>>();
+// Monaco Editor 配置
+const editorOptions = computed<editor.IStandaloneEditorConstructionOptions>(() => ({
+  minimap: { enabled: false },
+  lineNumbers: 'off',
+  folding: false,
+  wordWrap: 'on',
+  scrollBeyondLastLine: false,
+  overviewRulerLanes: 0,
+  hideCursorInOverviewRuler: true,
+  renderLineHighlight: 'none',
+  scrollbar: {
+    vertical: 'auto',
+    horizontal: 'hidden',
+  },
+  padding: { top: 8, bottom: 8 },
+  fontSize: 14,
+  fontFamily: 'var(--el-font-family)',
+}))
 
 // --- 数据同步 ---
 
 // 1. 从父组件(prop)到本地状态的单向同步
-watch(() => props.modelValue, (newVal) => {
-  if (JSON.stringify(newVal) !== JSON.stringify(localPartitions.value)) {
-    const partitionsToSet = newVal && newVal.length > 0 ? newVal : [{ id: Date.now(), content: '' }];
-    localPartitions.value = JSON.parse(JSON.stringify(partitionsToSet));
-  }
-}, { deep: true, immediate: true });
+watch(
+  () => props.modelValue,
+  (newVal) => {
+    if (JSON.stringify(newVal) !== JSON.stringify(localPartitions.value)) {
+      const partitionsToSet =
+        newVal && newVal.length > 0 ? newVal : [{ id: Date.now(), content: '' }]
+      localPartitions.value = JSON.parse(JSON.stringify(partitionsToSet))
+    }
+  },
+  { deep: true, immediate: true },
+)
 
 // 2. 从本地状态到父组件(emit)的单向同步
-watch(localPartitions, (newVal) => {
-  emit('update:modelValue', newVal);
-}, { deep: true });
-
+watch(
+  localPartitions,
+  (newVal) => {
+    emit('update:modelValue', newVal)
+  },
+  { deep: true },
+)
 
 // --- UI 交互方法 ---
 
+const handleEditorMounted = (instance: editor.IStandaloneCodeEditor) => {
+  editorInstance = instance
+}
+
 const selectPartition = (index: number) => {
-  // 不再修改本地状态，而是发出事件
-  emit('update:activeIndex', index);
-  textareaRef.value?.focus();
-};
+  emit('update:activeIndex', index)
+  editorInstance?.focus()
+}
 
 const addPartition = async () => {
-  localPartitions.value.push({ id: Date.now(), content: '' });
-  const newIndex = localPartitions.value.length - 1;
-  // 发出事件以更新父组件中的 activeIndex
-  emit('update:activeIndex', newIndex);
-  await nextTick();
-  textareaRef.value?.focus();
-};
+  localPartitions.value.push({ id: Date.now(), content: '' })
+  const newIndex = localPartitions.value.length - 1
+  emit('update:activeIndex', newIndex)
+  await nextTick()
+  editorInstance?.focus()
+}
 
 const removePartition = (index: number) => {
-  if (localPartitions.value.length <= 1) return;
+  if (localPartitions.value.length <= 1) return
 
-  const currentActiveIndex = props.activeIndex;
-  localPartitions.value.splice(index, 1);
+  const currentActiveIndex = props.activeIndex
+  localPartitions.value.splice(index, 1)
 
-  // 如果删除的是当前激活的分区或其之前的分区，则需要调整激活索引
   if (index <= currentActiveIndex) {
-    const newIndex = Math.max(0, currentActiveIndex - 1);
+    const newIndex = Math.max(0, currentActiveIndex - 1)
     if (newIndex !== currentActiveIndex) {
-      emit('update:activeIndex', newIndex);
+      emit('update:activeIndex', newIndex)
     }
   }
-};
-
-const handleKeydown = (event: Event) => {
-  if (!(event instanceof KeyboardEvent)) return;
-  if (event.key === 'Enter' && !event.shiftKey) {
-    event.preventDefault();
-    emit('send');
-  }
-};
+}
 
 // --- 暴露给父组件的方法 ---
 
@@ -126,35 +145,36 @@ const handleKeydown = (event: Event) => {
  */
 const getData = (): SubMessageCreate[] => {
   return localPartitions.value
-    .map((part, index): SubMessageCreate => ({
-      content: part.content,
-      sortOrder: index,
-      type: 'Normal',
-    }))
-    .filter(part => part.content.trim() !== '');
-};
+    .map(
+      (part, index): SubMessageCreate => ({
+        content: part.content,
+        sortOrder: index,
+        type: 'Normal',
+      }),
+    )
+    .filter((part) => part.content.trim() !== '')
+}
 
 /**
  * 重置输入框为初始状态。
  */
 const reset = () => {
-  localPartitions.value = [{ id: Date.now(), content: '' }];
-  // 重置时，通知父组件将索引也重置为0
-  emit('update:activeIndex', 0);
-};
+  localPartitions.value = [{ id: Date.now(), content: '' }]
+  emit('update:activeIndex', 0)
+}
 
 /**
  * 将焦点设置到当前激活的文本区域。
  */
 const focus = () => {
-  textareaRef.value?.focus();
-};
+  editorInstance?.focus()
+}
 
 defineExpose({
   getData,
   reset,
   focus,
-});
+})
 </script>
 
 <style scoped>
@@ -165,6 +185,7 @@ defineExpose({
   border: 1px solid var(--el-border-color);
   border-radius: 4px;
   overflow: hidden;
+  background-color: var(--el-bg-color);
 }
 
 .partition-sidebar {
@@ -230,17 +251,16 @@ defineExpose({
 
 .partition-editor {
   flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0; /* 防止 flex 子项溢出 */
 }
 
-.partition-editor .el-input,
-.partition-editor :deep(.el-textarea) {
+.monaco-wrapper {
+  flex-grow: 1;
   height: 100%;
-}
-
-.partition-editor :deep(.el-textarea__inner) {
-  height: 100% !important;
-  border: none;
-  border-radius: 0;
-  box-shadow: none;
+  overflow: hidden;
+  background-color: #ffffff;
+  padding: 0 12px;
 }
 </style>

@@ -119,12 +119,13 @@
               <span class="content-label">{{ contentEditorLabel }}</span>
             </div>
             <el-form-item prop="content" class="content-form-item">
-              <el-input
-                v-model="form.content"
-                type="textarea"
-                placeholder="在此处输入 Prompt 或模板内容..."
-                class="content-textarea"
-              />
+              <div class="monaco-wrapper">
+                <MonacoEditor
+                  v-model="form.content"
+                  :language="editorLanguage"
+                  :options="editorOptions"
+                />
+              </div>
             </el-form-item>
           </template>
         </template>
@@ -191,8 +192,8 @@ import {
   ArrowLeft,
   Picture,
   DocumentAdd,
-  Download,
 } from '@element-plus/icons-vue'
+import type { editor } from 'monaco-editor'
 
 import { useResourceStore } from '@/stores/resourceStore'
 import { uploadResourceFile } from '@/api/kbService'
@@ -200,6 +201,7 @@ import type { ResourceWithVersions, ResourceVersion, ResourceVersionCreate } fro
 import ResourceVersionBar from './ResourceVersionBar.vue'
 import ResourceMetaSidebar from './ResourceMetaSidebar.vue'
 import KnowledgeBaseFileDetail from '../kb/KnowledgeBaseFileDetail.vue'
+import MonacoEditor from '@/components/common/MonacoEditor.vue'
 
 interface SubMessageTemplateAttributes {
   context_participation_length: number
@@ -295,6 +297,24 @@ const contentEditorLabel = computed(() => {
   }
   return '内容 (当前版本)'
 })
+
+const editorLanguage = computed(() => {
+  if (form.name.endsWith('.json')) {
+    return 'json'
+  }
+  return 'markdown'
+})
+
+const editorOptions = computed<editor.IStandaloneEditorConstructionOptions>(() => ({
+  minimap: { enabled: true },
+  lineNumbers: 'on',
+  folding: true,
+  wordWrap: 'on',
+  scrollBeyondLastLine: false,
+  renderLineHighlight: 'all',
+  fontSize: 14,
+  fontFamily: 'var(--el-font-family)',
+}))
 
 watch(
   () => props.resource,
@@ -542,17 +562,14 @@ async function handleConfirmNewVersion() {
   height: 100%;
 }
 
-:deep(.content-textarea) {
+.monaco-wrapper {
+  width: 100%;
   height: 100%;
-}
-
-:deep(.content-textarea .el-textarea__inner) {
-  height: 100% !important;
-  resize: none;
-  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
-  line-height: 1.6;
-  padding: 12px;
+  border: 1px solid var(--el-border-color);
   border-radius: 4px;
+  overflow: hidden;
+  background-color: #ffffff;
+  padding: 0 12px;
 }
 
 .folder-placeholder {
