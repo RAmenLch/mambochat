@@ -24,7 +24,12 @@
 
         <!-- Case 2: Unified Resource Editor (Files, Prompts, Templates) -->
         <!-- Note: ResourceEditor now handles internal switching for KB files -->
-        <ResourceEditor v-else :resource="activeResourceDetails" />
+        <!-- [修改] 传递 initialViewMode prop -->
+        <ResourceEditor
+          v-else
+          :resource="activeResourceDetails"
+          :initial-view-mode="initialViewMode"
+        />
       </template>
 
       <div v-else class="editor-placeholder">
@@ -50,6 +55,8 @@ const { isResourcesLoading, resources, resourceTree } = storeToRefs(resourceStor
 
 // --- State ---
 const selectedResourceId = ref<string | null>(null)
+// [新增] 状态：控制 ResourceEditor 的初始视图模式
+const initialViewMode = ref<'editor' | 'kb_config'>('editor')
 
 // --- Computed Properties ---
 const treeData = computed(() => resourceTree.value)
@@ -71,6 +78,8 @@ onMounted(() => {
  */
 async function handleNodeClick(data: BaseTreeItem) {
   selectedResourceId.value = data.id
+  // [修改] 常规点击树节点，默认进入编辑器模式
+  initialViewMode.value = 'editor'
 
   // Cast to Resource to access resourceType safely
   const resource = data as unknown as Resource
@@ -84,22 +93,21 @@ async function handleNodeClick(data: BaseTreeItem) {
 
 /**
  * Handles the event after a new resource or folder is created.
- * Selects the new item in the tree and editor view.
  */
 async function handleItemCreated(newItem: Resource) {
   selectedResourceId.value = newItem.id
+  // [修改] 新建资源默认进入编辑器模式
+  initialViewMode.value = 'editor'
 
   const isKnowledgeBase = newItem.resourceType === 'knowledge_base'
 
   if (newItem.itemType === 'resource' || isKnowledgeBase) {
-    // Ensure details are fetched for the new resource to populate the editor.
     await resourceStore.fetchResourceDetails(newItem.id)
   }
 }
 
 /**
  * Handles the event after an item is deleted.
- * Clears the editor view if the deleted item was the one being edited.
  */
 function handleItemDeleted(deletedId: string) {
   if (selectedResourceId.value === deletedId) {
@@ -109,7 +117,6 @@ function handleItemDeleted(deletedId: string) {
 
 /**
  * Handles the event after resources are moved successfully.
- * Re-fetches details for the currently selected resource if it was moved.
  */
 async function handleMoveSuccess(movedIds: string[]) {
   if (selectedResourceId.value && movedIds.includes(selectedResourceId.value)) {
@@ -120,13 +127,14 @@ async function handleMoveSuccess(movedIds: string[]) {
 /**
  * Handles the 'select-file' event from KnowledgeBaseConfig.
  * Switches the view to the unified editor which will handle the file view.
- * [Fix] Fetches full details to ensure versions and file info are loaded.
+ * 这里是"配置任务"按钮的入口，强制进入 kb_config 模式
  */
 async function handleFileSelected(file: Resource) {
   selectedResourceId.value = file.id
+  // 设置为 kb_config，让 ResourceEditor 打开时直接显示配置页
+  initialViewMode.value = 'kb_config'
 
   // 关键修复：调用 fetchResourceDetails 获取完整的资源信息（包含 versions 列表）
-  // 因为从 KnowledgeBaseConfig 传过来的 file 对象来自 /children 接口，数据不完整
   await resourceStore.fetchResourceDetails(file.id)
 }
 </script>

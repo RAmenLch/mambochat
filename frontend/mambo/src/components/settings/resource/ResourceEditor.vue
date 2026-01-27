@@ -134,7 +134,6 @@
         </div>
 
         <!-- Footer Actions (Attached to content area) -->
-        <!-- Only show footer for Text Resources, Files are handled by Upload -->
         <div
           class="editor-footer"
           v-if="resource.itemType === 'resource' && resource.resourceType !== 'file'"
@@ -202,29 +201,25 @@ import ResourceVersionBar from './ResourceVersionBar.vue'
 import ResourceMetaSidebar from './ResourceMetaSidebar.vue'
 import KnowledgeBaseFileDetail from '../kb/KnowledgeBaseFileDetail.vue'
 
-// --- Local Type Definitions ---
 interface SubMessageTemplateAttributes {
   context_participation_length: number
   is_collapsed: boolean
   is_minimal: boolean
 }
 
-// --- Props ---
 const props = defineProps<{
   resource: ResourceWithVersions
+  initialViewMode?: 'editor' | 'kb_config'
 }>()
 
-// --- Store ---
 const resourceStore = useResourceStore()
 
-// --- Constants ---
 const DEFAULT_SUBMESSAGE_ATTRIBUTES: SubMessageTemplateAttributes = {
   context_participation_length: 1,
   is_collapsed: false,
   is_minimal: false,
 }
 
-// --- State ---
 const formRef = ref<FormInstance>()
 const newVersionFormRef = ref<FormInstance>()
 const loadedVersionInEditor = ref<ResourceVersion | null>(null)
@@ -248,25 +243,19 @@ const newVersionDialog = reactive({
   },
 })
 
-// --- Computed Properties ---
-
-// 获取当前正在查看或编辑的版本对象
 const currentVersion = computed(() => {
   return loadedVersionInEditor.value ?? props.resource.latest_version
 })
 
-// 获取当前版本关联的文件信息
 const currentFileInfo = computed(() => {
   return currentVersion.value?.file_info ?? null
 })
 
-// 判断当前文件是否为图片
 const isImage = computed(() => {
   const mime = currentFileInfo.value?.mime_type
   return mime ? mime.startsWith('image/') : false
 })
 
-// 获取文件下载链接
 const fileDownloadUrl = computed(() => {
   return currentFileInfo.value?.url ?? ''
 })
@@ -280,7 +269,6 @@ const isFormDirty = computed(() => {
     form.name !== original.name || form.description !== (original.description || '')
 
   if (original.itemType === 'resource' && originalVersion) {
-    // Files don't use content/version meta dirty check in the same way (handled by upload)
     if (original.resourceType === 'file') return isMetaDirty
 
     const isVersionMetaDirty =
@@ -308,30 +296,22 @@ const contentEditorLabel = computed(() => {
   return '内容 (当前版本)'
 })
 
-// --- Watchers ---
 watch(
   () => props.resource,
   (newSelection, oldSelection) => {
     if (newSelection) {
-      // 仅当资源 ID 发生变化时才重置视图状态
-      // 这样可以避免在资源更新（如移动、重命名）时丢失当前的查看状态
       if (newSelection.id !== oldSelection?.id) {
         resetForm()
-        viewMode.value = 'editor'
+        viewMode.value = props.initialViewMode === 'kb_config' ? 'kb_config' : 'editor'
       } else {
-        // 如果 kb_id 发生变化，说明资源所属的知识库状态改变了，应强制切回编辑器视图
         if (newSelection.kb_id !== oldSelection?.kb_id) {
           viewMode.value = 'editor'
         }
-        // 如果是同一个资源更新（例如上传了新文件导致 latest_version 变更）
-        // 我们需要同步表单的基本信息，但保留用户的编辑上下文
         if (!loadedVersionInEditor.value) {
-          // 如果正在查看最新版本，则刷新表单数据以匹配最新的 latest_version
           resetForm()
         }
       }
     } else {
-      // Reset form when resource becomes null (handled by parent)
       form.name = ''
       form.description = ''
       form.content = ''
@@ -343,8 +323,6 @@ watch(
   { immediate: true },
 )
 
-// --- Handlers ---
-
 function formatFileSize(bytes: number): string {
   if (bytes === 0) return '0 B'
   const k = 1024
@@ -354,7 +332,6 @@ function formatFileSize(bytes: number): string {
 }
 
 function toggleKbView() {
-  // viewMode.value = viewMode.value === 'editor' ? 'kb_config' : 'editor'
   viewMode.value = 'kb_config'
 }
 
@@ -376,7 +353,7 @@ function resetForm() {
     } else {
       form.attributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES }
     }
-    loadedVersionInEditor.value = null // Reset to viewing latest version
+    loadedVersionInEditor.value = null
   }
 }
 
@@ -384,7 +361,6 @@ async function handleSaveChanges() {
   if (!props.resource || !isFormDirty.value) return
   const resource = props.resource
 
-  // 1. Save Basic Meta (Name/Desc) - Applies to all types
   if (form.name !== resource.name || form.description !== (resource.description || '')) {
     await resourceStore.updateResourceItem(resource.id, {
       name: form.name,
@@ -392,7 +368,6 @@ async function handleSaveChanges() {
     })
   }
 
-  // 2. Save Content/Version Meta - Only for Text Resources
   if (resource.itemType === 'resource' && resource.resourceType !== 'file') {
     const targetVersionId = loadedVersionInEditor.value?.id ?? resource.latest_version?.id
 
@@ -417,16 +392,13 @@ async function handleSaveChanges() {
   ElMessage.success('保存成功')
 }
 
-// File Upload Handler
 async function handleFileChange(uploadFile: UploadFile) {
   if (!uploadFile.raw || !props.resource) return
 
   isUploading.value = true
   try {
-    // Call the unified upload API with resourceId to update the existing resource
     await uploadResourceFile(uploadFile.raw, undefined, props.resource.id)
     ElMessage.success('文件上传成功，新版本已创建')
-    // Refresh details to show new version info
     await resourceStore.fetchResourceDetails(props.resource.id)
   } catch (error) {
     console.error(error)
@@ -451,7 +423,6 @@ function loadVersionIntoEditor(version: ResourceVersion) {
   }
   loadedVersionInEditor.value = version
 
-  // [Fix] 确保在选择版本时切换回编辑器模式
   if (viewMode.value !== 'editor') {
     viewMode.value = 'editor'
   }
@@ -504,7 +475,6 @@ async function handleConfirmNewVersion() {
   height: 100%;
 }
 
-/* --- KB Config View --- */
 .kb-config-view {
   flex-grow: 1;
   display: flex;
@@ -522,8 +492,8 @@ async function handleConfirmNewVersion() {
 }
 
 .kb-detail-wrapper {
-  flex: 1; /* 占据剩余空间 */
-  min-height: 0; /* 允许 Flex 子元素内部的滚动条正常工作 */
+  flex: 1;
+  min-height: 0;
   position: relative;
   width: 100%;
 }
@@ -533,14 +503,12 @@ async function handleConfirmNewVersion() {
   font-size: 14px;
 }
 
-/* --- Split Layout --- */
 .editor-split-layout {
   flex-grow: 1;
   display: flex;
   min-height: 0;
 }
 
-/* Left: Content Column */
 .content-column {
   flex: 1;
   display: flex;
@@ -604,7 +572,6 @@ async function handleConfirmNewVersion() {
   background-color: #fff;
 }
 
-/* --- File Uploader Styles --- */
 .file-uploader-area {
   flex: 1;
   display: flex;
