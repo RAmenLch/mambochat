@@ -207,7 +207,7 @@ const minimizedSubMessages = computed(() =>
 );
 
 /**
- * 筛选出正常显示的子消息
+ * 筛选出正常显示的子消息 (排除最小化)
  */
 const normalSubMessages = computed(() =>
   displayableSubMessages.value.filter(sm => !sm.config?.is_minimal)
@@ -455,7 +455,8 @@ async function handleCopySingle(subMessage: SubMessage) {
 }
 
 async function handleCopy() {
-  const contentToCopy = displayableSubMessages.value.map(sm => {
+  // 使用 normalSubMessages 确保只复制非最小化状态的子消息
+  const contentToCopy = normalSubMessages.value.map(sm => {
     // For file types, we might want to copy a link or filename instead of just the ID.
     // For now, we'll stick to the content, which is the file ID.
     return sm.content;
