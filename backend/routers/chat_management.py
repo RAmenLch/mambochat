@@ -4,13 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional, Dict, Any
 
-from backend.crud import chat_crud, setting_crud, provider_crud
+from backend.crud import chat_crud, setting_crud, provider_crud, resource_crud
 from backend.services import chat_service
 from backend import schemas
 from backend.models import chat_model
 from backend.database import get_db
 from backend.routers.settings import get_global_settings
 from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
+from backend.schemas.enums import ResourceItemType, ResourceType
 
 router = APIRouter()
 
@@ -173,8 +174,8 @@ async def read_chats(skip: int = 0, limit: int = 1000, db: AsyncSession = Depend
     summary="批量获取子会话和文件夹"
 )
 async def read_chat_children(
-    parentIds: List[str] = Query(..., description="父节点ID列表，'root'代表根目录"),
-    db: AsyncSession = Depends(get_db)
+        parentIds: List[str] = Query(..., description="父节点ID列表，'root'代表根目录"),
+        db: AsyncSession = Depends(get_db)
 ):
     """
     根据父节点ID列表并行加载子节点内容。
@@ -285,6 +286,33 @@ async def update_chat_settings(
 
     if chat_update.modelParameters is not None:
         _validate_model_parameters(chat_update.modelParameters)
+
+    # 验证资源挂载列表
+    if chat_update.resource_prompt_list is not None:
+        if len(chat_update.resource_prompt_list) > 0:
+            # 批量获取资源对象
+            resources = await resource_crud.get_resources_by_ids(db, chat_update.resource_prompt_list)
+            resources_map = {res.id: res for res in resources}
+
+            # 遍历ID进行严格验证
+            for rid in chat_update.resource_prompt_list:
+                res = resources_map.get(rid)
+                if not res:
+                    raise HTTPException(status_code=400, detail=f"Resource ID {rid} not found.")
+
+                # 检查是否为文件夹
+                if res.itemType != ResourceItemType.RESOURCE.value:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Item {rid} is a folder, cannot be mounted as a resource prompt."
+                    )
+
+                # 检查资源类型
+                if res.resourceType not in [ResourceType.SYSTEM_PROMPT.value, ResourceType.SUBMESSAGE_TEMPLATE.value]:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Resource {rid} type is not supported for mounting. Only SYSTEM_PROMPT and SUBMESSAGE_TEMPLATE are allowed."
+                    )
 
     updated_chat = await chat_crud.update_chat(db, chat_id=chat_id, chat_update=chat_update)
 

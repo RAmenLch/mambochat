@@ -20,6 +20,9 @@ class ChatBase(BaseModel):
     parentId: Optional[str] = Field(None, description="父文件夹的ID")
     sortOrder: int = Field(0, description="排序权重")
 
+    # 新增：资源挂载ID列表
+    resource_prompt_list: Optional[List[str]] = Field(None, description="挂载的资源ID列表")
+
     @field_validator("modelParameters", mode="before")
     @classmethod
     def parse_model_parameters(cls, v):
@@ -52,6 +55,9 @@ class ChatUpdate(BaseModel):
     modelParameters: Optional[Dict] = None
     parentId: Optional[str] = None
     sortOrder: Optional[int] = None
+
+    # 新增：资源挂载ID列表
+    resource_prompt_list: Optional[List[str]] = None
 
 
 # noinspection PyDataclass

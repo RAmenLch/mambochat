@@ -31,6 +31,22 @@ async def get_resources(db: AsyncSession) -> List[resource_model.Resource]:
     return result.scalars().all()
 
 
+async def get_resources_by_ids(db: AsyncSession, resource_ids: List[str]) -> List[resource_model.Resource]:
+    """
+    根据ID列表批量获取资源对象。
+    自动预加载 latest_version 关系数据。
+    """
+    if not resource_ids:
+        return []
+
+    result = await db.execute(
+        select(resource_model.Resource)
+        .options(joinedload(resource_model.Resource.latest_version))
+        .filter(resource_model.Resource.id.in_(resource_ids))
+    )
+    return result.scalars().all()
+
+
 async def get_resources_by_parent_ids(db: AsyncSession, parent_ids: List[str]) -> List[resource_model.Resource]:
     """
     根据父节点ID列表批量获取子资源和文件夹。

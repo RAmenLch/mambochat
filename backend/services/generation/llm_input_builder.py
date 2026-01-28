@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_core.tools import BaseTool
 
-from backend.crud import chat_crud, message_crud, setting_crud, file_crud, provider_crud
+from backend.crud import chat_crud, message_crud, setting_crud, file_crud, provider_crud, resource_crud
 from backend.services.storage_service import storage_service
 from backend.schemas import enums as schemas_enums, AIModel
 from backend.schemas.message import McpToolContent
@@ -54,6 +54,7 @@ class LLMInputBuilder:
         self._global_model_keys: List[str] = []
         self._system_prompt_override: Optional[str] = None
         self._history_override: Optional[List[Any]] = None
+        self._enable_resource_merge: bool = False
 
         # 新增配置项
         self._content_limit: Optional[int] = None
@@ -140,6 +141,14 @@ class LLMInputBuilder:
         self._history_override = history
         return self
 
+    def enable_resource_prompt_merge(self) -> "LLMInputBuilder":
+        """
+        启用资源挂载功能。
+        如果 Chat 配置了 resource_prompt_list，则提取资源内容并追加到 System Prompt。
+        """
+        self._enable_resource_merge = True
+        return self
+
     def limit_sub_message_content(self, max_length: int) -> "LLMInputBuilder":
         """
         限制每个子消息文本内容的长度。
@@ -191,6 +200,14 @@ class LLMInputBuilder:
         system_prompt = self._system_prompt_override
         if system_prompt is None:
             system_prompt = self.chat.systemPrompt
+
+        # 资源挂载逻辑：提取并追加资源内容
+        if self._enable_resource_merge and self.chat.resource_prompt_list:
+            resources = await resource_crud.get_resources_by_ids(self.db, self.chat.resource_prompt_list)
+            resource_contents = [res.latest_version.content for res in resources if res.latest_version and res.latest_version.content]
+            if resource_contents:
+                merged_content = "\n\n".join(resource_contents)
+                system_prompt = (system_prompt or "") + "\n\n" + merged_content
 
         # 2. 应用压缩历史逻辑
         effective_history = self.history

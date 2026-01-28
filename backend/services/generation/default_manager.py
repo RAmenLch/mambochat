@@ -73,6 +73,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
             )
             .enable_image_with_model()
             .enable_cpl_filter()
+            .enable_resource_prompt_merge()
         )
 
         # 2. 预加载素材以检查配置

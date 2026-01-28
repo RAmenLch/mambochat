@@ -16,7 +16,7 @@ WORKDIR /app
 COPY backend/pyproject.toml /app/backend/pyproject.toml
 RUN uv pip install --system --no-cache -r /app/backend/pyproject.toml -i ${PYPI_INDEX_URL}
 
-# 2.2 安装 Bing MCP 依赖 (这是超时的那一步)
+# 2.2 安装 Bing MCP 依赖
 COPY MCP_SERVER/ddgs/pyproject.toml /app/MCP_SERVER/ddgs/pyproject.toml
 RUN uv pip install --system --no-cache -r /app/MCP_SERVER/ddgs/pyproject.toml -i ${PYPI_INDEX_URL}
 
