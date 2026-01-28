@@ -3,11 +3,12 @@
 import asyncio
 import json
 import logging
+import jieba
 from abc import ABC, abstractmethod
-from typing import List, Tuple, Optional, Set
-from datetime import datetime
+from typing import List, Tuple, Optional, Set, Dict
+from collections import defaultdict
 
-from fastapi import UploadFile, HTTPException
+from fastapi import HTTPException
 from langchain_openai import OpenAIEmbeddings
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
@@ -17,9 +18,7 @@ from backend.crud import kb_crud, resource_crud, file_crud, provider_crud
 from backend.models import resource_model, kb_model
 from backend.schemas import kb as kb_schemas
 from backend.schemas.enums import (
-    FileManagementType,
     ModelType,
-    ResourceItemType,
     ResourceType,
     ProviderWorkerType,
     KBFileStatus
@@ -29,20 +28,6 @@ from backend.services.stream_manager_service import stream_manager
 from backend.config.timezone_config import get_configured_now
 
 # 定义支持的知识库文件 MIME 类型白名单
-SUPPORTED_KB_MIME_TYPES = {
-    "text/plain",
-    "text/markdown",
-    "text/csv",
-    "application/json",
-    "text/xml",
-    "application/xml",
-    "text/yaml",
-    "application/x-yaml",
-    "application/pdf" # 通常向量化库支持PDF，如果不支持请移除
-}
-# 注意：如果你的系统依赖纯文本读取，PDF等二进制格式可能需要专门的解析器(如PyPDF2)，
-# 这里根据你的 FileExtractor 实现（直接 read_bytes decode），目前仅支持纯文本类型。
-# 根据你的代码逻辑 (decode utf-8)，我将严格限制为文本类型。
 STRICT_TEXT_MIME_TYPES = {
     "text/plain",
     "text/markdown",
@@ -166,6 +151,7 @@ class AbstractContentExtractor(ABC):
 
 class FileExtractor(AbstractContentExtractor):
     """适用于 FILE 和 KB_FILE 类型，从存储系统读取物理文件"""
+
     async def extract(self, resource: schemas.ResourceWithVersions, db: AsyncSession) -> str:
         if not resource.latest_version or not resource.latest_version.content:
             raise ValueError("Resource content (file_id) is empty.")
@@ -175,12 +161,10 @@ class FileExtractor(AbstractContentExtractor):
         if not db_file:
             raise ValueError(f"Physical file record not found for ID: {file_id}")
 
-        # --- 新增：类型校验 ---
         # 检查 MIME 类型是否在允许的文本列表中
         if db_file.mime_type not in STRICT_TEXT_MIME_TYPES:
-             # 对于 text/plain 等通用类型，有时 mime检测可能不准，但这里严格执行要求
-             # 如果是二进制文件（如 image/png, application/zip 等），直接报错
-             raise ValueError(f"Unsupported file type for vectorization: {db_file.mime_type}. Only text files are supported.")
+            raise ValueError(
+                f"Unsupported file type for vectorization: {db_file.mime_type}. Only text files are supported.")
 
         try:
             content_bytes = await storage_service.read_bytes(db_file.storage_path)
@@ -195,6 +179,7 @@ class FileExtractor(AbstractContentExtractor):
 
 class TextExtractor(AbstractContentExtractor):
     """适用于 SYSTEM_PROMPT 和 SUBMESSAGE_TEMPLATE，直接读取版本内容"""
+
     async def extract(self, resource: schemas.ResourceWithVersions, db: AsyncSession) -> str:
         if not resource.latest_version:
             return ""
@@ -209,7 +194,6 @@ class ExtractorFactory:
         elif resource_type in [ResourceType.SYSTEM_PROMPT.value, ResourceType.SUBMESSAGE_TEMPLATE.value]:
             return TextExtractor()
         else:
-            # 默认尝试作为文本处理，或者抛出不支持的异常
             raise ValueError(f"Unsupported resource type for extraction: {resource_type}")
 
 
@@ -284,10 +268,19 @@ class KnowledgeBaseService:
         return kb_nodes[0]
 
     async def _cleanup_vectors(self, resource_id: str, dimension: int):
-        """清理指定资源在指定维度下的所有向量数据"""
+        """
+        清理指定资源的所有索引数据（向量 + 全文检索）。
+        注意：方法名保持为 _cleanup_vectors 以兼容 resource_service 的调用，但逻辑已扩展。
+        """
+        # 1. 清理向量
         vector_ids = await kb_crud.get_vector_ids_by_resource(self.db, resource_id)
         if vector_ids:
             await kb_crud.delete_vectors(self.db, dimension, vector_ids)
+
+        # 2. 清理 FTS 索引
+        fts_ids = await kb_crud.get_fts_ids_by_resource(self.db, resource_id)
+        if fts_ids:
+            await kb_crud.delete_fts_indexes(self.db, fts_ids)
 
     async def create_knowledge_base(self, kb_data: kb_schemas.KBCreate) -> schemas.Resource:
         """
@@ -349,7 +342,6 @@ class KnowledgeBaseService:
 
         return new_resource
 
-
     async def update_kb_file_config(self, resource_id: str,
                                     config_data: kb_schemas.KBUpdateConfigRequest) -> schemas.Resource:
         """
@@ -369,7 +361,7 @@ class KnowledgeBaseService:
 
     async def delete_kb_file(self, resource_id: str) -> schemas.Resource:
         """
-        删除 KB 文件资源：先清理向量数据，再删除资源记录。
+        删除 KB 文件资源：先清理向量和FTS数据，再删除资源记录。
         """
         resource = await resource_crud.get_resource(self.db, resource_id)
         if not resource:
@@ -423,8 +415,6 @@ class KnowledgeBaseService:
             if max_processed_at and latest_version_time > max_processed_at:
                 stats.is_stale = True
             elif not max_processed_at and stats.total_chunks == 0:
-                # 如果没有处理记录且不是初始状态(通常指有内容但未处理)，也可以视为 stale
-                # 但这里保持简单，仅对比时间
                 pass
 
         return stats
@@ -485,7 +475,6 @@ class KnowledgeBaseService:
             raise HTTPException(status_code=400, detail="Splitter configuration not found.")
 
         # 获取上次运行的配置快照 (用于 Resume 校验)
-        # 注意：last_ingest_config 仍然保存在 Version attributes 中，代表该版本最后一次处理时的配置
         current_attributes = dict(resource.latest_version.attributes) if resource.latest_version.attributes else {}
         last_config_dict = current_attributes.get("last_ingest_config")
 
@@ -545,7 +534,7 @@ class KnowledgeBaseService:
             splitter_config: kb_schemas.KBTextSplitterConfig
     ):
         """
-        核心任务循环：处理切分、嵌入、存储、状态更新和取消。
+        核心任务循环：处理切分、嵌入、存储(向量+FTS)、状态更新和取消。
         """
         KnowledgeBaseService._running_tasks.add(resource_id)
 
@@ -572,12 +561,12 @@ class KnowledgeBaseService:
                     if not resource:
                         raise ValueError("Resource not found.")
 
-                    # 2. 清理旧数据
+                    # 2. 清理旧数据 (向量 + FTS + Chunks)
                     await self._publish_status(resource_id, KBFileStatus.CLEANING, 0, 0, 0, 0)
                     await temp_service._cleanup_vectors(resource_id, dimension)
                     await kb_crud.delete_chunks_by_resource(session, resource_id)
 
-                    # 3. 提取文本 (使用工厂模式)
+                    # 3. 提取文本
                     await self._publish_status(resource_id, KBFileStatus.READING, 0, 0, 0, 0)
 
                     try:
@@ -645,45 +634,63 @@ class KnowledgeBaseService:
                     texts = [c.content for c in batch]
 
                     try:
+                        # 1. 生成向量
                         vectors = await client.aembed_documents(texts)
 
                         current_batch_success = 0
                         current_batch_failed = 0
-
-                        # 记录当前时间作为 processed_at
                         now = get_configured_now()
 
                         for idx, vector in enumerate(vectors):
                             chunk = batch[idx]
-                            if len(vector) == dimension:
-                                rowid = await kb_crud.insert_vector(session, dimension, vector)
+                            vec_rowid = None
+                            fts_rowid = None
 
-                                # 更新 Chunk 状态和时间
-                                chunk.vector_id = rowid
-                                chunk.status = kb_schemas.KBChunkStatus.COMPLETED.value
-                                chunk.processed_at = now
+                            try:
+                                # 2. 插入向量
+                                if len(vector) == dimension:
+                                    vec_rowid = await kb_crud.insert_vector(session, dimension, vector)
 
-                                # 显式提交更新 (因为 crud 方法可能只更新部分字段，这里需要更新 processed_at)
-                                # 由于 kb_crud.update_chunk_vector_id_and_status 不支持 processed_at
-                                # 我们这里直接操作 session 或需要扩展 crud。
-                                # 鉴于不能修改 crud，我们直接在 session 中 merge 或 add
-                                session.add(chunk)
+                                # 3. 插入 FTS 索引 (使用 jieba 分词)
+                                tokens = " ".join(jieba.cut_for_search(chunk.content))
+                                fts_rowid = await kb_crud.insert_fts_index(session, tokens)
 
-                                current_batch_success += 1
-                            else:
+                                # 4. 验证双路插入结果
+                                if vec_rowid is not None and fts_rowid is not None:
+                                    # 更新 Chunk 状态
+                                    chunk.vector_id = vec_rowid
+                                    chunk.fts_id = fts_rowid
+                                    chunk.status = kb_schemas.KBChunkStatus.COMPLETED.value
+                                    chunk.processed_at = now
+                                    session.add(chunk)
+                                    current_batch_success += 1
+                                else:
+                                    # 任何一路失败，回滚该条目
+                                    raise Exception("Dual index insertion incomplete")
+
+                            except Exception as inner_e:
+                                # 回滚补偿：如果部分插入成功，尝试清理
+                                if vec_rowid:
+                                    await kb_crud.delete_vectors(session, dimension, [vec_rowid])
+                                if fts_rowid:
+                                    await kb_crud.delete_fts_indexes(session, [fts_rowid])
+
                                 chunk.vector_id = None
+                                chunk.fts_id = None
                                 chunk.status = kb_schemas.KBChunkStatus.FAILED.value
                                 session.add(chunk)
                                 current_batch_failed += 1
 
                         await session.commit()
 
+                        # 处理向量生成数量少于文本数量的情况 (极少发生)
                         if len(vectors) < len(batch):
                             diff = len(batch) - len(vectors)
                             current_batch_failed += diff
                             for k in range(len(vectors), len(batch)):
                                 chunk = batch[k]
                                 chunk.vector_id = None
+                                chunk.fts_id = None
                                 chunk.status = kb_schemas.KBChunkStatus.FAILED.value
                                 session.add(chunk)
                             await session.commit()
@@ -695,6 +702,7 @@ class KnowledgeBaseService:
                         logger.error(f"Embedding batch failed: {e}")
                         for chunk in batch:
                             chunk.vector_id = None
+                            chunk.fts_id = None
                             chunk.status = kb_schemas.KBChunkStatus.FAILED.value
                             session.add(chunk)
                         await session.commit()
@@ -720,7 +728,7 @@ class KnowledgeBaseService:
 
     async def search_kb(self, request: kb_schemas.KBSearchRequest) -> kb_schemas.KBSearchResponse:
         """
-        执行向量检索。
+        执行混合检索 (Vector + BM25) 并使用 RRF 融合排序。
         """
         target_kb_id = request.kb_id
         embedding_model_id = None
@@ -739,23 +747,89 @@ class KnowledgeBaseService:
         except ValueError as e:
             raise HTTPException(status_code=500, detail=str(e))
 
-        try:
-            query_vector = await client.aembed_query(request.query_text)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Embedding generation failed: {e}")
+        # 1. 扩大候选集 (Candidate Multiplier = 2)
+        candidate_k = request.top_k * 2
 
-        vector_results = await kb_crud.search_vectors(self.db, dimension, query_vector, request.top_k)
+        # 2. 并行执行双路召回
+        # Vector Path
+        async def _vector_search():
+            try:
+                query_vector = await client.aembed_query(request.query_text)
+                return await kb_crud.search_vectors(self.db, dimension, query_vector, candidate_k)
+            except Exception as e:
+                logger.error(f"Vector search failed: {e}")
+                return []
 
-        if not vector_results:
+        # Keyword Path (BM25)
+        async def _keyword_search():
+            try:
+                # 使用 jieba 对 Query 分词，并用 OR 连接以提高召回
+                keywords = list(jieba.cut(request.query_text))
+                if not keywords:
+                    return []
+                # 构造 MATCH 查询: "term1 OR term2"
+                # 注意处理关键词中的特殊字符以防 SQL 注入或语法错误 (简单处理：去除双引号)
+                sanitized_keywords = [k.replace('"', '') for k in keywords if k.strip()]
+                if not sanitized_keywords:
+                    return []
+                match_query = " OR ".join(f'"{k}"' for k in sanitized_keywords)
+                return await kb_crud.search_fts_bm25(self.db, match_query, candidate_k)
+            except Exception as e:
+                logger.error(f"Keyword search failed: {e}")
+                return []
+
+        vec_results, fts_results = await asyncio.gather(_vector_search(), _keyword_search())
+
+        # 3. 获取所有涉及的 Chunk 信息
+        vec_ids = [r[0] for r in vec_results]
+        fts_ids = [r[0] for r in fts_results]
+
+        if not vec_ids and not fts_ids:
             return kb_schemas.KBSearchResponse(total=0, items=[])
 
-        rowids = [r[0] for r in vector_results]
-        distance_map = {r[0]: r[1] for r in vector_results}
+        chunk_rows = await kb_crud.get_chunks_by_mixed_ids(self.db, vec_ids, fts_ids, kb_id_filter=target_kb_id)
 
-        rows = await kb_crud.get_chunks_by_vector_ids(self.db, rowids, kb_id_filter=target_kb_id)
+        # 建立映射: Chunk ID -> Chunk Object & Metadata
+        chunk_map = {}
+        # 建立映射: Vector/FTS ID -> Chunk ID (用于 RRF 评分归属)
+        vec_id_to_chunk_id = {}
+        fts_id_to_chunk_id = {}
 
+        for row in chunk_rows:
+            chunk = row[0]
+            chunk_map[chunk.id] = row
+            if chunk.vector_id:
+                vec_id_to_chunk_id[chunk.vector_id] = chunk.id
+            if chunk.fts_id:
+                fts_id_to_chunk_id[chunk.fts_id] = chunk.id
+
+        # 4. RRF 融合排序
+        # Score = 1 / (k + rank_vec) + 1 / (k + rank_bm25)
+        rrf_k = 60
+        scores: Dict[str, float] = defaultdict(float)
+
+        # 处理向量结果 (Rank 从 1 开始)
+        for rank, (rowid, _) in enumerate(vec_results, start=1):
+            c_id = vec_id_to_chunk_id.get(rowid)
+            if c_id:
+                scores[c_id] += 1.0 / (rrf_k + rank)
+
+        # 处理关键词结果
+        for rank, (rowid, _) in enumerate(fts_results, start=1):
+            c_id = fts_id_to_chunk_id.get(rowid)
+            if c_id:
+                scores[c_id] += 1.0 / (rrf_k + rank)
+
+        # 5. 排序并截取 Top K
+        sorted_chunk_ids = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)[:request.top_k]
+
+        # 6. 组装最终结果
         items = []
-        for row in rows:
+        for c_id in sorted_chunk_ids:
+            row = chunk_map.get(c_id)
+            if not row:
+                continue
+
             chunk = row[0]
             file_id = row[1]
             file_name = row[2]
@@ -763,20 +837,15 @@ class KnowledgeBaseService:
             kb_name = row[4]
             chunk_index = row[5]
 
-            if chunk.vector_id not in distance_map:
-                continue
-
             items.append(kb_schemas.KBSearchResultItem(
                 chunk_id=chunk.id,
                 chunk_content=chunk.content,
-                score=distance_map[chunk.vector_id],
+                score=scores[c_id],  # 这里返回 RRF 分数
                 resource_id=file_id,
                 resource_name=file_name,
                 kb_id=kb_id,
                 kb_name=kb_name,
                 chunk_index=chunk_index
             ))
-
-        items.sort(key=lambda x: x.score)
 
         return kb_schemas.KBSearchResponse(total=len(items), items=items)

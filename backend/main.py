@@ -45,6 +45,10 @@ async def lifespan(app: FastAPI):
             stmt = text(f"CREATE VIRTUAL TABLE IF NOT EXISTS {table_name} USING vec0(vector FLOAT[{dim}]);")
             await conn.execute(stmt)
 
+        # 初始化全文检索表 (FTS5)
+        # content_tokens 存储经过 jieba 预分词后的空格分隔字符串
+        await conn.execute(text("CREATE VIRTUAL TABLE IF NOT EXISTS kb_chunk_fts USING fts5(content_tokens);"))
+
     # 添加并启动僵尸文件清理的定时任务
     scheduler.add_job(cleanup_zombie_files, 'interval', hours=1)
     scheduler.start()

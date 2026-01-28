@@ -24,8 +24,11 @@ class ResourceKBChunk(Base):
     # 关联向量表的 rowid，仅当 status 为 COMPLETED 时有效
     vector_id = Column(Integer, nullable=True)
 
-    # 新增：切分创建时间
+    # 关联 FTS5 表的 rowid，仅当 status 为 COMPLETED 时有效
+    fts_id = Column(Integer, nullable=True, index=True)
+
+    # 切分创建时间
     created_at = Column(DateTime, nullable=False, default=get_configured_now)
 
-    # 新增：向量化完成时间，用于过时判定
+    # 向量化完成时间，用于过时判定
     processed_at = Column(DateTime, nullable=True)

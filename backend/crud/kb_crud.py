@@ -5,7 +5,7 @@ from typing import List, Optional, Tuple, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import aliased
-from sqlalchemy import text, func, case, delete, update
+from sqlalchemy import text, func, case, delete, update, or_
 
 from backend.models import kb_model, resource_model
 from backend.schemas import kb as kb_schemas
@@ -69,15 +69,20 @@ async def get_chunks_by_statuses(
     return result.scalars().all()
 
 
-async def update_chunk_vector_id_and_status(
+async def update_chunk_indexing_status(
         db: AsyncSession,
         chunk_id: str,
-        vector_id: Optional[int],
-        status: kb_schemas.KBChunkStatus
+        status: kb_schemas.KBChunkStatus,
+        vector_id: Optional[int] = None,
+        fts_id: Optional[int] = None
 ) -> None:
+    """
+    更新切片的索引状态，包括向量ID和全文检索ID。
+    """
     chunk = await db.get(kb_model.ResourceKBChunk, chunk_id)
     if chunk:
         chunk.vector_id = vector_id
+        chunk.fts_id = fts_id
         chunk.status = status.value
         await db.commit()
 
@@ -120,6 +125,21 @@ async def get_vector_ids_by_resource(
         .filter(
             kb_model.ResourceKBChunk.resource_id == resource_id,
             kb_model.ResourceKBChunk.vector_id.is_not(None)
+        )
+    )
+    return result.scalars().all()
+
+
+async def get_fts_ids_by_resource(
+        db: AsyncSession,
+        resource_id: str
+) -> List[int]:
+    """获取指定资源下所有已完成切片的 fts_id"""
+    result = await db.execute(
+        select(kb_model.ResourceKBChunk.fts_id)
+        .filter(
+            kb_model.ResourceKBChunk.resource_id == resource_id,
+            kb_model.ResourceKBChunk.fts_id.is_not(None)
         )
     )
     return result.scalars().all()
@@ -281,22 +301,90 @@ async def search_vectors(
     return result.all()
 
 
-async def get_chunks_by_vector_ids(
+# --- FTS Operations (Raw SQL) ---
+
+async def insert_fts_index(
+        db: AsyncSession,
+        content_tokens: str
+) -> int:
+    """
+    将分词后的文本插入 FTS5 虚拟表，并返回 rowid。
+    content_tokens: 预分词后的空格分隔字符串
+    """
+    stmt = text("INSERT INTO kb_chunk_fts (content_tokens) VALUES (:tokens)")
+    result = await db.execute(stmt, {"tokens": content_tokens})
+
+    rowid = result.lastrowid
+    await db.commit()
+    return rowid
+
+
+async def delete_fts_indexes(
+        db: AsyncSession,
+        rowids: List[int]
+) -> None:
+    """
+    批量删除 FTS5 索引数据。
+    """
+    if not rowids:
+        return
+
+    # rowids 是 int 列表，直接拼接是安全的
+    rowids_str = ",".join(map(str, rowids))
+    stmt = text(f"DELETE FROM kb_chunk_fts WHERE rowid IN ({rowids_str})")
+    await db.execute(stmt)
+    await db.commit()
+
+
+async def search_fts_bm25(
+        db: AsyncSession,
+        query: str,
+        limit: int
+) -> List[Tuple[int, float]]:
+    """
+    使用 BM25 算法在 FTS5 表中进行关键词检索。
+    返回: List[(rowid, rank_score)]
+    注意: FTS5 的 rank 值越小通常表示匹配度越高(负对数概率)，或者取决于具体实现。
+    RRF 算法只关心相对排序，因此我们只需按 rank 排序返回即可。
+    """
+    # 构造查询 SQL
+    # 使用 built-in rank 函数进行排序
+    sql = """
+        SELECT rowid, rank 
+        FROM kb_chunk_fts 
+        WHERE kb_chunk_fts MATCH :query 
+        ORDER BY rank 
+        LIMIT :limit
+    """
+
+    stmt = text(sql)
+    result = await db.execute(stmt, {"query": query, "limit": limit})
+    return result.all()
+
+
+# --- Mixed Retrieval ---
+
+async def get_chunks_by_mixed_ids(
         db: AsyncSession,
         vector_ids: List[int],
+        fts_ids: List[int],
         kb_id_filter: Optional[str] = None
 ) -> List[Any]:
     """
-    根据 vector_id 列表反查 Chunk 及其所属 Resource 和 KB 信息。
-    支持多级目录结构 (Knowledge Base -> Folder -> File)。
+    根据 vector_id 列表或 fts_id 列表反查 Chunk 及其所属 Resource 和 KB 信息。
+    用于混合检索结果的组装。
     """
-    if not vector_ids:
+    if not vector_ids and not fts_ids:
         return []
 
-    # 1. CTE Base Part: 找到命中向量的文件资源
-    # 我们需要保留原始文件的 ID 和 Name (origin_file_*)，以便最后输出
-    # 同时获取其父级信息用于递归 (ancestor_*)
-    # 使用 distinct 去重，防止同一个文件的多个 chunk 导致重复的递归起始点
+    # 1. CTE Base Part: 找到命中向量或关键词的文件资源
+    # 筛选条件: vector_id IN (...) OR fts_id IN (...)
+    conditions = []
+    if vector_ids:
+        conditions.append(kb_model.ResourceKBChunk.vector_id.in_(vector_ids))
+    if fts_ids:
+        conditions.append(kb_model.ResourceKBChunk.fts_id.in_(fts_ids))
+
     base_stmt = select(
         resource_model.Resource.id.label("ancestor_id"),
         resource_model.Resource.parentId.label("ancestor_parent_id"),
@@ -307,7 +395,7 @@ async def get_chunks_by_vector_ids(
     ).join(
         kb_model.ResourceKBChunk, kb_model.ResourceKBChunk.resource_id == resource_model.Resource.id
     ).where(
-        kb_model.ResourceKBChunk.vector_id.in_(vector_ids)
+        or_(*conditions)
     ).distinct()
 
     cte = base_stmt.cte(name="kb_hierarchy", recursive=True)
@@ -328,9 +416,6 @@ async def get_chunks_by_vector_ids(
     )
 
     # 3. 主查询: 关联 Chunk 和 CTE
-    # 筛选条件:
-    # a. Chunk 的 vector_id 必须在列表中
-    # b. CTE 中的 ancestor_type 必须是 KNOWLEDGE_BASE (找到根节点)
     query = select(
         kb_model.ResourceKBChunk,
         cte.c.origin_file_id.label("file_id"),
@@ -341,7 +426,7 @@ async def get_chunks_by_vector_ids(
     ).join(
         cte, kb_model.ResourceKBChunk.resource_id == cte.c.origin_file_id
     ).where(
-        kb_model.ResourceKBChunk.vector_id.in_(vector_ids),
+        or_(*conditions),
         cte.c.ancestor_type == ResourceType.KNOWLEDGE_BASE.value
     )
 

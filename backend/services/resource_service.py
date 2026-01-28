@@ -10,7 +10,6 @@ from backend.models import resource_model
 from backend.schemas import resource as schemas
 from backend.schemas import kb as kb_schemas
 from backend.schemas.enums import ResourceType, MoveAction, ResourceItemType, FileManagementType
-# 复用 chat_service 中的文本截取工具，保持逻辑一致
 from backend.services.chat_service import extract_context_snippet
 from backend.services.kb_service import KnowledgeBaseService
 
@@ -198,7 +197,7 @@ async def _process_move_side_effects(
 
         # --- 变化处理逻辑 ---
 
-        # 1. 如果旧环境是 KB，且现在移出或换库 -> 清理旧向量
+        # 1. 如果旧环境是 KB，且现在移出或换库 -> 清理旧索引数据 (向量 + FTS)
         if old_kb_id:
             # 尝试获取旧 KB 的维度配置以清理向量
             # 注意：这里我们假设 old_kb_id 指向有效的 KB 资源
@@ -207,7 +206,8 @@ async def _process_move_side_effects(
                 if old_kb and old_kb.latest_version and old_kb.latest_version.attributes:
                     dimension = old_kb.latest_version.attributes.get("dimension")
                     if dimension:
-                        # 调用 Service 的内部方法清理向量
+                        # 调用 Service 的内部方法清理索引 (向量 + FTS)
+                        # kb_service._cleanup_vectors 已更新为同时处理 FTS 清理
                         await kb_service._cleanup_vectors(res.id, dimension)
             except Exception:
                 # 容错处理，防止因旧数据异常导致移动失败
