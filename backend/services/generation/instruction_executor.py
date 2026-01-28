@@ -220,7 +220,7 @@ class InstructionExecutor:
             storage_path=storage_path,
             mime_type=instruction.mime_type,
             size=size,
-            management_type=instruction.management_type,
+            management_type=[instruction.management_type],
             file_id=instruction.file_id  # 使用指令预生成的 ID
         )
 

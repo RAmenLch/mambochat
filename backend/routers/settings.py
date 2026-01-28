@@ -193,7 +193,7 @@ async def _update_avatar(db: AsyncSession, file: UploadFile, avatar_key: str):
             storage_path=storage_path,
             mime_type=file.content_type,
             size=file.size,
-            management_type=FileManagementType.GLOBAL_SETTING.value
+            management_type=[FileManagementType.GLOBAL_SETTING.value]
         )
 
         # 3. 更新全局配置中的文件ID

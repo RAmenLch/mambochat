@@ -153,7 +153,7 @@ async def upload_temporary_file(
         storage_path=storage_path,
         mime_type=final_mime_type,  # 存入数据库的是修正后的类型
         size=file.size,
-        management_type=FileManagementType.TEMPORARY.value
+        management_type=[FileManagementType.TEMPORARY.value]
     )
 
     return schemas.File(
