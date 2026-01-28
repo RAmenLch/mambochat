@@ -77,6 +77,7 @@ class KBSearchResultItem(BaseModel):
     resource_name: str = Field(..., description="所属文件名")
     kb_id: str = Field(..., description="所属知识库ID")
     kb_name: str = Field(..., description="所属知识库名称")
+    chunk_index: int = Field(..., description="切片在原文件中的索引序号")
 
 
 class KBSearchResponse(BaseModel):
@@ -113,3 +114,11 @@ class KBCreate(BaseModel):
     parent_id: Optional[str] = Field(None, description="父文件夹ID")
     embedding_model_id: str = Field(..., description="使用的 Embedding 模型ID")
     embedding_rate_limit: float = Field(0.0, ge=0.0, description="嵌入请求频率限制(秒)，即每次请求后的等待时间")
+
+
+# --- Chunk List Models ---
+
+class KBChunkListResponse(BaseModel):
+    """切片列表查询响应模型"""
+    total: int
+    items: List[KBChunk]

@@ -177,6 +177,41 @@ async def get_chunk_stats_by_resource(
     )
 
 
+async def get_chunks_by_resource_paginated(
+        db: AsyncSession,
+        resource_id: str,
+        min_index: Optional[int] = None,
+        max_index: Optional[int] = None,
+        page: int = 1,
+        page_size: int = 20
+) -> Tuple[List[kb_model.ResourceKBChunk], int]:
+    """
+    通过 resource_id 查询切片，支持按 chunk_index 范围筛选和分页。
+    """
+    query = select(kb_model.ResourceKBChunk).filter(
+        kb_model.ResourceKBChunk.resource_id == resource_id
+    )
+
+    if min_index is not None:
+        query = query.filter(kb_model.ResourceKBChunk.chunk_index >= min_index)
+    if max_index is not None:
+        query = query.filter(kb_model.ResourceKBChunk.chunk_index <= max_index)
+
+    query = query.order_by(kb_model.ResourceKBChunk.chunk_index.asc())
+
+    count_query = select(func.count()).select_from(query.subquery())
+    total_result = await db.execute(count_query)
+    total = total_result.scalar()
+
+    offset = (page - 1) * page_size
+    query = query.offset(offset).limit(page_size)
+
+    result = await db.execute(query)
+    items = result.scalars().all()
+
+    return items, total
+
+
 # --- Vector Operations (Raw SQL) ---
 
 async def insert_vector(
@@ -301,7 +336,8 @@ async def get_chunks_by_vector_ids(
         cte.c.origin_file_id.label("file_id"),
         cte.c.origin_file_name.label("file_name"),
         cte.c.ancestor_id.label("kb_id"),
-        cte.c.ancestor_name.label("kb_name")
+        cte.c.ancestor_name.label("kb_name"),
+        kb_model.ResourceKBChunk.chunk_index.label("chunk_index")
     ).join(
         cte, kb_model.ResourceKBChunk.resource_id == cte.c.origin_file_id
     ).where(

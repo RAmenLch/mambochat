@@ -761,6 +761,7 @@ class KnowledgeBaseService:
             file_name = row[2]
             kb_id = row[3]
             kb_name = row[4]
+            chunk_index = row[5]
 
             if chunk.vector_id not in distance_map:
                 continue
@@ -772,7 +773,8 @@ class KnowledgeBaseService:
                 resource_id=file_id,
                 resource_name=file_name,
                 kb_id=kb_id,
-                kb_name=kb_name
+                kb_name=kb_name,
+                chunk_index=chunk_index
             ))
 
         items.sort(key=lambda x: x.score)

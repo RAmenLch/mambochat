@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/chat/dialogs/KnowledgeBaseSearchDialog.vue -->
 <template>
   <div class="kb-search-container">
     <!-- 搜索工具栏 -->
@@ -5,7 +6,7 @@
       <div class="kb-select-container">
         <el-select
           v-model="selectedKbId"
-          placeholder="选择知识库范围 (默认全部)"
+          placeholder="选择知识库范围"
           clearable
           style="width: 100%"
         >
@@ -58,15 +59,15 @@
             :key="item.chunk_id"
             class="result-item"
             :class="{ 'is-selected': isSelected(item.chunk_id) }"
-            @click="toggleSelection(item)"
           >
-            <div class="item-header">
+            <div class="item-header" @click="toggleSelection(item)">
               <div class="item-source">
                 <el-icon><Collection /></el-icon>
                 <span class="kb-name">{{ item.kb_name }}</span>
                 <el-divider direction="vertical" />
                 <el-icon><Document /></el-icon>
                 <span class="file-name" :title="item.resource_name">{{ item.resource_name }}</span>
+                <span class="chunk-index-badge">#{{ item.chunk_index }}</span>
               </div>
               <div class="item-score">
                 <el-tag size="small" type="info" effect="plain" title="距离分数 (越小越相似)">
@@ -80,8 +81,72 @@
               </div>
             </div>
 
-            <div class="item-content">
-              {{ item.chunk_content }}
+            <div class="item-body">
+              <div 
+                class="item-content" 
+                :class="{ 'is-collapsed': !isExpanded(item.chunk_id) }"
+                @click="toggleExpand(item.chunk_id)"
+              >
+                {{ item.chunk_content }}
+              </div>
+              
+              <div class="item-actions">
+                <el-button 
+                  link 
+                  type="primary" 
+                  size="small" 
+                  @click="toggleExpand(item.chunk_id)"
+                >
+                  {{ isExpanded(item.chunk_id) ? '收起内容' : '展开查看' }}
+                  <el-icon class="el-icon--right">
+                    <ArrowUp v-if="isExpanded(item.chunk_id)" />
+                    <ArrowDown v-else />
+                  </el-icon>
+                </el-button>
+              </div>
+
+              <!-- 上下文导航栏 (仅展开时显示) -->
+              <div v-if="isExpanded(item.chunk_id)" class="context-nav">
+                <el-button-group size="small">
+                  <el-button 
+                    :icon="ArrowLeft" 
+                    :loading="isContextLoading(item.chunk_id, 'prev')"
+                    :disabled="item.chunk_index <= 0"
+                    @click="navigateContext(item, 'prev')"
+                  >
+                    上一片段
+                  </el-button>
+                  
+                  <el-button disabled class="context-label">
+                    当前: {{ item.chunk_index }}
+                  </el-button>
+
+                  <!-- 回跳按钮：仅当当前索引不等于原始索引时显示 -->
+                  <el-tooltip 
+                    v-if="item.chunk_index !== item.original_index"
+                    content="点击跳回最初检索命中的切片位置"
+                    placement="top"
+                  >
+                    <el-button 
+                      type="primary" 
+                      plain
+                      :loading="isContextLoading(item.chunk_id, 'reset')"
+                      @click="resetToOriginal(item)"
+                    >
+                      <el-icon><Aim /></el-icon>
+                      命中: {{ item.original_index }}
+                    </el-button>
+                  </el-tooltip>
+
+                  <el-button 
+                    :loading="isContextLoading(item.chunk_id, 'next')"
+                    @click="navigateContext(item, 'next')"
+                  >
+                    下一片段
+                    <el-icon class="el-icon--right"><ArrowRight /></el-icon>
+                  </el-button>
+                </el-button-group>
+              </div>
             </div>
           </div>
         </div>
@@ -118,12 +183,25 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
-import { Search, Document, Collection } from '@element-plus/icons-vue';
+import { ref, computed, watch, onMounted } from 'vue';
+import { 
+  Search, 
+  Document, 
+  Collection, 
+  ArrowDown, 
+  ArrowUp, 
+  ArrowLeft, 
+  ArrowRight,
+  Aim
+} from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
-import { searchKnowledgeBase } from '@/api/kbService';
+import { searchKnowledgeBase, getKBFileChunks } from '@/api/kbService';
 import { useResourceStore } from '@/stores/resourceStore';
 import type { KBSearchResultItem } from '@/api/types';
+
+// --- Types ---
+// 扩展基础类型，增加原始索引字段，用于回跳功能
+type ExtendedSearchResultItem = KBSearchResultItem & { original_index: number };
 
 // --- Emits ---
 const emit = defineEmits<{
@@ -140,13 +218,24 @@ const topK = ref(5);
 const selectedKbId = ref<string | null>(null);
 const isSearching = ref(false);
 const hasSearched = ref(false);
-const results = ref<KBSearchResultItem[]>([]);
+const results = ref<ExtendedSearchResultItem[]>([]);
 const selectedItems = ref<KBSearchResultItem[]>([]);
+const expandedItems = ref<Set<string>>(new Set());
+const contextLoadingMap = ref<Map<string, boolean>>(new Map());
 
 // --- Computed ---
 const kbList = computed(() => {
-  return resourceStore.resources.filter(r => r.resourceType === 'knowledge_base');
+  return resourceStore.resources
+    .filter(r => r.resourceType === 'knowledge_base')
+    .sort((a, b) => a.sortOrder - b.sortOrder);
 });
+
+// --- Watchers ---
+watch(kbList, (list) => {
+  if (!selectedKbId.value && list.length > 0) {
+    selectedKbId.value = list[0].id;
+  }
+}, { immediate: true });
 
 // --- Methods ---
 
@@ -163,6 +252,18 @@ const toggleSelection = (item: KBSearchResultItem) => {
   }
 };
 
+const isExpanded = (chunkId: string) => {
+  return expandedItems.value.has(chunkId);
+};
+
+const toggleExpand = (chunkId: string) => {
+  if (expandedItems.value.has(chunkId)) {
+    expandedItems.value.delete(chunkId);
+  } else {
+    expandedItems.value.add(chunkId);
+  }
+};
+
 const handleSearch = async () => {
   if (!queryText.value.trim()) {
     ElMessage.warning('请输入搜索内容');
@@ -172,6 +273,7 @@ const handleSearch = async () => {
   isSearching.value = true;
   hasSearched.value = true;
   selectedItems.value = [];
+  expandedItems.value.clear();
 
   try {
     const res = await searchKnowledgeBase({
@@ -179,7 +281,12 @@ const handleSearch = async () => {
       top_k: topK.value,
       kb_id: selectedKbId.value
     });
-    results.value = res.items;
+    
+    // 初始化时，记录原始索引
+    results.value = res.items.map(item => ({
+      ...item,
+      original_index: item.chunk_index
+    }));
   } catch (error) {
     console.error('Vector search failed', error);
     ElMessage.error('检索失败，请稍后重试');
@@ -189,10 +296,88 @@ const handleSearch = async () => {
   }
 };
 
+const isContextLoading = (chunkId: string, action: 'prev' | 'next' | 'reset') => {
+  return contextLoadingMap.value.get(`${chunkId}-${action}`) || false;
+};
+
+/**
+ * 核心方法：获取指定索引的切片并替换当前列表项
+ */
+const updateChunkContent = async (
+  item: ExtendedSearchResultItem, 
+  targetIndex: number, 
+  action: 'prev' | 'next' | 'reset'
+) => {
+  const loadingKey = `${item.chunk_id}-${action}`;
+  contextLoadingMap.value.set(loadingKey, true);
+
+  try {
+    const res = await getKBFileChunks(item.resource_id, {
+      min_index: targetIndex,
+      max_index: targetIndex,
+      page: 1,
+      page_size: 1
+    });
+
+    if (res.items && res.items.length > 0) {
+      const newChunk = res.items[0];
+      
+      // 构造新对象，务必保留 original_index
+      const newItem: ExtendedSearchResultItem = {
+        ...item,
+        chunk_id: newChunk.id,
+        chunk_content: newChunk.content,
+        chunk_index: newChunk.chunk_index,
+        original_index: item.original_index 
+      };
+
+      // 在结果列表中原地替换
+      const index = results.value.findIndex(r => r.chunk_id === item.chunk_id);
+      if (index !== -1) {
+        // 如果旧项被选中，取消选中（因为内容变了，ID也变了）
+        const selIndex = selectedItems.value.findIndex(i => i.chunk_id === item.chunk_id);
+        if (selIndex > -1) {
+          selectedItems.value.splice(selIndex, 1);
+        }
+
+        results.value.splice(index, 1, newItem);
+
+        // 更新展开状态：移除旧ID，添加新ID，保持展开
+        expandedItems.value.delete(item.chunk_id);
+        expandedItems.value.add(newItem.chunk_id);
+      }
+    } else {
+      ElMessage.info('没有更多切片了');
+    }
+  } catch (error) {
+    console.error('Failed to fetch context chunk', error);
+    ElMessage.error('获取切片内容失败');
+  } finally {
+    contextLoadingMap.value.delete(loadingKey);
+  }
+};
+
+const navigateContext = async (item: ExtendedSearchResultItem, direction: 'prev' | 'next') => {
+  const targetIndex = direction === 'prev' ? item.chunk_index - 1 : item.chunk_index + 1;
+  if (targetIndex < 0) return;
+  await updateChunkContent(item, targetIndex, direction);
+};
+
+const resetToOriginal = async (item: ExtendedSearchResultItem) => {
+  if (item.chunk_index === item.original_index) return;
+  await updateChunkContent(item, item.original_index, 'reset');
+};
+
 const handleConfirm = () => {
   if (selectedItems.value.length === 0) return;
   emit('confirm', selectedItems.value);
 };
+
+onMounted(() => {
+  if (!selectedKbId.value && kbList.value.length > 0) {
+    selectedKbId.value = kbList.value[0].id;
+  }
+});
 </script>
 
 <style scoped>
@@ -200,7 +385,6 @@ const handleConfirm = () => {
   display: flex;
   flex-direction: column;
   height: 60vh;
-  /* 关键修复 1: 强制隐藏溢出，防止内部元素（如Loading遮罩）撑开容器 */
   overflow: hidden;
 }
 
@@ -240,7 +424,6 @@ const handleConfirm = () => {
 
 .results-area {
   flex-grow: 1;
-  /* 关键修复 2: 防止 Flex 子元素溢出，并允许其在空间不足时收缩 */
   overflow: hidden;
   min-height: 0;
   position: relative;
@@ -249,7 +432,6 @@ const handleConfirm = () => {
   flex-direction: column;
 }
 
-/* 确保滚动条占满剩余空间 */
 .custom-scrollbar {
   height: 100%;
 }
@@ -261,7 +443,6 @@ const handleConfirm = () => {
 .result-item {
   padding: 12px;
   border-bottom: 1px solid var(--el-border-color-lighter);
-  cursor: pointer;
   transition: background-color 0.2s;
 }
 
@@ -278,6 +459,7 @@ const handleConfirm = () => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 8px;
+  cursor: pointer;
 }
 
 .item-source {
@@ -301,6 +483,13 @@ const handleConfirm = () => {
   max-width: 200px;
 }
 
+.chunk-index-badge {
+  background-color: var(--el-fill-color-dark);
+  padding: 0 4px;
+  border-radius: 4px;
+  font-family: monospace;
+}
+
 .item-score {
   display: flex;
   align-items: center;
@@ -313,15 +502,44 @@ const handleConfirm = () => {
   height: 20px;
 }
 
+.item-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .item-content {
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.6;
   color: var(--el-text-color-regular);
+  word-break: break-all;
+  white-space: pre-wrap;
+  cursor: pointer;
+}
+
+.item-content.is-collapsed {
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  word-break: break-all;
+}
+
+.item-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.context-nav {
+  display: flex;
+  justify-content: center;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--el-border-color-lighter);
+}
+
+.context-label {
+  min-width: 80px;
+  font-family: monospace;
 }
 
 .placeholder-state {
@@ -344,7 +562,7 @@ const handleConfirm = () => {
   justify-content: space-between;
   align-items: center;
   flex-shrink: 0;
-  background-color: #fff; /* 确保背景色不透明 */
+  background-color: #fff;
   z-index: 10;
 }
 

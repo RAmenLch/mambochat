@@ -10,6 +10,8 @@ import type {
   KBRunTaskRequest,
   KBTaskProgressPayload,
   KBUpdateConfigRequest,
+  KBChunkListRequest,
+  KBChunkListResponse,
 } from './types'
 
 /**
@@ -65,6 +67,19 @@ export const updateKBFileConfig = (
  */
 export const searchKnowledgeBase = (data: KBSearchRequest): Promise<KBSearchResponse> => {
   return apiClient.post('/resources/kb/search', data)
+}
+
+/**
+ * 获取知识库文件的切片列表
+ * 支持分页和索引范围筛选
+ * @param resourceId 文件资源ID
+ * @param params 查询参数
+ */
+export const getKBFileChunks = (
+  resourceId: string,
+  params?: KBChunkListRequest,
+): Promise<KBChunkListResponse> => {
+  return apiClient.get(`/resources/kb/${resourceId}/chunks`, { params })
 }
 
 /**

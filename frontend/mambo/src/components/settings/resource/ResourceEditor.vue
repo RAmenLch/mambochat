@@ -16,12 +16,6 @@
 
     <!-- Region: KB Configuration View -->
     <div v-if="viewMode === 'kb_config'" class="kb-config-view">
-      <div class="config-view-header">
-        <el-button link @click="viewMode = 'editor'">
-          <el-icon><ArrowLeft /></el-icon> 返回编辑器
-        </el-button>
-        <span class="view-title">知识库向量化配置</span>
-      </div>
       <div class="kb-detail-wrapper">
         <KnowledgeBaseFileDetail :resource="resource" />
       </div>
@@ -186,7 +180,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type UploadFile } from 'element-plus'
-import { Document, Upload, ArrowLeft, Picture, DocumentAdd } from '@element-plus/icons-vue'
+import { Document, Upload, Picture, DocumentAdd } from '@element-plus/icons-vue'
 import type { editor } from 'monaco-editor'
 
 import { useResourceStore } from '@/stores/resourceStore'
@@ -499,24 +493,11 @@ async function handleConfirmNewVersion() {
   background-color: #fff;
 }
 
-.config-view-header {
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
 .kb-detail-wrapper {
   flex: 1;
   min-height: 0;
   position: relative;
   width: 100%;
-}
-
-.view-title {
-  font-weight: 600;
-  font-size: 14px;
 }
 
 .editor-split-layout {

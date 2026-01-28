@@ -1,7 +1,7 @@
 # backend/routers/kb_management.py
 
 import json
-from fastapi import APIRouter, Depends, status, HTTPException
+from fastapi import APIRouter, Depends, status, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +10,7 @@ from backend import schemas
 from backend.schemas import kb as kb_schemas
 from backend.schemas.enums import KBFileStatus
 from backend.services.kb_service import KnowledgeBaseService
+from backend.crud import kb_crud
 
 router = APIRouter()
 
@@ -134,6 +135,40 @@ async def search_knowledge_base(
 ):
     """
     在知识库中进行语义搜索。
+    返回结果包含切片索引 (chunk_index)。
     """
     service = KnowledgeBaseService(db)
     return await service.search_kb(request)
+
+
+@router.get(
+    "/{resource_id}/chunks",
+    response_model=kb_schemas.KBChunkListResponse,
+    summary="查询知识库文件切片列表"
+)
+async def get_resource_chunks(
+        resource_id: str,
+        min_index: int = Query(None, ge=0, description="切片索引最小值 (包含)"),
+        max_index: int = Query(None, ge=0, description="切片索引最大值 (包含)"),
+        page: int = Query(1, ge=1, description="页码"),
+        page_size: int = Query(20, ge=1, le=100, description="每页数量"),
+        db: AsyncSession = Depends(get_db)
+):
+    """
+    根据资源 ID 查询切片列表。
+    支持按 chunk_index 范围筛选和分页。
+    结果按 chunk_index 升序排列。
+    """
+    chunks, total = await kb_crud.get_chunks_by_resource_paginated(
+        db=db,
+        resource_id=resource_id,
+        min_index=min_index,
+        max_index=max_index,
+        page=page,
+        page_size=page_size
+    )
+    
+    # 将 ORM 模型转换为 Pydantic 模型
+    chunk_items = [kb_schemas.KBChunk.model_validate(chunk) for chunk in chunks]
+    
+    return kb_schemas.KBChunkListResponse(total=total, items=chunk_items)

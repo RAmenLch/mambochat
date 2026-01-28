@@ -89,11 +89,34 @@ export interface KBSearchResultItem {
   resource_name: string
   kb_id: string
   kb_name: string
+  chunk_index: number
 }
 
 export interface KBSearchResponse {
   total: number
   items: KBSearchResultItem[]
+}
+
+export interface KBChunk {
+  id: string
+  resource_id: string
+  content: string
+  chunk_index: number
+  byte_size: number
+  status: 'PENDING' | 'COMPLETED' | 'FAILED' | 'STOPPED'
+  vector_id?: number
+}
+
+export interface KBChunkListResponse {
+  total: number
+  items: KBChunk[]
+}
+
+export interface KBChunkListRequest {
+  min_index?: number
+  max_index?: number
+  page?: number
+  page_size?: number
 }
 
 // --- Resource Center Types ---
