@@ -578,7 +578,7 @@ const formatBytes = (bytes: number) => {
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
 }
-
+type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
 const getChunkStatusType = (status: string) => {
   const map: Record<string, TagType> = {
     PENDING: 'info',
