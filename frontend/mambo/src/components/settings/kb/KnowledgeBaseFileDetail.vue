@@ -580,7 +580,7 @@ const formatBytes = (bytes: number) => {
 }
 
 const getChunkStatusType = (status: string) => {
-  const map: Record<string, string> = {
+  const map: Record<string, TagType> = {
     PENDING: 'info',
     COMPLETED: 'success',
     FAILED: 'danger',
