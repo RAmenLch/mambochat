@@ -54,3 +54,5 @@ ALTER TABLE ResourceKBChunk ADD COLUMN fts_id INTEGER;
 
 -- 2. 为 fts_id 创建索引以提高查询性能
 CREATE INDEX IF NOT EXISTS ix_ResourceKBChunk_fts_id ON ResourceKBChunk (fts_id);
+
+ALTER TABLE Chat ADD COLUMN resource_prompt_list TEXT;
