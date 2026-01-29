@@ -2,20 +2,32 @@
 <template>
   <div v-if="hasAttachments" class="attachment-preview-wrapper">
     <!-- Attached Templates Preview Area -->
-    <div v-if="attachedResources.length > 0" class="attached-templates-preview">
+    <transition-group
+      v-if="attachedResources.length > 0"
+      name="list"
+      tag="div"
+      class="attached-templates-preview"
+    >
       <el-tag
-        v-for="resource in attachedResources"
+        v-for="(resource, index) in attachedResources"
         :key="resource.id"
         closable
         disable-transitions
         type="info"
+        class="draggable-tag"
+        :class="{ 'is-dragging': draggedIndex === index }"
+        draggable="true"
+        @dragstart.stop="handleDragStart(index, $event)"
+        @dragover.prevent.stop="handleDragOver($event)"
+        @drop.stop="handleDrop(index)"
+        @dragend="handleDragEnd"
         @close="$emit('remove-resource', resource.id)"
       >
         <el-tooltip :content="resource.latest_version?.content || ''" placement="top">
           <span>{{ resource.name }}</span>
         </el-tooltip>
       </el-tag>
-    </div>
+    </transition-group>
 
     <!-- Uploaded Files Preview Area -->
     <div v-if="uploadedFiles.length > 0" class="uploaded-files-preview">
@@ -49,7 +61,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import type { PropType } from 'vue';
 import { Document, Picture, Close } from '@element-plus/icons-vue';
 import type { FileResponse, Resource } from '@/api/types';
@@ -65,12 +77,48 @@ const props = defineProps({
   },
 });
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'remove-file', fileId: string): void;
   (e: 'remove-resource', resourceId: string): void;
+  (e: 'update:attachedResources', resources: Resource[]): void;
 }>();
 
 const hasAttachments = computed(() => props.uploadedFiles.length > 0 || props.attachedResources.length > 0);
+
+// --- Drag and Drop Logic ---
+const draggedIndex = ref<number | null>(null);
+
+const handleDragStart = (index: number, event: DragEvent) => {
+  draggedIndex.value = index;
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move';
+    // Set a custom type or plain text to avoid triggering file upload zones in parent components
+    event.dataTransfer.setData('text/plain', index.toString());
+  }
+};
+
+const handleDragOver = (event: DragEvent) => {
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'move';
+  }
+};
+
+const handleDrop = (targetIndex: number) => {
+  if (draggedIndex.value === null || draggedIndex.value === targetIndex) {
+    return;
+  }
+
+  const newResources = [...props.attachedResources];
+  const [draggedItem] = newResources.splice(draggedIndex.value, 1);
+  newResources.splice(targetIndex, 0, draggedItem);
+
+  emit('update:attachedResources', newResources);
+  draggedIndex.value = null;
+};
+
+const handleDragEnd = () => {
+  draggedIndex.value = null;
+};
 </script>
 
 <style scoped>
@@ -84,6 +132,33 @@ const hasAttachments = computed(() => props.uploadedFiles.length > 0 || props.at
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* Drag and Drop Styles */
+.draggable-tag {
+  cursor: grab;
+  transition: all 0.3s ease;
+}
+
+.draggable-tag:active {
+  cursor: grabbing;
+}
+
+.draggable-tag.is-dragging {
+  opacity: 0.3;
+  background-color: var(--el-color-info-light-8);
+  border-style: dashed;
+}
+
+/* List Transitions */
+.list-move,
+.list-enter-active,
+.list-leave-active {
+  transition: all 0.3s ease;
+}
+
+.list-leave-active {
+  position: absolute;
 }
 
 .uploaded-files-preview {

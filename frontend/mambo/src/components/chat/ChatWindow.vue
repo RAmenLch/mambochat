@@ -32,15 +32,16 @@
       <div
         class="input-container-wrapper"
         :style="{ height: `${inputAreaHeight}px` }"
-        @dragenter.prevent.stop="isDraggingOver = true"
-        @dragover.prevent.stop
+        @dragenter.prevent.stop="handleContainerDragEnter"
+        @dragover.prevent.stop="handleContainerDragOver"
+        @drop.prevent.stop="handleContainerDrop"
       >
         <!-- 拖拽文件时的覆盖层 -->
         <div
           v-if="isDraggingOver"
           class="drag-over-overlay"
           @dragleave.prevent.stop="isDraggingOver = false"
-          @drop.prevent.stop="handleDrop"
+          @drop.prevent.stop="handleContainerDrop"
         >
           <div class="drag-over-content">
             <el-icon size="50"><UploadFilled /></el-icon>
@@ -67,6 +68,7 @@
           :attached-resources="attachedSubmessageResources"
           @remove-file="removeUploadedFile"
           @remove-resource="removeAttachedResource"
+          @update:attached-resources="(newList) => attachedSubmessageResources = newList"
         />
 
         <ChatInputBox
@@ -287,10 +289,23 @@ async function handleFileUploads(files: FileList) {
   }
 }
 
-function handleDrop(event: DragEvent) {
+function handleContainerDragEnter(event: DragEvent) {
+  // 仅当拖拽内容包含文件时才显示上传遮罩，避免与内部 Tag 拖拽冲突
+  if (event.dataTransfer && event.dataTransfer.types.includes('Files')) {
+    isDraggingOver.value = true;
+  }
+}
+
+function handleContainerDragOver(event: DragEvent) {
+  if (isDraggingOver.value && event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'copy';
+  }
+}
+
+function handleContainerDrop(event: DragEvent) {
   isDraggingOver.value = false;
   const files = event.dataTransfer?.files;
-  if (files) {
+  if (files && files.length > 0) {
     handleFileUploads(files);
   }
 }

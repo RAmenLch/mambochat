@@ -29,20 +29,33 @@
           </template>
           <el-input v-model="chatSettingsForm.systemPrompt" type="textarea" :rows="8" placeholder="定义AI的角色和行为" />
 
-          <!-- 挂载资源预览区 -->
-          <div v-if="mountedSystemResources.length > 0" class="mounted-resources-area">
-            <el-tag
-              v-for="resource in mountedSystemResources"
-              :key="resource.id"
-              closable
-              disable-transitions
-              type="info"
-              @close="handleRemoveMountedResource(resource.id)"
+          <!-- 挂载资源预览区 (修改部分：支持拖拽排序) -->
+          <div v-if="mountedSystemResources.length > 0" class="mounted-resources-wrapper">
+            <transition-group
+              name="list"
+              tag="div"
+              class="mounted-resources-area"
             >
-              <el-tooltip :content="resource.latest_version?.content || '无内容'" placement="top">
-                <span>{{ resource.name }}</span>
-              </el-tooltip>
-            </el-tag>
+              <el-tag
+                v-for="(resource, index) in mountedSystemResources"
+                :key="resource.id"
+                closable
+                disable-transitions
+                type="info"
+                class="draggable-tag"
+                :class="{ 'is-dragging': draggedIndex === index }"
+                draggable="true"
+                @dragstart.stop="handleDragStart(index, $event)"
+                @dragover.prevent.stop="handleDragOver($event)"
+                @drop.stop="handleDrop(index)"
+                @dragend="handleDragEnd"
+                @close="handleRemoveMountedResource(resource.id)"
+              >
+                <el-tooltip :content="resource.latest_version?.content || '无内容'" placement="top">
+                  <span>{{ resource.name }}</span>
+                </el-tooltip>
+              </el-tag>
+            </transition-group>
           </div>
         </el-form-item>
         <el-divider>模型参数</el-divider>
@@ -199,6 +212,9 @@ const chatSettingsForm = reactive<ChatSettingsForm>({
 // --- Mounted Resources State ---
 const mountedSystemResources = ref<Resource[]>([]);
 
+// --- Drag and Drop State (新增) ---
+const draggedIndex = ref<number | null>(null);
+
 // --- Computed Properties ---
 
 const filteredGroupedModels = computed(() => {
@@ -237,34 +253,59 @@ const dynamicParameters = computed((): DynamicParameterUI[] => {
     }));
 });
 
-// --- Watchers ---
-watch(() => props.chatData, async (newChat) => {
-  if (newChat) {
-    chatSettingsForm.name = newChat.name;
-    chatSettingsForm.aiModelId = newChat.aiModelId;
-    chatSettingsForm.systemPrompt = newChat.systemPrompt;
+const chatConfigSnapshot = computed(() => {
+  if (!props.chatData) return null;
+  return {
+    id: props.chatData.id,
+    name: props.chatData.name,
+    aiModelId: props.chatData.aiModelId,
+    systemPrompt: props.chatData.systemPrompt,
+    modelParameters: props.chatData.modelParameters,
+    resource_prompt_list: props.chatData.resource_prompt_list
+  };
+});
 
-    const params = newChat.modelParameters || {};
-    // 深拷贝并确保固定参数有默认值
+// --- Watchers ---
+
+watch(chatConfigSnapshot, async (newConfig, oldConfig) => {
+  if (newConfig) {
+    // 1. 同步基本表单数据
+    chatSettingsForm.name = newConfig.name;
+    chatSettingsForm.aiModelId = newConfig.aiModelId;
+    chatSettingsForm.systemPrompt = newConfig.systemPrompt;
+
+    const params = newConfig.modelParameters || {};
     chatSettingsForm.modelParameters = {
       ...JSON.parse(JSON.stringify(params)),
       max_context_messages: params.max_context_messages ?? 0,
       stream: params.stream ?? true,
     };
 
-    // 加载挂载的资源列表
-    if (newChat.resource_prompt_list && newChat.resource_prompt_list.length > 0) {
-      mountedSystemResources.value = [];
-      try {
-        const promises = newChat.resource_prompt_list.map(id => getResourceDetails(id));
-        const results = await Promise.all(promises);
-        mountedSystemResources.value = results;
-      } catch (error) {
-        console.error('Failed to load mounted resources:', error);
-        ElMessage.error('加载挂载资源失败');
+    // 2. 智能加载挂载资源
+    const hasResourceChanged =
+      JSON.stringify(newConfig.resource_prompt_list) !== JSON.stringify(oldConfig?.resource_prompt_list);
+    const hasChatChanged = newConfig.id !== oldConfig?.id;
+
+    if (hasResourceChanged || hasChatChanged) {
+      if (newConfig.resource_prompt_list && newConfig.resource_prompt_list.length > 0) {
+        mountedSystemResources.value = [];
+        try {
+          // 并发请求资源详情
+          const promises = newConfig.resource_prompt_list.map(id => getResourceDetails(id));
+          const results = await Promise.all(promises);
+          // 保持原有顺序
+          const orderedResults = newConfig.resource_prompt_list
+            .map(id => results.find(r => r.id === id))
+            .filter((r): r is Resource => !!r);
+
+          mountedSystemResources.value = orderedResults;
+        } catch (error) {
+          console.error('Failed to load mounted resources:', error);
+          ElMessage.error('加载挂载资源失败');
+        }
+      } else {
+        mountedSystemResources.value = [];
       }
-    } else {
-      mountedSystemResources.value = [];
     }
   }
 }, { immediate: true, deep: true });
@@ -277,18 +318,13 @@ watch(() => chatSettingsForm.aiModelId, (newModelId) => {
   if (!currentModel) return;
 
   const supportedParams = new Set(currentModel.meta_config?.supported_parameters ?? []);
-  // 核心参数：无论模型是否显式声明支持，通常都允许保留（与 dynamicParameters 逻辑保持一致）
   const coreParameters = ['temperature', 'top_p'];
 
-  // 确定哪些参数应该被保留
-  // 逻辑必须与 dynamicParameters computed 中的显示逻辑保持一致
   const keysToKeep = new Set<string>();
 
-  // 1. 固定参数 (始终保留)
   keysToKeep.add('max_context_messages');
   keysToKeep.add('stream');
 
-  // 2. 动态参数 (根据系统配置和模型支持情况保留)
   if (systemConfigStore.llmParameters) {
     systemConfigStore.llmParameters.forEach(paramDef => {
       if (
@@ -301,7 +337,6 @@ watch(() => chatSettingsForm.aiModelId, (newModelId) => {
     });
   }
 
-  // 3. 过滤 modelParameters 对象
   const newParams: Record<string, any> = {};
   for (const key in chatSettingsForm.modelParameters) {
     if (keysToKeep.has(key)) {
@@ -309,11 +344,42 @@ watch(() => chatSettingsForm.aiModelId, (newModelId) => {
     }
   }
 
-  // 更新表单数据，移除不支持的参数
   chatSettingsForm.modelParameters = newParams;
 });
 
 // --- Methods ---
+
+// --- Drag and Drop Logic (新增) ---
+const handleDragStart = (index: number, event: DragEvent) => {
+  draggedIndex.value = index;
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', index.toString());
+  }
+};
+
+const handleDragOver = (event: DragEvent) => {
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'move';
+  }
+};
+
+const handleDrop = (targetIndex: number) => {
+  if (draggedIndex.value === null || draggedIndex.value === targetIndex) {
+    return;
+  }
+
+  const newResources = [...mountedSystemResources.value];
+  const [draggedItem] = newResources.splice(draggedIndex.value, 1);
+  newResources.splice(targetIndex, 0, draggedItem);
+
+  mountedSystemResources.value = newResources;
+  draggedIndex.value = null;
+};
+
+const handleDragEnd = () => {
+  draggedIndex.value = null;
+};
 
 function getSliderStep(min: number, max: number): number {
   const range = max - min;
@@ -323,18 +389,14 @@ function getSliderStep(min: number, max: number): number {
 }
 
 function handleToggleParameter(param: DynamicParameterUI, isEnabled: boolean) {
-  // 创建 modelParameters 的一个新副本以确保响应性
   const newParams = { ...chatSettingsForm.modelParameters };
 
   if (isEnabled) {
-    // 当启用参数时，为其设置默认值
     newParams[param.key] = param.definition.default_value;
   } else {
-    // 当禁用参数时，从新副本中移除该键
     delete newParams[param.key];
   }
 
-  // 将修改后的新副本重新赋值给 chatSettingsForm.modelParameters
   chatSettingsForm.modelParameters = newParams;
 }
 
@@ -342,7 +404,6 @@ function handleMountResources(resources: Resource[]) {
   if (resources.length === 0) return;
 
   resources.forEach(resource => {
-    // 避免重复添加
     if (!mountedSystemResources.value.some(r => r.id === resource.id)) {
       mountedSystemResources.value.push(resource);
     }
@@ -363,25 +424,21 @@ function handleSaveSettings() {
     return;
   }
 
-  // max_context_messages 和 stream 是固定必须启用的参数
   const finalModelParameters: Record<string, any> = {
     max_context_messages: chatSettingsForm.modelParameters.max_context_messages,
     stream: chatSettingsForm.modelParameters.stream,
   };
 
-  // 处理动态参数
   for (const key in chatSettingsForm.modelParameters) {
     if (Object.prototype.hasOwnProperty.call(chatSettingsForm.modelParameters, key)) {
       if (key === 'max_context_messages' || key === 'stream') {
         continue;
       }
-      // 只要参数存在于 modelParameters 中（即已被用户启用），就将其包含在最终提交的数据中
-      // 不再依赖 supportedParameters 校验，以支持"按需启用"场景（特别是针对 Temperature 和 Top P）
       finalModelParameters[key] = chatSettingsForm.modelParameters[key];
     }
   }
 
-  // 提取挂载的资源 ID 列表
+  // 保存时使用当前 mountedSystemResources 的顺序
   const resourcePromptList = mountedSystemResources.value.map(r => r.id);
 
   emit('save', {
@@ -428,10 +485,45 @@ function handleDrawerClose() {
   margin-left: 16px;
   flex-shrink: 0;
 }
-.mounted-resources-area {
+
+/* 挂载资源区域样式 */
+.mounted-resources-wrapper {
   margin-top: 8px;
+  background-color: var(--color-background-soft);
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.mounted-resources-area {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* Drag and Drop Styles (与 AttachmentPreview 保持一致) */
+.draggable-tag {
+  cursor: grab;
+  transition: all 0.3s ease;
+}
+
+.draggable-tag:active {
+  cursor: grabbing;
+}
+
+.draggable-tag.is-dragging {
+  opacity: 0.3;
+  background-color: var(--el-color-info-light-8);
+  border-style: dashed;
+}
+
+/* List Transitions */
+.list-move,
+.list-enter-active,
+.list-leave-active {
+  transition: all 0.3s ease;
+}
+
+.list-leave-active {
+  position: absolute;
 }
 </style>
