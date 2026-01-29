@@ -5,7 +5,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import text
-import pytz
 from backend.config.timezone_config import TZ
 from backend.database import engine
 from backend.models.base_model import Base
@@ -32,9 +31,10 @@ async def lifespan(app: FastAPI):
     # --- 应用启动时执行 ---
     async with engine.begin() as conn:
         # 确保所有定义的模型表都已在数据库中创建
-        # 注意: 新的 resource_model 中的模型需要被 Base 正确识别
+        # Base.metadata 包含了所有继承自 Base 的模型（包括 McpServer）
         await conn.run_sync(Base.metadata.create_all)
 
+        # 以下是特殊用途的虚拟表的创建,普通表是不需要在此处创建的
         # 初始化预定义的向量表
         # 使用 sqlite-vec 的 vec0 模块创建虚拟表
         # 预创建维度: 384, 768, 1024, 1536, 2560, 3072, 4096

@@ -80,3 +80,10 @@ class KBFileStatus(str, Enum):
     COMPLETED = "COMPLETED"  # 处理完成 (原 INDEXED)
     FAILED = "FAILED"        # 处理失败
     STOPPED = "STOPPED"      # 任务已停止
+
+
+class McpTransportType(str, Enum):
+    """定义 MCP 服务器的传输类型"""
+    STDIO = "stdio"
+    SSE = "sse"
+

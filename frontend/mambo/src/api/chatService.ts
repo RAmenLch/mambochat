@@ -13,9 +13,10 @@ import type {
   SubMessageUpdate,
   GenerateRequest,
   PrepareGenerateResponse,
-  FileResponse, UpdateMessageResponse, McpService,
+  FileResponse, UpdateMessageResponse,
   SearchRequest, SearchResponse
 } from './types';
+
 /**
  * [新增] 懒加载获取会话/文件夹子节点
  * @param parentIds 父节点ID列表，传 "root" 获取根目录
@@ -25,6 +26,7 @@ export const getChatChildren = (parentIds: string[]): Promise<Chat[]> => {
   parentIds.forEach(id => params.append('parentIds', id));
   return apiClient.get('/chats/children', { params });
 };
+
 /**
  * [新增] 移动会话/文件夹节点
  */
@@ -80,7 +82,7 @@ export const duplicateChat = (chatId: string): Promise<Chat> => {
  * @param messageId 消息ID
  * @param data 包含新的子消息列表和resend标志的对象
  */
-export const updateMessageAndRegenerate = (messageId: string, data: MessageUpdate): Promise<UpdateMessageResponse> => { // <--- 修改返回值类型
+export const updateMessageAndRegenerate = (messageId: string, data: MessageUpdate): Promise<UpdateMessageResponse> => {
   return apiClient.put(`/messages/${messageId}`, data)
 };
 
@@ -154,9 +156,6 @@ export const initiateHistoryCompression = (messageId: string): Promise<{ message
  */
 export const generateChatTitle = (chatId: string): Promise<{ message: string }> => {
   return apiClient.post(`/chats/${chatId}/generate-title`)
-};
-export const getAvailableMcpServices = (): Promise<McpService[]> => { // <--- 2. 添加这个新函数
-  return apiClient.get('/mcp/available');
 };
 
 /**

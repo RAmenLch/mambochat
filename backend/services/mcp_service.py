@@ -1,85 +1,72 @@
+# backend/services/mcp_service.py
+
 import sys
 import os
 from typing import List, Dict, Any, Optional
 from contextlib import AsyncExitStack
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from backend.config.mcp_config import DDGS_MCP_SERVER_PATH
+from backend.crud import mcp_crud
+from backend.config.internal_mcp import get_internal_mcp_config, list_internal_mcps
+from backend.schemas.mcp import McpServerResponse
 
 
-class McpClientService:
+# --- Configuration Management Services ---
+
+async def load_mcp_config_by_id(db: AsyncSession, mcp_id: str) -> Optional[McpServerResponse]:
     """
-    封装 MCP 客户端逻辑，负责与 MCP 服务器子进程通信。
+    统一配置加载器：
+    先检查是否为系统内置 ID，如果是则直接返回配置；
+    否则去数据库查询。
     """
-
-    def __init__(self, script_path: str = str(DDGS_MCP_SERVER_PATH)):
-        self.script_path = script_path
-        self.session: Optional[ClientSession] = None
-        self._exit_stack = AsyncExitStack()
-
-    async def connect(self):
-        """
-        启动 MCP 服务器子进程并建立会话连接。
-        """
-        # 配置服务器参数，使用当前 Python 解释器运行目标脚本
-        server_params = StdioServerParameters(
-            command=sys.executable,
-            args=[self.script_path],
-            env=os.environ.copy()  # 继承当前环境以确保依赖可用
+    # 1. 检查内置注册表
+    internal_config = get_internal_mcp_config(mcp_id)
+    if internal_config:
+        # 构造响应对象
+        return McpServerResponse(
+            id=mcp_id,
+            **internal_config,
+            isSystem=True
         )
 
-        # 使用 AsyncExitStack 管理上下文，保持连接直到显式调用 close
-        read, write = await self._exit_stack.enter_async_context(stdio_client(server_params))
-        self.session = await self._exit_stack.enter_async_context(ClientSession(read, write))
+    # 2. 检查数据库
+    db_server = await mcp_crud.get_mcp_server(db, mcp_id)
+    if db_server:
+        return McpServerResponse.model_validate(db_server)
 
-        await self.session.initialize()
+    return None
 
-    async def get_openai_tools(self) -> List[Dict[str, Any]]:
-        """
-        获取 MCP 工具列表并转换为 OpenAI API 兼容的格式。
-        """
-        if not self.session:
-            raise RuntimeError("MCP session is not connected.")
 
-        result = await self.session.list_tools()
-        openai_tools = []
+async def get_all_merged_mcp_configs(db: AsyncSession) -> List[McpServerResponse]:
+    """
+    获取所有 MCP 配置的合并列表。
+    合并策略：系统内置 MCP (置顶) + 数据库自定义 MCP。
+    """
+    response_list = []
 
-        for tool in result.tools:
-            openai_tools.append({
-                "type": "function",
-                "function": {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": tool.inputSchema
-                }
-            })
+    # 1. 获取系统内置 MCP
+    internal_servers = list_internal_mcps()
+    for internal in internal_servers:
+        sys_mcp = McpServerResponse(
+            id=internal["id"],
+            name=internal["name"],
+            description=internal["description"],
+            transportType=internal["transportType"],
+            command=str(internal["command"]) if internal.get("command") else None,
+            args=internal["args"],
+            env=internal["env"],
+            url=internal.get("url"),
+            isEnabled=internal["isEnabled"],
+            isSystem=True
+        )
+        response_list.append(sys_mcp)
 
-        return openai_tools
+    # 2. 获取数据库中的自定义 MCP
+    db_servers = await mcp_crud.get_all_mcp_servers(db)
+    for server in db_servers:
+        response_list.append(McpServerResponse.model_validate(server))
 
-    async def call_tool(self, name: str, arguments: Dict[str, Any]) -> str:
-        """
-        调用指定的 MCP 工具并返回结果文本。
-        """
-        if not self.session:
-            raise RuntimeError("MCP session is not connected.")
-
-        result = await self.session.call_tool(name, arguments)
-
-        # 提取文本内容结果
-        content_list = []
-        if hasattr(result, 'content') and result.content:
-            for item in result.content:
-                if item.type == 'text':
-                    content_list.append(item.text)
-                # 暂不处理 image 或 resource 类型，按需扩展
-
-        return "\n".join(content_list)
-
-    async def close(self):
-        """
-        关闭会话并清理子进程资源。
-        """
-        await self._exit_stack.aclose()
-        self.session = None
+    return response_list

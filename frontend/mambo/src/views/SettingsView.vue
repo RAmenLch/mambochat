@@ -19,6 +19,9 @@
           <el-tab-pane label="全局配置" name="globalSettings">
             <GlobalSettings />
           </el-tab-pane>
+          <el-tab-pane label="MCP 工具" name="mcpManager">
+            <McpManager />
+          </el-tab-pane>
           <el-tab-pane label="资源中心" name="resourceManager">
             <ResourceManager />
           </el-tab-pane>
@@ -34,6 +37,7 @@ import { useRoute, useRouter } from 'vue-router';
 import ProviderModelManager from '@/components/settings/ProviderModelManager.vue';
 import GlobalSettings from '@/components/settings/GlobalSettings.vue';
 import ResourceManager from '@/components/settings/ResourceManager.vue';
+import McpManager from '@/components/settings/McpManager.vue';
 
 const route = useRoute();
 const router = useRouter();

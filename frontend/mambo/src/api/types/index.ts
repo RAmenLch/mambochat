@@ -5,3 +5,4 @@ export * from './chatTypes';
 export * from './resourceTypes';
 export * from './providerTypes';
 export * from './settingsTypes';
+export * from './mcpTypes';

@@ -57,12 +57,47 @@
     </div>
 
     <div class="actions">
+      <!-- MCP 工具选择器 -->
+      <el-popover
+        placement="bottom-end"
+        :width="220"
+        trigger="click"
+      >
+        <template #reference>
+          <el-button
+            :icon="Suitcase"
+            circle
+            title="MCP 工具"
+          />
+        </template>
+        <div class="mcp-tool-list">
+          <div class="mcp-header">可用工具</div>
+          <div v-if="activeUserMcpServices.length === 0" class="mcp-empty">
+            暂无可用工具
+          </div>
+          <div v-else class="mcp-items">
+            <div
+              v-for="tool in activeUserMcpServices"
+              :key="tool.id"
+              class="mcp-item"
+            >
+              <el-checkbox
+                :model-value="isMcpToolEnabled(tool.id)"
+                @change="$emit('toggleMcpTool', tool.id)"
+              >
+                <span :title="tool.description || tool.name">{{ tool.name }}</span>
+              </el-checkbox>
+            </div>
+          </div>
+        </div>
+      </el-popover>
+
       <el-button
         :icon="Search"
-        :type="isBingSearchEnabled ? 'primary' : ''"
+        :type="isWebSearchEnabled ? 'primary' : ''"
         circle
         title="联网搜索"
-        @click="$emit('toggleBingSearch')"
+        @click="$emit('toggleWebSearch')"
       />
       <el-button
         :icon="Upload"
@@ -94,10 +129,15 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import { storeToRefs } from 'pinia';
 import { useProviderStore } from '@/stores/providerStore';
+import { useMcpStore } from '@/stores/mcpStore';
 import type { Chat, Message } from '@/api/types';
 import type { PropType } from 'vue';
-import { Cpu, Setting, Files, Tickets, Upload, Collection, QuestionFilled, Search } from '@element-plus/icons-vue';
+import {
+  Cpu, Setting, Files, Tickets, Upload, Collection,
+  QuestionFilled, Search, Suitcase
+} from '@element-plus/icons-vue';
 
 const props = defineProps({
   currentChat: {
@@ -120,10 +160,14 @@ defineEmits([
   'triggerFileUpload',
   'openResourceSelector',
   'jumpToMessage',
-  'toggleBingSearch'
+  'toggleWebSearch',
+  'toggleMcpTool'
 ]);
 
 const providerStore = useProviderStore();
+const mcpStore = useMcpStore();
+
+const { activeUserMcpServices } = storeToRefs(mcpStore);
 
 const displayModelName = computed(() => {
   if (!props.currentChat?.aiModelId) {
@@ -134,12 +178,21 @@ const displayModelName = computed(() => {
 });
 
 /**
- * 检查当前会话是否已启用 Bing 搜索工具。
+ * 检查当前会话是否已启用系统联网搜索工具。
+ * 目标 ID: system-ddgs-search
  */
-const isBingSearchEnabled = computed((): boolean => {
+const isWebSearchEnabled = computed((): boolean => {
   const mcpIds = props.currentChat?.modelParameters?.enabled_mcp_ids;
-  return Array.isArray(mcpIds) && mcpIds.includes('bing-search');
+  return Array.isArray(mcpIds) && mcpIds.includes('system-ddgs-search');
 });
+
+/**
+ * 检查指定 MCP 工具是否在当前会话中启用。
+ */
+const isMcpToolEnabled = (mcpId: string): boolean => {
+  const mcpIds = props.currentChat?.modelParameters?.enabled_mcp_ids;
+  return Array.isArray(mcpIds) && mcpIds.includes(mcpId);
+};
 
 /**
  * Computed property to extract messages containing ZipHistory sub-messages.
@@ -263,5 +316,54 @@ const zipHistoryItems = computed(() => {
 
 .zip-item-tag {
   margin-left: 8px;
+}
+
+/* MCP Tool List Styles */
+.mcp-tool-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.mcp-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  margin-bottom: 8px;
+}
+
+.mcp-empty {
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+  text-align: center;
+  padding: 8px 0;
+}
+
+.mcp-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.mcp-item {
+  display: flex;
+  align-items: center;
+}
+
+.mcp-item .el-checkbox {
+  width: 100%;
+  margin-right: 0;
+}
+
+.mcp-item .el-checkbox__label span {
+  display: inline-block;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
 }
 </style>

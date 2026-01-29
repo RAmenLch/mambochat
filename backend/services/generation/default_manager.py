@@ -1,3 +1,5 @@
+# backend/services/generation/default_manager.py
+
 import asyncio
 import json
 from typing import AsyncGenerator, Optional, Dict
@@ -5,10 +7,10 @@ from typing import AsyncGenerator, Optional, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
-from backend.config.mcp_config import MCP_SERVER_ENABLED, DDGS_MCP_SERVER_PATH
 from backend.models.base_model import generate_uuid
 from backend.schemas import enums as schemas_enums
 from backend.schemas.message import McpToolContent
+from backend.services import mcp_service
 from backend.services.stream_manager_service import stream_manager
 from backend.services.generation.instructions import (
     BaseInstruction,
@@ -103,34 +105,56 @@ class DefaultGenerateManager(AbstractGenerateManager):
 
     async def _setup_mcp_tools(self, builder: LLMInputBuilder):
         """配置并注入 MCP 工具"""
-        if not MCP_SERVER_ENABLED:
-            return
-
-        # 检查 Chat 配置中是否启用了 MCP
+        # 1. 检查 Chat 配置中启用的 MCP ID 列表
         enabled_mcp_ids = []
         if builder.chat and builder.chat.modelParameters:
             try:
-                params = json.loads(builder.chat.modelParameters) if isinstance(builder.chat.modelParameters, str) else builder.chat.modelParameters
+                params = json.loads(builder.chat.modelParameters) if isinstance(builder.chat.modelParameters,
+                                                                                str) else builder.chat.modelParameters
                 enabled_mcp_ids = params.get("enabled_mcp_ids", [])
             except (json.JSONDecodeError, TypeError):
                 pass
 
-        if enabled_mcp_ids:
-            # 初始化 MultiServerMCPClient
-            # 目前仅示例配置 Bing Search，实际可根据 enabled_mcp_ids 动态加载不同 Server
-            self._mcp_client = MultiServerMCPClient(
-                {
-                    "bing_search": {
-                        "transport": "stdio",
-                        "command": "python",
-                        "args": [str(DDGS_MCP_SERVER_PATH)],
-                    }
+        if not enabled_mcp_ids:
+            return
+
+        # 2. 动态加载 MCP 配置并构建客户端参数
+        mcp_servers_config = {}
+
+        for mcp_id in enabled_mcp_ids:
+            # 使用统一服务加载配置 (支持系统内置和数据库自定义)
+            config = await mcp_service.load_mcp_config_by_id(self.db_session, mcp_id)
+
+            # 忽略不存在或未启用的服务
+            if not config or not config.isEnabled:
+                continue
+
+            # 根据传输类型构建配置
+            if config.transportType == schemas_enums.McpTransportType.STDIO:
+                mcp_servers_config[config.name] = {
+                    "transport": "stdio",
+                    "command": config.command,
+                    "args": config.args,
+                    "env": config.env or {}
                 }
-            )
-            # 获取 LangChain BaseTool 列表并注入 Builder
-            # 注意: 这里会启动子进程连接
-            tools = await self._mcp_client.get_tools()
-            builder.set_tools(tools)
+            elif config.transportType == schemas_enums.McpTransportType.SSE:
+                mcp_servers_config[config.name] = {
+                    "transport": "sse",
+                    "url": config.url
+                }
+
+        # 3. 初始化客户端并注入工具
+        if mcp_servers_config:
+            try:
+                self._mcp_client = MultiServerMCPClient(mcp_servers_config)
+                # 获取 LangChain BaseTool 列表并注入 Builder
+                # 注意: 这里会启动子进程连接或建立网络连接
+                tools = await self._mcp_client.get_tools()
+                builder.set_tools(tools)
+            except Exception as e:
+                print(f"[DefaultGenerateManager] Failed to initialize MCP client: {e}")
+                # 即使 MCP 初始化失败，也不应阻断主流程，只是没有工具可用
+                pass
 
     async def _process_stream_event(self, mode: str, event: any) -> AsyncGenerator[BaseInstruction, None]:
         """
@@ -168,7 +192,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
         # --- 3. 处理工具调用请求 (Tool Calls) ---
         # 通常在 mode='updates' 且 message 为 AIMessage 时出现
         from langchain_core.messages.tool import ToolCall
-        tool_calls:list[ToolCall] = OpenAiDecode.get_toolcall_content(mode, event)
+        tool_calls: list[ToolCall] = OpenAiDecode.get_toolcall_content(mode, event)
         if tool_calls:
             for tool_call in tool_calls:
                 # tool_call 结构: {'id': '...', 'name': '...', 'args': {...}, ...}
@@ -307,7 +331,10 @@ class DefaultGenerateManager(AbstractGenerateManager):
 
         # 4. 关闭 MCP 连接
         if self._mcp_client:
-            # 暂时没有 close 方法，预留
+            # MultiServerMCPClient 目前没有显式的 close 方法，
+            # 但如果底层使用了 AsyncExitStack 或类似机制，可能需要手动清理。
+            # 这里的 client 是为单次生成任务创建的，随 manager 销毁。
+            # 如果未来 LangChain 适配器提供了 close/aclose，应在此处调用。
             pass
 
     async def _cleanup_on_exception(

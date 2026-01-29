@@ -59,7 +59,8 @@
           @trigger-file-upload="handleTriggerFileUpload"
           @open-resource-selector="resourceSelectorVisible = true"
           @jump-to-message="handleJumpToMessage"
-          @toggle-bing-search="handleToggleBingSearch"
+          @toggle-web-search="handleToggleWebSearch"
+          @toggle-mcp-tool="handleToggleMcpTool"
         />
 
         <AttachmentPreview
@@ -378,19 +379,20 @@ async function handleSaveSettings(settings: ChatUpdate) {
 }
 
 /**
- * 处理 Bing 搜索工具的启用/停用切换。
+ * 处理联网搜索工具的启用/停用切换。
+ * 目标 ID: system-ddgs-search
  */
-async function handleToggleBingSearch() {
+async function handleToggleWebSearch() {
   if (!currentChat.value) return;
 
-  const BING_SEARCH_ID = 'bing-search';
+  const SEARCH_TOOL_ID = 'system-ddgs-search';
   const currentParams = currentChat.value.modelParameters || {};
   const currentMcpIds: string[] = currentParams.enabled_mcp_ids || [];
 
-  const isEnabled = currentMcpIds.includes(BING_SEARCH_ID);
+  const isEnabled = currentMcpIds.includes(SEARCH_TOOL_ID);
   const newMcpIds = isEnabled
-    ? currentMcpIds.filter(id => id !== BING_SEARCH_ID)
-    : [...currentMcpIds, BING_SEARCH_ID];
+    ? currentMcpIds.filter(id => id !== SEARCH_TOOL_ID)
+    : [...currentMcpIds, SEARCH_TOOL_ID];
 
   const updatedSettings: ChatUpdate = {
     modelParameters: {
@@ -401,6 +403,30 @@ async function handleToggleBingSearch() {
 
   await chatListStore.updateChatSettings(currentChat.value.id, updatedSettings);
   ElMessage.success(`联网搜索已${isEnabled ? '禁用' : '启用'}`);
+}
+
+/**
+ * 处理通用 MCP 工具的启用/停用切换。
+ */
+async function handleToggleMcpTool(mcpId: string) {
+  if (!currentChat.value) return;
+
+  const currentParams = currentChat.value.modelParameters || {};
+  const currentMcpIds: string[] = currentParams.enabled_mcp_ids || [];
+
+  const isEnabled = currentMcpIds.includes(mcpId);
+  const newMcpIds = isEnabled
+    ? currentMcpIds.filter(id => id !== mcpId)
+    : [...currentMcpIds, mcpId];
+
+  const updatedSettings: ChatUpdate = {
+    modelParameters: {
+      ...currentParams,
+      enabled_mcp_ids: newMcpIds,
+    },
+  };
+
+  await chatListStore.updateChatSettings(currentChat.value.id, updatedSettings);
 }
 
 
