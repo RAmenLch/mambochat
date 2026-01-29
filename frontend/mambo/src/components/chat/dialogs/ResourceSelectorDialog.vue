@@ -256,14 +256,25 @@
 
     <!-- Footer: 仅在资源模式下显示 (KB模式有内部Footer) -->
     <template #footer v-if="selectorMode === 'resource'">
-      <el-button @click="emit('update:visible', false)">取消</el-button>
-      <el-button
-        type="primary"
-        @click="handleConfirmSelection"
-        :disabled="selectedResources.length === 0"
-      >
-        使用 ({{ selectedResources.length }})
-      </el-button>
+<!--      <el-button @click="emit('update:visible', false)">取消</el-button>-->
+      <div class="action-buttons">
+        <el-button
+          v-if="showAppendButton"
+          type="default"
+          @click="handleAppend"
+          :disabled="selectedResources.length === 0"
+        >
+          追加 ({{ selectedResources.length }})
+        </el-button>
+        <el-button
+          v-if="showMountButton"
+          type="primary"
+          @click="handleMount"
+          :disabled="selectedResources.length === 0"
+        >
+          挂载 ({{ selectedResources.length }})
+        </el-button>
+      </div>
     </template>
   </el-dialog>
 </template>
@@ -285,11 +296,13 @@ import KnowledgeBaseSearchDialog from './KnowledgeBaseSearchDialog.vue';
 const props = defineProps<{
   visible: boolean;
   resourceTypeFilter?: string | null;
+  source: 'settings' | 'toolbar';
 }>();
 
 const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void;
-  (e: 'select-resource', resources: Resource[]): void;
+  (e: 'mount-resources', resources: Resource[]): void;
+  (e: 'append-resources', resources: Resource[]): void;
 }>();
 
 // --- Store ---
@@ -342,6 +355,27 @@ const currentFileInfo = computed(() => {
 const isImage = computed(() => {
   const mime = currentFileInfo.value?.mime_type;
   return mime ? mime.startsWith('image/') : false;
+});
+
+// 按钮显示逻辑
+const showMountButton = computed(() => {
+  if (selectedResources.value.length === 0) return false;
+  if (props.source === 'settings') return true;
+
+  // Toolbar: 允许挂载 submessage_template 和 file
+  return selectedResources.value.some(r =>
+    r.resourceType === 'submessage_template' || r.resourceType === 'file'
+  );
+});
+
+const showAppendButton = computed(() => {
+  if (selectedResources.value.length === 0) return false;
+  if (props.source === 'settings') return false;
+
+  // Toolbar: 允许追加 system_prompt 和 submessage_template
+  return selectedResources.value.some(r =>
+    r.resourceType === 'system_prompt' || r.resourceType === 'submessage_template'
+  );
 });
 
 function filterTreeByType(nodes: ResourceNode[]): ResourceNode[] {
@@ -634,9 +668,17 @@ async function loadResourcePreview(resourceId: string) {
   }
 }
 
-function handleConfirmSelection() {
+// --- Action Handlers ---
+
+function handleMount() {
   if (selectedResources.value.length === 0) return;
-  emit('select-resource', selectedResources.value);
+  emit('mount-resources', selectedResources.value);
+  emit('update:visible', false);
+}
+
+function handleAppend() {
+  if (selectedResources.value.length === 0) return;
+  emit('append-resources', selectedResources.value);
   emit('update:visible', false);
 }
 
@@ -672,7 +714,7 @@ const handleKBSelection = (items: KBSearchResultItem[]) => {
     kb_config: null
   }));
 
-  emit('select-resource', resources);
+  emit('append-resources', resources);
   emit('update:visible', false);
 };
 
@@ -882,6 +924,13 @@ const handleScroll = ({ scrollTop, scrollHeight, clientHeight }: any) => {
 /* Multi-select Preview Styles */
 .multi-preview-item { margin-bottom: 10px; }
 .multi-preview-label { font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 4px; font-weight: bold; }
+
+/* Footer Actions */
+.action-buttons {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
 
 @keyframes rotating {
   0% { transform: rotate(0deg); }

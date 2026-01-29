@@ -96,7 +96,9 @@
 
     <ResourceSelectorDialog
       v-model:visible="resourceSelectorVisible"
-      @select-resource="handleResourceSelected"
+      source="toolbar"
+      @mount-resources="handleMountResources"
+      @append-resources="handleAppendResources"
     />
   </div>
 </template>
@@ -227,47 +229,45 @@ const isSendButtonDisabled = computed(() => isGenerating.value || !isReadyToSend
 
 // --- Methods ---
 
-async function handleResourceSelected(resources: Resource[]) {
-  const promptContents: string[] = [];
-  let hasFileAdded = false; // 用于标记是否有文件被添加，以便决定是否提示
+/**
+ * 处理资源挂载操作 (Toolbar 场景)
+ * 支持: submessage_template, file
+ */
+async function handleMountResources(resources: Resource[]) {
+  let hasFileAdded = false;
 
   for (const resource of resources) {
-    if (resource.resourceType === 'system_prompt' || resource.resourceType === 'knowledge_base_chunk') {
-      // 处理文本类资源：追加到输入框
-      if (resource.latest_version?.content) {
-        promptContents.push(resource.latest_version.content);
-      }
-    } else if (resource.resourceType === 'submessage_template') {
-      // 处理模板类资源：挂载到 SubMessage 模板区
+    if (resource.resourceType === 'submessage_template') {
       addAttachedResource(resource);
     } else if (resource.resourceType === 'file') {
-      // [新增] 处理文件类资源：挂载到上传文件预览区
-      // 注意：ResourceSelectorDialog 已确保选中时加载了 details，所以 file_info 应该存在
       const fileInfo = resource.latest_version?.file_info;
-
       if (fileInfo) {
-        // 复用 useChatInput 中的 addUploadedFile 方法
-        // 这会将文件元数据加入 uploadedFiles 数组，AttachmentPreview 会自动渲染
-        // 发送消息时，useChatInput 会自动将其转换为 type: 'File' 的 SubMessage
         addUploadedFile(fileInfo);
         hasFileAdded = true;
       } else {
-        // 对应需求：content/file_info 为空时，简单提示
         ElMessage.warning(`资源 "${resource.name}" 文件信息为空，已跳过`);
       }
     }
   }
 
-  // 如果有文本内容，追加到草稿箱
-  if (promptContents.length > 0) {
-    appendContentToDraft(promptContents.join('\n'));
-    await nextTick();
-    chatInputBoxRef.value?.focus();
-  }
-
-  // 如果添加了文件，也可以给个成功提示（可选）
   if (hasFileAdded) {
     ElMessage.success('已从资源库添加文件');
+  }
+}
+
+/**
+ * 处理资源追加操作 (Toolbar 场景)
+ * 支持: system_prompt, submessage_template, knowledge_base_chunk
+ */
+async function handleAppendResources(resources: Resource[]) {
+  const contentsToAppend = resources
+    .map(res => res.latest_version?.content)
+    .filter((content): content is string => !!content);
+
+  if (contentsToAppend.length > 0) {
+    appendContentToDraft(contentsToAppend.join('\n'));
+    await nextTick();
+    chatInputBoxRef.value?.focus();
   }
 }
 

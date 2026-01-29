@@ -11,7 +11,9 @@
         type="info"
         @close="$emit('remove-resource', resource.id)"
       >
-        {{ resource.name }}
+        <el-tooltip :content="resource.latest_version?.content || ''" placement="top">
+          <span>{{ resource.name }}</span>
+        </el-tooltip>
       </el-tag>
     </div>
 

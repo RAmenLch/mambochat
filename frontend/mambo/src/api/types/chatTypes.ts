@@ -89,6 +89,7 @@ export interface Chat {
   sortOrder: number
   lastOpenedAt: string | null
   isLoaded?: boolean // 标记该节点的子节点是否已加载
+  resource_prompt_list?: string[] | null // 挂载的资源 ID 列表
 }
 
 export type ChatNode = Chat & { children?: ChatNode[] }
@@ -110,6 +111,7 @@ export interface ChatUpdate {
   modelParameters?: Record<string, any> | null
   parentId?: string | null
   sortOrder?: number
+  resource_prompt_list?: string[] | null
 }
 
 export interface ChatWithMessages extends Chat {
@@ -180,5 +182,3 @@ export interface ZipHistoryUpdateNotificationPayload {
   message_id: string
   sub_message: SubMessage
 }
-
-

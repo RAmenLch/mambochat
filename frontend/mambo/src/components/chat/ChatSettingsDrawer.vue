@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/chat/ChatSettingsDrawer.vue -->
 <template>
   <el-drawer
     :model-value="visible"
@@ -27,6 +28,22 @@
             </div>
           </template>
           <el-input v-model="chatSettingsForm.systemPrompt" type="textarea" :rows="8" placeholder="定义AI的角色和行为" />
+
+          <!-- 挂载资源预览区 -->
+          <div v-if="mountedSystemResources.length > 0" class="mounted-resources-area">
+            <el-tag
+              v-for="resource in mountedSystemResources"
+              :key="resource.id"
+              closable
+              disable-transitions
+              type="info"
+              @close="handleRemoveMountedResource(resource.id)"
+            >
+              <el-tooltip :content="resource.latest_version?.content || '无内容'" placement="top">
+                <span>{{ resource.name }}</span>
+              </el-tooltip>
+            </el-tag>
+          </div>
         </el-form-item>
         <el-divider>模型参数</el-divider>
 
@@ -40,11 +57,11 @@
           </template>
           <el-input-number v-model="chatSettingsForm.modelParameters.max_context_messages" :min="0" :step="2" controls-position="right" style="width: 100%;" />
         </el-form-item>
-        <el-form-item label="流式对话 (Stream)">
+        <el-form-item label="流式对话">
            <el-switch v-model="chatSettingsForm.modelParameters.stream" />
            <el-tooltip class="box-item" effect="dark" content="关闭后, AI将一次性返回完整回复, 可能会增加等待时间。" placement="top">
               <el-icon class="label-icon"><QuestionFilled /></el-icon>
-            </el-tooltip>
+           </el-tooltip>
         </el-form-item>
 
         <!-- 动态参数 -->
@@ -116,8 +133,8 @@
   <!-- Reusable Resource Selector Dialog -->
   <ResourceSelectorDialog
     v-model:visible="promptDialogVisible"
-    resource-type-filter="system_prompt"
-    @select-resource="handleAppendSystemPrompt"
+    source="settings"
+    @mount-resources="handleMountResources"
   />
 </template>
 
@@ -127,6 +144,7 @@ import { ElMessage } from 'element-plus';
 import { QuestionFilled } from '@element-plus/icons-vue';
 import { useSystemConfigStore } from '@/stores/systemConfigStore';
 import { useProviderStore } from '@/stores/providerStore';
+import { getResourceDetails } from '@/api/resourceService';
 import type { Chat, ChatUpdate, AIModel, Resource, LLMParameterDefinition } from '@/api/types';
 import ResourceSelectorDialog from './dialogs/ResourceSelectorDialog.vue';
 
@@ -178,6 +196,9 @@ const chatSettingsForm = reactive<ChatSettingsForm>({
   modelParameters: {},
 });
 
+// --- Mounted Resources State ---
+const mountedSystemResources = ref<Resource[]>([]);
+
 // --- Computed Properties ---
 
 const filteredGroupedModels = computed(() => {
@@ -217,7 +238,7 @@ const dynamicParameters = computed((): DynamicParameterUI[] => {
 });
 
 // --- Watchers ---
-watch(() => props.chatData, (newChat) => {
+watch(() => props.chatData, async (newChat) => {
   if (newChat) {
     chatSettingsForm.name = newChat.name;
     chatSettingsForm.aiModelId = newChat.aiModelId;
@@ -230,8 +251,24 @@ watch(() => props.chatData, (newChat) => {
       max_context_messages: params.max_context_messages ?? 0,
       stream: params.stream ?? true,
     };
+
+    // 加载挂载的资源列表
+    if (newChat.resource_prompt_list && newChat.resource_prompt_list.length > 0) {
+      mountedSystemResources.value = [];
+      try {
+        const promises = newChat.resource_prompt_list.map(id => getResourceDetails(id));
+        const results = await Promise.all(promises);
+        mountedSystemResources.value = results;
+      } catch (error) {
+        console.error('Failed to load mounted resources:', error);
+        ElMessage.error('加载挂载资源失败');
+      }
+    } else {
+      mountedSystemResources.value = [];
+    }
   }
 }, { immediate: true, deep: true });
+
 // 监听模型切换，清理不支持的参数
 watch(() => chatSettingsForm.aiModelId, (newModelId) => {
   if (!newModelId) return;
@@ -301,20 +338,22 @@ function handleToggleParameter(param: DynamicParameterUI, isEnabled: boolean) {
   chatSettingsForm.modelParameters = newParams;
 }
 
-function handleAppendSystemPrompt(resources: Resource[]) {
+function handleMountResources(resources: Resource[]) {
   if (resources.length === 0) return;
 
-  const contentsToAppend = resources
-    .map(res => res.latest_version?.content)
-    .filter((content): content is string => !!content)
-    .join('\n');
+  resources.forEach(resource => {
+    // 避免重复添加
+    if (!mountedSystemResources.value.some(r => r.id === resource.id)) {
+      mountedSystemResources.value.push(resource);
+    }
+  });
+}
 
-  if (!contentsToAppend) return;
-
-  const currentPrompt = chatSettingsForm.systemPrompt || '';
-  const separator = currentPrompt.trim().length > 0 ? '\n' : '';
-
-  chatSettingsForm.systemPrompt = currentPrompt + separator + contentsToAppend;
+function handleRemoveMountedResource(resourceId: string) {
+  const index = mountedSystemResources.value.findIndex(r => r.id === resourceId);
+  if (index !== -1) {
+    mountedSystemResources.value.splice(index, 1);
+  }
 }
 
 function handleSaveSettings() {
@@ -342,11 +381,15 @@ function handleSaveSettings() {
     }
   }
 
+  // 提取挂载的资源 ID 列表
+  const resourcePromptList = mountedSystemResources.value.map(r => r.id);
+
   emit('save', {
     name: chatSettingsForm.name,
     aiModelId: chatSettingsForm.aiModelId,
     systemPrompt: chatSettingsForm.systemPrompt,
     modelParameters: finalModelParameters,
+    resource_prompt_list: resourcePromptList.length > 0 ? resourcePromptList : null,
   });
 }
 
@@ -384,5 +427,11 @@ function handleDrawerClose() {
 .parameter-switch {
   margin-left: 16px;
   flex-shrink: 0;
+}
+.mounted-resources-area {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 </style>
