@@ -29,7 +29,7 @@
           </template>
           <el-input v-model="chatSettingsForm.systemPrompt" type="textarea" :rows="8" placeholder="定义AI的角色和行为" />
 
-          <!-- 挂载资源预览区 (修改部分：支持拖拽排序) -->
+          <!-- 挂载资源预览区 (支持拖拽排序) -->
           <div v-if="mountedSystemResources.length > 0" class="mounted-resources-wrapper">
             <transition-group
               name="list"
@@ -212,7 +212,7 @@ const chatSettingsForm = reactive<ChatSettingsForm>({
 // --- Mounted Resources State ---
 const mountedSystemResources = ref<Resource[]>([]);
 
-// --- Drag and Drop State (新增) ---
+// --- Drag and Drop State ---
 const draggedIndex = ref<number | null>(null);
 
 // --- Computed Properties ---
@@ -293,10 +293,12 @@ watch(chatConfigSnapshot, async (newConfig, oldConfig) => {
           // 并发请求资源详情
           const promises = newConfig.resource_prompt_list.map(id => getResourceDetails(id));
           const results = await Promise.all(promises);
-          // 保持原有顺序
+
+          // 保持原有顺序，并过滤掉 undefined
+          // 修复：使用 as Resource[] 强制类型转换，解决 ResourceWithVersions 和 Resource 的类型兼容问题
           const orderedResults = newConfig.resource_prompt_list
             .map(id => results.find(r => r.id === id))
-            .filter((r): r is Resource => !!r);
+            .filter((r) => !!r) as Resource[];
 
           mountedSystemResources.value = orderedResults;
         } catch (error) {
@@ -349,7 +351,7 @@ watch(() => chatSettingsForm.aiModelId, (newModelId) => {
 
 // --- Methods ---
 
-// --- Drag and Drop Logic (新增) ---
+// --- Drag and Drop Logic ---
 const handleDragStart = (index: number, event: DragEvent) => {
   draggedIndex.value = index;
   if (event.dataTransfer) {
@@ -500,7 +502,7 @@ function handleDrawerClose() {
   gap: 8px;
 }
 
-/* Drag and Drop Styles (与 AttachmentPreview 保持一致) */
+/* Drag and Drop Styles */
 .draggable-tag {
   cursor: grab;
   transition: all 0.3s ease;
