@@ -232,6 +232,49 @@ watch(() => props.chatData, (newChat) => {
     };
   }
 }, { immediate: true, deep: true });
+// 监听模型切换，清理不支持的参数
+watch(() => chatSettingsForm.aiModelId, (newModelId) => {
+  if (!newModelId) return;
+
+  const currentModel = providerStore.allModels.find(m => m.id === newModelId);
+  if (!currentModel) return;
+
+  const supportedParams = new Set(currentModel.meta_config?.supported_parameters ?? []);
+  // 核心参数：无论模型是否显式声明支持，通常都允许保留（与 dynamicParameters 逻辑保持一致）
+  const coreParameters = ['temperature', 'top_p'];
+
+  // 确定哪些参数应该被保留
+  // 逻辑必须与 dynamicParameters computed 中的显示逻辑保持一致
+  const keysToKeep = new Set<string>();
+
+  // 1. 固定参数 (始终保留)
+  keysToKeep.add('max_context_messages');
+  keysToKeep.add('stream');
+
+  // 2. 动态参数 (根据系统配置和模型支持情况保留)
+  if (systemConfigStore.llmParameters) {
+    systemConfigStore.llmParameters.forEach(paramDef => {
+      if (
+        coreParameters.includes(paramDef.key) ||
+        supportedParams.has(paramDef.key) ||
+        paramDef.default_activate
+      ) {
+        keysToKeep.add(paramDef.key);
+      }
+    });
+  }
+
+  // 3. 过滤 modelParameters 对象
+  const newParams: Record<string, any> = {};
+  for (const key in chatSettingsForm.modelParameters) {
+    if (keysToKeep.has(key)) {
+      newParams[key] = chatSettingsForm.modelParameters[key];
+    }
+  }
+
+  // 更新表单数据，移除不支持的参数
+  chatSettingsForm.modelParameters = newParams;
+});
 
 // --- Methods ---
 
