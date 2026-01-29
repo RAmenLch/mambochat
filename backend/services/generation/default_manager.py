@@ -158,9 +158,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 builder.set_tools(tools)
             except Exception as e:
                 print(f"[DefaultGenerateManager] Failed to initialize MCP client: {e}")
-                # 即使 MCP 初始化失败，也不应阻断主流程，只是没有工具可用
                 raise e
-                pass
 
     async def _process_stream_event(self, mode: str, event: any) -> AsyncGenerator[BaseInstruction, None]:
         """
