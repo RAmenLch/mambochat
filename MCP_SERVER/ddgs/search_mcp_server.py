@@ -104,5 +104,4 @@ async def read_webpage(url: str) -> str:
 
 if __name__ == "__main__":
     # 启动 MCP 服务器，使用 stdio 传输
-    # mcp.run(transport="stdio")
-    asyncio.run(read_webpage("https://www.leagueoflegends.com/en-us/news/game-updates/patch-26-1-notes/"))
+    mcp.run(transport="stdio")

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 from typing import AsyncGenerator, Optional, Dict
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -109,8 +110,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
         enabled_mcp_ids = []
         if builder.chat and builder.chat.modelParameters:
             try:
-                params = json.loads(builder.chat.modelParameters) if isinstance(builder.chat.modelParameters,
-                                                                                str) else builder.chat.modelParameters
+                params = json.loads(builder.chat.modelParameters) if isinstance(builder.chat.modelParameters, str) else builder.chat.modelParameters
                 enabled_mcp_ids = params.get("enabled_mcp_ids", [])
             except (json.JSONDecodeError, TypeError):
                 pass
@@ -131,14 +131,19 @@ class DefaultGenerateManager(AbstractGenerateManager):
 
             # 根据传输类型构建配置
             if config.transportType == schemas_enums.McpTransportType.STDIO:
-                mcp_servers_config[config.name] = {
+                # 必须继承当前系统环境变量，否则子进程可能因缺少 Path 而崩溃
+                current_env = os.environ.copy()
+                if config.env:
+                    current_env.update(config.env)
+
+                mcp_servers_config[config.id] = {
                     "transport": "stdio",
                     "command": config.command,
                     "args": config.args,
-                    "env": config.env or {}
+                    "env": current_env
                 }
             elif config.transportType == schemas_enums.McpTransportType.SSE:
-                mcp_servers_config[config.name] = {
+                mcp_servers_config[config.id] = {
                     "transport": "sse",
                     "url": config.url
                 }
@@ -154,6 +159,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
             except Exception as e:
                 print(f"[DefaultGenerateManager] Failed to initialize MCP client: {e}")
                 # 即使 MCP 初始化失败，也不应阻断主流程，只是没有工具可用
+                raise e
                 pass
 
     async def _process_stream_event(self, mode: str, event: any) -> AsyncGenerator[BaseInstruction, None]:
@@ -192,7 +198,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
         # --- 3. 处理工具调用请求 (Tool Calls) ---
         # 通常在 mode='updates' 且 message 为 AIMessage 时出现
         from langchain_core.messages.tool import ToolCall
-        tool_calls: list[ToolCall] = OpenAiDecode.get_toolcall_content(mode, event)
+        tool_calls:list[ToolCall] = OpenAiDecode.get_toolcall_content(mode, event)
         if tool_calls:
             for tool_call in tool_calls:
                 # tool_call 结构: {'id': '...', 'name': '...', 'args': {...}, ...}
