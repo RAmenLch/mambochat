@@ -5,7 +5,7 @@
     title="会话设置"
     direction="rtl"
     size="450px"
-    @update:model-value="val => emit('update:visible', val)"
+    @update:model-value="handleUpdateModelValue"
     @close="handleDrawerClose"
   >
     <div class="drawer-content">
@@ -63,7 +63,7 @@
         <!-- 固定参数 -->
         <el-form-item>
           <template #label>
-            <span>上下文消息数量 (Context)</span>
+            <span>上下文消息数量</span>
             <el-tooltip effect="dark" content="每次请求时携带的最近历史消息数量。0 代表不限制（发送全部历史）。" placement="top">
               <el-icon class="label-icon"><QuestionFilled /></el-icon>
             </el-tooltip>
@@ -215,6 +215,16 @@ const mountedSystemResources = ref<Resource[]>([]);
 // --- Drag and Drop State ---
 const draggedIndex = ref<number | null>(null);
 
+// --- Methods ---
+
+const handleUpdateModelValue = (val: boolean) => {
+  emit('update:visible', val);
+};
+
+const handleDrawerClose = () => {
+  emit('close');
+};
+
 // --- Computed Properties ---
 
 const filteredGroupedModels = computed(() => {
@@ -349,8 +359,6 @@ watch(() => chatSettingsForm.aiModelId, (newModelId) => {
   chatSettingsForm.modelParameters = newParams;
 });
 
-// --- Methods ---
-
 // --- Drag and Drop Logic ---
 const handleDragStart = (index: number, event: DragEvent) => {
   draggedIndex.value = index;
@@ -450,10 +458,6 @@ function handleSaveSettings() {
     modelParameters: finalModelParameters,
     resource_prompt_list: resourcePromptList.length > 0 ? resourcePromptList : null,
   });
-}
-
-function handleDrawerClose() {
-  emit('close');
 }
 </script>
 
