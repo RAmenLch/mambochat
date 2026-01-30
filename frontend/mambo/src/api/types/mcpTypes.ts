@@ -1,6 +1,7 @@
 // frontend/mambo/src/api/types/mcpTypes.ts
 
 export type McpTransportType = 'stdio' | 'sse';
+export type McpHealthStatus = 'healthy' | 'unhealthy' | null;
 
 export interface McpServer {
   id: string;
@@ -9,6 +10,11 @@ export interface McpServer {
   transportType: McpTransportType;
   isEnabled: boolean;
   isSystem: boolean;
+
+  // 状态字段
+  last_status: McpHealthStatus;
+  last_test_at: string | null;
+  last_error: string | null;
 
   // STDIO 模式专属字段
   command: string | null;
@@ -47,4 +53,11 @@ export interface McpUpdateRequest {
 
   // SSE 模式参数
   url?: string | null;
+}
+
+export interface McpTestResponse {
+  status: 'healthy' | 'unhealthy';
+  tools_count: number;
+  message: string;
+  error: string | null;
 }

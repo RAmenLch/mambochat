@@ -6,13 +6,12 @@ import os
 from typing import AsyncGenerator, Optional, Dict
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from backend.models.base_model import generate_uuid
 from backend.schemas import enums as schemas_enums
 from backend.schemas.message import McpToolContent
-from backend.services import mcp_service
 from backend.services.stream_manager_service import stream_manager
+from backend.services.mcp_connection_manager import McpConnectionManager, McpConnectionError
 from backend.services.generation.instructions import (
     BaseInstruction,
     CreateSubMessage,
@@ -37,6 +36,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
     1. 负责标准的对话生成流程，支持文本、推理 (Reasoning)、工具调用 (MCP) 和多模态图片生成。
     2. 接管原 ReActAgentChatGenerateManager 的能力，通过 LangChain/LangGraph 的事件流驱动。
     3. 解析 OpenAiWorker 输出的 messages (流式) 和 updates (状态) 事件，转换为前端指令。
+    4. 集成 MCP 连接管理，负责在生成前进行服务可用性熔断检查。
     """
 
     def __init__(self, db_session: AsyncSession):
@@ -51,9 +51,6 @@ class DefaultGenerateManager(AbstractGenerateManager):
         # 工具信息缓存: tool_call_id -> McpToolContent
         # 用于在接收到 Tool Result 时，结合之前的 Tool Call 信息构建完整的更新 Payload
         self._tool_info_cache: Dict[str, McpToolContent] = {}
-
-        # MCP 客户端实例
-        self._mcp_client: Optional[MultiServerMCPClient] = None
 
     async def _execute_generation(
             self,
@@ -79,14 +76,29 @@ class DefaultGenerateManager(AbstractGenerateManager):
             .enable_resource_prompt_merge()
         )
 
-        # 2. 预加载素材以检查配置
-        await builder._load_materials()
+        try:
+            # 2. 预加载素材以检查配置
+            await builder._load_materials()
 
-        # 3. 初始化 MCP 工具 (如果启用)
-        await self._setup_mcp_tools(builder)
+            # 3. 初始化 MCP 工具 (如果启用)
+            # 这里会进行连接检查，如果服务不可用将抛出异常并熔断
+            await self._setup_mcp_tools(builder)
 
-        # 4. 构建 LLMInput
-        llm_input = await builder.build()
+            # 4. 构建 LLMInput
+            llm_input = await builder.build()
+
+        except McpConnectionError as e:
+            # 熔断处理：如果 MCP 服务不可用，直接生成错误消息并终止，不消耗 LLM Token
+            error_id = generate_uuid()
+            yield CreateSubMessage(
+                sub_message_id=error_id,
+                type=schemas_enums.SubMessageType.NORMAL.value,
+                sortOrder=1,
+                status=schemas_enums.MessageStatus.FAILED,
+                initial_content=f"**生成已终止**：检测到配置的 MCP 服务不可用。\n\n错误信息：{e.error_message}"
+            )
+            yield SetFinalStatus(status=schemas_enums.MessageStatus.FAILED)
+            return
 
         # 5. 执行生成循环
         # V2 Worker 返回的是 (mode, event) 元组流
@@ -105,12 +117,13 @@ class DefaultGenerateManager(AbstractGenerateManager):
             yield instruction
 
     async def _setup_mcp_tools(self, builder: LLMInputBuilder):
-        """配置并注入 MCP 工具"""
+        """配置并注入 MCP 工具，包含健康检查"""
         # 1. 检查 Chat 配置中启用的 MCP ID 列表
         enabled_mcp_ids = []
         if builder.chat and builder.chat.modelParameters:
             try:
-                params = json.loads(builder.chat.modelParameters) if isinstance(builder.chat.modelParameters, str) else builder.chat.modelParameters
+                params = json.loads(builder.chat.modelParameters) if isinstance(builder.chat.modelParameters,
+                                                                                str) else builder.chat.modelParameters
                 enabled_mcp_ids = params.get("enabled_mcp_ids", [])
             except (json.JSONDecodeError, TypeError):
                 pass
@@ -118,47 +131,14 @@ class DefaultGenerateManager(AbstractGenerateManager):
         if not enabled_mcp_ids:
             return
 
-        # 2. 动态加载 MCP 配置并构建客户端参数
-        mcp_servers_config = {}
+        # 2. 使用连接管理器获取工具并检查状态
+        # 如果有服务不可用，此处会抛出 McpConnectionError
+        conn_manager = McpConnectionManager(self.db_session)
+        tools = await conn_manager.get_tools_and_check_status(enabled_mcp_ids)
 
-        for mcp_id in enabled_mcp_ids:
-            # 使用统一服务加载配置 (支持系统内置和数据库自定义)
-            config = await mcp_service.load_mcp_config_by_id(self.db_session, mcp_id)
-
-            # 忽略不存在或未启用的服务
-            if not config or not config.isEnabled:
-                continue
-
-            # 根据传输类型构建配置
-            if config.transportType == schemas_enums.McpTransportType.STDIO:
-                # 必须继承当前系统环境变量，否则子进程可能因缺少 Path 而崩溃
-                current_env = os.environ.copy()
-                if config.env:
-                    current_env.update(config.env)
-
-                mcp_servers_config[config.id] = {
-                    "transport": "stdio",
-                    "command": config.command,
-                    "args": config.args,
-                    "env": current_env
-                }
-            elif config.transportType == schemas_enums.McpTransportType.SSE:
-                mcp_servers_config[config.id] = {
-                    "transport": "sse",
-                    "url": config.url
-                }
-
-        # 3. 初始化客户端并注入工具
-        if mcp_servers_config:
-            try:
-                self._mcp_client = MultiServerMCPClient(mcp_servers_config)
-                # 获取 LangChain BaseTool 列表并注入 Builder
-                # 注意: 这里会启动子进程连接或建立网络连接
-                tools = await self._mcp_client.get_tools()
-                builder.set_tools(tools)
-            except Exception as e:
-                print(f"[DefaultGenerateManager] Failed to initialize MCP client: {e}")
-                raise e
+        # 3. 注入工具到 Builder
+        if tools:
+            builder.set_tools(tools)
 
     async def _process_stream_event(self, mode: str, event: any) -> AsyncGenerator[BaseInstruction, None]:
         """
@@ -196,7 +176,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
         # --- 3. 处理工具调用请求 (Tool Calls) ---
         # 通常在 mode='updates' 且 message 为 AIMessage 时出现
         from langchain_core.messages.tool import ToolCall
-        tool_calls:list[ToolCall] = OpenAiDecode.get_toolcall_content(mode, event)
+        tool_calls: list[ToolCall] = OpenAiDecode.get_toolcall_content(mode, event)
         if tool_calls:
             for tool_call in tool_calls:
                 # tool_call 结构: {'id': '...', 'name': '...', 'args': {...}, ...}
@@ -332,14 +312,6 @@ class DefaultGenerateManager(AbstractGenerateManager):
 
         # 3. 设置最终状态
         yield SetFinalStatus(status=schemas_enums.MessageStatus.COMPLETED)
-
-        # 4. 关闭 MCP 连接
-        if self._mcp_client:
-            # MultiServerMCPClient 目前没有显式的 close 方法，
-            # 但如果底层使用了 AsyncExitStack 或类似机制，可能需要手动清理。
-            # 这里的 client 是为单次生成任务创建的，随 manager 销毁。
-            # 如果未来 LangChain 适配器提供了 close/aclose，应在此处调用。
-            pass
 
     async def _cleanup_on_exception(
             self,

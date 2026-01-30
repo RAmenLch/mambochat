@@ -1,7 +1,7 @@
 // frontend/mambo/src/api/mcpService.ts
 
 import apiClient from './index';
-import type { McpServer, McpCreateRequest, McpUpdateRequest } from './types';
+import type { McpServer, McpCreateRequest, McpUpdateRequest, McpTestResponse } from './types';
 
 /**
  * 获取所有可用 MCP 服务列表
@@ -44,4 +44,12 @@ export const updateMcp = (id: string, data: McpUpdateRequest): Promise<McpServer
  */
 export const deleteMcp = (id: string): Promise<void> => {
   return apiClient.delete(`/mcp/${id}`);
+};
+
+/**
+ * 测试指定 MCP 服务的连接状态
+ * @param id MCP 服务 ID
+ */
+export const testMcpServer = (id: string): Promise<McpTestResponse> => {
+  return apiClient.post(`/mcp/${id}/test`);
 };

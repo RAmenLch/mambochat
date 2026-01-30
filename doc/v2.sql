@@ -56,3 +56,7 @@ ALTER TABLE ResourceKBChunk ADD COLUMN fts_id INTEGER;
 CREATE INDEX IF NOT EXISTS ix_ResourceKBChunk_fts_id ON ResourceKBChunk (fts_id);
 
 ALTER TABLE Chat ADD COLUMN resource_prompt_list TEXT;
+
+ALTER TABLE McpServer ADD COLUMN last_status VARCHAR(50);
+ALTER TABLE McpServer ADD COLUMN last_test_at DATETIME;
+ALTER TABLE McpServer ADD COLUMN last_error TEXT;

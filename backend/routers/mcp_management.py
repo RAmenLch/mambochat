@@ -8,6 +8,7 @@ from backend.database import get_db
 from backend.schemas.mcp import McpServerCreate, McpServerUpdate, McpServerResponse
 from backend.crud import mcp_crud
 from backend.services import mcp_service
+from backend.services.mcp_connection_manager import McpConnectionManager, McpConnectionError
 
 router = APIRouter()
 
@@ -78,3 +79,41 @@ async def delete_mcp_server(server_id: str, db: AsyncSession = Depends(get_db)):
     if not success:
         raise HTTPException(status_code=404, detail="MCP Server not found")
     return
+
+
+@router.post("/{server_id}/test", summary="测试 MCP 服务器连接")
+async def test_mcp_server(server_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    测试指定的 MCP 服务器连接状态。
+    无论成功或失败，HTTP 状态码均为 200，请通过响应体中的 status 字段判断结果。
+    """
+    # 确认服务存在
+    server = await mcp_service.load_mcp_config_by_id(db, server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="MCP Server not found")
+
+    manager = McpConnectionManager(db)
+    try:
+        tools = await manager.get_tools_and_check_status([server_id])
+        return {
+            "status": "healthy",
+            "tools_count": len(tools),
+            "message": f"Successfully connected. Found {len(tools)} tools.",
+            "error": None
+        }
+    except McpConnectionError as e:
+        # 捕获连接错误，返回 200 状态码和 unhealthy 状态
+        return {
+            "status": "unhealthy",
+            "tools_count": 0,
+            "message": "Connection failed.",
+            "error": e.error_message
+        }
+    except Exception as e:
+        # 捕获其他未预期的错误
+        return {
+            "status": "unhealthy",
+            "tools_count": 0,
+            "message": "Unexpected error occurred.",
+            "error": str(e)
+        }

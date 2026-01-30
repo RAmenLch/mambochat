@@ -73,21 +73,40 @@
     </el-form>
 
     <template #footer>
-      <span class="dialog-footer">
-        <el-button @click="handleCancel">取消</el-button>
-        <el-button type="primary" @click="handleSubmit" :loading="isSubmitting">
-          确定
-        </el-button>
-      </span>
+      <div class="dialog-footer-wrapper">
+        <div class="footer-left">
+          <template v-if="isEditMode">
+            <el-button
+              :loading="isTestingConnection"
+              :icon="Connection"
+              @click="handleTestConnection"
+            >
+              测试连接
+            </el-button>
+            <div v-if="testFeedback.status !== 'none'" class="test-feedback" :class="testFeedback.status">
+              <el-icon v-if="testFeedback.status === 'success'"><CircleCheck /></el-icon>
+              <el-icon v-else><CircleClose /></el-icon>
+              <span :title="testFeedback.message">{{ testFeedback.shortMessage }}</span>
+            </div>
+          </template>
+        </div>
+        <div class="footer-right">
+          <el-button @click="handleCancel">取消</el-button>
+          <el-button type="primary" @click="handleSubmit" :loading="isSubmitting">
+            确定
+          </el-button>
+        </div>
+      </div>
     </template>
   </el-dialog>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue';
-import { Plus, Minus } from '@element-plus/icons-vue';
+import { Plus, Minus, Connection, CircleCheck, CircleClose } from '@element-plus/icons-vue';
 import type { FormInstance, FormRules } from 'element-plus';
 import type { McpServer, McpCreateRequest, McpTransportType } from '@/api/types';
+import { useMcpStore } from '@/stores/mcpStore';
 
 const props = defineProps<{
   visible: boolean;
@@ -100,9 +119,18 @@ const emit = defineEmits<{
   (e: 'save', data: McpCreateRequest): void;
 }>();
 
+const mcpStore = useMcpStore();
 const formRef = ref<FormInstance>();
 
-// 内部表单数据结构，为了方便 UI 绑定，将 args 和 env 转换为数组形式
+// 测试连接状态
+const isTestingConnection = ref(false);
+const testFeedback = reactive({
+  status: 'none' as 'none' | 'success' | 'error',
+  shortMessage: '',
+  message: ''
+});
+
+// 内部表单数据结构
 interface LocalFormData {
   name: string;
   description: string;
@@ -152,6 +180,11 @@ watch(
   () => [props.visible, props.initialData],
   ([newVisible]) => {
     if (newVisible) {
+      // 重置测试状态
+      testFeedback.status = 'none';
+      testFeedback.shortMessage = '';
+      testFeedback.message = '';
+
       if (props.initialData) {
         // 编辑模式：回填数据
         const data = props.initialData as McpServer;
@@ -247,6 +280,28 @@ const handleSubmit = async () => {
     }
   });
 };
+
+const handleTestConnection = async () => {
+  if (!props.initialData?.id) return;
+
+  isTestingConnection.value = true;
+  testFeedback.status = 'none';
+
+  try {
+    await mcpStore.testConnection(props.initialData.id);
+    testFeedback.status = 'success';
+    testFeedback.shortMessage = '连接成功';
+    testFeedback.message = '连接测试通过，服务运行正常。';
+  } catch (error: any) {
+    testFeedback.status = 'error';
+    testFeedback.shortMessage = '连接失败';
+    // store 抛出的 Error.message 即为具体错误信息
+    const detail = error.message || '连接测试未通过，请检查配置。';
+    testFeedback.message = detail;
+  } finally {
+    isTestingConnection.value = false;
+  }
+};
 </script>
 
 <style scoped>
@@ -266,5 +321,33 @@ const handleSubmit = async () => {
 .separator {
   font-weight: bold;
   color: var(--el-text-color-secondary);
+}
+
+.dialog-footer-wrapper {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.footer-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.test-feedback {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.test-feedback.success {
+  color: var(--el-color-success);
+}
+
+.test-feedback.error {
+  color: var(--el-color-danger);
 }
 </style>

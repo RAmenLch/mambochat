@@ -2,6 +2,7 @@
 
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Dict
+from datetime import datetime
 from backend.schemas.enums import McpTransportType
 
 class McpServerBase(BaseModel):
@@ -20,14 +21,20 @@ class McpServerBase(BaseModel):
 
     @field_validator('url')
     def validate_url_if_sse(cls, v, values):
-        if values.data.get('transportType') == McpTransportType.SSE and not v:
-            raise ValueError('URL is required for SSE transport')
+        if values.data.get('transportType') == McpTransportType.SSE:
+            if not v:
+                raise ValueError('URL is required for SSE transport')
+            # 清理 URL 中的空白字符
+            return v.strip()
         return v
 
     @field_validator('command')
     def validate_command_if_stdio(cls, v, values):
-        if values.data.get('transportType') == McpTransportType.STDIO and not v:
-            raise ValueError('Command is required for stdio transport')
+        if values.data.get('transportType') == McpTransportType.STDIO:
+            if not v:
+                raise ValueError('Command is required for stdio transport')
+            # 清理命令中的空白字符
+            return v.strip()
         return v
 
 class McpServerCreate(McpServerBase):
@@ -47,6 +54,10 @@ class McpServerResponse(McpServerBase):
     id: str
     isSystem: bool = False  # 标记是否为系统内置工具
 
+    # 状态监控字段
+    last_status: Optional[str] = None
+    last_test_at: Optional[datetime] = None
+    last_error: Optional[str] = None
+
     class Config:
         from_attributes = True
-

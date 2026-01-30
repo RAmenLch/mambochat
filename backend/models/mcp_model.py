@@ -1,6 +1,6 @@
 # backend/models/mcp_model.py
 
-from sqlalchemy import Column, String, Boolean, JSON, Text
+from sqlalchemy import Column, String, Boolean, JSON, Text, DateTime
 from backend.models.base_model import Base, generate_uuid
 from backend.schemas.enums import McpTransportType
 
@@ -25,3 +25,7 @@ class McpServer(Base):
 
     isEnabled = Column(Boolean, default=True)
 
+    # 状态监控字段
+    last_status = Column(String(50), nullable=True)  # 例如: "healthy", "unhealthy"
+    last_test_at = Column(DateTime, nullable=True)   # 上次测试/执行时间
+    last_error = Column(Text, nullable=True)         # 详细报错堆栈信息

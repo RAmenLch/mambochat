@@ -59,8 +59,8 @@
     <div class="actions">
       <!-- MCP 工具选择器 -->
       <el-popover
-        placement="bottom-end"
-        :width="220"
+        placement="top"
+        :width="260"
         trigger="click"
       >
         <template #reference>
@@ -81,12 +81,31 @@
               :key="tool.id"
               class="mcp-item"
             >
-              <el-checkbox
-                :model-value="isMcpToolEnabled(tool.id)"
-                @change="$emit('toggleMcpTool', tool.id)"
-              >
-                <span :title="tool.description || tool.name">{{ tool.name }}</span>
-              </el-checkbox>
+              <div class="mcp-item-left">
+                <el-checkbox
+                  :model-value="isMcpToolEnabled(tool.id)"
+                  @change="$emit('toggleMcpTool', tool.id)"
+                >
+                  <span :title="tool.description || tool.name">{{ tool.name }}</span>
+                </el-checkbox>
+              </div>
+
+              <div class="mcp-item-right">
+                <div
+                  class="mcp-status-dot"
+                  :class="getMcpStatusClass(tool.last_status)"
+                  :title="getMcpStatusTitle(tool.last_status)"
+                ></div>
+                <el-button
+                  link
+                  size="small"
+                  :icon="Refresh"
+                  class="mcp-test-btn"
+                  :loading="testingMcpIds.has(tool.id)"
+                  @click.stop="handleTestMcpTool(tool.id)"
+                  title="测试连接"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -128,15 +147,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, reactive } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useProviderStore } from '@/stores/providerStore';
 import { useMcpStore } from '@/stores/mcpStore';
-import type { Chat, Message } from '@/api/types';
+import type { Chat, Message, McpHealthStatus } from '@/api/types';
 import type { PropType } from 'vue';
+import { ElMessage } from 'element-plus';
 import {
   Cpu, Setting, Files, Tickets, Upload, Collection,
-  QuestionFilled, Search, Suitcase
+  QuestionFilled, Search, Suitcase, Refresh
 } from '@element-plus/icons-vue';
 
 const props = defineProps({
@@ -168,6 +188,9 @@ const providerStore = useProviderStore();
 const mcpStore = useMcpStore();
 
 const { activeUserMcpServices } = storeToRefs(mcpStore);
+
+// 本地状态：正在测试连接的 MCP ID 集合
+const testingMcpIds = reactive(new Set<string>());
 
 const displayModelName = computed(() => {
   if (!props.currentChat?.aiModelId) {
@@ -214,6 +237,41 @@ const zipHistoryItems = computed(() => {
 
   return items;
 });
+
+/**
+ * 处理 MCP 工具连接测试
+ */
+const handleTestMcpTool = async (mcpId: string) => {
+  if (testingMcpIds.has(mcpId)) return;
+
+  testingMcpIds.add(mcpId);
+  try {
+    await mcpStore.testConnection(mcpId);
+    // 状态更新由 store 自动处理，UI 会响应式更新
+  } catch (error: any) {
+    // 错误信息已在 store 中记录，且 store 抛出的 Error.message 即为具体错误
+    const detail = error.message || '连接失败';
+    ElMessage.error(detail);
+  } finally {
+    testingMcpIds.delete(mcpId);
+  }
+};
+
+const getMcpStatusClass = (status: McpHealthStatus) => {
+  switch (status) {
+    case 'healthy': return 'status-healthy';
+    case 'unhealthy': return 'status-unhealthy';
+    default: return 'status-unknown';
+  }
+};
+
+const getMcpStatusTitle = (status: McpHealthStatus) => {
+  switch (status) {
+    case 'healthy': return '连接正常';
+    case 'unhealthy': return '连接异常';
+    default: return '未测试';
+  }
+};
 </script>
 
 <style scoped>
@@ -351,19 +409,74 @@ const zipHistoryItems = computed(() => {
 .mcp-item {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  padding: 2px 0;
 }
 
-.mcp-item .el-checkbox {
+.mcp-item-left {
+  flex: 1;
+  min-width: 0; /* 允许 flex item 收缩 */
+  margin-right: 8px;
+}
+
+.mcp-item-left .el-checkbox {
   width: 100%;
   margin-right: 0;
+  height: auto;
 }
 
-.mcp-item .el-checkbox__label span {
-  display: inline-block;
-  max-width: 160px;
+.mcp-item-left :deep(.el-checkbox__label) {
+  width: 100%;
+  padding-left: 8px;
+}
+
+.mcp-item-left .el-checkbox__label span {
+  display: block;
+  width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   vertical-align: middle;
+}
+
+.mcp-item-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.mcp-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.status-healthy {
+  background-color: var(--el-color-success);
+  box-shadow: 0 0 3px var(--el-color-success-light-5);
+}
+
+.status-unhealthy {
+  background-color: var(--el-color-danger);
+  box-shadow: 0 0 3px var(--el-color-danger-light-5);
+}
+
+.status-unknown {
+  background-color: var(--el-color-info-light-3);
+  border: 1px solid var(--el-color-info-light-5);
+}
+
+.mcp-test-btn {
+  padding: 4px;
+  height: 24px;
+  width: 24px;
+  font-size: 14px;
+  color: var(--el-text-color-secondary);
+}
+
+.mcp-test-btn:hover {
+  color: var(--el-color-primary);
+  background-color: var(--el-fill-color-light);
 }
 </style>
