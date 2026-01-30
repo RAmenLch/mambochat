@@ -16,8 +16,8 @@ _project_root = _current_dir.parent.parent
 # Value: 配置字典
 INTERNAL_MCP_REGISTRY: Dict[str, Dict[str, Any]] = {
     "system-ddgs-search": {
-        "name": "⚡️ 联网搜索 (DDGS)",
-        "description": "系统内置：使用 DuckDuckGo 进行隐私保护的联网搜索。",
+        "name": "⚡️联网搜索(DDGS)",
+        "description": "系统内置：使用 DuckDuckGo进行联网搜索。",
         "transportType": McpTransportType.STDIO,
         "command": sys.executable,  # 使用当前运行环境的 Python 解释器
         "args": [str(_project_root / "MCP_SERVER" / "ddgs" / "search_mcp_server.py")],

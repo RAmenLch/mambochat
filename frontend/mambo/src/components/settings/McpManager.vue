@@ -21,7 +21,7 @@
 
       <el-table-column prop="transportType" label="连接类型" width="100">
         <template #default="{ row }">
-          <el-tag :type="row.transportType === 'stdio' ? '' : 'warning'">
+          <el-tag :type="row.transportType === 'stdio' ? 'info' : 'warning'">
             {{ row.transportType.toUpperCase() }}
           </el-tag>
         </template>
