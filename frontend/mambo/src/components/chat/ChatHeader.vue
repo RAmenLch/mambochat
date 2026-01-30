@@ -67,17 +67,6 @@
 
     <!-- 竖向模式底部的操作按钮组 -->
     <div v-if="mode === 'vertical' && currentChat" class="header-bottom-actions">
-      <!-- 导出按钮 (竖向模式) -->
-      <el-dropdown trigger="click" @command="handleExport">
-        <el-button :icon="Download" circle text class="action-btn" title="导出对话" />
-        <template #dropdown>
-          <el-dropdown-menu>
-            <el-dropdown-item command="json">导出 JSON</el-dropdown-item>
-            <el-dropdown-item command="markdown">导出 Markdown</el-dropdown-item>
-            <el-dropdown-item command="html">导出 HTML</el-dropdown-item>
-          </el-dropdown-menu>
-        </template>
-      </el-dropdown>
 
       <!-- 编辑按钮 (Popover) -->
       <el-popover
