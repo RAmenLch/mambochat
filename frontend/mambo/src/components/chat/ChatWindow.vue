@@ -13,6 +13,7 @@
         v-if="!isSidebarCollapsed"
         :current-chat="currentChat"
         :is-title-refreshing="isTitleRefreshing"
+        :messages="currentChatMessages"
         @save-title="(newTitle) => chatListStore.updateChatSettings(currentChat!.id, { name: newTitle })"
         @refresh-title="handleRefreshTitle"
       />
