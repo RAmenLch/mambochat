@@ -113,6 +113,7 @@
               :data="filteredTreeData"
               node-key="id"
               :props="treeProps"
+              :expand-on-click-node="false"
               @node-click="handleNodeClick"
               @node-expand="handleNodeExpand"
               @node-collapse="handleNodeCollapse"
@@ -146,6 +147,15 @@
                   >
                     {{ getReadableResourceType(data.resourceType) }}
                   </el-tag>
+                  <!-- 特殊处理：知识库也是文件夹，但也显示类型标签 -->
+                  <el-tag
+                    v-else-if="data.itemType === 'folder' && data.resourceType === 'knowledge_base'"
+                    size="small"
+                    type="primary"
+                    class="resource-type-tag"
+                  >
+                    知识库
+                  </el-tag>
                 </span>
               </template>
             </el-tree>
@@ -164,8 +174,26 @@
               </div>
             </template>
             <el-scrollbar class="preview-scrollbar" v-loading="isPreviewLoading">
+              <!-- Knowledge Base Preview -->
+              <template v-if="selectedResources[0].resourceType === 'knowledge_base'">
+                <div class="kb-preview-wrapper">
+                  <el-icon :size="64" color="#409EFF"><Collection /></el-icon>
+                  <h3>{{ selectedResources[0].name }}</h3>
+                  <p class="kb-desc">{{ selectedResources[0].description || '暂无描述' }}</p>
+                  <el-alert
+                    title="知识库挂载说明"
+                    type="info"
+                    :closable="false"
+                    show-icon
+                    style="margin-top: 20px; max-width: 80%;"
+                  >
+                    点击下方“提供给AI助手检索”按钮，将此知识库挂载到当前会话。AI助手将能够根据您的提问，自动检索知识库中的相关内容。
+                  </el-alert>
+                </div>
+              </template>
+
               <!-- File Resource Preview -->
-              <template v-if="selectedResources[0].resourceType === 'file'">
+              <template v-else-if="selectedResources[0].resourceType === 'file'">
                 <div v-if="currentFileInfo" class="file-preview-wrapper">
                   <!-- Image Preview -->
                   <div v-if="isImage" class="file-preview-image">
@@ -217,8 +245,12 @@
               <div v-for="(res, index) in selectedResources" :key="res.id" class="multi-preview-item">
                 <div class="multi-preview-label">#{{ index + 1 }} {{ res.name }}</div>
 
+                <template v-if="res.resourceType === 'knowledge_base'">
+                   <div class="mini-empty">知识库容器 (不支持预览内容)</div>
+                </template>
+
                 <!-- Multi-select File Preview -->
-                <template v-if="res.resourceType === 'file'">
+                <template v-else-if="res.resourceType === 'file'">
                   <div v-if="res.latest_version?.file_info" class="file-preview-wrapper mini">
                     <div v-if="isResourceImage(res)" class="file-preview-image mini">
                       <el-image
@@ -256,8 +288,18 @@
 
     <!-- Footer: 仅在资源模式下显示 (KB模式有内部Footer) -->
     <template #footer v-if="selectorMode === 'resource'">
-<!--      <el-button @click="emit('update:visible', false)">取消</el-button>-->
       <div class="action-buttons">
+        <!-- 新增: 提供给AI助手检索按钮 -->
+        <el-button
+          v-if="showKbSearchButton"
+          type="primary"
+          :icon="Search"
+          plain
+          @click="handleMountKnowledgeBase"
+        >
+          提供给AI助手检索
+        </el-button>
+
         <el-button
           v-if="showAppendButton"
           type="default"
@@ -285,7 +327,7 @@ import { ElTree, ElMessage } from 'element-plus';
 import type { TreeNodeData } from 'element-plus/es/components/tree/src/tree.type';
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import type Node from 'element-plus/es/components/tree/src/model/node';
-import { Folder, Document, Memo, Loading, Picture, Download } from '@element-plus/icons-vue';
+import { Folder, Document, Memo, Loading, Picture, Download, Search, Collection } from '@element-plus/icons-vue';
 import { storeToRefs } from 'pinia';
 import { useResourceStore } from '@/stores/resourceStore';
 import { searchResources } from '@/api/resourceService';
@@ -303,6 +345,7 @@ const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void;
   (e: 'mount-resources', resources: Resource[]): void;
   (e: 'append-resources', resources: Resource[]): void;
+  (e: 'mount-knowledge-base', resource: Resource): void;
 }>();
 
 // --- Store ---
@@ -378,6 +421,13 @@ const showAppendButton = computed(() => {
   );
 });
 
+// 新增: 判断是否显示知识库检索按钮
+const showKbSearchButton = computed(() => {
+  if (selectorMode.value !== 'resource') return false;
+  if (selectedResources.value.length !== 1) return false;
+  return selectedResources.value[0].resourceType === 'knowledge_base';
+});
+
 function filterTreeByType(nodes: ResourceNode[]): ResourceNode[] {
   if (!props.resourceTypeFilter) return nodes;
   const result: ResourceNode[] = [];
@@ -438,7 +488,11 @@ const isResourceSelected = (resourceId: string): boolean => {
 
 const isNodeDisabled = (data: ResourceNode): boolean => {
   if (!isMultiSelectMode.value || !selectionType.value) return false;
-  if (data.itemType === 'folder') return false;
+
+  // 普通文件夹永远不禁用（允许展开导航）
+  if (data.itemType === 'folder' && data.resourceType !== 'knowledge_base') return false;
+
+  // 知识库既是容器也是可选项，如果当前已选类型不匹配，则禁用选中
   return data.resourceType !== selectionType.value;
 };
 
@@ -641,7 +695,12 @@ const handleNodeCollapse = (data: ResourceNode) => {
 
 const handleNodeClick = async (data: TreeNodeData) => {
   const resource = data as ResourceNode;
-  if (resource.itemType !== 'resource' || isNodeDisabled(resource)) return;
+
+  // 允许选中：资源类型为 'resource'，或者 (类型为 'folder' 且 是知识库)
+  const isSelectable = resource.itemType === 'resource' || (resource.itemType === 'folder' && resource.resourceType === 'knowledge_base');
+
+  if (!isSelectable || isNodeDisabled(resource)) return;
+
   selectResourceById(resource.id, resource.resourceType, resource);
 };
 
@@ -679,6 +738,13 @@ function handleMount() {
 function handleAppend() {
   if (selectedResources.value.length === 0) return;
   emit('append-resources', selectedResources.value);
+  emit('update:visible', false);
+}
+
+// 新增: 处理知识库挂载
+function handleMountKnowledgeBase() {
+  if (selectedResources.value.length !== 1) return;
+  emit('mount-knowledge-base', selectedResources.value[0]);
   emit('update:visible', false);
 }
 
@@ -802,6 +868,23 @@ const handleScroll = ({ scrollTop, scrollHeight, clientHeight }: any) => {
 :deep(.preview-card .el-card__body) { flex-grow: 1; padding: 0; overflow: hidden; }
 .preview-scrollbar { padding: 20px; }
 .preview-content { white-space: pre-wrap; word-wrap: break-word; font-family: var(--el-font-family); font-size: 14px; margin: 0; }
+
+/* KB Preview Styles */
+.kb-preview-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  text-align: center;
+  height: 100%;
+}
+
+.kb-desc {
+  color: var(--el-text-color-secondary);
+  margin-top: 10px;
+  max-width: 80%;
+}
 
 /* --- File Preview Styles (Adapted from ResourceEditor) --- */
 .file-preview-wrapper {

@@ -65,7 +65,7 @@ class KBChunk(KBChunkBase):
 
 class KBSearchRequest(BaseModel):
     query_text: str = Field(..., min_length=1, description="查询文本")
-    kb_id: Optional[str] = Field(None, description="限定搜索的知识库ID (Resource ID)，若为空则搜索所有知识库")
+    kb_id: Optional[str] = Field(None, description="限定搜索的知识库ID (Resource ID)")
     top_k: int = Field(5, ge=1, le=20, description="返回的最相似结果数量")
 
 

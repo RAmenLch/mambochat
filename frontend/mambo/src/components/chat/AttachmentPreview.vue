@@ -1,6 +1,26 @@
 <!-- frontend/mambo/src/components/chat/AttachmentPreview.vue -->
 <template>
   <div v-if="hasAttachments" class="attachment-preview-wrapper">
+    <!-- Attached Knowledge Bases Preview Area -->
+    <div v-if="attachedKnowledgeBases.length > 0" class="attached-kb-preview">
+      <el-tag
+        v-for="kb in attachedKnowledgeBases"
+        :key="kb.id"
+        closable
+        disable-transitions
+        type="primary"
+        class="kb-tag"
+        @close="$emit('remove-knowledge-base', kb.id)"
+      >
+        <div class="kb-tag-content">
+          <el-icon class="kb-icon"><Search /></el-icon>
+          <el-tooltip :content="kb.description || '知识库'" placement="top">
+            <span>{{ kb.name }}</span>
+          </el-tooltip>
+        </div>
+      </el-tag>
+    </div>
+
     <!-- Attached Templates Preview Area -->
     <transition-group
       v-if="attachedResources.length > 0"
@@ -63,7 +83,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import type { PropType } from 'vue';
-import { Document, Picture, Close } from '@element-plus/icons-vue';
+import { Document, Picture, Close, Search } from '@element-plus/icons-vue';
 import type { FileResponse, Resource } from '@/api/types';
 
 const props = defineProps({
@@ -75,15 +95,24 @@ const props = defineProps({
     type: Array as PropType<Resource[]>,
     required: true,
   },
+  attachedKnowledgeBases: {
+    type: Array as PropType<Resource[]>,
+    default: () => [],
+  },
 });
 
 const emit = defineEmits<{
   (e: 'remove-file', fileId: string): void;
   (e: 'remove-resource', resourceId: string): void;
+  (e: 'remove-knowledge-base', resourceId: string): void;
   (e: 'update:attachedResources', resources: Resource[]): void;
 }>();
 
-const hasAttachments = computed(() => props.uploadedFiles.length > 0 || props.attachedResources.length > 0);
+const hasAttachments = computed(() => 
+  props.uploadedFiles.length > 0 || 
+  props.attachedResources.length > 0 ||
+  props.attachedKnowledgeBases.length > 0
+);
 
 // --- Drag and Drop Logic ---
 const draggedIndex = ref<number | null>(null);
@@ -127,11 +156,23 @@ const handleDragEnd = () => {
   padding-bottom: 8px; /* Provide spacing when attachments are visible */
 }
 
+.attached-kb-preview,
 .attached-templates-preview {
   padding: 8px 20px 0;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* Knowledge Base Tag Styles */
+.kb-tag-content {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.kb-icon {
+  font-size: 12px;
 }
 
 /* Drag and Drop Styles */

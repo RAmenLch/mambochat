@@ -118,23 +118,32 @@ class DefaultGenerateManager(AbstractGenerateManager):
 
     async def _setup_mcp_tools(self, builder: LLMInputBuilder):
         """配置并注入 MCP 工具，包含健康检查"""
-        # 1. 检查 Chat 配置中启用的 MCP ID 列表
-        enabled_mcp_ids = []
+        # 1. 检查 Chat 配置中启用的 MCP ID 列表或配置字典
+        mcp_config_map = {}
+
         if builder.chat and builder.chat.modelParameters:
             try:
                 params = json.loads(builder.chat.modelParameters) if isinstance(builder.chat.modelParameters,
                                                                                 str) else builder.chat.modelParameters
-                enabled_mcp_ids = params.get("enabled_mcp_ids", [])
+                raw_config = params.get("enabled_mcp_ids")
+
+                if isinstance(raw_config, list):
+                    # 兼容旧格式：[id1, id2] -> {id1: {}, id2: {}}
+                    mcp_config_map = {mcp_id: {} for mcp_id in raw_config}
+                elif isinstance(raw_config, dict):
+                    # 新格式：{id1: {key: val}, id2: {}}
+                    mcp_config_map = raw_config
+
             except (json.JSONDecodeError, TypeError):
                 pass
 
-        if not enabled_mcp_ids:
+        if not mcp_config_map:
             return
 
         # 2. 使用连接管理器获取工具并检查状态
         # 如果有服务不可用，此处会抛出 McpConnectionError
         conn_manager = McpConnectionManager(self.db_session)
-        tools = await conn_manager.get_tools_and_check_status(enabled_mcp_ids)
+        tools = await conn_manager.get_tools_and_check_status(mcp_config_map)
 
         # 3. 注入工具到 Builder
         if tools:

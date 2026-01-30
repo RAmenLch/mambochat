@@ -203,18 +203,34 @@ const displayModelName = computed(() => {
 /**
  * 检查当前会话是否已启用系统联网搜索工具。
  * 目标 ID: system-ddgs-search
+ * 兼容处理 List 和 Dict 两种数据结构
  */
 const isWebSearchEnabled = computed((): boolean => {
   const mcpIds = props.currentChat?.modelParameters?.enabled_mcp_ids;
-  return Array.isArray(mcpIds) && mcpIds.includes('system-ddgs-search');
+  if (!mcpIds) return false;
+
+  if (Array.isArray(mcpIds)) {
+    return mcpIds.includes('system-ddgs-search');
+  } else if (typeof mcpIds === 'object') {
+    return Object.prototype.hasOwnProperty.call(mcpIds, 'system-ddgs-search');
+  }
+  return false;
 });
 
 /**
  * 检查指定 MCP 工具是否在当前会话中启用。
+ * 兼容处理 List 和 Dict 两种数据结构
  */
 const isMcpToolEnabled = (mcpId: string): boolean => {
   const mcpIds = props.currentChat?.modelParameters?.enabled_mcp_ids;
-  return Array.isArray(mcpIds) && mcpIds.includes(mcpId);
+  if (!mcpIds) return false;
+
+  if (Array.isArray(mcpIds)) {
+    return mcpIds.includes(mcpId);
+  } else if (typeof mcpIds === 'object') {
+    return Object.prototype.hasOwnProperty.call(mcpIds, mcpId);
+  }
+  return false;
 };
 
 /**

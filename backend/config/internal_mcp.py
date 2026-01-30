@@ -23,6 +23,15 @@ INTERNAL_MCP_REGISTRY: Dict[str, Dict[str, Any]] = {
         "args": [str(_project_root / "MCP_SERVER" / "ddgs" / "search_mcp_server.py")],
         "env": {},
         "isEnabled": True
+    },
+    "system-knowledge-base": {
+        "name": "📚 知识库工具",
+        "description": "系统内置：允许模型搜索和读取挂载的知识库内容。",
+        "transportType": McpTransportType.STDIO,
+        "command": sys.executable,
+        "args": [str(_project_root / "MCP_SERVER" / "knowledge_base" / "knowledge_base_mcp.py")],
+        "env": {},
+        "isEnabled": True
     }
 }
 
@@ -39,4 +48,3 @@ def list_internal_mcps() -> List[Dict[str, Any]]:
         item["isSystem"] = True
         results.append(item)
     return results
-

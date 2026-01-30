@@ -16,9 +16,14 @@ WORKDIR /app
 COPY backend/pyproject.toml /app/backend/pyproject.toml
 RUN uv pip install --system --no-cache -r /app/backend/pyproject.toml -i ${PYPI_INDEX_URL}
 
-# 2.2 安装 Bing MCP 依赖
+# 2.2 安装 ddgs MCP 依赖
 COPY MCP_SERVER/ddgs/pyproject.toml /app/MCP_SERVER/ddgs/pyproject.toml
 RUN uv pip install --system --no-cache -r /app/MCP_SERVER/ddgs/pyproject.toml -i ${PYPI_INDEX_URL}
+
+# 2.3 安装 knowledge_base 依赖
+COPY MCP_SERVER/knowledge_base/pyproject.toml /app/MCP_SERVER/knowledge_base/pyproject.toml
+RUN uv pip install --system --no-cache -r /app/MCP_SERVER/knowledge_base/pyproject.toml -i ${PYPI_INDEX_URL}
+
 
 # 3. 复制源代码
 COPY backend /app/backend

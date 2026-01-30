@@ -1,0 +1,14 @@
+# MCP_SERVER/bing/pyproject.toml
+
+[project]
+name = "ddgs-search-mcp"
+version = "1.0.0"
+description = "A DDGS Search MCP Server"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp",              # 对应 from mcp.server.fastmcp import FastMCP
+    "httpx",            # 对应 import httpx
+]
+
+[tool.uv]
+# 可选配置
