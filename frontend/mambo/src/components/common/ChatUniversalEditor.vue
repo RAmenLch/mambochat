@@ -44,12 +44,14 @@ const props = withDefaults(
     minRows?: number
     maxRows?: number
     monacoOptions?: editor.IStandaloneEditorConstructionOptions
+    enableShortcuts?: boolean
   }>(),
   {
     language: 'markdown',
     minRows: 3,
     maxRows: 10,
     monacoOptions: () => ({}),
+    enableShortcuts: true,
   },
 )
 
@@ -63,6 +65,7 @@ const emit = defineEmits<{
 const settingsStore = useSettingsStore()
 const textareaRef = ref()
 let monacoInstance: editor.IStandaloneCodeEditor | null = null
+let sendOnEnterContextKey: editor.IContextKey<boolean> | null = null
 
 // --- Computed States ---
 
@@ -93,37 +96,58 @@ const handleSubmit = () => {
 const handleMonacoMounted = async (instance: editor.IStandaloneCodeEditor) => {
   monacoInstance = instance
   emit('editor-mounted', instance)
-  await updateMonacoKeybindings()
-}
 
-/**
- * 根据快捷键配置更新 Monaco 的按键绑定
- */
-const updateMonacoKeybindings = async () => {
-  if (!monacoInstance) return
-
-  const monaco = await loader.init()
-
-  // MonacoEditor 组件内部默认绑定了 Ctrl+Enter 发送。
-  // 这里我们需要根据配置决定是否添加 Enter 发送的绑定。
-  if (shortcutMode.value === 'enter') {
-    // 绑定 Enter 为发送
-    monacoInstance.addCommand(monaco.KeyCode.Enter, () => {
-      handleSubmit()
-    })
+  if (props.enableShortcuts) {
+    await setupMonacoShortcuts(instance)
   }
 }
 
-// 监听快捷键配置变化
-watch(shortcutMode, () => {
-  // 注意：Monaco 动态移除 command 比较复杂，通常依赖组件重绘更新
-  // 如果需要严格支持动态切换，建议在上层通过 key 强制重新渲染组件
+/**
+ * 配置 Monaco 的快捷键
+ * 使用 ContextKey 和 addAction 来实现动态切换 Enter 键的行为
+ */
+const setupMonacoShortcuts = async (instance: editor.IStandaloneCodeEditor) => {
+  const monaco = await loader.init()
+
+  // 1. 创建 Context Key，用于动态控制 Enter 键是否触发发送
+  sendOnEnterContextKey = instance.createContextKey('isSendOnEnter', shortcutMode.value === 'enter')
+
+  // 2. 绑定 Enter 键 (带条件)
+  // 仅当 'isSendOnEnter' 为 true 且没有建议框/重命名框时触发
+  instance.addAction({
+    id: 'chat-send-message-enter',
+    label: 'Send Message',
+    keybindings: [monaco.KeyCode.Enter],
+    precondition: 'isSendOnEnter && !suggestWidgetVisible && !renameInputVisible',
+    run: () => {
+      handleSubmit()
+    },
+  })
+
+  // 3. 绑定 Ctrl+Enter (始终触发)
+  // 即使配置为 Enter 发送，Ctrl+Enter 通常也作为辅助发送快捷键
+  instance.addAction({
+    id: 'chat-send-message-ctrl-enter',
+    label: 'Send Message',
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
+    run: () => {
+      handleSubmit()
+    },
+  })
+}
+
+// 监听快捷键配置变化，动态更新 Context Key
+watch(shortcutMode, (newMode) => {
+  if (sendOnEnterContextKey) {
+    sendOnEnterContextKey.set(newMode === 'enter')
+  }
 })
 
 // --- Textarea Logic ---
 
 const handleTextareaKeydown = (e: KeyboardEvent) => {
-  if (e.isComposing) return // 输入法输入中不处理
+  if (!props.enableShortcuts) return
+  if (e.isComposing) return
 
   if (shortcutMode.value === 'enter') {
     // Enter 发送, Shift+Enter 换行

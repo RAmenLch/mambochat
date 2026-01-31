@@ -243,9 +243,9 @@ onMounted(async () => {
       }
     })
 
-    instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-      emit('submit')
-    })
+    // 注意：此处移除了硬编码的 Ctrl+Enter 快捷键绑定，
+    // 以避免影响不需要发送功能的编辑器实例（如资源编辑器）。
+    // 发送快捷键的绑定逻辑应由父组件（如 ChatUniversalEditor）根据配置动态处理。
 
     instance.onDidScrollChange(() => {
       menuVisible.value = false

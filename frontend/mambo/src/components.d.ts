@@ -94,7 +94,6 @@ declare module 'vue' {
     RouterView: typeof import('vue-router')['RouterView']
     SearchDialog: typeof import('./components/chat/dialogs/SearchDialog.vue')['default']
     SubMessageItem: typeof import('./components/chat/SubMessageItem.vue')['default']
-    UniversalEditor: typeof import('./components/common/UniversalEditor.vue')['default']
     UsageInfo: typeof import('./components/chat/UsageInfo.vue')['default']
     ZipHistoryCard: typeof import('./components/chat/ZipHistoryCard.vue')['default']
   }
