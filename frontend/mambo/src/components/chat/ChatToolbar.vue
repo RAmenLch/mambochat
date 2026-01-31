@@ -115,7 +115,7 @@
         :icon="Search"
         :type="isWebSearchEnabled ? 'primary' : ''"
         circle
-        title="联网搜索"
+        title="联网搜索(不好用别用)"
         @click="$emit('toggleWebSearch')"
       />
       <el-button

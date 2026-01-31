@@ -10,8 +10,15 @@
       @update:active-index="(val) => $emit('update:activePartitionIndex', val)"
       class="input-field"
       @send="$emit('send')"
+      @paste="handlePaste"
     />
     <div v-else class="input-field monaco-wrapper">
+      <!--
+        [关键点]
+        监听 @paste-file 事件。
+        当 MonacoEditor 内部通过 Ctrl+V (DOM监听) 或 右键菜单 (Clipboard API)
+        检测到文件时，会触发此事件。
+      -->
       <MonacoEditor
         :model-value="singlePartDraft"
         @update:model-value="(val) => $emit('update:singlePartDraft', val)"
@@ -19,6 +26,7 @@
         :options="monacoOptions"
         @submit="$emit('send')"
         @editor-mounted="handleEditorMounted"
+        @paste-file="(files) => $emit('files-pasted', files)"
       />
     </div>
     <el-button
@@ -88,10 +96,8 @@ const emit = defineEmits<{
 }>()
 
 const multiPartInputRef = ref<InstanceType<typeof MultiPartInput>>()
-// 保存 Monaco Editor 实例引用，用于控制焦点
 let editorInstance: editor.IStandaloneCodeEditor | null = null
 
-// Monaco Editor 配置项
 const monacoOptions = computed<editor.IStandaloneEditorConstructionOptions>(() => ({
   theme: 'vs',
   minimap: { enabled: false },
@@ -115,29 +121,23 @@ const monacoOptions = computed<editor.IStandaloneEditorConstructionOptions>(() =
 }))
 
 /**
- * 处理粘贴事件，用于捕获粘贴的文件。
- * @param event - 剪贴板事件对象。
+ * 处理外层容器的粘贴事件。
+ * 1. 当使用 MultiPartInput 时，此函数处理粘贴。
+ * 2. 当焦点不在 Monaco 内部（例如点击了输入框边缘的 padding 区域）时，此函数作为后备处理。
  */
 function handlePaste(event: ClipboardEvent) {
   if (!event.clipboardData) return
 
   const files = event.clipboardData.files
   if (files && files.length > 0) {
-    // 阻止默认的粘贴行为（例如，将文件名作为文本粘贴）
     event.preventDefault()
+    event.stopPropagation()
     emit('files-pasted', files)
   }
 }
 
-/**
- * 处理全局键盘快捷键，如撤销和重做。
- * 注意：Monaco Editor 内部有自己的 Undo/Redo 栈，当焦点在编辑器内时，
- * 这里的事件可能会被 Monaco 拦截或作为补充。
- * @param event - 键盘事件对象。
- */
 function handleGlobalKeydown(event: KeyboardEvent) {
   if (event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === 'z') {
-    // 如果焦点不在 Monaco 内，或者是多分区模式，触发外部 Undo
     if (props.isMultiPartMode) {
       event.preventDefault()
       emit('undo')
@@ -150,16 +150,10 @@ function handleGlobalKeydown(event: KeyboardEvent) {
   }
 }
 
-/**
- * Monaco Editor 挂载完成后的回调
- */
 function handleEditorMounted(instance: editor.IStandaloneCodeEditor) {
   editorInstance = instance
 }
 
-/**
- * 将焦点设置到当前激活的输入框。
- */
 const focus = () => {
   if (props.isMultiPartMode) {
     multiPartInputRef.value?.focus()
@@ -168,7 +162,6 @@ const focus = () => {
   }
 }
 
-// 使用 defineExpose 暴露 focus 方法给父组件
 defineExpose({
   focus,
 })
@@ -187,7 +180,6 @@ defineExpose({
 .input-field {
   flex-grow: 1;
   margin-right: 10px;
-  /* 确保 Monaco Editor 容器占满可用空间 */
   min-height: 0;
 }
 
