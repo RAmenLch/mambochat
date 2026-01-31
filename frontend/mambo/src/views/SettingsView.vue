@@ -1,17 +1,32 @@
 <template>
   <el-container class="settings-container">
     <el-header class="settings-header">
-      <h1>系统设置</h1>
-      <router-link to="/chat">
-        <el-button type="primary">返回聊天</el-button>
-      </router-link>
+      <div class="brand-container">
+        <img src="/logo.svg" alt="MamboChat" class="logo" />
+        <div class="title-wrapper">
+          <h1 class="app-name">MamboChat</h1>
+          <span class="divider">|</span>
+          <span class="sub-name">曼波茶</span>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <!-- 新增：关于按钮 -->
+        <el-button link @click="aboutDialogVisible = true">
+          <template #icon>
+            <el-icon :size="18"><InfoFilled /></el-icon>
+          </template>
+          关于
+        </el-button>
+        <el-divider direction="vertical" />
+        <router-link to="/chat">
+          <el-button type="primary" plain>返回聊天</el-button>
+        </router-link>
+      </div>
     </el-header>
 
     <el-main class="settings-main">
-      <div
-        class="settings-content"
-        :class="{ 'is-full-width': activeTab === 'resourceManager' }"
-      >
+      <div class="settings-content" :class="{ 'is-full-width': activeTab === 'resourceManager' }">
         <el-tabs v-model="activeTab">
           <el-tab-pane label="服务商与模型管理" name="providerModel">
             <ProviderModelManager />
@@ -28,37 +43,78 @@
         </el-tabs>
       </div>
     </el-main>
+
+    <!-- 新增：关于弹窗 -->
+    <el-dialog
+      v-model="aboutDialogVisible"
+      width="420px"
+      align-center
+      append-to-body
+      class="about-dialog"
+    >
+      <div class="about-content">
+        <img src="/logo.svg" alt="Logo" class="about-logo" />
+        <h2 class="about-title">MamboChat <span class="about-subtitle">| 曼波茶</span></h2>
+        <el-tag type="info" size="small" effect="plain" class="version-tag">v1.1.0</el-tag>
+
+        <p class="about-desc">
+          一款简约强大的 AI Web 平台，融合了多服务商模型聚合、本地知识库 RAG 与 MCP
+          协议扩展。
+        </p>
+
+        <div class="about-links">
+          <a href="https://github.com/RAmenLch/mambochat" target="_blank" class="link-item">
+            <img src="https://github.com/fluidicon.png" class="link-icon" alt="GitHub" />
+            GitHub 仓库
+          </a>
+          <div class="link-divider"></div>
+          <a href="mailto:ramenlch@qq.com" class="link-item">
+            <el-icon class="link-icon-el"><Message /></el-icon>
+            联系作者
+          </a>
+        </div>
+
+        <div class="copyright">
+          &copy; {{ new Date().getFullYear() }} MamboChat. All rights reserved.
+        </div>
+      </div>
+    </el-dialog>
   </el-container>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
-import ProviderModelManager from '@/components/settings/ProviderModelManager.vue';
-import GlobalSettings from '@/components/settings/GlobalSettings.vue';
-import ResourceManager from '@/components/settings/ResourceManager.vue';
-import McpManager from '@/components/settings/McpManager.vue';
+import { ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { InfoFilled, Message } from '@element-plus/icons-vue' // 引入图标
+import ProviderModelManager from '@/components/settings/ProviderModelManager.vue'
+import GlobalSettings from '@/components/settings/GlobalSettings.vue'
+import ResourceManager from '@/components/settings/ResourceManager.vue'
+import McpManager from '@/components/settings/McpManager.vue'
 
-const route = useRoute();
-const router = useRouter();
+const route = useRoute()
+const router = useRouter()
 
-const activeTab = ref(route.query.tab?.toString() || 'providerModel');
+const activeTab = ref(route.query.tab?.toString() || 'providerModel')
+const aboutDialogVisible = ref(false) // 控制关于弹窗显示
 
 watch(activeTab, (newTab) => {
-  router.replace({ query: { ...route.query, tab: newTab } });
-});
+  router.replace({ query: { ...route.query, tab: newTab } })
+})
 
-watch(() => route.query.tab, (newTab) => {
-  if (newTab && newTab !== activeTab.value) {
-    activeTab.value = newTab.toString();
-  }
-});
+watch(
+  () => route.query.tab,
+  (newTab) => {
+    if (newTab && newTab !== activeTab.value) {
+      activeTab.value = newTab.toString()
+    }
+  },
+)
 </script>
 
 <style scoped>
 .settings-container {
   height: 100vh;
-  background-color: #f0f2f5;
+  background-color: #f5f7fa;
   display: flex;
   flex-direction: column;
 }
@@ -68,19 +124,68 @@ watch(() => route.query.tab, (newTab) => {
   justify-content: space-between;
   align-items: center;
   background-color: #ffffff;
-  border-bottom: 1px solid #dcdfe6;
+  border-bottom: 1px solid #e4e7ed;
+  padding: 0 24px;
+  height: 60px;
   flex-shrink: 0;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+  z-index: 10;
+}
+
+.brand-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  user-select: none;
+}
+
+.logo {
+  height: 32px;
+  width: 32px;
+  object-fit: contain;
+}
+
+.title-wrapper {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.app-name {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #303133;
+  letter-spacing: -0.5px;
+  line-height: 1;
+}
+
+.divider {
+  color: #dcdfe6;
+  font-size: 18px;
+  font-weight: 300;
+  transform: translateY(-1px);
+}
+
+.sub-name {
+  font-size: 16px;
+  font-weight: 400;
+  color: #606266;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .settings-main {
   padding: 20px;
   flex-grow: 1;
-  /* 主内容区域负责滚动 */
   overflow-y: auto;
 }
 
 .settings-content {
-  /* 默认状态：高度由内容决定 */
   max-width: 1200px;
   width: 100%;
   margin: 0 auto;
@@ -88,18 +193,16 @@ watch(() => route.query.tab, (newTab) => {
   padding: 24px;
   border-radius: 8px;
   transition: max-width 0.3s ease-in-out;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
 }
 
-/* 资源中心激活时，应用全屏 Flex 布局 */
 .settings-content.is-full-width {
   max-width: 98%;
-  /* 占满父容器 .settings-main 的所有可用高度 */
   height: 100%;
   display: flex;
   flex-direction: column;
 }
 
-/* 以下强制高度的样式，都限定在 .is-full-width 类下 */
 .settings-content.is-full-width .el-tabs {
   display: flex;
   flex-direction: column;
@@ -115,8 +218,94 @@ watch(() => route.query.tab, (newTab) => {
   height: 100%;
 }
 
-/* 为所有标签页提供一个统一的顶部内边距 */
 :deep(.el-tabs__content) {
   padding-top: 16px;
+}
+
+/* 关于弹窗样式 */
+.about-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 10px 0 20px;
+}
+
+.about-logo {
+  width: 80px;
+  height: 80px;
+  margin-bottom: 16px;
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
+}
+
+.about-title {
+  margin: 0 0 8px;
+  font-size: 22px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.about-subtitle {
+  font-weight: 400;
+  color: #606266;
+  font-size: 18px;
+}
+
+.version-tag {
+  margin-bottom: 20px;
+  font-family: monospace;
+}
+
+.about-desc {
+  font-size: 14px;
+  color: #606266;
+  line-height: 1.6;
+  margin: 0 20px 24px;
+  text-align: justify;
+  text-align-last: center; /* 最后一行居中 */
+}
+
+.about-links {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.link-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+  color: var(--el-color-primary);
+  font-size: 14px;
+  transition: opacity 0.2s;
+}
+
+.link-item:hover {
+  opacity: 0.8;
+  text-decoration: underline;
+}
+
+.link-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+}
+
+.link-icon-el {
+  font-size: 18px;
+}
+
+.link-divider {
+  width: 1px;
+  height: 14px;
+  background-color: #dcdfe6;
+}
+
+.copyright {
+  font-size: 12px;
+  color: #909399;
 }
 </style>
