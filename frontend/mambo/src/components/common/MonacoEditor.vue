@@ -28,7 +28,6 @@
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import loader from '@monaco-editor/loader'
 import type { editor, IRange } from 'monaco-editor'
-// [新增] 引入 ElMessage
 import { ElMessage } from 'element-plus'
 
 const props = withDefaults(
@@ -36,10 +35,12 @@ const props = withDefaults(
     modelValue: string
     language?: string
     options?: editor.IStandaloneEditorConstructionOptions
+    allowFilePaste?: boolean
   }>(),
   {
     language: 'markdown',
     options: () => ({}),
+    allowFilePaste: true,
   },
 )
 
@@ -109,7 +110,7 @@ const handleCut = async () => {
 }
 
 /**
- * [修改] 右键菜单粘贴逻辑
+ * 右键菜单粘贴逻辑
  * 包含降级处理：read() 失败 -> readText() -> 提示用户使用 Ctrl+V
  */
 const handlePaste = async () => {
@@ -118,15 +119,13 @@ const handlePaste = async () => {
 
   if (!editorInstance) return
 
-  // 2. [关键] 尝试强制聚焦编辑器，试图解决 "Document is not focused"
-  // 虽然在某些浏览器（如 Chrome）中，点击自定义菜单那一刻焦点已经丢失，
-  // 这里再聚焦一次不一定能骗过浏览器的安全检查，但值得一试。
+  // 2. 尝试强制聚焦编辑器
   editorInstance.focus()
 
   try {
     // --- 尝试读取富内容 (文件/图片) ---
-    // 注意：这步极易因焦点问题报错 NotAllowedError
-    if (navigator.clipboard && navigator.clipboard.read) {
+    // 仅在允许粘贴文件且 API 可用时执行
+    if (props.allowFilePaste && navigator.clipboard && navigator.clipboard.read) {
       const items = await navigator.clipboard.read()
 
       for (const item of items) {
@@ -146,12 +145,10 @@ const handlePaste = async () => {
       }
     }
 
-    // 如果 read() 成功但没有图片，继续向下执行读取文本逻辑...
-    throw new Error('No image found in read(), falling back to text')
+    // 如果未启用文件粘贴，或 read() 成功但没有图片，继续向下执行读取文本逻辑...
+    throw new Error('No image found or file paste disabled, falling back to text')
   } catch (err) {
     // --- 降级处理 ---
-    // console.warn('Clipboard.read() failed or no image, trying text:', err)
-
     try {
       // 3. 尝试读取纯文本 (readText 对焦点要求较低)
       const text = await navigator.clipboard.readText()
@@ -168,9 +165,9 @@ const handlePaste = async () => {
             },
           ])
         }
-      } else {
+      } else if (props.allowFilePaste) {
         // 4. 既没有读取到文件(read失败)，readText也是空的
-        // 这通常意味着剪贴板里有一个文件，但浏览器阻止了通过菜单读取
+        // 仅在允许文件粘贴时提示，因为如果禁用了文件粘贴，这通常意味着剪贴板确实是空的或只有文件
         ElMessage.warning({
           message: '无法通过菜单访问剪贴板文件，请使用 Ctrl+V 或上传按钮。',
           duration: 4000,
@@ -202,7 +199,7 @@ const closeMenu = () => {
  * 保持 capture: true 以确保优先捕获
  */
 const handleDomPaste = (event: ClipboardEvent) => {
-  if (event.clipboardData && event.clipboardData.files.length > 0) {
+  if (props.allowFilePaste && event.clipboardData && event.clipboardData.files.length > 0) {
     event.preventDefault()
     event.stopPropagation()
     emit('paste-file', event.clipboardData.files)

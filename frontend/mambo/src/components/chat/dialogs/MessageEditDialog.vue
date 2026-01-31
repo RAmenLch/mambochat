@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/chat/MessageEditDialog.vue -->
 <template>
   <el-dialog
     v-model="internalVisible"
@@ -25,10 +26,10 @@
       class="monaco-wrapper"
       :style="{ height: isFullscreen ? 'calc(100vh - 180px)' : contentHeight + 'px' }"
     >
-      <MonacoEditor
+      <ResourceUniversalEditor
         v-model="editingContent"
         language="markdown"
-        :options="editorOptions"
+        :monaco-options="editorOptions"
         @editor-mounted="handleEditorMounted"
       />
     </div>
@@ -62,7 +63,7 @@ import { ref, watch, computed, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { FullScreen } from '@element-plus/icons-vue'
 import type { editor } from 'monaco-editor'
-import MonacoEditor from '@/components/common/MonacoEditor.vue'
+import ResourceUniversalEditor from '@/components/common/ResourceUniversalEditor.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -197,10 +198,6 @@ const handleMouseMove = (event: MouseEvent) => {
   const deltaY = event.clientY - startY
 
   // 计算新尺寸
-  // const newWidth = startWidth + deltaX * 2 // *2 是因为 el-dialog 默认居中，向右拉伸时左边也会动，为了视觉跟手通常乘以系数，或者简单相加
-  // Element Plus 的 dialog 是 transform 居中的，单纯加 deltaX 实际上是单边扩展。
-  // 为了体验更好，我们直接加 deltaX，用户感觉是向右下角拉伸。
-
   dialogWidth.value = Math.max(minWidth, startWidth + deltaX)
   contentHeight.value = Math.max(minHeight, startHeight + deltaY)
 }
@@ -239,7 +236,14 @@ onUnmounted(() => {
   background-color: #ffffff;
   padding: 0 2px;
   overflow: hidden;
-  /* 移除 CSS resize，改用 JS 控制 */
+}
+
+/* 适配 ResourceUniversalEditor 内部 textarea 的样式 */
+.monaco-wrapper :deep(.simple-textarea .el-textarea__inner) {
+  border: none !important;
+  box-shadow: none !important;
+  padding: 8px 2px;
+  background-color: transparent;
 }
 
 /* Footer 布局 */

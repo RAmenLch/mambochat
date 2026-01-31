@@ -21,7 +21,7 @@
     <div class="partition-editor">
       <!-- 确保在 localPartitions 可用时才渲染编辑器 -->
       <div v-if="localPartitions.length > 0 && localPartitions[activeIndex]" class="editor-wrapper">
-        <UniversalEditor
+        <ChatUniversalEditor
           ref="universalEditorRef"
           v-model="localPartitions[activeIndex].content"
           :monaco-options="editorOptions"
@@ -37,7 +37,7 @@ import { ref, watch, nextTick, computed } from 'vue'
 import { Plus, Close } from '@element-plus/icons-vue'
 import type { SubMessageCreate } from '@/api/types'
 import type { editor } from 'monaco-editor'
-import UniversalEditor from '@/components/common/UniversalEditor.vue'
+import ChatUniversalEditor from '@/components/common/ChatUniversalEditor.vue'
 
 // 分区对象的本地UI表示
 interface Partition {
@@ -59,7 +59,7 @@ const emit = defineEmits<{
 }>()
 
 const localPartitions = ref<Partition[]>([])
-const universalEditorRef = ref<InstanceType<typeof UniversalEditor>>()
+const universalEditorRef = ref<InstanceType<typeof ChatUniversalEditor>>()
 
 // Monaco Editor 配置
 const editorOptions = computed<editor.IStandaloneEditorConstructionOptions>(() => ({

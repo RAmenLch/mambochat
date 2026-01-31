@@ -14,12 +14,10 @@
     />
     <div v-else class="input-field editor-wrapper">
       <!--
-        [适配变更]
-        使用 UniversalEditor 替代直接使用 MonacoEditor。
-        UniversalEditor 内部根据全局配置决定渲染 Monaco 还是普通 Textarea，
-        并统一处理快捷键逻辑。
+        使用 ChatUniversalEditor 替代 UniversalEditor。
+        ChatUniversalEditor 包含发送快捷键和文件粘贴逻辑。
       -->
-      <UniversalEditor
+      <ChatUniversalEditor
         ref="universalEditorRef"
         :model-value="singlePartDraft"
         @update:model-value="(val) => $emit('update:singlePartDraft', val)"
@@ -49,7 +47,7 @@ import type { PropType } from 'vue'
 import { Promotion, VideoPause } from '@element-plus/icons-vue'
 import type { editor } from 'monaco-editor'
 import MultiPartInput from './MultiPartInput.vue'
-import UniversalEditor from '@/components/common/UniversalEditor.vue'
+import ChatUniversalEditor from '@/components/common/ChatUniversalEditor.vue'
 
 interface Partition {
   id: number
@@ -95,7 +93,7 @@ const emit = defineEmits<{
 }>()
 
 const multiPartInputRef = ref<InstanceType<typeof MultiPartInput>>()
-const universalEditorRef = ref<InstanceType<typeof UniversalEditor>>()
+const universalEditorRef = ref<InstanceType<typeof ChatUniversalEditor>>()
 
 const monacoOptions = computed<editor.IStandaloneEditorConstructionOptions>(() => ({
   theme: 'vs',

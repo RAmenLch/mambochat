@@ -114,7 +114,7 @@
             </div>
             <el-form-item prop="content" class="content-form-item">
               <div class="monaco-wrapper">
-                <UniversalEditor
+                <ResourceUniversalEditor
                   v-model="form.content"
                   :language="editorLanguage"
                   :monaco-options="editorOptions"
@@ -189,7 +189,7 @@ import type { ResourceWithVersions, ResourceVersion, ResourceVersionCreate } fro
 import ResourceVersionBar from './ResourceVersionBar.vue'
 import ResourceMetaSidebar from './ResourceMetaSidebar.vue'
 import KnowledgeBaseFileDetail from '../kb/KnowledgeBaseFileDetail.vue'
-import UniversalEditor from '@/components/common/UniversalEditor.vue'
+import ResourceUniversalEditor from '@/components/common/ResourceUniversalEditor.vue'
 
 interface SubMessageTemplateAttributes {
   context_participation_length: number
@@ -549,15 +549,10 @@ async function handleConfirmNewVersion() {
   padding: 0 6px;
 }
 
-/*
-  [修复] 强制移除 UniversalEditor 内部 el-input 的默认边框和阴影。
-  使用 !important 确保覆盖 UniversalEditor 组件内部定义的样式。
-  同时调整 padding 以配合 monaco-wrapper 的 padding。
-*/
 .monaco-wrapper :deep(.simple-textarea .el-textarea__inner) {
   border: none !important;
   box-shadow: none !important;
-  padding: 8px 2px; /* 上下8px，左右2px (配合外层6px达到约8px视觉效果) */
+  padding: 8px 2px;
   background-color: transparent;
 }
 
