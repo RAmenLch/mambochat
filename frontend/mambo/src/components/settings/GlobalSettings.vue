@@ -284,7 +284,12 @@ const { groupedModels } = storeToRefs(providerStore)
 const { globalSettings } = storeToRefs(settingsStore)
 
 // 表单数据
-const settingsForm = reactive<Omit<GlobalSettingsUpdate, 'user_avatar_url' | 'ai_avatar_url'>>({
+// 显式重写 frontend_editor 类型为 string，以解决 el-radio-group 不接受 null 的问题
+const settingsForm = reactive<
+  Omit<GlobalSettingsUpdate, 'user_avatar_url' | 'ai_avatar_url' | 'frontend_editor'> & {
+    frontend_editor: string
+  }
+>({
   default_model_id: null,
   title_generation_model_id: null,
   last_selected_provider_id: null,
@@ -346,7 +351,8 @@ watch(
       proxy_enabled: newSettings.proxy_enabled,
       proxy_url: newSettings.proxy_url,
       zip_history_system_prompt: newSettings.zip_history_system_prompt,
-      frontend_editor: newSettings.frontend_editor,
+      // 确保赋值给 frontend_editor 的值不为 null
+      frontend_editor: newSettings.frontend_editor ?? 'simple',
       kb_default_chunk_size: newSettings.kb_default_chunk_size,
       kb_default_chunk_overlap: newSettings.kb_default_chunk_overlap,
       send_message_shortcut: newSettings.send_message_shortcut,

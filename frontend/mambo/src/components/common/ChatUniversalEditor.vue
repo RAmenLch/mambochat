@@ -145,7 +145,9 @@ watch(shortcutMode, (newMode) => {
 
 // --- Textarea Logic ---
 
-const handleTextareaKeydown = (e: KeyboardEvent) => {
+const handleTextareaKeydown = (evt: Event) => {
+  const e = evt as KeyboardEvent // 类型断言，确保可以使用 .key, .ctrlKey 等属性
+
   if (!props.enableShortcuts) return
   if (e.isComposing) return
 
