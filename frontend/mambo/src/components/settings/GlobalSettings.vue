@@ -4,7 +4,7 @@
       <h2>全局配置</h2>
     </div>
     <div class="settings-form-container">
-      <el-form :model="settingsForm" label-position="top" style="max-width: 600px;">
+      <el-form :model="settingsForm" label-position="top" style="max-width: 600px">
         <el-form-item>
           <template #label>
             <span>全局默认模型</span>
@@ -22,11 +22,7 @@
             style="width: 100%"
             clearable
           >
-            <el-option-group
-              v-for="group in groupedModels"
-              :key="group.label"
-              :label="group.label"
-            >
+            <el-option-group v-for="group in groupedModels" :key="group.label" :label="group.label">
               <el-option
                 v-for="item in group.options"
                 :key="item.id"
@@ -54,11 +50,7 @@
             style="width: 100%"
             clearable
           >
-            <el-option-group
-              v-for="group in groupedModels"
-              :key="group.label"
-              :label="group.label"
-            >
+            <el-option-group v-for="group in groupedModels" :key="group.label" :label="group.label">
               <el-option
                 v-for="item in group.options"
                 :key="item.id"
@@ -69,6 +61,57 @@
           </el-select>
         </el-form-item>
 
+        <el-divider>编辑器与交互</el-divider>
+        <el-form-item label="前端编辑器类型">
+          <el-radio-group v-model="settingsForm.frontend_editor">
+            <el-radio-button label="simple">普通文本框</el-radio-button>
+            <el-radio-button label="monaco">Monaco 编辑器 (代码高亮)</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+
+        <el-form-item label="发送消息快捷键">
+          <el-select v-model="settingsForm.send_message_shortcut" style="width: 100%">
+            <el-option label="Enter 发送 (Shift+Enter 换行)" value="enter" />
+            <el-option label="Ctrl + Enter 发送 (Enter 换行)" value="ctrl_enter" />
+          </el-select>
+        </el-form-item>
+
+        <el-divider>知识库默认参数</el-divider>
+        <el-row :gutter="20">
+          <el-col :span="12">
+            <el-form-item>
+              <template #label>
+                <span>默认切片大小</span>
+                <el-tooltip content="新上传文件的默认切片字符数" placement="top">
+                  <el-icon class="label-icon"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </template>
+              <el-input-number
+                v-model="settingsForm.kb_default_chunk_size"
+                :min="100"
+                :step="100"
+                style="width: 100%"
+              />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item>
+              <template #label>
+                <span>默认重叠大小</span>
+                <el-tooltip content="新上传文件的默认切片重叠字符数" placement="top">
+                  <el-icon class="label-icon"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </template>
+              <el-input-number
+                v-model="settingsForm.kb_default_chunk_overlap"
+                :min="0"
+                :step="10"
+                style="width: 100%"
+              />
+            </el-form-item>
+          </el-col>
+        </el-row>
+
         <el-divider>头像设置</el-divider>
         <div class="avatar-settings-section">
           <AvatarUploader
@@ -76,7 +119,7 @@
             :avatar-url="globalSettings.user_avatar_url"
             :icon="User"
             :is-loading="isAvatarLoading.user"
-            @upload="file => handleUploadAvatar('user', file)"
+            @upload="(file) => handleUploadAvatar('user', file)"
             @delete="() => handleDeleteAvatar('user')"
           />
           <AvatarUploader
@@ -84,24 +127,24 @@
             :avatar-url="globalSettings.ai_avatar_url"
             :icon="Cpu"
             :is-loading="isAvatarLoading.ai"
-            @upload="file => handleUploadAvatar('ai', file)"
+            @upload="(file) => handleUploadAvatar('ai', file)"
             @delete="() => handleDeleteAvatar('ai')"
           />
         </div>
 
         <el-divider>代理配置</el-divider>
         <el-form-item label="启用代理">
-           <el-switch
-             :model-value="settingsForm.proxy_enabled ?? false"
-             @update:model-value="val => settingsForm.proxy_enabled = val as boolean"
-           />
-           <el-tooltip
-              effect="dark"
-              content="全局启用代理后，可在各个服务商设置中独立开关"
-              placement="top"
-            >
-              <el-icon class="label-icon"><QuestionFilled /></el-icon>
-            </el-tooltip>
+          <el-switch
+            :model-value="settingsForm.proxy_enabled ?? false"
+            @update:model-value="(val) => (settingsForm.proxy_enabled = val as boolean)"
+          />
+          <el-tooltip
+            effect="dark"
+            content="全局启用代理后，可在各个服务商设置中独立开关"
+            placement="top"
+          >
+            <el-icon class="label-icon"><QuestionFilled /></el-icon>
+          </el-tooltip>
         </el-form-item>
         <el-form-item label="代理 URL" v-if="settingsForm.proxy_enabled">
           <el-input
@@ -158,14 +201,14 @@
             :min="0"
             :step="2"
             controls-position="right"
-            style="width: 100%;"
+            style="width: 100%"
           />
         </el-form-item>
 
         <el-form-item label="Temperature (温度)">
           <el-slider
             :model-value="settingsForm.default_temperature ?? 1.0"
-            @update:model-value="val => settingsForm.default_temperature = val as number"
+            @update:model-value="(val) => (settingsForm.default_temperature = val as number)"
             :min="0"
             :max="2"
             :step="0.1"
@@ -176,7 +219,7 @@
         <el-form-item label="Top P">
           <el-slider
             :model-value="settingsForm.default_top_p ?? 1.0"
-            @update:model-value="val => settingsForm.default_top_p = val as number"
+            @update:model-value="(val) => (settingsForm.default_top_p = val as number)"
             :min="0"
             :max="1"
             :step="0.01"
@@ -185,24 +228,21 @@
         </el-form-item>
 
         <el-form-item label="流式对话 (Stream)">
-           <el-switch
-             :model-value="settingsForm.default_stream ?? true"
-             @update:model-value="val => settingsForm.default_stream = val as boolean"
-           />
-           <el-tooltip
-              effect="dark"
-              content="新会话默认是否开启流式对话。关闭后, AI将一次性返回完整回复, 可能会增加等待时间。"
-              placement="top"
-            >
-              <el-icon class="label-icon"><QuestionFilled /></el-icon>
-            </el-tooltip>
+          <el-switch
+            :model-value="settingsForm.default_stream ?? true"
+            @update:model-value="(val) => (settingsForm.default_stream = val as boolean)"
+          />
+          <el-tooltip
+            effect="dark"
+            content="新会话默认是否开启流式对话。关闭后, AI将一次性返回完整回复, 可能会增加等待时间。"
+            placement="top"
+          >
+            <el-icon class="label-icon"><QuestionFilled /></el-icon>
+          </el-tooltip>
         </el-form-item>
 
-
         <el-form-item>
-          <el-button type="primary" @click="handleSave" :loading="isSaving">
-            保存设置
-          </el-button>
+          <el-button type="primary" @click="handleSave" :loading="isSaving"> 保存设置 </el-button>
         </el-form-item>
       </el-form>
     </div>
@@ -210,22 +250,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch } from 'vue';
-import { useProviderStore } from '@/stores/providerStore';
-import { useSettingsStore } from '@/stores/settingsStore';
-import { storeToRefs } from 'pinia';
-import { ElMessage } from 'element-plus';
-import { QuestionFilled, User, Cpu } from '@element-plus/icons-vue';
-import type { GlobalSettingsUpdate } from '@/api/types';
-import AvatarUploader from './AvatarUploader.vue';
+import { ref, reactive, onMounted, watch } from 'vue'
+import { useProviderStore } from '@/stores/providerStore'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { storeToRefs } from 'pinia'
+import { ElMessage } from 'element-plus'
+import { QuestionFilled, User, Cpu } from '@element-plus/icons-vue'
+import type { GlobalSettingsUpdate } from '@/api/types'
+import AvatarUploader from './AvatarUploader.vue'
 
-type AvatarType = 'user' | 'ai';
+type AvatarType = 'user' | 'ai'
 
-const providerStore = useProviderStore();
-const settingsStore = useSettingsStore();
+const providerStore = useProviderStore()
+const settingsStore = useSettingsStore()
 
-const { groupedModels } = storeToRefs(providerStore);
-const { globalSettings } = storeToRefs(settingsStore);
+const { groupedModels } = storeToRefs(providerStore)
+const { globalSettings } = storeToRefs(settingsStore)
 
 const settingsForm = reactive<Omit<GlobalSettingsUpdate, 'user_avatar_url' | 'ai_avatar_url'>>({
   default_model_id: null,
@@ -238,101 +278,116 @@ const settingsForm = reactive<Omit<GlobalSettingsUpdate, 'user_avatar_url' | 'ai
   proxy_enabled: false,
   proxy_url: null,
   zip_history_system_prompt: null,
-});
+  frontend_editor: 'simple',
+  kb_default_chunk_size: 500,
+  kb_default_chunk_overlap: 50,
+  send_message_shortcut: 'enter',
+})
 
-const isSaving = ref(false);
-const isTestingProxy = ref(false);
-const proxyTestUrl = ref('https://www.google.com');
+const isSaving = ref(false)
+const isTestingProxy = ref(false)
+const proxyTestUrl = ref('https://www.google.com')
 const isAvatarLoading = reactive({
   user: false,
   ai: false,
-});
+})
 
 onMounted(async () => {
-  await settingsStore.fetchGlobalSettings();
-});
+  await settingsStore.fetchGlobalSettings()
+})
 
-watch(globalSettings, (newSettings) => {
-  // 只同步表单相关的设置, 头像URL由 AvatarUploader 组件直接消费
-  Object.assign(settingsForm, {
-    default_model_id: newSettings.default_model_id,
-    title_generation_model_id: newSettings.title_generation_model_id,
-    last_selected_provider_id: newSettings.last_selected_provider_id,
-    default_max_context_messages: newSettings.default_max_context_messages,
-    default_temperature: newSettings.default_temperature,
-    default_top_p: newSettings.default_top_p,
-    default_stream: newSettings.default_stream,
-    proxy_enabled: newSettings.proxy_enabled,
-    proxy_url: newSettings.proxy_url,
-    zip_history_system_prompt: newSettings.zip_history_system_prompt,
-  });
-}, { deep: true, immediate: true });
+watch(
+  globalSettings,
+  (newSettings) => {
+    // 只同步表单相关的设置, 头像URL由 AvatarUploader 组件直接消费
+    Object.assign(settingsForm, {
+      default_model_id: newSettings.default_model_id,
+      title_generation_model_id: newSettings.title_generation_model_id,
+      last_selected_provider_id: newSettings.last_selected_provider_id,
+      default_max_context_messages: newSettings.default_max_context_messages,
+      default_temperature: newSettings.default_temperature,
+      default_top_p: newSettings.default_top_p,
+      default_stream: newSettings.default_stream,
+      proxy_enabled: newSettings.proxy_enabled,
+      proxy_url: newSettings.proxy_url,
+      zip_history_system_prompt: newSettings.zip_history_system_prompt,
+      frontend_editor: newSettings.frontend_editor,
+      kb_default_chunk_size: newSettings.kb_default_chunk_size,
+      kb_default_chunk_overlap: newSettings.kb_default_chunk_overlap,
+      send_message_shortcut: newSettings.send_message_shortcut,
+    })
+  },
+  { deep: true, immediate: true },
+)
 
 const handleUploadAvatar = async (type: AvatarType, file: File) => {
-  isAvatarLoading[type] = true;
+  isAvatarLoading[type] = true
   try {
-    await settingsStore.uploadAvatar(type, file);
-    ElMessage.success('头像上传成功！');
+    await settingsStore.uploadAvatar(type, file)
+    ElMessage.success('头像上传成功！')
   } catch (error: unknown) {
     // 错误消息已由全局拦截器处理
-    console.error(`Failed to upload ${type} avatar:`, error);
+    console.error(`Failed to upload ${type} avatar:`, error)
   } finally {
-    isAvatarLoading[type] = false;
+    isAvatarLoading[type] = false
   }
-};
+}
 
 const handleDeleteAvatar = async (type: AvatarType) => {
-  isAvatarLoading[type] = true;
+  isAvatarLoading[type] = true
   try {
-    await settingsStore.deleteAvatar(type);
-    ElMessage.success('头像已删除。');
-  } catch (error: unknown)
-  {
-    console.error(`Failed to delete ${type} avatar:`, error);
+    await settingsStore.deleteAvatar(type)
+    ElMessage.success('头像已删除。')
+  } catch (error: unknown) {
+    console.error(`Failed to delete ${type} avatar:`, error)
   } finally {
-    isAvatarLoading[type] = false;
+    isAvatarLoading[type] = false
   }
-};
+}
 
 const handleSave = async () => {
-  isSaving.value = true;
+  isSaving.value = true
   try {
-    const settingsToSave: GlobalSettingsUpdate = { ...settingsForm, user_avatar_url: null, ai_avatar_url: null };
-    await settingsStore.saveGlobalSettings(settingsToSave);
-    ElMessage.success('全局设置已保存！');
+    const settingsToSave: GlobalSettingsUpdate = {
+      ...settingsForm,
+      user_avatar_url: null,
+      ai_avatar_url: null,
+    }
+    await settingsStore.saveGlobalSettings(settingsToSave)
+    ElMessage.success('全局设置已保存！')
   } catch (error: unknown) {
-    console.error('Failed to save global settings:', error);
+    console.error('Failed to save global settings:', error)
   } finally {
-    isSaving.value = false;
+    isSaving.value = false
   }
-};
+}
 
 const handleTestProxy = async () => {
   if (!settingsForm.proxy_url) {
-    ElMessage.warning('请输入代理 URL');
-    return;
+    ElMessage.warning('请输入代理 URL')
+    return
   }
   if (!proxyTestUrl.value) {
-    ElMessage.warning('请输入测试链接');
-    return;
+    ElMessage.warning('请输入测试链接')
+    return
   }
 
-  isTestingProxy.value = true;
+  isTestingProxy.value = true
   try {
     const response = await settingsStore.testProxy({
       proxy_url: settingsForm.proxy_url,
       test_url: proxyTestUrl.value,
-    });
+    })
     ElMessage({
       type: response.status === 'success' ? 'success' : 'error',
       message: response.message,
-    });
+    })
   } catch (error: unknown) {
-     console.error('Failed to test proxy:', error);
+    console.error('Failed to test proxy:', error)
   } finally {
-    isTestingProxy.value = false;
+    isTestingProxy.value = false
   }
-};
+}
 </script>
 
 <style scoped>

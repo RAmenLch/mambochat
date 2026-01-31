@@ -123,9 +123,34 @@ async def read_resource_children(
 @router.post("", response_model=schemas.Resource, status_code=status.HTTP_201_CREATED, summary="创建新资源或文件夹")
 async def create_resource(resource: schemas.ResourceCreate, db: AsyncSession = Depends(get_db)):
     """
-    创建一个新的资源项（'resource'）或文件夹（'folder'）。
+    创建一个新的资源项（'resource'）或 'folder'）。
     """
+    # 1. 先创建资源
     new_resource = await resource_crud.create_resource(db=db, resource=resource)
+
+    # 2. 补充逻辑：如果提供了 parentId 且不是 root，尝试自动推导并赋值 kb_id
+    # 这样可以确保在知识库下新建资源时，自动成为知识库成员
+    if resource.parentId and resource.parentId != "root" and not new_resource.kb_id:
+        ancestors = await resource_crud.get_batch_resource_ancestors(db, [resource.parentId])
+        kb_node = next((res for res in ancestors if res.resourceType == ResourceType.KNOWLEDGE_BASE.value), None)
+
+        if kb_node:
+            # 赋值 kb_id
+            new_resource.kb_id = kb_node.id
+
+            # 如果是资源类型（非文件夹），且没有配置切分参数，设置默认配置
+            if new_resource.itemType == ResourceItemType.RESOURCE.value and not new_resource.kb_config:
+                default_config = kb_schemas.KBTextSplitterConfig(
+                    splitter_type=kb_schemas.KBSplitterType.SIMPLE,
+                    chunk_size=500,
+                    chunk_overlap=50
+                ).model_dump()
+                new_resource.kb_config = default_config
+
+            # 提交更改
+            await db.commit()
+            await db.refresh(new_resource)
+
     # 如果创建时带有初始内容（文件ID），尝试填充
     await _hydrate_resources([new_resource], db)
     return new_resource

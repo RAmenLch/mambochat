@@ -20,13 +20,12 @@
     </div>
     <div class="partition-editor">
       <!-- 确保在 localPartitions 可用时才渲染编辑器 -->
-      <div v-if="localPartitions.length > 0 && localPartitions[activeIndex]" class="monaco-wrapper">
-        <MonacoEditor
+      <div v-if="localPartitions.length > 0 && localPartitions[activeIndex]" class="editor-wrapper">
+        <UniversalEditor
+          ref="universalEditorRef"
           v-model="localPartitions[activeIndex].content"
-          language="markdown"
-          :options="editorOptions"
+          :monaco-options="editorOptions"
           @submit="$emit('send')"
-          @editor-mounted="handleEditorMounted"
         />
       </div>
     </div>
@@ -38,7 +37,7 @@ import { ref, watch, nextTick, computed } from 'vue'
 import { Plus, Close } from '@element-plus/icons-vue'
 import type { SubMessageCreate } from '@/api/types'
 import type { editor } from 'monaco-editor'
-import MonacoEditor from '@/components/common/MonacoEditor.vue'
+import UniversalEditor from '@/components/common/UniversalEditor.vue'
 
 // 分区对象的本地UI表示
 interface Partition {
@@ -60,7 +59,7 @@ const emit = defineEmits<{
 }>()
 
 const localPartitions = ref<Partition[]>([])
-let editorInstance: editor.IStandaloneCodeEditor | null = null
+const universalEditorRef = ref<InstanceType<typeof UniversalEditor>>()
 
 // Monaco Editor 配置
 const editorOptions = computed<editor.IStandaloneEditorConstructionOptions>(() => ({
@@ -107,13 +106,11 @@ watch(
 
 // --- UI 交互方法 ---
 
-const handleEditorMounted = (instance: editor.IStandaloneCodeEditor) => {
-  editorInstance = instance
-}
-
 const selectPartition = (index: number) => {
   emit('update:activeIndex', index)
-  editorInstance?.focus()
+  nextTick(() => {
+    universalEditorRef.value?.focus()
+  })
 }
 
 const addPartition = async () => {
@@ -121,7 +118,7 @@ const addPartition = async () => {
   const newIndex = localPartitions.value.length - 1
   emit('update:activeIndex', newIndex)
   await nextTick()
-  editorInstance?.focus()
+  universalEditorRef.value?.focus()
 }
 
 const removePartition = (index: number) => {
@@ -167,7 +164,7 @@ const reset = () => {
  * 将焦点设置到当前激活的文本区域。
  */
 const focus = () => {
-  editorInstance?.focus()
+  universalEditorRef.value?.focus()
 }
 
 defineExpose({
@@ -256,11 +253,19 @@ defineExpose({
   min-width: 0; /* 防止 flex 子项溢出 */
 }
 
-.monaco-wrapper {
+.editor-wrapper {
   flex-grow: 1;
   height: 100%;
   overflow: hidden;
   background-color: #ffffff;
   padding: 0 2px;
+}
+
+/* 适配 UniversalEditor 内部 el-input 的样式，使其无边框融入 */
+.editor-wrapper :deep(.el-textarea__inner) {
+  border: none;
+  box-shadow: none;
+  padding: 8px;
+  background-color: transparent;
 }
 </style>

@@ -42,7 +42,8 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
         "default_model_id", "title_generation_model_id", "zip_history_system_prompt",
         "last_selected_provider_id", "default_max_context_messages", "default_temperature",
         "default_top_p", "default_stream", "proxy_enabled", "proxy_url",
-        "user_avatar_file_id", "ai_avatar_file_id"
+        "user_avatar_file_id", "ai_avatar_file_id",
+        "frontend_editor", "kb_default_chunk_size", "kb_default_chunk_overlap", "send_message_shortcut"
     ]
 
     result = await db.execute(
@@ -77,6 +78,11 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
     proxy_enabled = _get_typed_setting(settings_map.get("proxy_enabled"), False, bool)
     proxy_url = _get_typed_setting(settings_map.get("proxy_url"), None, str)
 
+    frontend_editor = _get_typed_setting(settings_map.get("frontend_editor"), "simple", str)
+    kb_default_chunk_size = _get_typed_setting(settings_map.get("kb_default_chunk_size"), 500, int)
+    kb_default_chunk_overlap = _get_typed_setting(settings_map.get("kb_default_chunk_overlap"), 50, int)
+    send_message_shortcut = _get_typed_setting(settings_map.get("send_message_shortcut"), "enter", str)
+
     return schemas.GlobalSettingsUpdate(
         default_model_id=default_model_id,
         title_generation_model_id=title_generation_model_id,
@@ -89,7 +95,11 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
         proxy_enabled=proxy_enabled,
         proxy_url=proxy_url,
         user_avatar_url=user_avatar_url,
-        ai_avatar_url=ai_avatar_url
+        ai_avatar_url=ai_avatar_url,
+        frontend_editor=frontend_editor,
+        kb_default_chunk_size=kb_default_chunk_size,
+        kb_default_chunk_overlap=kb_default_chunk_overlap,
+        send_message_shortcut=send_message_shortcut
     )
 
 
@@ -143,7 +153,8 @@ async def update_global_settings(
 
     param_keys = [
         "default_max_context_messages", "default_temperature", "default_top_p",
-        "default_stream", "proxy_enabled", "proxy_url", "zip_history_system_prompt"
+        "default_stream", "proxy_enabled", "proxy_url", "zip_history_system_prompt",
+        "frontend_editor", "kb_default_chunk_size", "kb_default_chunk_overlap", "send_message_shortcut"
     ]
     for key in param_keys:
         if key in update_data:

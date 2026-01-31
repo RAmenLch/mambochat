@@ -105,17 +105,11 @@
                   />
                 </el-form-item>
 
-                <el-form-item
-                  v-if="taskConfig.splitter_type === 'separator'"
-                  prop="separator"
-                >
+                <el-form-item v-if="taskConfig.splitter_type === 'separator'" prop="separator">
                   <template #label>
                     <div class="label-with-tooltip">
                       <span>分隔符</span>
-                      <el-tooltip
-                        content="用于识别段落边界的字符序列。例如: \n\n"
-                        placement="top"
-                      >
+                      <el-tooltip content="用于识别段落边界的字符序列。例如: \n\n" placement="top">
                         <el-icon class="help-icon"><QuestionFilled /></el-icon>
                       </el-tooltip>
                     </div>
@@ -299,25 +293,17 @@
 <script setup lang="ts">
 import { ref, computed, watch, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import {
-  Document,
-  QuestionFilled,
-  Warning,
-  ArrowDown,
-  ArrowUp
-} from '@element-plus/icons-vue'
+import { Document, QuestionFilled, Warning, ArrowDown, ArrowUp } from '@element-plus/icons-vue'
 import { useKBFileTask } from '@/composables/useKBFileTask'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { getKBFileChunks } from '@/api/kbService'
-import type {
-  Resource,
-  KBSplitterConfig,
-  KBResumeConflictErrorDetail,
-  KBChunk
-} from '@/api/types'
+import type { Resource, KBSplitterConfig, KBResumeConflictErrorDetail, KBChunk } from '@/api/types'
 
 const props = defineProps<{
   resource: Resource
 }>()
+
+const settingsStore = useSettingsStore()
 
 // --- Config & Task Logic ---
 const configFormRef = ref<FormInstance>()
@@ -442,9 +428,10 @@ const loadInitialConfig = () => {
       taskConfig.separator = saved.separator
     }
   } else {
+    // 使用全局配置作为默认值
     taskConfig.splitter_type = 'simple'
-    taskConfig.chunk_size = 500
-    taskConfig.chunk_overlap = 50
+    taskConfig.chunk_size = settingsStore.globalSettings.kb_default_chunk_size ?? 500
+    taskConfig.chunk_overlap = settingsStore.globalSettings.kb_default_chunk_overlap ?? 50
     taskConfig.separator = '\\n\\n'
   }
 }
@@ -475,7 +462,7 @@ const handleStart = async () => {
       await ElMessageBox.confirm(
         '该文件已有向量数据，重新启动将覆盖旧数据，是否继续？',
         '确认覆盖',
-        { confirmButtonText: '覆盖并启动', cancelButtonText: '取消', type: 'warning' }
+        { confirmButtonText: '覆盖并启动', cancelButtonText: '取消', type: 'warning' },
       )
     } catch {
       return
@@ -543,7 +530,7 @@ const fetchChunks = async () => {
   try {
     const res = await getKBFileChunks(props.resource.id, {
       page: currentPage.value,
-      page_size: pageSize.value
+      page_size: pageSize.value,
     })
     chunkList.value = res.items
     totalChunks.value = res.total
@@ -584,35 +571,47 @@ const getChunkStatusType = (status: string) => {
     PENDING: 'info',
     COMPLETED: 'success',
     FAILED: 'danger',
-    STOPPED: 'warning'
+    STOPPED: 'warning',
   }
   return map[status] || 'info'
 }
 
 // --- Watchers & Lifecycle ---
 
-watch(savedConfig, (newConfig) => {
-  if (newConfig) {
-    loadInitialConfig()
-  }
-}, { deep: true })
+watch(
+  savedConfig,
+  (newConfig) => {
+    if (newConfig) {
+      loadInitialConfig()
+    }
+  },
+  { deep: true },
+)
 
-watch(() => props.resource.id, (newId, oldId) => {
-  if (newId !== oldId) {
-    loadInitialConfig()
-    startSSE()
-    currentPage.value = 1
-    fetchChunks()
-  }
-})
+watch(
+  () => props.resource.id,
+  (newId, oldId) => {
+    if (newId !== oldId) {
+      loadInitialConfig()
+      startSSE()
+      currentPage.value = 1
+      fetchChunks()
+    }
+  },
+)
 
-watch(() => statusInfo.value?.file_status, (newStatus, oldStatus) => {
-  if (newStatus === 'COMPLETED' && oldStatus !== 'COMPLETED') {
-    fetchChunks()
-  }
-})
+watch(
+  () => statusInfo.value?.file_status,
+  (newStatus, oldStatus) => {
+    if (newStatus === 'COMPLETED' && oldStatus !== 'COMPLETED') {
+      fetchChunks()
+    }
+  },
+)
 
-onMounted(() => {
+onMounted(async () => {
+  // 确保获取最新的全局配置，以便使用正确的默认值
+  await settingsStore.fetchGlobalSettings()
   loadInitialConfig()
   startSSE()
   fetchChunks()
@@ -808,10 +807,18 @@ onMounted(() => {
   font-family: monospace;
 }
 
-.stat-value.success { color: var(--el-color-success); }
-.stat-value.primary { color: var(--el-color-primary); }
-.stat-value.danger { color: var(--el-color-danger); }
-.stat-value.warning { color: var(--el-color-warning); }
+.stat-value.success {
+  color: var(--el-color-success);
+}
+.stat-value.primary {
+  color: var(--el-color-primary);
+}
+.stat-value.danger {
+  color: var(--el-color-danger);
+}
+.stat-value.warning {
+  color: var(--el-color-warning);
+}
 
 /* Chunk List Styles */
 .chunk-total-badge {

@@ -12,20 +12,19 @@
       @send="$emit('send')"
       @paste="handlePaste"
     />
-    <div v-else class="input-field monaco-wrapper">
+    <div v-else class="input-field editor-wrapper">
       <!--
-        [关键点]
-        监听 @paste-file 事件。
-        当 MonacoEditor 内部通过 Ctrl+V (DOM监听) 或 右键菜单 (Clipboard API)
-        检测到文件时，会触发此事件。
+        [适配变更]
+        使用 UniversalEditor 替代直接使用 MonacoEditor。
+        UniversalEditor 内部根据全局配置决定渲染 Monaco 还是普通 Textarea，
+        并统一处理快捷键逻辑。
       -->
-      <MonacoEditor
+      <UniversalEditor
+        ref="universalEditorRef"
         :model-value="singlePartDraft"
         @update:model-value="(val) => $emit('update:singlePartDraft', val)"
-        language="markdown"
-        :options="monacoOptions"
+        :monaco-options="monacoOptions"
         @submit="$emit('send')"
-        @editor-mounted="handleEditorMounted"
         @paste-file="(files) => $emit('files-pasted', files)"
       />
     </div>
@@ -50,7 +49,7 @@ import type { PropType } from 'vue'
 import { Promotion, VideoPause } from '@element-plus/icons-vue'
 import type { editor } from 'monaco-editor'
 import MultiPartInput from './MultiPartInput.vue'
-import MonacoEditor from '@/components/common/MonacoEditor.vue'
+import UniversalEditor from '@/components/common/UniversalEditor.vue'
 
 interface Partition {
   id: number
@@ -96,7 +95,7 @@ const emit = defineEmits<{
 }>()
 
 const multiPartInputRef = ref<InstanceType<typeof MultiPartInput>>()
-let editorInstance: editor.IStandaloneCodeEditor | null = null
+const universalEditorRef = ref<InstanceType<typeof UniversalEditor>>()
 
 const monacoOptions = computed<editor.IStandaloneEditorConstructionOptions>(() => ({
   theme: 'vs',
@@ -115,6 +114,7 @@ const monacoOptions = computed<editor.IStandaloneEditorConstructionOptions>(() =
     vertical: 'auto',
     horizontal: 'hidden',
   },
+  // Monaco 内部只控制上下 padding，左右 padding 由外部容器控制
   padding: { top: 12, bottom: 12 },
   fontSize: 14,
   fontFamily: 'var(--el-font-family)',
@@ -123,7 +123,7 @@ const monacoOptions = computed<editor.IStandaloneEditorConstructionOptions>(() =
 /**
  * 处理外层容器的粘贴事件。
  * 1. 当使用 MultiPartInput 时，此函数处理粘贴。
- * 2. 当焦点不在 Monaco 内部（例如点击了输入框边缘的 padding 区域）时，此函数作为后备处理。
+ * 2. 当焦点不在编辑器内部（例如点击了输入框边缘的 padding 区域）时，此函数作为后备处理。
  */
 function handlePaste(event: ClipboardEvent) {
   if (!event.clipboardData) return
@@ -137,6 +137,8 @@ function handlePaste(event: ClipboardEvent) {
 }
 
 function handleGlobalKeydown(event: KeyboardEvent) {
+  // 仅处理 MultiPartInput 的自定义撤销/重做逻辑
+  // 单输入框模式下的撤销/重做由编辑器原生支持
   if (event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === 'z') {
     if (props.isMultiPartMode) {
       event.preventDefault()
@@ -150,15 +152,11 @@ function handleGlobalKeydown(event: KeyboardEvent) {
   }
 }
 
-function handleEditorMounted(instance: editor.IStandaloneCodeEditor) {
-  editorInstance = instance
-}
-
 const focus = () => {
   if (props.isMultiPartMode) {
     multiPartInputRef.value?.focus()
   } else {
-    editorInstance?.focus()
+    universalEditorRef.value?.focus()
   }
 }
 
@@ -183,14 +181,28 @@ defineExpose({
   min-height: 0;
 }
 
-.monaco-wrapper {
+.editor-wrapper {
   border: 1px solid var(--el-border-color);
   border-radius: 4px;
   overflow: hidden;
   display: flex;
+  flex-direction: column;
   background-color: #ffffff;
+  /* 恢复左右 padding，Monaco Editor 需要这个来保持左右间距 */
   padding: 0 12px;
   height: 100%;
+}
+
+/*
+  适配 UniversalEditor 内部 el-input 的样式。
+  外层已设置左右 padding，这里只需设置上下 padding，并去除左右 padding 以免双重缩进。
+  Monaco Editor 的上下 padding 由 options 控制，左右由 .editor-wrapper 控制。
+*/
+.editor-wrapper :deep(.el-textarea__inner) {
+  border: none;
+  box-shadow: none;
+  padding: 12px 0;
+  background-color: transparent;
 }
 
 .action-button {

@@ -27,3 +27,9 @@ class GlobalSettingsUpdate(BaseModel):
     user_avatar_url: Optional[str] = Field(None, description="当前用户头像的访问URL")
     ai_avatar_url: Optional[str] = Field(None, description="当前AI助手头像的访问URL")
 
+    # 前端与知识库默认配置
+    frontend_editor: Optional[str] = Field("simple", description="前端编辑器类型: simple 或 monaco")
+    kb_default_chunk_size: Optional[int] = Field(500, description="知识库默认切片大小")
+    kb_default_chunk_overlap: Optional[int] = Field(50, description="知识库默认切片重叠大小")
+    send_message_shortcut: Optional[str] = Field("enter", description="发送消息快捷键: enter 或 ctrl_enter")
+

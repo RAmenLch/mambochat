@@ -1,21 +1,17 @@
 // frontend/mambo/src/stores/settingsStore.ts
 
-import { defineStore } from 'pinia';
+import { defineStore } from 'pinia'
 import {
   getGlobalSettings,
   updateGlobalSettings,
   testProxyConnection,
   uploadAvatar,
   deleteAvatar,
-} from '@/api/settingsService';
-import type {
-  GlobalSettingsUpdate,
-  ProxyTestRequest,
-  ConnectionTestResponse,
-} from '@/api/types';
+} from '@/api/settingsService'
+import type { GlobalSettingsUpdate, ProxyTestRequest, ConnectionTestResponse } from '@/api/types'
 
 interface SettingsState {
-  globalSettings: GlobalSettingsUpdate;
+  globalSettings: GlobalSettingsUpdate
 }
 
 export const useSettingsStore = defineStore('settings', {
@@ -33,6 +29,10 @@ export const useSettingsStore = defineStore('settings', {
       user_avatar_url: null,
       ai_avatar_url: null,
       zip_history_system_prompt: null,
+      frontend_editor: 'simple',
+      kb_default_chunk_size: 500,
+      kb_default_chunk_overlap: 50,
+      send_message_shortcut: 'enter',
     },
   }),
 
@@ -41,7 +41,7 @@ export const useSettingsStore = defineStore('settings', {
      * 从后端获取最新的全局配置。
      */
     async fetchGlobalSettings() {
-      this.globalSettings = await getGlobalSettings();
+      this.globalSettings = await getGlobalSettings()
     },
 
     /**
@@ -49,8 +49,8 @@ export const useSettingsStore = defineStore('settings', {
      * @param settings - 包含要更新的配置的对象。
      */
     async saveGlobalSettings(settings: GlobalSettingsUpdate) {
-      const updatedSettings = await updateGlobalSettings(settings);
-      this.globalSettings = updatedSettings;
+      const updatedSettings = await updateGlobalSettings(settings)
+      this.globalSettings = updatedSettings
     },
 
     /**
@@ -58,7 +58,7 @@ export const useSettingsStore = defineStore('settings', {
      * @param requestData - 包含代理URL和测试目标URL的对象。
      */
     async testProxy(requestData: ProxyTestRequest): Promise<ConnectionTestResponse> {
-      return await testProxyConnection(requestData);
+      return await testProxyConnection(requestData)
     },
 
     /**
@@ -67,8 +67,8 @@ export const useSettingsStore = defineStore('settings', {
      * @param file - 文件对象。
      */
     async uploadAvatar(type: 'user' | 'ai', file: File) {
-      await uploadAvatar(type, file);
-      await this.fetchGlobalSettings(); // 成功后刷新全局设置以获取新URL
+      await uploadAvatar(type, file)
+      await this.fetchGlobalSettings() // 成功后刷新全局设置以获取新URL
     },
 
     /**
@@ -76,8 +76,8 @@ export const useSettingsStore = defineStore('settings', {
      * @param type - 头像类型, 'user' 或 'ai'。
      */
     async deleteAvatar(type: 'user' | 'ai') {
-      await deleteAvatar(type);
-      await this.fetchGlobalSettings(); // 成功后刷新全局设置
+      await deleteAvatar(type)
+      await this.fetchGlobalSettings() // 成功后刷新全局设置
     },
   },
-});
+})

@@ -13,6 +13,10 @@ export interface GlobalSettingsUpdate {
   user_avatar_url: string | null
   ai_avatar_url: string | null
   zip_history_system_prompt?: string | null
+  frontend_editor: string | null
+  kb_default_chunk_size: number | null
+  kb_default_chunk_overlap: number | null
+  send_message_shortcut: string | null
 }
 
 export interface ProxyTestRequest {

@@ -14,14 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
 
 from backend import schemas
-from backend.crud import kb_crud, resource_crud, file_crud, provider_crud
+from backend.crud import kb_crud, resource_crud, file_crud, provider_crud, setting_crud
 from backend.models import resource_model, kb_model
 from backend.schemas import kb as kb_schemas
 from backend.schemas.enums import (
     ModelType,
     ResourceType,
     ProviderWorkerType,
-    KBFileStatus
+    KBFileStatus, ResourceItemType
 )
 from backend.services.storage_service import storage_service
 from backend.services.stream_manager_service import stream_manager
@@ -471,8 +471,34 @@ class KnowledgeBaseService:
         # 4. 获取切分配置 (从 Resource 层级)
         kb_config_dict = resource.kb_config
 
+        # 如果配置为空且动作是 START，则尝试加载全局默认配置
         if not kb_config_dict and request.action == kb_schemas.KBTaskAction.START:
-            raise HTTPException(status_code=400, detail="Splitter configuration not found.")
+            # 获取全局默认切分参数
+            size_setting = await setting_crud.get_setting(self.db, "kb_default_chunk_size")
+            overlap_setting = await setting_crud.get_setting(self.db, "kb_default_chunk_overlap")
+
+            # 解析参数，如果解析失败或未设置则使用硬编码默认值
+            try:
+                default_size = int(size_setting.value) if size_setting and size_setting.value else 500
+            except (ValueError, TypeError):
+                default_size = 500
+
+            try:
+                default_overlap = int(overlap_setting.value) if overlap_setting and overlap_setting.value else 50
+            except (ValueError, TypeError):
+                default_overlap = 50
+
+            # 构建默认配置 (默认使用 simple 切分器)
+            kb_config_dict = {
+                "splitter_type": "simple",
+                "chunk_size": default_size,
+                "chunk_overlap": default_overlap
+            }
+
+            # 将默认配置保存回资源，以便下次使用
+            resource.kb_config = kb_config_dict
+            await self.db.commit()
+            await self.db.refresh(resource)
 
         # 获取上次运行的配置快照 (用于 Resume 校验)
         current_attributes = dict(resource.latest_version.attributes) if resource.latest_version.attributes else {}
