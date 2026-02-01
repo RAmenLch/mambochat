@@ -36,16 +36,16 @@
 
       <!-- Chat 模型专用配置 -->
       <template v-if="isChatModel">
-        <el-form-item label="分词器 (Tokenizer)">
-          <el-select
-            v-model="modelForm.meta_config.tokenizer"
-            placeholder="请选择分词器"
-            clearable
-            style="width: 100%"
-          >
-            <el-option v-for="item in tokenizerOptions" :key="item" :label="item" :value="item" />
-          </el-select>
-        </el-form-item>
+<!--        <el-form-item label="分词器 (Tokenizer)">-->
+<!--          <el-select-->
+<!--            v-model="modelForm.meta_config.tokenizer"-->
+<!--            placeholder="请选择分词器"-->
+<!--            clearable-->
+<!--            style="width: 100%"-->
+<!--          >-->
+<!--            <el-option v-for="item in tokenizerOptions" :key="item" :label="item" :value="item" />-->
+<!--          </el-select>-->
+<!--        </el-form-item>-->
         <el-form-item label="最大输出Token数">
           <el-input-number
             v-model="modelForm.meta_config.max_output_tokens"
