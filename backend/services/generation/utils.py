@@ -45,3 +45,39 @@ class OpenAiDecode:
                 return None
         else:
             return None
+
+
+
+class AnthropicDecode:
+    @staticmethod
+    def get_text_content(mode,message:AIMessageChunk| AIMessage):
+        if mode == "updates":
+            return None
+        if mode == "messages" and isinstance(message,AIMessage):
+            for sub_message in message.content_blocks:
+                if sub_message.get("type","") == "text":
+                    return sub_message.get("text","")
+            else:
+                return None
+        else:
+            return None
+
+    @staticmethod
+    def get_reasoning_content(mode,message:AIMessageChunk| AIMessage):
+        if mode == "updates":
+            return None
+        if mode == "messages" and isinstance(message,AIMessage):
+            for sub_message in message.content_blocks:
+                if sub_message.get("type","") == "reasoning":
+                    return sub_message.get("reasoning","")
+            else:
+                return None
+        else:
+            return None
+
+    @staticmethod
+    def get_toolcall_content(mode,message:AIMessageChunk| AIMessage):
+        if mode == "updates" and isinstance(message,AIMessage):
+            return message.tool_calls # 示例 [{'name': 'ddgs_search', 'args': {'query': '今日广州天气', 'max_results': 5}, 'id': '019bcccc33c40a0867a2879848bddca0', 'type': 'tool_call'}]
+        else:
+            return None
