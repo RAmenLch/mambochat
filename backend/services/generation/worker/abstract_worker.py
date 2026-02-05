@@ -2,9 +2,15 @@ from abc import ABC, abstractmethod
 from typing import AsyncGenerator, Any
 
 from backend.services.generation.llm_io import LLMInput
+from services.generation.worker.decode import BaseDecode
 
 
 class AbstractGenerateWorker(ABC):
+
+    @staticmethod
+    def get_decode() -> type[BaseDecode]:
+        return BaseDecode
+
     @abstractmethod
     async def generate(self, llm_input: LLMInput) -> AsyncGenerator[Any, None]:
         """

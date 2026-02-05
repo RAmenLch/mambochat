@@ -15,7 +15,7 @@ from backend.services.generation.instructions import (
 from backend.services.generation.abstract_manager import AbstractGenerateManager
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.llm_input_builder import LLMInputBuilder
-from backend.services.generation.utils import OpenAiDecode
+
 
 
 class TitleGenerationContext(BaseModel):
@@ -81,7 +81,7 @@ class TitleGenerateManager(AbstractGenerateManager):
         accumulated_content = ""
 
         async for mode, event in worker.generate(llm_input):
-            text_chunk = OpenAiDecode.get_text_content(mode, event)
+            text_chunk = self.decode.get_text_content(mode, event)
             if text_chunk:
                 accumulated_content += text_chunk
 

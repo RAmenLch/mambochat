@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import os
 from typing import AsyncGenerator, Optional, Dict
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,7 +24,6 @@ from backend.services.generation.instructions import (
 from backend.services.generation.abstract_manager import AbstractGenerateManager
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.llm_input_builder import LLMInputBuilder
-from backend.services.generation.utils import OpenAiDecode
 
 
 class DefaultGenerateManager(AbstractGenerateManager):
@@ -152,11 +150,11 @@ class DefaultGenerateManager(AbstractGenerateManager):
     async def _process_stream_event(self, mode: str, event: any) -> AsyncGenerator[BaseInstruction, None]:
         """
         核心解析逻辑：根据 mode 和 event 类型分发处理。
-        依赖 OpenAiDecode 工具类提取信息。
+        依赖 Decode 工具类提取信息。
         """
-
+        Decode = self.decode
         # --- 1. 处理文本内容 (Content) ---
-        text_content = OpenAiDecode.get_text_content(mode, event)
+        text_content = Decode.get_text_content(mode, event)
         if text_content:
             if not self._content_id:
                 self._content_id = generate_uuid()
@@ -169,7 +167,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
             yield AppendToSubMessage(sub_message_id=self._content_id, content=text_content)
 
         # --- 2. 处理推理内容 (Reasoning) ---
-        reasoning_content = OpenAiDecode.get_reasoning_content(mode, event)
+        reasoning_content = Decode.get_reasoning_content(mode, event)
         if reasoning_content:
             if not self._reasoning_id:
                 self._reasoning_id = generate_uuid()
@@ -185,7 +183,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
         # --- 3. 处理工具调用请求 (Tool Calls) ---
         # 通常在 mode='updates' 且 message 为 AIMessage 时出现
         from langchain_core.messages.tool import ToolCall
-        tool_calls: list[ToolCall] = OpenAiDecode.get_toolcall_content(mode, event)
+        tool_calls: list[ToolCall] = Decode.get_toolcall_content(mode, event)
         if tool_calls:
             for tool_call in tool_calls:
                 # tool_call 结构: {'id': '...', 'name': '...', 'args': {...}, ...}
@@ -220,7 +218,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
 
         # --- 4. 处理工具执行结果 (Tool Results) ---
         # 通常在 mode='updates' 且 message 为 ToolMessage 时出现
-        tool_result = OpenAiDecode.get_toolcall_result(mode, event)
+        tool_result = Decode.get_toolcall_result(mode, event)
         if tool_result:
             # tool_result 结构: {'id': '...', 'text': '...'}
             tool_call_id = tool_result.get("id")
@@ -247,7 +245,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 )
 
         # --- 5. 处理生成的图片 (Images) ---
-        image_data = OpenAiDecode.get_image_url(mode, event)
+        image_data = Decode.get_image_url(mode, event)
         if image_data:
             # image_data 结构: {"image_url": {"url": "data:image/..."}}
             url = image_data.get("image_url", {}).get("url")

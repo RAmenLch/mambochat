@@ -22,6 +22,7 @@ from backend.services.generation.worker.google_worker import GoogleWorker
 from backend.services.generation.worker.deepseek_worker import DeepSeekWorker
 from backend.schemas.enums import FileManagementType, MessageStatus, MessageRole, SubMessageType, ProviderWorkerType
 from backend.config.timezone_config import get_configured_now, TZ
+from services.generation.worker.anthropic_worker import AnthropicWorker
 
 # 定义生成任务启动的超时阈值
 GENERATION_START_TIMEOUT = timedelta(minutes=10)
@@ -172,6 +173,8 @@ def _create_worker_instance(worker_type: str):
         return GoogleWorker()
     elif worker_type == ProviderWorkerType.DEEPSEEK:
         return DeepSeekWorker()
+    elif worker_type == ProviderWorkerType.ANTHROPIC:
+        return AnthropicWorker()
     else:
         return OpenAiWorker()
 

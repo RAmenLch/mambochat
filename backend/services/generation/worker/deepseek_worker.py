@@ -6,6 +6,7 @@ from langchain_core.messages import ToolMessage, HumanMessage, AIMessage, System
 from backend.services.generation.llm_io import LLMInput
 from backend.services.generation.worker.chat_worker import ChatWorker
 from backend.services.generation.worker.deepseek_chat_model import ChatDeepSeek
+from services.generation.worker.decode import BaseDecode, OpenAiDecode
 
 
 class DeepSeekWorker(ChatWorker):
@@ -13,6 +14,11 @@ class DeepSeekWorker(ChatWorker):
     DeepSeek 生成工作者。
     继承自 ChatWorker，针对 DeepSeek 的思考模式（Reasoning Mode）进行了适配。
     """
+
+    @staticmethod
+    def get_decode() -> type[BaseDecode]:
+        return OpenAiDecode
+
 
     def _convert_messages(self, messages: List[Dict[str, Any]]) -> List[BaseMessage]:
         """

@@ -1,6 +1,6 @@
 // frontend/mambo/src/api/types/providerTypes.ts
 
-export type ProviderWorkerType = 'openai' | 'google' | 'deepseek'
+export type ProviderWorkerType = 'openai' | 'google' | 'deepseek' | 'anthropic'
 export type ModelType = 'chat' | 'embedding'
 
 export interface AIModelMetaConfig {

@@ -1,6 +1,29 @@
 from langchain_core.messages import AIMessageChunk,AIMessage, ToolMessage
 
-class OpenAiDecode:
+class BaseDecode:
+    @staticmethod
+    def get_text_content(mode,message):
+        pass
+
+    @staticmethod
+    def get_reasoning_content(mode,message):
+        pass
+
+    @staticmethod
+    def get_toolcall_content(mode,message):
+        pass
+
+    @staticmethod
+    def get_toolcall_result(mode,message):
+        pass
+
+    @staticmethod
+    def get_image_url(mode,message):
+        pass
+
+
+
+class OpenAiDecode(BaseDecode):
     @staticmethod
     def get_text_content(mode,message:AIMessageChunk| AIMessage):
         if mode == "updates":
@@ -48,7 +71,7 @@ class OpenAiDecode:
 
 
 
-class AnthropicDecode:
+class AnthropicDecode(BaseDecode):
     @staticmethod
     def get_text_content(mode,message:AIMessageChunk| AIMessage):
         if mode == "updates":
@@ -88,3 +111,7 @@ class AnthropicDecode:
             return {"id": message.tool_call_id, "text": message.text} # text 工具调用mcp方法返回的json
         else:
             return None
+
+    @staticmethod
+    def get_image_url(mode,message:AIMessageChunk| AIMessage):
+        return None

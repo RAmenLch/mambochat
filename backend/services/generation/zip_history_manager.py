@@ -12,7 +12,7 @@ from backend.services.generation.instructions import (
 from backend.services.generation.abstract_manager import AbstractGenerateManager
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.llm_input_builder import LLMInputBuilder
-from backend.services.generation.utils import OpenAiDecode
+
 
 DEFAULT_ZIP_HISTORY_PROMPT = (
     "你是一个对话历史压缩工具。请根据用户提供的对话历史，生成一段简洁、精确、信息完整的摘要。"
@@ -70,7 +70,7 @@ class ZipHistoryGenerateManager(AbstractGenerateManager):
         accumulated_content = ""
 
         async for mode, event in worker.generate(llm_input):
-            text_chunk = OpenAiDecode.get_text_content(mode, event)
+            text_chunk = self.decode.get_text_content(mode, event)
             if text_chunk:
                 accumulated_content += text_chunk
 

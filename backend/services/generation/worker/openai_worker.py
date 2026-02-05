@@ -1,4 +1,5 @@
-from services.generation.worker.extended_chat_openai_model import  ExtendedChatOpenAI
+from backend.services.generation.worker.decode import BaseDecode, OpenAiDecode
+from backend.services.generation.worker.extended_chat_openai_model import  ExtendedChatOpenAI
 from backend.services.generation.llm_io import LLMInput
 from backend.services.generation.worker.chat_worker import ChatWorker
 
@@ -12,6 +13,9 @@ class OpenAiWorker(ChatWorker):
     输出流为 LangChain 的原生消息块 (BaseMessageChunk) 或状态更新，
     由 Manager 负责翻译。
     """
+    @staticmethod
+    def get_decode() -> type[BaseDecode]:
+        return OpenAiDecode
 
     def _create_model(self, llm_input: LLMInput) -> ExtendedChatOpenAI:
         """

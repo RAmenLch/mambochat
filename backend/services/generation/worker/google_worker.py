@@ -1,6 +1,7 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
 from backend.services.generation.llm_io import LLMInput
 from backend.services.generation.worker.chat_worker import ChatWorker
+from backend.services.generation.worker.decode import OpenAiDecode, BaseDecode
 
 
 class GoogleWorker(ChatWorker):
@@ -12,6 +13,10 @@ class GoogleWorker(ChatWorker):
     输出流为 LangChain 的原生消息块 (BaseMessageChunk) 或状态更新，
     由 Manager 负责翻译。
     """
+    @staticmethod
+    def get_decode() -> type[BaseDecode]:
+        return OpenAiDecode
+
 
     def _create_model(self, llm_input: LLMInput) -> ChatGoogleGenerativeAI:
         """

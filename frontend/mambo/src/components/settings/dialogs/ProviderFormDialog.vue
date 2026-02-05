@@ -25,6 +25,7 @@
             <el-option label="OpenAI Compatible" value="openai" />
             <el-option label="Google Gemini Native" value="google" />
             <el-option label="DeepSeek Native" value="deepseek" />
+             <el-option label="Anthropic Native" value="anthropic" />
           </el-select>
         </el-form-item>
 

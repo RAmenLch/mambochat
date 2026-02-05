@@ -14,6 +14,7 @@ from langchain_core.tools import BaseTool
 from langchain.agents import create_agent
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.llm_io import LLMInput
+from backend.services.generation.worker.decode import OpenAiDecode, BaseDecode
 
 
 class ChatWorker(AbstractGenerateWorker):
@@ -25,6 +26,10 @@ class ChatWorker(AbstractGenerateWorker):
     输出流为 LangChain 的原生消息块 (BaseMessageChunk) 或状态更新，
     由 Manager 负责翻译。
     """
+    @staticmethod
+    def get_decode() -> type[BaseDecode]:
+        return BaseDecode
+
 
     def _convert_messages(self, messages: List[Dict[str, Any]]) -> List[BaseMessage]:
         """

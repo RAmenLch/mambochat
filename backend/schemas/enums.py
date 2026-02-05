@@ -45,6 +45,7 @@ class ProviderWorkerType(str, Enum):
     OPENAI = "openai"
     GOOGLE = "google"
     DEEPSEEK = "deepseek"
+    ANTHROPIC = "anthropic"
 
 
 class ModelType(str, Enum):
