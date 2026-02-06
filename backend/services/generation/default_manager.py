@@ -42,6 +42,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
         # 状态追踪 ID
         self._reasoning_id: Optional[str] = None
         self._content_id: Optional[str] = None
+        self._final_usage_data:Optional[Dict] = None
 
         # 工具调用 ID 映射表: tool_call_id -> sub_message_id
         self._tool_sub_msg_map: Dict[str, str] = {}
@@ -253,6 +254,11 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 async for instruction in self._handle_generated_image(url):
                     yield instruction
 
+        # --- 6.处理 Usage ----
+        usage_data = Decode.get_usage(mode,event)
+        if usage_data:
+            self._final_usage_data = usage_data
+
     async def _handle_generated_image(self, base64_url: str) -> AsyncGenerator[BaseInstruction, None]:
         """处理 Base64 图片数据：保存文件并创建子消息"""
         try:
@@ -317,6 +323,18 @@ class DefaultGenerateManager(AbstractGenerateManager):
             )
             self._reasoning_id = None
 
+        if self._final_usage_data:
+            if self._final_usage_data:
+                self._usage_id = generate_uuid()
+                usage_content = json.dumps(self._final_usage_data)
+                yield CreateSubMessage(
+                    sub_message_id=self._usage_id,
+                    type=schemas_enums.SubMessageType.USAGE.value,
+                    sortOrder=99,
+                    status=schemas_enums.MessageStatus.COMPLETED,
+                    initial_content=usage_content,
+                    config={"context_participation_length": 0}
+                )
         # 3. 设置最终状态
         yield SetFinalStatus(status=schemas_enums.MessageStatus.COMPLETED)
 

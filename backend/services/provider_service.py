@@ -67,7 +67,12 @@ async def test_connection_to_provider(
     测试与外部LLM服务商的连接，并可选择通过代理进行。
     """
     try:
-        await fetch_models_from_provider(db, api_host, api_key, use_proxy)
+        if api_host == "https://generativelanguage.googleapis.com/v1beta":
+            func1 = fetch_models_from_provider_google
+        else:
+            func1 = fetch_models_from_provider
+
+        await func1(db, api_host, api_key, use_proxy)
         return schemas.ConnectionTestResponse(status="success", message="连接成功！")
     except json.JSONDecodeError:
         return schemas.ConnectionTestResponse(
@@ -160,6 +165,74 @@ async def fetch_models_from_provider(
             processed_models.append(
                 schemas.AIModelBase(
                     modelId=model.get("id"),
+                    name=model_name,
+                    meta_config=meta_config_obj
+                )
+            )
+        return processed_models
+
+
+async def fetch_models_from_provider_google(
+        db: AsyncSession,
+        api_host: str,
+        api_key: str,
+        use_proxy: bool
+) -> List[schemas.AIModelBase]:
+    """
+    调用外部LLM服务商的API以获取其提供的模型列表，并解析元数据。
+    """
+    headers = {
+        "Content-Type": "application/json",
+    }
+
+    url = f"{api_host.rstrip('/')}/models?key={api_key}"
+
+    async with await _get_http_client_with_proxy(db, use_proxy_flag=use_proxy, timeout=30) as client:
+        response = await client.get(url, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+
+        # 1. 修改解析键名：Google 返回的是 'models' 而不是 'data'
+        model_list = data.get("models", [])
+
+        if not isinstance(model_list, list):
+            raise json.JSONDecodeError("响应体中的 'models' 字段不是一个列表", str(data), 0)
+
+        processed_models = []
+        for model in model_list:
+            # 2. 修改 ID 校验逻辑：Google 使用 'name' 字段作为唯一标识
+            if not (isinstance(model, dict) and model.get("name")):
+                continue
+
+            meta_dict = {}
+
+            # 3. 字段映射：将 Google 的字段映射到系统的 meta_config 结构
+            # inputTokenLimit -> context_length
+            input_token_limit = model.get('inputTokenLimit')
+            if input_token_limit is not None:
+                meta_dict['context_length'] = input_token_limit
+
+            # outputTokenLimit -> max_output_tokens
+            output_token_limit = model.get('outputTokenLimit')
+            if output_token_limit is not None:
+                meta_dict['max_output_tokens'] = output_token_limit
+
+            # 注意：Google 响应中通常不直接提供 tokenizer, input_modalities 等信息，
+            # 也没有 supported_parameters 列表（只有 supportedGenerationMethods）。
+            # 这里我们只提取明确存在的数值字段。
+
+            # 仅当 meta_dict 非空时才创建 meta_config 对象
+            meta_config_obj = schemas.AIModelMetaConfig(**meta_dict) if meta_dict else None
+
+            # 4. ID 与 Name 映射
+            # modelId: 使用 Google 的 'name' (例如 'models/gemini-2.5-flash')
+            # name: 使用 Google 的 'displayName' (例如 'Gemini 2.5 Flash')
+            model_id = model.get("name")
+            model_name = model.get("displayName", model_id)
+
+            processed_models.append(
+                schemas.AIModelBase(
+                    modelId=model_id,
                     name=model_name,
                     meta_config=meta_config_obj
                 )

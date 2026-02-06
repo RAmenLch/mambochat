@@ -25,7 +25,11 @@ async def _fetch_models_and_handle_errors(
     一个内部辅助函数，封装了调用服务获取模型并统一处理各种潜在异常的逻辑。
     """
     try:
-        return await provider_service.fetch_models_from_provider(db, api_host, api_key, use_proxy)
+        if api_host == "https://generativelanguage.googleapis.com/v1beta":
+            func1 = provider_service.fetch_models_from_provider_google
+        else:
+            func1 = provider_service.fetch_models_from_provider
+        return await func1(db, api_host, api_key, use_proxy)
     except json.JSONDecodeError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

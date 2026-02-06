@@ -86,6 +86,16 @@ SUPPORTED_LLM_PARAMETERS: List[LLMParameter] = [
         default_activate=False
     ),
     LLMParameter(
+        key="gemini::includeThoughts",
+        label="includeThoughts(Gemini)",
+        path=["include_thoughts"],
+        description="用于是否输出思考总结",
+        type="boolean",
+        limit=[True,False],
+        default_value=True,
+        default_activate=False
+    ),
+    LLMParameter(
         key="gemini::reasoning_effort",
         label="reasoning_effort(Gemini)",
         path=["reasoning_effort"],
@@ -103,6 +113,26 @@ SUPPORTED_LLM_PARAMETERS: List[LLMParameter] = [
         type="string",
         limit=["minimal","low","medium","high"],
         default_value="medium",
+        default_activate=False
+    ),
+    LLMParameter(
+        key="anthropic::thinking.type",
+        label="thinking.type(Anthropic)",
+        path=["thinking", "type"],
+        description="用于是否启动思考,启用后须启用thinking.budget_tokens",
+        type="string",
+        limit=["enabled","disabled"],
+        default_value="enabled",
+        default_activate=False
+    ),
+    LLMParameter(
+        key="anthropic::thinking.budget_tokens",
+        label="thinking.budget_tokens(Openrouter)",
+        path=["thinking", "budget_tokens"],
+        description="用于控制思考思考预算,须启用thinking.type(Anthropic)",
+        type="integer",
+        limit={"min": 1000,"max":32000},
+        default_value=2048,
         default_activate=False
     ),
 

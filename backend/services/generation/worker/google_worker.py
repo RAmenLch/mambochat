@@ -1,7 +1,7 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
 from backend.services.generation.llm_io import LLMInput
 from backend.services.generation.worker.chat_worker import ChatWorker
-from backend.services.generation.worker.decode import OpenAiDecode, BaseDecode
+from backend.services.generation.worker.decode import OpenAiDecode, BaseDecode, GoogleDecode
 
 
 class GoogleWorker(ChatWorker):
@@ -15,7 +15,7 @@ class GoogleWorker(ChatWorker):
     """
     @staticmethod
     def get_decode() -> type[BaseDecode]:
-        return OpenAiDecode
+        return GoogleDecode
 
 
     def _create_model(self, llm_input: LLMInput) -> ChatGoogleGenerativeAI:
@@ -25,14 +25,15 @@ class GoogleWorker(ChatWorker):
         # 提取基础参数
         model_kwargs = llm_input.parameters.copy()
         stream = model_kwargs.pop("stream", True) # 既然是 Worker，默认应该支持流式
-
+        include_thoughts = model_kwargs.pop("include_thoughts", True)
         # 处理代理
         openai_proxy = llm_input.proxy_url if llm_input.proxy_url else None
-
+        url = llm_input.api_host.rstrip("/").rstrip("/v1beta")
         return ChatGoogleGenerativeAI(
             model=llm_input.model_id,
             api_key=llm_input.api_key,
-            base_url=llm_input.api_host.rstrip("/"),
+            include_thoughts=include_thoughts,
+            base_url=url,
             model_kwargs=model_kwargs,
             openai_proxy=openai_proxy,
             timeout=llm_input.timeout,
