@@ -6,7 +6,7 @@ from langchain_core.messages import ToolMessage, HumanMessage, AIMessage, System
 from backend.services.generation.llm_io import LLMInput
 from backend.services.generation.worker.chat_worker import ChatWorker
 from backend.services.generation.worker.deepseek_chat_model import ChatDeepSeek
-from services.generation.worker.decode import BaseDecode, OpenAiDecode
+from backend.services.generation.worker.decode import BaseDecode, OpenAiDecode
 
 
 class DeepSeekWorker(ChatWorker):

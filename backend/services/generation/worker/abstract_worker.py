@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import AsyncGenerator, Any
 
 from backend.services.generation.llm_io import LLMInput
-from services.generation.worker.decode import BaseDecode
+from backend.services.generation.worker.decode import BaseDecode
 
 
 class AbstractGenerateWorker(ABC):

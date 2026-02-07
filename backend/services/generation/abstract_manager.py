@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.instructions import BaseInstruction
 from backend.schemas import enums as schemas_enums
-from services.generation.worker.decode import BaseDecode
+from backend.services.generation.worker.decode import BaseDecode
 
 
 class AbstractGenerateManager(ABC):
