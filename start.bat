@@ -32,7 +32,7 @@ if exist "%UV_EXE%" (
     goto :uv_ready
 )
 
-:: Check if uv is in system PATH
+rem :: Check if uv is in system PATH
 where uv >nul 2>&1
 if %errorlevel% equ 0 (
     for /f "delims=" %%i in ('where uv') do (
@@ -47,16 +47,7 @@ if %errorlevel% equ 0 (
 echo  × 未检测到 uv，正在下载...
 if not exist "%UV_DIR%" mkdir "%UV_DIR%"
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12;" ^
-    "$zipFile = '%RUNTIME_DIR%\uv.zip';" ^
-    "Write-Host '  下载中...';" ^
-    "Invoke-WebRequest -Uri 'https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip' -OutFile $zipFile;" ^
-    "Write-Host '  解压中...';" ^
-    "Expand-Archive -Path $zipFile -DestinationPath '%RUNTIME_DIR%\uv_temp' -Force;" ^
-    "Remove-Item $zipFile -Force;" ^
-    "Get-ChildItem '%RUNTIME_DIR%\uv_temp' -Recurse -Filter 'uv.exe' | ForEach-Object { Copy-Item $_.Directory.FullName\* '%UV_DIR%\' -Force };" ^
-    "Remove-Item '%RUNTIME_DIR%\uv_temp' -Recurse -Force"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $zipFile = '%RUNTIME_DIR%\uv.zip'; Write-Host '  下载中...'; Invoke-WebRequest -Uri 'https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip' -OutFile $zipFile; Write-Host '  解压中...'; Expand-Archive -Path $zipFile -DestinationPath '%RUNTIME_DIR%\uv_temp' -Force; Remove-Item $zipFile -Force; Get-ChildItem '%RUNTIME_DIR%\uv_temp' -Recurse -Filter 'uv.exe' | ForEach-Object { Copy-Item \"$($_.Directory.FullName)\*\" '%UV_DIR%\' -Force }; Remove-Item '%RUNTIME_DIR%\uv_temp' -Recurse -Force"
 
 if exist "%UV_DIR%\uv.exe" (
     set "UV_EXE=%UV_DIR%\uv.exe"
@@ -67,6 +58,7 @@ if exist "%UV_DIR%\uv.exe" (
     pause
     exit /b 1
 )
+
 
 :uv_ready
 
@@ -109,7 +101,7 @@ if not exist "%VENV_DIR%\Scripts\python.exe" (
 )
 
 echo  安装 backend 依赖...
-"%UV_EXE%" pip install --python "%PYTHON_EXE%" -r "%ROOT_DIR%backend\pyproject.toml" -i https://pypi.tuna.tsinghua.edu.cn/simple
+"%UV_EXE%" pip install --python "%PYTHON_EXE%" -e "%ROOT_DIR%backend" -i https://pypi.tuna.tsinghua.edu.cn/simple
 if %errorlevel% neq 0 (
     echo  × backend 依赖安装失败
     pause
@@ -117,10 +109,10 @@ if %errorlevel% neq 0 (
 )
 
 echo  安装 MCP Server (ddgs) 依赖...
-"%UV_EXE%" pip install --python "%PYTHON_EXE%" -r "%ROOT_DIR%MCP_SERVER\ddgs\pyproject.toml" -i https://pypi.tuna.tsinghua.edu.cn/simple
+"%UV_EXE%" pip install --python "%PYTHON_EXE%" -e "%ROOT_DIR%MCP_SERVER\ddgs" -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 echo  安装 MCP Server (knowledge_base) 依赖...
-"%UV_EXE%" pip install --python "%PYTHON_EXE%" -r "%ROOT_DIR%MCP_SERVER\knowledge_base\pyproject.toml" -i https://pypi.tuna.tsinghua.edu.cn/simple
+"%UV_EXE%" pip install --python "%PYTHON_EXE%" -e "%ROOT_DIR%MCP_SERVER\knowledge_base" -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 echo  √ 后端依赖安装完成
 
@@ -149,7 +141,6 @@ if %errorlevel% equ 0 (
         goto :node_found_system
     )
     :node_found_system
-    :: Derive npm.cmd from the same directory as node.exe
     for %%F in ("!NODE_EXE!") do set "NODE_BIN_DIR=%%~dpF"
     set "NPM_CMD=!NODE_BIN_DIR!npm.cmd"
     if exist "!NPM_CMD!" (
@@ -157,7 +148,6 @@ if %errorlevel% equ 0 (
         echo    npm 路径: !NPM_CMD!
         goto :node_ready
     )
-    :: Fallback: try npx-style
     for /f "delims=" %%j in ('where npm') do (
         set "NPM_CMD=%%j"
         goto :npm_found_system
@@ -172,17 +162,7 @@ if %errorlevel% equ 0 (
 echo  × 未检测到 Node.js，正在下载 v%NODE_VERSION%...
 if not exist "%NODE_DIR%" mkdir "%NODE_DIR%"
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12;" ^
-    "$url = 'https://nodejs.org/dist/v%NODE_VERSION%/node-v%NODE_VERSION%-win-x64.zip';" ^
-    "$zipFile = '%RUNTIME_DIR%\node.zip';" ^
-    "Write-Host '  下载 Node.js v%NODE_VERSION% ...';" ^
-    "Invoke-WebRequest -Uri $url -OutFile $zipFile;" ^
-    "Write-Host '  解压中...';" ^
-    "Expand-Archive -Path $zipFile -DestinationPath '%RUNTIME_DIR%' -Force;" ^
-    "Remove-Item $zipFile -Force;" ^
-    "$extracted = Get-ChildItem '%RUNTIME_DIR%' -Directory | Where-Object { $_.Name -like 'node-v*' } | Select-Object -First 1;" ^
-    "if ($extracted) { Get-ChildItem $extracted.FullName | Move-Item -Destination '%NODE_DIR%\' -Force; Remove-Item $extracted.FullName -Recurse -Force }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $url = 'https://nodejs.org/dist/v%NODE_VERSION%/node-v%NODE_VERSION%-win-x64.zip'; $zipFile = '%RUNTIME_DIR%\node.zip'; Write-Host '  下载 Node.js v%NODE_VERSION% ...'; Invoke-WebRequest -Uri $url -OutFile $zipFile; Write-Host '  解压中...'; Expand-Archive -Path $zipFile -DestinationPath '%RUNTIME_DIR%' -Force; Remove-Item $zipFile -Force; $extracted = Get-ChildItem '%RUNTIME_DIR%' -Directory | Where-Object { $_.Name -like 'node-v*' } | Select-Object -First 1; if ($extracted) { Get-ChildItem $extracted.FullName | Move-Item -Destination '%NODE_DIR%\' -Force; Remove-Item $extracted.FullName -Recurse -Force }"
 
 if exist "%NODE_DIR%\node.exe" (
     set "NODE_EXE=%NODE_DIR%\node.exe"
@@ -197,7 +177,6 @@ if exist "%NODE_DIR%\node.exe" (
 
 :node_ready
 
-:: Verify npm is accessible
 if not exist "!NPM_CMD!" (
     echo  × 找不到 npm: !NPM_CMD!
     pause
@@ -212,23 +191,8 @@ echo  验证: npm 路径 = !NPM_CMD!
 echo.
 echo [5/6] 安装前端依赖并构建...
 
-:: Clean corrupted node_modules if it exists but is broken
-if exist "%FRONTEND_DIR%\node_modules\npm" (
-    if not exist "%FRONTEND_DIR%\node_modules\.package-lock.json" (
-        echo  检测到损坏的 node_modules，正在清理...
-        rmdir /s /q "%FRONTEND_DIR%\node_modules" 2>nul
-    )
-)
-
-:: Install npm dependencies
-if not exist "%FRONTEND_DIR%\node_modules\.package-lock.json" (
-    echo  安装 npm 依赖...
-    :: Delete potentially corrupted node_modules
-    if exist "%FRONTEND_DIR%\node_modules" (
-        echo  清理旧的 node_modules...
-        rmdir /s /q "%FRONTEND_DIR%\node_modules" 2>nul
-    )
-    :: Run npm install using absolute paths - do NOT cd first
+if not exist "%FRONTEND_DIR%\node_modules\" (
+    echo  未检测到 node_modules，正在安装 npm 依赖...
     pushd "%FRONTEND_DIR%"
     call "!NPM_CMD!" install
     if !errorlevel! neq 0 (
@@ -240,10 +204,9 @@ if not exist "%FRONTEND_DIR%\node_modules\.package-lock.json" (
     popd
     echo  √ npm 依赖安装完成
 ) else (
-    echo  √ node_modules 已存在且完整，跳过安装
+    echo  √ node_modules 已存在，跳过安装
 )
 
-:: Build frontend
 echo  构建前端静态文件...
 pushd "%FRONTEND_DIR%"
 call "!NPM_CMD!" run build
@@ -269,16 +232,13 @@ echo.
 echo [6/6] 启动服务...
 echo.
 
-:: Set environment variables
 set "PYTHONPATH=%ROOT_DIR%"
 set "TZ=Asia/Shanghai"
 set "STORAGE_PATH=%ROOT_DIR%uploads"
 
-:: Create necessary directories
 if not exist "%ROOT_DIR%uploads" mkdir "%ROOT_DIR%uploads"
 if not exist "%ROOT_DIR%DB" mkdir "%ROOT_DIR%DB"
 
-:: Kill any previous instances on ports 8000 and 24911
 echo  清理可能残留的旧进程...
 for /f "tokens=5" %%p in ('netstat -aon ^| findstr ":8000 " ^| findstr "LISTENING"') do (
     taskkill /PID %%p /F >nul 2>&1
@@ -287,11 +247,9 @@ for /f "tokens=5" %%p in ('netstat -aon ^| findstr ":24911 " ^| findstr "LISTENI
     taskkill /PID %%p /F >nul 2>&1
 )
 
-:: Start backend
 echo  启动后端服务 (端口 8000)...
 start "MamboChat-Backend" cmd /k "title MamboChat-Backend && "%PYTHON_EXE%" -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --app-dir "%ROOT_DIR%""
 
-:: Wait for backend to be ready
 echo  等待后端启动...
 set "BACKEND_READY=0"
 for /l %%i in (1,1,15) do (
@@ -308,13 +266,11 @@ if !BACKEND_READY! equ 0 (
     echo  ！后端可能还在启动中，继续启动前端...
 )
 
-:: Start frontend preview server
 echo  启动前端服务 (端口 24911)...
 pushd "%FRONTEND_DIR%"
 start "MamboChat-Frontend" cmd /k "title MamboChat-Frontend && call "!NPM_CMD!" run preview -- --port 24911 --host 127.0.0.1"
 popd
 
-:: Wait a moment then open browser
 timeout /t 3 /nobreak >nul
 
 echo.
@@ -330,11 +286,4 @@ echo         MamboChat-Frontend 窗口即可停止服务
 echo.
 echo ============================================
 echo.
-
-:: Ask if user wants to open browser
-choice /c YN /m "是否打开浏览器访问 MamboChat"
-if %errorlevel% equ 1 (
-    start http://localhost:24911
-)
-
 pause
