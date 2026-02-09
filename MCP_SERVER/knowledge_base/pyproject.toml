@@ -1,9 +1,9 @@
 # MCP_SERVER/bing/pyproject.toml
 
 [project]
-name = "ddgs-search-mcp"
+name = "knowledge_base_mcp"
 version = "1.0.0"
-description = "A DDGS Search MCP Server"
+description = "内部资源库调用MCP服务"
 requires-python = ">=3.11"
 dependencies = [
     "mcp",              # 对应 from mcp.server.fastmcp import FastMCP

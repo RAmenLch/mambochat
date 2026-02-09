@@ -13,13 +13,22 @@ from backend.schemas.message import McpToolContent
 from backend.services.generation.llm_io import LLMInput
 from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 
-# 支持作为文本注入上下文的 MIME 类型
-SUPPORTED_TEXT_MIME_TYPES = {
-    "text/plain", "text/markdown", "text/csv", "text/html", "text/css",
-    "application/json", "text/xml", "text/x-python", "application/javascript",
-    "text/typescript", "text/x-java-source", "text/x-csharp", "text/x-c",
-    "text/x-c++src", "text/x-go", "text/x-ruby", "application/sql", "application/x-sh"
+# 以 application/* 开头但本质是文本的 MIME 类型
+_KNOWN_TEXT_APPLICATION_TYPES = {
+    "application/json", "application/xml", "application/sql",
+    "application/javascript", "application/x-sh", "application/x-yaml",
+    "application/rtf", "application/x-ipynb+json",
 }
+
+def _is_text_mime_type(mime_type: str) -> bool:
+    """
+    判断 MIME 类型是否可作为文本注入 LLM 上下文。
+    - text/* 前缀通用放行
+    - 已知的文本类 application/* 类型放行
+    """
+    if mime_type.startswith("text/"):
+        return True
+    return mime_type in _KNOWN_TEXT_APPLICATION_TYPES
 
 
 class LLMInputBuilder:
@@ -531,30 +540,26 @@ class LLMInputBuilder:
 
     async def _process_file_part(self, file_id: str) -> Optional[Dict[str, Any]]:
         """处理文件内容的转换与读取，支持缓存以减少 I/O。"""
-        # 1. 检查缓存
         if file_id in self._file_content_cache:
             return self._file_content_cache[file_id]
 
-        # 2. 查库
         db_file = await file_crud.get_file(self.db, file_id)
         if not db_file:
             return None
 
         result = None
-        # 3. 处理图片多模态
+        # 处理图片多模态
         if db_file.mime_type.startswith("image/") \
                 and self._enable_image_with_model and self._model_supports_images():
             img_bytes = await storage_service.read_bytes(db_file.storage_path)
             b64_data = base64.b64encode(img_bytes).decode('utf-8')
             result = {"type": "image_url", "image_url": {"url": f"data:{db_file.mime_type};base64,{b64_data}"}}
 
-        # 4. 处理文本文件注入
-        elif db_file.mime_type in SUPPORTED_TEXT_MIME_TYPES:
+        elif _is_text_mime_type(db_file.mime_type):
             text_bytes = await storage_service.read_bytes(db_file.storage_path)
             content = text_bytes.decode('utf-8')
             result = {"type": "text", "text": f"\n--- File: {db_file.filename} ---\n{content}\n--- End of File ---"}
 
-        # 5. 写入缓存
         if result:
             self._file_content_cache[file_id] = result
 
