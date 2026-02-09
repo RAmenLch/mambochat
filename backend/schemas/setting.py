@@ -33,3 +33,4 @@ class GlobalSettingsUpdate(BaseModel):
     kb_default_chunk_overlap: Optional[int] = Field(50, description="知识库默认切片重叠大小")
     send_message_shortcut: Optional[str] = Field("enter", description="发送消息快捷键: enter 或 ctrl_enter")
 
+    language: Optional[str] = Field("zh-CN", description="系统界面语言: zh-CN (简体中文) 或 en (英文)")

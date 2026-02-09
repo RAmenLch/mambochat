@@ -87,4 +87,3 @@ class McpTransportType(str, Enum):
     """定义 MCP 服务器的传输类型"""
     STDIO = "stdio"
     SSE = "sse"
-

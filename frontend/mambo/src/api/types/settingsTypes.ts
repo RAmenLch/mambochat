@@ -17,6 +17,7 @@ export interface GlobalSettingsUpdate {
   kb_default_chunk_size: number | null
   kb_default_chunk_overlap: number | null
   send_message_shortcut: string | null
+  language: string | null
 }
 
 export interface ProxyTestRequest {
