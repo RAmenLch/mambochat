@@ -28,9 +28,9 @@
     *   **会话管理**：支持文件夹分类、拖拽排序、会话搜索。
     *   **编辑器模式**：支持 Monaco Editor 代码编辑器模式。
     *   **编辑对话**：支持消息编辑、重新生成。
-    *   **压缩对话**: 支持压缩历史对话。✨ **主推功能** 请好好的看着我!
+    *   **压缩对话**: 支持压缩历史对话。✨ **主推特色功能** 请好好的看着我!
 *   **🛠️ 资源与提示词管理**
-    *   统一管理 System Prompts、消息模板。 ✨ **主推功能** 请好好的看着我!
+    *   统一管理 System Prompts、消息模板。 ✨ **主推特色功能** 请好好的看着我!
     *   支持资源的版本控制与回滚。
 *   **⚙️ 全局个性化**
     *   自定义用户与 AI 头像。
@@ -48,7 +48,7 @@
 
 1.  **克隆仓库**
     ```bash
-    git clone https://github.com/your-username/mambochat.git
+    git clone https://github.com/RAmenLch/mambochat.git
     cd mambochat
     ```
 
@@ -63,6 +63,18 @@
     *   数据持久化目录：
         *   `./DB`: 存放 SQLite 数据库文件。
         *   `./uploads`: 存放上传的文件和头像。
+
+## 🚀 快速开始 (Windows 一键启动)
+1.  **克隆仓库或通过github下载压缩包**
+    ```bash
+    git clone https://github.com/RAmenLch/mambochat.git
+    cd mambochat
+    ```
+2.  **双击或右键点击"在终端中打开"(WIN11)并执行命令**
+    ```bash
+        PS C:\mambochat> .\start.bat
+    ```
+> 注: 该脚本未在不同环境下经历测试,若出现问题欢迎创建 Issue
 
 ## 💻 本地开发指南
 
