@@ -1,4 +1,4 @@
-# MamboChat (曼波茶)
+# ![mambo](doc/img/logo_hajimi.svg) MamboChat (曼波茶)
 
 ![Version](https://img.shields.io/badge/version-1.1.0-blue)
 ![License](https://img.shields.io/badge/license-GPLv3-green)
