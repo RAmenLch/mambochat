@@ -26,24 +26,26 @@ if not exist "%RUNTIME_DIR%" mkdir "%RUNTIME_DIR%"
 echo.
 echo [1/6] 检查 uv 包管理器...
 
-set "UV_EXE=%UV_DIR%\uv.exe"
-if exist "%UV_EXE%" (
+set "UV_EXE="
+
+:: Priority 1: Check runtime directory
+if exist "%UV_DIR%\uv.exe" (
+    set "UV_EXE=%UV_DIR%\uv.exe"
     echo  √ uv 已安装在 runtime 目录
     goto :uv_ready
 )
 
-rem :: Check if uv is in system PATH
-where uv >nul 2>&1
-if %errorlevel% equ 0 (
-    for /f "delims=" %%i in ('where uv') do (
-        set "UV_EXE=%%i"
-        goto :uv_found_system
-    )
-    :uv_found_system
+:: Priority 2: Check system PATH
+:: [FIX] 使用 if exist 验证, 防止 cmd AutoRun 输出 (如 chcp) 被误捕获
+for /f "delims=" %%i in ('where uv 2^>nul') do (
+    if not defined UV_EXE if exist "%%i" set "UV_EXE=%%i"
+)
+if defined UV_EXE (
     echo  √ 检测到系统 uv: !UV_EXE!
     goto :uv_ready
 )
 
+:: Priority 3: Download uv
 echo  × 未检测到 uv，正在下载...
 if not exist "%UV_DIR%" mkdir "%UV_DIR%"
 
@@ -58,7 +60,6 @@ if exist "%UV_DIR%\uv.exe" (
     pause
     exit /b 1
 )
-
 
 :uv_ready
 
@@ -133,29 +134,29 @@ if exist "%NODE_DIR%\node.exe" (
     goto :node_ready
 )
 
-:: Priority 2: Check system PATH - resolve full absolute path BEFORE cd
-where node >nul 2>&1
-if %errorlevel% equ 0 (
-    for /f "delims=" %%i in ('where node') do (
-        set "NODE_EXE=%%i"
-        goto :node_found_system
-    )
-    :node_found_system
+:: Priority 2: Check system PATH
+:: [FIX] 使用 if exist 验证, 防止 cmd AutoRun 输出被误捕获
+for /f "delims=" %%i in ('where node 2^>nul') do (
+    if not defined NODE_EXE if exist "%%i" set "NODE_EXE=%%i"
+)
+if defined NODE_EXE (
+    :: 从 node.exe 路径推算同目录下的 npm.cmd
     for %%F in ("!NODE_EXE!") do set "NODE_BIN_DIR=%%~dpF"
     set "NPM_CMD=!NODE_BIN_DIR!npm.cmd"
-    if exist "!NPM_CMD!" (
+    if not exist "!NPM_CMD!" (
+        :: npm.cmd 不在 node 同目录, 尝试 where npm
+        set "NPM_CMD="
+        for /f "delims=" %%j in ('where npm 2^>nul') do (
+            if not defined NPM_CMD if exist "%%j" set "NPM_CMD=%%j"
+        )
+    )
+    if defined NPM_CMD (
         echo  √ 检测到系统 Node.js: !NODE_EXE!
         echo    npm 路径: !NPM_CMD!
         goto :node_ready
     )
-    for /f "delims=" %%j in ('where npm') do (
-        set "NPM_CMD=%%j"
-        goto :npm_found_system
-    )
-    :npm_found_system
-    echo  √ 检测到系统 Node.js: !NODE_EXE!
-    echo    npm 路径: !NPM_CMD!
-    goto :node_ready
+    echo  ! 找到 node 但未找到 npm, 将重新下载完整 Node.js
+    set "NODE_EXE="
 )
 
 :: Priority 3: Download Node.js

@@ -86,7 +86,7 @@ class AnthropicWorker(ChatWorker):
         # 提取基础参数
         model_kwargs = llm_input.parameters.copy()
         stream = model_kwargs.pop("stream", True) # 既然是 Worker，默认应该支持流式
-        thinking = model_kwargs.pop("thinking", {"type": "enabled", "budget_tokens": 2048})
+        thinking = model_kwargs.pop("thinking", {"type": "enabled", "budget_tokens": 32000})
         # 处理代理
         openai_proxy = llm_input.proxy_url if llm_input.proxy_url else None
 

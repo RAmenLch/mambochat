@@ -22,6 +22,7 @@ from backend.routers import (
     kb_management
 )
 from backend.services.cleanup_service import cleanup_zombie_files
+from backend.services.kb_service import SUP_DIM
 
 scheduler = AsyncIOScheduler(timezone=TZ)
 
@@ -38,7 +39,7 @@ async def lifespan(app: FastAPI):
         # 初始化预定义的向量表
         # 使用 sqlite-vec 的 vec0 模块创建虚拟表
         # 预创建维度: 384, 768, 1024, 1536, 2560, 3072, 4096
-        dimensions = [384, 768, 1024, 1536, 2560, 3072, 4096]
+        dimensions = SUP_DIM
         for dim in dimensions:
             table_name = f"vec_dim_{dim}"
             # 创建虚拟表 SQL, vec0 自动处理 rowid

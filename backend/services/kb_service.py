@@ -27,19 +27,24 @@ from backend.services.storage_service import storage_service
 from backend.services.stream_manager_service import stream_manager
 from backend.config.timezone_config import get_configured_now
 
-# 定义支持的知识库文件 MIME 类型白名单
-STRICT_TEXT_MIME_TYPES = {
-    "text/plain",
-    "text/markdown",
-    "text/csv",
-    "application/json",
-    "text/xml",
-    "application/xml",
-    "text/yaml",
-    "application/x-yaml",
-    "application/javascript",
-    "text/html"
+SUP_DIM = [384, 768, 1024, 1536, 2560, 3072, 4096]
+
+
+_KNOWN_TEXT_APPLICATION_TYPES = {
+    "application/json", "application/xml", "application/sql",
+    "application/javascript", "application/x-sh", "application/x-yaml",
+    "application/x-ipynb+json",
 }
+
+def _is_vectorizable_text_type(mime_type: str) -> bool:
+    """
+    判断 MIME 类型是否为可向量化的文本类型。
+    - text/* 前缀通用放行
+    - 已知的文本类 application/* 类型放行
+    """
+    if mime_type.startswith("text/"):
+        return True
+    return mime_type in _KNOWN_TEXT_APPLICATION_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -161,14 +166,12 @@ class FileExtractor(AbstractContentExtractor):
         if not db_file:
             raise ValueError(f"Physical file record not found for ID: {file_id}")
 
-        # 检查 MIME 类型是否在允许的文本列表中
-        if db_file.mime_type not in STRICT_TEXT_MIME_TYPES:
+        if not _is_vectorizable_text_type(db_file.mime_type):
             raise ValueError(
                 f"Unsupported file type for vectorization: {db_file.mime_type}. Only text files are supported.")
 
         try:
             content_bytes = await storage_service.read_bytes(db_file.storage_path)
-            # 尝试解码
             try:
                 return content_bytes.decode('utf-8')
             except UnicodeDecodeError:
@@ -223,7 +226,7 @@ class KnowledgeBaseService:
         if not dimension:
             raise ValueError(f"Model {model_id} configuration is missing 'embedding_dimension'.")
 
-        supported_dims = [384, 768, 1024, 1536, 2560, 3072, 4096]
+        supported_dims = SUP_DIM
         if dimension not in supported_dims:
             raise ValueError(f"Dimension {dimension} is not supported. Supported: {supported_dims}")
 

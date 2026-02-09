@@ -81,12 +81,12 @@
 
       <!-- Embedding 模型专用配置 -->
       <template v-if="isEmbeddingModel">
-        <el-form-item label="向量维度">
+        <el-form-item label="向量维度*">
           <el-input-number
             v-model="modelForm.meta_config.embedding_dimension"
             :min="1"
             :controls="false"
-            placeholder="例如: 1536"
+            placeholder="支持: [384, 768, 1024, 1536, 2560, 3072, 4096]"
             style="width: 100%"
           />
         </el-form-item>

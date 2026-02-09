@@ -18,6 +18,7 @@ from backend.schemas.enums import FileManagementType, ResourceType, ResourceItem
 from backend.services import chat_service, resource_service
 from backend.services.kb_service import KnowledgeBaseService
 from backend.services.storage_service import storage_service
+from backend.routers.file_management import correct_mime_type, is_mime_type_allowed
 
 router = APIRouter(prefix="/resources", tags=["Resource Management"])
 
@@ -163,13 +164,17 @@ async def upload_resource_file(
         resource_id: Optional[str] = Form(None, description="更新指定资源ID (更新模式)"),
         db: AsyncSession = Depends(get_db)
 ):
-    """
-    统一资源上传接口。
-    - **新建模式**: 提供 parent_id (或 'root')，创建新 Resource (Type=FILE) 和 Version。
-    - **更新模式**: 提供 resource_id，更新现有 Resource 的内容 (创建新 Version)。
-    """
     if not parent_id and not resource_id:
         raise HTTPException(status_code=400, detail="Either parent_id or resource_id must be provided.")
+
+    # 修正 MIME 类型（必须在 save 之前，因为 sniff 会 read+seek）
+    final_mime_type = await correct_mime_type(file)
+
+    if not is_mime_type_allowed(final_mime_type):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"不支持的文件类型: {final_mime_type}。"
+        )
 
     # 1. 保存物理文件
     try:
@@ -181,7 +186,7 @@ async def upload_resource_file(
         db=db,
         filename=file.filename,
         storage_path=storage_path,
-        mime_type=file.content_type or "application/octet-stream",
+        mime_type=final_mime_type,  # ★ 使用修正后的类型（原来是 file.content_type or "application/octet-stream"）
         size=file.size,
         management_type=[FileManagementType.RESOURCE.value]
     )
