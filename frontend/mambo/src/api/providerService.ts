@@ -17,70 +17,88 @@ import type {
  * 获取所有服务商及其模型
  */
 export const getProviders = (): Promise<AIProviderWithModels[]> => {
-  return apiClient.get('/providers/').then(res => res.data);
+  return apiClient.get('/providers/')
 };
 
 /**
  * 创建一个包含模型的新服务商
  */
 export const createProviderWithModels = (providerData: ProviderWithModelsCreate): Promise<AIProviderWithModels> => {
-  return apiClient.post('/providers/', providerData).then(res => res.data);
+  return apiClient.post('/providers/', providerData)
 };
 
 /**
  * 更新服务商信息
  */
 export const updateProvider = (providerId: string, providerData: AIProviderUpdate): Promise<AIProviderWithModels> => {
-  return apiClient.put(`/providers/${providerId}`, providerData).then(res => res.data);
+  return apiClient.put(`/providers/${providerId}`, providerData)
 };
 
 /**
  * 删除一个服务商
  */
 export const deleteProvider = (providerId: string): Promise<void> => {
-  return apiClient.delete(`/providers/${providerId}`).then(res => res.data);
+  return apiClient.delete(`/providers/${providerId}`)
 };
 
 /**
  * 创建一个新模型
  */
 export const createModel = (modelData: AIModelCreate): Promise<AIModel> => {
-  return apiClient.post('/models/', modelData).then(res => res.data);
+  return apiClient.post('/models/', modelData)
 };
 
 /**
  * 更新模型信息
  */
 export const updateModel = (modelId: string, modelData: AIModelUpdate): Promise<AIModel> => {
-  return apiClient.put(`/models/${modelId}`, modelData).then(res => res.data);
+  return apiClient.put(`/models/${modelId}`, modelData)
 };
 
 /**
  * 删除一个模型
  */
 export const deleteModel = (modelId: string): Promise<void> => {
-  return apiClient.delete(`/models/${modelId}`).then(res => res.data);
+  return apiClient.delete(`/models/${modelId}`)
 };
 
 /**
- * 测试与外部服务的连接
+ * 测试与外部服务的连接 (需要提供 apiHost 和 apiKey)
  */
-export const testConnection = (connectionData: ConnectionRequest): Promise<ConnectionTestResponse> => {
-  return apiClient.post('/providers/test-connection', connectionData).then(res => res.data);
+export const testConnection = (connectionData: ConnectionRequest, useProxy: boolean): Promise<ConnectionTestResponse> => {
+  return apiClient.post('/providers/test-connection', connectionData, {
+    params: { use_proxy: useProxy }
+  })
 };
 
 /**
- * 从外部服务获取模型列表
+ * 为已存在的服务商测试连接 (使用已存储的凭证)
+ * @param providerId 服务商ID
+ * @param apiHost 要测试的 API Host (用户可能在表单中修改)
+ * @param useProxy 是否启用代理 (用户可能在表单中修改)
  */
-export const fetchExternalModels = (connectionData: ConnectionRequest): Promise<AIModelBase[]> => {
-  return apiClient.post('/providers/fetch-models', connectionData).then(res => res.data);
+export const testConnectionForProvider = (providerId: string, apiHost: string, useProxy: boolean): Promise<ConnectionTestResponse> => {
+  return apiClient.post(`/providers/${providerId}/test-connection`, { apiHost }, {
+    params: { use_proxy: useProxy }
+  })
+};
+
+/**
+ * 从外部服务获取模型列表 (需要提供 apiHost 和 apiKey)
+ */
+export const fetchExternalModels = (connectionData: ConnectionRequest, useProxy: boolean): Promise<AIModelBase[]> => {
+  return apiClient.post('/providers/fetch-models', connectionData, {
+    params: { use_proxy: useProxy }
+  })
 };
 
 /**
  * 为已存在的服务商获取模型列表 (使用已存凭证)
  * @param providerId 服务商ID
+ * @param useProxy 是否启用代理 (用户可能在表单中修改)
  */
-export const fetchModelsForProvider = (providerId: string): Promise<AIModelBase[]> => {
-  // 修正：将请求方法从 POST 改为 GET 以匹配后端路由
-  return apiClient.get(`/providers/${providerId}/fetch-models`).then(res => res.data);
+export const fetchModelsForProvider = (providerId: string, useProxy: boolean): Promise<AIModelBase[]> => {
+  return apiClient.get(`/providers/${providerId}/fetch-models`, {
+    params: { use_proxy: useProxy }
+  })
 };

@@ -1,294 +1,631 @@
+<!-- frontend/mambo/src/components/chat/MessageItem.vue -->
 <template>
   <div
+    :id="id"
     class="message-item-container"
     :class="roleClass"
     @mouseenter="showActions = true"
     @mouseleave="showActions = false"
   >
-    <!-- 头像 -->
     <div class="message-avatar">
-      <el-avatar>
+      <el-avatar :src="avatarUrl || ''">
         <el-icon v-if="message.role === 'user'"><User /></el-icon>
         <el-icon v-else><Cpu /></el-icon>
       </el-avatar>
     </div>
 
-    <!-- 消息主体 (根据子消息数量进行条件渲染) -->
     <div class="message-body">
-      <!-- 单一分区视图 -->
-      <template v-if="isSingleSubMessage">
-        <div class="single-sub-message-wrapper" :class="{ collapsed: isSingleViewCollapsed }">
-          <SubMessageItem
-            :sub-message="firstSubMessage"
-            :parent-message="message"
-            @edit="(content) => openEditDialog(firstSubMessage, content)"
-            @copy="handleCopy"
-          />
-        </div>
-      </template>
+      <!-- Minimized SubMessages Area -->
+      <div v-if="minimizedSubMessages.length > 0" class="minimized-sub-messages-container">
+        <el-tooltip
+          v-for="subMessage in minimizedSubMessages"
+          :key="subMessage.id"
+          placement="top"
+          :show-after="300"
+        >
+          <template #content>
+            <div style="max-width: 300px; white-space: pre-wrap;">{{ getMinimizedTooltipContent(subMessage) }}</div>
+          </template>
+          <div class="minimized-item" @click="restoreSubMessage(subMessage.id)">
+            <!-- MCP Tool Specific Minimized View -->
+            <template v-if="subMessage.type === 'McpTool'">
+              <el-icon>
+                <Loading v-if="getMinimizedMcpInfo(subMessage).status === 'generating'" class="is-loading" />
+                <CircleCheck v-else-if="getMinimizedMcpInfo(subMessage).status === 'success'" style="color: var(--el-color-success);" />
+                <CircleClose v-else style="color: var(--el-color-error);" />
+              </el-icon>
+              <span class="minimized-item-title">工具调用</span>
+            </template>
+            <!-- Generic Minimized View -->
+            <template v-else>
+              <el-icon><Document /></el-icon>
+              <span class="minimized-item-title">{{ getPartitionTitleForMinimized(subMessage) }}</span>
+            </template>
+          </div>
+        </el-tooltip>
+      </div>
 
-      <!-- 多分区视图 -->
-      <template v-else>
-        <div class="multi-part-container">
-          <SubMessageItem
-            v-for="(subMessage, index) in message.sub_messages"
-            :key="subMessage.id"
-            :sub-message="subMessage"
-            :parent-message="message"
-            :show-header="true"
-            :index="index + 1"
-            @edit="(content) => openEditDialog(subMessage, content)"
-            @copy="handleCopySingle(subMessage)"
-          />
+      <div
+        class="sub-messages-container"
+        :class="{
+          'is-single': useSinglePartitionView,
+          'is-single-collapsed': useSinglePartitionView && isSingleViewCollapsed
+        }"
+      >
+        <!-- Display a loading indicator when the message is generating but has no sub-messages yet -->
+        <div v-if="message.status === 'generating' && normalSubMessages.length === 0" class="initial-loading-placeholder">
+          <div class="typing-indicator">
+            <span></span><span></span><span></span>
+          </div>
         </div>
-      </template>
 
-      <!-- 悬浮操作菜单 (根据视图模式显示不同按钮) -->
-      <div class="message-actions" :class="{ 'is-visible': showActions && !isAnySubMessageGenerating }">
-        <!-- 通用: 重新回答 -->
+        <template v-for="(group, groupIndex) in groupedSubMessages" :key="groupIndex">
+          <!-- Render a group of files with a flex layout -->
+          <div v-if="group.type === 'file'" class="file-group-container">
+            <SubMessageItem
+              v-for="(subMessage, index) in group.sub_messages"
+              :key="subMessage.id"
+              :id="`sub-msg-${subMessage.id}`"
+              :sub-message="subMessage"
+              :parent-message="message"
+              :index="index + 1"
+              :is-minimize-disabled="isLastVisibleSubMessage"
+              @edit="(payload) => handleEditRequest(subMessage, payload)"
+              @copy="handleCopySingle(subMessage)"
+            />
+          </div>
+          <!-- Render a single non-file sub-message -->
+          <SubMessageItem
+            v-else
+            :key="group.sub_messages[0].id"
+            :id="`sub-msg-${group.sub_messages[0].id}`"
+            :sub-message="group.sub_messages[0]"
+            :parent-message="message"
+            :show-header="!useSinglePartitionView"
+            :index="group.sub_messages[0].sortOrder + 1"
+            :is-minimize-disabled="isLastVisibleSubMessage"
+            @edit="(payload) => handleEditRequest(group.sub_messages[0], payload)"
+            @copy="handleCopySingle(group.sub_messages[0])"
+          />
+        </template>
+      </div>
+
+      <!-- Zip History Bookmark and Card -->
+      <div v-if="zipHistorySubMessage" class="zip-history-section">
+        <div
+          class="zip-history-bookmark"
+          :class="zipBookmarkClass"
+          @click="handleZipBookmarkClick"
+        >
+          <el-icon :class="{ 'is-loading': zipStatus === 'generating' }">
+            <component :is="zipBookmarkIcon" />
+          </el-icon>
+          <span>{{ zipBookmarkText }}</span>
+        </div>
+        <ZipHistoryCard
+          v-if="isZipCardVisible && zipStatus !== 'generating'"
+          :sub-message="zipHistorySubMessage"
+          class="zip-history-card"
+        />
+      </div>
+
+      <div class="message-actions" :class="{ 'is-visible': showActions && message.status !== 'generating' }">
         <el-tooltip :content="message.role === 'user' ? '在下方重新回答' : '重新回答'" placement="top" :show-after="500">
           <el-button :icon="message.role === 'user' ? RefreshLeft : Refresh" circle size="small" @click="handleRegenerate" />
         </el-tooltip>
 
-        <!-- 单一视图: 折叠/展开 -->
         <el-tooltip v-if="isSingleSubMessage" :content="isSingleViewCollapsed ? '展开' : '折叠'" placement="top" :show-after="500">
           <el-button :icon="isSingleViewCollapsed ? ArrowDownBold : ArrowUpBold" circle size="small" @click="toggleSingleViewCollapse" />
         </el-tooltip>
 
-        <!-- 单一视图: 编辑 -->
         <el-tooltip v-if="isSingleSubMessage" content="编辑" placement="top" :show-after="500">
-          <el-button :icon="Edit" circle size="small" @click="openEditDialog(firstSubMessage, firstSubMessage.content)" />
+          <el-button :icon="Edit" circle size="small" @click="handleEditRequest(firstSubMessage, { content: firstSubMessage.content })" />
         </el-tooltip>
 
-        <!-- 复制 (行为不同) -->
         <el-tooltip :content="isSingleSubMessage ? '复制' : '全部复制'" placement="top" :show-after="500">
           <el-button :icon="CopyDocument" circle size="small" @click="handleCopy" />
         </el-tooltip>
 
-        <!-- 通用: 删除 -->
+        <el-tooltip v-if="message.role === 'assistant'" content="压缩以上历史" placement="top" :show-after="500">
+          <el-button :icon="Clock" circle size="small" @click="handleCompressHistory" />
+        </el-tooltip>
+
         <el-tooltip content="删除" placement="top" :show-after="500">
           <el-button :icon="Delete" circle size="small" type="danger" plain @click="handleDelete" />
         </el-tooltip>
+
+        <UsageInfo
+          v-if="usageSubMessage"
+          :usage-sub-message="usageSubMessage"
+          class="usage-info-component"
+        />
       </div>
     </div>
   </div>
 
-  <!-- 编辑消息弹窗 (由MessageItem统一管理) -->
-  <el-dialog v-model="editDialogVisible" title="编辑分区内容" width="650px">
-    <el-input
-      v-model="editingContent"
-      type="textarea"
-      :rows="12"
-      resize="none"
-      placeholder="内容不能为空"
-    />
-    <template #footer>
-      <span class="dialog-footer">
-        <el-button @click="editDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSaveEdit">仅保存</el-button>
-        <el-button
-          v-if="message.role === 'user'"
-          type="success"
-          @click="handleSaveAndResend"
-        >
-          保存并重新生成
-        </el-button>
-      </span>
-    </template>
-  </el-dialog>
+  <MessageEditDialog
+    v-model:visible="editDialogVisible"
+    :initial-content="originalEditingContent"
+    :is-user-message="message.role === 'user'"
+    @save="handleSaveEdit"
+    @save-and-resend="handleSaveAndResend"
+  />
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import type { Message, SubMessage } from '@/api/types';
-import { useChatStore } from '@/stores/chatStore';
+import { storeToRefs } from 'pinia';
+import type { Message, SubMessage, SubMessageCreate, MessageStatus, McpToolContent } from '@/api/types';
+import { useChatInteractionStore } from '@/stores/chatInteractionStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { User, Cpu, Refresh, RefreshLeft, Delete, Edit, CopyDocument, ArrowUpBold, ArrowDownBold } from '@element-plus/icons-vue';
+import {
+  User, Cpu, Refresh, RefreshLeft, Delete, Edit, CopyDocument,
+  ArrowUpBold, ArrowDownBold, Clock, Document, Loading, CircleCheck, CircleClose
+} from '@element-plus/icons-vue';
 import SubMessageItem from './SubMessageItem.vue';
+import MessageEditDialog from './dialogs/MessageEditDialog.vue';
+import UsageInfo from './UsageInfo.vue';
+import ZipHistoryCard from './ZipHistoryCard.vue';
 import { copyToClipboard } from '@/utils/clipboard';
+import { parseMarkdown } from '@/utils/markdownParser';
+
+interface SubMessageGroup {
+  type: 'file' | 'normal';
+  sub_messages: SubMessage[];
+}
+
+interface MinimizedMcpInfo {
+  status: 'generating' | 'success' | 'error';
+}
 
 const props = defineProps<{
+  id: string;
   message: Message;
   isLastMessage: boolean;
 }>();
 
-const chatStore = useChatStore();
-const showActions = ref(false);
+const interactionStore = useChatInteractionStore();
+const settingsStore = useSettingsStore();
+const { globalSettings } = storeToRefs(settingsStore);
 
-// --- 计算属性 ---
-const isSingleSubMessage = computed(() => props.message.sub_messages.length <= 1);
-const firstSubMessage = computed(() => props.message.sub_messages[0]);
-const isAnySubMessageGenerating = computed(() => props.message.sub_messages.some(sm => sm.status === 'generating'));
+const showActions = ref(false);
+const isZipCardVisible = ref(false);
+
+/**
+ * 过滤出所有用于在消息气泡中显示的子消息 (排除 'Usage' 和 'ZipHistory' 类型)。
+ */
+const displayableSubMessages = computed(() =>
+  props.message.sub_messages.filter(sm => sm.type !== 'Usage' && sm.type !== 'ZipHistory')
+);
+
+/**
+ * 筛选出被最小化的子消息
+ */
+const minimizedSubMessages = computed(() =>
+  displayableSubMessages.value.filter(sm => sm.config?.is_minimal === true)
+);
+
+/**
+ * 筛选出正常显示的子消息 (排除最小化)
+ */
+const normalSubMessages = computed(() =>
+  displayableSubMessages.value.filter(sm => !sm.config?.is_minimal)
+);
+
+/**
+ * 判断当前是否只剩下一个可见的子消息
+ */
+const isLastVisibleSubMessage = computed(() => normalSubMessages.value.length === 1);
+
+/**
+ * 提取出 'Usage' 类型的子消息，用于在工具栏中显示。
+ */
+const usageSubMessage = computed(() =>
+  props.message.sub_messages.find(sm => sm.type === 'Usage')
+);
+
+/**
+ * 提取出 'ZipHistory' 类型的子消息，用于显示历史摘要卡片。
+ */
+const zipHistorySubMessage = computed(() =>
+  props.message.sub_messages.find(sm => sm.type === 'ZipHistory')
+);
+
+/**
+ * 计算历史摘要的当前状态
+ */
+const zipStatus = computed(() => {
+  if (!zipHistorySubMessage.value) return null;
+  if (zipHistorySubMessage.value.status === 'generating') return 'generating';
+  if (zipHistorySubMessage.value.config.zip_enable) return 'enabled';
+  return 'disabled';
+});
+
+/**
+ * 根据状态返回对应的图标组件
+ */
+const zipBookmarkIcon = computed(() => {
+  switch (zipStatus.value) {
+    case 'generating': return Loading;
+    case 'enabled': return CircleCheck;
+    case 'disabled': return Clock;
+    default: return Clock;
+  }
+});
+
+/**
+ * 根据状态返回显示的文本
+ */
+const zipBookmarkText = computed(() => {
+  switch (zipStatus.value) {
+    case 'generating': return '摘要生成中...';
+    case 'enabled': return '历史摘要';
+    case 'disabled': return '历史摘要';
+    default: return '历史摘要';
+  }
+});
+
+/**
+ * 根据状态返回 CSS 类名
+ */
+const zipBookmarkClass = computed(() => ({
+  'is-generating': zipStatus.value === 'generating',
+  'is-enabled': zipStatus.value === 'enabled',
+  'is-disabled': zipStatus.value === 'disabled',
+}));
+
+const isSingleSubMessage = computed(() => normalSubMessages.value.length === 1);
+const firstSubMessage = computed(() => normalSubMessages.value[0]);
+
+// Groups consecutive file sub-messages for grid layout, while keeping others separate.
+const groupedSubMessages = computed((): SubMessageGroup[] => {
+  if (!normalSubMessages.value || normalSubMessages.value.length === 0) {
+    return [];
+  }
+
+  const result: SubMessageGroup[] = [];
+  let lastGroup: SubMessageGroup | null = null;
+
+  for (const subMessage of normalSubMessages.value) {
+    if (subMessage.type === 'File') {
+      if (lastGroup && lastGroup.type === 'file') {
+        lastGroup.sub_messages.push(subMessage);
+      } else {
+        const newGroup: SubMessageGroup = { type: 'file', sub_messages: [subMessage] };
+        result.push(newGroup);
+        lastGroup = newGroup;
+      }
+    } else {
+      const newGroup: SubMessageGroup = { type: 'normal', sub_messages: [subMessage] };
+      result.push(newGroup);
+      lastGroup = newGroup;
+    }
+  }
+  return result;
+});
+
+// 决定是否使用简化的单分区视图（无头部，有特殊背景和折叠效果）
+const useSinglePartitionView = computed(() => {
+  return normalSubMessages.value.length === 1 && firstSubMessage.value?.type === 'Normal';
+});
+
 const roleClass = computed(() => ({
   'is-user': props.message.role === 'user',
   'is-assistant': props.message.role === 'assistant',
 }));
 
-// --- 单一视图折叠逻辑 ---
+const avatarUrl = computed(() => {
+  if (props.message.role === 'user') {
+    return globalSettings.value.user_avatar_url;
+  }
+  if (props.message.role === 'assistant') {
+    return globalSettings.value.ai_avatar_url;
+  }
+  return null;
+});
+
 const isSingleViewCollapsed = ref(firstSubMessage.value?.config?.is_collapsed || false);
 watch(() => firstSubMessage.value?.config?.is_collapsed, (newValue) => {
   isSingleViewCollapsed.value = newValue || false;
 });
 
-const toggleSingleViewCollapse = () => {
+function toggleSingleViewCollapse() {
   if (!firstSubMessage.value) return;
   const newCollapsedState = !isSingleViewCollapsed.value;
   isSingleViewCollapsed.value = newCollapsedState;
-  chatStore.updateSubMessage({
+  interactionStore.updateSubMessage({
     subMessageId: firstSubMessage.value.id,
-    data: {
-      config: { ...firstSubMessage.value.config, is_collapsed: newCollapsedState },
-    },
+    data: { config: { ...firstSubMessage.value.config, is_collapsed: newCollapsedState } },
   });
-};
+}
 
-// --- 编辑逻辑 (统一管理) ---
 const editDialogVisible = ref(false);
-const editingContent = ref('');
-const originalEditingContent = ref('');
 const editingSubMessage = ref<SubMessage | null>(null);
+const originalEditingContent = ref('');
+const editingBlockIndex = ref<number | null>(null);
 
-const openEditDialog = (subMessage: SubMessage, contentToEdit: string) => {
-  editingSubMessage.value = subMessage;
-  editingContent.value = contentToEdit;
-  originalEditingContent.value = contentToEdit;
-  editDialogVisible.value = true;
-};
-
-const getUpdatedFullContent = () => {
-  if (!editingSubMessage.value) return '';
-  const fullOriginalContent = editingSubMessage.value.content;
-  const newContent = editingContent.value;
-  // 如果原始编辑内容与完整内容相同，则直接替换；否则，进行字符串替换
-  if (originalEditingContent.value === fullOriginalContent) {
-    return newContent;
+watch(editDialogVisible, (newValue) => {
+  if (!newValue) {
+    editingSubMessage.value = null;
+    originalEditingContent.value = '';
+    editingBlockIndex.value = null;
   }
-  return fullOriginalContent.replace(originalEditingContent.value, newContent);
-};
+});
 
-const handleSaveEdit = () => {
-  if (!editingSubMessage.value || editingContent.value.trim() === '') {
-    ElMessage.warning('内容不能为空');
+function handleEditRequest(subMessage: SubMessage, payload: { content: string; blockIndex?: number }) {
+  if (!subMessage || !payload) {
+    console.error("handleEditRequest called with invalid arguments", { subMessage, payload });
     return;
   }
-  const updatedContent = getUpdatedFullContent();
-  chatStore.updateSubMessage({
+
+  editingSubMessage.value = subMessage;
+  originalEditingContent.value = payload.content;
+  editingBlockIndex.value = payload.blockIndex ?? null;
+  editDialogVisible.value = true;
+}
+
+function replaceNthOccurrence(str: string, find: string, replace: string, n: number): string {
+  let i = -1;
+  while (n-- > 0) {
+    i = str.indexOf(find, i + 1);
+    if (i < 0) return str;
+  }
+  return str.substring(0, i) + replace + str.substring(i + find.length);
+}
+
+function getUpdatedFullContent(newPartialContent: string): string {
+  if (!editingSubMessage.value) return '';
+
+  const fullOriginalContent = editingSubMessage.value.content;
+  const partialOriginalContent = originalEditingContent.value;
+  const blockIndex = editingBlockIndex.value;
+
+  if (blockIndex === null || partialOriginalContent === fullOriginalContent) {
+    return newPartialContent;
+  }
+
+  const originalBlocks = parseMarkdown(fullOriginalContent);
+  let occurrence = 0;
+  if (blockIndex < originalBlocks.length && originalBlocks[blockIndex].content === partialOriginalContent) {
+    for (let i = 0; i < blockIndex; i++) {
+      if (originalBlocks[i].content === partialOriginalContent) {
+        occurrence++;
+      }
+    }
+  } else {
+    // Fallback if blockIndex doesn't match or partialOriginalContent isn't found in blocks
+    return fullOriginalContent.replace(partialOriginalContent, newPartialContent);
+  }
+
+  return replaceNthOccurrence(fullOriginalContent, partialOriginalContent, newPartialContent, occurrence + 1);
+}
+
+function handleSaveEdit(newContent: string) {
+  if (!editingSubMessage.value) return;
+  const updatedContent = getUpdatedFullContent(newContent);
+  interactionStore.updateSubMessage({
     subMessageId: editingSubMessage.value.id,
     data: { content: updatedContent },
   });
-  editDialogVisible.value = false;
-};
+}
 
-const handleSaveAndResend = () => {
-  if (!editingSubMessage.value || editingContent.value.trim() === '') {
-    ElMessage.warning('内容不能为空');
-    return;
-  }
-  const updatedContent = getUpdatedFullContent();
-  const newSubMessages = props.message.sub_messages.map(sm => ({
-    content: sm.id === editingSubMessage.value!.id ? updatedContent : sm.content,
-    sortOrder: sm.sortOrder,
-    type: sm.type,
-    config: sm.config,
-    status: sm.status,
-  }));
-  chatStore.editMessageAndRegenerate({
+function handleSaveAndResend(newContent: string) {
+  if (!editingSubMessage.value) return;
+
+  const updatedContent = getUpdatedFullContent(newContent);
+
+  const newSubMessages: SubMessageCreate[] = props.message.sub_messages.map(sm => {
+    // Note: We resend ALL sub-messages, including the unmodified original Usage sub-message if it exists.
+    // The edit only applies to a displayable sub-message.
+    return {
+      content: sm.id === editingSubMessage.value!.id ? updatedContent : sm.content,
+      sortOrder: sm.sortOrder,
+      type: sm.type,
+      config: sm.config,
+      status: 'completed' as MessageStatus,
+    };
+  });
+
+  interactionStore.editMessageAndRegenerate({
     messageId: props.message.id,
     sub_messages: newSubMessages,
     resend: true,
   });
-  editDialogVisible.value = false;
-};
-
-// --- 其他操作 ---
-const handleRegenerate = () => {
-  chatStore.regenerateFrom(props.message.id);
-};
-
-const handleDelete = () => {
-  ElMessageBox.confirm('确定要删除这条消息吗？（包含所有分区）', '确认删除', {
-    confirmButtonText: '删除',
-    cancelButtonText: '取消',
-    type: 'warning',
-  })
-    .then(() => chatStore.deleteMessage(props.message.id))
-    .catch(() => {});
-};
-
-const handleCopySingle = (subMessage: SubMessage) => {
-  copyToClipboard(subMessage.content)
-    .then(() => ElMessage.success('已复制到剪贴板'))
-    .catch(() => ElMessage.error('复制失败'));
 }
 
-const handleCopy = () => {
-  let contentToCopy = '';
-  if (isSingleSubMessage.value) {
-    contentToCopy = firstSubMessage.value?.content || '';
-  } else {
-    contentToCopy = props.message.sub_messages
-      .map(sm => sm.content)
-      .join('\n--------------------------\n');
+function handleRegenerate() {
+  interactionStore.regenerateFrom(props.message.id);
+}
+
+async function handleDelete() {
+  try {
+    await ElMessageBox.confirm('确定要删除这条消息吗？（包含所有分区）', '确认删除', {
+      confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning'
+    });
+    await interactionStore.deleteMessage(props.message.id);
+  } catch { /* User canceled */ }
+}
+
+async function handleCopySingle(subMessage: SubMessage) {
+  try {
+    await copyToClipboard(subMessage.content);
+    ElMessage.success('已复制到剪贴板');
+  } catch { ElMessage.error('复制失败'); }
+}
+
+async function handleCopy() {
+  // 使用 normalSubMessages 确保只复制非最小化状态的子消息
+  const contentToCopy = normalSubMessages.value.map(sm => {
+    // For file types, we might want to copy a link or filename instead of just the ID.
+    // For now, we'll stick to the content, which is the file ID.
+    return sm.content;
+  }).join('\n--------------------------\n');
+
+  try {
+    await copyToClipboard(contentToCopy);
+    ElMessage.success('已复制到剪贴板');
+  } catch { ElMessage.error('复制失败'); }
+}
+
+function handleCompressHistory() {
+  interactionStore.initiateHistoryCompression(props.message.id);
+  ElMessage.info('已开始在后台压缩历史对话，您可以继续聊天。');
+}
+
+function handleZipBookmarkClick() {
+  if (zipStatus.value === 'generating') return;
+  isZipCardVisible.value = !isZipCardVisible.value;
+}
+
+/**
+ * 恢复一个最小化的子消息
+ */
+function restoreSubMessage(subMessageId: string) {
+  const subMessage = props.message.sub_messages.find(sm => sm.id === subMessageId);
+  if (!subMessage) return;
+
+  interactionStore.updateSubMessage({
+    subMessageId: subMessageId,
+    data: { config: { ...subMessage.config, is_minimal: false } },
+  });
+}
+
+/**
+ * 为最小化按钮获取一个简短的标题
+ */
+function getPartitionTitleForMinimized(subMessage: SubMessage): string {
+  if (subMessage.type === 'Reasoning') return '思考';
+  if (subMessage.type === 'File') return '文件';
+  if (subMessage.type === 'Normal') {
+      const normalSubMessages = displayableSubMessages.value.filter(sm => sm.type === 'Normal');
+      if (normalSubMessages.length <= 1) return '正文';
+      const normalIndex = normalSubMessages.findIndex(sm => sm.id === subMessage.id);
+      if (normalIndex !== -1) {
+        return `正文(${normalIndex + 1})`;
+      }
   }
-  copyToClipboard(contentToCopy)
-    .then(() => ElMessage.success('已复制到剪贴板'))
-    .catch(() => ElMessage.error('复制失败'));
-};
+  return '分区';
+}
+
+/**
+ * 解析最小化的 McpTool 子消息以获取其状态。
+ */
+function getMinimizedMcpInfo(subMessage: SubMessage): MinimizedMcpInfo {
+  if (subMessage.status === 'generating') {
+    return { status: 'generating' };
+  }
+  try {
+    const content: McpToolContent = JSON.parse(subMessage.content);
+    return {
+      status: content.is_error ? 'error' : 'success',
+    };
+  } catch (e) {
+    return { status: 'error' };
+  }
+}
+
+/**
+ * 为最小化的子消息生成工具提示内容。
+ */
+function getMinimizedTooltipContent(subMessage: SubMessage): string {
+  if (subMessage.type === 'McpTool') {
+      const content: McpToolContent = JSON.parse(subMessage.content);
+      const args = content.arguments ? `参数: ${content.arguments}` : '';
+      return `工具: ${content.name || '未知'}\n${args}`.trim();
+  }
+  return subMessage.content.substring(0, 100) + (subMessage.content.length > 100 ? '...' : '');
+}
+
 </script>
 
 <style scoped>
-.message-item-container {
+.message-item-container { display: flex; align-items: flex-start; margin-bottom: 20px; max-width: 90%; }
+.message-avatar { flex-shrink: 0; margin-right: 12px; margin-top: 2px; }
+.message-body { display: flex; flex-direction: column; min-width: 80px; }
+
+.minimized-sub-messages-container {
   display: flex;
-  align-items: flex-start;
-  margin-bottom: 20px;
-  max-width: 90%;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.minimized-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background-color: var(--color-background-soft);
+  border: 1px solid var(--el-border-color-light);
+  color: var(--el-text-color-regular);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.minimized-item .el-icon.is-loading {
+  animation: rotating 2s linear infinite;
+}
+.minimized-item:hover {
+  border-color: var(--el-color-primary);
+  color: var(--el-color-primary);
+}
+.is-user .minimized-item {
+  background-color: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary-light-8);
+}
+.is-user .minimized-item:hover {
+  border-color: var(--el-color-primary);
+  color: var(--el-color-primary);
+}
+.minimized-item-title {
+  white-space: nowrap;
 }
 
-.message-avatar {
-  flex-shrink: 0;
-  margin-right: 12px;
-  margin-top: 2px;
-}
-
-.message-body {
+.sub-messages-container {
   display: flex;
   flex-direction: column;
-  min-width: 80px;
+  gap: 8px; /* Spacing between groups */
   width: 100%;
+  position: relative;
+  transition: max-height 0.25s ease-out;
+  overflow: hidden;
 }
 
-/* 单一分区包裹器 */
-.single-sub-message-wrapper {
+.file-group-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px; /* Spacing between files in a group */
+}
+
+.sub-messages-container.is-single {
+  gap: 0;
   padding: 10px 15px;
   border-radius: 8px;
   background-color: var(--color-background-soft);
   min-height: 40px;
-  transition: max-height 0.25s ease-out;
-  overflow: hidden;
-  position: relative;
 }
-.is-user .single-sub-message-wrapper {
+.is-user .sub-messages-container.is-single {
   background-color: var(--el-color-primary-light-9);
 }
-/* 移除 SubMessageItem 在单一视图下的边框和背景 */
-.single-sub-message-wrapper :deep(.sub-message-item) {
+
+.sub-messages-container.is-single :deep(.sub-message-item) {
   border: none;
   background-color: transparent;
   overflow: visible;
 }
-.single-sub-message-wrapper :deep(.message-content) {
+.sub-messages-container.is-single :deep(.message-content) {
   padding: 0;
-  max-height: none; /* 让SubMessageItem的内容区不限制高度 */
+  max-height: none;
 }
-.single-sub-message-wrapper :deep(.message-content)::after {
-  display: none; /* 移除SubMessageItem内部的折叠遮罩 */
+.sub-messages-container.is-single :deep(.message-content)::after {
+  display: none;
 }
 
-/* 单一分区折叠样式 */
-.single-sub-message-wrapper.collapsed {
+.sub-messages-container.is-single-collapsed {
   max-height: 5em;
 }
-.single-sub-message-wrapper.collapsed::after {
+.sub-messages-container.is-single-collapsed::after {
   content: '';
   position: absolute;
   bottom: 0;
@@ -298,51 +635,90 @@ const handleCopy = () => {
   background: linear-gradient(to bottom, transparent, var(--color-background-soft));
   pointer-events: none;
 }
-.is-user .single-sub-message-wrapper.collapsed::after {
+.is-user .sub-messages-container.is-single-collapsed::after {
   background: linear-gradient(to bottom, transparent, var(--el-color-primary-light-9));
 }
 
-/* 多分区容器 */
-.multi-part-container {
-  display: flex;
-  flex-direction: column;
-  gap: 6px; /* 子消息之间的紧凑间距 */
-  width: 100%;
-}
-
-.message-actions {
-  display: flex;
-  gap: 4px;
+.zip-history-section {
   margin-top: 8px;
-  opacity: 0;
-  visibility: hidden;
-  height: 24px;
-  transition: opacity 0.2s, visibility 0.2s;
-}
-.message-actions.is-visible {
-  opacity: 1;
-  visibility: visible;
 }
 
-/* -- 用户消息样式 -- */
-/* 核心修复：将 .is-user 选择器变得更具体，防止样式泄漏到子组件 */
-.message-item-container.is-user {
-  flex-direction: row-reverse;
-  margin-left: auto;
-}
-.is-user .message-avatar {
-  margin-right: 0;
-  margin-left: 12px;
-}
-
-/* 为了让用户消息整体靠右，我们对消息气泡本身进行对齐 */
-.is-user .single-sub-message-wrapper,
-.is-user .multi-part-container {
-  margin-left: auto;
+.zip-history-bookmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background-color: var(--color-background-soft);
+  border: 1px solid var(--el-border-color);
+  color: var(--el-text-color-regular);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
 }
 
-/* 确保用户消息的操作菜单也靠右对齐 */
-.is-user .message-actions {
-  justify-content: flex-end;
+/* Enabled State (Green) */
+.zip-history-bookmark.is-enabled {
+  background-color: var(--el-color-success-light-9);
+  border-color: var(--el-color-success-light-5);
+  color: var(--el-color-success);
 }
+.zip-history-bookmark.is-enabled:hover {
+  background-color: var(--el-color-success-light-8);
+}
+
+/* Disabled State (Gray/Info) */
+.zip-history-bookmark.is-disabled {
+  background-color: var(--el-color-info-light-9);
+  border-color: var(--el-color-info-light-7);
+  color: var(--el-color-info);
+}
+.zip-history-bookmark.is-disabled:hover {
+  background-color: var(--el-color-info-light-8);
+}
+
+/* Generating State (Blue/Primary) */
+.zip-history-bookmark.is-generating {
+  background-color: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary-light-5);
+  color: var(--el-color-primary);
+  cursor: default;
+}
+
+/* Loading Icon Animation */
+.zip-history-bookmark .el-icon.is-loading {
+  animation: rotating 2s linear infinite;
+}
+
+.zip-history-card {
+  margin-top: 8px;
+}
+
+.message-actions { display: flex; gap: 4px; margin-top: 8px; opacity: 0; visibility: hidden; min-height: 24px; transition: opacity 0.2s, visibility 0.2s; align-items: center; }
+.message-actions.is-visible { opacity: 1; visibility: visible; }
+.message-item-container.is-user { flex-direction: row-reverse; margin-left: auto; }
+.is-user .message-avatar { margin-right: 0; margin-left: 12px; }
+.is-user .sub-messages-container { align-items: flex-end; }
+.is-user .minimized-sub-messages-container { justify-content: flex-end; }
+.is-user .file-group-container { justify-content: flex-end; }
+.is-user .message-actions { justify-content: flex-end; }
+
+.usage-info-component {
+  margin-left: 8px;
+}
+
+.initial-loading-placeholder {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 10px 15px;
+  border-radius: 8px;
+  background-color: var(--color-background-soft);
+}
+
+.typing-indicator { display: flex; align-items: center; justify-content: flex-start; height: 24px; }
+.typing-indicator span { height: 8px; width: 8px; border-radius: 50%; background-color: #909399; margin: 0 3px; animation: bounce 1.4s infinite ease-in-out both; }
+.typing-indicator span:nth-of-type(1) { animation-delay: -0.32s; }
+.typing-indicator span:nth-of-type(2) { animation-delay: -0.16s; }
+@keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
 </style>

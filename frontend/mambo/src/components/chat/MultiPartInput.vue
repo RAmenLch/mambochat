@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/chat/MultiPartInput.vue -->
 <template>
   <div class="multi-part-input-container">
     <div class="partition-sidebar">
@@ -18,108 +19,121 @@
       </div>
     </div>
     <div class="partition-editor">
-      <!-- 确保在 localPartitions 可用时才渲染 el-input，防止绑定错误 -->
-      <el-input
-        v-if="localPartitions.length > 0 && localPartitions[activeIndex]"
-        ref="textareaRef"
-        v-model="localPartitions[activeIndex].content"
-        type="textarea"
-        resize="none"
-        :placeholder="`输入分区 ${activeIndex + 1} 的内容... (Shift + Enter 换行)`"
-        @keydown="handleKeydown"
-      />
+      <!-- 确保在 localPartitions 可用时才渲染编辑器 -->
+      <div v-if="localPartitions.length > 0 && localPartitions[activeIndex]" class="editor-wrapper">
+        <ChatUniversalEditor
+          ref="universalEditorRef"
+          v-model="localPartitions[activeIndex].content"
+          :monaco-options="editorOptions"
+          @submit="$emit('send')"
+        />
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue';
-import { Plus, Close } from '@element-plus/icons-vue';
-import type { SubMessageCreate } from '@/api/types';
-import type { ElInput } from 'element-plus';
+import { ref, watch, nextTick, computed } from 'vue'
+import { Plus, Close } from '@element-plus/icons-vue'
+import type { SubMessageCreate } from '@/api/types'
+import type { editor } from 'monaco-editor'
+import ChatUniversalEditor from '@/components/common/ChatUniversalEditor.vue'
 
 // 分区对象的本地UI表示
 interface Partition {
-  id: number;
-  content: string;
+  id: number
+  content: string
 }
 
 // 接收 modelValue prop (用于 v-model)
 const props = defineProps<{
-  modelValue: Partition[];
-}>();
+  modelValue: Partition[]
+  activeIndex: number
+}>()
 
 // 定义组件可发出的事件
 const emit = defineEmits<{
-  (e: 'update:modelValue', value: Partition[]): void;
-  (e: 'send'): void;
-}>();
+  (e: 'update:modelValue', value: Partition[]): void
+  (e: 'update:activeIndex', index: number): void
+  (e: 'send'): void
+}>()
 
+const localPartitions = ref<Partition[]>([])
+const universalEditorRef = ref<InstanceType<typeof ChatUniversalEditor>>()
 
-const localPartitions = ref<Partition[]>([]);
-const activeIndex = ref(0);
-const textareaRef = ref<InstanceType<typeof ElInput>>();
+// Monaco Editor 配置
+const editorOptions = computed<editor.IStandaloneEditorConstructionOptions>(() => ({
+  minimap: { enabled: false },
+  lineNumbers: 'off',
+  folding: false,
+  wordWrap: 'on',
+  scrollBeyondLastLine: false,
+  overviewRulerLanes: 0,
+  hideCursorInOverviewRuler: true,
+  renderLineHighlight: 'none',
+  scrollbar: {
+    vertical: 'auto',
+    horizontal: 'hidden',
+  },
+  padding: { top: 8, bottom: 8 },
+  fontSize: 14,
+  fontFamily: 'var(--el-font-family)',
+}))
 
 // --- 数据同步 ---
 
 // 1. 从父组件(prop)到本地状态的单向同步
-//    当外部的 modelValue (例如，来自store的草稿) 变化时，更新本地UI
-watch(() => props.modelValue, (newVal) => {
-  // 使用JSON字符串比较来避免因对象引用不同而导致的无限更新循环
-  if (JSON.stringify(newVal) !== JSON.stringify(localPartitions.value)) {
-    // 确保分区数组至少有一个元素，以防UI绑定出错
-    const partitionsToSet = newVal && newVal.length > 0 ? newVal : [{ id: Date.now(), content: '' }];
-    localPartitions.value = JSON.parse(JSON.stringify(partitionsToSet)); // 深拷贝
-
-    // 如果当前选中的索引在新数据中无效，则重置它
-    if (activeIndex.value >= localPartitions.value.length) {
-      activeIndex.value = Math.max(0, localPartitions.value.length - 1);
+watch(
+  () => props.modelValue,
+  (newVal) => {
+    if (JSON.stringify(newVal) !== JSON.stringify(localPartitions.value)) {
+      const partitionsToSet =
+        newVal && newVal.length > 0 ? newVal : [{ id: Date.now(), content: '' }]
+      localPartitions.value = JSON.parse(JSON.stringify(partitionsToSet))
     }
-  }
-}, { deep: true, immediate: true });
+  },
+  { deep: true, immediate: true },
+)
 
 // 2. 从本地状态到父组件(emit)的单向同步
-//    当用户在UI中操作 (输入、增删分区) 时，通知父组件数据已更新
-watch(localPartitions, (newVal) => {
-  emit('update:modelValue', newVal);
-}, { deep: true });
-
+watch(
+  localPartitions,
+  (newVal) => {
+    emit('update:modelValue', newVal)
+  },
+  { deep: true },
+)
 
 // --- UI 交互方法 ---
 
 const selectPartition = (index: number) => {
-  activeIndex.value = index;
-  textareaRef.value?.focus();
-};
+  emit('update:activeIndex', index)
+  nextTick(() => {
+    universalEditorRef.value?.focus()
+  })
+}
 
 const addPartition = async () => {
-  localPartitions.value.push({ id: Date.now(), content: '' });
-  await nextTick();
-  selectPartition(localPartitions.value.length - 1);
-};
+  localPartitions.value.push({ id: Date.now(), content: '' })
+  const newIndex = localPartitions.value.length - 1
+  emit('update:activeIndex', newIndex)
+  await nextTick()
+  universalEditorRef.value?.focus()
+}
 
 const removePartition = (index: number) => {
-  // 保持至少有一个分区
-  if (localPartitions.value.length <= 1) return;
+  if (localPartitions.value.length <= 1) return
 
-  localPartitions.value.splice(index, 1);
+  const currentActiveIndex = props.activeIndex
+  localPartitions.value.splice(index, 1)
 
-  // 如果删除的是当前或之前的分区，调整 activeIndex
-  if (activeIndex.value >= localPartitions.value.length) {
-    activeIndex.value = localPartitions.value.length - 1;
+  if (index <= currentActiveIndex) {
+    const newIndex = Math.max(0, currentActiveIndex - 1)
+    if (newIndex !== currentActiveIndex) {
+      emit('update:activeIndex', newIndex)
+    }
   }
-};
-
-/**
- * 监听键盘事件，实现 Enter 发送，Shift+Enter 换行。
- */
-const handleKeydown = (event: KeyboardEvent| Event) => {
-  if (!(event instanceof KeyboardEvent)) return;
-  if (event.key === 'Enter' && !event.shiftKey) {
-    event.preventDefault(); // 阻止默认的换行行为
-    emit('send'); // 触发发送事件
-  }
-};
+}
 
 // --- 暴露给父组件的方法 ---
 
@@ -128,25 +142,36 @@ const handleKeydown = (event: KeyboardEvent| Event) => {
  */
 const getData = (): SubMessageCreate[] => {
   return localPartitions.value
-    .map((part, index) => ({
-      content: part.content,
-      sortOrder: index,
-    }))
-    .filter(part => part.content.trim() !== '');
-};
+    .map(
+      (part, index): SubMessageCreate => ({
+        content: part.content,
+        sortOrder: index,
+        type: 'Normal',
+      }),
+    )
+    .filter((part) => part.content.trim() !== '')
+}
 
 /**
  * 重置输入框为初始状态。
  */
 const reset = () => {
-  localPartitions.value = [{ id: Date.now(), content: '' }];
-  activeIndex.value = 0;
-};
+  localPartitions.value = [{ id: Date.now(), content: '' }]
+  emit('update:activeIndex', 0)
+}
+
+/**
+ * 将焦点设置到当前激活的文本区域。
+ */
+const focus = () => {
+  universalEditorRef.value?.focus()
+}
 
 defineExpose({
   getData,
   reset,
-});
+  focus,
+})
 </script>
 
 <style scoped>
@@ -157,6 +182,7 @@ defineExpose({
   border: 1px solid var(--el-border-color);
   border-radius: 4px;
   overflow: hidden;
+  background-color: var(--el-bg-color);
 }
 
 .partition-sidebar {
@@ -222,18 +248,24 @@ defineExpose({
 
 .partition-editor {
   flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0; /* 防止 flex 子项溢出 */
 }
 
-/* 确保 el-input 和其内部的 textarea 填满容器高度 */
-.partition-editor .el-input,
-.partition-editor :deep(.el-textarea) {
+.editor-wrapper {
+  flex-grow: 1;
   height: 100%;
+  overflow: hidden;
+  background-color: #ffffff;
+  padding: 0 2px;
 }
 
-.partition-editor :deep(.el-textarea__inner) {
-  height: 100% !important;
+/* 适配 UniversalEditor 内部 el-input 的样式，使其无边框融入 */
+.editor-wrapper :deep(.el-textarea__inner) {
   border: none;
-  border-radius: 0;
   box-shadow: none;
+  padding: 8px;
+  background-color: transparent;
 }
 </style>

@@ -1,76 +1,80 @@
+<!-- frontend/mambo/src/views/ChatView.vue -->
 <template>
   <el-container class="chat-view-container">
-    <!-- 左侧会话列表区域 -->
     <el-aside :width="`${asideWidth}px`" class="chat-sidebar">
-      <ChatList />
+      <!-- 变更点：传入 width 属性 -->
+      <ChatList
+        :is-collapsed="isSidebarCollapsed"
+        :width="asideWidth"
+        @expand="expand"
+      />
     </el-aside>
 
-    <!-- 拖拽手柄 -->
     <div class="resizer" @mousedown.prevent="startResize"></div>
 
-    <!-- 右侧主聊天窗口区域 -->
     <el-main class="chat-main">
-      <ChatWindow />
+      <ChatWindow
+        :is-sidebar-collapsed="isSidebarCollapsed"
+      />
     </el-main>
   </el-container>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 import ChatList from '@/components/chat/ChatList.vue';
 import ChatWindow from '@/components/chat/ChatWindow.vue';
+import { useResizablePanels } from '@/composables/useResizablePanels';
 
-// --- 侧边栏宽度常量 ---
-const DEFAULT_ASIDE_WIDTH = 190; // 默认宽度
-const MIN_ASIDE_WIDTH = 150;     // 最小宽度
-const MAX_ASIDE_WIDTH = 500;     // 最大宽度
+// --- Constants for Persistence ---
+const SIDEBAR_WIDTH_KEY = 'mambo_sidebar_width';
+const SIDEBAR_COLLAPSED_KEY = 'mambo_sidebar_collapsed';
 
-const asideWidth = ref(DEFAULT_ASIDE_WIDTH);
+// --- State Initialization ---
+const savedWidth = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+// 如果上次是折叠状态，恢复时宽度设为 60 (collapsedWidth)，否则设为保存值或默认 260
+// 注意：这里需要根据保存的 collapsed 状态来决定初始 width，防止逻辑冲突
+const savedCollapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
+const initialWidth = savedWidth ? parseInt(savedWidth, 10) : (savedCollapsed ? 60 : 260);
 
-// --- 拖拽逻辑 ---
-const startResize = (event: MouseEvent) => {
-  const startX = event.clientX;
-  const startWidth = asideWidth.value;
+const asideWidth = ref(initialWidth);
+const isSidebarCollapsed = ref(savedCollapsed);
 
-  const doResize = (e: MouseEvent) => {
-    const deltaX = e.clientX - startX;
-    const newWidth = startWidth + deltaX;
-    // 应用宽度限制
-    asideWidth.value = Math.max(MIN_ASIDE_WIDTH, Math.min(newWidth, MAX_ASIDE_WIDTH));
-  };
+// --- Responsive Panel Logic ---
+const { startResize, expand } = useResizablePanels(asideWidth, isSidebarCollapsed, {
+  min: 180, // 正常列表的最小舒适宽度
+  max: 500,
+  snapThreshold: 150, // 拖过这里松手就会折叠
+  collapsedWidth: 60,
+  orientation: 'horizontal'
+});
 
-  const stopResize = () => {
-    window.removeEventListener('mousemove', doResize);
-    window.removeEventListener('mouseup', stopResize);
-    // 恢复鼠标样式和文本选择
-    document.body.style.cursor = '';
-    document.body.style.userSelect = '';
-  };
+// --- Persistence Watchers ---
+watch(asideWidth, (newWidth) => {
+  localStorage.setItem(SIDEBAR_WIDTH_KEY, newWidth.toString());
+});
 
-  // 阻止拖拽过程中的文本选择
-  document.body.style.cursor = 'col-resize';
-  document.body.style.userSelect = 'none';
-
-  window.addEventListener('mousemove', doResize);
-  window.addEventListener('mouseup', stopResize);
-};
+watch(isSidebarCollapsed, (isCollapsed) => {
+  localStorage.setItem(SIDEBAR_COLLAPSED_KEY, isCollapsed.toString());
+});
 </script>
 
 <style scoped>
 .chat-view-container {
   height: 100vh;
   background-color: var(--color-background);
-  /* 确保容器是flex布局, 以便resizer能正常工作 */
   display: flex;
-  overflow: hidden; /* 防止拖动过快导致出现滚动条 */
+  overflow: hidden;
 }
 
 .chat-sidebar {
   display: flex;
   flex-direction: column;
   background-color: var(--color-background-soft);
-  /* 确保侧边栏不会被flex压缩 */
   flex-shrink: 0;
+  transition: width 0.3s cubic-bezier(0.25, 0.8, 0.5, 1);
+  will-change: width;
+  overflow: hidden;
 }
 
 .resizer {
@@ -78,7 +82,7 @@ const startResize = (event: MouseEvent) => {
   cursor: col-resize;
   background-color: var(--color-border);
   flex-shrink: 0;
-  transition: background-color 0.2s ease, width 0.2s ease;
+  transition: background-color 0.2s ease;
   z-index: 10;
   display: flex;
   align-items: center;
@@ -93,9 +97,7 @@ const startResize = (event: MouseEvent) => {
   padding: 0;
   display: flex;
   flex-direction: column;
-  /* 允许主区域根据侧边栏宽度变化而伸缩 */
   flex-grow: 1;
-  /* 修复flex布局中内容溢出的问题 */
   min-width: 0;
 }
 </style>

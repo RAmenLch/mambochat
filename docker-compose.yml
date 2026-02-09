@@ -4,14 +4,18 @@ services:
   # 1. 后端 FastAPI 服务
   backend:
     build:
-      context: ./backend  # Dockerfile 所在的目录
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     environment:
         - TZ=Asia/Shanghai
+        - STORAGE_PATH=/app/uploads # 指定容器内的文件存储路径
     volumes:
       # 将宿主机的 ./DB 目录映射到容器内的 /app/DB 目录
       # 这样 SQLite 数据库文件就能持久化保存
       - ./DB:/app/DB
+      # 将宿主机的 ./uploads 目录映射到容器内的 /app/uploads 目录
+      # 用于持久化保存上传的文件
+      - ./uploads:/app/uploads
     expose:
       # 只在 Docker 内部网络暴露 8000 端口，不直接映射到宿主机
       - "8000"
@@ -30,4 +34,3 @@ services:
       # 确保后端服务启动后，前端服务再启动
       - backend
     restart: unless-stopped
-

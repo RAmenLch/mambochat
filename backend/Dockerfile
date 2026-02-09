@@ -1,23 +1,38 @@
-# backend/Dockerfile
+# backend/Dockerfile (支持 MCP 扩展版)
 
-# 使用官方 Python 3.11 slim 镜像作为基础
+# 使用清华大学的镜像源，你也可以换成其他的，比如：
+# 阿里云: https://mirrors.aliyun.com/pypi/simple/
+# 豆瓣: http://pypi.douban.com/simple/
 FROM python:3.11-slim
+ARG PYPI_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 
-# 设置工作目录为 /app
-# 我们将从这个目录启动应用，这样 Python 就能找到 'backend' 包
+# 1. 安装 uv
+RUN pip install --no-cache-dir uv -i  ${PYPI_INDEX_URL}
+
+# 2. 准备环境依赖
 WORKDIR /app
 
-# 复制依赖文件到工作目录
-COPY requirements.txt .
+# 2.1 安装 Backend 依赖
+COPY backend/pyproject.toml /app/backend/pyproject.toml
+RUN uv pip install --system --no-cache -r /app/backend/pyproject.toml -i ${PYPI_INDEX_URL}
 
-# 安装依赖
-RUN pip install --no-cache-dir -r requirements.txt
+# 2.2 安装 ddgs MCP 依赖
+COPY MCP_SERVER/ddgs/pyproject.toml /app/MCP_SERVER/ddgs/pyproject.toml
+RUN uv pip install --system --no-cache -r /app/MCP_SERVER/ddgs/pyproject.toml -i ${PYPI_INDEX_URL}
 
-# 将您本地 backend/ 目录下的所有内容，
-# 复制到容器内 /app/backend/ 这个新目录中
-COPY . ./backend/
+# 2.3 安装 knowledge_base 依赖
+COPY MCP_SERVER/knowledge_base/pyproject.toml /app/MCP_SERVER/knowledge_base/pyproject.toml
+RUN uv pip install --system --no-cache -r /app/MCP_SERVER/knowledge_base/pyproject.toml -i ${PYPI_INDEX_URL}
 
-# 启动命令：
-# 从 /app 目录启动，告诉 gunicorn 运行 backend 包里的 main 模块的 app 实例
-# 这就解决了相对导入的问题
-CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "backend.main:app", "--bind", "0.0.0.0:8000"]
+
+# 3. 复制源代码
+COPY backend /app/backend
+COPY MCP_SERVER /app/MCP_SERVER
+
+# 4. 设置 PYTHONPATH
+ENV PYTHONPATH=/app
+
+WORKDIR /app
+
+# 5. 启动命令
+CMD ["gunicorn", "-w", "1", "-k", "uvicorn.workers.UvicornWorker", "backend.main:app", "--bind", "0.0.0.0:8000"]
