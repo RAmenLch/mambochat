@@ -3,7 +3,7 @@
   <div class="chat-header-container" :class="[`mode-${mode}`]">
     <!-- 竖向模式特有的顶部展开按钮 -->
     <div v-if="mode === 'vertical'" class="header-top-actions">
-      <el-tooltip content="展开侧边栏" placement="right">
+      <el-tooltip :content="$t('chat.header.expand')" placement="right">
         <el-button link class="expand-btn" @click="$emit('expand')">
           <el-icon :size="18"><Expand /></el-icon>
         </el-button>
@@ -15,7 +15,7 @@
       <!-- 竖向编辑模式：使用 Popover -->
       <template v-if="mode === 'vertical'">
         <div class="vertical-title-wrapper">
-          <h3 class="chat-title">{{ currentChat?.name || '未选择会话' }}</h3>
+          <h3 class="chat-title">{{ currentChat?.name || $t('chat.header.noChat') }}</h3>
         </div>
       </template>
 
@@ -25,10 +25,10 @@
           <h3 class="chat-title">{{ currentChat.name }}</h3>
           <div class="title-actions">
             <!-- 编辑和刷新保留在标题旁边 -->
-            <el-tooltip content="编辑标题" placement="bottom" :show-after="500">
+            <el-tooltip :content="$t('chat.header.editTitle')" placement="bottom" :show-after="500">
               <el-button :icon="Edit" circle text @click="startHorizontalEdit" />
             </el-tooltip>
-            <el-tooltip content="刷新标题" placement="bottom" :show-after="500">
+            <el-tooltip :content="$t('chat.header.refreshTitle')" placement="bottom" :show-after="500">
               <el-button
                 :icon="Refresh"
                 circle
@@ -51,15 +51,15 @@
       </template>
     </div>
 
-    <!-- [修改] 横向模式：右侧操作区 (导出按钮) -->
+    <!-- 横向模式：右侧操作区 (导出按钮) -->
     <div v-if="mode === 'horizontal'" class="header-right-actions">
       <el-dropdown trigger="click" @command="handleExport">
-        <el-button :icon="Download" circle text title="导出对话" />
+        <el-button :icon="Download" circle text :title="$t('chat.header.export')" />
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item command="json">导出 JSON</el-dropdown-item>
-            <el-dropdown-item command="markdown">导出 Markdown</el-dropdown-item>
-            <el-dropdown-item command="html">导出 HTML</el-dropdown-item>
+            <el-dropdown-item command="json">{{ $t('chat.header.exportJson') }}</el-dropdown-item>
+            <el-dropdown-item command="markdown">{{ $t('chat.header.exportMd') }}</el-dropdown-item>
+            <el-dropdown-item command="html">{{ $t('chat.header.exportHtml') }}</el-dropdown-item>
           </el-dropdown-menu>
         </template>
       </el-dropdown>
@@ -77,21 +77,21 @@
         @show="initPopoverInput"
       >
         <template #reference>
-          <el-button :icon="Edit" circle text class="action-btn" title="编辑标题" />
+          <el-button :icon="Edit" circle text class="action-btn" :title="$t('chat.header.editTitle')" />
         </template>
         <div class="popover-edit-content">
           <el-input
             ref="popoverInputRef"
             v-model="titleInput"
-            placeholder="输入新标题"
+            :placeholder="$t('chat.header.inputPlaceholder')"
             @keydown.enter.prevent="saveTitle"
           />
-          <el-button type="primary" size="small" @click="saveTitle">保存</el-button>
+          <el-button type="primary" size="small" @click="saveTitle">{{ $t('common.action.save') }}</el-button>
         </div>
       </el-popover>
 
       <!-- 刷新按钮 -->
-      <el-tooltip content="刷新标题" placement="right">
+      <el-tooltip :content="$t('chat.header.refreshTitle')" placement="right">
         <el-button
           :icon="Refresh"
           circle
@@ -107,13 +107,15 @@
 
 <script setup lang="ts">
 import { ref, nextTick, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import type { ElInput } from 'element-plus';
 import { ElMessage } from 'element-plus';
 import { Edit, Refresh, Expand, Download } from '@element-plus/icons-vue';
 import type { Chat, Message } from '@/api/types';
 import { getResourceDetails } from '@/api/resourceService';
 
-// [修改] 将 messages 设为可选属性，解决 ChatList 调用报错问题
+const { t } = useI18n();
+
 const props = withDefaults(defineProps<{
   currentChat: Chat | null;
   isTitleRefreshing: boolean;
@@ -186,8 +188,6 @@ async function getFullSystemPrompt(): Promise<string> {
       resourceIds.map(id => getResourceDetails(id).catch(() => null))
     );
 
-    // [修改] 修复 TS2677 和 TS18047 错误
-    // 不使用复杂的类型谓词，直接检查对象和属性是否存在
     const resourceContents = resources
       .filter(r => r && r.latest_version && r.latest_version.content)
       .map(r => r!.latest_version!.content!);
@@ -195,7 +195,7 @@ async function getFullSystemPrompt(): Promise<string> {
     return [basePrompt, ...resourceContents].join('\n\n').trim();
   } catch (error) {
     console.error('Failed to fetch resources for export:', error);
-    ElMessage.warning('导出时获取挂载资源失败，仅导出基础 System Prompt');
+    ElMessage.warning(t('chat.header.exportResourceError'));
     return basePrompt;
   }
 }
@@ -221,7 +221,6 @@ async function handleExport(format: 'json' | 'markdown' | 'html') {
     const fullPrompt = await getFullSystemPrompt();
     const chatName = props.currentChat.name || 'chat';
     const timestamp = new Date().toISOString().slice(0, 10);
-    // 确保 messages 存在
     const msgs = props.messages || [];
 
     if (format === 'json') {
@@ -301,7 +300,7 @@ async function handleExport(format: 'json' | 'markdown' | 'html') {
     }
   } catch (error) {
     console.error('Export failed:', error);
-    ElMessage.error('导出失败');
+    ElMessage.error(t('chat.header.exportFailed'));
   } finally {
     isExporting.value = false;
   }
@@ -336,7 +335,7 @@ watch(() => props.currentChat?.id, () => {
   padding: 0 20px;
   height: 60px;
   display: flex;
-  justify-content: space-between; /* 确保左右分布 */
+  justify-content: space-between;
   align-items: center;
   border-bottom: 1px solid var(--color-border);
   width: 100%;
@@ -360,7 +359,6 @@ watch(() => props.currentChat?.id, () => {
   width: 100%;
 }
 
-/* [新增] 右侧操作区样式 */
 .header-right-actions {
   flex-shrink: 0;
   margin-left: 16px;
@@ -393,16 +391,14 @@ watch(() => props.currentChat?.id, () => {
 .title-section {
   flex-grow: 1;
   display: flex;
-  justify-content: center; /* 竖向模式居中 */
+  justify-content: center;
   overflow: hidden;
-  /* [修改] 横向模式下，让 title-section 占据剩余空间，但不强制 100% 导致挤压右侧 */
   min-width: 0;
 }
 
-/* 针对横向模式的特殊调整 */
 .mode-horizontal .title-section {
   justify-content: flex-start;
-  width: auto; /* 允许 flex-grow 生效 */
+  width: auto;
 }
 
 .vertical-title-wrapper {
@@ -429,7 +425,6 @@ watch(() => props.currentChat?.id, () => {
   margin-left: 0 !important;
 }
 
-/* Common Text Styles */
 .chat-title {
   margin: 0;
   font-size: 16px;
@@ -444,7 +439,6 @@ watch(() => props.currentChat?.id, () => {
   text-overflow: ellipsis;
 }
 
-/* Popover Content */
 .popover-edit-content {
   display: flex;
   gap: 8px;

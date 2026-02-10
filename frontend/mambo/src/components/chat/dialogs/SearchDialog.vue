@@ -1,8 +1,8 @@
-<!-- frontend/mambo/src/components/dialogs/SearchDialog.vue -->
+<!-- frontend/mambo/src/components/chat/dialogs/SearchDialog.vue -->
 <template>
   <el-dialog
     v-model="dialogVisible"
-    title="会话搜索"
+    :title="t('chat.search.title')"
     width="800px"
     :close-on-click-modal="false"
     @open="handleOpen"
@@ -12,22 +12,22 @@
       <!-- 搜索范围提示 -->
       <div v-if="searchRootId && (rootName || rootPath)" class="search-scope-info">
         <el-icon><FolderOpened /></el-icon>
-        <span class="scope-label">搜索范围：</span>
+        <span class="scope-label">{{ t('chat.search.scope') }}</span>
         <span class="scope-text">
           {{ rootName || rootPath }}
         </span>
       </div>
       <div v-else class="search-scope-info global-scope">
         <el-icon><Monitor /></el-icon>
-        <span class="scope-label">搜索范围：</span>
-        <span class="scope-text">全局搜索</span>
+        <span class="scope-label">{{ t('chat.search.scope') }}</span>
+        <span class="scope-text">{{ t('chat.search.scopeGlobal') }}</span>
       </div>
 
       <!-- 搜索表单 -->
       <div class="search-form">
         <el-input
           v-model="searchKeyword"
-          placeholder="输入搜索关键词..."
+          :placeholder="t('chat.search.placeholder')"
           clearable
           @clear="handleSearch"
           @keyup.enter="handleSearch"
@@ -38,7 +38,7 @@
         </el-input>
 
         <div class="search-options">
-          <el-checkbox v-model="enableRegex" @change="handleSearch">使用正则表达式</el-checkbox>
+          <el-checkbox v-model="enableRegex" @change="handleSearch">{{ t('chat.search.regex') }}</el-checkbox>
         </div>
       </div>
 
@@ -46,17 +46,17 @@
       <div class="search-results">
         <div v-if="isLoading" class="loading-state">
           <el-icon class="is-loading"><Loading /></el-icon>
-          <span>搜索中...</span>
+          <span>{{ t('chat.search.searching') }}</span>
         </div>
 
         <div v-else-if="searchResults.length === 0 && !hasSearched" class="empty-state">
           <el-icon><Search /></el-icon>
-          <span>请输入关键词进行搜索</span>
+          <span>{{ t('chat.search.tipInput') }}</span>
         </div>
 
         <div v-else-if="searchResults.length === 0 && hasSearched" class="empty-state">
           <el-icon><DocumentDelete /></el-icon>
-          <span>未找到匹配的结果</span>
+          <span>{{ t('chat.search.noResult') }}</span>
         </div>
 
         <div v-else class="results-list">
@@ -86,7 +86,7 @@
             <div class="result-footer">
               <span class="result-time">{{ formatTime(item.created_at) }}</span>
               <el-button type="primary" link size="small">
-                查看详情
+                {{ t('chat.search.viewDetail') }}
                 <el-icon><ArrowRight /></el-icon>
               </el-button>
             </div>
@@ -112,11 +112,13 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue';
-import { useRouter } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { ElMessage } from 'element-plus';
 import { Search, Loading, DocumentDelete, ChatDotRound, FolderOpened, ArrowRight, Monitor } from '@element-plus/icons-vue';
-import { searchChats } from '@/api/chatService.ts';
+import { searchChats } from '@/api/chatService';
 import type { SearchResultItem } from '@/api/types';
+
+const { t, locale } = useI18n();
 
 interface Props {
   visible: boolean;
@@ -136,8 +138,6 @@ const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void;
   (e: 'select-result', data: { chatId: string; subMessageId: string | null }): void;
 }>();
-
-const router = useRouter();
 
 const dialogVisible = computed({
   get: () => props.visible,
@@ -159,7 +159,6 @@ const rootName = ref<string | null>(props.rootName);
 const rootPath = ref<string | null>(props.rootPath);
 
 function handleOpen() {
-  // 重置搜索状态
   searchKeyword.value = '';
   searchScope.value = props.rootId || null;
   enableRegex.value = false;
@@ -173,7 +172,6 @@ function handleOpen() {
 }
 
 function handleClose() {
-  // 清理状态
   searchKeyword.value = '';
   searchResults.value = [];
   hasSearched.value = false;
@@ -181,7 +179,7 @@ function handleClose() {
 
 async function handleSearch() {
   if (!searchKeyword.value.trim()) {
-    ElMessage.warning('请输入搜索关键词');
+    ElMessage.warning(t('chat.search.warningInput'));
     return;
   }
 
@@ -201,7 +199,7 @@ async function handleSearch() {
     total.value = response.total;
   } catch (error) {
     console.error('Search failed:', error);
-    ElMessage.error('搜索失败，请稍后重试');
+    ElMessage.error(t('chat.search.error'));
   } finally {
     isLoading.value = false;
   }
@@ -226,7 +224,6 @@ function highlightKeyword(text: string): string {
     const regex = new RegExp(`(${keyword})`, 'gi');
     return text.replace(regex, '<mark class="search-highlight">$1</mark>');
   } catch (e) {
-    // 如果正则表达式无效，返回原文本
     return text;
   }
 }
@@ -234,17 +231,17 @@ function highlightKeyword(text: string): string {
 function getMatchTypeText(type: string): string {
   switch (type) {
     case 'title':
-      return '标题';
+      return t('chat.search.typeTitle');
     case 'system_prompt':
-      return '系统提示词';
+      return t('chat.search.typeSystem');
     case 'content':
-      return '消息内容';
+      return t('chat.search.typeContent');
     default:
       return type;
   }
 }
 
-function getMatchTypeTagType(type: string): any {
+function getMatchTypeTagType(type: string): 'primary' | 'warning' | 'success' | 'info' {
   switch (type) {
     case 'title':
       return 'primary';
@@ -263,11 +260,11 @@ function formatTime(dateStr: string): string {
   const diff = now.getTime() - date.getTime();
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
 
-  if (days === 0) return '今天';
-  if (days === 1) return '昨天';
-  if (days < 7) return `${days}天前`;
+  if (days === 0) return t('common.time.today');
+  if (days === 1) return t('common.time.yesterday');
+  if (days < 7) return t('common.time.daysAgo', { days });
 
-  return date.toLocaleDateString('zh-CN', {
+  return date.toLocaleDateString(locale.value === 'zh-CN' ? 'zh-CN' : 'en-US', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',

@@ -4,12 +4,12 @@
     <!-- Card Header: Status and Actions -->
     <div class="zip-card-header">
       <el-tag :type="isZipEnabled ? 'success' : 'info'" size="small" effect="light">
-        {{ isZipEnabled ? '已启用' : '未启用' }}
+        {{ isZipEnabled ? t('common.status.enabled') : t('common.status.disabled') }}
       </el-tag>
       <div class="actions" v-if="!isEditing">
-        <el-button type="primary" link @click="handleEdit">编辑</el-button>
+        <el-button type="primary" link @click="handleEdit">{{ t('common.action.edit') }}</el-button>
         <el-button :type="isZipEnabled ? 'warning' : 'primary'" link @click="handleToggleEnable">
-          {{ isZipEnabled ? '禁用' : '启用' }}
+          {{ isZipEnabled ? t('common.action.disable') : t('common.action.enable') }}
         </el-button>
       </div>
     </div>
@@ -28,8 +28,8 @@
           resize="none"
         />
         <div class="editor-actions">
-          <el-button @click="isEditing = false">取消</el-button>
-          <el-button type="primary" @click="handleSave" :loading="isSaving">保存</el-button>
+          <el-button @click="isEditing = false">{{ t('common.action.cancel') }}</el-button>
+          <el-button type="primary" @click="handleSave" :loading="isSaving">{{ t('common.action.save') }}</el-button>
         </div>
       </div>
     </div>
@@ -39,9 +39,12 @@
 <script setup lang="ts">
 import { ref, computed, nextTick } from 'vue';
 import type { PropType } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import type { SubMessage, SubMessageUpdate } from '@/api/types';
 import { ElInput } from 'element-plus';
+
+const { t } = useI18n();
 
 const props = defineProps({
   subMessage: {
@@ -130,7 +133,7 @@ function handleToggleEnable() {
   font-size: 14px;
   line-height: 1.6;
   color: var(--el-text-color-regular);
-  white-space: pre-wrap; /* Preserve whitespace and newlines */
+  white-space: pre-wrap;
   word-break: break-word;
 }
 

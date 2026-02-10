@@ -23,7 +23,7 @@
         <template #error>
           <div class="file-placeholder">
             <el-icon><Picture /></el-icon>
-            <span>图片加载失败</span>
+            <span>{{ t('chat.attachment.imageLoadFailed') }}</span>
           </div>
         </template>
       </el-image>
@@ -64,14 +64,14 @@
         <div class="actions">
           <!-- 编辑和复制按钮不适用于 McpTool -->
           <template v-if="subMessage.type !== 'McpTool'">
-            <el-tooltip content="编辑" placement="top" :show-after="500">
+            <el-tooltip :content="t('common.action.edit')" placement="top" :show-after="500">
               <el-button :icon="Edit" circle text size="small" @click="handleHeaderEditClick" :disabled="isGenerating" />
             </el-tooltip>
-            <el-tooltip content="复制" placement="top" :show-after="500">
+            <el-tooltip :content="t('common.action.copy')" placement="top" :show-after="500">
               <el-button :icon="CopyDocument" circle text size="small" @click="emit('copy')" :disabled="isGenerating" />
             </el-tooltip>
           </template>
-          <el-tooltip content="最小化" placement="top" :show-after="500">
+          <el-tooltip :content="t('chat.message.minimize')" placement="top" :show-after="500">
             <el-button
               :icon="Minus"
               circle
@@ -81,7 +81,7 @@
               :disabled="isGenerating || isMinimizeDisabled"
             />
           </el-tooltip>
-          <el-tooltip :content="isCollapsed ? '展开' : '折叠'" placement="top" :show-after="500">
+          <el-tooltip :content="isCollapsed ? t('chat.message.expand') : t('chat.message.collapse')" placement="top" :show-after="500">
             <el-button
               :icon="isCollapsed ? ArrowDownBold : ArrowUpBold"
               circle
@@ -109,16 +109,15 @@
             {{ mcpContent.result }}
           </div>
           <div v-if="!isGenerating && mcpContent.is_error" class="mcp-tool-error-message">
-            工具执行出错。
+            {{ t('chat.message.mcp.executionError') }}
           </div>
         </div>
         <div v-else class="mcp-tool-body">
-          <!-- Fallback for parsing error -->
           <div class="mcp-tool-summary">
             <div class="mcp-tool-status-icon">
               <el-icon color="var(--el-color-error)"><CircleClose /></el-icon>
             </div>
-            <span>无法解析工具调用内容</span>
+            <span>{{ t('chat.message.mcp.parseError') }}</span>
           </div>
         </div>
       </div>
@@ -152,12 +151,11 @@
             <div v-else v-html="block.content"></div>
           </div>
 
-          <!-- [修改] 回到顶部按钮: 增加高度判断 -->
           <div
             v-if="!isCollapsed && !isGenerating && showBackToTop"
             class="back-to-top-btn"
             @click.stop="scrollToTop"
-            title="回到顶部"
+            :title="t('chat.message.backToTop')"
           >
              <el-icon size="10"><Top /></el-icon>
           </div>
@@ -169,17 +167,20 @@
 
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue';
+import { useI18n } from 'vue-i18n';
 import type { SubMessage, Message, SubMessageConfig, McpToolContent } from '@/api/types';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { ElMessage } from 'element-plus';
 import {
   Edit, CopyDocument, ArrowUpBold, ArrowDownBold, Download, Picture, Minus,
-  Loading, CircleClose, CircleCheck, Top
+  Loading, CircleClose, CircleCheck, Top, Document
 } from '@element-plus/icons-vue';
 import CodeBlock from './CodeBlock.vue';
 import { copyToClipboard } from '@/utils/clipboard';
 import { parseMarkdown } from '@/utils/markdownParser';
 import { getIconForMimeType } from '@/utils/fileIcons';
+
+const { t } = useI18n();
 
 const props = withDefaults(defineProps<{
   id?: string;
@@ -213,7 +214,6 @@ onMounted(() => {
   if (contentRef.value) {
     resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        // 当内容高度超过 600px 时显示按钮
         showBackToTop.value = entry.target.scrollHeight > 600;
       }
     });
@@ -248,21 +248,18 @@ const mcpArguments = computed((): { query?: string } | null => {
   }
 });
 
-/**
- * 生成工具调用的摘要文本，用于在各种状态下显示。
- */
 const mcpSummaryText = computed((): string => {
-  if (!mcpContent.value) return '无效的工具调用';
-  const toolName = mcpContent.value.name || '未知工具';
+  if (!mcpContent.value) return t('chat.message.mcp.invalidCall');
+  const toolName = mcpContent.value.name || t('chat.message.mcp.unknownTool');
   const query = mcpArguments.value?.query || '...';
 
   if (isGenerating.value) {
-    return `正在使用 ${toolName} 搜索: "${query}"`;
+    return t('chat.message.mcp.searching', { tool: toolName, query });
   }
   if (mcpContent.value.is_error) {
-    return `使用 ${toolName} 搜索: "${query}" 时失败`;
+    return t('chat.message.mcp.searchFailed', { tool: toolName, query });
   }
-  return `使用 ${toolName} 搜索: "${query}"`;
+  return t('chat.message.mcp.searched', { tool: toolName, query });
 });
 
 // --- Computed properties for File type ---
@@ -270,7 +267,7 @@ const fileIcon = computed(() => {
   if (props.subMessage.type === 'File' && props.subMessage.file_info) {
     return getIconForMimeType(props.subMessage.file_info.mime_type);
   }
-  return Document; // Fallback
+  return Document;
 });
 
 const formattedFileSize = computed(() => {
@@ -292,16 +289,16 @@ const contentBlocks = computed(() => {
 
 const partitionTitle = computed(() => {
   if (props.subMessage.type === 'McpTool') {
-    return `工具调用: ${mcpContent.value?.name || '未知工具'}`;
+    return t('chat.message.mcp.toolCallTitle', { name: mcpContent.value?.name || t('chat.message.mcp.unknownTool') });
   }
-  if (props.subMessage.type === 'Reasoning') return '深度思考';
+  if (props.subMessage.type === 'Reasoning') return t('chat.message.reasoning');
   if (props.subMessage.type === 'Normal') {
     const normalSubMessages = props.parentMessage.sub_messages.filter(sm => sm.type === 'Normal');
-    if (normalSubMessages.length <= 1) return '正文';
+    if (normalSubMessages.length <= 1) return t('chat.message.content');
     const normalIndex = normalSubMessages.findIndex(sm => sm.id === props.subMessage.id);
-    if (normalIndex !== -1) return `正文(${normalIndex + 1})`;
+    if (normalIndex !== -1) return t('chat.message.contentIndex', { index: normalIndex + 1 });
   }
-  return `分区 ${props.index}`;
+  return t('chat.message.partitionIndex', { index: props.index });
 });
 
 watch(() => props.subMessage.config.is_collapsed, (newValue) => {
@@ -339,27 +336,24 @@ function toggleMinimize() {
 async function handleBlockCopy(contentToCopy: string) {
   try {
     await copyToClipboard(contentToCopy);
-    ElMessage.success('代码已复制到剪贴板');
+    ElMessage.success(t('chat.message.codeCopied'));
   } catch (err) {
-    ElMessage.error('复制失败');
+    ElMessage.error(t('chat.message.copyFailed'));
     console.error('Could not copy text: ', err);
   }
 }
 
 function scrollToTop() {
   if (rootRef.value) {
-    // 平滑滚动到当前组件的顶部
     rootRef.value.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 }
 </script>
 
-
 <style scoped>
 .sub-message-item { display: flex; flex-direction: column; max-width: 100%; border: 1px solid var(--el-border-color-light); border-radius: 6px; background-color: var(--color-background-soft); overflow: hidden; --sub-message-bg: var(--color-background-soft); position: relative; }
 .is-user .sub-message-item { background-color: var(--el-color-primary-light-9); border-color: var(--el-color-primary-light-8); --sub-message-bg: var(--el-color-primary-light-9); }
 
-/* File type specific styles */
 .sub-message-item.is-file { border: none; background-color: transparent; padding: 0; max-width: 260px; }
 .file-display-container { width: 100%; }
 .file-image-thumbnail { width: 100%; height: 160px; border-radius: 6px; border: 1px solid var(--el-border-color-lighter); background-color: var(--color-background); cursor: pointer; }
@@ -373,7 +367,6 @@ function scrollToTop() {
 .file-card-size { font-size: 12px; color: var(--el-text-color-secondary); }
 .file-card-download { flex-shrink: 0; }
 
-/* MCP Tool type specific styles */
 .mcp-tool-content { padding: 10px 15px; }
 .mcp-tool-body { display: flex; flex-direction: column; gap: 8px; }
 .mcp-tool-summary { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--el-text-color-secondary); }
@@ -391,7 +384,6 @@ function scrollToTop() {
 }
 .mcp-tool-error-message { color: var(--el-color-error); font-size: 14px; }
 
-/* Styles for text-based and MCP sub-messages */
 .sub-message-header { display: flex; justify-content: space-between; align-items: center; padding: 2px 12px; background-color: rgba(0, 0, 0, 0.03); height: 32px; flex-shrink: 0; gap: 8px; }
 .is-user .sub-message-header { background-color: rgba(64, 158, 255, 0.1); }
 .partition-title { font-size: 12px; color: var(--el-text-color-secondary); font-weight: bold; flex-grow: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -403,7 +395,6 @@ function scrollToTop() {
 .mcp-collapsed-summary .mcp-tool-status-icon { flex-shrink: 0; }
 .mcp-collapsed-text { font-size: 13px; color: var(--el-text-color-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* [修改] 移除了 10000px 的 max-height 限制，改为 none，允许无限高度 */
 .message-content { position: relative; word-break: break-word; line-height: 1.7; color: var(--color-text); min-height: 20px; transition: max-height 0.25s ease-out; max-height: none; overflow: hidden; }
 .message-content:not(.mcp-tool-content) { padding: 10px 15px; }
 .is-user .message-content { color: var(--el-color-primary-dark-2); }
@@ -428,46 +419,43 @@ function scrollToTop() {
   border-collapse: collapse;
   width: 100%;
   margin: 1em 0;
-  display: block; /* 允许在小屏幕上横向滚动 */
+  display: block;
   overflow-x: auto;
   border-spacing: 0;
 }
 .content-block :deep(th),
 .content-block :deep(td) {
   padding: 8px 12px;
-  border: 1px solid var(--el-border-color); /* 使用 Element Plus 的边框变量 */
+  border: 1px solid var(--el-border-color);
   text-align: left;
 }
 .content-block :deep(th) {
-  background-color: var(--el-fill-color-light); /* 表头背景色 */
+  background-color: var(--el-fill-color-light);
   font-weight: 600;
   color: var(--el-text-color-primary);
 }
 .content-block :deep(blockquote) {
   margin: 1em 0;
   padding: 8px 16px;
-  border-left: 4px solid var(--el-border-color-darker); /* 左侧竖线 */
-  background-color: var(--el-fill-color-light);       /* 浅灰色背景 */
-  color: var(--el-text-color-secondary);              /* 文字颜色稍浅 */
-  border-radius: 0 4px 4px 0;                         /* 右侧圆角 */
+  border-left: 4px solid var(--el-border-color-darker);
+  background-color: var(--el-fill-color-light);
+  color: var(--el-text-color-secondary);
+  border-radius: 0 4px 4px 0;
 }
 
-/* 去除引用块内最后一个段落的底部边距，防止底部留白过多 */
 .content-block :deep(blockquote > p:last-child) {
   margin-bottom: 0;
 }
 
-/* 处理嵌套引用 (blockquote 里的 blockquote) */
 .content-block :deep(blockquote blockquote) {
   margin: 8px 0;
-  background-color: transparent; /* 嵌套时不再叠加背景色，保持整洁 */
-  border-left-color: var(--el-border-color); /* 嵌套的竖线颜色稍微浅一点 */
+  background-color: transparent;
+  border-left-color: var(--el-border-color);
 }
 
-/* 针对用户消息气泡（蓝色背景）的特殊适配 */
 .is-user .content-block :deep(blockquote) {
-  border-left-color: var(--el-color-primary);   /* 用户消息用主色竖线 */
-  background-color: rgba(255, 255, 255, 0.2);   /* 半透明背景，融合蓝色气泡 */
+  border-left-color: var(--el-color-primary);
+  background-color: rgba(255, 255, 255, 0.2);
   color: var(--el-color-primary-dark-2);
 }
 .is-user .content-block :deep(strong),
@@ -480,10 +468,8 @@ function scrollToTop() {
 .typing-indicator span:nth-of-type(2) { animation-delay: -0.16s; }
 @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
 
-/* [修改] 回到顶部按钮样式: 小尺寸，定位到 Padding 区域 */
 .back-to-top-btn {
   position: absolute;
-  /* 位于右下角 padding (15px) 区域内，微调位置确保视觉对齐 */
   bottom: 2px;
   right: 2px;
   width: 20px;
@@ -495,7 +481,7 @@ function scrollToTop() {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  opacity: 0.5; /* 默认透明度较低，减少视觉干扰 */
+  opacity: 0.5;
   transition: all 0.2s;
   z-index: 10;
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
