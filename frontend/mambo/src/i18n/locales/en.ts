@@ -7,6 +7,9 @@ export default {
       searching: 'Searching...',
       loading: 'Loading...',
       noData: 'No Data',
+      connectionFailed: 'Connection Failed',
+      unspecified: 'Unspecified',
+      unknownModel: 'Unknown Model',
     },
     time: {
       today: 'Today',
@@ -21,6 +24,8 @@ export default {
       confirm: 'Confirm',
       edit: 'Edit',
       copy: 'Copy',
+      cut: 'Cut',
+      paste: 'Paste',
       close: 'Close',
       refresh: 'Refresh',
       export: 'Export',
@@ -29,6 +34,20 @@ export default {
       expand: 'Expand',
       collapse: 'Collapse',
       loadMore: 'Load More',
+    },
+    error: {
+      unknown: 'An unknown error occurred',
+      requestStatus: 'Request error, status code: {status}',
+      network: 'Network error, please check your connection',
+    },
+    placeholder: {
+      input: 'Please enter content...',
+      enter: 'Please enter {label}',
+      select: 'Please select {label}',
+    },
+    rule: {
+      nameRequired: 'Name cannot be empty',
+      selectRequired: 'Please select an option',
     },
   },
   settings: {
@@ -105,6 +124,38 @@ export default {
       avatarDeleteSuccess: 'Avatar deleted.',
       enterProxyUrl: 'Please enter Proxy URL',
       enterTestUrl: 'Please enter Test URL',
+    },
+    mcp: {
+      title: 'MCP Tool Management',
+      subtitle: 'Manage Model Context Protocol service connections to extend AI capabilities.',
+      add: 'Add MCP Service',
+      columns: {
+        name: 'Name',
+        type: 'Type',
+        config: 'Config',
+        enabled: 'Enabled',
+        status: 'Status',
+        monitor: 'Monitor',
+      },
+      system: 'System',
+      systemEditTip: 'System services cannot be edited',
+      checkError: 'View Error',
+      testConnection: 'Test Connection',
+      deleteConfirm: 'Are you sure you want to delete this MCP service?',
+      deleteSuccess: 'MCP service deleted',
+      deleteFailed: 'Delete failed',
+      updateSuccess: 'MCP service updated successfully',
+      createSuccess: 'MCP service created successfully',
+      updateFailed: 'Update failed',
+      createFailed: 'Create failed',
+      testSuccess: '[{name}] Connection test successful',
+      testFailed: '[{name}] Connection test failed',
+      errorDetail: {
+        title: 'MCP Service Error Details',
+        serviceName: 'Service Name',
+        occurredAt: 'Occurred At',
+        connectionFailed: 'Connection Test Failed',
+      },
     },
   },
   provider: {
@@ -213,6 +264,24 @@ export default {
       exportHtml: 'Export HTML',
       inputPlaceholder: 'Enter new title',
     },
+    toolbar: {
+      currentModel: 'Model',
+      zipHistoryList: 'History Summary List',
+      messageIndex: 'Message #{index}',
+      estimatedTokens: 'Est. Tokens',
+      tokenTooltip: 'Reference only. Actual usage depends on provider.',
+      availableTools: 'Available Tools',
+      noTools: 'No tools available',
+      testConnection: 'Test Connection',
+      webSearch: 'Web Search (Experimental)',
+      chatPartition: 'Chat Partitions',
+      chatSettings: 'Chat Settings',
+      mcpStatus: {
+        healthy: 'Connected',
+        unhealthy: 'Connection Error',
+        unknown: 'Not Tested',
+      },
+    },
     window: {
       welcome: 'Please select or create a chat from the sidebar to start',
       dropFiles: 'Drop files to upload',
@@ -249,6 +318,9 @@ export default {
         parseError: 'Failed to parse tool call content',
         toolCallTitle: 'Tool Call: {name}',
       },
+    },
+    codeBlock: {
+      lines: '{count} lines',
     },
     settings: {
       title: 'Chat Settings',
@@ -310,6 +382,11 @@ export default {
       delete: 'Delete',
       moveWarning: 'Moving resources out of or between knowledge bases will cause existing chunks and vector data to be lost. Continue?',
       moveWarningTitle: 'Warning',
+    },
+    explorer: {
+      uploadingCount: 'Uploading {count} files...',
+      uploadSuccess: 'Files uploaded successfully',
+      uploadPartialFail: 'Some files failed to upload, please try again',
     },
     editor: {
       contentLabel: 'Content',
@@ -529,6 +606,12 @@ export default {
       conflictTitle: 'Configuration Conflict',
       conflictMsg: '<p>Configuration changed, cannot resume.</p><p><strong>Current:</strong> Size={currentSize}, Overlap={currentOverlap}</p><p><strong>Last:</strong> Size={lastSize}, Overlap={lastOverlap}</p><p>Please select "Reprocess" to apply new config.</p>',
       reprocess: 'Reprocess',
+    },
+  },
+  editor: {
+    monaco: {
+      pasteFileError: 'Cannot access clipboard files via menu. Please use Ctrl+V or the upload button.',
+      clipboardError: 'Cannot access clipboard. Please check browser permissions.',
     },
   },
 }

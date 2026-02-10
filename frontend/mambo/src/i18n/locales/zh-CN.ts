@@ -7,6 +7,9 @@ export default {
       searching: '正在搜索...',
       loading: '加载中...',
       noData: '暂无数据',
+      connectionFailed: '连接失败',
+      unspecified: '未指定',
+      unknownModel: '未知模型',
     },
     time: {
       today: '今天',
@@ -21,6 +24,8 @@ export default {
       confirm: '确认',
       edit: '编辑',
       copy: '复制',
+      cut: '剪切',
+      paste: '粘贴',
       close: '关闭',
       refresh: '刷新',
       export: '导出',
@@ -29,6 +34,20 @@ export default {
       expand: '展开',
       collapse: '折叠',
       loadMore: '加载更多',
+    },
+    error: {
+      unknown: '发生未知错误',
+      requestStatus: '请求错误, 状态码: {status}',
+      network: '网络错误, 请检查您的连接',
+    },
+    placeholder: {
+      input: '请输入内容...',
+      enter: '请输入{label}',
+      select: '请选择{label}',
+    },
+    rule: {
+      nameRequired: '名称不能为空',
+      selectRequired: '请选择一项',
     },
   },
   settings: {
@@ -106,6 +125,38 @@ export default {
       enterProxyUrl: '请输入代理 URL',
       enterTestUrl: '请输入测试链接',
     },
+    mcp: {
+        title: 'MCP 工具管理',
+        subtitle: '管理 Model Context Protocol 服务连接，扩展 AI 能力。',
+        add: '新增 MCP 服务',
+        columns: {
+          name: '名称',
+          type: '连接类型',
+          config: '配置详情',
+          enabled: '启用',
+          status: '运行状态',
+          monitor: '监测详情',
+        },
+        system: '系统内置',
+        systemEditTip: '系统内置服务不可编辑',
+        checkError: '查看故障',
+        testConnection: '测试连接',
+        deleteConfirm: '确定要删除该 MCP 服务吗？',
+        deleteSuccess: 'MCP 服务已删除',
+        deleteFailed: '删除失败',
+        updateSuccess: 'MCP 服务更新成功',
+        createSuccess: 'MCP 服务创建成功',
+        updateFailed: '更新失败',
+        createFailed: '创建失败',
+        testSuccess: '[{name}] 连接测试成功',
+        testFailed: '[{name}] 连接测试失败',
+        errorDetail: {
+          title: 'MCP 服务故障详情',
+          serviceName: '服务名称',
+          occurredAt: '发生时间',
+          connectionFailed: '连接测试失败',
+        },
+      },
   },
   provider: {
     list: {
@@ -213,6 +264,24 @@ export default {
       exportHtml: '导出 HTML',
       inputPlaceholder: '输入新标题',
     },
+    toolbar: {
+      currentModel: '当前模型',
+      zipHistoryList: '历史摘要列表',
+      messageIndex: '第 {index} 条消息',
+      estimatedTokens: '预估 Tokens',
+      tokenTooltip: '仅供参考,实际消耗以usage或服务商账单为准',
+      availableTools: '可用工具',
+      noTools: '暂无可用工具',
+      testConnection: '测试连接',
+      webSearch: '联网搜索(不好用别用)',
+      chatPartition: '聊天分区',
+      chatSettings: '会话设置',
+      mcpStatus: {
+        healthy: '连接正常',
+        unhealthy: '连接异常',
+        unknown: '未测试',
+      },
+    },
     window: {
       welcome: '请从左侧选择或新建一个会话开始聊天',
       dropFiles: '松开即可上传文件',
@@ -249,6 +318,9 @@ export default {
         parseError: '无法解析工具调用内容',
         toolCallTitle: '工具调用: {name}',
       },
+    },
+    codeBlock: {
+      lines: '{count} 行',
     },
     settings: {
       title: '会话设置',
@@ -310,6 +382,11 @@ export default {
       delete: '删除',
       moveWarning: '将资源移出知识库或移动到其他知识库会导致原有的切片和向量数据丢失，是否继续？',
       moveWarningTitle: '警告',
+    },
+    explorer: {
+      uploadingCount: '正在上传 {count} 个文件...',
+      uploadSuccess: '文件上传成功',
+      uploadPartialFail: '部分文件上传失败，请重试',
     },
     editor: {
       contentLabel: '内容',
@@ -530,6 +607,12 @@ export default {
       conflictTitle: '配置冲突',
       conflictMsg: '<p>检测到配置变更，无法继续上次任务。</p><p><strong>当前配置:</strong> Size={currentSize}, Overlap={currentOverlap}</p><p><strong>上次配置:</strong> Size={lastSize}, Overlap={lastOverlap}</p><p>请选择"重新处理"以应用新配置。</p>',
       reprocess: '重新处理',
+    },
+  },
+  editor: {
+    monaco: {
+      pasteFileError: '无法通过菜单访问剪贴板文件，请使用 Ctrl+V 或上传按钮。',
+      clipboardError: '无法访问剪贴板，请检查浏览器权限。',
     },
   },
 }

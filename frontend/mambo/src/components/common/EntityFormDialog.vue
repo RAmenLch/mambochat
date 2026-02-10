@@ -10,7 +10,7 @@
       <el-form-item :label="nameLabel" prop="name">
         <el-input
           v-model="form.name"
-          :placeholder="`请输入${nameLabel}`"
+          :placeholder="t('common.placeholder.enter', { label: nameLabel })"
           @keyup.enter="handleConfirm"
           ref="nameInputRef"
         />
@@ -23,12 +23,10 @@
       >
         <el-select
           v-model="form.selectValue"
-          :placeholder="`请选择${selectConfig.label}`"
+          :placeholder="t('common.placeholder.select', { label: selectConfig.label })"
           style="width: 100%;"
         >
-          <!-- 修复点：支持分组渲染 -->
           <template v-for="(item, index) in selectConfig.options" :key="index">
-            <!-- 如果是分组 (拥有 options 属性) -->
             <el-option-group
               v-if="'options' in item"
               :label="item.label"
@@ -41,7 +39,6 @@
               />
             </el-option-group>
 
-            <!-- 如果是普通选项 -->
             <el-option
               v-else
               :label="(item as SelectOptionItem).label"
@@ -53,14 +50,15 @@
     </el-form>
 
     <template #footer>
-      <el-button @click="handleClose">取消</el-button>
-      <el-button type="primary" @click="handleConfirm">确认</el-button>
+      <el-button @click="handleClose">{{ t('common.action.cancel') }}</el-button>
+      <el-button type="primary" @click="handleConfirm">{{ t('common.action.confirm') }}</el-button>
     </template>
   </el-dialog>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, watch, nextTick } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { type FormInstance, type FormRules, ElMessage } from 'element-plus';
 
 // --- Types ---
@@ -75,7 +73,6 @@ export interface SelectGroupItem {
   options: SelectOptionItem[];
 }
 
-// 联合类型：配置项可以是普通选项，也可以是分组
 export type SelectConfigOption = SelectOptionItem | SelectGroupItem;
 
 interface SelectConfig {
@@ -106,6 +103,7 @@ const emit = defineEmits<{
 
 // --- State ---
 
+const { t } = useI18n();
 const internalVisible = ref(false);
 const formRef = ref<FormInstance>();
 const nameInputRef = ref<HTMLInputElement>();
@@ -116,8 +114,8 @@ const form = reactive({
 });
 
 const rules = reactive<FormRules>({
-  name: [{ required: true, message: '名称不能为空', trigger: 'blur' }],
-  selectValue: [{ required: true, message: '请选择一项', trigger: 'change' }],
+  name: [{ required: true, message: t('common.rule.nameRequired'), trigger: 'blur' }],
+  selectValue: [{ required: true, message: t('common.rule.selectRequired'), trigger: 'change' }],
 });
 
 // --- Watchers ---
@@ -139,7 +137,6 @@ const handleOpen = () => {
     if (props.selectConfig.initialValue) {
       form.selectValue = props.selectConfig.initialValue;
     } else {
-      // 尝试自动选中第一个可用选项
       const firstItem = props.selectConfig.options[0];
       if (firstItem) {
         if ('options' in firstItem && firstItem.options.length > 0) {
@@ -184,7 +181,7 @@ const handleConfirm = async () => {
       handleClose();
     } else {
       if (!form.name.trim()) {
-        ElMessage.warning('名称不能为空');
+        ElMessage.warning(t('common.rule.nameRequired'));
       }
     }
   });

@@ -19,7 +19,7 @@
         :autosize="{ minRows, maxRows }"
         resize="none"
         class="simple-textarea"
-        placeholder="请输入内容..."
+        :placeholder="t('common.placeholder.input')"
         @input="handleUpdateValue"
       />
     </template>
@@ -28,6 +28,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/settingsStore'
 import MonacoEditor from '@/components/common/MonacoEditor.vue'
 import type { editor } from 'monaco-editor'
@@ -53,6 +54,7 @@ const emit = defineEmits<{
   (e: 'editor-mounted', instance: editor.IStandaloneCodeEditor): void
 }>()
 
+const { t } = useI18n()
 const settingsStore = useSettingsStore()
 const textareaRef = ref()
 let monacoInstance: editor.IStandaloneCodeEditor | null = null

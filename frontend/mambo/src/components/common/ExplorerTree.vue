@@ -33,8 +33,6 @@
         class="custom-tree tree-with-lines"
         :props="treeProps"
       >
-        <!-- 注意：这里将 indent 改为了 16 或更大，以便给连接线留出空间 -->
-
         <template #default="{ node, data }">
           <span
             class="custom-tree-node"
@@ -66,13 +64,14 @@
           </span>
         </template>
       </el-tree>
-      <el-empty v-else :description="emptyText" />
+      <el-empty v-else :description="displayEmptyText" />
     </el-scrollbar>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElTree, ElMessage } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
 import type {
@@ -92,17 +91,13 @@ interface Props {
   folderItemType?: string
   persistenceKey?: string
   loadingFolderIds?: Set<string>
-  /**
-   * 自定义拖拽允许校验函数。
-   * 如果提供，将在默认的结构校验前执行。返回 false 则禁止拖拽。
-   */
   customAllowDrop?: (draggingNode: Node, dropNode: Node, dropType: AllowDropType) => boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   currentId: null,
   isLoading: false,
-  emptyText: '暂无数据',
+  emptyText: undefined,
   folderItemType: 'folder',
   persistenceKey: undefined,
   loadingFolderIds: () => new Set(),
@@ -118,10 +113,12 @@ const emit = defineEmits<{
   (e: 'upload-success'): void
 }>()
 
+const { t } = useI18n()
 const treeRef = ref<InstanceType<typeof ElTree>>()
 const expandedState = ref<Record<string, boolean>>({})
 const dragOverId = ref<string | null>(null)
 
+const displayEmptyText = computed(() => props.emptyText || t('common.status.noData'))
 const loadingNodes = computed(() => props.loadingFolderIds)
 
 const treeProps = {
@@ -148,15 +145,12 @@ const handleRootContextMenu = (event: MouseEvent) => {
 }
 
 const allowDrop = (draggingNode: Node, dropNode: Node, dropType: AllowDropType) => {
-  // 1. 优先执行外部传入的业务规则校验
   if (props.customAllowDrop) {
     if (!props.customAllowDrop(draggingNode, dropNode, dropType)) {
       return false
     }
   }
 
-  // 2. 执行组件内部的基础结构校验
-  // 仅允许放置到文件夹类型的节点内部
   if ((dropNode.data as BaseTreeItem).itemType !== props.folderItemType && dropType === 'inner') {
     return false
   }
@@ -196,27 +190,21 @@ const processFileUpload = async (files: FileList, parentId: string) => {
   if (files.length === 0) return
 
   const loading = ElMessage.info({
-    message: `正在上传 ${files.length} 个文件...`,
+    message: t('resource.explorer.uploadingCount', { count: files.length }),
     duration: 0,
   })
 
   try {
     const uploadPromises = Array.from(files).map((file) => {
-      // 如果 parentId 是 'root'，传递给 API 时可能需要特定处理，
-      // 但根据 kbService 的定义，parentId 是可选的。
-      // 如果业务约定 'root' 字符串代表根目录，则直接传；
-      // 如果约定不传代表根目录，则需转换。
-      // 这里假设后端能处理 'root' 或前端需转为 undefined。
-      // 根据计划：如果是根目录,则parent_id 为 'root'。直接传递。
       return uploadResourceFile(file, parentId)
     })
 
     await Promise.all(uploadPromises)
-    ElMessage.success('文件上传成功')
+    ElMessage.success(t('resource.explorer.uploadSuccess'))
     emit('upload-success')
   } catch (error) {
     console.error('File upload failed', error)
-    ElMessage.error('部分文件上传失败，请重试')
+    ElMessage.error(t('resource.explorer.uploadPartialFail'))
   } finally {
     loading.close()
   }
@@ -249,8 +237,6 @@ const handleNodeNativeDrop = async (data: BaseTreeItem, event: DragEvent) => {
   const files = event.dataTransfer?.files
   if (!files || files.length === 0) return
 
-  // 计划要求：若放置在文件夹节点上，取该节点 ID 为 parent_id；
-  // 若放置在非文件夹节点上，设置 parent_id 为 'root'。
   const targetParentId = data.itemType === props.folderItemType ? data.id : 'root'
   await processFileUpload(files, targetParentId)
 }
@@ -362,9 +348,8 @@ defineExpose({ scrollToKey })
   background-color: transparent;
 }
 
-/* 调整节点高度和样式 */
 :deep(.el-tree-node__content) {
-  height: 36px; /* 稍微调小一点高度，让列表更紧凑 */
+  height: 36px;
   border-radius: 4px;
   margin: 0 0 2px 0;
   position: relative;
@@ -427,23 +412,12 @@ defineExpose({ scrollToKey })
   display: none !important;
 }
 
-/* --- Tree Guide Lines Implementation --- */
-/* 增加连接线样式，使层级关系更明显 */
-
-/* 1. 给子节点容器添加左边框 */
 .tree-with-lines .el-tree-node__children {
   position: relative;
-  /* 这里的 margin-left 需要根据 el-tree 的 indent 属性微调，通常 indent=16 时，这里设为 12px 左右比较合适 */
   margin-left: 5px;
   border-left: 3px solid var(--el-border-color-lighter);
 }
 
-/* 2. 隐藏根节点的左边框（可选，如果根节点不需要线） */
-/* .tree-with-lines > .el-tree-node > .el-tree-node__children {
-  border-left: none;
-} */
-
-/* 3. 鼠标悬停时加深连接线颜色，增加交互感 */
 .tree-with-lines .el-tree-node__children:hover {
   border-left-color: var(--el-color-primary-light-5);
 }

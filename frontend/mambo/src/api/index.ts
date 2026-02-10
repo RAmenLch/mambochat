@@ -1,5 +1,6 @@
 import axios, { isAxiosError } from 'axios';
 import { ElMessage } from 'element-plus';
+import i18n from '@/i18n';
 
 const apiClient = axios.create({
   // baseURL 将会指向 Vite 开发服务器的代理
@@ -12,9 +13,10 @@ const apiClient = axios.create({
 
 // 响应拦截器, 用于全局处理 API 错误
 apiClient.interceptors.response.use(
-  response => response.data,
-  error => {
-    let errorMessage = '发生未知错误';
+  (response) => response.data,
+  (error) => {
+    const { t } = i18n.global;
+    let errorMessage = t('common.error.unknown');
 
     if (isAxiosError(error)) {
       // 优先使用后端返回的业务错误信息
@@ -22,10 +24,10 @@ apiClient.interceptors.response.use(
         errorMessage = error.response.data.detail;
       } else if (error.response) {
         // 如果没有 detail, 但有 response, 则根据状态码提供通用提示
-        errorMessage = `请求错误, 状态码: ${error.response.status}`;
+        errorMessage = t('common.error.requestStatus', { status: error.response.status });
       } else if (error.request) {
         // 请求已发出但没有收到响应
-        errorMessage = '网络错误, 请检查您的连接';
+        errorMessage = t('common.error.network');
       } else {
         // 设置请求时发生错误
         errorMessage = error.message;
