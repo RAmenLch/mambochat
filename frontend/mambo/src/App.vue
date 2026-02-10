@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { onMounted, computed, watch } from 'vue'
 import { RouterView } from 'vue-router'
 import { useChatListStore } from '@/stores/chatListStore'
 import { useMcpStore } from '@/stores/mcpStore'
@@ -8,19 +8,36 @@ import loader from '@monaco-editor/loader'
 import { ElConfigProvider } from 'element-plus'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import en from 'element-plus/es/locale/lang/en'
+import { useI18n } from 'vue-i18n'
 
 const chatListStore = useChatListStore()
 const mcpStore = useMcpStore()
 const settingsStore = useSettingsStore()
+const { locale } = useI18n()
 
 // 根据全局设置计算 Element Plus 的语言包
 const elementLocale = computed(() => {
   return settingsStore.globalSettings.language === 'en' ? en : zhCn
 })
 
+// 监听全局设置变化，同步更新 vue-i18n 的 locale
+watch(
+  () => settingsStore.globalSettings.language,
+  (newLang) => {
+    if (newLang) {
+      locale.value = newLang
+    }
+  },
+  { immediate: true }
+)
+
 onMounted(async () => {
   // 1. 优先获取全局配置，确保语言环境正确加载
   await settingsStore.fetchGlobalSettings()
+  // 确保在异步获取配置后，如果 watch 没有触发（例如初始值与默认值相同），手动同步一次
+  if (settingsStore.globalSettings.language) {
+    locale.value = settingsStore.globalSettings.language
+  }
 
   // 2. 初始化全局通知监听器
   chatListStore.initializeNotificationListener()

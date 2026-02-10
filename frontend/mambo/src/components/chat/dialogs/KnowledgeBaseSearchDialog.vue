@@ -6,7 +6,7 @@
       <div class="kb-select-container">
         <el-select
           v-model="selectedKbId"
-          placeholder="选择知识库范围"
+          :placeholder="$t('kb.search.selectKbPlaceholder')"
           clearable
           style="width: 100%"
         >
@@ -24,7 +24,7 @@
 
       <el-input
         v-model="queryText"
-        placeholder="输入问题或关键词进行向量检索..."
+        :placeholder="$t('kb.search.inputPlaceholder')"
         class="search-input"
         @keyup.enter="handleSearch"
         clearable
@@ -35,7 +35,7 @@
       </el-input>
 
       <div class="settings-row">
-        <span class="setting-label">匹配数量 (Top K):</span>
+        <span class="setting-label">{{ $t('kb.search.topKLabel') }}</span>
         <el-input-number
           v-model="topK"
           :min="1"
@@ -45,7 +45,7 @@
         />
         <el-divider direction="vertical" />
         <span class="result-count" v-if="hasSearched">
-          找到 {{ results.length }} 个相关切片
+          {{ $t('kb.search.resultCount', { count: results.length }) }}
         </span>
       </div>
     </div>
@@ -70,7 +70,7 @@
                 <span class="chunk-index-badge">#{{ item.chunk_index }}</span>
               </div>
               <div class="item-score">
-                <el-tag size="small" type="info" effect="plain" title="距离分数 (越小越相似)">
+                <el-tag size="small" type="info" effect="plain" :title="$t('kb.search.scoreTooltip')">
                   Score: {{ item.score.toFixed(4) }}
                 </el-tag>
                 <el-checkbox
@@ -82,22 +82,22 @@
             </div>
 
             <div class="item-body">
-              <div 
-                class="item-content" 
+              <div
+                class="item-content"
                 :class="{ 'is-collapsed': !isExpanded(item.chunk_id) }"
                 @click="toggleExpand(item.chunk_id)"
               >
                 {{ item.chunk_content }}
               </div>
-              
+
               <div class="item-actions">
-                <el-button 
-                  link 
-                  type="primary" 
-                  size="small" 
+                <el-button
+                  link
+                  type="primary"
+                  size="small"
                   @click="toggleExpand(item.chunk_id)"
                 >
-                  {{ isExpanded(item.chunk_id) ? '收起内容' : '展开查看' }}
+                  {{ isExpanded(item.chunk_id) ? $t('kb.search.collapse') : $t('kb.search.expand') }}
                   <el-icon class="el-icon--right">
                     <ArrowUp v-if="isExpanded(item.chunk_id)" />
                     <ArrowDown v-else />
@@ -108,41 +108,41 @@
               <!-- 上下文导航栏 (仅展开时显示) -->
               <div v-if="isExpanded(item.chunk_id)" class="context-nav">
                 <el-button-group size="small">
-                  <el-button 
-                    :icon="ArrowLeft" 
+                  <el-button
+                    :icon="ArrowLeft"
                     :loading="isContextLoading(item.chunk_id, 'prev')"
                     :disabled="item.chunk_index <= 0"
                     @click="navigateContext(item, 'prev')"
                   >
-                    上一片段
+                    {{ $t('kb.search.prevChunk') }}
                   </el-button>
-                  
+
                   <el-button disabled class="context-label">
-                    当前: {{ item.chunk_index }}
+                    {{ $t('kb.search.currentChunk', { index: item.chunk_index }) }}
                   </el-button>
 
                   <!-- 回跳按钮：仅当当前索引不等于原始索引时显示 -->
-                  <el-tooltip 
+                  <el-tooltip
                     v-if="item.chunk_index !== item.original_index"
-                    content="点击跳回最初检索命中的切片位置"
+                    :content="$t('kb.search.jumpBackTooltip')"
                     placement="top"
                   >
-                    <el-button 
-                      type="primary" 
+                    <el-button
+                      type="primary"
                       plain
                       :loading="isContextLoading(item.chunk_id, 'reset')"
                       @click="resetToOriginal(item)"
                     >
                       <el-icon><Aim /></el-icon>
-                      命中: {{ item.original_index }}
+                      {{ $t('kb.search.hitIndex', { index: item.original_index }) }}
                     </el-button>
                   </el-tooltip>
 
-                  <el-button 
+                  <el-button
                     :loading="isContextLoading(item.chunk_id, 'next')"
                     @click="navigateContext(item, 'next')"
                   >
-                    下一片段
+                    {{ $t('kb.search.nextChunk') }}
                     <el-icon class="el-icon--right"><ArrowRight /></el-icon>
                   </el-button>
                 </el-button-group>
@@ -154,28 +154,28 @@
 
       <el-empty
         v-else-if="hasSearched"
-        description="未找到匹配的知识库切片"
+        :description="$t('kb.search.noResult')"
         :image-size="100"
       />
       <div v-else class="placeholder-state">
         <el-icon class="placeholder-icon"><Search /></el-icon>
-        <p>输入关键词开始语义搜索</p>
+        <p>{{ $t('kb.search.placeholder') }}</p>
       </div>
     </div>
 
     <!-- 底部操作栏 -->
     <div class="dialog-footer">
       <div class="selection-info">
-        已选择 {{ selectedItems.length }} 个切片
+        {{ $t('kb.search.selectedCount', { count: selectedItems.length }) }}
       </div>
       <div class="footer-buttons">
-        <el-button @click="$emit('cancel')">取消</el-button>
+        <el-button @click="$emit('cancel')">{{ $t('common.action.cancel') }}</el-button>
         <el-button
           type="primary"
           @click="handleConfirm"
           :disabled="selectedItems.length === 0"
         >
-          确认使用 ({{ selectedItems.length }})
+          {{ $t('kb.search.confirmUse', { count: selectedItems.length }) }}
         </el-button>
       </div>
     </div>
@@ -184,17 +184,18 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
-import { 
-  Search, 
-  Document, 
-  Collection, 
-  ArrowDown, 
-  ArrowUp, 
-  ArrowLeft, 
+import {
+  Search,
+  Document,
+  Collection,
+  ArrowDown,
+  ArrowUp,
+  ArrowLeft,
   ArrowRight,
   Aim
 } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
+import { useI18n } from 'vue-i18n';
 import { searchKnowledgeBase, getKBFileChunks } from '@/api/kbService';
 import { useResourceStore } from '@/stores/resourceStore';
 import type { KBSearchResultItem } from '@/api/types';
@@ -209,8 +210,9 @@ const emit = defineEmits<{
   (e: 'confirm', items: KBSearchResultItem[]): void;
 }>();
 
-// --- Store ---
+// --- Store & I18n ---
 const resourceStore = useResourceStore();
+const { t } = useI18n();
 
 // --- State ---
 const queryText = ref('');
@@ -266,7 +268,7 @@ const toggleExpand = (chunkId: string) => {
 
 const handleSearch = async () => {
   if (!queryText.value.trim()) {
-    ElMessage.warning('请输入搜索内容');
+    ElMessage.warning(t('kb.search.msg.inputRequired'));
     return;
   }
 
@@ -281,7 +283,7 @@ const handleSearch = async () => {
       top_k: topK.value,
       kb_id: selectedKbId.value
     });
-    
+
     // 初始化时，记录原始索引
     results.value = res.items.map(item => ({
       ...item,
@@ -289,7 +291,7 @@ const handleSearch = async () => {
     }));
   } catch (error) {
     console.error('Vector search failed', error);
-    ElMessage.error('检索失败，请稍后重试');
+    ElMessage.error(t('kb.search.msg.searchFailed'));
     results.value = [];
   } finally {
     isSearching.value = false;
@@ -304,8 +306,8 @@ const isContextLoading = (chunkId: string, action: 'prev' | 'next' | 'reset') =>
  * 核心方法：获取指定索引的切片并替换当前列表项
  */
 const updateChunkContent = async (
-  item: ExtendedSearchResultItem, 
-  targetIndex: number, 
+  item: ExtendedSearchResultItem,
+  targetIndex: number,
   action: 'prev' | 'next' | 'reset'
 ) => {
   const loadingKey = `${item.chunk_id}-${action}`;
@@ -321,14 +323,14 @@ const updateChunkContent = async (
 
     if (res.items && res.items.length > 0) {
       const newChunk = res.items[0];
-      
+
       // 构造新对象，务必保留 original_index
       const newItem: ExtendedSearchResultItem = {
         ...item,
         chunk_id: newChunk.id,
         chunk_content: newChunk.content,
         chunk_index: newChunk.chunk_index,
-        original_index: item.original_index 
+        original_index: item.original_index
       };
 
       // 在结果列表中原地替换
@@ -347,11 +349,11 @@ const updateChunkContent = async (
         expandedItems.value.add(newItem.chunk_id);
       }
     } else {
-      ElMessage.info('没有更多切片了');
+      ElMessage.info(t('kb.search.msg.noMore'));
     }
   } catch (error) {
     console.error('Failed to fetch context chunk', error);
-    ElMessage.error('获取切片内容失败');
+    ElMessage.error(t('kb.search.msg.fetchFailed'));
   } finally {
     contextLoadingMap.value.delete(loadingKey);
   }

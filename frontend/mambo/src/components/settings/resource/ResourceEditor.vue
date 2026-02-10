@@ -41,7 +41,7 @@
                   <template #error>
                     <div class="image-slot">
                       <el-icon><Picture /></el-icon>
-                      <span>加载失败</span>
+                      <span>{{ t('resource.editor.imageLoadError') }}</span>
                     </div>
                   </template>
                 </el-image>
@@ -62,11 +62,13 @@
                 </div>
                 <div class="file-actions">
                   <a :href="fileDownloadUrl" target="_blank" class="download-link">
-                    <el-button type="primary" link icon="Download">下载文件</el-button>
+                    <el-button type="primary" link icon="Download">
+                      {{ t('resource.editor.downloadFile') }}
+                    </el-button>
                   </a>
                 </div>
                 <p v-if="resource.kb_id" class="kb-badge">
-                  <el-tag size="small" type="warning" effect="plain">已关联知识库</el-tag>
+                  <el-tag size="small" type="warning" effect="plain">{{ t('resource.editor.kbLinked') }}</el-tag>
                 </p>
               </div>
             </div>
@@ -74,8 +76,8 @@
             <!-- Sub-case A2: No File (Empty State) -->
             <div v-else class="file-empty-state">
               <el-icon :size="64" class="empty-icon"><DocumentAdd /></el-icon>
-              <p class="empty-text">当前版本暂无文件</p>
-              <p class="empty-subtext">请上传文件以创建内容</p>
+              <p class="empty-text">{{ t('resource.editor.noFile') }}</p>
+              <p class="empty-subtext">{{ t('resource.editor.uploadPrompt') }}</p>
             </div>
 
             <!-- Upload Action Area -->
@@ -91,18 +93,18 @@
                 <template #trigger>
                   <el-button type="primary" :loading="isUploading">
                     <el-icon class="el-icon--left"><Upload /></el-icon>
-                    {{ currentFileInfo ? '上传新版本' : '上传文件' }}
+                    {{ currentFileInfo ? t('resource.editor.uploadNew') : t('resource.editor.uploadFile') }}
                   </el-button>
                 </template>
               </el-upload>
               <div class="upload-tip">
                 <template v-if="currentFileInfo">
-                  上传新文件将自动创建一个新的版本。<br />
+                  {{ t('resource.editor.uploadAutoVersion') }}<br />
                   <span v-if="resource.kb_id" class="warning-text">
-                    注意：更新文件内容会导致原有的向量切片失效，需重新执行任务。
+                    {{ t('resource.editor.kbWarning') }}
                   </span>
                 </template>
-                <template v-else> 支持上传图片、文档等多种格式。 </template>
+                <template v-else> {{ t('resource.editor.uploadTip') }} </template>
               </div>
             </div>
           </div>
@@ -125,7 +127,7 @@
         </template>
 
         <div v-else class="folder-placeholder">
-          <el-empty description="文件夹无需编辑内容" :image-size="100" />
+          <el-empty :description="t('resource.editor.folderNoContent')" :image-size="100" />
         </div>
 
         <!-- Footer Actions (Attached to content area) -->
@@ -133,11 +135,11 @@
           class="editor-footer"
           v-if="resource.itemType === 'resource' && resource.resourceType !== 'file'"
         >
-          <el-button @click="resetForm">重置</el-button>
-          <el-button type="success" @click="openNewVersionDialog">另存为新版本</el-button>
-          <el-button type="primary" @click="handleSaveChanges" :disabled="!isFormDirty"
-            >保存更改</el-button
-          >
+          <el-button @click="resetForm">{{ t('resource.editor.reset') }}</el-button>
+          <el-button type="success" @click="openNewVersionDialog">{{ t('resource.editor.saveAsNew') }}</el-button>
+          <el-button type="primary" @click="handleSaveChanges" :disabled="!isFormDirty">
+            {{ t('common.action.save') }}
+          </el-button>
         </div>
       </div>
 
@@ -153,26 +155,26 @@
     </el-form>
   </div>
 
-  <el-dialog v-model="newVersionDialog.visible" title="另存为新版本" width="500px">
+  <el-dialog v-model="newVersionDialog.visible" :title="t('resource.dialog.saveAsNewTitle')" width="500px">
     <el-form :model="newVersionDialog.form" label-position="top" ref="newVersionFormRef">
       <el-form-item
-        label="版本名称"
+        :label="t('resource.dialog.versionName')"
         prop="name"
-        :rules="{ required: true, message: '版本名称不能为空', trigger: 'blur' }"
+        :rules="{ required: true, message: t('resource.dialog.versionNameRequired'), trigger: 'blur' }"
       >
-        <el-input v-model="newVersionDialog.form.name" placeholder="例如：v1.1 优化了逻辑" />
+        <el-input v-model="newVersionDialog.form.name" :placeholder="t('resource.dialog.versionNamePlaceholder')" />
       </el-form-item>
-      <el-form-item label="提交信息 (可选)" prop="commitMessage">
+      <el-form-item :label="t('resource.dialog.commitMessage')" prop="commitMessage">
         <el-input
           v-model="newVersionDialog.form.commitMessage"
           type="textarea"
-          placeholder="描述本次变更的内容"
+          :placeholder="t('resource.dialog.commitPlaceholder')"
         />
       </el-form-item>
     </el-form>
     <template #footer>
-      <el-button @click="newVersionDialog.visible = false">取消</el-button>
-      <el-button type="primary" @click="handleConfirmNewVersion">确认</el-button>
+      <el-button @click="newVersionDialog.visible = false">{{ t('common.action.cancel') }}</el-button>
+      <el-button type="primary" @click="handleConfirmNewVersion">{{ t('common.action.confirm') }}</el-button>
     </template>
   </el-dialog>
 </template>
@@ -181,6 +183,7 @@
 import { ref, reactive, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type UploadFile } from 'element-plus'
 import { Document, Upload, Picture, DocumentAdd } from '@element-plus/icons-vue'
+import { useI18n } from 'vue-i18n'
 import type { editor } from 'monaco-editor'
 
 import { useResourceStore } from '@/stores/resourceStore'
@@ -190,6 +193,8 @@ import ResourceVersionBar from './ResourceVersionBar.vue'
 import ResourceMetaSidebar from './ResourceMetaSidebar.vue'
 import KnowledgeBaseFileDetail from '../kb/KnowledgeBaseFileDetail.vue'
 import ResourceUniversalEditor from '@/components/common/ResourceUniversalEditor.vue'
+
+const { t } = useI18n()
 
 interface SubMessageTemplateAttributes {
   context_participation_length: number
@@ -281,9 +286,9 @@ const isFormDirty = computed(() => {
 
 const contentEditorLabel = computed(() => {
   if (loadedVersionInEditor.value) {
-    return `内容 (正在查看: ${loadedVersionInEditor.value.name})`
+    return t('resource.editor.viewing', { name: loadedVersionInEditor.value.name })
   }
-  return '内容 (当前版本)'
+  return t('resource.editor.currentVersion')
 })
 
 const editorLanguage = computed(() => {
@@ -399,7 +404,7 @@ async function handleSaveChanges() {
     }
   }
 
-  ElMessage.success('保存成功')
+  ElMessage.success(t('resource.editor.saveSuccess'))
 }
 
 async function handleFileChange(uploadFile: UploadFile) {
@@ -408,11 +413,11 @@ async function handleFileChange(uploadFile: UploadFile) {
   isUploading.value = true
   try {
     await uploadResourceFile(uploadFile.raw, undefined, props.resource.id)
-    ElMessage.success('文件上传成功，新版本已创建')
+    ElMessage.success(t('resource.editor.uploadSuccess'))
     await resourceStore.fetchResourceDetails(props.resource.id)
   } catch (error) {
     console.error(error)
-    ElMessage.error('文件上传失败')
+    ElMessage.error(t('resource.editor.uploadError'))
   } finally {
     isUploading.value = false
   }
@@ -441,13 +446,17 @@ function loadVersionIntoEditor(version: ResourceVersion) {
 async function handleSetActiveVersion(versionId: string) {
   if (!props.resource) return
   try {
-    await ElMessageBox.confirm('确定要将此版本设为当前活跃版本吗？', '确认', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'info',
-    })
+    await ElMessageBox.confirm(
+      t('resource.version.confirmActive'),
+      t('resource.tree.moveWarningTitle'),
+      {
+        confirmButtonText: t('common.action.confirm'),
+        cancelButtonText: t('common.action.cancel'),
+        type: 'info',
+      }
+    )
     await resourceStore.setActiveResourceVersion(props.resource.id, versionId)
-    ElMessage.success('活跃版本已切换')
+    ElMessage.success(t('resource.version.switchSuccess'))
   } catch {
     /* User canceled */
   }
@@ -471,7 +480,7 @@ async function handleConfirmNewVersion() {
       }
       await resourceStore.createNewVersion(props.resource!.id, versionData)
       newVersionDialog.visible = false
-      ElMessage.success('新版本创建成功')
+      ElMessage.success(t('resource.editor.uploadSuccess'))
     }
   })
 }
