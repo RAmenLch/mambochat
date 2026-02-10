@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     v-model="internalVisible"
-    :title="isEditing ? '编辑 AI 服务商' : '新增 AI 服务商'"
+    :title="isEditing ? t('provider.form.editTitle') : t('provider.form.addTitle')"
     width="750px"
     :close-on-click-modal="false"
     class="provider-dialog"
@@ -9,19 +9,19 @@
   >
     <div class="dialog-body-wrapper">
       <el-form ref="providerFormRef" :model="providerForm" :rules="providerFormRules" label-width="120px" class="form-section">
-        <el-form-item label="服务商名称" prop="name">
+        <el-form-item :label="t('provider.form.name')" prop="name">
           <el-autocomplete
             v-model="providerForm.name"
             :fetch-suggestions="querySearchProviders"
-            placeholder="选择或输入服务商名称"
+            :placeholder="t('provider.form.namePlaceholder')"
             style="width: 100%"
             @select="(item: Record<string, any>) => handleProviderSelect(item as AutocompleteSuggestion)"
             :trigger-on-focus="true"
           />
         </el-form-item>
 
-        <el-form-item label="执行器" prop="worker_type">
-          <el-select v-model="providerForm.worker_type" placeholder="选择执行器" style="width: 100%">
+        <el-form-item :label="t('provider.form.workerType')" prop="worker_type">
+          <el-select v-model="providerForm.worker_type" :placeholder="t('provider.form.workerTypePlaceholder')" style="width: 100%">
             <el-option label="OpenAI Compatible" value="openai" />
             <el-option label="Google Gemini Native" value="google" />
             <el-option label="DeepSeek Native" value="deepseek" />
@@ -29,24 +29,24 @@
           </el-select>
         </el-form-item>
 
-        <el-form-item label="API Host" prop="apiHost">
-          <el-input v-model.trim="providerForm.apiHost" placeholder="例如：https://api.openai.com/v1" />
+        <el-form-item :label="t('provider.form.apiHost')" prop="apiHost">
+          <el-input v-model.trim="providerForm.apiHost" :placeholder="t('provider.form.apiHostPlaceholder')" />
         </el-form-item>
-        <el-form-item label="API Key" prop="apiKey">
+        <el-form-item :label="t('provider.form.apiKey')" prop="apiKey">
           <el-input
             v-model="providerForm.apiKey"
             type="password"
             show-password
-            placeholder="请输入您的 API Key"
+            :placeholder="t('provider.form.apiKeyPlaceholder')"
             @focus="handleApiKeyFocus"
             @blur="handleApiKeyBlur"
           >
             <template #append>
-              <el-button @click="handleTestConnection" :loading="isTestingConnection">测试连接</el-button>
+              <el-button @click="handleTestConnection" :loading="isTestingConnection">{{ t('provider.form.testConnection') }}</el-button>
             </template>
           </el-input>
         </el-form-item>
-        <el-form-item label="启用代理">
+        <el-form-item :label="t('provider.form.enableProxy')">
            <el-switch
              v-model="providerForm.use_proxy"
              :disabled="!isProxyGloballyEnabled"
@@ -54,7 +54,7 @@
            <el-tooltip
               v-if="!isProxyGloballyEnabled"
               effect="dark"
-              content="请先在“全局配置”中启用代理功能"
+              :content="t('provider.form.proxyTip')"
               placement="top"
             >
               <el-icon class="label-icon"><QuestionFilled /></el-icon>
@@ -62,33 +62,33 @@
         </el-form-item>
       </el-form>
       <div class="scrollable-content">
-        <el-divider>模型列表</el-divider>
+        <el-divider>{{ t('provider.form.modelList') }}</el-divider>
         <div v-if="providerForm.models.length > 0" class="model-form-header">
-          <span class="header-item id-col">模型ID</span>
-          <span class="header-item name-col">模型显示名称</span>
-          <span class="header-item type-col">类型</span>
+          <span class="header-item id-col">{{ t('model.table.id') }}</span>
+          <span class="header-item name-col">{{ t('model.table.name') }}</span>
+          <span class="header-item type-col">{{ t('model.table.type') }}</span>
         </div>
         <div v-for="(model, index) in providerForm.models" :key="index" class="model-form-item">
-          <el-input v-model.trim="model.modelId" placeholder="模型ID (e.g. gpt-4o)" class="id-input" />
-          <el-input v-model.trim="model.name" placeholder="模型显示名称" class="name-input" />
-          <el-select v-model="model.model_type" placeholder="类型" class="type-select">
-            <el-option label="对话" value="chat" />
-            <el-option label="向量" value="embedding" />
+          <el-input v-model.trim="model.modelId" :placeholder="t('model.form.idPlaceholder')" class="id-input" />
+          <el-input v-model.trim="model.name" :placeholder="t('model.form.namePlaceholder')" class="name-input" />
+          <el-select v-model="model.model_type" placeholder="Type" class="type-select">
+            <el-option :label="t('model.table.typeChat')" value="chat" />
+            <el-option :label="t('model.table.typeEmbedding')" value="embedding" />
           </el-select>
           <el-button link type="danger" :icon="Delete" @click="removeModelEntryFromForm(index)" class="delete-model-btn" />
         </div>
         <el-button @click="addModelEntryToForm" style="margin-right: 10px;">
-          <el-icon><Plus /></el-icon>手动添加
+          <el-icon><Plus /></el-icon>{{ t('provider.form.manualAdd') }}
         </el-button>
         <el-button @click="handleFetchModels" :loading="isFetchingModels">
-          <el-icon><Download /></el-icon>从API获取
+          <el-icon><Download /></el-icon>{{ t('provider.form.fetchModels') }}
         </el-button>
       </div>
     </div>
     <template #footer>
       <div class="dialog-footer">
-        <el-button @click="handleClose">取消</el-button>
-        <el-button type="primary" @click="submitForm">确认</el-button>
+        <el-button @click="handleClose">{{ t('common.action.cancel') }}</el-button>
+        <el-button type="primary" @click="submitForm">{{ t('common.action.confirm') }}</el-button>
       </div>
     </template>
   </el-dialog>
@@ -96,6 +96,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, watch, computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
 import { Plus, Delete, Download, QuestionFilled } from '@element-plus/icons-vue';
 import { useProviderStore } from '@/stores/providerStore';
@@ -143,6 +144,7 @@ const emit = defineEmits<{
 
 const API_KEY_PLACEHOLDER = '********';
 
+const { t } = useI18n();
 const providerStore = useProviderStore();
 const settingsStore = useSettingsStore();
 const systemConfigStore = useSystemConfigStore();
@@ -166,25 +168,25 @@ const providerForm = reactive<ProviderFormData>({
 const isEditing = computed(() => !!props.providerData);
 const isProxyGloballyEnabled = computed(() => globalSettings.value.proxy_enabled === true);
 
-const providerFormRules = reactive<FormRules<ProviderFormData>>({
-  name: [{ required: true, message: '请输入服务商名称', trigger: 'blur' }],
-  worker_type: [{ required: true, message: '请选择执行器', trigger: 'change' }],
-  apiHost: [{ required: true, message: '请输入 API Host', trigger: 'blur' }],
+const providerFormRules = computed<FormRules<ProviderFormData>>(() => ({
+  name: [{ required: true, message: t('provider.form.namePlaceholder'), trigger: 'blur' }],
+  worker_type: [{ required: true, message: t('provider.form.workerTypePlaceholder'), trigger: 'change' }],
+  apiHost: [{ required: true, message: t('provider.form.apiHostPlaceholder'), trigger: 'blur' }],
   apiKey: [{
     validator: (rule, value: string, callback: (error?: Error) => void) => {
       if (!isEditing.value && !value) {
-        callback(new Error('请输入 API Key'));
+        callback(new Error(t('provider.form.apiKeyPlaceholder')));
       } else if (isEditing.value && value === API_KEY_PLACEHOLDER) {
         callback();
       } else if (value === '') {
-        callback(new Error('请输入 API Key'));
+        callback(new Error(t('provider.form.apiKeyPlaceholder')));
       } else {
         callback();
       }
     },
     trigger: 'blur',
   }],
-});
+}));
 
 watch(() => props.visible, (newVal) => {
   internalVisible.value = newVal;
@@ -251,12 +253,12 @@ function handleProviderSelect(item: AutocompleteSuggestion) {
 
 async function handleTestConnection() {
   if (!providerForm.apiHost) {
-    ElMessage.warning('请填写 API Host 以进行测试');
+    ElMessage.warning(t('provider.form.testWarningHost'));
     return;
   }
   if (!isEditing.value || providerForm.apiKey !== API_KEY_PLACEHOLDER) {
     if (!providerForm.apiKey) {
-      ElMessage.warning('请填写 API Key 以进行测试');
+      ElMessage.warning(t('provider.form.testWarningKey'));
       return;
     }
   }
@@ -269,12 +271,13 @@ async function handleTestConnection() {
     } else {
       res = await providerStore.testConnection({ apiHost: providerForm.apiHost, apiKey: providerForm.apiKey }, providerForm.use_proxy);
     }
-    ElMessage({ type: res.status === 'success' ? 'success' : 'error', message: res.message });
+    const msg = res.status === 'success' ? t('provider.form.testSuccess') : (res.message || t('provider.form.testFailed'));
+    ElMessage({ type: res.status === 'success' ? 'success' : 'error', message: msg });
   } catch (error: unknown) {
     if(isAxiosError(error)){
-      ElMessage.error(error?.response?.data?.detail || '连接测试失败');
+      ElMessage.error(error?.response?.data?.detail || t('provider.form.testFailed'));
     } else {
-      ElMessage.error("未知错误");
+      ElMessage.error(t('api.error.unknown', '未知错误')); // Fallback if key missing
     }
   } finally {
     isTestingConnection.value = false;
@@ -289,7 +292,7 @@ async function handleFetchModels() {
       models = await providerStore.fetchModelsForProvider(props.providerData.id, providerForm.use_proxy);
     } else {
       if (!providerForm.apiHost || !providerForm.apiKey) {
-        ElMessage.warning('请填写 API Host 和 API Key 以获取模型列表');
+        ElMessage.warning(t('provider.form.fetchWarning'));
         isFetchingModels.value = false;
         return;
       }
@@ -369,7 +372,7 @@ async function handleCreateProvider() {
     })),
   };
   await providerStore.addProviderWithModels(createData);
-  ElMessage.success('新增服务商成功！');
+  ElMessage.success(t('provider.form.createSuccess'));
 }
 
 async function handleUpdateProvider() {
@@ -433,7 +436,7 @@ async function handleUpdateProvider() {
   ];
 
   await Promise.all(updatePromises);
-  ElMessage.success('更新服务商及模型成功！');
+  ElMessage.success(t('provider.form.updateSuccess'));
 }
 
 defineExpose({

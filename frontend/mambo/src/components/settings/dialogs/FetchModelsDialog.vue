@@ -1,6 +1,6 @@
 <template>
-  <el-dialog v-model="internalVisible" title="选择要添加的模型" width="500px" @close="handleClose">
-    <el-input v-model="modelSearchQuery" placeholder="搜索模型" clearable class="model-search-input" />
+  <el-dialog v-model="internalVisible" :title="t('model.fetch.title')" width="500px" @close="handleClose">
+    <el-input v-model="modelSearchQuery" :placeholder="t('model.fetch.placeholder')" clearable class="model-search-input" />
     <el-scrollbar height="300px">
       <el-checkbox-group v-model="selectedModelIds" class="fetched-model-group">
         <el-checkbox
@@ -15,14 +15,15 @@
       </el-checkbox-group>
     </el-scrollbar>
     <template #footer>
-      <el-button @click="handleClose">取消</el-button>
-      <el-button type="primary" @click="handleConfirm">确认添加</el-button>
+      <el-button @click="handleClose">{{ t('common.action.cancel') }}</el-button>
+      <el-button type="primary" @click="handleConfirm">{{ t('model.fetch.confirm') }}</el-button>
     </template>
   </el-dialog>
 </template>
 
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import type { AIModelBase } from '@/api/types';
 
 const props = defineProps<{
@@ -37,6 +38,7 @@ const emit = defineEmits<{
   (e: 'confirm', selectedIds: string[]): void;
 }>();
 
+const { t } = useI18n();
 const internalVisible = ref(false);
 const modelSearchQuery = ref('');
 const selectedModelIds = ref<string[]>([]);

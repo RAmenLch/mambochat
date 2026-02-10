@@ -1,30 +1,30 @@
 <template>
   <el-dialog
     v-model="internalVisible"
-    :title="isEditing ? '编辑 AI 模型' : '新增 AI 模型'"
+    :title="isEditing ? t('model.form.editTitle') : t('model.form.addTitle')"
     width="600px"
     :close-on-click-modal="false"
     @close="handleClose"
   >
     <el-form ref="modelFormRef" :model="modelForm" :rules="modelFormRules" label-width="140px">
       <!-- 基本信息 -->
-      <el-form-item label="模型 ID" prop="modelId">
-        <el-input v-model.trim="modelForm.modelId" placeholder="例如：gpt-4o" :disabled="isEditing" />
+      <el-form-item :label="t('model.form.id')" prop="modelId">
+        <el-input v-model.trim="modelForm.modelId" :placeholder="t('model.form.idPlaceholder')" :disabled="isEditing" />
       </el-form-item>
-      <el-form-item label="模型显示名称" prop="name">
-        <el-input v-model.trim="modelForm.name" placeholder="例如：GPT-4o" />
+      <el-form-item :label="t('model.form.name')" prop="name">
+        <el-input v-model.trim="modelForm.name" :placeholder="t('model.form.namePlaceholder')" />
       </el-form-item>
-      <el-form-item label="模型类型" prop="model_type">
+      <el-form-item :label="t('model.form.type')" prop="model_type">
         <el-radio-group v-model="modelForm.model_type">
-          <el-radio-button value="chat">对话模型</el-radio-button>
-          <el-radio-button value="embedding">向量模型</el-radio-button>
+          <el-radio-button value="chat">{{ t('model.form.typeChat') }}</el-radio-button>
+          <el-radio-button value="embedding">{{ t('model.form.typeEmbedding') }}</el-radio-button>
         </el-radio-group>
       </el-form-item>
 
-      <el-divider>元配置 (Meta Config)</el-divider>
+      <el-divider>{{ t('model.form.metaConfig') }}</el-divider>
 
       <!-- 通用配置 -->
-      <el-form-item label="上下文长度">
+      <el-form-item :label="t('model.form.contextLength')">
         <el-input-number
           v-model="modelForm.meta_config.context_length"
           :min="0"
@@ -46,7 +46,7 @@
 <!--            <el-option v-for="item in tokenizerOptions" :key="item" :label="item" :value="item" />-->
 <!--          </el-select>-->
 <!--        </el-form-item>-->
-        <el-form-item label="最大输出Token数">
+        <el-form-item :label="t('model.form.maxOutput')">
           <el-input-number
             v-model="modelForm.meta_config.max_output_tokens"
             :min="0"
@@ -55,22 +55,22 @@
             style="width: 100%"
           />
         </el-form-item>
-        <el-form-item label="输入模态">
+        <el-form-item :label="t('model.form.inputModalities')">
           <el-select
             v-model="modelForm.meta_config.input_modalities"
             multiple
-            placeholder="请选择支持的输入模态"
+            placeholder="Select input modalities"
             clearable
             style="width: 100%"
           >
             <el-option v-for="item in inputModalitiesOptions" :key="item" :label="item" :value="item" />
           </el-select>
         </el-form-item>
-        <el-form-item label="输出模态">
+        <el-form-item :label="t('model.form.outputModalities')">
           <el-select
             v-model="modelForm.meta_config.output_modalities"
             multiple
-            placeholder="请选择支持的输出模态"
+            placeholder="Select output modalities"
             clearable
             style="width: 100%"
           >
@@ -81,24 +81,24 @@
 
       <!-- Embedding 模型专用配置 -->
       <template v-if="isEmbeddingModel">
-        <el-form-item label="向量维度*">
+        <el-form-item :label="t('model.form.embeddingDimension')">
           <el-input-number
             v-model="modelForm.meta_config.embedding_dimension"
             :min="1"
             :controls="false"
-            placeholder="支持: [384, 768, 1024, 1536, 2560, 3072, 4096]"
+            placeholder="e.g. 1536"
             style="width: 100%"
           />
         </el-form-item>
       </template>
 
       <!-- 通用配置 -->
-      <el-form-item label="支持的参数">
+      <el-form-item :label="t('model.form.supportedParams')">
         <el-select
           v-model="modelForm.meta_config.supported_parameters"
           multiple
           filterable
-          placeholder="请选择支持的参数"
+          placeholder="Select supported parameters"
           clearable
           style="width: 100%"
         >
@@ -108,20 +108,20 @@
     </el-form>
 
     <template #footer>
-      <el-button @click="handleClose">取消</el-button>
-      <el-button type="primary" @click="submitForm">确认</el-button>
+      <el-button @click="handleClose">{{ t('common.action.cancel') }}</el-button>
+      <el-button type="primary" @click="submitForm">{{ t('common.action.confirm') }}</el-button>
     </template>
   </el-dialog>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, watch, computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
 import { useProviderStore } from '@/stores/providerStore';
 import { useSystemConfigStore } from '@/stores/systemConfigStore';
 import type { AIModel, AIModelCreate, AIModelMetaConfig, AIModelUpdate, ModelType } from '@/api/types';
 import {
-  tokenizerOptions,
   inputModalitiesOptions,
   outputModalitiesOptions,
 } from '@/constants/metaConfigOptions';
@@ -144,6 +144,7 @@ const emit = defineEmits<{
   (e: 'submitted'): void;
 }>();
 
+const { t } = useI18n();
 const providerStore = useProviderStore();
 const systemConfigStore = useSystemConfigStore();
 const internalVisible = ref(false);
@@ -170,11 +171,11 @@ const isEditing = computed(() => !!props.modelData);
 const isChatModel = computed(() => modelForm.model_type === 'chat');
 const isEmbeddingModel = computed(() => modelForm.model_type === 'embedding');
 
-const modelFormRules = reactive<FormRules<Partial<ModelFormData>>>({
-  name: [{ required: true, message: '请输入模型显示名称', trigger: 'blur' }],
-  modelId: [{ required: true, message: '请输入模型 ID', trigger: 'blur' }],
-  model_type: [{ required: true, message: '请选择模型类型', trigger: 'change' }],
-});
+const modelFormRules = computed<FormRules<Partial<ModelFormData>>>(() => ({
+  name: [{ required: true, message: t('model.form.namePlaceholder'), trigger: 'blur' }],
+  modelId: [{ required: true, message: t('model.form.idPlaceholder'), trigger: 'blur' }],
+  model_type: [{ required: true, message: t('model.form.type'), trigger: 'change' }],
+}));
 
 watch(() => props.visible, (newVal) => {
   internalVisible.value = newVal;
@@ -248,7 +249,7 @@ async function submitForm() {
             meta_config: sanitizedMetaConfig
           };
           await providerStore.updateModel(props.modelData.id, updateData);
-          ElMessage.success('更新模型成功！');
+          ElMessage.success(t('model.form.updateSuccess'));
         } else if (props.providerId) {
           const createData: AIModelCreate = {
             name: modelForm.name,
@@ -258,7 +259,7 @@ async function submitForm() {
             meta_config: sanitizedMetaConfig
           };
           await providerStore.addModel(createData);
-          ElMessage.success('新增模型成功！');
+          ElMessage.success(t('model.form.createSuccess'));
         }
         emit('submitted');
         handleClose();
@@ -271,5 +272,4 @@ async function submitForm() {
 </script>
 
 <style scoped>
-/* 样式可以保持不变，以备将来使用，或根据需要删除 */
 </style>
