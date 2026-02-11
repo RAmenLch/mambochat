@@ -62,9 +62,14 @@ class ZipHistoryGenerateManager(AbstractGenerateManager):
             .build()
         )
 
+        language = builder.settings.get("language")
+        en_prompt = "Please output a summary of the conversation history:"
+        cn_prompt = "请输出历史摘要:"
+        prompt = cn_prompt if language == "zh-CN" else en_prompt
+
         # 5. 后处理：追加触发提示
         # 由于 LLMInputBuilderV2 生成的是 payload 列表，直接操作 messages 列表
-        llm_input.messages.append({"role": "user", "content": "请输出历史摘要:"})
+        llm_input.messages.append({"role": "user", "content": prompt})
 
         # 6. 执行生成并累积结果
         accumulated_content = ""
