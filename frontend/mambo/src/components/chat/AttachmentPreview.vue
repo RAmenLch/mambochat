@@ -14,7 +14,7 @@
       >
         <div class="kb-tag-content">
           <el-icon class="kb-icon"><Search /></el-icon>
-          <el-tooltip :content="kb.description || '知识库'" placement="top">
+          <el-tooltip :content="kb.description || t('chat.attachment.knowledgeBase')" placement="top">
             <span>{{ kb.name }}</span>
           </el-tooltip>
         </div>
@@ -83,8 +83,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import type { PropType } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { Document, Picture, Close, Search } from '@element-plus/icons-vue';
 import type { FileResponse, Resource } from '@/api/types';
+
+const { t } = useI18n();
 
 const props = defineProps({
   uploadedFiles: {
@@ -108,8 +111,8 @@ const emit = defineEmits<{
   (e: 'update:attachedResources', resources: Resource[]): void;
 }>();
 
-const hasAttachments = computed(() => 
-  props.uploadedFiles.length > 0 || 
+const hasAttachments = computed(() =>
+  props.uploadedFiles.length > 0 ||
   props.attachedResources.length > 0 ||
   props.attachedKnowledgeBases.length > 0
 );

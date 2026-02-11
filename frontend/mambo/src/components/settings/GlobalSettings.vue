@@ -1,17 +1,25 @@
 <template>
   <div class="global-settings-manager">
     <div class="header">
-      <h2>全局配置</h2>
+      <h2>{{ t('settings.global.title') }}</h2>
       <!-- 顶部也可以显示保存状态，可选 -->
     </div>
     <div class="settings-form-container">
       <el-form :model="settingsForm" label-position="top" style="max-width: 600px">
+        <!-- 语言设置 -->
+        <el-form-item :label="t('settings.global.language')">
+          <el-select v-model="settingsForm.language" style="width: 100%">
+            <el-option label="简体中文" value="zh-CN" />
+            <el-option label="English" value="en" />
+          </el-select>
+        </el-form-item>
+
         <el-form-item>
           <template #label>
-            <span>全局默认模型</span>
+            <span>{{ t('settings.global.defaultModel') }}</span>
             <el-tooltip
               effect="dark"
-              content="此模型将用于新创建的会话，以及那些原有模型被删除的会话。"
+              :content="t('settings.global.defaultModelTip')"
               placement="top"
             >
               <el-icon class="label-icon"><QuestionFilled /></el-icon>
@@ -19,7 +27,7 @@
           </template>
           <el-select
             v-model="settingsForm.default_model_id"
-            placeholder="请选择一个默认模型"
+            :placeholder="t('settings.global.defaultModelPlaceholder')"
             style="width: 100%"
             clearable
           >
@@ -36,10 +44,10 @@
 
         <el-form-item>
           <template #label>
-            <span>生成标题模型</span>
+            <span>{{ t('settings.global.titleModel') }}</span>
             <el-tooltip
               effect="dark"
-              content="专门用于自动生成会话标题的模型。如果未设置，将使用上方的全局默认模型。"
+              :content="t('settings.global.titleModelTip')"
               placement="top"
             >
               <el-icon class="label-icon"><QuestionFilled /></el-icon>
@@ -47,7 +55,7 @@
           </template>
           <el-select
             v-model="settingsForm.title_generation_model_id"
-            placeholder="请选择一个用于生成标题的模型"
+            :placeholder="t('settings.global.titleModelPlaceholder')"
             style="width: 100%"
             clearable
           >
@@ -62,28 +70,28 @@
           </el-select>
         </el-form-item>
 
-        <el-divider>编辑器与交互</el-divider>
-        <el-form-item label="前端编辑器类型">
+        <el-divider>{{ t('settings.global.editorInteraction') }}</el-divider>
+        <el-form-item :label="t('settings.global.frontendEditor')">
           <el-radio-group v-model="settingsForm.frontend_editor">
-            <el-radio-button label="simple">普通文本框</el-radio-button>
-            <el-radio-button label="monaco">Monaco 编辑器 (代码高亮)</el-radio-button>
+            <el-radio-button label="simple">{{ t('settings.global.editorSimple') }}</el-radio-button>
+            <el-radio-button label="monaco">{{ t('settings.global.editorMonaco') }}</el-radio-button>
           </el-radio-group>
         </el-form-item>
 
-        <el-form-item label="发送消息快捷键">
+        <el-form-item :label="t('settings.global.sendShortcut')">
           <el-select v-model="settingsForm.send_message_shortcut" style="width: 100%">
-            <el-option label="Enter 发送 (Shift+Enter 换行)" value="enter" />
-            <el-option label="Ctrl + Enter 发送 (Enter 换行)" value="ctrl_enter" />
+            <el-option :label="t('settings.global.shortcutEnter')" value="enter" />
+            <el-option :label="t('settings.global.shortcutCtrlEnter')" value="ctrl_enter" />
           </el-select>
         </el-form-item>
 
-        <el-divider>知识库默认参数</el-divider>
+        <el-divider>{{ t('settings.global.kbParams') }}</el-divider>
         <el-row :gutter="20">
           <el-col :span="12">
             <el-form-item>
               <template #label>
-                <span>默认切片大小</span>
-                <el-tooltip content="新上传文件的默认切片字符数" placement="top">
+                <span>{{ t('settings.global.kbChunkSize') }}</span>
+                <el-tooltip :content="t('settings.global.kbChunkSizeTip')" placement="top">
                   <el-icon class="label-icon"><QuestionFilled /></el-icon>
                 </el-tooltip>
               </template>
@@ -98,8 +106,8 @@
           <el-col :span="12">
             <el-form-item>
               <template #label>
-                <span>默认重叠大小</span>
-                <el-tooltip content="新上传文件的默认切片重叠字符数" placement="top">
+                <span>{{ t('settings.global.kbChunkOverlap') }}</span>
+                <el-tooltip :content="t('settings.global.kbChunkOverlapTip')" placement="top">
                   <el-icon class="label-icon"><QuestionFilled /></el-icon>
                 </el-tooltip>
               </template>
@@ -113,10 +121,10 @@
           </el-col>
         </el-row>
 
-        <el-divider>头像设置</el-divider>
+        <el-divider>{{ t('settings.global.avatarSettings') }}</el-divider>
         <div class="avatar-settings-section">
           <AvatarUploader
-            title="用户头像"
+            :title="t('settings.avatar.userTitle')"
             :avatar-url="globalSettings.user_avatar_url"
             :icon="User"
             :is-loading="isAvatarLoading.user"
@@ -124,7 +132,7 @@
             @delete="() => handleDeleteAvatar('user')"
           />
           <AvatarUploader
-            title="AI 助手头像"
+            :title="t('settings.avatar.aiTitle')"
             :avatar-url="globalSettings.ai_avatar_url"
             :icon="Cpu"
             :is-loading="isAvatarLoading.ai"
@@ -133,44 +141,46 @@
           />
         </div>
 
-        <el-divider>代理配置</el-divider>
-        <el-form-item label="启用代理">
+        <el-divider>{{ t('settings.global.proxyConfig') }}</el-divider>
+        <el-form-item :label="t('settings.global.enableProxy')">
           <el-switch
             :model-value="settingsForm.proxy_enabled ?? false"
             @update:model-value="(val) => (settingsForm.proxy_enabled = val as boolean)"
           />
           <el-tooltip
             effect="dark"
-            content="全局启用代理后，可在各个服务商设置中独立开关"
+            :content="t('settings.global.enableProxyTip')"
             placement="top"
           >
             <el-icon class="label-icon"><QuestionFilled /></el-icon>
           </el-tooltip>
         </el-form-item>
-        <el-form-item label="代理 URL" v-if="settingsForm.proxy_enabled">
+        <el-form-item :label="t('settings.global.proxyUrl')" v-if="settingsForm.proxy_enabled">
           <el-input
             v-model.trim="settingsForm.proxy_url"
-            placeholder="例如: http://127.0.0.1:7890"
+            :placeholder="t('settings.global.proxyUrlPlaceholder')"
           />
         </el-form-item>
-        <el-form-item label="代理测试" v-if="settingsForm.proxy_enabled">
+        <el-form-item :label="t('settings.global.proxyTest')" v-if="settingsForm.proxy_enabled">
           <div class="proxy-test-container">
             <el-input
               v-model.trim="proxyTestUrl"
-              placeholder="测试链接, 如 https://www.google.com"
+              :placeholder="t('settings.global.testUrlPlaceholder')"
               class="proxy-test-input"
             />
-            <el-button @click="handleTestProxy" :loading="isTestingProxy">测试代理</el-button>
+            <el-button @click="handleTestProxy" :loading="isTestingProxy">
+              {{ t('settings.global.testProxyBtn') }}
+            </el-button>
           </div>
         </el-form-item>
 
-        <el-divider>对话历史压缩</el-divider>
+        <el-divider>{{ t('settings.global.historyCompression') }}</el-divider>
         <el-form-item>
           <template #label>
-            <span>生成压缩历史 System Prompt</span>
+            <span>{{ t('settings.global.compressionPrompt') }}</span>
             <el-tooltip
               effect="dark"
-              content="用于指导 AI 如何进行对话历史压缩的系统指令。如果为空，将使用后端默认的 Prompt。"
+              :content="t('settings.global.compressionPromptTip')"
               placement="top"
             >
               <el-icon class="label-icon"><QuestionFilled /></el-icon>
@@ -180,18 +190,18 @@
             v-model="settingsForm.zip_history_system_prompt"
             type="textarea"
             :rows="5"
-            placeholder="例如：请将以上对话内容浓缩为一段简洁的摘要，保留关键信息、问题和结论。"
+            :placeholder="t('settings.global.compressionPromptPlaceholder')"
           />
         </el-form-item>
 
-        <el-divider>新会话默认参数</el-divider>
+        <el-divider>{{ t('settings.global.newChatParams') }}</el-divider>
 
         <el-form-item>
           <template #label>
-            <span>上下文消息数量</span>
+            <span>{{ t('settings.global.contextMsgCount') }}</span>
             <el-tooltip
               effect="dark"
-              content="新会话默认携带的最近历史消息数量。0 代表不限制（发送全部历史）。"
+              :content="t('settings.global.contextMsgCountTip')"
               placement="top"
             >
               <el-icon class="label-icon"><QuestionFilled /></el-icon>
@@ -206,7 +216,7 @@
           />
         </el-form-item>
 
-        <el-form-item label="Temperature (温度)">
+        <el-form-item :label="t('settings.global.temperature')">
           <el-slider
             :model-value="settingsForm.default_temperature ?? 1.0"
             @update:model-value="(val) => (settingsForm.default_temperature = val as number)"
@@ -217,7 +227,7 @@
           />
         </el-form-item>
 
-        <el-form-item label="Top P">
+        <el-form-item :label="t('settings.global.topP')">
           <el-slider
             :model-value="settingsForm.default_top_p ?? 1.0"
             @update:model-value="(val) => (settingsForm.default_top_p = val as number)"
@@ -228,14 +238,14 @@
           />
         </el-form-item>
 
-        <el-form-item label="流式对话 (Stream)">
+        <el-form-item :label="t('settings.global.stream')">
           <el-switch
             :model-value="settingsForm.default_stream ?? true"
             @update:model-value="(val) => (settingsForm.default_stream = val as boolean)"
           />
           <el-tooltip
             effect="dark"
-            content="新会话默认是否开启流式对话。关闭后, AI将一次性返回完整回复, 可能会增加等待时间。"
+            :content="t('settings.global.streamTip')"
             placement="top"
           >
             <el-icon class="label-icon"><QuestionFilled /></el-icon>
@@ -247,15 +257,15 @@
           <transition name="fade" mode="out-in">
             <div v-if="saveStatus === 'saving'" class="status-item saving">
               <el-icon class="is-loading"><Loading /></el-icon>
-              <span>正在保存设置...</span>
+              <span>{{ t('settings.global.saving') }}</span>
             </div>
             <div v-else-if="saveStatus === 'saved'" class="status-item saved">
               <el-icon><Check /></el-icon>
-              <span>所有更改已保存</span>
+              <span>{{ t('settings.global.saved') }}</span>
             </div>
             <div v-else-if="saveStatus === 'error'" class="status-item error">
               <el-icon><Warning /></el-icon>
-              <span>保存失败，请检查网络</span>
+              <span>{{ t('settings.global.saveError') }}</span>
             </div>
           </transition>
         </div>
@@ -266,6 +276,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, watch, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useProviderStore } from '@/stores/providerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { storeToRefs } from 'pinia'
@@ -277,6 +288,7 @@ import AvatarUploader from './AvatarUploader.vue'
 type AvatarType = 'user' | 'ai'
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 
+const { t, locale } = useI18n()
 const providerStore = useProviderStore()
 const settingsStore = useSettingsStore()
 
@@ -304,6 +316,7 @@ const settingsForm = reactive<
   kb_default_chunk_size: 500,
   kb_default_chunk_overlap: 50,
   send_message_shortcut: 'enter',
+  language: 'zh-CN', // 默认值
 })
 
 // 状态控制
@@ -356,12 +369,18 @@ watch(
       kb_default_chunk_size: newSettings.kb_default_chunk_size,
       kb_default_chunk_overlap: newSettings.kb_default_chunk_overlap,
       send_message_shortcut: newSettings.send_message_shortcut,
+      language: newSettings.language || 'zh-CN',
     })
 
     // 在 DOM 更新循环结束后释放锁，确保 watch(settingsForm) 不会被此次赋值触发
     nextTick(() => {
       isSyncingFromStore.value = false
     })
+
+    // 同步语言设置到 i18n 实例
+    if (newSettings.language && (newSettings.language === 'zh-CN' || newSettings.language === 'en')) {
+      locale.value = newSettings.language
+    }
   },
   { deep: true, immediate: true },
 )
@@ -414,7 +433,7 @@ const handleUploadAvatar = async (type: AvatarType, file: File) => {
   isAvatarLoading[type] = true
   try {
     await settingsStore.uploadAvatar(type, file)
-    ElMessage.success('头像上传成功！')
+    ElMessage.success(t('settings.global.avatarUploadSuccess'))
   } catch (error: unknown) {
     console.error(`Failed to upload ${type} avatar:`, error)
   } finally {
@@ -426,7 +445,7 @@ const handleDeleteAvatar = async (type: AvatarType) => {
   isAvatarLoading[type] = true
   try {
     await settingsStore.deleteAvatar(type)
-    ElMessage.success('头像已删除。')
+    ElMessage.success(t('settings.global.avatarDeleteSuccess'))
   } catch (error: unknown) {
     console.error(`Failed to delete ${type} avatar:`, error)
   } finally {
@@ -436,11 +455,11 @@ const handleDeleteAvatar = async (type: AvatarType) => {
 
 const handleTestProxy = async () => {
   if (!settingsForm.proxy_url) {
-    ElMessage.warning('请输入代理 URL')
+    ElMessage.warning(t('settings.global.enterProxyUrl'))
     return
   }
   if (!proxyTestUrl.value) {
-    ElMessage.warning('请输入测试链接')
+    ElMessage.warning(t('settings.global.enterTestUrl'))
     return
   }
 

@@ -2,27 +2,27 @@
 <template>
   <el-dialog
     :model-value="visible"
-    title="新建知识库"
+    :title="$t('kb.form.createTitle')"
     width="500px"
     @update:model-value="val => emit('update:visible', val)"
     @close="handleClose"
   >
     <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
-      <el-form-item label="知识库名称" prop="name">
+      <el-form-item :label="$t('kb.form.nameLabel')" prop="name">
         <el-input
           v-model="form.name"
-          placeholder="请输入知识库名称"
+          :placeholder="$t('kb.form.namePlaceholder')"
           ref="nameInputRef"
           @keyup.enter="handleConfirm"
         />
       </el-form-item>
 
-      <el-form-item label="嵌入模型 (Embedding Model)" prop="embeddingModelId">
+      <el-form-item :label="$t('kb.form.modelLabel')" prop="embeddingModelId">
         <el-select
           v-model="form.embeddingModelId"
-          placeholder="请选择嵌入模型"
+          :placeholder="$t('kb.form.modelPlaceholder')"
           style="width: 100%"
-          no-data-text="暂无可用模型，请先在设置中添加 Embedding 模型"
+          :no-data-text="$t('kb.form.noModel')"
         >
           <template v-for="group in embeddingModelOptions" :key="group.label">
             <el-option-group :label="group.label">
@@ -39,8 +39,8 @@
 
       <el-form-item prop="embeddingRateLimit">
         <template #label>
-          <span>嵌入频率限制 (秒)</span>
-          <el-tooltip content="每次 Embedding 请求后的冷却时间，用于防止触发 API 速率限制" placement="top">
+          <span>{{ $t('kb.form.rateLimitLabel') }}</span>
+          <el-tooltip :content="$t('kb.form.rateLimitTooltip')" placement="top">
             <el-icon class="label-icon"><QuestionFilled /></el-icon>
           </el-tooltip>
         </template>
@@ -50,22 +50,23 @@
           :step="0.1"
           :precision="2"
           style="width: 100%"
-          placeholder="0.0"
+          :placeholder="$t('kb.form.rateLimitPlaceholder')"
         />
       </el-form-item>
     </el-form>
 
     <template #footer>
-      <el-button @click="handleClose">取消</el-button>
-      <el-button type="primary" @click="handleConfirm">确认</el-button>
+      <el-button @click="handleClose">{{ $t('common.action.cancel') }}</el-button>
+      <el-button type="primary" @click="handleConfirm">{{ $t('common.action.confirm') }}</el-button>
     </template>
   </el-dialog>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, nextTick, watch } from 'vue';
+import { ref, reactive, nextTick, watch, computed } from 'vue';
 import { type FormInstance, type FormRules, ElMessage } from 'element-plus';
 import { QuestionFilled } from '@element-plus/icons-vue';
+import { useI18n } from 'vue-i18n';
 
 // --- Types ---
 
@@ -92,7 +93,7 @@ const props = withDefaults(defineProps<{
   embeddingModelOptions: ModelGroup[];
   initialName?: string;
 }>(), {
-  initialName: '新建知识库'
+  initialName: ''
 });
 
 const emit = defineEmits<{
@@ -102,6 +103,7 @@ const emit = defineEmits<{
 
 // --- State ---
 
+const { t } = useI18n();
 const formRef = ref<FormInstance>();
 const nameInputRef = ref<HTMLInputElement>();
 
@@ -111,10 +113,10 @@ const form = reactive({
   embeddingRateLimit: 0,
 });
 
-const rules = reactive<FormRules>({
-  name: [{ required: true, message: '知识库名称不能为空', trigger: 'blur' }],
-  embeddingModelId: [{ required: true, message: '请选择嵌入模型', trigger: 'change' }],
-});
+const rules = computed<FormRules>(() => ({
+  name: [{ required: true, message: t('kb.form.rule.nameRequired'), trigger: 'blur' }],
+  embeddingModelId: [{ required: true, message: t('kb.form.rule.modelRequired'), trigger: 'change' }],
+}));
 
 // --- Methods ---
 
@@ -140,8 +142,8 @@ const tryAutoSelectModel = () => {
  * 初始化表单数据
  */
 const initForm = () => {
-  // 1. 设置默认名称
-  form.name = props.initialName;
+  // 1. 设置默认名称，如果 props 未提供则使用 i18n 默认值
+  form.name = props.initialName || t('kb.form.createTitle');
   form.embeddingRateLimit = 0;
 
   // 2. 重置模型选择
@@ -194,7 +196,7 @@ const handleConfirm = async () => {
       handleClose();
     } else {
       if (!form.name.trim()) {
-        ElMessage.warning('请检查输入项');
+        ElMessage.warning(t('kb.form.rule.checkInput'));
       }
     }
   });

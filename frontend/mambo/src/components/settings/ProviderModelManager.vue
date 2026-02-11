@@ -2,9 +2,9 @@
   <div class="provider-model-manager">
     <!-- 1. 服务商管理区域 -->
     <div class="header">
-      <h2>服务商</h2>
+      <h2>{{ t('provider.list.title') }}</h2>
       <el-button type="primary" :icon="Plus" @click="openAddProviderDialog">
-        新增服务商
+        {{ t('provider.list.add') }}
       </el-button>
     </div>
     <el-table
@@ -17,7 +17,7 @@
       :row-key="(row: AIProviderWithModels) => row.id"
       ref="providerTableRef"
     >
-      <el-table-column prop="name" label="服务商名称" width="220" />
+      <el-table-column prop="name" :label="t('provider.list.name')" width="220" />
 <!--      <el-table-column prop="worker_type" label="后端类型" width="160">-->
 <!--        <template #default="{ row }">-->
 <!--          <el-tag :type="getWorkerTypeTag(row.worker_type)">-->
@@ -25,11 +25,11 @@
 <!--          </el-tag>-->
 <!--        </template>-->
 <!--      </el-table-column>-->
-      <el-table-column prop="apiHost" label="API Host" />
-      <el-table-column label="操作" width="180" align="center">
+      <el-table-column prop="apiHost" :label="t('provider.list.apiHost')" />
+      <el-table-column :label="t('provider.list.action')" width="180" align="center">
         <template #default="{ row }">
-          <el-button link type="primary" @click.stop="openEditProviderDialog(row)">编辑</el-button>
-          <el-button link type="danger" @click.stop="handleDeleteProvider(row)">删除</el-button>
+          <el-button link type="primary" @click.stop="openEditProviderDialog(row)">{{ t('common.action.edit') }}</el-button>
+          <el-button link type="danger" @click.stop="handleDeleteProvider(row)">{{ t('common.action.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -38,34 +38,34 @@
 
     <!-- 2. 模型管理区域 -->
     <div class="header">
-      <h2>模型</h2>
+      <h2>{{ t('model.list.title') }}</h2>
       <div>
         <el-button type="primary" :icon="Plus" @click="openAddModelDialog" :disabled="!selectedProvider">
-          新增模型
+          {{ t('model.list.add') }}
         </el-button>
         <el-button @click="handleFetchModelsForProvider" :loading="isFetchingModels" :disabled="!selectedProvider">
           <el-icon><Download /></el-icon>
-          从API获取
+          {{ t('model.list.fetch') }}
         </el-button>
       </div>
     </div>
     <div v-if="selectedProvider">
       <p class="provider-info">
-        当前服务商: <strong>{{ selectedProvider.name }}</strong>
+        {{ t('provider.list.currentProvider') }}: <strong>{{ selectedProvider.name }}</strong>
       </p>
       <el-table :data="selectedProvider.models" border style="width: 100%">
-        <el-table-column prop="modelId" label="模型 ID" width="220" />
-        <el-table-column prop="name" label="模型显示名称" width="200" />
-        <el-table-column prop="model_type" label="类型" width="50" align="center">
+        <el-table-column prop="modelId" :label="t('model.table.id')" width="220" />
+        <el-table-column prop="name" :label="t('model.table.name')" width="200" />
+        <el-table-column prop="model_type" :label="t('model.table.type')" width="50" align="center">
           <template #default="{ row }">
-            <el-tooltip :content="row.model_type === 'embedding' ? '向量模型' : '对话模型'" placement="top">
+            <el-tooltip :content="row.model_type === 'embedding' ? t('model.table.typeEmbedding') : t('model.table.typeChat')" placement="top">
               <el-icon size="18">
                 <component :is="row.model_type === 'embedding' ? Connection : ChatDotRound" />
               </el-icon>
             </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column label="上下文 / 输出(或维度)" width="180" align="center">
+        <el-table-column :label="t('model.table.context')" width="180" align="center">
           <template #default="{ row }">
             <div v-if="row.meta_config">
               <span>{{ row.meta_config.context_length || '-' }}</span>
@@ -85,7 +85,7 @@
 <!--            <span>{{ row.meta_config?.tokenizer || '-' }}</span>-->
 <!--          </template>-->
 <!--        </el-table-column>-->
-        <el-table-column label="模态能力" width="200" align="center">
+        <el-table-column :label="t('model.table.modality')" width="200" align="center">
           <template #default="{ row }">
             <div class="modality-cell" v-if="row.meta_config && row.model_type !== 'embedding'">
               <div class="modality-group">
@@ -103,11 +103,11 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="支持参数" align="center" width="100">
+        <el-table-column :label="t('model.table.params')" align="center" width="100">
           <template #default="{ row }">
             <el-popover v-if="row.meta_config?.supported_parameters?.length" placement="top" :width="200" trigger="hover">
               <template #reference>
-                <el-button link type="primary">查看</el-button>
+                <el-button link type="primary">{{ t('model.table.viewParams') }}</el-button>
               </template>
               <div class="parameter-list">
                 <el-tag v-for="param in row.meta_config.supported_parameters" :key="param" size="small" type="info">{{ param }}</el-tag>
@@ -116,15 +116,15 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" align="center" fixed="right">
+        <el-table-column :label="t('provider.list.action')" width="180" align="center" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openEditModelDialog(row)">编辑</el-button>
-            <el-button link type="danger" @click="handleDeleteModel(row)">删除</el-button>
+            <el-button link type="primary" @click="openEditModelDialog(row)">{{ t('common.action.edit') }}</el-button>
+            <el-button link type="danger" @click="handleDeleteModel(row)">{{ t('common.action.delete') }}</el-button>
           </template>
         </el-table-column>
       </el-table>
     </div>
-    <el-empty v-else description="请先在上方表格中点击选择一个服务商" />
+    <el-empty v-else :description="t('provider.list.empty')" />
 
     <!-- 3. Dialogs -->
     <ProviderFormDialog
@@ -153,6 +153,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, watch, onMounted, nextTick, shallowRef, type Component } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useProviderStore } from '@/stores/providerStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useSystemConfigStore } from '@/stores/systemConfigStore';
@@ -168,6 +169,7 @@ import ProviderFormDialog from './dialogs/ProviderFormDialog.vue';
 import ModelFormDialog from './dialogs/ModelFormDialog.vue';
 import FetchModelsDialog from './dialogs/FetchModelsDialog.vue';
 
+const { t } = useI18n();
 const providerStore = useProviderStore();
 const settingsStore = useSettingsStore();
 const systemConfigStore = useSystemConfigStore();
@@ -243,12 +245,16 @@ const openEditProviderDialog = (provider: AIProviderWithModels) => {
 };
 
 const handleDeleteProvider = async (provider: AIProviderWithModels) => {
-    await ElMessageBox.confirm(`确定删除服务商 "${provider.name}" 吗？其下所有模型也将被删除。`, '警告', { type: 'warning' });
+    await ElMessageBox.confirm(
+      t('provider.list.deleteConfirm', { name: provider.name }),
+      t('common.action.delete'), // Title: Warning or Delete
+      { type: 'warning', confirmButtonText: t('common.action.confirm'), cancelButtonText: t('common.action.cancel') }
+    );
     await providerStore.removeProvider(provider.id);
     if (selectedProvider.value?.id === provider.id) {
       selectedProvider.value = null;
     }
-    ElMessage.success('删除成功！');
+    ElMessage.success(t('provider.list.deleteSuccess'));
 };
 
 // Model Handlers
@@ -263,9 +269,13 @@ const openEditModelDialog = (model: AIModel) => {
 };
 
 const handleDeleteModel = async (model: AIModel) => {
-    await ElMessageBox.confirm(`确定删除模型 "${model.name}" 吗？`, '警告', { type: 'warning' });
+    await ElMessageBox.confirm(
+      t('model.list.deleteConfirm', { name: model.name }),
+      t('common.action.delete'),
+      { type: 'warning', confirmButtonText: t('common.action.confirm'), cancelButtonText: t('common.action.cancel') }
+    );
     await providerStore.removeModel(model.id);
-    ElMessage.success('删除模型成功！');
+    ElMessage.success(t('model.list.deleteSuccess'));
 };
 
 // Dialog Event Handlers
@@ -316,7 +326,7 @@ const onConfirmAddFetchedModels = (selectedIds: string[]) => {
 
     if (modelsToAdd.length > 0) {
       Promise.all(modelsToAdd.map(m => providerStore.addModel(m)))
-        .then(() => ElMessage.success(`已批量添加 ${modelsToAdd.length} 个模型。`))
+        .then(() => ElMessage.success(t('model.list.batchAddSuccess', { count: modelsToAdd.length })))
         .catch((error) => {
             console.error('Failed to batch add models:', error);
           }

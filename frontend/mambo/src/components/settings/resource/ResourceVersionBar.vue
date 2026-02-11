@@ -2,7 +2,7 @@
 <template>
   <div class="version-top-bar">
     <div class="version-bar-header">
-      <span class="version-bar-title">版本历史</span>
+      <span class="version-bar-title">{{ t('resource.version.history') }}</span>
     </div>
     <el-scrollbar>
       <div class="version-list-horizontal">
@@ -15,7 +15,7 @@
         >
           <div class="special-card-content">
             <el-icon :size="24" class="special-icon"><Setting /></el-icon>
-            <span class="special-label">知识库配置</span>
+            <span class="special-label">{{ t('resource.version.kbConfig') }}</span>
           </div>
         </div>
 
@@ -45,19 +45,20 @@
                 size="small"
                 @click.stop="$emit('set-active', version.id)"
               >
-                设为当前
+                {{ t('resource.version.setActive') }}
               </el-button>
-              <el-tag v-else type="success" size="small" effect="plain">当前版本</el-tag>
+              <el-tag v-else type="success" size="small" effect="plain">{{ t('resource.version.current') }}</el-tag>
             </div>
           </div>
         </template>
-        <div v-else-if="!kbId" class="no-versions">暂无历史版本</div>
+        <div v-else-if="!kbId" class="no-versions">{{ t('resource.version.empty') }}</div>
       </div>
     </el-scrollbar>
   </div>
 </template>
 
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { Setting } from '@element-plus/icons-vue'
 import type { ResourceVersion } from '@/api/types'
 
@@ -74,6 +75,8 @@ defineEmits<{
   (e: 'set-active', versionId: string): void
   (e: 'toggle-kb-view'): void
 }>()
+
+const { t } = useI18n()
 </script>
 
 <style scoped>

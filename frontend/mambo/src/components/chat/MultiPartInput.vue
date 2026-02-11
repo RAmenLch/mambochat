@@ -15,7 +15,13 @@
         </div>
       </el-scrollbar>
       <div class="add-partition">
-        <el-button :icon="Plus" circle size="small" @click="addPartition" title="添加分区" />
+        <el-button
+          :icon="Plus"
+          circle
+          size="small"
+          @click="addPartition"
+          :title="t('chat.input.addPartition')"
+        />
       </div>
     </div>
     <div class="partition-editor">
@@ -34,10 +40,13 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Plus, Close } from '@element-plus/icons-vue'
 import type { SubMessageCreate } from '@/api/types'
 import type { editor } from 'monaco-editor'
 import ChatUniversalEditor from '@/components/common/ChatUniversalEditor.vue'
+
+const { t } = useI18n()
 
 // 分区对象的本地UI表示
 interface Partition {

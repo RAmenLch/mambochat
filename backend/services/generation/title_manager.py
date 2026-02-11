@@ -1,10 +1,12 @@
+# backend/services/generation/title_manager.py
 import json
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, Optional, Tuple
 
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend import schemas
+from backend.crud import setting_crud
 from backend.schemas import SubMessageType
 from backend.services.generation.instructions import (
     BaseInstruction,
@@ -17,10 +19,48 @@ from backend.services.generation.worker.abstract_worker import AbstractGenerateW
 from backend.services.generation.llm_input_builder import LLMInputBuilder
 
 
-
 class TitleGenerationContext(BaseModel):
     """标题生成任务的上下文信息"""
     chat_id: str
+
+
+class TitlePromptProvider:
+    """
+    标题生成提示词提供者。
+    根据全局配置的语言设置，返回对应的 System Prompt 和 Trigger Prompt。
+    """
+    _PROMPTS = {
+        "en": {
+            "system": (
+                "You are a conversation title generator. "
+                "Based on the following conversation content, generate a concise and precise title "
+                "(no more than 12 words). "
+                "Return only in JSON format: ```{\"title\": \"Generated Title\"}```"
+            ),
+            "trigger": "Please output the title JSON based on the conversation content above."
+        },
+        "zh-CN": {
+            "system": (
+                "你是一个对话标题生成器。请根据以下对话内容, "
+                "为其生成一个简洁、精确、不超过12个字[len(title)<12]的标题。"
+                "请仅以JSON格式返回, 格式为: ```{\"title\": \"生成的标题\"}```"
+            ),
+            "trigger": "请根据上述对话内容，输出标题json。"
+        }
+    }
+
+    @classmethod
+    async def get_prompts(cls, db: AsyncSession) -> Tuple[str, str]:
+        """
+        获取当前语言配置下的提示词。
+        :return: (system_prompt, trigger_prompt)
+        """
+        lang_setting = await setting_crud.get_setting(db, "language")
+        language = lang_setting.value if lang_setting else "zh-CN"
+
+        # 默认回退到中文
+        prompts = cls._PROMPTS.get(language, cls._PROMPTS["zh-CN"])
+        return prompts["system"], prompts["trigger"]
 
 
 class TitleGenerateManager(AbstractGenerateManager):
@@ -43,23 +83,13 @@ class TitleGenerateManager(AbstractGenerateManager):
 
         self.chat_id = chat_id
 
-        # 1. 准备提示词
-        system_prompt = (
-            "你是一个对话标题生成器。请根据以下对话内容, "
-            "为其生成一个简洁、精确、不超过12个字[len(title)<12]的标题。"
-            "请仅以JSON格式返回, 格式为: ```{\"title\": \"生成的标题\"}```"
-        )
-        trigger_prompt = "请根据上述对话内容，输出标题json。"
+        # 1. 获取动态提示词
+        system_prompt, trigger_prompt = await TitlePromptProvider.get_prompts(self.db_session)
 
         # 2. 初始化构建器
         builder = LLMInputBuilder(self.db_session, chat_id=chat_id)
 
-        # 3. 配置构建器 (保持与 V1 逻辑一致)
-        # - 优先使用全局配置的标题生成模型
-        # - 仅截取头尾各2条消息
-        # - 限制内容长度
-        # - 禁用 ZipHistory
-        # - 聚合历史为单条 User 消息
+        # 3. 配置构建器
         llm_input = await (
             builder
             .use_global_model(["title_generation_model_id", "default_model_id"])
@@ -75,7 +105,7 @@ class TitleGenerateManager(AbstractGenerateManager):
 
         # 强制 JSON 模式
         llm_input.set_parameter('response_format', {'type': 'json_object'})
-        llm_input.set_parameter("stream",False)
+        llm_input.set_parameter("stream", False)
 
         # 4. 执行生成并累积结果
         accumulated_content = ""
@@ -91,7 +121,7 @@ class TitleGenerateManager(AbstractGenerateManager):
                 data = json.loads(accumulated_content)
                 title = data.get("title")
 
-                if isinstance(title, str) and 0 < len(title) <= 24:
+                if isinstance(title, str) and 0 < len(title) <= 50:
                     yield UpdateChatName(chat_id=self.chat_id, new_name=title.strip())
                     yield SetFinalStatus(status=schemas.enums.MessageStatus.COMPLETED)
                 else:

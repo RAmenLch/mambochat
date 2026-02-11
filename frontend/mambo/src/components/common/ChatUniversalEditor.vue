@@ -21,7 +21,7 @@
         :autosize="{ minRows, maxRows }"
         resize="none"
         class="simple-textarea"
-        placeholder="请输入内容..."
+        :placeholder="t('common.placeholder.input')"
         @input="handleUpdateValue"
         @keydown="handleTextareaKeydown"
         @paste="handleTextareaPaste"
@@ -32,6 +32,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/settingsStore'
 import MonacoEditor from '@/components/common/MonacoEditor.vue'
 import loader from '@monaco-editor/loader'
@@ -62,6 +63,7 @@ const emit = defineEmits<{
   (e: 'editor-mounted', instance: editor.IStandaloneCodeEditor): void
 }>()
 
+const { t } = useI18n()
 const settingsStore = useSettingsStore()
 const textareaRef = ref()
 let monacoInstance: editor.IStandaloneCodeEditor | null = null
@@ -116,7 +118,7 @@ const setupMonacoShortcuts = async (instance: editor.IStandaloneCodeEditor) => {
   // 仅当 'isSendOnEnter' 为 true 且没有建议框/重命名框时触发
   instance.addAction({
     id: 'chat-send-message-enter',
-    label: 'Send Message',
+    label: t('chat.input.send'),
     keybindings: [monaco.KeyCode.Enter],
     precondition: 'isSendOnEnter && !suggestWidgetVisible && !renameInputVisible',
     run: () => {
@@ -125,10 +127,9 @@ const setupMonacoShortcuts = async (instance: editor.IStandaloneCodeEditor) => {
   })
 
   // 3. 绑定 Ctrl+Enter (始终触发)
-  // 即使配置为 Enter 发送，Ctrl+Enter 通常也作为辅助发送快捷键
   instance.addAction({
     id: 'chat-send-message-ctrl-enter',
-    label: 'Send Message',
+    label: t('chat.input.send'),
     keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
     run: () => {
       handleSubmit()
@@ -146,7 +147,7 @@ watch(shortcutMode, (newMode) => {
 // --- Textarea Logic ---
 
 const handleTextareaKeydown = (evt: Event) => {
-  const e = evt as KeyboardEvent // 类型断言，确保可以使用 .key, .ctrlKey 等属性
+  const e = evt as KeyboardEvent
 
   if (!props.enableShortcuts) return
   if (e.isComposing) return

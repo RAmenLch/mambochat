@@ -1,12 +1,16 @@
 # ![mambo](doc/img/logo_hajimi.svg) MamboChat (曼波茶)
 
-![Version](https://img.shields.io/badge/version-1.1.0-blue)
+![Version](https://img.shields.io/badge/version-1.1.1-blue)
 ![License](https://img.shields.io/badge/license-GPLv3-green)
 ![Vue](https://img.shields.io/badge/frontend-Vue3%20%2B%20ElementPlus-42b883)
 ![FastAPI](https://img.shields.io/badge/backend-FastAPI%20%2B%20Python3.11-009688)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue?logo=docker)](docker-compose.yml)
 
 **MamboChat** 是一款简约而强大的 AI Web 平台，融合了多服务商模型聚合、本地知识库 (RAG) 与 MCP (Model Context Protocol) 协议扩展。旨在为用户提供高度可定制、隐私安全且功能丰富的 AI 对话体验。
+
+**MamboChat** is a minimalist yet powerful AI Web platform featuring multi-provider model aggregation, local knowledge base integration (RAG), and MCP (Model Context Protocol) extensions. It is designed to deliver a highly customizable, privacy-focused, and feature-rich conversational AI experience.
+
+[中文文档](./README.md) | [English Documentation](./doc/README_EN.md)
 
 ## ✨ 核心功能
 本应用的优点: 首先是个可部署的Web平台,也就是可以在线使用! 其次支持多种大模型平台接口,并且有很多好用的工具!总之本人用起来很不错!  
@@ -17,13 +21,13 @@
     *   支持对话模型与 Embedding 向量模型的统一管理。
 *   **📚 本地知识库 (RAG)**
     *   支持上传 Markdown, TXT 等多种格式文档。
-    *   内置文件切分、向量化（Embedding）与语义检索功能。
+    *   内置文件切分、向量化与语义检索功能。
     *   支持在对话中动态挂载知识库。
 *   **🔌 MCP (Model Context Protocol) 支持**
     *   实现了 MCP 协议，支持扩展 AI 的能力。
-    *   支持添加自定义 MCP 服务器（Stdio/SSE 连接方式）。
+    *   支持添加自定义 MCP 服务器。
 *   **💬 强大的对话体验**
-    *   支持流式响应 (Stream) 与 Markdown/代码高亮渲染。
+    *   支持流式响应 与 Markdown/代码高亮渲染。
     *   **多模态支持**：支持图片、文件上传与解析。支持生图模型输出图片。
     *   **会话管理**：支持文件夹分类、拖拽排序、会话搜索。
     *   **编辑器模式**：支持 Monaco Editor 代码编辑器模式。
@@ -80,7 +84,7 @@
 
 如果你需要进行二次开发，可以分别启动前后端服务。
 
-### 后端 (Backend)
+### 后端
 
 1.  进入后端目录：
     ```bash
@@ -99,7 +103,7 @@
     uvicorn backend.main:app --reload --port 8000
     ```
 
-### 前端 (Frontend)
+### 前端
 
 1.  进入前端目录：
     ```bash

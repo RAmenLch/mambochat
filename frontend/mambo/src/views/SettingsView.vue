@@ -4,9 +4,9 @@
       <div class="brand-container">
         <img src="/logo.svg" alt="MamboChat" class="logo" />
         <div class="title-wrapper">
-          <h1 class="app-name">MamboChat</h1>
+          <h1 class="app-name">{{ t('settings.about.title') }}</h1>
           <span class="divider">|</span>
-          <span class="sub-name">曼波茶</span>
+          <span class="sub-name">{{ t('settings.about.subtitle') }}</span>
         </div>
       </div>
 
@@ -16,11 +16,11 @@
           <template #icon>
             <el-icon :size="18"><InfoFilled /></el-icon>
           </template>
-          关于
+          {{ t('settings.nav.about') }}
         </el-button>
         <el-divider direction="vertical" />
         <router-link to="/chat">
-          <el-button type="primary" plain>返回聊天</el-button>
+          <el-button type="primary" plain>{{ t('settings.nav.returnToChat') }}</el-button>
         </router-link>
       </div>
     </el-header>
@@ -28,16 +28,16 @@
     <el-main class="settings-main">
       <div class="settings-content" :class="{ 'is-full-width': activeTab === 'resourceManager' }">
         <el-tabs v-model="activeTab">
-          <el-tab-pane label="服务商与模型管理" name="providerModel">
+          <el-tab-pane :label="t('settings.tabs.providerModel')" name="providerModel">
             <ProviderModelManager />
           </el-tab-pane>
-          <el-tab-pane label="全局配置" name="globalSettings">
+          <el-tab-pane :label="t('settings.tabs.globalSettings')" name="globalSettings">
             <GlobalSettings />
           </el-tab-pane>
-          <el-tab-pane label="MCP 工具" name="mcpManager">
+          <el-tab-pane :label="t('settings.tabs.mcpManager')" name="mcpManager">
             <McpManager />
           </el-tab-pane>
-          <el-tab-pane label="资源中心" name="resourceManager">
+          <el-tab-pane :label="t('settings.tabs.resourceManager')" name="resourceManager">
             <ResourceManager />
           </el-tab-pane>
         </el-tabs>
@@ -54,28 +54,29 @@
     >
       <div class="about-content">
         <img src="/logo.svg" alt="Logo" class="about-logo" />
-        <h2 class="about-title">MamboChat <span class="about-subtitle">| 曼波茶</span></h2>
+        <h2 class="about-title">
+          {{ t('settings.about.title') }} <span class="about-subtitle">| {{ t('settings.about.subtitle') }}</span>
+        </h2>
         <el-tag type="info" size="small" effect="plain" class="version-tag">v1.1.0</el-tag>
 
         <p class="about-desc">
-          一款简约强大的 AI Web 平台，融合了多服务商模型聚合、本地知识库 RAG 与 MCP
-          协议扩展。
+          {{ t('settings.about.desc') }}
         </p>
 
         <div class="about-links">
           <a href="https://github.com/RAmenLch/mambochat" target="_blank" class="link-item">
             <img src="https://github.com/fluidicon.png" class="link-icon" alt="GitHub" />
-            GitHub 仓库
+            {{ t('settings.about.github') }}
           </a>
           <div class="link-divider"></div>
           <a href="mailto:ramenlch@qq.com" class="link-item">
             <el-icon class="link-icon-el"><Message /></el-icon>
-            联系作者
+            {{ t('settings.about.contact') }}
           </a>
         </div>
 
         <div class="copyright">
-          &copy; {{ new Date().getFullYear() }} MamboChat. All rights reserved.
+          {{ t('settings.about.copyright', { year: new Date().getFullYear() }) }}
         </div>
       </div>
     </el-dialog>
@@ -85,6 +86,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { InfoFilled, Message } from '@element-plus/icons-vue' // 引入图标
 import ProviderModelManager from '@/components/settings/ProviderModelManager.vue'
 import GlobalSettings from '@/components/settings/GlobalSettings.vue'
@@ -93,6 +95,7 @@ import McpManager from '@/components/settings/McpManager.vue'
 
 const route = useRoute()
 const router = useRouter()
+const { t } = useI18n()
 
 const activeTab = ref(route.query.tab?.toString() || 'providerModel')
 const aboutDialogVisible = ref(false) // 控制关于弹窗显示

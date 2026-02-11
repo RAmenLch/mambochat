@@ -2,8 +2,8 @@
 <template>
   <div class="kb-config-container">
     <div class="kb-config-header">
-      <div class="header-title">知识库配置</div>
-      <div class="header-subtitle">配置嵌入模型并管理知识库文档</div>
+      <div class="header-title">{{ $t('kb.config.title') }}</div>
+      <div class="header-subtitle">{{ $t('kb.config.subtitle') }}</div>
     </div>
 
     <el-scrollbar class="kb-config-content">
@@ -11,15 +11,15 @@
         <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="kb-form">
           <el-row :gutter="20">
             <el-col :span="12">
-              <el-form-item label="知识库名称" prop="name">
-                <el-input v-model="form.name" placeholder="请输入知识库名称" />
+              <el-form-item :label="$t('kb.config.labels.name')" prop="name">
+                <el-input v-model="form.name" :placeholder="$t('kb.form.namePlaceholder')" />
               </el-form-item>
             </el-col>
             <el-col :span="12">
-              <el-form-item label="嵌入模型" prop="embeddingModelId">
+              <el-form-item :label="$t('kb.config.labels.embeddingModel')" prop="embeddingModelId">
                 <el-select
                   v-model="form.embeddingModelId"
-                  placeholder="请选择嵌入模型"
+                  :placeholder="$t('kb.form.modelPlaceholder')"
                   :disabled="isSaving"
                   clearable
                   style="width: 100%"
@@ -46,9 +46,9 @@
             <el-col :span="12">
               <el-form-item prop="embeddingRateLimit">
                 <template #label>
-                  <span>嵌入频率限制 (秒)</span>
+                  <span>{{ $t('kb.config.labels.rateLimit') }}</span>
                   <el-tooltip
-                    content="每次 Embedding 请求后的冷却时间，用于防止触发 API 速率限制"
+                    :content="$t('kb.form.rateLimitTooltip')"
                     placement="top"
                   >
                     <el-icon class="label-icon"><QuestionFilled /></el-icon>
@@ -60,18 +60,18 @@
                   :step="0.1"
                   :precision="2"
                   style="width: 100%"
-                  placeholder="0.0"
+                  :placeholder="$t('kb.form.rateLimitPlaceholder')"
                 />
               </el-form-item>
             </el-col>
           </el-row>
 
-          <el-form-item label="描述" prop="description">
+          <el-form-item :label="$t('kb.config.labels.description')" prop="description">
             <el-input
               v-model="form.description"
               type="textarea"
               :rows="3"
-              placeholder="请输入知识库描述"
+              :placeholder="$t('resource.meta.descPlaceholder')"
               resize="none"
             />
           </el-form-item>
@@ -83,7 +83,7 @@
               :loading="isSaving"
               :disabled="!isFormDirty"
             >
-              保存配置
+              {{ $t('common.action.save') }}
             </el-button>
           </div>
         </el-form>
@@ -93,10 +93,10 @@
 
       <div class="files-section">
         <div class="files-header">
-          <span class="section-title">文档列表</span>
+          <span class="section-title">{{ $t('kb.config.file.listTitle') }}</span>
           <div class="files-actions">
             <el-button type="primary" :icon="Upload" @click="triggerUpload" :disabled="!canUpload">
-              上传文档
+              {{ $t('kb.config.file.upload') }}
             </el-button>
             <input
               ref="fileInputRef"
@@ -134,16 +134,16 @@
                   }}</span>
                   <el-button type="primary" link size="small" @click="handleManageFile(data)">
                     <el-icon class="el-icon--left"><Setting /></el-icon>
-                    配置任务
+                    {{ $t('kb.config.file.configTask') }}
                   </el-button>
                   <el-button type="danger" link size="small" @click="handleDeleteFile(data)">
-                    删除
+                    {{ $t('common.action.delete') }}
                   </el-button>
                 </div>
               </div>
             </template>
           </el-tree>
-          <el-empty v-else description="暂无文档，请上传" :image-size="80" />
+          <el-empty v-else :description="$t('kb.config.file.empty')" :image-size="80" />
         </div>
       </div>
     </el-scrollbar>
@@ -155,6 +155,7 @@ import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Upload, Document, QuestionFilled, Setting, Folder } from '@element-plus/icons-vue'
+import { useI18n } from 'vue-i18n'
 
 import { useResourceStore } from '@/stores/resourceStore'
 import { useProviderStore } from '@/stores/providerStore'
@@ -169,11 +170,12 @@ const emit = defineEmits<{
   (e: 'select-file', resource: Resource): void
 }>()
 
-// --- Stores ---
+// --- Stores & I18n ---
 const resourceStore = useResourceStore()
 const providerStore = useProviderStore()
 const { providers } = storeToRefs(providerStore)
 const { resourceTree } = storeToRefs(resourceStore)
+const { t } = useI18n()
 
 // --- State ---
 const formRef = ref<FormInstance>()
@@ -196,10 +198,10 @@ const form = reactive<KBFormState>({
   embeddingRateLimit: 0,
 })
 
-const rules = reactive<FormRules>({
-  name: [{ required: true, message: '请输入知识库名称', trigger: 'blur' }],
-  embeddingModelId: [{ required: true, message: '请选择嵌入模型', trigger: 'change' }],
-})
+const rules = computed<FormRules>(() => ({
+  name: [{ required: true, message: t('kb.form.rule.nameRequired'), trigger: 'blur' }],
+  embeddingModelId: [{ required: true, message: t('kb.form.rule.modelRequired'), trigger: 'change' }],
+}))
 
 // --- Computed ---
 
@@ -312,10 +314,10 @@ const handleSave = async () => {
           }
         }
 
-        ElMessage.success('配置已保存')
+        ElMessage.success(t('kb.msg.configSaved'))
       } catch (error) {
         console.error(error)
-        ElMessage.error('保存失败')
+        ElMessage.error(t('kb.msg.saveFailed'))
       } finally {
         isSaving.value = false
       }
@@ -325,7 +327,7 @@ const handleSave = async () => {
 
 const triggerUpload = () => {
   if (!canUpload.value) {
-    ElMessage.warning('请先配置并保存嵌入模型')
+    ElMessage.warning(t('kb.msg.configureModelFirst'))
     return
   }
   fileInputRef.value?.click()
@@ -338,7 +340,7 @@ const handleFileChange = async (event: Event) => {
   const file = input.files[0]
   isUploading.value = true
   const loadingInstance = ElMessage.info({
-    message: '正在上传文件...',
+    message: t('kb.msg.uploading'),
     duration: 0,
   })
 
@@ -346,12 +348,12 @@ const handleFileChange = async (event: Event) => {
     // 调用 Store 方法上传文件，Store 负责更新本地状态
     await resourceStore.uploadKBFile(props.resource.id, file)
 
-    ElMessage.success('上传成功，请点击"配置任务"以启动切分与嵌入')
+    ElMessage.success(t('kb.msg.uploadSuccess'))
     // 刷新文件列表以确保视图更新
     await loadFiles()
   } catch (error) {
     console.error('Upload failed', error)
-    ElMessage.error('上传失败')
+    ElMessage.error(t('kb.msg.uploadFailed'))
   } finally {
     loadingInstance.close()
     isUploading.value = false
@@ -366,16 +368,16 @@ const handleManageFile = (file: Resource) => {
 const handleDeleteFile = async (file: Resource) => {
   try {
     await ElMessageBox.confirm(
-      `确定要删除文档 "${file.name}" 吗？相关的向量数据也将被删除。`,
-      '警告',
+      t('kb.msg.deleteConfirm', { name: file.name }),
+      t('common.action.delete'),
       {
-        confirmButtonText: '确定删除',
-        cancelButtonText: '取消',
+        confirmButtonText: t('common.action.confirm'),
+        cancelButtonText: t('common.action.cancel'),
         type: 'warning',
       },
     )
     await resourceStore.deleteResourceItem(file.id)
-    ElMessage.success('删除成功')
+    ElMessage.success(t('kb.msg.deleteSuccess'))
   } catch {
     // Cancelled
   }

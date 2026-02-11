@@ -3,8 +3,8 @@
     <div class="code-block-header">
       <span class="language-name">{{ language || 'text' }}</span>
       <div class="actions">
-        <span class="line-count">{{ totalLines }} lines</span>
-        <el-tooltip content="编辑" placement="top" :show-after="500">
+        <span class="line-count">{{ t('chat.codeBlock.lines', { count: totalLines }) }}</span>
+        <el-tooltip :content="t('common.action.edit')" placement="top" :show-after="500">
           <el-button
             :icon="Edit"
             circle
@@ -14,7 +14,7 @@
             @click="emitEdit"
           />
         </el-tooltip>
-        <el-tooltip content="复制" placement="top" :show-after="500">
+        <el-tooltip :content="t('common.action.copy')" placement="top" :show-after="500">
           <el-button
             :icon="CopyDocument"
             circle
@@ -25,7 +25,7 @@
           />
         </el-tooltip>
         <el-tooltip
-          :content="isCollapsed ? '展开' : '折叠'"
+          :content="isCollapsed ? t('common.action.expand') : t('common.action.collapse')"
           placement="top"
           :show-after="500"
         >
@@ -52,6 +52,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import {
   Edit,
   CopyDocument,
@@ -71,6 +72,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits(['edit', 'copy']);
+const { t } = useI18n();
 
 // --- 状态计算 ---
 const totalLines = computed(() => props.code.split('\n').length);

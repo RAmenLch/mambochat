@@ -9,15 +9,15 @@
       @mousedown.stop
     >
       <div class="menu-item" @click="handleCut">
-        <span class="label">剪切</span>
+        <span class="label">{{ t('common.action.cut') }}</span>
         <span class="shortcut">Ctrl+X</span>
       </div>
       <div class="menu-item" @click="handleCopy">
-        <span class="label">复制</span>
+        <span class="label">{{ t('common.action.copy') }}</span>
         <span class="shortcut">Ctrl+C</span>
       </div>
       <div class="menu-item" @click="handlePaste">
-        <span class="label">粘贴</span>
+        <span class="label">{{ t('common.action.paste') }}</span>
         <span class="shortcut">Ctrl+V</span>
       </div>
     </div>
@@ -26,6 +26,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import loader from '@monaco-editor/loader'
 import type { editor, IRange } from 'monaco-editor'
 import { ElMessage } from 'element-plus'
@@ -51,6 +52,7 @@ const emit = defineEmits<{
   (e: 'paste-file', files: FileList): void
 }>()
 
+const { t } = useI18n()
 const editorContainer = ref<HTMLElement | null>(null)
 let editorInstance: editor.IStandaloneCodeEditor | null = null
 let resizeObserver: ResizeObserver | null = null
@@ -114,17 +116,13 @@ const handleCut = async () => {
  * 包含降级处理：read() 失败 -> readText() -> 提示用户使用 Ctrl+V
  */
 const handlePaste = async () => {
-  // 1. 立即关闭菜单
   menuVisible.value = false
 
   if (!editorInstance) return
 
-  // 2. 尝试强制聚焦编辑器
   editorInstance.focus()
 
   try {
-    // --- 尝试读取富内容 (文件/图片) ---
-    // 仅在允许粘贴文件且 API 可用时执行
     if (props.allowFilePaste && navigator.clipboard && navigator.clipboard.read) {
       const items = await navigator.clipboard.read()
 
@@ -140,21 +138,17 @@ const handlePaste = async () => {
           dt.items.add(file)
 
           emit('paste-file', dt.files)
-          return // 成功读取文件，结束
+          return
         }
       }
     }
 
-    // 如果未启用文件粘贴，或 read() 成功但没有图片，继续向下执行读取文本逻辑...
     throw new Error('No image found or file paste disabled, falling back to text')
   } catch (err) {
-    // --- 降级处理 ---
     try {
-      // 3. 尝试读取纯文本 (readText 对焦点要求较低)
       const text = await navigator.clipboard.readText()
 
       if (text) {
-        // 成功读取到文本，执行插入
         const selection = editorInstance.getSelection()
         if (selection) {
           editorInstance.executeEdits('context-menu', [
@@ -166,17 +160,15 @@ const handlePaste = async () => {
           ])
         }
       } else if (props.allowFilePaste) {
-        // 4. 既没有读取到文件(read失败)，readText也是空的
-        // 仅在允许文件粘贴时提示，因为如果禁用了文件粘贴，这通常意味着剪贴板确实是空的或只有文件
         ElMessage.warning({
-          message: '无法通过菜单访问剪贴板文件，请使用 Ctrl+V 或上传按钮。',
+          message: t('editor.monaco.pasteFileError'),
           duration: 4000,
           showClose: true,
         })
       }
     } catch (textErr) {
       console.error('Clipboard access completely failed:', textErr)
-      ElMessage.error('无法访问剪贴板，请检查浏览器权限。')
+      ElMessage.error(t('editor.monaco.clipboardError'))
     }
   }
 }
@@ -243,10 +235,6 @@ onMounted(async () => {
       }
     })
 
-    // 注意：此处移除了硬编码的 Ctrl+Enter 快捷键绑定，
-    // 以避免影响不需要发送功能的编辑器实例（如资源编辑器）。
-    // 发送快捷键的绑定逻辑应由父组件（如 ChatUniversalEditor）根据配置动态处理。
-
     instance.onDidScrollChange(() => {
       menuVisible.value = false
     })
@@ -287,7 +275,9 @@ watch(
       const model = editorInstance.getModel()
       if (model) {
         const monaco = loader.__getMonacoInstance()
-        monaco?.editor.setModelLanguage(model, newLang)
+        if (monaco && newLang) {
+          monaco.editor.setModelLanguage(model, newLang)
+        }
       }
     }
   },

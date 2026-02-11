@@ -10,7 +10,7 @@
         accept="image/png, image/jpeg, image/gif, image/webp"
         class="avatar-uploader-trigger"
       >
-        <el-tooltip content="点击上传新头像" placement="top" :show-after="500">
+        <el-tooltip :content="t('settings.avatar.uploadTip')" placement="top" :show-after="500">
           <el-avatar :size="80" :src="avatarUrl || ''" v-loading="isLoading">
             <component :is="icon" v-if="icon" />
           </el-avatar>
@@ -26,54 +26,59 @@
         @click="handleDelete"
         :loading="isLoading"
       >
-        删除
+        {{ t('common.action.delete') }}
       </el-button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { type Component } from 'vue';
-import { ElMessage } from 'element-plus';
-import { Delete } from '@element-plus/icons-vue';
-import type { UploadRequestOptions, UploadRawFile } from 'element-plus';
+import { type Component } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { ElMessage } from 'element-plus'
+import { Delete } from '@element-plus/icons-vue'
+import type { UploadRequestOptions, UploadRawFile } from 'element-plus'
 
 defineProps<{
-  title: string;
-  avatarUrl: string | null;
-  icon: Component;
-  isLoading: boolean;
-}>();
+  title: string
+  avatarUrl: string | null
+  icon: Component
+  isLoading: boolean
+}>()
 
 const emit = defineEmits<{
-  (e: 'upload', file: File): void;
-  (e: 'delete'): void;
-}>();
+  (e: 'upload', file: File): void
+  (e: 'delete'): void
+}>()
 
-const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
-const MAX_FILE_SIZE_MB = 5;
+const { t } = useI18n()
+
+const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+const MAX_FILE_SIZE_MB = 5
 
 const handleBeforeUpload = (rawFile: UploadRawFile): boolean => {
   if (!ALLOWED_MIME_TYPES.includes(rawFile.type)) {
-    ElMessage.error(`文件类型无效。只允许上传 ${ALLOWED_MIME_TYPES.join(', ')} 格式的图片。`);
-    return false;
+    ElMessage.error(
+      t('settings.avatar.invalidType', { types: ALLOWED_MIME_TYPES.join(', ') })
+    )
+    return false
   }
   if (rawFile.size / 1024 / 1024 > MAX_FILE_SIZE_MB) {
-    ElMessage.error(`文件过大。图片大小不能超过 ${MAX_FILE_SIZE_MB}MB。`);
-    return false;
+    ElMessage.error(t('settings.avatar.tooLarge', { size: MAX_FILE_SIZE_MB }))
+    return false
   }
-  return true;
-};
+  return true
+}
 
 const handleHttpRequest = (options: UploadRequestOptions) => {
   // 自定义上传行为, 仅将文件 emit 出去, 由父组件处理实际的上传逻辑
-  emit('upload', options.file);
-  return Promise.resolve(true);
-};
+  emit('upload', options.file)
+  return Promise.resolve(true)
+}
 
 const handleDelete = () => {
-  emit('delete');
-};
+  emit('delete')
+}
 </script>
 
 <style scoped>

@@ -2,7 +2,7 @@
 <template>
   <el-drawer
     :model-value="visible"
-    title="会话设置"
+    :title="$t('chat.settings.title')"
     direction="rtl"
     size="450px"
     @update:model-value="handleUpdateModelValue"
@@ -10,11 +10,11 @@
   >
     <div class="drawer-content">
       <el-form v-if="chatData" :model="chatSettingsForm" label-position="top">
-        <el-form-item label="会话名称">
-          <el-input v-model.trim="chatSettingsForm.name" placeholder="请输入会话名称" />
+        <el-form-item :label="$t('chat.settings.name')">
+          <el-input v-model.trim="chatSettingsForm.name" :placeholder="$t('chat.settings.namePlaceholder')" />
         </el-form-item>
-        <el-form-item label="AI 模型">
-          <el-select v-model="chatSettingsForm.aiModelId" placeholder="请选择一个AI模型" style="width: 100%">
+        <el-form-item :label="$t('chat.settings.model')">
+          <el-select v-model="chatSettingsForm.aiModelId" :placeholder="$t('chat.settings.modelPlaceholder')" style="width: 100%">
             <el-option-group v-for="group in filteredGroupedModels" :key="group.label" :label="group.label">
               <el-option v-for="item in group.options" :key="item.id" :label="item.name" :value="item.id" />
             </el-option-group>
@@ -23,11 +23,18 @@
         <el-form-item>
           <template #label>
             <div class="form-item-label-with-action">
-              <span>System Prompt (系统提示词)</span>
-              <el-button type="primary" link @click="promptDialogVisible = true">从资源库选择</el-button>
+              <span>{{ $t('chat.settings.systemPrompt') }}</span>
+              <el-button type="primary" link @click="promptDialogVisible = true">
+                {{ $t('chat.settings.selectFromResource') }}
+              </el-button>
             </div>
           </template>
-          <el-input v-model="chatSettingsForm.systemPrompt" type="textarea" :rows="8" placeholder="定义AI的角色和行为" />
+          <el-input
+            v-model="chatSettingsForm.systemPrompt"
+            type="textarea"
+            :rows="8"
+            :placeholder="$t('chat.settings.systemPromptPlaceholder')"
+          />
 
           <!-- 挂载资源预览区 (支持拖拽排序) -->
           <div v-if="mountedSystemResources.length > 0" class="mounted-resources-wrapper">
@@ -51,28 +58,28 @@
                 @dragend="handleDragEnd"
                 @close="handleRemoveMountedResource(resource.id)"
               >
-                <el-tooltip :content="resource.latest_version?.content || '无内容'" placement="top">
+                <el-tooltip :content="resource.latest_version?.content || ''" placement="top">
                   <span>{{ resource.name }}</span>
                 </el-tooltip>
               </el-tag>
             </transition-group>
           </div>
         </el-form-item>
-        <el-divider>模型参数</el-divider>
+        <el-divider>{{ $t('chat.settings.modelParams') }}</el-divider>
 
         <!-- 固定参数 -->
         <el-form-item>
           <template #label>
-            <span>上下文消息数量</span>
-            <el-tooltip effect="dark" content="每次请求时携带的最近历史消息数量。0 代表不限制（发送全部历史）。" placement="top">
+            <span>{{ $t('chat.settings.contextCount') }}</span>
+            <el-tooltip effect="dark" :content="$t('chat.settings.contextCountTip')" placement="top">
               <el-icon class="label-icon"><QuestionFilled /></el-icon>
             </el-tooltip>
           </template>
           <el-input-number v-model="chatSettingsForm.modelParameters.max_context_messages" :min="0" :step="2" controls-position="right" style="width: 100%;" />
         </el-form-item>
-        <el-form-item label="流式对话">
+        <el-form-item :label="$t('chat.settings.stream')">
            <el-switch v-model="chatSettingsForm.modelParameters.stream" />
-           <el-tooltip class="box-item" effect="dark" content="关闭后, AI将一次性返回完整回复, 可能会增加等待时间。" placement="top">
+           <el-tooltip class="box-item" effect="dark" :content="$t('chat.settings.streamTip')" placement="top">
               <el-icon class="label-icon"><QuestionFilled /></el-icon>
            </el-tooltip>
         </el-form-item>
@@ -137,8 +144,8 @@
     </div>
     <template #footer>
       <div style="flex: auto">
-        <el-button @click="emit('update:visible', false)">取消</el-button>
-        <el-button type="primary" @click="handleSaveSettings">保存</el-button>
+        <el-button @click="emit('update:visible', false)">{{ $t('common.action.cancel') }}</el-button>
+        <el-button type="primary" @click="handleSaveSettings">{{ $t('common.action.save') }}</el-button>
       </div>
     </template>
   </el-drawer>
@@ -153,6 +160,7 @@
 
 <script setup lang="ts">
 import { reactive, watch, ref, computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { ElMessage } from 'element-plus';
 import { QuestionFilled } from '@element-plus/icons-vue';
 import { useSystemConfigStore } from '@/stores/systemConfigStore';
@@ -170,7 +178,7 @@ interface ChatSettingsForm {
   name: string | null;
   aiModelId: string | null;
   systemPrompt: string | null;
-  modelParameters: Record<string, any>;
+  modelParameters: Record<string, string | number | boolean | null | undefined | any>;
 }
 
 interface DynamicParameterUI {
@@ -178,7 +186,7 @@ interface DynamicParameterUI {
   label: string;
   description: string;
   type: 'integer' | 'number' | 'string' | 'boolean';
-  limit?: Array<any> | { min?: number; max?: number; };
+  limit?: Array<string | number> | { min?: number; max?: number; };
   isEnabled: boolean;
   definition: LLMParameterDefinition;
 }
@@ -195,6 +203,7 @@ const emit = defineEmits<{
   (e: 'save', settings: ChatUpdate): void;
 }>();
 
+const { t } = useI18n();
 const systemConfigStore = useSystemConfigStore();
 const providerStore = useProviderStore();
 
@@ -242,12 +251,10 @@ const dynamicParameters = computed((): DynamicParameterUI[] => {
   const currentModel = providerStore.allModels.find(m => m.id === chatSettingsForm.aiModelId);
   const supportedParameters = new Set(currentModel?.meta_config?.supported_parameters ?? []);
 
-  // 核心参数：无论模型是否显式声明支持，都应显示在列表中，允许用户按需启用
   const coreParameters = ['temperature', 'top_p'];
 
   return systemConfigStore.llmParameters
     .filter(paramDef =>
-      // 显示条件：核心参数 或 模型明确支持 或 参数是默认激活的
       coreParameters.includes(paramDef.key) ||
       supportedParameters.has(paramDef.key) ||
       paramDef.default_activate
@@ -256,7 +263,7 @@ const dynamicParameters = computed((): DynamicParameterUI[] => {
       key: paramDef.key,
       label: paramDef.label,
       description: paramDef.description,
-      type: paramDef.type,
+      type: paramDef.type as 'integer' | 'number' | 'string' | 'boolean',
       limit: paramDef.limit,
       isEnabled: Object.prototype.hasOwnProperty.call(chatSettingsForm.modelParameters, paramDef.key),
       definition: paramDef,
@@ -279,7 +286,6 @@ const chatConfigSnapshot = computed(() => {
 
 watch(chatConfigSnapshot, async (newConfig, oldConfig) => {
   if (newConfig) {
-    // 1. 同步基本表单数据
     chatSettingsForm.name = newConfig.name;
     chatSettingsForm.aiModelId = newConfig.aiModelId;
     chatSettingsForm.systemPrompt = newConfig.systemPrompt;
@@ -291,7 +297,6 @@ watch(chatConfigSnapshot, async (newConfig, oldConfig) => {
       stream: params.stream ?? true,
     };
 
-    // 2. 智能加载挂载资源
     const hasResourceChanged =
       JSON.stringify(newConfig.resource_prompt_list) !== JSON.stringify(oldConfig?.resource_prompt_list);
     const hasChatChanged = newConfig.id !== oldConfig?.id;
@@ -300,20 +305,16 @@ watch(chatConfigSnapshot, async (newConfig, oldConfig) => {
       if (newConfig.resource_prompt_list && newConfig.resource_prompt_list.length > 0) {
         mountedSystemResources.value = [];
         try {
-          // 并发请求资源详情
           const promises = newConfig.resource_prompt_list.map(id => getResourceDetails(id));
           const results = await Promise.all(promises);
 
-          // 保持原有顺序，并过滤掉 undefined
-          // 修复：使用 as Resource[] 强制类型转换，解决 ResourceWithVersions 和 Resource 的类型兼容问题
           const orderedResults = newConfig.resource_prompt_list
             .map(id => results.find(r => r.id === id))
-            .filter((r) => !!r) as Resource[];
+            .filter((r): r is Resource => !!r);
 
           mountedSystemResources.value = orderedResults;
         } catch (error) {
           console.error('Failed to load mounted resources:', error);
-          ElMessage.error('加载挂载资源失败');
         }
       } else {
         mountedSystemResources.value = [];
@@ -322,7 +323,6 @@ watch(chatConfigSnapshot, async (newConfig, oldConfig) => {
   }
 }, { immediate: true, deep: true });
 
-// 监听模型切换，清理不支持的参数
 watch(() => chatSettingsForm.aiModelId, (newModelId) => {
   if (!newModelId) return;
 
@@ -333,7 +333,6 @@ watch(() => chatSettingsForm.aiModelId, (newModelId) => {
   const coreParameters = ['temperature', 'top_p'];
 
   const keysToKeep = new Set<string>();
-
   keysToKeep.add('max_context_messages');
   keysToKeep.add('stream');
 
@@ -430,7 +429,7 @@ function handleRemoveMountedResource(resourceId: string) {
 function handleSaveSettings() {
   if (!props.chatData) return;
   if (!chatSettingsForm.name?.trim()) {
-    ElMessage.warning('会话名称不能为空');
+    ElMessage.warning(t('chat.settings.namePlaceholder'));
     return;
   }
 
@@ -448,7 +447,6 @@ function handleSaveSettings() {
     }
   }
 
-  // 保存时使用当前 mountedSystemResources 的顺序
   const resourcePromptList = mountedSystemResources.value.map(r => r.id);
 
   emit('save', {
@@ -492,7 +490,6 @@ function handleSaveSettings() {
   flex-shrink: 0;
 }
 
-/* 挂载资源区域样式 */
 .mounted-resources-wrapper {
   margin-top: 8px;
   background-color: var(--color-background-soft);
@@ -506,7 +503,6 @@ function handleSaveSettings() {
   gap: 8px;
 }
 
-/* Drag and Drop Styles */
 .draggable-tag {
   cursor: grab;
   transition: all 0.3s ease;
@@ -522,7 +518,6 @@ function handleSaveSettings() {
   border-style: dashed;
 }
 
-/* List Transitions */
 .list-move,
 .list-enter-active,
 .list-leave-active {
@@ -532,4 +527,4 @@ function handleSaveSettings() {
 .list-leave-active {
   position: absolute;
 }
-</style>
+</style>```

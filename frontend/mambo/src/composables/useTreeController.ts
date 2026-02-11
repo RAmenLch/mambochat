@@ -3,6 +3,7 @@
 import { ref, computed, type Ref, type ComputedRef, type CSSProperties } from 'vue';
 import { ElMessage, ElMessageBox, type ElDropdown } from 'element-plus';
 import type Node from 'element-plus/es/components/tree/src/model/node';
+import { useI18n } from 'vue-i18n';
 
 import { useContextMenu } from '@/composables/useContextMenu';
 import { useDialogState } from '@/composables/useDialogState';
@@ -86,6 +87,8 @@ export function useTreeController<T extends BaseTreeItem, TCreate, TUpdate>(
 ): UseTreeControllerReturn<T> {
   const { items, crudHandlers, getDialogProps, handleDialogConfirm: handleDialogConfirmCallback, onExpand } = options;
 
+  const { t } = useI18n();
+
   // --- Refs & State ---
   const treeRef = ref<InstanceType<typeof ExplorerTree>>();
   const contextMenuRef = ref<InstanceType<typeof ElDropdown>>();
@@ -103,13 +106,17 @@ export function useTreeController<T extends BaseTreeItem, TCreate, TUpdate>(
   // --- Core Action Handlers ---
   const handleDelete = async (item: T) => {
     try {
-      await ElMessageBox.confirm(`确定要删除 "${item.name}" 吗？此操作不可恢复。`, '警告', {
-        confirmButtonText: '确定删除',
-        cancelButtonText: '取消',
-        type: 'warning',
-      });
+      await ElMessageBox.confirm(
+        t('common.dialog.confirmDelete', { name: item.name }),
+        t('common.dialog.warning'),
+        {
+          confirmButtonText: t('common.action.confirmDelete'),
+          cancelButtonText: t('common.action.cancel'),
+          type: 'warning',
+        }
+      );
       await crudHandlers.deleteItem(item.id);
-      ElMessage.success('删除成功');
+      ElMessage.success(t('common.msg.deleteSuccess'));
     } catch {
       /* User canceled the action */
     }
@@ -122,7 +129,7 @@ export function useTreeController<T extends BaseTreeItem, TCreate, TUpdate>(
     }
     const newItem = await crudHandlers.duplicateItem(item.id);
     if (newItem) {
-      ElMessage.success('复制成功');
+      ElMessage.success(t('common.msg.duplicateSuccess'));
       await treeRef.value?.scrollToKey(newItem.id);
     }
   };
@@ -188,7 +195,7 @@ export function useTreeController<T extends BaseTreeItem, TCreate, TUpdate>(
     const newItem = await handleDialogConfirmCallback(state, formPayload);
 
     if (newItem && typeof newItem === 'object' && 'id' in newItem) {
-      ElMessage.success('创建成功');
+      ElMessage.success(t('common.msg.createSuccess'));
       await treeRef.value?.scrollToKey(newItem.id);
     }
   };

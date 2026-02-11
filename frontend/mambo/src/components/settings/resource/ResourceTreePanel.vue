@@ -19,7 +19,7 @@
     >
       <template #header>
         <div class="panel-header">
-          <h4>资源列表</h4>
+          <h4>{{ t('resource.tree.title') }}</h4>
         </div>
       </template>
 
@@ -47,25 +47,26 @@
     <template #dropdown>
       <el-dropdown-menu>
         <template v-if="!contextMenuItem || contextMenuItem.itemType === 'folder'">
-          <el-dropdown-item command="newResource"
-            ><el-icon><DocumentAdd /></el-icon>新建资源</el-dropdown-item
-          >
-          <el-dropdown-item command="newFolder"
-            ><el-icon><FolderAdd /></el-icon>新建文件夹</el-dropdown-item
-          >
-          <el-dropdown-item command="newKB"
-            ><el-icon><Collection /></el-icon>新建知识库</el-dropdown-item
-          >
+          <el-dropdown-item command="newResource">
+            <el-icon><DocumentAdd /></el-icon>{{ t('resource.tree.newResource') }}
+          </el-dropdown-item>
+          <el-dropdown-item command="newFolder">
+            <el-icon><FolderAdd /></el-icon>{{ t('resource.tree.newFolder') }}
+          </el-dropdown-item>
+          <el-dropdown-item command="newKB">
+            <el-icon><Collection /></el-icon>{{ t('resource.tree.newKB') }}
+          </el-dropdown-item>
         </template>
         <template v-if="contextMenuItem">
           <el-dropdown-item
             command="rename"
             :divided="!contextMenuItem || contextMenuItem.itemType === 'folder'"
-            ><el-icon><EditPen /></el-icon>重命名</el-dropdown-item
           >
-          <el-dropdown-item command="delete" class="delete-item"
-            ><el-icon><Delete /></el-icon>删除</el-dropdown-item
-          >
+            <el-icon><EditPen /></el-icon>{{ t('resource.tree.rename') }}
+          </el-dropdown-item>
+          <el-dropdown-item command="delete" class="delete-item">
+            <el-icon><Delete /></el-icon>{{ t('resource.tree.delete') }}
+          </el-dropdown-item>
         </template>
       </el-dropdown-menu>
     </template>
@@ -95,6 +96,7 @@
 <script setup lang="ts">
 import { onMounted, computed } from 'vue'
 import { storeToRefs } from 'pinia'
+import { useI18n } from 'vue-i18n'
 import {
   Folder,
   Document,
@@ -135,6 +137,8 @@ import type {
   MoveRequest,
 } from '@/api/types'
 
+const { t } = useI18n()
+
 // --- Props & Emits ---
 
 defineProps<{
@@ -156,11 +160,11 @@ const providerStore = useProviderStore()
 const { resources, loadingFolders } = storeToRefs(resourceStore)
 
 // --- Constants ---
-const creatableResourceTypes: { value: ResourceType; label: string }[] = [
-  { value: 'system_prompt', label: '系统提示词' },
-  { value: 'submessage_template', label: '消息模板' },
-  { value: 'file', label: '通用文件' },
-]
+const creatableResourceTypes = computed(() => [
+  { value: 'system_prompt' as ResourceType, label: t('resource.types.system_prompt') },
+  { value: 'submessage_template' as ResourceType, label: t('resource.types.submessage_template') },
+  { value: 'file' as ResourceType, label: t('resource.types.file') },
+])
 
 const DEFAULT_SUBMESSAGE_ATTRIBUTES = {
   context_participation_length: 1,
@@ -170,7 +174,6 @@ const DEFAULT_SUBMESSAGE_ATTRIBUTES = {
 
 // --- Computed Options ---
 
-// 计算可用的 Embedding 模型选项，按服务商分组，适配 KnowledgeBaseFormDialog 的数据结构
 const embeddingModelOptions = computed<ModelGroup[]>(() => {
   const models = providerStore.allModels.filter((m) => m.model_type === 'embedding')
   const groups: Record<string, ModelGroup> = {}
@@ -189,14 +192,8 @@ const embeddingModelOptions = computed<ModelGroup[]>(() => {
 
 // --- Drag & Drop Validation Logic ---
 
-/**
- * 查找节点所属的知识库 ID
- * @param node 树节点
- * @returns 知识库 ID，如果节点不在知识库中则返回 null
- */
 const findKBParentId = (node: Node): string | null => {
   let current: Node | null = node
-  // 向上遍历，检查当前节点或其祖先是否为 knowledge_base 类型
   while (current && current.level > 0) {
     const data = current.data as Resource
     if (data.resourceType === 'knowledge_base') {
@@ -207,11 +204,6 @@ const findKBParentId = (node: Node): string | null => {
   return null
 }
 
-/**
- * 自定义拖拽校验逻辑
- * 1. 禁止将 KB 嵌套 (KB 放入另一个 KB)。
- * 2. 允许将 KB 文件移出 KB 或跨 KB 移动 (逻辑层会进行警告拦截)。
- */
 const checkDropPermission = (
   draggingNode: Node,
   dropNode: Node,
@@ -220,22 +212,17 @@ const checkDropPermission = (
   const draggingData = draggingNode.data as Resource
   const dropData = dropNode.data as Resource
 
-  // 场景 1: 拖拽的是知识库本身
   if (draggingData.resourceType === 'knowledge_base') {
-    // 目标不能在另一个知识库内部
     const targetKBId = findKBParentId(dropNode)
     if (targetKBId) {
-      return false // 禁止 KB 嵌套
+      return false
     }
-    // 如果目标是另一个 KB (且 dropType 是 inner)，也禁止
     if (dropType === 'inner' && dropData.resourceType === 'knowledge_base') {
       return false
     }
     return true
   }
 
-  // 场景 2: 拖拽的是普通资源
-  // 允许任意移动，具体的副作用（如向量丢失）在 handleResourceMove 中处理
   return true
 }
 
@@ -247,7 +234,6 @@ const {
   contextMenuPosition,
   dialogState,
   dialogProps,
-  // handleMove, // 不使用默认的 handleMove，改用自定义的 handleResourceMove
   handleNodeExpand,
   handleNodeContextMenu,
   openRootContextMenu,
@@ -268,20 +254,19 @@ const {
   getDialogProps: (payload: DialogPayload<Resource>) => {
     switch (payload.type) {
       case 'rename':
-        return { title: '重命名', initialName: payload.targetItem?.name || '' }
+        return { title: t('resource.tree.rename'), initialName: payload.targetItem?.name || '' }
       case 'newResource':
         return {
-          title: '新建资源',
-          initialName: '新的资源',
+          title: t('resource.tree.newResource'),
+          initialName: '',
           selectConfig: {
-            label: '资源类型',
-            options: creatableResourceTypes,
-            initialValue: creatableResourceTypes[0].value,
+            label: t('resource.meta.type'),
+            options: creatableResourceTypes.value,
+            initialValue: creatableResourceTypes.value[0].value,
           },
         }
       case 'newFolder':
-        return { title: '新建文件夹', initialName: '新的文件夹' }
-      // newKB 使用专用 Dialog，此处无需配置 props，但为了类型安全返回空对象
+        return { title: t('resource.tree.newFolder'), initialName: '' }
       case 'newKB':
         return { title: '', initialName: '' }
       default:
@@ -292,7 +277,6 @@ const {
     dialogPayload: DialogPayload<Resource>,
     formPayload: DialogConfirmPayload,
   ): Promise<Resource | null> => {
-    // 注意：newKB 的处理逻辑已分离到 handleKBConfirm，此处仅处理通用资源
     if (dialogPayload.type === 'rename' && dialogPayload.targetItem) {
       await resourceStore.updateResourceItem(dialogPayload.targetItem.id, {
         name: formPayload.name,
@@ -332,33 +316,27 @@ const {
 // --- Custom Move Handler with Warning ---
 
 const handleResourceMove = async (req: MoveRequest) => {
-  // 1. 计算目标父节点 ID
   let targetParentId: string | null = null
   if (req.action === 'inside') {
     targetParentId = req.reference_id
   } else {
-    // 如果是 before/after，目标父节点是参考节点的父节点
     const refNode = resources.value.find((r) => r.id === req.reference_id)
     targetParentId = refNode?.parentId ?? null
   }
 
-  // 2. 确定目标位置所属的 Knowledge Base ID
   let targetKbId: string | null = null
   if (targetParentId) {
     const parentRes = resources.value.find((r) => r.id === targetParentId)
     if (parentRes) {
-      // 如果父节点本身是 KB，则 ID 即为 KB ID；否则沿用其 kb_id
       targetKbId = parentRes.resourceType === 'knowledge_base' ? parentRes.id : parentRes.kb_id
     }
   }
 
-  // 3. 检查是否涉及将资源移出知识库或跨知识库移动
   const movingIds = req.item_ids
   let needsWarning = false
 
   for (const id of movingIds) {
     const item = resources.value.find((r) => r.id === id)
-    // 如果源资源属于某个 KB，且目标位置的 KB ID 与源不一致（包括移到非 KB 区域），则需要警告
     if (item && item.kb_id && item.kb_id !== targetKbId) {
       needsWarning = true
       break
@@ -368,40 +346,32 @@ const handleResourceMove = async (req: MoveRequest) => {
   if (needsWarning) {
     try {
       await ElMessageBox.confirm(
-        '将资源移出知识库或移动到其他知识库会导致原有的切片和向量数据丢失，是否继续？',
-        '警告',
+        t('resource.tree.moveWarning'),
+        t('resource.tree.moveWarningTitle'),
         {
-          confirmButtonText: '确定移动',
-          cancelButtonText: '取消',
+          confirmButtonText: t('common.action.confirm'),
+          cancelButtonText: t('common.action.cancel'),
           type: 'warning',
         },
       )
     } catch {
-      // 用户取消操作
       return
     }
   }
 
-  // 4. 执行移动
   await resourceStore.moveResourceItem(req)
   emit('move-success', req.item_ids)
 }
 
 const handleUploadSuccess = () => {
-  // 上传成功后刷新列表以显示新文件
   resourceStore.initializeList()
 }
 
 // --- KB Specific Handlers ---
 
-/**
- * 处理知识库创建确认
- */
 const handleKBConfirm = async (payload: KBConfirmPayload) => {
-  // 获取当前上下文的父节点 ID (由 useTreeController 管理)
   const parentId = dialogState.payload.value?.parentId ?? null
 
-  // 调用 Service 创建知识库
   const newItem = await createKnowledgeBase({
     name: payload.name,
     parent_id: parentId,
@@ -409,10 +379,7 @@ const handleKBConfirm = async (payload: KBConfirmPayload) => {
     embedding_rate_limit: payload.embeddingRateLimit,
   })
 
-  // 手动同步到 Store
   if (newItem) {
-    // 构造符合 Store 要求的 ResourceWithVersions 类型
-    // 后端创建知识库时会自动创建初始版本并挂载到 latest_version
     const newItemWithVersions: ResourceWithVersions = {
       ...newItem,
       versions: newItem.latest_version ? [newItem.latest_version] : [],
@@ -426,15 +393,12 @@ const handleKBConfirm = async (payload: KBConfirmPayload) => {
     emit('item-created', newItem)
   }
 
-  // 关闭弹窗
   dialogState.visible.value = false
 }
 
 // --- Lifecycle ---
 onMounted(() => {
-  // 初始化资源列表（加载根节点）
   resourceStore.initializeList()
-  // 预加载服务商列表，以便创建知识库时有模型可选
   providerStore.fetchProviders()
 })
 
@@ -474,4 +438,4 @@ function handleNodeClick(data: BaseTreeItem) {
   transition: none !important;
   animation: none !important;
 }
-</style>
+</style>```

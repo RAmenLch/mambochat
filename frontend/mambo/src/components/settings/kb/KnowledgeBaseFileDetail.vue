@@ -11,17 +11,17 @@
           <el-tag :type="statusTagType" effect="dark" size="small" class="status-tag">
             {{ statusLabel }}
           </el-tag>
-          <span class="meta-item">ID: {{ resource.id }}</span>
+          <span class="meta-item">{{ $t('resource.meta.id') }}: {{ resource.id }}</span>
           <span class="meta-item">
-            上传时间: {{ new Date(resource.createdAt).toLocaleString() }}
+            {{ $t('kb.detail.uploadTime', { time: new Date(resource.createdAt).toLocaleString() }) }}
           </span>
           <el-tooltip
             v-if="statusInfo?.is_stale"
-            content="文件内容已更新，当前向量数据已过期，建议重新执行嵌入任务"
+            :content="$t('kb.detail.staleTooltip')"
             placement="top"
           >
             <el-tag type="warning" effect="plain" size="small" class="stale-tag">
-              <el-icon><Warning /></el-icon> 内容待同步
+              <el-icon><Warning /></el-icon> {{ $t('kb.task.reEmbed') }}
             </el-tag>
           </el-tooltip>
         </div>
@@ -37,7 +37,7 @@
             <el-card shadow="never" class="config-card h-full">
               <template #header>
                 <div class="card-header">
-                  <span>切分配置</span>
+                  <span>{{ $t('kb.task.configTitle') }}</span>
                   <el-button
                     type="primary"
                     size="small"
@@ -45,7 +45,7 @@
                     :loading="isSubmitting"
                     @click="handleSaveConfig"
                   >
-                    保存
+                    {{ $t('common.action.save') }}
                   </el-button>
                 </div>
               </template>
@@ -58,19 +58,19 @@
                 :disabled="isProcessing"
                 class="config-form"
               >
-                <el-form-item label="切分方式" prop="splitter_type">
+                <el-form-item :label="$t('kb.task.splitterType')" prop="splitter_type">
                   <el-radio-group v-model="taskConfig.splitter_type" class="w-full">
-                    <el-radio-button label="simple">简单切分</el-radio-button>
-                    <el-radio-button label="separator">分隔符切分</el-radio-button>
+                    <el-radio-button label="simple">{{ $t('kb.task.simple') }}</el-radio-button>
+                    <el-radio-button label="separator">{{ $t('kb.task.separator') }}</el-radio-button>
                   </el-radio-group>
                 </el-form-item>
 
                 <el-form-item prop="chunk_size">
                   <template #label>
                     <div class="label-with-tooltip">
-                      <span>切片大小</span>
+                      <span>{{ $t('kb.task.chunkSize') }}</span>
                       <el-tooltip
-                        content="单个文本块的最大字符数量。较小的切片更精确，但可能丢失上下文；较大的切片包含更多上下文，但可能包含噪声。"
+                        :content="$t('kb.task.chunkSizeTooltip')"
                         placement="top"
                       >
                         <el-icon class="help-icon"><QuestionFilled /></el-icon>
@@ -88,9 +88,9 @@
                 <el-form-item prop="chunk_overlap">
                   <template #label>
                     <div class="label-with-tooltip">
-                      <span>重叠大小</span>
+                      <span>{{ $t('kb.task.chunkOverlap') }}</span>
                       <el-tooltip
-                        content="相邻两个文本块之间重复的字符数量。建议设为切片大小的 10%-20%。"
+                        :content="$t('kb.task.chunkOverlapTooltip')"
                         placement="top"
                       >
                         <el-icon class="help-icon"><QuestionFilled /></el-icon>
@@ -108,8 +108,8 @@
                 <el-form-item v-if="taskConfig.splitter_type === 'separator'" prop="separator">
                   <template #label>
                     <div class="label-with-tooltip">
-                      <span>分隔符</span>
-                      <el-tooltip content="用于识别段落边界的字符序列。例如: \n\n" placement="top">
+                      <span>{{ $t('kb.task.separatorChar') }}</span>
+                      <el-tooltip :content="$t('kb.task.separatorTooltip')" placement="top">
                         <el-icon class="help-icon"><QuestionFilled /></el-icon>
                       </el-tooltip>
                     </div>
@@ -125,7 +125,7 @@
             <el-card shadow="never" class="status-card h-full">
               <template #header>
                 <div class="card-header">
-                  <span>向量化进度</span>
+                  <span>{{ $t('kb.task.statusTitle') }}</span>
                   <div class="card-header-actions">
                     <el-button
                       v-if="isProcessing"
@@ -134,7 +134,7 @@
                       :loading="isSubmitting"
                       @click="handleStop"
                     >
-                      停止任务
+                      {{ $t('kb.task.stop') }}
                     </el-button>
                     <el-button
                       v-if="canResume"
@@ -143,7 +143,7 @@
                       :loading="isSubmitting"
                       @click="handleResume"
                     >
-                      继续任务
+                      {{ $t('kb.task.resume') }}
                     </el-button>
                     <el-button
                       v-if="!isProcessing"
@@ -170,7 +170,7 @@
                   >
                     <template #default="{ percentage }">
                       <span class="progress-value">{{ percentage }}%</span>
-                      <span class="progress-label">完成度</span>
+                      <span class="progress-label">{{ $t('kb.task.progress') }}</span>
                     </template>
                   </el-progress>
                 </div>
@@ -180,11 +180,11 @@
                   <div class="stats-grid">
                     <!-- Row 1 -->
                     <div class="stat-item">
-                      <div class="stat-label">总切片数</div>
+                      <div class="stat-label">{{ $t('kb.task.totalChunks') }}</div>
                       <div class="stat-value">{{ statusInfo.total_chunks }}</div>
                     </div>
                     <div class="stat-item">
-                      <div class="stat-label">当前状态</div>
+                      <div class="stat-label">{{ $t('kb.task.currentStatus') }}</div>
                       <div class="stat-value">
                         <el-tag :type="statusTagType" size="small" effect="plain">
                           {{ statusLabel }}
@@ -194,21 +194,21 @@
 
                     <!-- Row 2 -->
                     <div class="stat-item">
-                      <div class="stat-label">已完成</div>
+                      <div class="stat-label">{{ $t('kb.task.completed') }}</div>
                       <div class="stat-value success">{{ statusInfo.completed_chunks }}</div>
                     </div>
                     <div class="stat-item">
-                      <div class="stat-label">处理中</div>
+                      <div class="stat-label">{{ $t('kb.task.pending') }}</div>
                       <div class="stat-value primary">{{ statusInfo.pending_chunks }}</div>
                     </div>
 
                     <!-- Row 3 -->
                     <div class="stat-item">
-                      <div class="stat-label">失败</div>
+                      <div class="stat-label">{{ $t('kb.task.failed') }}</div>
                       <div class="stat-value danger">{{ statusInfo.failed_chunks }}</div>
                     </div>
                     <div class="stat-item">
-                      <div class="stat-label">已停止</div>
+                      <div class="stat-label">{{ $t('kb.task.stopped') }}</div>
                       <div class="stat-value warning">{{ statusInfo.stopped_chunks }}</div>
                     </div>
                   </div>
@@ -223,9 +223,9 @@
         <el-card shadow="never" class="chunks-card">
           <template #header>
             <div class="card-header">
-              <span>当前切分详情</span>
+              <span>{{ $t('kb.chunk.title') }}</span>
               <span class="chunk-total-badge" v-if="totalChunks > 0">
-                共 {{ totalChunks }} 个切片
+                {{ $t('kb.chunk.totalCount', { count: totalChunks }) }}
               </span>
             </div>
           </template>
@@ -261,7 +261,7 @@
                     class="expand-btn"
                     @click.stop="toggleExpand(chunk.id)"
                   >
-                    {{ isExpanded(chunk.id) ? '收起' : '展开' }}
+                    {{ isExpanded(chunk.id) ? $t('common.action.collapse') : $t('common.action.expand') }}
                     <el-icon class="el-icon--right">
                       <ArrowUp v-if="isExpanded(chunk.id)" />
                       <ArrowDown v-else />
@@ -270,7 +270,7 @@
                 </div>
               </div>
             </div>
-            <el-empty v-else description="暂无切片数据" :image-size="60" />
+            <el-empty v-else :description="$t('kb.chunk.empty')" :image-size="60" />
 
             <div class="pagination-wrapper" v-if="totalChunks > 0">
               <el-pagination
@@ -294,6 +294,7 @@
 import { ref, computed, watch, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Document, QuestionFilled, Warning, ArrowDown, ArrowUp } from '@element-plus/icons-vue'
+import { useI18n } from 'vue-i18n'
 import { useKBFileTask } from '@/composables/useKBFileTask'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { getKBFileChunks } from '@/api/kbService'
@@ -304,6 +305,7 @@ const props = defineProps<{
 }>()
 
 const settingsStore = useSettingsStore()
+const { t } = useI18n()
 
 // --- Config & Task Logic ---
 const configFormRef = ref<FormInstance>()
@@ -347,9 +349,9 @@ const expandedChunks = ref<Set<string>>(new Set())
 // --- Computed ---
 
 const startButtonText = computed(() => {
-  if (optimisticStatus.value === 'STARTING') return '启动中...'
-  if (statusInfo.value?.file_status === 'INITIAL') return '开始任务'
-  return hasIndexedData.value ? '重新嵌入' : '启动任务'
+  if (optimisticStatus.value === 'STARTING') return t('kb.task.starting')
+  if (statusInfo.value?.file_status === 'INITIAL') return t('kb.task.start')
+  return hasIndexedData.value ? t('kb.task.reEmbed') : t('kb.task.start')
 })
 
 const progressStatus = computed(() => {
@@ -362,21 +364,21 @@ const progressStatus = computed(() => {
 })
 
 const statusLabel = computed(() => {
-  if (optimisticStatus.value === 'STARTING') return '启动中...'
-  if (optimisticStatus.value === 'STOPPING') return '停止中...'
+  if (optimisticStatus.value === 'STARTING') return t('kb.task.starting')
+  if (optimisticStatus.value === 'STOPPING') return t('kb.task.stopping')
 
   const status = statusInfo.value?.file_status
   const map: Record<string, string> = {
-    INITIAL: '待处理',
-    CLEANING: '清理中',
-    READING: '读取中',
-    SPLITTING: '切分中',
-    EMBEDDING: '向量化中',
-    COMPLETED: '已完成',
-    FAILED: '失败',
-    STOPPED: '已停止',
+    INITIAL: t('kb.status.initial'),
+    CLEANING: t('kb.status.cleaning'),
+    READING: t('kb.status.reading'),
+    SPLITTING: t('kb.status.splitting'),
+    EMBEDDING: t('kb.status.embedding'),
+    COMPLETED: t('kb.status.completed'),
+    FAILED: t('kb.status.failed'),
+    STOPPED: t('kb.status.stopped'),
   }
-  return status ? map[status] || status : '加载中...'
+  return status ? map[status] || status : t('common.status.loading')
 })
 
 const statusTagType = computed(() => {
@@ -445,9 +447,9 @@ const handleSaveConfig = async () => {
   }
   const success = await saveConfig(taskConfig)
   if (success) {
-    ElMessage.success('配置已保存')
+    ElMessage.success(t('kb.msg.configSaved'))
   } else {
-    ElMessage.error('保存配置失败')
+    ElMessage.error(t('kb.msg.saveFailed'))
   }
   return success
 }
@@ -460,9 +462,9 @@ const handleStart = async () => {
   if (hasIndexedData.value) {
     try {
       await ElMessageBox.confirm(
-        '该文件已有向量数据，重新启动将覆盖旧数据，是否继续？',
-        '确认覆盖',
-        { confirmButtonText: '覆盖并启动', cancelButtonText: '取消', type: 'warning' },
+        t('kb.msg.confirmOverwrite'),
+        t('common.action.confirm'),
+        { confirmButtonText: t('kb.msg.overwriteBtn'), cancelButtonText: t('common.action.cancel'), type: 'warning' },
       )
     } catch {
       return
@@ -470,31 +472,31 @@ const handleStart = async () => {
   }
   try {
     await startTask(taskConfig, isConfigDirty.value)
-    ElMessage.success('任务已启动')
+    ElMessage.success(t('kb.msg.taskStarted'))
     fetchChunks()
   } catch (error) {
-    ElMessage.error('启动任务失败')
+    ElMessage.error(t('kb.msg.taskStartFailed'))
   }
 }
 
 const handleResume = async () => {
   try {
     await resumeTask()
-    ElMessage.success('任务已继续')
+    ElMessage.success(t('kb.msg.taskResumed'))
   } catch (error: any) {
     const detail = error as KBResumeConflictErrorDetail
     const current = detail.current_config
     const last = detail.last_ingest_config
-    const msg = `
-      <p>检测到配置变更，无法继续上次任务。</p>
-      <p><strong>当前配置:</strong> Size=${current.chunk_size}, Overlap=${current.chunk_overlap}</p>
-      <p><strong>上次配置:</strong> Size=${last.chunk_size}, Overlap=${last.chunk_overlap}</p>
-      <p>请选择"重新处理"以应用新配置。</p>
-    `
+    const msg = t('kb.msg.conflictMsg', {
+      currentSize: current.chunk_size,
+      currentOverlap: current.chunk_overlap,
+      lastSize: last.chunk_size,
+      lastOverlap: last.chunk_overlap
+    })
     try {
-      await ElMessageBox.confirm(msg, '配置冲突', {
-        confirmButtonText: '重新处理',
-        cancelButtonText: '取消',
+      await ElMessageBox.confirm(msg, t('kb.msg.conflictTitle'), {
+        confirmButtonText: t('kb.msg.reprocess'),
+        cancelButtonText: t('common.action.cancel'),
         type: 'warning',
         dangerouslyUseHTMLString: true,
       })
@@ -507,16 +509,17 @@ const handleResume = async () => {
 
 const handleStop = async () => {
   try {
-    await ElMessageBox.confirm('确定要停止当前任务吗？', '确认停止', {
-      confirmButtonText: '停止',
-      cancelButtonText: '取消',
+    // 暂使用硬编码或通用确认，因 locale 中未明确定义停止确认消息
+    await ElMessageBox.confirm('确定要停止当前任务吗？', t('kb.task.stop'), {
+      confirmButtonText: t('kb.task.stop'),
+      cancelButtonText: t('common.action.cancel'),
       type: 'warning',
     })
     try {
       await stopTask()
-      ElMessage.success('任务已停止')
+      ElMessage.success(t('kb.msg.taskStopped'))
     } catch (error) {
-      ElMessage.error('停止任务失败')
+      ElMessage.error(t('kb.msg.taskStopFailed'))
     }
   } catch {
     // User canceled

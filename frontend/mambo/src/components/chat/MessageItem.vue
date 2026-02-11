@@ -34,7 +34,7 @@
                 <CircleCheck v-else-if="getMinimizedMcpInfo(subMessage).status === 'success'" style="color: var(--el-color-success);" />
                 <CircleClose v-else style="color: var(--el-color-error);" />
               </el-icon>
-              <span class="minimized-item-title">工具调用</span>
+              <span class="minimized-item-title">{{ $t('chat.message.toolCall') }}</span>
             </template>
             <!-- Generic Minimized View -->
             <template v-else>
@@ -110,27 +110,27 @@
       </div>
 
       <div class="message-actions" :class="{ 'is-visible': showActions && message.status !== 'generating' }">
-        <el-tooltip :content="message.role === 'user' ? '在下方重新回答' : '重新回答'" placement="top" :show-after="500">
+        <el-tooltip :content="$t('chat.message.regenerate')" placement="top" :show-after="500">
           <el-button :icon="message.role === 'user' ? RefreshLeft : Refresh" circle size="small" @click="handleRegenerate" />
         </el-tooltip>
 
-        <el-tooltip v-if="isSingleSubMessage" :content="isSingleViewCollapsed ? '展开' : '折叠'" placement="top" :show-after="500">
+        <el-tooltip v-if="isSingleSubMessage" :content="isSingleViewCollapsed ? $t('chat.message.expand') : $t('chat.message.collapse')" placement="top" :show-after="500">
           <el-button :icon="isSingleViewCollapsed ? ArrowDownBold : ArrowUpBold" circle size="small" @click="toggleSingleViewCollapse" />
         </el-tooltip>
 
-        <el-tooltip v-if="isSingleSubMessage" content="编辑" placement="top" :show-after="500">
+        <el-tooltip v-if="isSingleSubMessage" :content="$t('common.action.edit')" placement="top" :show-after="500">
           <el-button :icon="Edit" circle size="small" @click="handleEditRequest(firstSubMessage, { content: firstSubMessage.content })" />
         </el-tooltip>
 
-        <el-tooltip :content="isSingleSubMessage ? '复制' : '全部复制'" placement="top" :show-after="500">
+        <el-tooltip :content="isSingleSubMessage ? $t('common.action.copy') : $t('chat.message.copyAll')" placement="top" :show-after="500">
           <el-button :icon="CopyDocument" circle size="small" @click="handleCopy" />
         </el-tooltip>
 
-        <el-tooltip v-if="message.role === 'assistant'" content="压缩以上历史" placement="top" :show-after="500">
+        <el-tooltip v-if="message.role === 'assistant'" :content="$t('chat.message.compressHistory')" placement="top" :show-after="500">
           <el-button :icon="Clock" circle size="small" @click="handleCompressHistory" />
         </el-tooltip>
 
-        <el-tooltip content="删除" placement="top" :show-after="500">
+        <el-tooltip :content="$t('common.action.delete')" placement="top" :show-after="500">
           <el-button :icon="Delete" circle size="small" type="danger" plain @click="handleDelete" />
         </el-tooltip>
 
@@ -154,6 +154,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { storeToRefs } from 'pinia';
 import type { Message, SubMessage, SubMessageCreate, MessageStatus, McpToolContent } from '@/api/types';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
@@ -185,6 +186,7 @@ const props = defineProps<{
   isLastMessage: boolean;
 }>();
 
+const { t } = useI18n();
 const interactionStore = useChatInteractionStore();
 const settingsStore = useSettingsStore();
 const { globalSettings } = storeToRefs(settingsStore);
@@ -259,10 +261,10 @@ const zipBookmarkIcon = computed(() => {
  */
 const zipBookmarkText = computed(() => {
   switch (zipStatus.value) {
-    case 'generating': return '摘要生成中...';
-    case 'enabled': return '历史摘要';
-    case 'disabled': return '历史摘要';
-    default: return '历史摘要';
+    case 'generating': return t('chat.message.zipGenerating');
+    case 'enabled': return t('chat.message.zipHistory');
+    case 'disabled': return t('chat.message.zipHistory');
+    default: return t('chat.message.zipHistory');
   }
 });
 
@@ -440,9 +442,15 @@ function handleRegenerate() {
 
 async function handleDelete() {
   try {
-    await ElMessageBox.confirm('确定要删除这条消息吗？（包含所有分区）', '确认删除', {
-      confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning'
-    });
+    await ElMessageBox.confirm(
+      t('chat.message.deleteConfirm'),
+      t('common.action.delete'),
+      {
+        confirmButtonText: t('common.action.delete'),
+        cancelButtonText: t('common.action.cancel'),
+        type: 'warning'
+      }
+    );
     await interactionStore.deleteMessage(props.message.id);
   } catch { /* User canceled */ }
 }
@@ -495,14 +503,14 @@ function restoreSubMessage(subMessageId: string) {
  * 为最小化按钮获取一个简短的标题
  */
 function getPartitionTitleForMinimized(subMessage: SubMessage): string {
-  if (subMessage.type === 'Reasoning') return '思考';
+  if (subMessage.type === 'Reasoning') return t('chat.message.reasoning');
   if (subMessage.type === 'File') return '文件';
   if (subMessage.type === 'Normal') {
       const normalSubMessages = displayableSubMessages.value.filter(sm => sm.type === 'Normal');
-      if (normalSubMessages.length <= 1) return '正文';
+      if (normalSubMessages.length <= 1) return t('chat.message.content');
       const normalIndex = normalSubMessages.findIndex(sm => sm.id === subMessage.id);
       if (normalIndex !== -1) {
-        return `正文(${normalIndex + 1})`;
+        return `${t('chat.message.content')}(${normalIndex + 1})`;
       }
   }
   return '分区';
@@ -531,8 +539,8 @@ function getMinimizedMcpInfo(subMessage: SubMessage): MinimizedMcpInfo {
 function getMinimizedTooltipContent(subMessage: SubMessage): string {
   if (subMessage.type === 'McpTool') {
       const content: McpToolContent = JSON.parse(subMessage.content);
-      const args = content.arguments ? `参数: ${content.arguments}` : '';
-      return `工具: ${content.name || '未知'}\n${args}`.trim();
+      const args = content.arguments ? `Args: ${content.arguments}` : '';
+      return `${t('chat.message.toolCall')}: ${content.name || 'Unknown'}\n${args}`.trim();
   }
   return subMessage.content.substring(0, 100) + (subMessage.content.length > 100 ? '...' : '');
 }

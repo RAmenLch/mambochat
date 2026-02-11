@@ -25,7 +25,7 @@
         <template #header>
           <!-- 添加 no-wrap 样式防止在临界宽度时换行 -->
           <div class="chat-list-header">
-            <h4>会话列表</h4>
+            <h4>{{ $t('chat.sidebar.title') }}</h4>
           </div>
         </template>
 
@@ -47,19 +47,19 @@
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'" command="newChat">
-              <el-icon><Plus /></el-icon>新建会话
+              <el-icon><Plus /></el-icon>{{ $t('chat.sidebar.newChat') }}
             </el-dropdown-item>
             <el-dropdown-item v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'" command="newFolder">
-              <el-icon><FolderAdd /></el-icon>新建文件夹
+              <el-icon><FolderAdd /></el-icon>{{ $t('chat.sidebar.newFolder') }}
             </el-dropdown-item>
 
             <template v-if="contextMenuItem">
-              <el-dropdown-item command="rename" :divided="contextMenuItem.itemType === 'folder'"><el-icon><EditPen /></el-icon>重命名</el-dropdown-item>
-              <el-dropdown-item v-if="contextMenuItem.itemType === 'chat'" command="duplicate"><el-icon><CopyDocument /></el-icon>复制会话</el-dropdown-item>
-              <el-dropdown-item command="delete" class="delete-item"><el-icon><Delete /></el-icon>删除</el-dropdown-item>
+              <el-dropdown-item command="rename" :divided="contextMenuItem.itemType === 'folder'"><el-icon><EditPen /></el-icon>{{ $t('chat.sidebar.rename') }}</el-dropdown-item>
+              <el-dropdown-item v-if="contextMenuItem.itemType === 'chat'" command="duplicate"><el-icon><CopyDocument /></el-icon>{{ $t('chat.sidebar.duplicate') }}</el-dropdown-item>
+              <el-dropdown-item command="delete" class="delete-item"><el-icon><Delete /></el-icon>{{ $t('chat.sidebar.delete') }}</el-dropdown-item>
             </template>
 
-            <el-dropdown-item command="search" :divided="true"><el-icon><Search /></el-icon>搜索</el-dropdown-item>
+            <el-dropdown-item command="search" :divided="true"><el-icon><Search /></el-icon>{{ $t('chat.sidebar.search') }}</el-dropdown-item>
           </el-dropdown-menu>
         </template>
       </el-dropdown>
@@ -81,7 +81,7 @@
 
     <!-- 底部按钮：在 tree 显示时靠右，在 header 显示时居中 -->
     <div class="footer" :class="{ 'collapsed': !showTree }">
-      <el-tooltip v-if="!showTree" content="设置" placement="right">
+      <el-tooltip v-if="!showTree" :content="$t('settings.tabs.globalSettings')" placement="right">
         <el-button :icon="Setting" circle @click="goToSettings" />
       </el-tooltip>
       <el-button v-else :icon="Setting" circle @click="goToSettings" />
@@ -109,6 +109,7 @@
 import { onMounted, computed, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRouter, useRoute } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, EditPen, CopyDocument, Search } from '@element-plus/icons-vue';
 
 import type { Chat, ChatCreate, ChatUpdate, BaseTreeItem } from '@/api/types';
@@ -135,9 +136,9 @@ const emit = defineEmits<{
   (e: 'expand'): void;
 }>();
 
+const { t } = useI18n();
+
 // -- Visual Threshold Logic --
-// 当宽度小于 200px 时，哪怕还没松手（isCollapsed 仍为 false），
-// 我们也认为树形列表已经无法美观展示了，直接切换到竖向 Header 模式。
 const VISUAL_COLLAPSE_THRESHOLD = 150;
 
 const showTree = computed(() => {
@@ -204,23 +205,23 @@ const {
     switch (payload.type) {
       case 'rename':
         return {
-          title: '重命名',
+          title: t('chat.sidebar.rename'),
           initialName: payload.targetItem?.name || '',
         };
       case 'newChat':
         return {
-          title: '新建会话',
-          initialName: '新的会话',
+          title: t('chat.sidebar.newChat'),
+          initialName: t('chat.sidebar.newChat'),
           selectConfig: {
-            label: '模型',
+            label: t('chat.settings.model'),
             options: modelOptions.value,
             initialValue: globalSettings.value.default_model_id || undefined,
           },
         };
       case 'newFolder':
         return {
-          title: '新建文件夹',
-          initialName: '新的文件夹',
+          title: t('chat.sidebar.newFolder'),
+          initialName: t('chat.sidebar.newFolder'),
         };
       default:
         return { title: '', initialName: '' };
@@ -263,7 +264,6 @@ onMounted(async () => {
   await providerStore.fetchProviders();
   await chatListStore.initializeList();
 
-  // 确保路由参数已就绪
   await router.isReady();
 
   let targetChatId = route.params.id as string;
@@ -424,7 +424,6 @@ async function handleSearchResultSelect(data: { chatId: string; subMessageId: st
 
 .chat-list-header {
   cursor: default;
-  /* 防止在切换临界点时文字换行导致闪烁 */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

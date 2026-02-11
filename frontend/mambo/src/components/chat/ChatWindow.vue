@@ -4,7 +4,7 @@
     <input type="file" ref="fileInputRef" @change="onFileSelected" multiple style="display: none;" />
 
     <div v-if="!currentChat" class="welcome-view">
-      <el-empty description="请从左侧选择或新建一个会话开始聊天" />
+      <el-empty :description="$t('chat.window.welcome')" />
     </div>
 
     <template v-else>
@@ -46,7 +46,7 @@
         >
           <div class="drag-over-content">
             <el-icon size="50"><UploadFilled /></el-icon>
-            <span>松开即可上传文件</span>
+            <span>{{ $t('chat.window.dropFiles') }}</span>
           </div>
         </div>
 
@@ -112,6 +112,7 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, computed, onMounted } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { storeToRefs } from 'pinia';
 import { ElScrollbar, ElMessage } from 'element-plus';
 import { UploadFilled } from '@element-plus/icons-vue';
@@ -144,6 +145,8 @@ interface GroupedModels { label: string; options: AIModel[]; }
 const props = defineProps<{
   isSidebarCollapsed: boolean;
 }>();
+
+const { t } = useI18n();
 
 // --- Store Instances ---
 const chatListStore = useChatListStore();
@@ -508,7 +511,7 @@ async function handleSaveSettings(settings: ChatUpdate) {
   if (!currentChat.value) return;
   await chatListStore.updateChatSettings(currentChat.value.id, settings);
   settingsDrawerVisible.value = false;
-  ElMessage.success('设置已保存');
+  ElMessage.success(t('chat.settings.saveSuccess'));
 }
 
 /**

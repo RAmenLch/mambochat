@@ -2,7 +2,7 @@
 <template>
   <el-dialog
     :model-value="visible"
-    title="从资源库选择"
+    :title="$t('resource.selector.title')"
     width="70%"
     @update:model-value="val => emit('update:visible', val)"
     @close="handleDialogClose"
@@ -11,8 +11,8 @@
       <div class="toolbar">
         <!-- 模式切换 -->
         <el-radio-group v-model="selectorMode" size="small" class="mode-switch">
-          <el-radio-button label="resource">资源浏览</el-radio-button>
-          <el-radio-button label="kb">知识库检索</el-radio-button>
+          <el-radio-button label="resource">{{ $t('resource.selector.modeResource') }}</el-radio-button>
+          <el-radio-button label="kb">{{ $t('resource.selector.modeKb') }}</el-radio-button>
         </el-radio-group>
 
         <el-divider direction="vertical" class="toolbar-divider" />
@@ -22,12 +22,12 @@
           <div class="search-wrapper">
             <el-input
               v-model="searchText"
-              placeholder="搜索资源名称、描述或内容..."
+              :placeholder="$t('resource.selector.searchPlaceholder')"
               clearable
               class="search-input"
               @input="handleSearchInput"
             />
-            <el-tooltip content="启用正则表达式搜索" placement="top">
+            <el-tooltip :content="$t('resource.selector.regexTooltip')" placement="top">
               <el-button
                 :type="enableRegex ? 'primary' : 'default'"
                 size="small"
@@ -40,14 +40,14 @@
           </div>
 
           <div class="multi-select-switch">
-            <span>多选模式</span>
+            <span>{{ $t('resource.selector.multiSelect') }}</span>
             <el-switch v-model="isMultiSelectMode" />
           </div>
         </template>
 
         <!-- 知识库模式下的占位符 -->
         <div v-else class="kb-toolbar-placeholder">
-          <span class="info-text">通过语义向量检索查找知识库切片，选中后内容将注入输入框</span>
+          <span class="info-text">{{ $t('resource.selector.kbModeTip') }}</span>
         </div>
       </div>
 
@@ -59,10 +59,10 @@
           <div v-if="searchText" class="search-result-container">
             <div v-if="isSearching" class="loading-state">
               <el-icon class="is-loading"><Loading /></el-icon>
-              <span>正在搜索...</span>
+              <span>{{ $t('common.status.searching') }}</span>
             </div>
             <div v-else-if="searchResult.length === 0" class="empty-state">
-              <span class="empty-text">未找到匹配资源</span>
+              <span class="empty-text">{{ $t('chat.search.noResult') }}</span>
             </div>
             <el-scrollbar v-else @scroll="handleScroll">
               <div class="search-list">
@@ -95,7 +95,7 @@
                 </div>
                 <div v-if="hasMore" class="load-more-wrapper">
                   <el-button link size="small" :loading="isSearching" @click="loadMore">
-                    加载更多
+                    {{ $t('common.action.loadMore') }}
                   </el-button>
                 </div>
               </div>
@@ -154,7 +154,7 @@
                     type="primary"
                     class="resource-type-tag"
                   >
-                    知识库
+                    {{ $t('resource.types.knowledge_base') }}
                   </el-tag>
                 </span>
               </template>
@@ -164,13 +164,13 @@
 
         <!-- 预览区域 -->
         <el-main class="resource-preview-main">
-          <el-empty v-if="selectedResources.length === 0" description="从左侧选择一个资源以预览" />
+          <el-empty v-if="selectedResources.length === 0" :description="$t('resource.editor.placeholder')" />
 
           <!-- 单选预览 -->
           <el-card v-else-if="selectedResources.length === 1" shadow="never" class="preview-card">
             <template #header>
               <div class="preview-header">
-                <strong>预览: {{ selectedResources[0].name }}</strong>
+                <strong>{{ $t('resource.selector.previewHeader', { name: selectedResources[0].name }) }}</strong>
               </div>
             </template>
             <el-scrollbar class="preview-scrollbar" v-loading="isPreviewLoading">
@@ -179,15 +179,15 @@
                 <div class="kb-preview-wrapper">
                   <el-icon :size="64" color="#409EFF"><Collection /></el-icon>
                   <h3>{{ selectedResources[0].name }}</h3>
-                  <p class="kb-desc">{{ selectedResources[0].description || '暂无描述' }}</p>
+                  <p class="kb-desc">{{ selectedResources[0].description || $t('resource.selector.noDesc') }}</p>
                   <el-alert
-                    title="知识库挂载说明"
+                    :title="$t('resource.selector.kbMountTip')"
                     type="info"
                     :closable="false"
                     show-icon
                     style="margin-top: 20px; max-width: 80%;"
                   >
-                    点击下方“提供给AI助手检索”按钮，将此知识库挂载到当前会话。AI助手将能够根据您的提问，自动检索知识库中的相关内容。
+                    {{ $t('resource.selector.kbMountContent') }}
                   </el-alert>
                 </div>
               </template>
@@ -206,7 +206,7 @@
                       <template #error>
                         <div class="image-slot">
                           <el-icon><Picture /></el-icon>
-                          <span>加载失败</span>
+                          <span>{{ $t('resource.attachment.imageLoadFailed') }}</span>
                         </div>
                       </template>
                     </el-image>
@@ -219,18 +219,18 @@
                       <div class="file-size">{{ formatFileSize(currentFileInfo.size) }}</div>
                     </div>
                     <a :href="currentFileInfo.url" target="_blank" class="download-link">
-                      <el-button type="primary" link icon="Download">下载文件</el-button>
+                      <el-button type="primary" link icon="Download">{{ $t('resource.editor.downloadFile') }}</el-button>
                     </a>
                   </div>
                 </div>
                 <div v-else class="file-empty-state">
                   <el-icon :size="48"><Document /></el-icon>
-                  <p>该资源暂无文件内容</p>
+                  <p>{{ $t('resource.selector.noFileContent') }}</p>
                 </div>
               </template>
 
               <!-- Text Resource Preview -->
-              <pre v-else class="preview-content">{{ selectedResources[0].latest_version?.content || '该资源没有内容' }}</pre>
+              <pre v-else class="preview-content">{{ selectedResources[0].latest_version?.content || $t('resource.selector.noContent') }}</pre>
             </el-scrollbar>
           </el-card>
 
@@ -238,7 +238,7 @@
           <el-card v-else shadow="never" class="preview-card">
              <template #header>
               <div class="preview-header">
-                <strong>已选择 {{ selectedResources.length }} 个项目 (合并预览)</strong>
+                <strong>{{ $t('resource.selector.multiPreview', { count: selectedResources.length }) }}</strong>
               </div>
             </template>
             <el-scrollbar class="preview-scrollbar" v-loading="isPreviewLoading">
@@ -246,7 +246,7 @@
                 <div class="multi-preview-label">#{{ index + 1 }} {{ res.name }}</div>
 
                 <template v-if="res.resourceType === 'knowledge_base'">
-                   <div class="mini-empty">知识库容器 (不支持预览内容)</div>
+                   <div class="mini-empty">{{ $t('resource.selector.kbContainer') }}</div>
                 </template>
 
                 <!-- Multi-select File Preview -->
@@ -265,11 +265,11 @@
                       <span>{{ res.latest_version.file_info.filename }}</span>
                     </div>
                   </div>
-                  <div v-else class="mini-empty">无文件内容</div>
+                  <div v-else class="mini-empty">{{ $t('resource.selector.noFile') }}</div>
                 </template>
 
                 <!-- Multi-select Text Preview -->
-                <pre v-else class="preview-content">{{ res.latest_version?.content || '该资源没有内容' }}</pre>
+                <pre v-else class="preview-content">{{ res.latest_version?.content || $t('resource.selector.noContent') }}</pre>
 
                 <el-divider v-if="index < selectedResources.length - 1" border-style="dashed" />
               </div>
@@ -297,7 +297,7 @@
           plain
           @click="handleMountKnowledgeBase"
         >
-          提供给AI助手检索
+          {{ $t('resource.action.mountKbSearch') }}
         </el-button>
 
         <el-button
@@ -306,7 +306,7 @@
           @click="handleAppend"
           :disabled="selectedResources.length === 0"
         >
-          追加 ({{ selectedResources.length }})
+          {{ $t('resource.action.append', { count: selectedResources.length }) }}
         </el-button>
         <el-button
           v-if="showMountButton"
@@ -314,7 +314,7 @@
           @click="handleMount"
           :disabled="selectedResources.length === 0"
         >
-          挂载 ({{ selectedResources.length }})
+          {{ $t('resource.action.mount', { count: selectedResources.length }) }}
         </el-button>
       </div>
     </template>
@@ -329,6 +329,7 @@ import type { TreeNodeData } from 'element-plus/es/components/tree/src/tree.type
 import type Node from 'element-plus/es/components/tree/src/model/node';
 import { Folder, Document, Memo, Loading, Picture, Download, Search, Collection } from '@element-plus/icons-vue';
 import { storeToRefs } from 'pinia';
+import { useI18n } from 'vue-i18n';
 import { useResourceStore } from '@/stores/resourceStore';
 import { searchResources } from '@/api/resourceService';
 import type { Resource, ResourceNode, ResourceType, ResourceSearchResultItem, KBSearchResultItem } from '@/api/types';
@@ -348,9 +349,10 @@ const emit = defineEmits<{
   (e: 'mount-knowledge-base', resource: Resource): void;
 }>();
 
-// --- Store ---
+// --- Store & I18n ---
 const resourceStore = useResourceStore();
 const { resourceTree, isResourcesLoading, loadingFolders, resources } = storeToRefs(resourceStore);
+const { t } = useI18n();
 
 // --- Local State ---
 const selectorMode = ref<'resource' | 'kb'>('resource');
@@ -472,14 +474,15 @@ watch(filteredTreeData, () => {
 
 // --- Helper Methods ---
 const getReadableResourceType = (type: string | null) => {
-  if (!type) return '未知';
+  if (!type) return t('resource.types.unknown');
   const map: Record<string, string> = {
-    'system_prompt': '系统提示词',
-    'submessage_template': '消息模板',
-    'knowledge_base': '知识库',
-    'file': '文件'
+    'system_prompt': 'system_prompt',
+    'submessage_template': 'submessage_template',
+    'knowledge_base': 'knowledge_base',
+    'file': 'file'
   };
-  return map[type] || type;
+  const key = map[type];
+  return key ? t(`resource.types.${key}`) : type;
 };
 
 const isResourceSelected = (resourceId: string): boolean => {
@@ -510,9 +513,9 @@ const getMatchTypeTag = (type: string): TagType => {
 
 const getMatchTypeLabel = (type: string) => {
   const map: Record<string, string> = {
-    name: '标题',
-    description: '描述',
-    content: '内容'
+    name: t('resource.meta.name'),
+    description: t('resource.meta.description'),
+    content: t('resource.editor.contentLabel')
   };
   return map[type] || type;
 };
@@ -590,7 +593,7 @@ const triggerSearch = async (resetPage = true) => {
     searchTotal.value = res.total;
   } catch (e) {
     console.error('Search failed:', e);
-    ElMessage.error('搜索失败，请稍后重试');
+    ElMessage.error(t('resource.msg.searchFailed'));
   } finally {
     isSearching.value = false;
   }
@@ -611,7 +614,7 @@ const selectResourceById = async (resourceId: string, resourceType?: ResourceTyp
   }
 
   if (targetResource && props.resourceTypeFilter && targetResource.resourceType !== props.resourceTypeFilter) {
-    ElMessage.warning(`只能选择类型为 ${getReadableResourceType(props.resourceTypeFilter)} 的资源`);
+    ElMessage.warning(t('resource.msg.typeMismatch', { type: getReadableResourceType(props.resourceTypeFilter) }));
     return;
   }
 
@@ -641,7 +644,7 @@ const selectResourceById = async (resourceId: string, resourceType?: ResourceTyp
       } else {
         selectedResources.value.push({
           id: resourceId,
-          name: '正在加载...',
+          name: t('common.status.loading'),
           description: null,
           itemType: 'resource',
           resourceType: typeToCheck || null,
