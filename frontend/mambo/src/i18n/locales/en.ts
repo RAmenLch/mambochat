@@ -1,3 +1,4 @@
+// src/i18n/locales/en.ts
 export default {
   common: {
     test: 'Test Text',
@@ -34,11 +35,23 @@ export default {
       expand: 'Expand',
       collapse: 'Collapse',
       loadMore: 'Load More',
+      confirmDelete: 'Confirm Delete',
+    },
+    dialog: {
+      warning: 'Warning',
+      confirmDelete: 'Are you sure you want to delete "{name}"? This action cannot be undone.',
+    },
+    msg: {
+      deleteSuccess: 'Deleted successfully',
+      duplicateSuccess: 'Duplicated successfully',
+      createSuccess: 'Created successfully',
     },
     error: {
       unknown: 'An unknown error occurred',
       requestStatus: 'Request error, status code: {status}',
       network: 'Network error, please check your connection',
+      deleteFailed: 'Delete failed, operation reverted',
+      moveFailed: 'Move failed',
     },
     placeholder: {
       input: 'Please enter content...',
@@ -615,3 +628,4 @@ export default {
     },
   },
 }
+

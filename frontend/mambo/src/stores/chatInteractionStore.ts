@@ -47,7 +47,11 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
         // 检查是否需要触发自动标题生成
         if (
           sessionStore.currentChat &&
-          sessionStore.currentChat.name === '新的会话' &&
+            (
+                sessionStore.currentChat.name === '新的会话' ||
+                sessionStore.currentChat.name === 'New Chat'
+            )
+            &&
           sessionStore.currentChatMessages.length === 2
         ) {
           listStore.refreshChatTitle(chatId);

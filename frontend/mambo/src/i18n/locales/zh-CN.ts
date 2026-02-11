@@ -1,3 +1,4 @@
+// src/i18n/locales/zh-CN.ts
 export default {
   common: {
     test: '测试文本',
@@ -34,11 +35,23 @@ export default {
       expand: '展开',
       collapse: '折叠',
       loadMore: '加载更多',
+      confirmDelete: '确定删除',
+    },
+    dialog: {
+      warning: '警告',
+      confirmDelete: '确定要删除 "{name}" 吗？此操作不可恢复。',
+    },
+    msg: {
+      deleteSuccess: '删除成功',
+      duplicateSuccess: '复制成功',
+      createSuccess: '创建成功',
     },
     error: {
       unknown: '发生未知错误',
       requestStatus: '请求错误, 状态码: {status}',
       network: '网络错误, 请检查您的连接',
+      deleteFailed: '删除失败，已撤销操作',
+      moveFailed: '移动失败',
     },
     placeholder: {
       input: '请输入内容...',
@@ -115,7 +128,7 @@ export default {
       contextMsgCountTip: '新会话默认携带的最近历史消息数量。0 代表不限制（发送全部历史）。',
       temperature: 'Temperature (温度)',
       topP: 'Top P',
-      stream: '流式对话 (Stream)',
+      stream: '流式对话',
       streamTip: '新会话默认是否开启流式对话。关闭后, AI将一次性返回完整回复, 可能会增加等待时间。',
       saving: '正在保存设置...',
       saved: '所有更改已保存',
@@ -226,7 +239,7 @@ export default {
       type: '模型类型',
       typeChat: '对话模型',
       typeEmbedding: '向量模型',
-      metaConfig: '元配置 (Meta Config)',
+      metaConfig: '元配置',
       contextLength: '上下文长度',
       maxOutput: '最大输出Token数',
       inputModalities: '输入模态',
@@ -423,7 +436,7 @@ export default {
       versionCommitPlaceholder: '描述此版本的具体变更内容',
       configTitle: '模板配置',
       participation: '参与长度',
-      participationTip: '上下文参与长度 (Context Participation Length)',
+      participationTip: '上下文参与长度',
       collapsed: '默认折叠',
       collapsedTip: '在对话中注入时, 该模板内容是否默认折叠',
       minimal: '默认最小化',
@@ -490,7 +503,7 @@ export default {
     search: {
       selectKbPlaceholder: '选择知识库范围',
       inputPlaceholder: '输入问题或关键词进行向量检索...',
-      topKLabel: '匹配数量 (Top K):',
+      topKLabel: '匹配数量:',
       resultCount: '找到 {count} 个相关切片',
       scoreTooltip: '距离分数 (越小越相似)',
       collapse: '收起内容',
@@ -514,7 +527,7 @@ export default {
     form: {
       createTitle: '新建知识库',
       nameLabel: '知识库名称',
-      modelLabel: '嵌入模型 (Embedding Model)',
+      modelLabel: '嵌入模型',
       rateLimitLabel: '嵌入频率限制 (秒)',
       namePlaceholder: '请输入知识库名称',
       modelPlaceholder: '请选择嵌入模型',
@@ -616,3 +629,4 @@ export default {
     },
   },
 }
+

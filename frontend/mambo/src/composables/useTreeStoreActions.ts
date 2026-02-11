@@ -3,6 +3,7 @@
 import { ref, type Ref } from 'vue';
 import type { BaseTreeItem, MoveRequest } from '@/api/types';
 import { ElMessage } from 'element-plus';
+import { useI18n } from 'vue-i18n';
 
 interface TreeStoreApi<TItem, TCreate, TUpdate> {
   fetchChildren: (parentIds: string[]) => Promise<TItem[]>;
@@ -38,6 +39,7 @@ export function useTreeStoreActions<TItem extends BaseTreeItem, TCreate, TUpdate
   options: TreeStoreActionsOptions<TItem, TCreate, TUpdate>
 ): UseTreeStoreActionsReturn<TItem, TCreate, TUpdate> {
   const { items, api, onDeleteItem } = options;
+  const { t } = useI18n();
 
   const isLoading = ref(false);
   const loadedFolderIds = ref(new Set<string>());
@@ -146,7 +148,6 @@ export function useTreeStoreActions<TItem extends BaseTreeItem, TCreate, TUpdate
     const targetItem = items.value.find(item => item.id === id);
     if (!targetItem) return;
 
-    // 收集需要删除的 ID 集合（自身 + 所有后代）
     const idsToRemove = new Set<string>();
     idsToRemove.add(id);
 
@@ -163,10 +164,8 @@ export function useTreeStoreActions<TItem extends BaseTreeItem, TCreate, TUpdate
 
     const itemsToDelete = items.value.filter(item => idsToRemove.has(item.id));
 
-    // 从本地状态中级联移除
     items.value = items.value.filter(item => !idsToRemove.has(item.id));
 
-    // 清理加载状态
     idsToRemove.forEach(removeId => {
       loadedFolderIds.value.delete(removeId);
       loadingFolders.value.delete(removeId);
@@ -179,9 +178,8 @@ export function useTreeStoreActions<TItem extends BaseTreeItem, TCreate, TUpdate
       }
     } catch (error) {
       console.error('Failed to delete item:', error);
-      // 回滚
       items.value.push(...itemsToDelete);
-      ElMessage.error('删除失败，已撤销操作');
+      ElMessage.error(t('common.error.deleteFailed'));
     }
   }
 
@@ -225,7 +223,7 @@ export function useTreeStoreActions<TItem extends BaseTreeItem, TCreate, TUpdate
       await Promise.all(Array.from(parentsToRefresh).map(pid => fetchChildren(pid)));
     } catch (error) {
       console.error('Failed to move items:', error);
-      ElMessage.error('移动失败');
+      ElMessage.error(t('common.error.moveFailed'));
       Object.assign(itemRef, originalState);
       const sourceParent = originalState.parentId || 'root';
       loadedFolderIds.value.delete(sourceParent);

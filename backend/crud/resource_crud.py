@@ -121,7 +121,7 @@ async def create_resource(db: AsyncSession, resource: schemas.ResourceCreate) ->
         # 使用请求中提供的初始值创建初始版本
         initial_version = resource_model.ResourceVersion(
             resourceId=db_resource.id,
-            name="初始版本",
+            name="v1",
             content=resource.initial_content or "",
             attributes=resource.initial_attributes
         )
