@@ -73,6 +73,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
             .enable_image_with_model()
             .enable_cpl_filter()
             .enable_resource_prompt_merge()
+            .enable_max_context_messages()
         )
 
         try:
