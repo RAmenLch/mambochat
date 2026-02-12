@@ -310,7 +310,7 @@ watch(chatConfigSnapshot, async (newConfig, oldConfig) => {
 
           const orderedResults = newConfig.resource_prompt_list
             .map(id => results.find(r => r.id === id))
-            .filter((r): r is Resource => !!r);
+            .filter((r) => !!r) as Resource[];
 
           mountedSystemResources.value = orderedResults;
         } catch (error) {
