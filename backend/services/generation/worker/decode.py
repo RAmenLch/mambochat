@@ -27,7 +27,10 @@ class BaseDecode:
 
     @staticmethod
     def get_usage(mode,message:AIMessage):
-        if mode == "messages" and message.response_metadata.get("finish_reason","").lower() == "stop":
+        if (mode == "messages"
+                and message.response_metadata.get("finish_reason","").lower() == "stop"
+                and message.usage_metadata
+        ):
             usage = {}
             if "input_tokens" in message.usage_metadata:
                 usage["prompt_tokens"] = message.usage_metadata.get("input_tokens")

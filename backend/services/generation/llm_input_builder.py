@@ -1,4 +1,3 @@
-# backend/services/generation/llm_input_builder.py
 import json
 import base64
 from typing import List, Dict, Any, Optional, Set, Tuple
@@ -19,6 +18,7 @@ _KNOWN_TEXT_APPLICATION_TYPES = {
     "application/javascript", "application/x-sh", "application/x-yaml",
     "application/rtf", "application/x-ipynb+json",
 }
+
 
 def _is_text_mime_type(mime_type: str) -> bool:
     """
@@ -70,6 +70,7 @@ class LLMInputBuilder:
         self._flatten_history: bool = False
         self._append_prompt: Optional[str] = None
         self._tools: Optional[List[BaseTool]] = None
+        self._enable_max_context_messages: bool = False  # 启用 max_context_messages 筛选
 
         # 内部数据缓存 (用于减少 I/O)
         self._cached_chat = None
@@ -193,6 +194,14 @@ class LLMInputBuilder:
         self._tools = tools
         return self
 
+    def enable_max_context_messages(self) -> "LLMInputBuilder":
+        """
+        [新增] 启用基于 max_context_messages 参数的历史消息筛选。
+        筛选逻辑：保留最新的 N 条历史消息（不包含当前最新的用户问题），N 为偶数。
+        """
+        self._enable_max_context_messages = True
+        return self
+
     # --- 核心构建方法 ---
 
     async def build(self) -> LLMInput:
@@ -213,7 +222,8 @@ class LLMInputBuilder:
         # 资源挂载逻辑：提取并追加资源内容
         if self._enable_resource_merge and self.chat.resource_prompt_list:
             resources = await resource_crud.get_resources_by_ids(self.db, self.chat.resource_prompt_list)
-            resource_contents = [res.latest_version.content for res in resources if res.latest_version and res.latest_version.content]
+            resource_contents = [res.latest_version.content for res in resources if
+                                 res.latest_version and res.latest_version.content]
             if resource_contents:
                 merged_content = "\n\n".join(resource_contents)
                 system_prompt = (system_prompt or "") + "\n\n" + merged_content
@@ -226,14 +236,18 @@ class LLMInputBuilder:
         # 3. 应用切片逻辑
         effective_history = self._apply_slicing(effective_history)
 
-        # 4. 核心转换：将消息对象集合转化为 Payload 结构
+        # 4.应用 max_context_messages 筛选逻辑
+        if self._enable_max_context_messages:
+            effective_history = self._apply_max_context_limit(effective_history)
+
+        # 5. 核心转换：将消息对象集合转化为 Payload 结构
         messages_payload = await self._build_payload(effective_history)
 
-        # 5. 注入 System Prompt
+        # 6. 注入 System Prompt
         if system_prompt:
             messages_payload.insert(0, {"role": "system", "content": system_prompt})
 
-        # 6. 组装参数
+        # 7. 组装参数
         api_params = {}
         if not self._global_model_keys:
             api_params = self._map_parameters(self.chat.modelParameters)
@@ -333,6 +347,55 @@ class LLMInputBuilder:
             return history[self._slice_range]
 
         return history
+
+    def _apply_max_context_limit(self, history: List[Any]) -> List[Any]:
+        """
+        应用 max_context_messages 限制。
+        逻辑：
+        1. 获取 chat.modelParameters 中的 max_context_messages。
+        2. 确保该值为偶数（奇数+1）。
+        3. 将历史消息分为“历史上下文”和“最新消息”。
+        4. 从“历史上下文”中保留最后 N 条，并与“最新消息”合并。
+        """
+        if not history:
+            return []
+
+        # 解析参数
+        params = self.chat.modelParameters
+        if not params:
+            return history
+
+        if isinstance(params, str):
+            try:
+                params = json.loads(params)
+            except json.JSONDecodeError:
+                return history
+
+        limit = params.get("max_context_messages")
+        if not limit or not isinstance(limit, int):
+            return history
+
+        # 强制偶数
+        if limit % 2 != 0:
+            limit += 1
+
+        # 如果只有一条消息（通常只有最新的用户问题），直接返回
+        if len(history) <= 1:
+            return history
+
+        # 分离最后一条消息（假设为当前触发的问题）
+        last_message = history[-1]
+        history_context = history[:-1]
+
+        # 如果历史上下文长度小于等于限制，无需截断
+        if len(history_context) <= limit:
+            return history
+
+        # 截取历史上下文的最后 limit 条
+        sliced_context = history_context[-limit:]
+
+        # 重新组合
+        return sliced_context + [last_message]
 
     async def _apply_zip_history_logic(self, history: List[Any]) -> List[Any]:
         """处理压缩历史逻辑：发现启用的 ZipHistory 则截断之前的内容并插入摘要。"""
