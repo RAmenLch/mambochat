@@ -106,6 +106,7 @@ async def create_chat(chat: schemas.ChatCreate, db: AsyncSession = Depends(get_d
             default_params = {
                 "max_context_messages": global_settings.default_max_context_messages,
                 "stream": global_settings.default_stream,
+                "enable_suggest": global_settings.default_enable_suggest,
             }
             # Apply default activated parameters from central config
             for param_def in SUPPORTED_LLM_PARAMETERS:

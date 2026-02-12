@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/settings/GlobalSettings.vue -->
 <template>
   <div class="global-settings-manager">
     <div class="header">
@@ -252,6 +253,20 @@
           </el-tooltip>
         </el-form-item>
 
+        <el-form-item :label="t('settings.global.defaultEnableSuggest')">
+          <el-switch
+            :model-value="settingsForm.default_enable_suggest ?? false"
+            @update:model-value="(val) => (settingsForm.default_enable_suggest = val as boolean)"
+          />
+          <el-tooltip
+            effect="dark"
+            :content="t('settings.global.defaultEnableSuggestTip')"
+            placement="top"
+          >
+            <el-icon class="label-icon"><QuestionFilled /></el-icon>
+          </el-tooltip>
+        </el-form-item>
+
         <!-- 状态栏替代了保存按钮 -->
         <div class="status-bar">
           <transition name="fade" mode="out-in">
@@ -317,6 +332,7 @@ const settingsForm = reactive<
   kb_default_chunk_overlap: 50,
   send_message_shortcut: 'enter',
   language: 'zh-CN', // 默认值
+  default_enable_suggest: false,
 })
 
 // 状态控制
@@ -370,6 +386,7 @@ watch(
       kb_default_chunk_overlap: newSettings.kb_default_chunk_overlap,
       send_message_shortcut: newSettings.send_message_shortcut,
       language: newSettings.language || 'zh-CN',
+      default_enable_suggest: newSettings.default_enable_suggest ?? false,
     })
 
     // 在 DOM 更新循环结束后释放锁，确保 watch(settingsForm) 不会被此次赋值触发

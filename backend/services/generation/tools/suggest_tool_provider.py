@@ -29,7 +29,7 @@ class SuggestToolProvider(BaseToolProvider):
         @tool(self._tool_name)
         def suggest(suggest_list: List[str]) -> str:
             """
-            请在输出所有完整文本之后,可调用此方法,提供3~5个建议文本选项给用户选择,建议文本内容语言取决于用户提问的语言;
+            调用此方法,提供3~5个建议文本选项给用户选择,建议文本内容语言取决于用户提问的语言;
             """
             return "ok"
 
@@ -40,7 +40,7 @@ class SuggestToolProvider(BaseToolProvider):
             return None
 
         return (
-            "在生成正文结束后,如果你对用户有回复推荐,请调用suggest方法。"
+            "{'建议模式': '启用','desc':'每次对话后,请提供回复建议选项! 调用suggest方法。'}"
         )
 
     def matches_tool_name(self, tool_name: str) -> bool:
