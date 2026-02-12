@@ -26,6 +26,7 @@
             :id="'msg-' + message.id"
             :message="message"
             :is-last-message="index === currentChatMessages.length - 1"
+            @suggestion-click="handleSuggestionClick"
           />
         </div>
       </el-scrollbar>
@@ -634,6 +635,19 @@ function handleJumpToSubMessage(subMessageId: string) {
       });
     });
   }
+}
+
+function handleSuggestionClick(text: string) {
+  if (isMultiPartMode.value) {
+    if (multiPartDraft.value[activePartitionIndex.value]) {
+       multiPartDraft.value[activePartitionIndex.value].content = text;
+    }
+  } else {
+    singlePartDraft.value = text;
+  }
+  nextTick(() => {
+    chatInputBoxRef.value?.focus();
+  });
 }
 
 // --- Watchers ---

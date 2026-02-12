@@ -663,7 +663,7 @@ class LLMInputBuilder:
         param_def_map = {p.key: p for p in SUPPORTED_LLM_PARAMETERS}
 
         for key, value in flat_params.items():
-            if key in ["max_context_messages", "stream", "enabled_mcp_ids"]:
+            if key in ["max_context_messages", "stream", "enabled_mcp_ids","enable_suggest"]:
                 continue
 
             definition = param_def_map.get(key)

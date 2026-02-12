@@ -28,7 +28,7 @@ def _validate_model_parameters(params: Dict[str, Any]):
     """
     for key, value in params.items():
         # These parameters are managed by the system but not defined in the central config
-        if key in ["max_context_messages", "stream", "enabled_mcp_ids"]:
+        if key in ["max_context_messages", "stream", "enabled_mcp_ids","enable_suggest"]:
             continue
 
         definition = _param_definition_map.get(key)

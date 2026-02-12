@@ -109,6 +109,21 @@
         />
       </div>
 
+      <!-- Suggestion Chips -->
+      <div v-if="isLastMessage && suggestionList.length > 0" class="suggestion-chips">
+        <el-tag
+          v-for="(suggestion, idx) in suggestionList"
+          :key="idx"
+          class="suggestion-item"
+          type="info"
+          effect="plain"
+          round
+          @click="$emit('suggestion-click', suggestion)"
+        >
+          {{ suggestion }}
+        </el-tag>
+      </div>
+
       <div class="message-actions" :class="{ 'is-visible': showActions && message.status !== 'generating' }">
         <el-tooltip :content="$t('chat.message.regenerate')" placement="top" :show-after="500">
           <el-button :icon="message.role === 'user' ? RefreshLeft : Refresh" circle size="small" @click="handleRegenerate" />
@@ -186,6 +201,10 @@ const props = defineProps<{
   isLastMessage: boolean;
 }>();
 
+const emit = defineEmits<{
+  (e: 'suggestion-click', text: string): void;
+}>();
+
 const { t } = useI18n();
 const interactionStore = useChatInteractionStore();
 const settingsStore = useSettingsStore();
@@ -195,10 +214,14 @@ const showActions = ref(false);
 const isZipCardVisible = ref(false);
 
 /**
- * 过滤出所有用于在消息气泡中显示的子消息 (排除 'Usage' 和 'ZipHistory' 类型)。
+ * 过滤出所有用于在消息气泡中显示的子消息 (排除 'Usage', 'ZipHistory' 和 'Suggest' 类型)。
  */
 const displayableSubMessages = computed(() =>
-  props.message.sub_messages.filter(sm => sm.type !== 'Usage' && sm.type !== 'ZipHistory')
+  props.message.sub_messages.filter(sm =>
+    sm.type !== 'Usage' &&
+    sm.type !== 'ZipHistory' &&
+    sm.type !== 'Suggest'
+  )
 );
 
 /**
@@ -233,6 +256,26 @@ const usageSubMessage = computed(() =>
 const zipHistorySubMessage = computed(() =>
   props.message.sub_messages.find(sm => sm.type === 'ZipHistory')
 );
+
+/**
+ * 提取出 'Suggest' 类型的子消息，用于显示建议气泡。
+ */
+const suggestSubMessage = computed(() =>
+  props.message.sub_messages.find(sm => sm.type === 'Suggest')
+);
+
+/**
+ * 解析建议内容列表
+ */
+const suggestionList = computed((): string[] => {
+  if (!suggestSubMessage.value || !suggestSubMessage.value.content) return [];
+  try {
+    const list = JSON.parse(suggestSubMessage.value.content);
+    return Array.isArray(list) ? list : [];
+  } catch (e) {
+    return [];
+  }
+});
 
 /**
  * 计算历史摘要的当前状态
@@ -700,6 +743,28 @@ function getMinimizedTooltipContent(subMessage: SubMessage): string {
 
 .zip-history-card {
   margin-top: 8px;
+}
+
+.suggestion-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.suggestion-item {
+  cursor: pointer;
+  transition: all 0.2s;
+  user-select: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-color: var(--el-border-color);
+  background-color: var(--color-background);
+}
+.suggestion-item:hover {
+  color: var(--el-color-primary);
+  border-color: var(--el-color-primary-light-5);
+  background-color: var(--el-color-primary-light-9);
 }
 
 .message-actions { display: flex; gap: 4px; margin-top: 8px; opacity: 0; visibility: hidden; min-height: 24px; transition: opacity 0.2s, visibility 0.2s; align-items: center; }

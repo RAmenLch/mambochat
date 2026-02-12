@@ -22,6 +22,7 @@ class SubMessageType(str, Enum):
     USAGE = "Usage"
     ZIP_HISTORY = "ZipHistory"
     MCP_TOOL = "McpTool"
+    SUGGEST = "Suggest"
 
 
 class FileManagementType(str, Enum):

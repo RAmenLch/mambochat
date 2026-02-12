@@ -350,6 +350,8 @@ export default {
       stream: 'Stream Response',
       streamTip: 'If disabled, AI waits for full response, which may increase wait time.',
       saveSuccess: 'Settings saved',
+      enableSuggest: 'Generate Suggestions',
+      enableSuggestTip: 'When enabled, AI will provide 3-5 follow-up questions at the end of the reply.',
     },
     input: {
       placeholder: 'Type a message...',
