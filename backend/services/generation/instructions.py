@@ -9,6 +9,14 @@ class BaseInstruction(BaseModel):
     """所有生成指令的基类。"""
     pass
 
+class InterruptGeneration(BaseInstruction):
+    """
+    指令：立即中断生成循环 (Control Flow)。
+    当 Manager 收到此指令时，应停止接收 Worker 的后续事件并进入 finalize 流程。
+    此指令通常由 Manager 内部消费，不应传递给 Executor。
+    """
+    pass
+
 
 class CreateSubMessage(BaseInstruction):
     """指令：创建一个新的子消息。

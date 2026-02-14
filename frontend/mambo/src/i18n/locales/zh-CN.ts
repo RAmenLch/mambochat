@@ -130,6 +130,8 @@ export default {
       topP: 'Top P',
       stream: '流式对话',
       streamTip: '新会话默认是否开启流式对话。关闭后, AI将一次性返回完整回复, 可能会增加等待时间。',
+      defaultEnableSuggest: '默认启用回复建议',
+      defaultEnableSuggestTip: '新会话默认是否启用回复建议功能。',
       saving: '正在保存设置...',
       saved: '所有更改已保存',
       saveError: '保存失败，请检查网络',
@@ -350,6 +352,8 @@ export default {
       stream: '流式对话',
       streamTip: '关闭后, AI将一次性返回完整回复, 可能会增加等待时间。',
       saveSuccess: '设置已保存',
+      enableSuggest: '生成回复建议',
+      enableSuggestTip: '开启后，AI 将在回复末尾提供 3-5 个后续问题建议。',
     },
     input: {
       placeholder: '输入消息...',

@@ -28,7 +28,7 @@ def _validate_model_parameters(params: Dict[str, Any]):
     """
     for key, value in params.items():
         # These parameters are managed by the system but not defined in the central config
-        if key in ["max_context_messages", "stream", "enabled_mcp_ids"]:
+        if key in ["max_context_messages", "stream", "enabled_mcp_ids","enable_suggest"]:
             continue
 
         definition = _param_definition_map.get(key)
@@ -106,6 +106,7 @@ async def create_chat(chat: schemas.ChatCreate, db: AsyncSession = Depends(get_d
             default_params = {
                 "max_context_messages": global_settings.default_max_context_messages,
                 "stream": global_settings.default_stream,
+                "enable_suggest": global_settings.default_enable_suggest,
             }
             # Apply default activated parameters from central config
             for param_def in SUPPORTED_LLM_PARAMETERS:

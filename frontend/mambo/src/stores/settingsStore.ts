@@ -34,6 +34,7 @@ export const useSettingsStore = defineStore('settings', {
       kb_default_chunk_overlap: 50,
       send_message_shortcut: 'enter',
       language: 'zh-CN',
+      default_enable_suggest: false,
     },
   }),
 

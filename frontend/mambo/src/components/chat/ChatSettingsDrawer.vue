@@ -83,6 +83,12 @@
               <el-icon class="label-icon"><QuestionFilled /></el-icon>
            </el-tooltip>
         </el-form-item>
+        <el-form-item :label="$t('chat.settings.enableSuggest')">
+          <el-switch v-model="chatSettingsForm.modelParameters.enable_suggest" />
+          <el-tooltip class="box-item" effect="dark" :content="$t('chat.settings.enableSuggestTip')" placement="top">
+            <el-icon class="label-icon"><QuestionFilled /></el-icon>
+          </el-tooltip>
+        </el-form-item>
 
         <!-- 动态参数 -->
         <el-form-item v-for="param in dynamicParameters" :key="param.key">
@@ -295,6 +301,7 @@ watch(chatConfigSnapshot, async (newConfig, oldConfig) => {
       ...JSON.parse(JSON.stringify(params)),
       max_context_messages: params.max_context_messages ?? 0,
       stream: params.stream ?? true,
+      enable_suggest: params.enable_suggest ?? false,
     };
 
     const hasResourceChanged =
@@ -436,6 +443,7 @@ function handleSaveSettings() {
   const finalModelParameters: Record<string, any> = {
     max_context_messages: chatSettingsForm.modelParameters.max_context_messages,
     stream: chatSettingsForm.modelParameters.stream,
+    enable_suggest: chatSettingsForm.modelParameters.enable_suggest,
   };
 
   for (const key in chatSettingsForm.modelParameters) {

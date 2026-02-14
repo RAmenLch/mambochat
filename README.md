@@ -58,7 +58,7 @@
 
 2.  **启动服务**
     ```bash
-    docker-compose up -d
+    docker compose up -d --build
     ```
 
 3.  **访问应用**
@@ -76,7 +76,7 @@
     ```
 2.  **双击或右键点击"在终端中打开"(WIN11)并执行命令**
     ```bash
-        PS C:\mambochat> .\start.bat
+      PS C:\mambochat> .\start.bat
     ```
 > 注: 该脚本未在不同环境下经历测试,若出现问题欢迎创建 Issue
 

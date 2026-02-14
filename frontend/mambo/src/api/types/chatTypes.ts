@@ -8,7 +8,7 @@ export type MessageStatus = 'generating' | 'completed' | 'failed'
 
 // --- SubMessage Types ---
 
-export type SubMessageType = 'Normal' | 'Reasoning' | 'File' | 'Usage' | 'ZipHistory' | 'McpTool'
+export type SubMessageType = 'Normal' | 'Reasoning' | 'File' | 'Usage' | 'ZipHistory' | 'McpTool' | 'Suggest'
 
 export interface SubMessageConfig {
   is_collapsed: boolean

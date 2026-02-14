@@ -28,7 +28,7 @@ class BaseDecode:
     @staticmethod
     def get_usage(mode,message:AIMessage):
         if (mode == "messages"
-                and message.response_metadata.get("finish_reason","").lower() == "stop"
+                # and message.response_metadata.get("finish_reason","").lower() == "stop"
                 and message.usage_metadata
         ):
             usage = {}
