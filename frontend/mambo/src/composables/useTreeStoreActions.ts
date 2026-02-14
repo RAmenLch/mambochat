@@ -69,7 +69,15 @@ export function useTreeStoreActions<TItem extends BaseTreeItem, TCreate, TUpdate
     loadingFolders.value.add(parentId);
     try {
       const children = await api.fetchChildren([parentId]);
-
+      if (parentId !== 'root') {
+        const parentExists = items.value.some((item) => item.id === parentId)
+        if (!parentExists) {
+          console.log(
+            `[TreeStore] Parent ${parentId} was removed while fetching children. Discarding results.`,
+          )
+          return
+        }
+      }
       const filteredItems = items.value.filter(item => {
         if (parentId === 'root') {
           return item.parentId !== 'root' && item.parentId !== null;
