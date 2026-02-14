@@ -4,7 +4,6 @@
     :title="title"
     width="400px"
     @close="handleClose"
-    @open="handleOpen"
   >
     <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent>
       <el-form-item :label="nameLabel" prop="name">
@@ -118,21 +117,16 @@ const rules = reactive<FormRules>({
   selectValue: [{ required: true, message: t('common.rule.selectRequired'), trigger: 'change' }],
 });
 
-// --- Watchers ---
+// --- Methods ---
 
-watch(() => props.visible, (val) => {
-  internalVisible.value = val;
-});
-
-watch(internalVisible, (val) => {
-  emit('update:visible', val);
-});
-
-// --- Handlers ---
-
-const handleOpen = () => {
+/**
+ * 初始化表单数据
+ */
+const initFormData = () => {
+  // 1. 设置名称
   form.name = props.initialName || '';
 
+  // 2. 处理下拉选择框初始值
   if (props.selectConfig) {
     if (props.selectConfig.initialValue) {
       form.selectValue = props.selectConfig.initialValue;
@@ -154,11 +148,30 @@ const handleOpen = () => {
     form.selectValue = '';
   }
 
+  // 3. 清除校验并聚焦
+  // 使用 nextTick 确保 DOM 已更新
   nextTick(() => {
     formRef.value?.clearValidate();
     nameInputRef.value?.focus();
   });
 };
+
+// --- Watchers ---
+
+watch(() => props.visible, (val) => {
+  internalVisible.value = val;
+  // 当 visible 变为 true 时，立即初始化表单数据
+  // 配合 immediate: true，即使组件挂载时 visible 已经是 true，也会执行初始化
+  if (val) {
+    initFormData();
+  }
+}, { immediate: true }); // [重要] 必须保留 immediate: true
+
+watch(internalVisible, (val) => {
+  emit('update:visible', val);
+});
+
+// --- Handlers ---
 
 const handleClose = () => {
   internalVisible.value = false;
