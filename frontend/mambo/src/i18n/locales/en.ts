@@ -93,10 +93,12 @@ export default {
       title: 'Global Settings',
       language: 'Language',
       defaultModel: 'Global Default Model',
-      defaultModelTip: 'This model will be used for new chats and chats where the original model was deleted.',
+      defaultModelTip:
+        'This model will be used for new chats and chats where the original model was deleted.',
       defaultModelPlaceholder: 'Select a default model',
       titleModel: 'Title Generation Model',
-      titleModelTip: 'Model used specifically for auto-generating chat titles. If unset, uses the Global Default Model.',
+      titleModelTip:
+        'Model used specifically for auto-generating chat titles. If unset, uses the Global Default Model.',
       titleModelPlaceholder: 'Select a model for title generation',
       editorInteraction: 'Editor & Interaction',
       frontendEditor: 'Frontend Editor Type',
@@ -121,11 +123,13 @@ export default {
       testProxyBtn: 'Test Proxy',
       historyCompression: 'Chat History Compression',
       compressionPrompt: 'Compression System Prompt',
-      compressionPromptTip: 'System instructions for AI to compress chat history. If empty, uses backend default.',
+      compressionPromptTip:
+        'System instructions for AI to compress chat history. If empty, uses backend default.',
       compressionPromptPlaceholder: 'e.g., Please summarize the conversation above...',
       newChatParams: 'New Chat Defaults',
       contextMsgCount: 'Context Message Count',
-      contextMsgCountTip: 'Number of recent messages sent with new chats. 0 means unlimited (send all history).',
+      contextMsgCountTip:
+        'Number of recent messages sent with new chats. 0 means unlimited (send all history).',
       temperature: 'Temperature',
       topP: 'Top P',
       stream: 'Stream Response',
@@ -182,7 +186,8 @@ export default {
       action: 'Actions',
       currentProvider: 'Current Provider',
       empty: 'Please select a provider from the table above first',
-      deleteConfirm: 'Are you sure you want to delete provider "{name}"? All its models will also be deleted.',
+      deleteConfirm:
+        'Are you sure you want to delete provider "{name}"? All its models will also be deleted.',
       deleteSuccess: 'Deleted successfully!',
     },
     form: {
@@ -347,13 +352,15 @@ export default {
       systemPromptPlaceholder: 'Define AI role and behavior',
       selectFromResource: ' Select from Resources',
       modelParams: 'Model Parameters',
-      contextCount: 'Context Message Count',
-      contextCountTip: 'Number of recent messages sent with each request. 0 means unlimited (send all history).',
+      contextCount: 'Max Context Number',
+      contextCountTip:
+        'Number of recent messages sent with each request. 0 means unlimited (send all history).',
       stream: 'Stream Response',
       streamTip: 'If disabled, AI waits for full response, which may increase wait time.',
       saveSuccess: 'Settings saved',
       enableSuggest: 'Generate Suggestions',
-      enableSuggestTip: 'When enabled, AI will provide 3-5 follow-up questions at the end of the reply.',
+      enableSuggestTip:
+        'When enabled, AI will provide 3-5 follow-up questions at the end of the reply.',
     },
     input: {
       placeholder: 'Type a message...',
@@ -397,7 +404,8 @@ export default {
       newKB: 'New Knowledge Base',
       rename: 'Rename',
       delete: 'Delete',
-      moveWarning: 'Moving resources out of or between knowledge bases will cause existing chunks and vector data to be lost. Continue?',
+      moveWarning:
+        'Moving resources out of or between knowledge bases will cause existing chunks and vector data to be lost. Continue?',
       moveWarningTitle: 'Warning',
     },
     explorer: {
@@ -416,7 +424,8 @@ export default {
       uploadFile: 'Upload File',
       uploadTip: 'Supports images, documents, and other formats.',
       uploadAutoVersion: 'Uploading a new file will automatically create a new version.',
-      kbWarning: 'Note: Updating file content will invalidate existing vector chunks and require re-running tasks.',
+      kbWarning:
+        'Note: Updating file content will invalidate existing vector chunks and require re-running tasks.',
       saveAsNew: 'Save as New Version',
       saveSuccess: 'Saved successfully',
       uploadSuccess: 'File uploaded successfully, new version created',
@@ -481,11 +490,13 @@ export default {
       searchPlaceholder: 'Search name, description or content...',
       regexTooltip: 'Enable Regex Search',
       multiSelect: 'Multi-select',
-      kbModeTip: 'Find KB chunks via semantic vector search. Selected content will be injected into input.',
+      kbModeTip:
+        'Find KB chunks via semantic vector search. Selected content will be injected into input.',
       previewHeader: 'Preview: {name}',
       noDesc: 'No description',
       kbMountTip: 'KB Mount Instructions',
-      kbMountContent: 'Click "Provide to AI" below to mount this KB. AI will be able to retrieve content based on your questions.',
+      kbMountContent:
+        'Click "Provide to AI" below to mount this KB. AI will be able to retrieve content based on your questions.',
       noFileContent: 'Resource has no file content',
       noContent: 'Resource has no content',
       multiPreview: 'Selected {count} items (Merged Preview)',
@@ -571,8 +582,10 @@ export default {
       chunkSize: 'Chunk Size',
       chunkOverlap: 'Overlap',
       separatorChar: 'Separator Char',
-      chunkSizeTooltip: 'Max characters per chunk. Smaller chunks are more precise but may lose context; larger chunks contain more context but may include noise.',
-      chunkOverlapTooltip: 'Overlapping characters between adjacent chunks. Recommended 10%-20% of chunk size.',
+      chunkSizeTooltip:
+        'Max characters per chunk. Smaller chunks are more precise but may lose context; larger chunks contain more context but may include noise.',
+      chunkOverlapTooltip:
+        'Overlapping characters between adjacent chunks. Recommended 10%-20% of chunk size.',
       separatorTooltip: 'Character sequence to identify paragraph boundaries. e.g., \\n\\n',
       statusTitle: 'Vectorization Progress',
       stop: 'Stop Task',
@@ -611,7 +624,8 @@ export default {
       uploading: 'Uploading file...',
       uploadSuccess: 'Upload successful, click "Configure Task" to start splitting and embedding',
       uploadFailed: 'Upload failed',
-      deleteConfirm: 'Are you sure you want to delete document "{name}"? Related vector data will also be deleted.',
+      deleteConfirm:
+        'Are you sure you want to delete document "{name}"? Related vector data will also be deleted.',
       deleteSuccess: 'Deleted successfully',
       taskStarted: 'Task started',
       taskStartFailed: 'Failed to start task',
@@ -621,13 +635,15 @@ export default {
       confirmOverwrite: 'This file has vector data. Restarting will overwrite old data. Continue?',
       overwriteBtn: 'Overwrite & Start',
       conflictTitle: 'Configuration Conflict',
-      conflictMsg: '<p>Configuration changed, cannot resume.</p><p><strong>Current:</strong> Size={currentSize}, Overlap={currentOverlap}</p><p><strong>Last:</strong> Size={lastSize}, Overlap={lastOverlap}</p><p>Please select "Reprocess" to apply new config.</p>',
+      conflictMsg:
+        '<p>Configuration changed, cannot resume.</p><p><strong>Current:</strong> Size={currentSize}, Overlap={currentOverlap}</p><p><strong>Last:</strong> Size={lastSize}, Overlap={lastOverlap}</p><p>Please select "Reprocess" to apply new config.</p>',
       reprocess: 'Reprocess',
     },
   },
   editor: {
     monaco: {
-      pasteFileError: 'Cannot access clipboard files via menu. Please use Ctrl+V or the upload button.',
+      pasteFileError:
+        'Cannot access clipboard files via menu. Please use Ctrl+V or the upload button.',
       clipboardError: 'Cannot access clipboard. Please check browser permissions.',
     },
   },
