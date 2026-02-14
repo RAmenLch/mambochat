@@ -258,7 +258,7 @@ const {
       case 'newResource':
         return {
           title: t('resource.tree.newResource'),
-          initialName: '',
+          initialName: t('resource.tree.newResource'),
           selectConfig: {
             label: t('resource.meta.type'),
             options: creatableResourceTypes.value,
@@ -266,7 +266,7 @@ const {
           },
         }
       case 'newFolder':
-        return { title: t('resource.tree.newFolder'), initialName: '' }
+        return { title: t('resource.tree.newFolder'), initialName: t('resource.tree.newFolder') }
       case 'newKB':
         return { title: '', initialName: '' }
       default:
@@ -438,4 +438,5 @@ function handleNodeClick(data: BaseTreeItem) {
   transition: none !important;
   animation: none !important;
 }
-</style>```
+</style>
+```
