@@ -266,7 +266,9 @@ export default {
     sidebar: {
       title: 'Chat List',
       newChat: 'New Chat',
+      initChatName: 'New Chat',
       newFolder: 'New Folder',
+      initFolderName: 'New Folder',
       rename: 'Rename',
       duplicate: 'Duplicate Chat',
       delete: 'Delete',

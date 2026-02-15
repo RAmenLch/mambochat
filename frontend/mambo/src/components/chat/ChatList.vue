@@ -46,20 +46,35 @@
         <span :style="contextMenuPosition" />
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'" command="newChat">
+            <el-dropdown-item
+              v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'"
+              command="newChat"
+            >
               <el-icon><Plus /></el-icon>{{ $t('chat.sidebar.newChat') }}
             </el-dropdown-item>
-            <el-dropdown-item v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'" command="newFolder">
+            <el-dropdown-item
+              v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'"
+              command="newFolder"
+            >
               <el-icon><FolderAdd /></el-icon>{{ $t('chat.sidebar.newFolder') }}
             </el-dropdown-item>
 
             <template v-if="contextMenuItem">
-              <el-dropdown-item command="rename" :divided="contextMenuItem.itemType === 'folder'"><el-icon><EditPen /></el-icon>{{ $t('chat.sidebar.rename') }}</el-dropdown-item>
-              <el-dropdown-item v-if="contextMenuItem.itemType === 'chat'" command="duplicate"><el-icon><CopyDocument /></el-icon>{{ $t('chat.sidebar.duplicate') }}</el-dropdown-item>
-              <el-dropdown-item command="delete" class="delete-item"><el-icon><Delete /></el-icon>{{ $t('chat.sidebar.delete') }}</el-dropdown-item>
+              <el-dropdown-item command="rename" :divided="contextMenuItem.itemType === 'folder'"
+                ><el-icon><EditPen /></el-icon>{{ $t('chat.sidebar.rename') }}</el-dropdown-item
+              >
+              <el-dropdown-item v-if="contextMenuItem.itemType === 'chat'" command="duplicate"
+                ><el-icon><CopyDocument /></el-icon
+                >{{ $t('chat.sidebar.duplicate') }}</el-dropdown-item
+              >
+              <el-dropdown-item command="delete" class="delete-item"
+                ><el-icon><Delete /></el-icon>{{ $t('chat.sidebar.delete') }}</el-dropdown-item
+              >
             </template>
 
-            <el-dropdown-item command="search" :divided="true"><el-icon><Search /></el-icon>{{ $t('chat.sidebar.search') }}</el-dropdown-item>
+            <el-dropdown-item command="search" :divided="true"
+              ><el-icon><Search /></el-icon>{{ $t('chat.sidebar.search') }}</el-dropdown-item
+            >
           </el-dropdown-menu>
         </template>
       </el-dropdown>
@@ -80,7 +95,7 @@
     <el-divider />
 
     <!-- 底部按钮：在 tree 显示时靠右，在 header 显示时居中 -->
-    <div class="footer" :class="{ 'collapsed': !showTree }">
+    <div class="footer" :class="{ collapsed: !showTree }">
       <el-tooltip v-if="!showTree" :content="$t('settings.tabs.globalSettings')" placement="right">
         <el-button :icon="Setting" circle @click="goToSettings" />
       </el-tooltip>
@@ -211,7 +226,7 @@ const {
       case 'newChat':
         return {
           title: t('chat.sidebar.newChat'),
-          initialName: t('chat.sidebar.newChat'),
+          initialName: t('chat.sidebar.initChatName'),
           selectConfig: {
             label: t('chat.settings.model'),
             options: modelOptions.value,
@@ -221,7 +236,7 @@ const {
       case 'newFolder':
         return {
           title: t('chat.sidebar.newFolder'),
-          initialName: t('chat.sidebar.newFolder'),
+          initialName: t('chat.sidebar.initFolderName'),
         };
       default:
         return { title: '', initialName: '' };

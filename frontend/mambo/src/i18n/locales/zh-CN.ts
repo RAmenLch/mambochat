@@ -261,7 +261,9 @@ export default {
     sidebar: {
       title: '会话列表',
       newChat: '新建会话',
+      initChatName:'新的会话',
       newFolder: '新建文件夹',
+      initFolderName :'新的文件夹',
       rename: '重命名',
       duplicate: '复制会话',
       delete: '删除',
