@@ -410,40 +410,60 @@ function handleEditRequest(subMessage: SubMessage, payload: { content: string; b
   editDialogVisible.value = true;
 }
 
-function replaceNthOccurrence(str: string, find: string, replace: string, n: number): string {
-  let i = -1;
-  while (n-- > 0) {
-    i = str.indexOf(find, i + 1);
-    if (i < 0) return str;
-  }
-  return str.substring(0, i) + replace + str.substring(i + find.length);
-}
-
 function getUpdatedFullContent(newPartialContent: string): string {
   if (!editingSubMessage.value) return '';
 
   const fullOriginalContent = editingSubMessage.value.content;
-  const partialOriginalContent = originalEditingContent.value;
   const blockIndex = editingBlockIndex.value;
 
-  if (blockIndex === null || partialOriginalContent === fullOriginalContent) {
+  // 1. 全量编辑（编辑普通消息）：直接返回新内容
+  if (blockIndex === null || blockIndex === undefined) {
     return newPartialContent;
   }
 
+  // 2. 局部编辑（代码块）：解析并定位
   const originalBlocks = parseMarkdown(fullOriginalContent);
-  let occurrence = 0;
-  if (blockIndex < originalBlocks.length && originalBlocks[blockIndex].content === partialOriginalContent) {
-    for (let i = 0; i < blockIndex; i++) {
-      if (originalBlocks[i].content === partialOriginalContent) {
-        occurrence++;
-      }
-    }
-  } else {
-    // Fallback if blockIndex doesn't match or partialOriginalContent isn't found in blocks
-    return fullOriginalContent.replace(partialOriginalContent, newPartialContent);
+
+  if (blockIndex >= originalBlocks.length) {
+    console.warn('Block index out of bounds, falling back to full replacement');
+    return fullOriginalContent;
   }
 
-  return replaceNthOccurrence(fullOriginalContent, partialOriginalContent, newPartialContent, occurrence + 1);
+  const targetBlock = originalBlocks[blockIndex];
+
+  if (targetBlock && targetBlock.type === 'code') {
+    // 计算代码块的相对序号
+    let targetCodeIdx = 0;
+    for (let i = 0; i < blockIndex; i++) {
+      if (originalBlocks[i].type === 'code') targetCodeIdx++;
+    }
+
+    /**
+     * 正则优化说明：
+     * Group 1 (p1): 前导字符
+     * Group 2 (p2): 开始围栏 (``` 或 ~~~)
+     * Group 3 (p3): 语言标识
+     * Group 4 (p4): 围栏后的换行
+     * Group 5 (p5): 内容
+     * Group 6 (p6): **关键修改** -> (\n?) 尾部换行改为可选，以匹配空代码块 ` ```\n``` `
+     * Group 7 (p7): 结束围栏
+     */
+    const fenceRegex = /(^|\n)(`{3,}|~{3,})([^\n]*)(\n)([\s\S]*?)(\n?)(\2)(?=\n|$)/g;
+
+    let matchCount = 0;
+    return fullOriginalContent.replace(fenceRegex, (match, p1, p2, p3, p4, p5, p6, p7) => {
+      if (matchCount === targetCodeIdx) {
+        matchCount++;
+        // 重组内容：显式添加 \n (替代 p6)，确保结构总是规范的 (围栏+内容+换行+围栏)
+        // 这样即使原代码块是空的 ` ```\n``` `，编辑后也会变成 ` ```\n新内容\n``` `
+        return `${p1}${p2}${p3}${p4}${newPartialContent}\n${p7}`;
+      }
+      matchCount++;
+      return match;
+    });
+  }
+
+  return newPartialContent;
 }
 
 function handleSaveEdit(newContent: string) {

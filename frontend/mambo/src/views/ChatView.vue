@@ -1,62 +1,61 @@
 <!-- frontend/mambo/src/views/ChatView.vue -->
 <template>
-  <el-container class="chat-view-container">
+  <!-- 移动端视图 -->
+  <MobileChatView v-if="isMobile" />
+
+  <!-- 桌面端视图 (原有逻辑) -->
+  <el-container v-else class="chat-view-container">
     <el-aside :width="`${asideWidth}px`" class="chat-sidebar">
-      <!-- 变更点：传入 width 属性 -->
-      <ChatList
-        :is-collapsed="isSidebarCollapsed"
-        :width="asideWidth"
-        @expand="expand"
-      />
+      <ChatList :is-collapsed="isSidebarCollapsed" :width="asideWidth" @expand="expand" />
     </el-aside>
 
     <div class="resizer" @mousedown.prevent="startResize"></div>
 
     <el-main class="chat-main">
-      <ChatWindow
-        :is-sidebar-collapsed="isSidebarCollapsed"
-      />
+      <ChatWindow :is-sidebar-collapsed="isSidebarCollapsed" />
     </el-main>
   </el-container>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue';
-import ChatList from '@/components/chat/ChatList.vue';
-import ChatWindow from '@/components/chat/ChatWindow.vue';
-import { useResizablePanels } from '@/composables/useResizablePanels';
+import { ref, watch, defineAsyncComponent } from 'vue'
+import ChatList from '@/components/chat/ChatList.vue'
+import ChatWindow from '@/components/chat/ChatWindow.vue'
+import { useResizablePanels } from '@/composables/useResizablePanels'
+import { useIsMobile } from '@/composables/useIsMobile'
 
-// --- Constants for Persistence ---
-const SIDEBAR_WIDTH_KEY = 'mambo_sidebar_width';
-const SIDEBAR_COLLAPSED_KEY = 'mambo_sidebar_collapsed';
+// 异步加载移动端组件，避免在桌面端加载不必要的代码
+const MobileChatView = defineAsyncComponent(() => import('@/mobile/views/ChatView.vue'))
 
-// --- State Initialization ---
-const savedWidth = localStorage.getItem(SIDEBAR_WIDTH_KEY);
-// 如果上次是折叠状态，恢复时宽度设为 60 (collapsedWidth)，否则设为保存值或默认 260
-// 注意：这里需要根据保存的 collapsed 状态来决定初始 width，防止逻辑冲突
-const savedCollapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
-const initialWidth = savedWidth ? parseInt(savedWidth, 10) : (savedCollapsed ? 60 : 260);
+// --- Mobile Detection ---
+const { isMobile } = useIsMobile()
 
-const asideWidth = ref(initialWidth);
-const isSidebarCollapsed = ref(savedCollapsed);
+// --- Desktop Logic (Keep existing logic) ---
+const SIDEBAR_WIDTH_KEY = 'mambo_sidebar_width'
+const SIDEBAR_COLLAPSED_KEY = 'mambo_sidebar_collapsed'
 
-// --- Responsive Panel Logic ---
+const savedWidth = localStorage.getItem(SIDEBAR_WIDTH_KEY)
+const savedCollapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true'
+const initialWidth = savedWidth ? parseInt(savedWidth, 10) : savedCollapsed ? 60 : 260
+
+const asideWidth = ref(initialWidth)
+const isSidebarCollapsed = ref(savedCollapsed)
+
 const { startResize, expand } = useResizablePanels(asideWidth, isSidebarCollapsed, {
-  min: 180, // 正常列表的最小舒适宽度
+  min: 180,
   max: 500,
-  snapThreshold: 150, // 拖过这里松手就会折叠
+  snapThreshold: 150,
   collapsedWidth: 60,
-  orientation: 'horizontal'
-});
+  orientation: 'horizontal',
+})
 
-// --- Persistence Watchers ---
 watch(asideWidth, (newWidth) => {
-  localStorage.setItem(SIDEBAR_WIDTH_KEY, newWidth.toString());
-});
+  localStorage.setItem(SIDEBAR_WIDTH_KEY, newWidth.toString())
+})
 
 watch(isSidebarCollapsed, (isCollapsed) => {
-  localStorage.setItem(SIDEBAR_COLLAPSED_KEY, isCollapsed.toString());
-});
+  localStorage.setItem(SIDEBAR_COLLAPSED_KEY, isCollapsed.toString())
+})
 </script>
 
 <style scoped>

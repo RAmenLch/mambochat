@@ -45,6 +45,8 @@ export default {
       deleteSuccess: 'Deleted successfully',
       duplicateSuccess: 'Duplicated successfully',
       createSuccess: 'Created successfully',
+      moveSuccess: 'Moved successfully',
+      updateSuccess: 'Updated successfully',
     },
     error: {
       unknown: 'An unknown error occurred',
@@ -274,6 +276,12 @@ export default {
       delete: 'Delete',
       search: 'Search',
       deleteConfirm: 'Are you sure you want to delete this item?',
+      move: 'Move To',
+    },
+    move: {
+      title: 'Move to Folder',
+      rootFolder: 'Root Directory',
+      noFolder: 'No available folders',
     },
     header: {
       expand: 'Expand Sidebar',

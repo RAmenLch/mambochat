@@ -6,6 +6,7 @@
     @dragover.prevent
     @drop.prevent="handleContainerDrop"
   >
+    <!-- ... 头部内容保持不变 ... -->
     <div class="explorer-tree-header" v-if="$slots.header">
       <slot name="header"></slot>
     </div>
@@ -58,6 +59,11 @@
               </el-tooltip>
             </slot>
 
+            <!-- 【新增】后缀插槽，用于放置移动端的菜单按钮或其他操作 -->
+            <span class="node-suffix-wrapper" v-if="$slots['item-suffix']">
+              <slot name="item-suffix" :node="node" :data="data"></slot>
+            </span>
+
             <el-icon v-if="loadingNodes.has(data.id)" class="is-loading loading-icon">
               <Loading />
             </el-icon>
@@ -70,6 +76,7 @@
 </template>
 
 <script setup lang="ts">
+// ... 脚本部分保持不变，无需修改 ...
 import { ref, watch, nextTick, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElTree, ElMessage } from 'element-plus'
@@ -392,6 +399,13 @@ defineExpose({ scrollToKey })
   min-width: 0;
   margin-right: 8px;
 }
+/* 【新增】后缀容器样式 */
+.node-suffix-wrapper {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+}
+
 .loading-icon {
   animation: rotating 2s linear infinite;
   color: var(--el-text-color-secondary);
