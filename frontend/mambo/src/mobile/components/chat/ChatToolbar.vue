@@ -193,9 +193,11 @@ function handleJumpToMessage(messageId: string) {
 .model-display {
   display: flex;
   align-items: center;
-  font-size: 14px;
+  /* 修改点1: 缩小字体以容纳更多内容 */
+  font-size: 12px;
   color: var(--el-text-color-regular);
-  margin-right: 4px;
+  /* 修改点2: 移除多余的右边距，由父容器的 gap 统一控制 */
+  /* margin-right: 4px; */
 }
 
 .model-display .el-icon {
@@ -208,7 +210,8 @@ function handleJumpToMessage(messageId: string) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 100px;
+  /* 修改点3: 增加最大宽度，从 100px 增加到 130px */
+  max-width: 130px;
 }
 
 .zip-trigger-btn {
