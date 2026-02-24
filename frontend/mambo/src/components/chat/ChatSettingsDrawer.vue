@@ -342,6 +342,7 @@ watch(() => chatSettingsForm.aiModelId, (newModelId) => {
   const keysToKeep = new Set<string>();
   keysToKeep.add('max_context_messages');
   keysToKeep.add('stream');
+  keysToKeep.add('enable_suggest');
 
   if (systemConfigStore.llmParameters) {
     systemConfigStore.llmParameters.forEach(paramDef => {
