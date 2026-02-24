@@ -58,7 +58,8 @@
                 @dragend="handleDragEnd"
                 @close="handleRemoveMountedResource(resource.id)"
               >
-                <el-tooltip placement="top" effect="dark" :show-after="300">
+                <!-- 优化：使用 popper-class 控制宽度，使用插槽控制内容格式 -->
+                <el-tooltip placement="top" effect="dark" :show-after="300" popper-class="resource-preview-tooltip">
                   <template #content>
                     <div class="resource-content-preview">
                       {{ resource.latest_version?.content || '' }}
@@ -541,15 +542,42 @@ function handleSaveSettings() {
 .list-leave-active {
   position: absolute;
 }
+</style>
 
+<!-- 非 Scoped 样式，用于控制 Teleport 到 body 的 Tooltip 内容 -->
+<style>
+/* 设置 Tooltip 气泡的最大宽度 */
+.resource-preview-tooltip {
+  max-width: 60vw !important;
+}
+
+/* 预览内容区域样式 */
 .resource-content-preview {
   white-space: pre-wrap;       /* 保留换行和缩进 */
   word-break: break-word;      /* 防止长单词溢出 */
-  font-family: monospace;      /* 等宽字体，更适合看代码/模板 */
+  font-family: monospace;      /* 等宽字体 */
   font-size: 12px;
   line-height: 1.5;
-  max-width: 400px;            /* 限制最大宽度，避免撑爆屏幕 */
-  max-height: 300px;           /* 限制最大高度 */
-  overflow-y: auto;            /* 内容过长时允许滚动 */
+  max-height: 400px;           /* 限制最大高度 */
+  overflow-y: auto;            /* 超出滚动 */
+  padding-right: 5px;          /* 留出滚动条空间 */
+}
+
+/* 自定义滚动条样式 (适配 Dark 主题背景) */
+.resource-content-preview::-webkit-scrollbar {
+  width: 4px;
+}
+
+.resource-content-preview::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+}
+
+.resource-content-preview::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.4);
+}
+
+.resource-content-preview::-webkit-scrollbar-track {
+  background: transparent;
 }
 </style>
