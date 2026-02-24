@@ -1,11 +1,12 @@
 // frontend/mambo/src/stores/chatSessionStore.ts
 
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { getChatWithMessages } from '@/api/chatService';
+import { getResourceDetails } from '@/api/resourceService';
 import { useChatListStore } from './chatListStore';
 import { useChatInteractionStore } from './chatInteractionStore';
-import type { Chat, Message, SubMessage } from '@/api/types';
+import type { Chat, Message, SubMessage, Resource, ResourceWithVersions } from '@/api/types';
 import type { StreamedChunk } from '@/services/sseService';
 
 export const LAST_ACTIVE_CHAT_KEY = 'mambo_last_active_chat_id';
@@ -22,6 +23,11 @@ export const useChatSessionStore = defineStore('chatSession', () => {
   const isChatHistoryLoading = ref(false);
   const activeSubscriptions = new Map<string, AbortController>();
   const searchTargetSubMessageId = ref<string | null>(null);
+
+  // 存储系统提示词挂载的资源详情
+  // 虽然 getResourceDetails 返回 ResourceWithVersions，但这里只需要 Resource 的基础字段即可
+  // ResourceWithVersions extends Resource，所以赋值是兼容的
+  const systemPromptResources = ref<Resource[]>([]);
 
   // --- Getters ---
 
@@ -45,12 +51,17 @@ export const useChatSessionStore = defineStore('chatSession', () => {
 
   /**
    * 为 Token 估算器提供上下文。
-   * 包含系统提示和经过`context_participation_length`规则筛选的最近消息历史。
+   * 包含系统提示、挂载的系统资源内容、和经过`context_participation_length`规则筛选的最近消息历史。
    */
   const contextForTokenEstimation = computed((): string => {
     const chat = currentChat.value;
     if (!chat) return '';
     const systemPrompt = chat.systemPrompt || '';
+
+    // 提取挂载资源的内容
+    const systemResourceContent = systemPromptResources.value
+      .map(r => r.latest_version?.content || '')
+      .join('\n');
 
     let anchorIndex = -1;
     let anchorContent = '';
@@ -116,7 +127,7 @@ export const useChatSessionStore = defineStore('chatSession', () => {
 
 
     // 组装最终上下文
-    const parts = [systemPrompt];
+    const parts = [systemPrompt, systemResourceContent];
     if (anchorIndex !== -1) {
       parts.push(anchorContent);
     }
@@ -124,6 +135,40 @@ export const useChatSessionStore = defineStore('chatSession', () => {
 
     return parts.filter(Boolean).join('\n');
   });
+
+  // --- Watchers ---
+
+  // 监听当前会话的 resource_prompt_list 变化，自动拉取资源详情
+  watch(
+    () => currentChat.value?.resource_prompt_list,
+    async (newResourceIds, oldResourceIds) => {
+      // 简单的比较，避免不必要的请求（如果ID列表完全一致）
+      if (JSON.stringify(newResourceIds) === JSON.stringify(oldResourceIds)) {
+        return;
+      }
+
+      if (!newResourceIds || newResourceIds.length === 0) {
+        systemPromptResources.value = [];
+        return;
+      }
+
+      try {
+        const promises = newResourceIds.map(id => getResourceDetails(id));
+        const results = await Promise.all(promises);
+
+        // 按照 ID 列表的顺序排列结果，并过滤掉加载失败的项
+        // 使用 ResourceWithVersions 作为类型谓词，因为 results 是 ResourceWithVersions[]
+        // ResourceWithVersions 是 Resource 的子类型，所以结果数组可以赋值给 Ref<Resource[]>
+        systemPromptResources.value = newResourceIds
+          .map(id => results.find(r => r.id === id))
+          .filter((r): r is ResourceWithVersions => !!r);
+      } catch (error) {
+        console.error('Failed to fetch system prompt resources for token estimation:', error);
+        systemPromptResources.value = [];
+      }
+    },
+    { immediate: true }
+  );
 
   // --- Actions ---
 
@@ -157,6 +202,10 @@ export const useChatSessionStore = defineStore('chatSession', () => {
     currentChatId.value = chatId;
     isChatHistoryLoading.value = true;
     currentChatMessages.value = [];
+
+    // 切换会话时，重置挂载资源状态（Watcher 会负责加载新的）
+    systemPromptResources.value = [];
+
     try {
       const chatWithMessages = await getChatWithMessages(chatId);
       // 更新chatListStore中的会话数据，以同步最新信息
@@ -190,6 +239,7 @@ export const useChatSessionStore = defineStore('chatSession', () => {
     currentChatMessages.value = [];
     isChatHistoryLoading.value = false;
     searchTargetSubMessageId.value = null;
+    systemPromptResources.value = [];
     _clearAllSubscriptions();
   }
 
