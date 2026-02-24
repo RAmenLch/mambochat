@@ -42,8 +42,12 @@
         @drop.stop="handleDrop(index)"
         @dragend="handleDragEnd"
         @close="$emit('remove-resource', resource.id)"
-      >
-        <el-tooltip :content="resource.latest_version?.content || ''" placement="top">
+      ><el-tooltip placement="top" effect="dark" :show-after="300">
+          <template #content>
+            <div class="resource-content-preview">
+              {{ resource.latest_version?.content || '' }}
+            </div>
+          </template>
           <span>{{ resource.name }}</span>
         </el-tooltip>
       </el-tag>
@@ -124,7 +128,6 @@ const handleDragStart = (index: number, event: DragEvent) => {
   draggedIndex.value = index;
   if (event.dataTransfer) {
     event.dataTransfer.effectAllowed = 'move';
-    // Set a custom type or plain text to avoid triggering file upload zones in parent components
     event.dataTransfer.setData('text/plain', index.toString());
   }
 };
@@ -156,7 +159,7 @@ const handleDragEnd = () => {
 <style scoped>
 .attachment-preview-wrapper {
   background-color: var(--color-background-soft);
-  padding-bottom: 8px; /* Provide spacing when attachments are visible */
+  padding-bottom: 8px;
 }
 
 .attached-kb-preview,
@@ -210,7 +213,7 @@ const handleDragEnd = () => {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  max-height: 100px; /* Example max height */
+  max-height: 100px;
   overflow-y: auto;
 }
 .file-item {
@@ -258,5 +261,16 @@ const handleDragEnd = () => {
 .remove-file-btn:hover {
   --el-button-text-color: var(--el-color-danger);
   background-color: transparent;
+}
+
+.resource-content-preview {
+  white-space: pre-wrap; /* 保留换行和缩进 */
+  word-break: break-word; /* 防止长单词溢出 */
+  font-family: monospace; /* 等宽字体，更适合看代码/模板 */
+  font-size: 12px;
+  line-height: 1.5;
+  max-width: 400px; /* 限制最大宽度，避免撑爆屏幕 */
+  max-height: 300px; /* 限制最大高度 */
+  overflow-y: auto; /* 内容过长时允许滚动 */
 }
 </style>
