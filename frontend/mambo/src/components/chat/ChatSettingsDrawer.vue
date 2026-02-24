@@ -36,39 +36,9 @@
             :placeholder="$t('chat.settings.systemPromptPlaceholder')"
           />
 
-          <!-- 挂载资源预览区 (支持拖拽排序) -->
+          <!-- 挂载资源预览区 -->
           <div v-if="mountedSystemResources.length > 0" class="mounted-resources-wrapper">
-            <transition-group
-              name="list"
-              tag="div"
-              class="mounted-resources-area"
-            >
-              <el-tag
-                v-for="(resource, index) in mountedSystemResources"
-                :key="resource.id"
-                closable
-                disable-transitions
-                type="info"
-                class="draggable-tag"
-                :class="{ 'is-dragging': draggedIndex === index }"
-                draggable="true"
-                @dragstart.stop="handleDragStart(index, $event)"
-                @dragover.prevent.stop="handleDragOver($event)"
-                @drop.stop="handleDrop(index)"
-                @dragend="handleDragEnd"
-                @close="handleRemoveMountedResource(resource.id)"
-              >
-                <!-- 优化：使用 popper-class 控制宽度，使用插槽控制内容格式 -->
-                <el-tooltip placement="top" effect="dark" :show-after="300" popper-class="resource-preview-tooltip">
-                  <template #content>
-                    <div class="resource-content-preview">
-                      {{ resource.latest_version?.content || '' }}
-                    </div>
-                  </template>
-                  <span>{{ resource.name }}</span>
-                </el-tooltip>
-              </el-tag>
-            </transition-group>
+            <MountedResourceTags v-model="mountedSystemResources" />
           </div>
         </el-form-item>
         <el-divider>{{ $t('chat.settings.modelParams') }}</el-divider>
@@ -180,6 +150,7 @@ import { useProviderStore } from '@/stores/providerStore';
 import { getResourceDetails } from '@/api/resourceService';
 import type { Chat, ChatUpdate, AIModel, Resource, LLMParameterDefinition } from '@/api/types';
 import ResourceSelectorDialog from './dialogs/ResourceSelectorDialog.vue';
+import MountedResourceTags from '@/components/common/MountedResourceTags.vue';
 
 interface GroupedModels {
   label: string;
@@ -232,9 +203,6 @@ const chatSettingsForm = reactive<ChatSettingsForm>({
 
 // --- Mounted Resources State ---
 const mountedSystemResources = ref<Resource[]>([]);
-
-// --- Drag and Drop State ---
-const draggedIndex = ref<number | null>(null);
 
 // --- Methods ---
 
@@ -324,7 +292,6 @@ watch(chatConfigSnapshot, async (newConfig, oldConfig) => {
           const orderedResults = newConfig.resource_prompt_list
             .map(id => results.find(r => r.id === id))
             .filter((r) => !!r) as Resource[];
-
           mountedSystemResources.value = orderedResults;
         } catch (error) {
           console.error('Failed to load mounted resources:', error);
@@ -372,38 +339,6 @@ watch(() => chatSettingsForm.aiModelId, (newModelId) => {
   chatSettingsForm.modelParameters = newParams;
 });
 
-// --- Drag and Drop Logic ---
-const handleDragStart = (index: number, event: DragEvent) => {
-  draggedIndex.value = index;
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/plain', index.toString());
-  }
-};
-
-const handleDragOver = (event: DragEvent) => {
-  if (event.dataTransfer) {
-    event.dataTransfer.dropEffect = 'move';
-  }
-};
-
-const handleDrop = (targetIndex: number) => {
-  if (draggedIndex.value === null || draggedIndex.value === targetIndex) {
-    return;
-  }
-
-  const newResources = [...mountedSystemResources.value];
-  const [draggedItem] = newResources.splice(draggedIndex.value, 1);
-  newResources.splice(targetIndex, 0, draggedItem);
-
-  mountedSystemResources.value = newResources;
-  draggedIndex.value = null;
-};
-
-const handleDragEnd = () => {
-  draggedIndex.value = null;
-};
-
 function getSliderStep(min: number, max: number): number {
   const range = max - min;
   if (range <= 2) return 0.01;
@@ -431,13 +366,6 @@ function handleMountResources(resources: Resource[]) {
       mountedSystemResources.value.push(resource);
     }
   });
-}
-
-function handleRemoveMountedResource(resourceId: string) {
-  const index = mountedSystemResources.value.findIndex(r => r.id === resourceId);
-  if (index !== -1) {
-    mountedSystemResources.value.splice(index, 1);
-  }
 }
 
 function handleSaveSettings() {
@@ -510,74 +438,5 @@ function handleSaveSettings() {
   background-color: var(--color-background-soft);
   padding: 4px;
   border-radius: 4px;
-}
-
-.mounted-resources-area {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.draggable-tag {
-  cursor: grab;
-  transition: all 0.3s ease;
-}
-
-.draggable-tag:active {
-  cursor: grabbing;
-}
-
-.draggable-tag.is-dragging {
-  opacity: 0.3;
-  background-color: var(--el-color-info-light-8);
-  border-style: dashed;
-}
-
-.list-move,
-.list-enter-active,
-.list-leave-active {
-  transition: all 0.3s ease;
-}
-
-.list-leave-active {
-  position: absolute;
-}
-</style>
-
-<!-- 非 Scoped 样式，用于控制 Teleport 到 body 的 Tooltip 内容 -->
-<style>
-/* 设置 Tooltip 气泡的最大宽度 */
-.resource-preview-tooltip {
-  max-width: 60vw !important;
-}
-
-/* 预览内容区域样式 */
-.resource-content-preview {
-  white-space: pre-wrap;       /* 保留换行和缩进 */
-  word-break: break-word;      /* 防止长单词溢出 */
-  font-family: monospace;      /* 等宽字体 */
-  font-size: 12px;
-  line-height: 1.5;
-  max-height: 400px;           /* 限制最大高度 */
-  overflow-y: auto;            /* 超出滚动 */
-  padding-right: 5px;          /* 留出滚动条空间 */
-}
-
-/* 自定义滚动条样式 (适配 Dark 主题背景) */
-.resource-content-preview::-webkit-scrollbar {
-  width: 4px;
-}
-
-.resource-content-preview::-webkit-scrollbar-thumb {
-  background-color: rgba(255, 255, 255, 0.2);
-  border-radius: 2px;
-}
-
-.resource-content-preview::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(255, 255, 255, 0.4);
-}
-
-.resource-content-preview::-webkit-scrollbar-track {
-  background: transparent;
 }
 </style>

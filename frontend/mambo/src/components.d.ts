@@ -80,6 +80,7 @@ declare module 'vue' {
     MessageItem: typeof import('./components/chat/MessageItem.vue')['default']
     ModelFormDialog: typeof import('./components/settings/dialogs/ModelFormDialog.vue')['default']
     MonacoEditor: typeof import('./components/common/MonacoEditor.vue')['default']
+    MountedResourceTags: typeof import('./components/common/MountedResourceTags.vue')['default']
     MultiPartInput: typeof import('./components/chat/MultiPartInput.vue')['default']
     ProviderFormDialog: typeof import('./components/settings/dialogs/ProviderFormDialog.vue')['default']
     ProviderModelManager: typeof import('./components/settings/ProviderModelManager.vue')['default']
