@@ -132,7 +132,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import type { Message, SubMessage, SubMessageCreate, MessageStatus } from '@/api/types'
@@ -156,7 +156,7 @@ import SubMessageItem from './SubMessageItem.vue'
 import ZipHistoryCard from './ZipHistoryCard.vue'
 import MessageEditDialog from '@/components/chat/dialogs/MessageEditDialog.vue'
 import { copyToClipboard } from '@/utils/clipboard'
-import { parseMarkdown } from '@/utils/markdownParser'
+import { parseMarkdown, type ParsedBlock } from '@/utils/markdownParser'
 
 const props = defineProps<{
   id?: string
@@ -274,63 +274,77 @@ const avatarUrl = computed(() => {
 const editDialogVisible = ref(false)
 const editingSubMessage = ref<SubMessage | null>(null)
 const originalEditingContent = ref('')
-const editingBlockIndex = ref<number | null>(null)
 
+// 适配电脑版：增加 range, markup, language 状态
+const editingRange = ref<{ start: number; end: number } | null>(null)
+const editingMarkup = ref('```')
+const editingLanguage = ref('')
+
+// 监听弹窗关闭，清理状态
+watch(editDialogVisible, (newValue) => {
+  if (!newValue) {
+    editingSubMessage.value = null
+    originalEditingContent.value = ''
+    editingRange.value = null
+    editingMarkup.value = '```'
+    editingLanguage.value = ''
+  }
+})
+
+// 适配电脑版：处理 SubMessageItem 传递的 edit payload
 function handleEditRequest(
   subMessage: SubMessage,
-  payload: { content: string; blockIndex?: number },
+  payload: { content: string; range?: ParsedBlock['range']; language?: string; markup?: string },
 ) {
   editingSubMessage.value = subMessage
   originalEditingContent.value = payload.content
-  editingBlockIndex.value = payload.blockIndex ?? null
+
+  if (payload.range) {
+    // 代码块局部编辑
+    editingRange.value = payload.range
+    editingMarkup.value = payload.markup || '```'
+    editingLanguage.value = payload.language || ''
+  } else {
+    // 全量编辑
+    editingRange.value = null
+    editingMarkup.value = '```'
+    editingLanguage.value = ''
+  }
+
   editDialogVisible.value = true
 }
 
 function handleEditFirst() {
   if (normalSubMessages.value.length > 0) {
+    // 全量编辑第一个子消息
     handleEditRequest(normalSubMessages.value[0], { content: normalSubMessages.value[0].content })
   }
 }
 
+// 适配电脑版：使用坐标进行精准替换
 function getUpdatedFullContent(newPartialContent: string): string {
   if (!editingSubMessage.value) return ''
 
   const fullOriginalContent = editingSubMessage.value.content
-  const blockIndex = editingBlockIndex.value
 
-  if (blockIndex === null || blockIndex === undefined) {
+  // 1. 全量编辑：直接返回新内容
+  if (!editingRange.value) {
     return newPartialContent
   }
 
-  const originalBlocks = parseMarkdown(fullOriginalContent)
+  // 2. 代码块局部编辑：基于坐标进行字符串切片替换
+  const { start, end } = editingRange.value
 
-  if (blockIndex >= originalBlocks.length) {
-    console.warn('Block index out of bounds, falling back to full replacement')
-    return fullOriginalContent
-  }
+  // 构造新的代码块字符串
+  // 格式：Fence + Lang + \n + Content + \n + Fence
+  const fence = editingMarkup.value
+  const lang = editingLanguage.value
+  const newBlockString = `${fence}${lang}\n${newPartialContent}\n${fence}`
 
-  const targetBlock = originalBlocks[blockIndex]
-
-  if (targetBlock && targetBlock.type === 'code') {
-    let targetCodeIdx = 0
-    for (let i = 0; i < blockIndex; i++) {
-      if (originalBlocks[i].type === 'code') targetCodeIdx++
-    }
-
-    const fenceRegex = /(^|\n)(`{3,}|~{3,})([^\n]*)(\n)([\s\S]*?)(\n?)(\2)(?=\n|$)/g
-
-    let matchCount = 0
-    return fullOriginalContent.replace(fenceRegex, (match, p1, p2, p3, p4, p5, p6, p7) => {
-      if (matchCount === targetCodeIdx) {
-        matchCount++
-        return `${p1}${p2}${p3}${p4}${newPartialContent}\n${p7}`
-      }
-      matchCount++
-      return match
-    })
-  }
-
-  return newPartialContent
+  // 拼接字符串
+  return (
+    fullOriginalContent.substring(0, start) + newBlockString + fullOriginalContent.substring(end)
+  )
 }
 
 function handleSaveEdit(newContent: string) {

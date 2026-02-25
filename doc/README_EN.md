@@ -1,6 +1,6 @@
 # ![mambo](img/logo_hajimi.svg) MamboChat
 
-![Version](https://img.shields.io/badge/version-1.1.0-blue)
+![Version](https://img.shields.io/badge/version-1.1.3-blue)
 ![License](https://img.shields.io/badge/license-GPLv3-green)
 ![Vue](https://img.shields.io/badge/frontend-Vue3%20%2B%20ElementPlus-42b883)
 ![FastAPI](https://img.shields.io/badge/backend-FastAPI%20%2B%20Python3.11-009688)

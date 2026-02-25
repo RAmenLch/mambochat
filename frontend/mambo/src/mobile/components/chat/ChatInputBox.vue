@@ -63,8 +63,10 @@ const handlePaste = (event: ClipboardEvent) => {
   }
 }
 
-const handleEnter = (event: KeyboardEvent) => {
-  if (event.ctrlKey) {
+// 修复: 适配 Element Plus 的事件类型定义
+const handleEnter = (event: Event | KeyboardEvent) => {
+  // 仅当是键盘事件且按下 Ctrl 键时触发
+  if (event instanceof KeyboardEvent && event.ctrlKey) {
     event.preventDefault()
     if (!props.isSendButtonDisabled && props.modelValue.trim()) {
       emit('send')

@@ -97,7 +97,9 @@
                 :code="block.content"
                 :language="block.language || 'Text'"
                 :is-generating="isGenerating"
-                @edit="(code) => handleCodeBlockEdit(code, idx)"
+                :range="block.range"
+                :markup="block.markup"
+                @edit="handleCodeBlockEdit"
                 @copy="handleBlockCopy"
               />
               <img
@@ -118,7 +120,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { SubMessage, Message, SubMessageConfig, McpToolContent } from '@/api/types'
+import type { SubMessage, Message, McpToolContent } from '@/api/types'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { ElMessage } from 'element-plus'
 import {
@@ -135,7 +137,7 @@ import {
 } from '@element-plus/icons-vue'
 import CodeBlock from '@/components/chat/CodeBlock.vue'
 import { copyToClipboard } from '@/utils/clipboard'
-import { parseMarkdown } from '@/utils/markdownParser'
+import { parseMarkdown, type ParsedBlock } from '@/utils/markdownParser'
 import { getIconForMimeType } from '@/utils/fileIcons'
 
 const { t } = useI18n()
@@ -155,8 +157,12 @@ const props = withDefaults(
   },
 )
 
+// 修复: 更新 emit 类型定义以适配电脑版变更 (range, language, markup 为可选)
 const emit = defineEmits<{
-  (e: 'edit', payload: { content: string; blockIndex?: number }): void
+  (
+    e: 'edit',
+    payload: { content: string; range?: ParsedBlock['range']; language?: string; markup?: string },
+  ): void
   (e: 'copy'): void
 }>()
 
@@ -229,10 +235,23 @@ watch(
 )
 
 function handleHeaderEditClick() {
+  // 全量编辑：只传递 content
   emit('edit', { content: props.subMessage.content })
 }
-function handleCodeBlockEdit(code: string, blockIndex: number) {
-  emit('edit', { content: code, blockIndex })
+
+// 修复: 接收 CodeBlock 传递的完整对象参数
+function handleCodeBlockEdit(payload: {
+  code: string
+  range: ParsedBlock['range']
+  language: string
+  markup: string
+}) {
+  emit('edit', {
+    content: payload.code,
+    range: payload.range,
+    language: payload.language,
+    markup: payload.markup,
+  })
 }
 
 function toggleCollapse() {
