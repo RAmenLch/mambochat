@@ -3,25 +3,37 @@
   <div class="mobile-attachment-preview">
     <!-- Knowledge Bases -->
     <div v-if="attachedKnowledgeBases.length > 0" class="preview-section">
-      <div class="preview-list horizontal">
-        <div v-for="kb in attachedKnowledgeBases" :key="kb.id" class="preview-tag kb">
+      <!-- 添加 scrollable 类 -->
+      <div class="preview-list horizontal scrollable">
+        <div
+          v-for="kb in attachedKnowledgeBases"
+          :key="kb.id"
+          class="preview-tag kb"
+          @click="handlePreviewKB(kb)"
+        >
           <el-icon class="tag-icon"><Search /></el-icon>
           <span class="tag-name">{{ kb.name }}</span>
-          <el-icon class="remove-icon" @click="$emit('remove-knowledge-base', kb.id)"
-            ><Close
-          /></el-icon>
+          <!-- 使用 .stop 防止点击关闭时触发预览 -->
+          <el-icon class="remove-icon" @click.stop="$emit('remove-knowledge-base', kb.id)">
+            <Close />
+          </el-icon>
         </div>
       </div>
     </div>
 
     <!-- Resources (Templates) -->
     <div v-if="attachedResources.length > 0" class="preview-section">
-      <div class="preview-list horizontal">
-        <div v-for="resource in attachedResources" :key="resource.id" class="preview-tag resource">
+      <div class="preview-list horizontal scrollable">
+        <div
+          v-for="resource in attachedResources"
+          :key="resource.id"
+          class="preview-tag resource"
+          @click="handlePreviewResource(resource)"
+        >
           <span class="tag-name">{{ resource.name }}</span>
-          <el-icon class="remove-icon" @click="$emit('remove-resource', resource.id)"
-            ><Close
-          /></el-icon>
+          <el-icon class="remove-icon" @click.stop="$emit('remove-resource', resource.id)">
+            <Close />
+          </el-icon>
         </div>
       </div>
     </div>
@@ -29,12 +41,14 @@
     <!-- Uploaded Files -->
     <div v-if="uploadedFiles.length > 0" class="preview-section">
       <div class="preview-list horizontal scrollable">
-        <div v-for="file in uploadedFiles" :key="file.id" class="file-card">
+        <div v-for="(file, index) in uploadedFiles" :key="file.id" class="file-card">
           <el-image
             v-if="file.mime_type.startsWith('image/')"
             :src="file.url"
             fit="cover"
             class="file-image"
+            :preview-src-list="imagePreviewList"
+            :initial-index="index"
           >
             <template #error>
               <div class="image-error">
@@ -42,8 +56,9 @@
               </div>
             </template>
           </el-image>
-          <div v-else class="file-icon-wrapper">
-            <el-icon class="file-icon"><Document /></el-icon>
+          <!-- 非图片文件点击显示信息 -->
+          <div v-else class="file-icon-wrapper" @click="handlePreviewFile(file)">
+             <el-icon class="file-icon"><Document /></el-icon>
           </div>
           <div class="file-info">
             <span class="file-name">{{ file.filename }}</span>
@@ -53,20 +68,37 @@
             :icon="Close"
             circle
             size="small"
-            @click="$emit('remove-file', file.id)"
+            @click.stop="$emit('remove-file', file.id)"
           />
         </div>
       </div>
     </div>
+
+    <!-- 通用预览弹窗 (用于资源/知识库/文件信息) -->
+    <el-dialog
+      v-model="previewVisible"
+      :title="previewTitle"
+      class="mobile-preview-dialog"
+      append-to-body
+      destroy-on-close
+    >
+      <el-scrollbar max-height="50vh">
+        <div class="preview-dialog-content">
+          <pre>{{ previewContent }}</pre>
+        </div>
+      </el-scrollbar>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
+import { ref, computed } from 'vue'
 import type { PropType } from 'vue'
 import type { FileResponse, Resource } from '@/api/types'
 import { Document, Picture, Close, Search } from '@element-plus/icons-vue'
 
-defineProps({
+// --- Props Definition ---
+const props = defineProps({
   uploadedFiles: {
     type: Array as PropType<FileResponse[]>,
     required: true,
@@ -81,11 +113,44 @@ defineProps({
   },
 })
 
+// --- Emits Definition ---
 defineEmits<{
   (e: 'remove-file', fileId: string): void
   (e: 'remove-resource', resourceId: string): void
   (e: 'remove-knowledge-base', resourceId: string): void
 }>()
+
+// --- Preview Logic ---
+const previewVisible = ref(false)
+const previewTitle = ref('')
+const previewContent = ref('')
+
+const handlePreviewResource = (resource: Resource) => {
+  previewTitle.value = resource.name
+  previewContent.value = resource.latest_version?.content || '无内容预览'
+  previewVisible.value = true
+}
+
+const handlePreviewKB = (kb: Resource) => {
+  previewTitle.value = kb.name
+  previewContent.value = kb.description || '暂无描述'
+  previewVisible.value = true
+}
+
+const handlePreviewFile = (file: FileResponse) => {
+  previewTitle.value = file.filename
+  previewContent.value = `文件类型: ${file.mime_type}\n文件大小: ${(file.size / 1024).toFixed(2)} KB`
+  previewVisible.value = true
+}
+
+// --- Image Preview Logic ---
+// 提取图片URL列表，供 el-image 组件使用，实现左右滑动预览
+const imagePreviewList = computed(() => {
+  return props.uploadedFiles
+    .filter(f => f.mime_type.startsWith('image/'))
+    .map(f => f.url)
+})
+
 </script>
 
 <style scoped>
@@ -93,7 +158,7 @@ defineEmits<{
   padding-top: 8px;
   padding-bottom: 4px;
   background-color: var(--color-background);
-  border-bottom: 1px solid var(--color-border-light);
+  border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
 .preview-section {
@@ -110,9 +175,20 @@ defineEmits<{
   gap: 8px;
 }
 
+/* 核心修改：开启横向滚动 */
 .preview-list.scrollable {
   overflow-x: auto;
-  padding-bottom: 4px; /* Space for scrollbar */
+  overflow-y: hidden;
+  white-space: nowrap;
+  -webkit-overflow-scrolling: touch; /* iOS 丝滑滚动 */
+  padding-bottom: 4px;
+  /* 隐藏滚动条，保持美观 */
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE 10+ */
+}
+
+.preview-list.scrollable::-webkit-scrollbar {
+  display: none; /* Chrome Safari */
 }
 
 .preview-tag {
@@ -121,8 +197,9 @@ defineEmits<{
   padding: 4px 8px;
   border-radius: 4px;
   font-size: 12px;
-  flex-shrink: 0;
+  flex-shrink: 0; /* 关键：防止标签被压缩 */
   position: relative;
+  cursor: pointer;
 }
 
 .preview-tag.kb {
@@ -166,8 +243,8 @@ defineEmits<{
   border-radius: 6px;
   overflow: hidden;
   background-color: var(--color-background-soft);
-  border: 1px solid var(--color-border-light);
-  flex-shrink: 0;
+  border: 1px solid var(--el-border-color-lighter);
+  flex-shrink: 0; /* 关键：防止卡片被压缩 */
   display: flex;
   flex-direction: column;
 }
@@ -192,6 +269,7 @@ defineEmits<{
   display: flex;
   justify-content: center;
   align-items: center;
+  cursor: pointer;
 }
 
 .file-icon {
@@ -230,5 +308,21 @@ defineEmits<{
 
 .remove-file-btn:active {
   background: rgba(0, 0, 0, 0.7);
+}
+
+/* 预览弹窗样式 */
+.preview-dialog-content {
+  padding: 10px;
+  font-size: 14px;
+  line-height: 1.6;
+  background-color: var(--color-background-soft);
+  border-radius: 4px;
+}
+
+.preview-dialog-content pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
 }
 </style>

@@ -137,10 +137,10 @@
       </el-tabs>
     </div>
 
-    <!-- Footer: Refactored to support Mount and Append options like Desktop -->
+    <!-- Footer -->
     <template #footer>
       <div class="drawer-footer-actions">
-        <!-- Append Button (Left/Full) -->
+        <!-- Append Button -->
         <el-button
           v-if="showAppendButton"
           type="primary"
@@ -152,7 +152,7 @@
           {{ $t('resource.action.append', { count: selectedResources.length }) }}
         </el-button>
 
-        <!-- Mount Button (Right/Full) -->
+        <!-- Mount Button -->
         <el-button
           v-if="showMountButton"
           :type="showAppendButton ? 'primary' : 'primary'"
@@ -161,6 +161,18 @@
           :style="{ width: showAppendButton ? '50%' : '100%' }"
         >
           {{ $t('resource.action.mount', { count: selectedResources.length }) }}
+        </el-button>
+
+        <!-- Mount Knowledge Base Search Button -->
+        <el-button
+          v-if="showKbSearchButton"
+          type="primary"
+          :icon="Search"
+          :disabled="selectedResources.length === 0"
+          @click="handleMountKnowledgeBase"
+          style="width: 100%"
+        >
+          {{ $t('resource.action.mountKbSearch') }}
         </el-button>
       </div>
     </template>
@@ -239,13 +251,10 @@ const treeProps = {
     (data as ResourceNode).itemType === 'stub' ? 'is-hidden-node' : '',
 }
 
-// --- Button Visibility Logic (Synced with Desktop) ---
+// --- Button Visibility Logic ---
 const showMountButton = computed(() => {
   if (selectedResources.value.length === 0) return false
-  // Settings mode usually is for System Prompt mounting
   if (props.source === 'settings') return true
-
-  // Toolbar: Allow mounting submessage_template and file
   return selectedResources.value.some(
     (r) => r.resourceType === 'submessage_template' || r.resourceType === 'file',
   )
@@ -254,14 +263,18 @@ const showMountButton = computed(() => {
 const showAppendButton = computed(() => {
   if (selectedResources.value.length === 0) return false
   if (props.source === 'settings') return false
-
-  // Toolbar: Allow appending system_prompt, submessage_template, and knowledge_base_chunk (from KB tab)
   return selectedResources.value.some(
     (r) =>
       r.resourceType === 'system_prompt' ||
       r.resourceType === 'submessage_template' ||
       r.resourceType === 'knowledge_base_chunk',
   )
+})
+
+const showKbSearchButton = computed(() => {
+  if (selectorMode.value !== 'resource') return false
+  if (selectedResources.value.length !== 1) return false
+  return selectedResources.value[0].resourceType === 'knowledge_base'
 })
 
 // --- Watchers ---
@@ -272,13 +285,15 @@ watch(
       resourceStore.initializeList()
       expandedKeys.value.clear()
       selectorMode.value = 'resource'
-      // Reset search state
       searchText.value = ''
       searchResult.value = []
       selectedResources.value = []
+      // FIX: 重置 selectionType，防止下次打开时因残留类型导致其他资源被禁用
+      selectionType.value = null
     } else {
-      // Cleanup on close
       selectedResources.value = []
+      // FIX: 关闭时也需要重置
+      selectionType.value = null
     }
   },
 )
@@ -451,14 +466,9 @@ const selectResourceById = async (
     }
   }
 
-  // --- FIX: Load details if content is missing (Critical for Append functionality) ---
-  // Tree nodes often lack 'latest_version.content'. We must fetch it.
-  // We fetch details for the selected resource regardless of whether it was just added or already existed.
   if (targetResource && !targetResource.latest_version?.content) {
     try {
       await resourceStore.fetchResourceDetails(resourceId)
-      // After fetching, the 'resources' ref in the store is updated.
-      // We need to update the object in our local 'selectedResources' array to reflect the new data.
       const updatedResource = resources.value.find((r) => r.id === resourceId)
       if (updatedResource) {
         const idx = selectedResources.value.findIndex((r) => r.id === resourceId)
@@ -510,14 +520,11 @@ const handleNodeExpand = (data: ResourceNode) => {
 // --- Tab & KB Logic ---
 
 const handleTabChange = () => {
-  // Clear selection when switching tabs to avoid confusion
   selectedResources.value = []
   selectionType.value = null
 }
 
-// Receive real-time selection changes from KB component
 const handleKBSelectionChange = (items: KBSearchResultItem[]) => {
-  // Convert KB chunks to Resource object structure
   const kbResources: Resource[] = items.map((item) => ({
     id: item.chunk_id,
     name: `Chunk: ${item.resource_name}`,
@@ -533,7 +540,7 @@ const handleKBSelectionChange = (items: KBSearchResultItem[]) => {
       resourceId: item.chunk_id,
       name: 'v1',
       commitMessage: null,
-      content: item.chunk_content, // Key: Content injected here
+      content: item.chunk_content,
       attributes: { score: item.score },
       sortOrder: 0,
       createdAt: new Date().toISOString(),
@@ -557,6 +564,12 @@ function handleMount() {
 function handleAppend() {
   if (selectedResources.value.length === 0) return
   emit('append-resources', selectedResources.value)
+  emit('update:visible', false)
+}
+
+function handleMountKnowledgeBase() {
+  if (selectedResources.value.length !== 1) return
+  emit('mount-knowledge-base', selectedResources.value[0])
   emit('update:visible', false)
 }
 
@@ -603,7 +616,6 @@ function handleDialogClose() {
   flex-direction: column;
 }
 
-/* Fix Element Plus Tabs height in flex container */
 :deep(.el-tabs__content) {
   flex: 1;
   overflow: hidden;
@@ -648,21 +660,19 @@ function handleDialogClose() {
   text-align: center;
 }
 
-/* 1. Style Fix: Ensure tree node content takes full height and centers properly */
 :deep(.el-tree-node__content) {
-  height: auto !important; /* Let content define height */
-  padding: 0 !important; /* Remove default padding, use inner node padding */
-  align-items: stretch; /* Stretch children to fill height */
+  height: auto !important;
+  padding: 0 !important;
+  align-items: stretch;
 }
 
-/* Tree Node Styles */
 .m-tree-node {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
   font-size: 15px;
-  padding: 12px 0; /* Increased padding for better spacing */
+  padding: 12px 0;
   border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
@@ -692,7 +702,6 @@ function handleDialogClose() {
   margin-right: 5px;
 }
 
-/* Search Item Styles */
 .m-search-item {
   display: flex;
   align-items: center;
@@ -746,7 +755,6 @@ function handleDialogClose() {
 }
 </style>
 <style>
-/* Global style to hide stub nodes if needed */
 .is-hidden-node {
   display: none !important;
 }
