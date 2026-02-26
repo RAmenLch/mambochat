@@ -101,7 +101,7 @@
   </div>
 
   <!-- 编辑弹窗 -->
-  <MessageEditDialog
+  <MobileMessageEditDialog
     v-model:visible="editDialogVisible"
     :initial-content="originalEditingContent"
     :is-user-message="message.role === 'user'"
@@ -123,9 +123,9 @@ import {
 } from '@element-plus/icons-vue'
 import SubMessageItem from './SubMessageItem.vue'
 import ZipHistoryCard from './ZipHistoryCard.vue'
-import MessageEditDialog from '@/components/chat/dialogs/MessageEditDialog.vue'
+import MobileMessageEditDialog from '@/mobile/components/chat/dialogs/MobileMessageEditDialog.vue'
 import { copyToClipboard } from '@/utils/clipboard'
-import { parseMarkdown, type ParsedBlock } from '@/utils/markdownParser'
+import { type ParsedBlock } from '@/utils/markdownParser'
 
 const props = defineProps<{
   id?: string
