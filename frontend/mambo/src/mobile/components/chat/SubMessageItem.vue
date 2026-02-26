@@ -377,11 +377,33 @@ async function handleBlockCopy(content: string) {
   margin: 10px 0;
   overflow-x: auto;
 }
+
+/* --- 表格样式修复开始 --- */
 .content-block :deep(table) {
-  display: block;
-  overflow-x: auto;
+  border-collapse: collapse; /* 关键：合并边框 */
   width: 100%;
+  margin: 1em 0;
+  display: block; /* 允许横向滚动 */
+  overflow-x: auto;
+  border-spacing: 0;
 }
+
+/* 单元格样式 */
+.content-block :deep(th),
+.content-block :deep(td) {
+  padding: 6px 10px; /* 移动端适宜的内边距 */
+  border: 1px solid var(--el-border-color); /* 关键：添加边框 */
+  text-align: left;
+}
+
+/* 表头样式 */
+.content-block :deep(th) {
+  background-color: var(--el-fill-color-light); /* 表头背景色 */
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+/* --- 表格样式修复结束 --- */
+
 .content-block :deep(blockquote) {
   margin: 10px 0;
   padding-left: 10px;
