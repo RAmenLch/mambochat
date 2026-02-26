@@ -95,7 +95,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, computed, onMounted, onUnmounted, reactive } from 'vue'
+import {
+  ref,
+  watch,
+  nextTick,
+  computed,
+  onMounted,
+  onUnmounted,
+  reactive,
+  type CSSProperties,
+} from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElScrollbar, ElMessage } from 'element-plus'
 import type { Ref } from 'vue'
@@ -169,7 +178,7 @@ const layoutStyle = reactive({
 })
 
 // 计算属性用于模板绑定
-const containerStyle = computed(() => ({
+const containerStyle = computed<CSSProperties>(() => ({
   position: 'fixed',
   top: layoutStyle.top,
   height: layoutStyle.height,
