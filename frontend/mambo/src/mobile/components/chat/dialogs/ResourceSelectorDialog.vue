@@ -95,6 +95,7 @@
                   :highlight-current="!isMultiSelectMode"
                   @node-click="handleNodeClick"
                   @node-expand="handleNodeExpand"
+                  @node-collapse="handleNodeCollapse"
                 >
                   <template #default="{ data }">
                     <div
@@ -515,6 +516,11 @@ const handleNodeExpand = (data: ResourceNode) => {
   if (data.itemType === 'folder') {
     resourceStore.fetchResourceChildren(data.id)
   }
+}
+
+// 【新增】处理目录折叠，从 expandedKeys 中移除该 ID
+const handleNodeCollapse = (data: ResourceNode) => {
+  expandedKeys.value.delete(data.id)
 }
 
 // --- Tab & KB Logic ---
