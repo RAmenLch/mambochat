@@ -34,10 +34,6 @@
             <el-dropdown-item command="newChat" :icon="Plus">{{
               $t('chat.sidebar.newChat')
             }}</el-dropdown-item>
-            <!-- 增加会话设置入口 -->
-            <el-dropdown-item command="chatSettings" :icon="Tools">{{
-              $t('chat.settings.title')
-            }}</el-dropdown-item>
             <el-dropdown-item command="refreshTitle" :icon="Refresh" divided>{{
               $t('chat.header.refreshTitle')
             }}</el-dropdown-item>
@@ -51,7 +47,7 @@
 <script setup lang="ts">
 import { ref, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Menu as MenuIcon, MoreFilled, Plus, Refresh, Tools } from '@element-plus/icons-vue'
+import { Menu as MenuIcon, MoreFilled, Plus, Refresh } from '@element-plus/icons-vue' // 移除了 Tools
 import type { Chat } from '@/api/types'
 import { useChatListStore } from '@/stores/chatListStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
@@ -62,7 +58,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'toggle-drawer'): void
-  (e: 'open-settings'): void // 新增事件定义
 }>()
 
 const { t } = useI18n()
@@ -99,8 +94,6 @@ async function handleCommand(command: string) {
     }
   } else if (command === 'refreshTitle' && props.currentChat) {
     chatListStore.refreshChatTitle(props.currentChat.id)
-  } else if (command === 'chatSettings') {
-    emit('open-settings') // 触发打开设置
   }
 }
 </script>

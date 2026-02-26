@@ -93,6 +93,9 @@
 
       <!-- Resource Selector -->
       <el-button :icon="Collection" circle size="small" @click="$emit('openResourceSelector')" />
+
+      <!-- 新增：Chat Settings -->
+      <el-button :icon="Tools" circle size="small" @click="$emit('openSettings')" />
     </div>
   </div>
 </template>
@@ -105,7 +108,8 @@ import { useProviderStore } from '@/stores/providerStore'
 import { useMcpStore } from '@/stores/mcpStore'
 import type { Chat, Message } from '@/api/types'
 import type { PropType } from 'vue'
-import { Cpu, Upload, Collection, Coin, Suitcase, Tickets } from '@element-plus/icons-vue'
+// 新增 Tools 图标导入
+import { Cpu, Upload, Collection, Coin, Suitcase, Tickets, Tools } from '@element-plus/icons-vue'
 
 const props = defineProps({
   currentChat: {
@@ -127,6 +131,7 @@ const emit = defineEmits([
   'openResourceSelector',
   'toggleMcpTool',
   'jumpToMessage',
+  'openSettings', // 新增事件
 ])
 
 const { t } = useI18n()
@@ -148,9 +153,6 @@ const isMcpToolEnabled = (mcpId: string): boolean => {
   return false
 }
 
-/**
- * 提取包含 ZipHistory 子消息的消息，用于渲染工具栏中的历史摘要列表。
- */
 const zipHistoryItems = computed(() => {
   const items: Array<{ messageId: string; index: number; isEnabled: boolean }> = []
 
@@ -174,6 +176,7 @@ function handleJumpToMessage(messageId: string) {
 </script>
 
 <style scoped>
+/* 样式保持不变，略 */
 .mobile-toolbar {
   display: flex;
   justify-content: space-between;
@@ -193,11 +196,8 @@ function handleJumpToMessage(messageId: string) {
 .model-display {
   display: flex;
   align-items: center;
-  /* 修改点1: 缩小字体以容纳更多内容 */
   font-size: 12px;
   color: var(--el-text-color-regular);
-  /* 修改点2: 移除多余的右边距，由父容器的 gap 统一控制 */
-  /* margin-right: 4px; */
 }
 
 .model-display .el-icon {
@@ -210,7 +210,6 @@ function handleJumpToMessage(messageId: string) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  /* 修改点3: 增加最大宽度，从 100px 增加到 130px */
   max-width: 130px;
 }
 

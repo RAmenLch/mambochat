@@ -10,15 +10,16 @@
     </div>
 
     <!-- 消息体 -->
-    <div class="message-body">
-      <!-- 最小化子消息区域 (简单展示图标) -->
+    <!-- 点击切换菜单 -->
+    <div class="message-body" @click="toggleActions">
+      <!-- 最小化子消息区域 -->
       <div v-if="minimizedSubMessages.length > 0" class="minimized-bar">
         <el-tag
           v-for="sub in minimizedSubMessages"
           :key="sub.id"
           size="small"
           type="info"
-          @click="restoreSubMessage(sub.id)"
+          @click.stop="restoreSubMessage(sub.id)"
         >
           <el-icon><Document /></el-icon>
         </el-tag>
@@ -26,7 +27,6 @@
 
       <!-- 子消息列表 -->
       <div class="sub-messages-container">
-        <!-- Loading 占位 -->
         <div
           v-if="message.status === 'generating' && normalSubMessages.length === 0"
           class="initial-loading"
@@ -34,7 +34,6 @@
           <div class="typing-indicator"><span></span><span></span><span></span></div>
         </div>
 
-        <!-- 渲染子消息 -->
         <template v-for="(subMessage, index) in normalSubMessages" :key="subMessage.id">
           <SubMessageItem
             :id="`sub-msg-${subMessage.id}`"
@@ -50,7 +49,7 @@
 
       <!-- Zip History Bookmark and Card -->
       <div v-if="zipHistorySubMessage" class="zip-history-section">
-        <div class="zip-history-bookmark" :class="zipBookmarkClass" @click="handleZipBookmarkClick">
+        <div class="zip-history-bookmark" :class="zipBookmarkClass" @click.stop="handleZipBookmarkClick">
           <el-icon :class="{ 'is-loading': zipStatus === 'generating' }">
             <component :is="zipBookmarkIcon" />
           </el-icon>
@@ -63,49 +62,29 @@
         />
       </div>
 
-      <!-- 底部操作栏 -->
-      <div class="message-footer" v-if="message.status !== 'generating'">
-        <!-- 左侧：建议 Chips -->
-        <div class="footer-left">
-          <div v-if="isLastMessage && suggestionList.length > 0" class="suggestion-scroll">
-            <el-tag
-              v-for="(suggestion, idx) in suggestionList"
-              :key="idx"
-              class="suggestion-item"
-              type="info"
-              effect="plain"
-              round
-              size="small"
-              @click="$emit('suggestion-click', suggestion)"
-            >
-              {{ suggestion }}
-            </el-tag>
-          </div>
-        </div>
+      <!-- 建议区域 (独立于操作菜单，始终占据空间但可换行) -->
+      <div class="suggestion-area" v-if="message.status !== 'generating' && isLastMessage && suggestionList.length > 0">
+        <el-tag
+          v-for="(suggestion, idx) in suggestionList"
+          :key="idx"
+          class="suggestion-item"
+          type="info"
+          effect="plain"
+          round
+          size="small"
+          @click.stop="$emit('suggestion-click', suggestion)"
+        >
+          {{ suggestion }}
+        </el-tag>
+      </div>
 
-        <!-- 右侧：操作按钮组 -->
-        <div class="footer-right actions-group">
-          <!-- 编辑 -->
-          <el-icon class="action-btn" @click="handleEditFirst" v-if="normalSubMessages.length > 0"
-            ><Edit
-          /></el-icon>
-
-          <!-- 复制全部 -->
+      <!-- 浮动操作菜单 (绝对定位，不占空间) -->
+      <transition name="fade-slide">
+        <div v-if="showActions && message.status !== 'generating'" class="floating-actions" :class="{'is-user-side': message.role === 'user'}" @click.stop>
+          <el-icon class="action-btn" @click="handleEditFirst" v-if="normalSubMessages.length > 0"><Edit /></el-icon>
           <el-icon class="action-btn" @click="handleCopyAll"><CopyDocument /></el-icon>
-
-          <!-- 重新生成 -->
           <el-icon class="action-btn" @click="handleRegenerate"><RefreshRight /></el-icon>
-
-          <!-- 压缩历史 (仅 Assistant 消息显示) -->
-          <el-icon
-            v-if="message.role === 'assistant'"
-            class="action-btn"
-            @click="handleCompressHistory"
-          >
-            <Clock />
-          </el-icon>
-
-          <!-- 更多/删除 -->
+          <el-icon v-if="message.role === 'assistant'" class="action-btn" @click="handleCompressHistory"><Clock /></el-icon>
           <el-dropdown trigger="click" @command="handleCommand">
             <el-icon class="action-btn"><MoreFilled /></el-icon>
             <template #dropdown>
@@ -117,7 +96,7 @@
             </template>
           </el-dropdown>
         </div>
-      </div>
+      </transition>
     </div>
   </div>
 
@@ -140,17 +119,7 @@ import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  User,
-  Cpu,
-  Document,
-  MoreFilled,
-  CopyDocument,
-  RefreshRight,
-  Delete,
-  Edit,
-  Clock,
-  Loading,
-  CircleCheck,
+  User, Cpu, Document, MoreFilled, CopyDocument, RefreshRight, Delete, Edit, Clock, Loading, CircleCheck,
 } from '@element-plus/icons-vue'
 import SubMessageItem from './SubMessageItem.vue'
 import ZipHistoryCard from './ZipHistoryCard.vue'
@@ -172,6 +141,15 @@ const { t } = useI18n()
 const interactionStore = useChatInteractionStore()
 const settingsStore = useSettingsStore()
 const { globalSettings } = storeToRefs(settingsStore)
+
+// --- Interaction State ---
+const showActions = ref(false)
+
+const toggleActions = () => {
+  if (props.message.status !== 'generating') {
+    showActions.value = !showActions.value
+  }
+}
 
 // --- Data Logic ---
 const displayableSubMessages = computed(() =>
@@ -201,16 +179,10 @@ const suggestionList = computed((): string[] => {
   }
 })
 
-/**
- * 提取出 'ZipHistory' 类型的子消息，用于显示历史摘要卡片。
- */
 const zipHistorySubMessage = computed(() =>
   props.message.sub_messages.find((sm) => sm.type === 'ZipHistory'),
 )
 
-/**
- * 计算历史摘要的当前状态
- */
 const zipStatus = computed(() => {
   if (!zipHistorySubMessage.value) return null
   if (zipHistorySubMessage.value.status === 'generating') return 'generating'
@@ -218,39 +190,23 @@ const zipStatus = computed(() => {
   return 'disabled'
 })
 
-/**
- * 根据状态返回对应的图标组件
- */
 const zipBookmarkIcon = computed(() => {
   switch (zipStatus.value) {
-    case 'generating':
-      return Loading
-    case 'enabled':
-      return CircleCheck
-    default:
-      return Clock
+    case 'generating': return Loading
+    case 'enabled': return CircleCheck
+    default: return Clock
   }
 })
 
-/**
- * 根据状态返回显示的文本
- */
 const zipBookmarkText = computed(() => {
   switch (zipStatus.value) {
-    case 'generating':
-      return t('chat.message.zipGenerating')
-    case 'enabled':
-      return t('chat.message.zipHistory')
-    case 'disabled':
-      return t('chat.message.zipHistory')
-    default:
-      return t('chat.message.zipHistory')
+    case 'generating': return t('chat.message.zipGenerating')
+    case 'enabled': return t('chat.message.zipHistory')
+    case 'disabled': return t('chat.message.zipHistory')
+    default: return t('chat.message.zipHistory')
   }
 })
 
-/**
- * 根据状态返回 CSS 类名
- */
 const zipBookmarkClass = computed(() => ({
   'is-generating': zipStatus.value === 'generating',
   'is-enabled': zipStatus.value === 'enabled',
@@ -274,13 +230,10 @@ const avatarUrl = computed(() => {
 const editDialogVisible = ref(false)
 const editingSubMessage = ref<SubMessage | null>(null)
 const originalEditingContent = ref('')
-
-// 适配电脑版：增加 range, markup, language 状态
 const editingRange = ref<{ start: number; end: number } | null>(null)
 const editingMarkup = ref('```')
 const editingLanguage = ref('')
 
-// 监听弹窗关闭，清理状态
 watch(editDialogVisible, (newValue) => {
   if (!newValue) {
     editingSubMessage.value = null
@@ -291,57 +244,38 @@ watch(editDialogVisible, (newValue) => {
   }
 })
 
-// 适配电脑版：处理 SubMessageItem 传递的 edit payload
 function handleEditRequest(
   subMessage: SubMessage,
   payload: { content: string; range?: ParsedBlock['range']; language?: string; markup?: string },
 ) {
   editingSubMessage.value = subMessage
   originalEditingContent.value = payload.content
-
   if (payload.range) {
-    // 代码块局部编辑
     editingRange.value = payload.range
     editingMarkup.value = payload.markup || '```'
     editingLanguage.value = payload.language || ''
   } else {
-    // 全量编辑
     editingRange.value = null
     editingMarkup.value = '```'
     editingLanguage.value = ''
   }
-
   editDialogVisible.value = true
 }
 
 function handleEditFirst() {
   if (normalSubMessages.value.length > 0) {
-    // 全量编辑第一个子消息
     handleEditRequest(normalSubMessages.value[0], { content: normalSubMessages.value[0].content })
   }
 }
 
-// 适配电脑版：使用坐标进行精准替换
 function getUpdatedFullContent(newPartialContent: string): string {
   if (!editingSubMessage.value) return ''
-
   const fullOriginalContent = editingSubMessage.value.content
-
-  // 1. 全量编辑：直接返回新内容
-  if (!editingRange.value) {
-    return newPartialContent
-  }
-
-  // 2. 代码块局部编辑：基于坐标进行字符串切片替换
+  if (!editingRange.value) return newPartialContent
   const { start, end } = editingRange.value
-
-  // 构造新的代码块字符串
-  // 格式：Fence + Lang + \n + Content + \n + Fence
   const fence = editingMarkup.value
   const lang = editingLanguage.value
   const newBlockString = `${fence}${lang}\n${newPartialContent}\n${fence}`
-
-  // 拼接字符串
   return (
     fullOriginalContent.substring(0, start) + newBlockString + fullOriginalContent.substring(end)
   )
@@ -349,9 +283,7 @@ function getUpdatedFullContent(newPartialContent: string): string {
 
 function handleSaveEdit(newContent: string) {
   if (!editingSubMessage.value) return
-
   const updatedContent = getUpdatedFullContent(newContent)
-
   interactionStore.updateSubMessage({
     subMessageId: editingSubMessage.value.id,
     data: { content: updatedContent },
@@ -360,9 +292,7 @@ function handleSaveEdit(newContent: string) {
 
 function handleSaveAndResend(newContent: string) {
   if (!editingSubMessage.value) return
-
   const updatedContent = getUpdatedFullContent(newContent)
-
   const newSubMessages: SubMessageCreate[] = props.message.sub_messages.map((sm) => ({
     content: sm.id === editingSubMessage.value!.id ? updatedContent : sm.content,
     sortOrder: sm.sortOrder,
@@ -433,7 +363,7 @@ async function handleCommand(command: string) {
 .mobile-message-item {
   display: flex;
   gap: 8px;
-  margin-bottom: 24px;
+  margin-bottom: 24px; /* 保留底部间距，给浮动菜单留出空间 */
   width: 100%;
 }
 
@@ -447,6 +377,8 @@ async function handleCommand(command: string) {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  cursor: pointer; /* 暗示可点击 */
+  position: relative; /* 关键：为绝对定位的菜单提供参考点 */
 }
 
 .minimized-bar {
@@ -481,14 +413,8 @@ async function handleCommand(command: string) {
   animation: bounce 1.4s infinite;
 }
 @keyframes bounce {
-  0%,
-  80%,
-  100% {
-    transform: scale(0);
-  }
-  40% {
-    transform: scale(1);
-  }
+  0%, 80%, 100% { transform: scale(0); }
+  40% { transform: scale(1); }
 }
 
 /* Zip History Styles */
@@ -516,12 +442,6 @@ async function handleCommand(command: string) {
   color: var(--el-color-success);
 }
 
-.zip-history-bookmark.is-disabled {
-  background-color: var(--el-color-info-light-9);
-  border-color: var(--el-color-info-light-7);
-  color: var(--el-color-info);
-}
-
 .zip-history-bookmark.is-generating {
   background-color: var(--el-color-primary-light-9);
   border-color: var(--el-color-primary-light-5);
@@ -534,73 +454,76 @@ async function handleCommand(command: string) {
 }
 
 @keyframes rotating {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .zip-history-card {
   margin-top: 8px;
 }
 
-/* Footer & Actions */
-.message-footer {
+/* Suggestion Area - 独立区域，允许换行 */
+.suggestion-area {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 6px;
-  min-height: 24px;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
 }
 
-.footer-left {
-  flex-grow: 1;
-  overflow: hidden;
+.suggestion-item {
+  margin: 0; /* 重置 margin */
 }
 
-.footer-right {
-  flex-shrink: 0;
+/* Floating Actions - 核心修改 */
+.floating-actions {
+  position: absolute;
+  bottom: -30px; /* 向下偏移，进入 margin-bottom 的空间 */
+  right: 0;
+  z-index: 10;
+
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-left: 8px;
-  opacity: 0.6;
+
+  background-color: var(--color-background);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 6px;
+  padding: 4px 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* 用户消息的菜单靠左对齐 */
+.floating-actions.is-user-side {
+  right: auto;
+  left: 0;
 }
 
 .action-btn {
   font-size: 16px;
   color: var(--el-text-color-secondary);
   cursor: pointer;
+  transition: color 0.2s;
 }
 
-/* Suggestion Chips Scroll */
-.suggestion-scroll {
-  display: flex;
-  overflow-x: auto;
-  gap: 6px;
-  padding-bottom: 2px;
-  scrollbar-width: none;
-}
-.suggestion-scroll::-webkit-scrollbar {
-  display: none;
+.action-btn:hover {
+  color: var(--el-color-primary);
 }
 
-.suggestion-item {
-  flex-shrink: 0;
+/* 过渡动画 */
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+.fade-slide-enter-from,
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-10px); /* 从上方滑入 */
 }
 
 /* User Message Specifics */
 .mobile-message-item.is-user {
   flex-direction: row-reverse;
-}
-.is-user .message-footer {
-  flex-direction: row-reverse;
-}
-.is-user .footer-right {
-  margin-left: 0;
-  margin-right: 8px;
 }
 
 .text-danger {

@@ -1,6 +1,7 @@
 <!-- frontend/mambo/src/mobile/components/chat/ChatWindow.vue -->
 <template>
-  <div class="mobile-chat-window">
+  <!-- 修改点：动态绑定 style，使用 fixed 定位强制适应可视区域 -->
+  <div class="mobile-chat-window" :style="containerStyle">
     <!-- Header -->
     <ChatHeader
       :current-chat="currentChat"
@@ -59,6 +60,7 @@
         @open-resource-selector="resourceSelectorVisible = true"
         @toggle-mcp-tool="handleToggleMcpTool"
         @jump-to-message="handleJumpToMessage"
+        @open-settings="settingsDrawerVisible = true"
       />
 
       <!-- Input Box -->
@@ -93,7 +95,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, computed } from 'vue'
+import { ref, watch, nextTick, computed, onMounted, onUnmounted, reactive } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElScrollbar, ElMessage } from 'element-plus'
 import type { Ref } from 'vue'
@@ -159,6 +161,47 @@ const settingsDrawerVisible = ref(false)
 const resourceSelectorVisible = ref(false)
 const userHasScrolledUp = ref(false)
 
+// --- 新增：可视区域布局状态 ---
+const layoutStyle = reactive({
+  top: '0px',
+  height: '100%',
+  width: '100%',
+})
+
+// 计算属性用于模板绑定
+const containerStyle = computed(() => ({
+  position: 'fixed',
+  top: layoutStyle.top,
+  height: layoutStyle.height,
+  width: layoutStyle.width,
+}))
+
+// --- 新增：核心布局修复逻辑 ---
+const updateLayout = () => {
+  // 优先使用 visualViewport
+  if (window.visualViewport) {
+    const vv = window.visualViewport
+    // 计算 top：由于页面可能滚动，我们需要计算可视区域在布局视口中的位置
+    // 并将容器固定在当前可视区域的位置
+    const top = vv.offsetTop
+    const height = vv.height
+
+    layoutStyle.top = `${top}px`
+    layoutStyle.height = `${height}px`
+
+    // 键盘弹起引起的视口变化时，确保输入框可见
+    // 这里我们利用 nextTick 确保 DOM 更新后滚动
+    nextTick(() => {
+      const wrap = scrollbarRef.value?.wrapRef
+      if (wrap) wrap.scrollTop = wrap.scrollHeight
+    })
+  } else {
+    // 降级处理：如果浏览器不支持 visualViewport (极少见)，回退到 100dvh
+    layoutStyle.top = '0px'
+    layoutStyle.height = '100dvh'
+  }
+}
+
 // --- Computed ---
 const isSendButtonDisabled = computed(() => isGenerating.value || !isReadyToSend.value)
 
@@ -218,13 +261,32 @@ watch(
   { immediate: true },
 )
 
+// --- Lifecycle Hooks ---
+onMounted(() => {
+  updateLayout() // 初始化布局
+  if (window.visualViewport) {
+    // 监听视口变化 (键盘弹起/落下, 滚动等)
+    window.visualViewport.addEventListener('resize', updateLayout)
+    window.visualViewport.addEventListener('scroll', updateLayout)
+  }
+  // 备用监听：某些浏览器在全屏切换时可能触发 window resize
+  window.addEventListener('resize', updateLayout)
+})
+
+onUnmounted(() => {
+  if (window.visualViewport) {
+    window.visualViewport.removeEventListener('resize', updateLayout)
+    window.visualViewport.removeEventListener('scroll', updateLayout)
+  }
+  window.removeEventListener('resize', updateLayout)
+})
+
 // --- Methods ---
 
 const handleSendMessage = async () => {
   if (isSendButtonDisabled.value) return
 
   const content = singlePartDraft.value.trim()
-  // Construct SubMessages
   const textSubMessages: SubMessageCreate[] = content
     ? [
         {
@@ -390,7 +452,6 @@ function handleJumpToMessage(messageId: string) {
     const offset = element.offsetTop - 10
     scrollbarRef.value.setScrollTop(offset)
 
-    // Add highlight effect
     element.classList.add('jump-highlight')
     setTimeout(() => {
       element.classList.remove('jump-highlight')
@@ -413,12 +474,17 @@ watch(
 </script>
 
 <style scoped>
+/* 移除 height: 100dvh，改为由 JS 动态控制 */
 .mobile-chat-window {
-  height: 100dvh;
+  /* position: fixed;  <- 由 JS 动态注入，这里为了性能可以预设，但会被 style 覆盖 */
+  left: 0;
+  right: 0;
+  bottom: 0; /* 兜底 */
   display: flex;
   flex-direction: column;
   background-color: var(--color-background);
   overflow: hidden;
+  /* 移除 transition，因为在全屏键盘弹起瞬间，transition 会导致动画不同步，感觉卡顿 */
 }
 
 .mobile-messages {
