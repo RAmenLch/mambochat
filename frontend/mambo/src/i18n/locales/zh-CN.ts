@@ -36,6 +36,7 @@ export default {
       collapse: '折叠',
       loadMore: '加载更多',
       confirmDelete: '确定删除',
+      back: '返回',
     },
     dialog: {
       warning: '警告',

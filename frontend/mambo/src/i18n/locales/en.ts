@@ -36,6 +36,7 @@ export default {
       collapse: 'Collapse',
       loadMore: 'Load More',
       confirmDelete: 'Confirm Delete',
+      back: 'Back',
     },
     dialog: {
       warning: 'Warning',
