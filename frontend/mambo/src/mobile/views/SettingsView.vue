@@ -4,7 +4,6 @@
     <!-- 顶部导航栏 -->
     <div class="settings-header">
       <div class="header-left">
-        <!-- 如果在详情页，显示返回按钮 -->
         <el-button
           v-if="activeSection"
           link
@@ -47,28 +46,22 @@
       <!-- 详情视图 -->
       <transition name="slide-right">
         <div v-if="activeSection" class="detail-view">
-          <!-- 全局设置 -->
           <GlobalSettings v-if="activeSection === 'global'" class="mobile-setting-component" />
-
-          <!-- 模型与服务商管理 -->
           <MobileProviderModelManager v-else-if="activeSection === 'provider'" class="mobile-setting-component" />
-
-          <!-- MCP 管理 -->
           <MobileMcpManager v-else-if="activeSection === 'mcp'" class="mobile-setting-component" />
-
-          <!-- 资源管理 (使用移动端专用组件) -->
           <MobileResourceManager v-else-if="activeSection === 'resource'" class="mobile-setting-component" />
         </div>
       </transition>
     </div>
 
-    <!-- 关于弹窗 -->
+    <!-- 关于弹窗 (修复部分) -->
     <el-dialog
       v-model="aboutDialogVisible"
-      width="420px"
+      width="90%"
       align-center
       append-to-body
       class="about-dialog"
+      :style="{ maxWidth: '400px' }"
     >
       <div class="about-content">
         <img src="/logo.svg" alt="Logo" class="about-logo" />
@@ -115,7 +108,6 @@ import {
   FolderOpened, Message,
 } from '@element-plus/icons-vue'
 
-
 import GlobalSettings from '@/components/settings/GlobalSettings.vue'
 import MobileProviderModelManager from '@/mobile/components/settings/MobileProviderModelManager.vue'
 import MobileMcpManager from '@/mobile/components/settings/MobileMcpManager.vue'
@@ -124,11 +116,9 @@ import MobileResourceManager from '@/mobile/components/settings/MobileResourceMa
 const router = useRouter()
 const { t } = useI18n()
 
-// 状态：当前选中的设置板块，空字符串表示在主菜单
 const activeSection = ref('')
 const aboutDialogVisible = ref(false)
 
-// 菜单配置
 const menuItems = computed(() => [
   { id: 'global', icon: User, label: t('settings.tabs.globalSettings') },
   { id: 'provider', icon: Monitor, label: t('settings.tabs.providerModel') },
@@ -136,7 +126,6 @@ const menuItems = computed(() => [
   { id: 'resource', icon: FolderOpened, label: t('settings.tabs.resourceManager') },
 ])
 
-// 计算当前详情页标题
 const currentTitle = computed(() => {
   const item = menuItems.value.find(m => m.id === activeSection.value)
   return item ? item.label : ''
@@ -243,27 +232,22 @@ const goToChat = () => {
 
 /* Detail View Adjustments */
 .mobile-setting-component {
-  /* 调整复用的桌面组件样式，移除其自带的大边距或背景 */
-  padding: 0; /* Mobile components handle their own padding */
+  padding: 0;
   height: 100%;
 }
 
-/* 隐藏桌面端组件内部可能存在的 Header，避免双重标题 */
 .mobile-setting-component :deep(.header) {
   display: none;
 }
 
-/* 隐藏 MobileResourceTreePanel 中重复的标题，因为 SettingsHeader 已经有了 */
 .mobile-setting-component :deep(.panel-header .title) {
   display: none;
 }
 
-/* 调整 Tree Panel Header 布局，因为标题隐藏了 */
 .mobile-setting-component :deep(.panel-header) {
-  justify-content: flex-end; /* 将按钮推到右侧 */
+  justify-content: flex-end;
 }
 
-/* 确保表单宽度适应手机 */
 .mobile-setting-component :deep(.settings-form-container) {
   border: none;
   padding: 0;
@@ -277,28 +261,17 @@ const goToChat = () => {
   transition: transform 0.3s ease;
 }
 
-/* 菜单进入/离开 */
-.slide-left-enter-from {
-  transform: translateX(-100%);
-}
-.slide-left-leave-to {
-  transform: translateX(-100%);
-}
+.slide-left-enter-from { transform: translateX(-100%); }
+.slide-left-leave-to { transform: translateX(-100%); }
+.slide-right-enter-from { transform: translateX(100%); }
+.slide-right-leave-to { transform: translateX(100%); }
 
-/* 详情页进入/离开 */
-.slide-right-enter-from {
-  transform: translateX(100%);
-}
-.slide-right-leave-to {
-  transform: translateX(100%);
-}
-
-/* About Dialog */
+/* About Dialog Styles (修复重点) */
 .about-content {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 20px 0;
+  padding: 10px 0 20px; /* 调整padding */
   text-align: center;
 }
 
@@ -308,13 +281,65 @@ const goToChat = () => {
   margin-bottom: 15px;
 }
 
-.about-content h2 {
+.about-title {
   margin: 0 0 10px;
+  font-size: 18px; /* 移动端适当缩小标题 */
+}
+
+.about-subtitle {
+  font-size: 14px;
+  color: var(--el-text-color-secondary);
+  font-weight: normal;
+}
+
+.version-tag {
+  margin-bottom: 15px;
 }
 
 .about-desc {
   font-size: 14px;
   color: var(--el-text-color-secondary);
-  margin: 10px 0 20px;
+  margin: 0 0 20px;
+  line-height: 1.5;
+  padding: 0 10px; /* 防止文字贴边 */
+}
+
+.about-links {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 20px;
+}
+
+.link-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--el-color-primary);
+  text-decoration: none;
+}
+
+/* 关键修复：限制图标大小 */
+.link-icon {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
+.link-icon-el {
+  font-size: 20px;
+}
+
+.link-divider {
+  width: 1px;
+  height: 14px;
+  background-color: var(--el-border-color);
+}
+
+.copyright {
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
 }
 </style>

@@ -3,9 +3,10 @@
   <div class="mobile-resource-editor">
 
     <!-- 0. 顶部操作栏 (固定在最上方) -->
+    <!-- 仅在编辑器模式下显示，KB配置页面有自己的保存按钮 -->
     <div
       class="top-actions-bar"
-      v-if="resource.itemType === 'resource' && resource.resourceType !== 'file'"
+      v-if="viewMode === 'editor' && resource.itemType === 'resource' && resource.resourceType !== 'file'"
     >
       <div class="action-left">
         <el-button link size="small" @click="resetForm">
@@ -27,143 +28,154 @@
       </div>
     </div>
 
-    <!-- 1. 标签切换栏 -->
-    <!-- 修改点: 移除了 fill 属性 -->
-    <div class="top-switcher">
-      <el-radio-group v-model="activeTab" size="small">
-        <el-radio-button label="editor">{{ t('resource.editor.contentLabel') || 'Content' }}</el-radio-button>
-        <el-radio-button label="settings">{{ t('resource.meta.title') || 'Settings' }}</el-radio-button>
-      </el-radio-group>
-    </div>
+    <!-- 1. 版本栏 (提取到外层，方便在KB配置和编辑器之间切换) -->
+    <MobileResourceVersionBar
+      v-if="resource.itemType === 'resource'"
+      :versions="resource.versions || []"
+      :active-version-id="resource.latest_version?.id || null"
+      :viewing-version-id="loadedVersionInEditor?.id || null"
+      :kb-id="resource.kb_id"
+      :view-mode="viewMode"
+      @select-version="loadVersionIntoEditor"
+      @set-active="handleSetActiveVersion"
+      @toggle-kb-view="toggleKbView"
+    />
 
-    <!-- 2. 中间内容区 -->
+    <!-- 2. 主内容区域 -->
     <div class="main-content-area">
 
-      <!-- Tab A: 编辑器视图 -->
-      <div v-show="activeTab === 'editor'" class="tab-pane-editor">
-        <!-- 版本栏 -->
-        <MobileResourceVersionBar
-          v-if="resource.itemType === 'resource'"
-          :versions="resource.versions || []"
-          :active-version-id="resource.latest_version?.id || null"
-          :viewing-version-id="loadedVersionInEditor?.id || null"
-          :kb-id="resource.kb_id"
-          :view-mode="viewMode"
-          @select-version="loadVersionIntoEditor"
-          @set-active="handleSetActiveVersion"
-        />
+      <!-- Case A: 知识库配置视图 -->
+      <div v-if="viewMode === 'kb_config'" class="kb-view-container">
+        <MobileKnowledgeBaseFileDetail :resource="resource" />
+      </div>
 
-        <!-- 编辑器核心区域 -->
-        <div class="editor-wrapper">
-          <!-- Case A: 文件资源 -->
-          <div v-if="resource.resourceType === 'file'" class="file-section">
-            <div v-if="currentFileInfo" class="file-preview-card">
-              <div class="preview-area">
-                 <el-image
-                  v-if="isImage"
-                  :src="fileDownloadUrl"
-                  fit="contain"
-                  class="preview-image"
-                  :preview-src-list="[fileDownloadUrl]"
-                 />
-                 <el-icon v-else :size="60" class="file-icon"><Document /></el-icon>
-              </div>
-              <div class="file-info">
-                <span class="filename">{{ currentFileInfo.filename }}</span>
-                <div class="meta">
-                  <el-tag size="small" type="info">{{ currentFileInfo.mime_type }}</el-tag>
-                  <span class="size">{{ formatFileSize(currentFileInfo.size) }}</span>
-                </div>
-                <a :href="fileDownloadUrl" target="_blank" class="download-link">
-                  <el-button type="primary" size="small" :icon="Download">
-                    {{ $t('resource.editor.downloadFile') }}
-                  </el-button>
-                </a>
-              </div>
-            </div>
-
-            <div class="upload-area">
-              <el-upload
-                action="#"
-                :auto-upload="false"
-                :show-file-list="false"
-                :on-change="handleFileChange"
-                :disabled="isUploading"
-              >
-                <el-button type="primary" :loading="isUploading">
-                  {{ currentFileInfo ? $t('resource.editor.uploadNew') : $t('resource.editor.uploadFile') }}
-                </el-button>
-              </el-upload>
-            </div>
-          </div>
-
-          <!-- Case B: 文本/Prompt 资源 -->
-          <template v-else>
-            <!-- 卡片式容器，四周留白 -->
-            <div class="monaco-container">
-              <ResourceUniversalEditor
-                v-model="form.content"
-                :language="editorLanguage"
-                :monaco-options="editorOptions"
-              />
-            </div>
-          </template>
+      <!-- Case B: 标准编辑器视图 -->
+      <template v-else>
+        <!-- 标签切换栏 -->
+        <div class="top-switcher">
+          <el-radio-group v-model="activeTab" size="small">
+            <el-radio-button label="editor">{{ t('resource.editor.contentLabel') || 'Content' }}</el-radio-button>
+            <el-radio-button label="settings">{{ t('resource.meta.title') || 'Settings' }}</el-radio-button>
+          </el-radio-group>
         </div>
-      </div>
 
-      <!-- Tab B: 设置视图 -->
-      <div v-show="activeTab === 'settings'" class="tab-pane-settings">
-        <el-scrollbar>
-          <div class="settings-form">
-            <!-- 基础信息 -->
-            <div class="form-section">
-              <div class="section-title">{{ $t('resource.meta.title') }}</div>
-              <el-form label-position="top" size="default">
-                <el-form-item :label="$t('resource.meta.name')">
-                  <el-input v-model="form.name" />
-                </el-form-item>
-                <el-form-item :label="$t('resource.meta.description')">
-                  <el-input v-model="form.description" type="textarea" :rows="3" />
-                </el-form-item>
-              </el-form>
-            </div>
+        <!-- 编辑器/设置内容 -->
+        <div class="tab-content-wrapper">
 
-            <!-- 版本信息 -->
-            <div class="form-section">
-              <div class="section-title">{{ $t('resource.meta.versionTitle') }}</div>
-              <el-form label-position="top" size="default">
-                <el-form-item :label="$t('resource.meta.versionName')">
-                  <el-input v-model="form.versionName" />
-                </el-form-item>
-                <el-form-item :label="$t('resource.meta.versionCommit')">
-                  <el-input v-model="form.versionCommitMessage" type="textarea" :rows="3" />
-                </el-form-item>
-              </el-form>
-            </div>
+          <!-- Tab A: 编辑器视图 -->
+          <div v-show="activeTab === 'editor'" class="tab-pane-editor">
+            <!-- 编辑器核心区域 -->
+            <div class="editor-wrapper">
+              <!-- Case A: 文件资源 -->
+              <div v-if="resource.resourceType === 'file'" class="file-section">
+                <div v-if="currentFileInfo" class="file-preview-card">
+                  <div class="preview-area">
+                     <el-image
+                      v-if="isImage"
+                      :src="fileDownloadUrl"
+                      fit="contain"
+                      class="preview-image"
+                      :preview-src-list="[fileDownloadUrl]"
+                     />
+                     <el-icon v-else :size="60" class="file-icon"><Document /></el-icon>
+                  </div>
+                  <div class="file-info">
+                    <span class="filename">{{ currentFileInfo.filename }}</span>
+                    <div class="meta">
+                      <el-tag size="small" type="info">{{ currentFileInfo.mime_type }}</el-tag>
+                      <span class="size">{{ formatFileSize(currentFileInfo.size) }}</span>
+                    </div>
+                    <a :href="fileDownloadUrl" target="_blank" class="download-link">
+                      <el-button type="primary" size="small" :icon="Download">
+                        {{ $t('resource.editor.downloadFile') }}
+                      </el-button>
+                    </a>
+                  </div>
+                </div>
 
-            <!-- 模板配置 -->
-            <template v-if="resource.resourceType === 'submessage_template'">
-              <div class="form-section">
-                <div class="section-title">{{ $t('resource.meta.configTitle') }}</div>
-                <el-form label-position="top" size="default">
-                   <el-form-item>
-                      <template #label>
-                        <span>{{ $t('resource.meta.participation') }}</span>
-                      </template>
-                      <el-input-number v-model="form.attributes.context_participation_length" :min="0" style="width: 100%" />
-                   </el-form-item>
-                   <el-form-item :label="$t('resource.meta.collapsed')">
-                     <el-switch v-model="form.attributes.is_collapsed" />
-                   </el-form-item>
-                   <el-form-item :label="$t('resource.meta.minimal')">
-                     <el-switch v-model="form.attributes.is_minimal" />
-                   </el-form-item>
-                </el-form>
+                <div class="upload-area">
+                  <el-upload
+                    action="#"
+                    :auto-upload="false"
+                    :show-file-list="false"
+                    :on-change="handleFileChange"
+                    :disabled="isUploading"
+                  >
+                    <el-button type="primary" :loading="isUploading">
+                      {{ currentFileInfo ? $t('resource.editor.uploadNew') : $t('resource.editor.uploadFile') }}
+                    </el-button>
+                  </el-upload>
+                </div>
               </div>
-            </template>
+
+              <!-- Case B: 文本/Prompt 资源 -->
+              <template v-else>
+                <div class="monaco-container">
+                  <ResourceUniversalEditor
+                    v-model="form.content"
+                    :language="editorLanguage"
+                    :monaco-options="editorOptions"
+                  />
+                </div>
+              </template>
+            </div>
           </div>
-        </el-scrollbar>
-      </div>
+
+          <!-- Tab B: 设置视图 -->
+          <div v-show="activeTab === 'settings'" class="tab-pane-settings">
+            <el-scrollbar>
+              <div class="settings-form">
+                <!-- 基础信息 -->
+                <div class="form-section">
+                  <div class="section-title">{{ $t('resource.meta.title') }}</div>
+                  <el-form label-position="top" size="default">
+                    <el-form-item :label="$t('resource.meta.name')">
+                      <el-input v-model="form.name" />
+                    </el-form-item>
+                    <el-form-item :label="$t('resource.meta.description')">
+                      <el-input v-model="form.description" type="textarea" :rows="3" />
+                    </el-form-item>
+                  </el-form>
+                </div>
+
+                <!-- 版本信息 -->
+                <div class="form-section">
+                  <div class="section-title">{{ $t('resource.meta.versionTitle') }}</div>
+                  <el-form label-position="top" size="default">
+                    <el-form-item :label="$t('resource.meta.versionName')">
+                      <el-input v-model="form.versionName" />
+                    </el-form-item>
+                    <el-form-item :label="$t('resource.meta.versionCommit')">
+                      <el-input v-model="form.versionCommitMessage" type="textarea" :rows="3" />
+                    </el-form-item>
+                  </el-form>
+                </div>
+
+                <!-- 模板配置 -->
+                <template v-if="resource.resourceType === 'submessage_template'">
+                  <div class="form-section">
+                    <div class="section-title">{{ $t('resource.meta.configTitle') }}</div>
+                    <el-form label-position="top" size="default">
+                       <el-form-item>
+                          <template #label>
+                            <span>{{ $t('resource.meta.participation') }}</span>
+                          </template>
+                          <el-input-number v-model="form.attributes.context_participation_length" :min="0" style="width: 100%" />
+                       </el-form-item>
+                       <el-form-item :label="$t('resource.meta.collapsed')">
+                         <el-switch v-model="form.attributes.is_collapsed" />
+                       </el-form-item>
+                       <el-form-item :label="$t('resource.meta.minimal')">
+                         <el-switch v-model="form.attributes.is_minimal" />
+                       </el-form-item>
+                    </el-form>
+                  </div>
+                </template>
+              </div>
+            </el-scrollbar>
+          </div>
+        </div>
+      </template>
 
     </div>
 
@@ -192,7 +204,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type UploadFile } from 'element-plus'
-import { Document, Download, Warning } from '@element-plus/icons-vue'
+import { Document, Download } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 import type { editor } from 'monaco-editor'
 
@@ -201,6 +213,8 @@ import { uploadResourceFile } from '@/api/kbService'
 import type { ResourceWithVersions, ResourceVersion, ResourceVersionCreate } from '@/api/types'
 import ResourceUniversalEditor from '@/components/common/ResourceUniversalEditor.vue'
 import MobileResourceVersionBar from './MobileResourceVersionBar.vue'
+// 引入移动端知识库文件详情组件
+import MobileKnowledgeBaseFileDetail from './MobileKnowledgeBaseFileDetail.vue'
 
 const { t } = useI18n()
 
@@ -228,6 +242,7 @@ const activeTab = ref<'editor' | 'settings'>('editor')
 const formRef = ref<FormInstance>()
 const newVersionFormRef = ref<FormInstance>()
 const loadedVersionInEditor = ref<ResourceVersion | null>(null)
+// 修复：定义 viewMode 状态，用于切换编辑器和知识库配置视图
 const viewMode = ref<'editor' | 'kb_config'>('editor')
 const isUploading = ref(false)
 
@@ -319,6 +334,7 @@ watch(
     if (newSelection) {
       resetForm()
       activeTab.value = 'editor'
+      // 修复：根据 prop 初始化 viewMode
       viewMode.value = props.initialViewMode === 'kb_config' ? 'kb_config' : 'editor'
     }
   },
@@ -332,6 +348,11 @@ function formatFileSize(bytes: number): string {
   const sizes = ['B', 'KB', 'MB', 'GB']
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+}
+
+// 修复：添加切换到知识库配置视图的方法
+function toggleKbView() {
+  viewMode.value = 'kb_config'
 }
 
 function resetForm() {
@@ -422,6 +443,10 @@ function loadVersionIntoEditor(version: ResourceVersion) {
   }
   loadedVersionInEditor.value = version
   activeTab.value = 'editor'
+  // 修复：点击版本时，如果当前在 KB 配置页，应切回编辑器页
+  if (viewMode.value === 'kb_config') {
+    viewMode.value = 'editor'
+  }
 }
 
 async function handleSetActiveVersion(versionId: string) {
@@ -463,7 +488,6 @@ async function handleConfirmNewVersion() {
 
 <style scoped>
 .mobile-resource-editor {
-  /* 强制填满父容器 */
   position: absolute;
   top: 0;
   left: 0;
@@ -493,6 +517,33 @@ async function handleConfirmNewVersion() {
   gap: 8px;
 }
 
+/* 2. 中间内容区 */
+.main-content-area {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--color-background-soft);
+}
+
+/* KB Config View Container */
+.kb-view-container {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--color-background);
+}
+
+/* Tab Content Wrapper */
+.tab-content-wrapper {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
 /* 1. 顶部切换器 */
 .top-switcher {
   flex-shrink: 0;
@@ -517,29 +568,15 @@ async function handleConfirmNewVersion() {
   border: none;
   background: transparent;
   border-radius: 4px;
-  /* 确保未选中状态文字颜色清晰 */
   color: var(--el-text-color-regular);
   font-weight: 500;
 }
 
-/* 核心修复：选中状态样式 */
 .top-switcher :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) {
-  /* 使用 !important 确保覆盖 Element Plus 默认的蓝色背景 */
   background-color: #fff !important;
-  /* 选中时文字变为主题色 */
   color: var(--el-color-primary);
   box-shadow: 0 1px 2px rgba(0,0,0,0.1);
   border: none;
-}
-
-/* 2. 中间内容区 */
-.main-content-area {
-  flex: 1;
-  position: relative;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  background-color: var(--color-background-soft);
 }
 
 /* Tab A: 编辑器视图 */
@@ -558,13 +595,11 @@ async function handleConfirmNewVersion() {
 }
 
 .monaco-container {
-  /* 关键：往回缩，形成卡片效果 */
   position: absolute;
   top: 10px;
   left: 12px;
   right: 12px;
   bottom: 12px;
-
   background-color: #fff;
   border: 1px solid var(--el-border-color);
   border-radius: 8px;
@@ -576,6 +611,7 @@ async function handleConfirmNewVersion() {
   flex: 1;
   height: 100%;
   background-color: var(--color-background-soft);
+  overflow-y: auto;
 }
 
 .settings-form {
