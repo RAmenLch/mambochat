@@ -107,8 +107,8 @@ echo.
 echo   前端地址: http://localhost:24911
 echo   后端API: http://localhost:8000
 echo.
-echo   提示: 关闭 MamboChat-Backend 和
-echo         MamboChat-Frontend 窗口即可停止服务
+echo   提示: 关闭 MamboChat-Backend 和 MamboChat-Frontend
+echo        窗口即可停止服务
 echo.
 echo ============================================
 echo.
