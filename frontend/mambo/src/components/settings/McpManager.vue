@@ -277,5 +277,145 @@ const formatTime = (isoString: string) => {
   display: flex;
   flex-direction: column;
 }
-/* ... (省略其余样式代码，与原文件一致) ... */
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.title-section h2 {
+  margin: 0 0 4px 0;
+  font-size: 18px;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+
+.name-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.name-text {
+  font-weight: 500;
+}
+
+.description-text {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.config-detail {
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+}
+
+.detail-item {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Status Column Styles */
+.health-status-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-healthy {
+  background-color: var(--el-color-success);
+  box-shadow: 0 0 4px var(--el-color-success-light-5);
+}
+
+.status-unhealthy {
+  background-color: var(--el-color-danger);
+  box-shadow: 0 0 4px var(--el-color-danger-light-5);
+}
+
+.status-unknown {
+  background-color: var(--el-color-info-light-3);
+  border: 1px solid var(--el-color-info-light-5);
+}
+
+/* Monitor Column Styles */
+.monitor-cell {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+}
+
+.last-test-time {
+  color: var(--el-text-color-regular);
+}
+
+.text-placeholder {
+  color: var(--el-text-color-placeholder);
+}
+
+.error-trigger {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--el-color-danger);
+  cursor: pointer;
+  margin-top: 2px;
+  transition: opacity 0.2s;
+}
+
+.error-trigger:hover {
+  opacity: 0.8;
+  text-decoration: underline;
+}
+
+/* Error Dialog Styles */
+.error-detail-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.error-meta p {
+  margin: 4px 0;
+  font-size: 14px;
+}
+
+.mb-2 {
+  margin-bottom: 8px;
+}
+
+.error-stack-trace {
+  background-color: #f5f7fa;
+  padding: 12px;
+  border-radius: 4px;
+  border: 1px solid #e4e7ed;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.error-stack-trace pre {
+  margin: 0;
+  font-family: monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--el-color-danger-dark-2);
+}
 </style>

@@ -1,5 +1,10 @@
+<!-- frontend/mambo/src/views/SettingsView.vue -->
 <template>
-  <el-container class="settings-container">
+  <!-- 移动端视图 -->
+  <MobileSettingsView v-if="isMobile" />
+
+  <!-- 桌面端视图 (原有逻辑) -->
+  <el-container v-else class="settings-container">
     <el-header class="settings-header">
       <div class="brand-container">
         <img src="/logo.svg" alt="MamboChat" class="logo" />
@@ -57,7 +62,7 @@
         <h2 class="about-title">
           {{ t('settings.about.title') }} <span class="about-subtitle">| {{ t('settings.about.subtitle') }}</span>
         </h2>
-        <el-tag type="info" size="small" effect="plain" class="version-tag">v1.1.0</el-tag>
+        <el-tag type="info" size="small" effect="plain" class="version-tag">v1.1.3</el-tag>
 
         <p class="about-desc">
           {{ t('settings.about.desc') }}
@@ -84,14 +89,21 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { InfoFilled, Message } from '@element-plus/icons-vue' // 引入图标
+import { InfoFilled, Message } from '@element-plus/icons-vue'
 import ProviderModelManager from '@/components/settings/ProviderModelManager.vue'
 import GlobalSettings from '@/components/settings/GlobalSettings.vue'
 import ResourceManager from '@/components/settings/ResourceManager.vue'
 import McpManager from '@/components/settings/McpManager.vue'
+import { useIsMobile } from '@/composables/useIsMobile'
+
+// 异步加载移动端组件
+const MobileSettingsView = defineAsyncComponent(() => import('@/mobile/views/SettingsView.vue'))
+
+// --- Mobile Detection ---
+const { isMobile } = useIsMobile()
 
 const route = useRoute()
 const router = useRouter()
@@ -115,6 +127,7 @@ watch(
 </script>
 
 <style scoped>
+/* 桌面端样式保持不变 */
 .settings-container {
   height: 100vh;
   background-color: #f5f7fa;

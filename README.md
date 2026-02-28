@@ -1,19 +1,18 @@
 # ![mambo](doc/img/logo_hajimi.svg) MamboChat (曼波茶)
 
-![Version](https://img.shields.io/badge/version-1.1.1-blue)
+![Version](https://img.shields.io/badge/version-1.1.3-blue)
 ![License](https://img.shields.io/badge/license-GPLv3-green)
 ![Vue](https://img.shields.io/badge/frontend-Vue3%20%2B%20ElementPlus-42b883)
 ![FastAPI](https://img.shields.io/badge/backend-FastAPI%20%2B%20Python3.11-009688)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue?logo=docker)](docker-compose.yml)
 
-**MamboChat** 是一款简约而强大的 AI Web 平台，融合了多服务商模型聚合、本地知识库 (RAG) 与 MCP (Model Context Protocol) 协议扩展。旨在为用户提供高度可定制、隐私安全且功能丰富的 AI 对话体验。
+**MamboChat** 是一款开源的支持 Linux/Windows 部署的 Web 对话平台，可集成多服务商 API，实现电脑与手机网页端同步访问，数据云端存储让配置与历史记录多端共享，同时具备知识库与 MCP 调用能力。
 
-**MamboChat** is a minimalist yet powerful AI Web platform featuring multi-provider model aggregation, local knowledge base integration (RAG), and MCP (Model Context Protocol) extensions. It is designed to deliver a highly customizable, privacy-focused, and feature-rich conversational AI experience.
+**MamboChat** is a web-based chat platform that integrates multiple service provider APIs, supporting Linux/Windows deployment with seamless access via desktop and mobile browsers. Data is stored on the server, enabling synchronized configuration and conversation history across all devices, while also featuring knowledge base and MCP integration capabilities.
 
 [中文文档](./README.md) | [English Documentation](./doc/README_EN.md)
 
 ## ✨ 核心功能
-本应用的优点: 首先是个可部署的Web平台,也就是可以在线使用! 其次支持多种大模型平台接口,并且有很多好用的工具!总之本人用起来很不错!  
 **MamboChat** 安装后功能使用预览: [使用教程](doc/使用教程.md)  
 *   **🤖 多模型聚合管理**
     *   支持 OpenAI、Google、DeepSeek 等多种服务商接口。关于不同模型的验证测试报告:[验证记录](doc/CheckRecord.md)
