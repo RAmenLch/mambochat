@@ -1,0 +1,10 @@
+# 自动检测文本文件并进行规范化
+* text=auto
+
+# 强制指定 .bat 和 .cmd 文件在检出时使用 CRLF 换行符
+# 这样无论用户 Git 设置如何，拉取下来的脚本在 Windows 上都能直接运行
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 强制指定 Shell 脚本在检出时使用 LF 换行符 (如果你的项目有 Linux 脚本)
+*.sh text eol=lf
