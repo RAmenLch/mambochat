@@ -6,12 +6,11 @@
 ![FastAPI](https://img.shields.io/badge/backend-FastAPI%20%2B%20Python3.11-009688)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue?logo=docker)](../docker-compose.yml)
 
-**MamboChat** is a minimalist yet powerful AI Web platform featuring multi-provider model aggregation, local knowledge base integration (RAG), and MCP (Model Context Protocol) extensions. It is designed to deliver a highly customizable, privacy-focused, and feature-rich conversational AI experience.
+**MamboChat** is a web-based chat platform that integrates multiple service provider APIs, supporting Linux/Windows deployment with seamless access via desktop and mobile browsers. Data is stored on the server, enabling synchronized configuration and conversation history across all devices, while also featuring knowledge base and MCP integration capabilities.
 
 [中文文档](../README.md) | [English Documentation](./README_EN.md)
 
 ## ✨ Core Features
-**Highlights**: MamboChat is a deployable web platform ready for online use! It supports various LLM platform interfaces and comes with numerous practical tools. It offers an excellent user experience!
 
 **Feature Preview & Usage**: [User Guide](./Tutorial_EN.md)
 
