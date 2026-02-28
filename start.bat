@@ -3,7 +3,7 @@ chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
 
 echo ============================================
-echo   MamboChat 一键启动脚本 (Windows)
+echo   MamboChat 一键启动脚本
 echo ============================================
 
 set "ROOT_DIR=%~dp0"
@@ -36,7 +36,6 @@ if exist "%UV_DIR%\uv.exe" (
 )
 
 :: Priority 2: Check system PATH
-:: [FIX] 使用 if exist 验证, 防止 cmd AutoRun 输出 (如 chcp) 被误捕获
 for /f "delims=" %%i in ('where uv 2^>nul') do (
     if not defined UV_EXE if exist "%%i" set "UV_EXE=%%i"
 )
@@ -57,6 +56,8 @@ if exist "%UV_DIR%\uv.exe" (
 ) else (
     echo  × uv 下载失败，请检查网络或手动安装 uv
     echo    下载地址: https://github.com/astral-sh/uv/releases
+    :: [FIX] 清理残留文件夹
+    if exist "%UV_DIR%" rd /s /q "%UV_DIR%"
     pause
     exit /b 1
 )
@@ -96,6 +97,8 @@ if not exist "%VENV_DIR%\Scripts\python.exe" (
     "%UV_EXE%" venv "%VENV_DIR%" --python %PYTHON_VERSION%
     if !errorlevel! neq 0 (
         echo  × 虚拟环境创建失败
+        :: [FIX] 清理残留文件夹
+        if exist "%VENV_DIR%" rd /s /q "%VENV_DIR%"
         pause
         exit /b 1
     )
@@ -105,15 +108,29 @@ echo  安装 backend 依赖...
 "%UV_EXE%" pip install --python "%PYTHON_EXE%" -e "%ROOT_DIR%backend" -i https://pypi.tuna.tsinghua.edu.cn/simple
 if %errorlevel% neq 0 (
     echo  × backend 依赖安装失败
+    :: [FIX] 清理残留文件夹
+    if exist "%VENV_DIR%" rd /s /q "%VENV_DIR%"
     pause
     exit /b 1
 )
 
-echo  安装 MCP Server (ddgs) 依赖...
+echo  安装 MCP Server ^(ddgs^) 依赖...
 "%UV_EXE%" pip install --python "%PYTHON_EXE%" -e "%ROOT_DIR%MCP_SERVER\ddgs" -i https://pypi.tuna.tsinghua.edu.cn/simple
+if %errorlevel% neq 0 (
+    echo  × MCP Server ^(ddgs^) 依赖安装失败
+    if exist "%VENV_DIR%" rd /s /q "%VENV_DIR%"
+    pause
+    exit /b 1
+)
 
-echo  安装 MCP Server (knowledge_base) 依赖...
+echo  安装 MCP Server ^(knowledge_base^) 依赖...
 "%UV_EXE%" pip install --python "%PYTHON_EXE%" -e "%ROOT_DIR%MCP_SERVER\knowledge_base" -i https://pypi.tuna.tsinghua.edu.cn/simple
+if %errorlevel% neq 0 (
+    echo  × MCP Server ^(knowledge_base^) 依赖安装失败
+    if exist "%VENV_DIR%" rd /s /q "%VENV_DIR%"
+    pause
+    exit /b 1
+)
 
 echo  √ 后端依赖安装完成
 
@@ -135,16 +152,13 @@ if exist "%NODE_DIR%\node.exe" (
 )
 
 :: Priority 2: Check system PATH
-:: [FIX] 使用 if exist 验证, 防止 cmd AutoRun 输出被误捕获
 for /f "delims=" %%i in ('where node 2^>nul') do (
     if not defined NODE_EXE if exist "%%i" set "NODE_EXE=%%i"
 )
 if defined NODE_EXE (
-    :: 从 node.exe 路径推算同目录下的 npm.cmd
     for %%F in ("!NODE_EXE!") do set "NODE_BIN_DIR=%%~dpF"
     set "NPM_CMD=!NODE_BIN_DIR!npm.cmd"
     if not exist "!NPM_CMD!" (
-        :: npm.cmd 不在 node 同目录, 尝试 where npm
         set "NPM_CMD="
         for /f "delims=" %%j in ('where npm 2^>nul') do (
             if not defined NPM_CMD if exist "%%j" set "NPM_CMD=%%j"
@@ -172,6 +186,8 @@ if exist "%NODE_DIR%\node.exe" (
 ) else (
     echo  × Node.js 下载失败
     echo    请手动下载: https://nodejs.org/
+    :: [FIX] 清理残留文件夹
+    if exist "%NODE_DIR%" rd /s /q "%NODE_DIR%"
     pause
     exit /b 1
 )
@@ -186,6 +202,9 @@ if not exist "!NPM_CMD!" (
 
 echo  验证: npm 路径 = !NPM_CMD!
 
+:: 将 Node.js 目录加入 PATH 环境变量
+set "PATH=%NODE_DIR%;%PATH%"
+
 :: ============================================
 :: Step 5: Install frontend dependencies and build
 :: ============================================
@@ -195,9 +214,14 @@ echo [5/6] 安装前端依赖并构建...
 if not exist "%FRONTEND_DIR%\node_modules\" (
     echo  未检测到 node_modules，正在安装 npm 依赖...
     pushd "%FRONTEND_DIR%"
-    call "!NPM_CMD!" install
+    :: [FIX] 增加淘宝镜像参数
+    call "!NPM_CMD!" install --registry=https://registry.npmmirror.com
     if !errorlevel! neq 0 (
+        echo.
         echo  × npm install 失败
+        echo  ! 正在清理 node_modules 以便下次重试...
+        :: [FIX] 清理残留文件夹
+        if exist "%FRONTEND_DIR%\node_modules" rd /s /q "%FRONTEND_DIR%\node_modules"
         popd
         pause
         exit /b 1
