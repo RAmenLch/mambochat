@@ -67,23 +67,24 @@ Use the provided `docker-compose.yml` to launch the service instantly.
         *   `./DB`: SQLite database files.
         *   `./uploads`: Uploaded files and avatars.
 
-## 🚀 Quick Start (Windows)
+## 🚀 Quick Start (Windows One-click Launch)
 
-1.  **Clone or Download**
+1.  **Clone the repository or download the ZIP archive from GitHub**
     ```bash
     git clone https://github.com/RAmenLch/mambochat.git
     cd mambochat
     ```
-2.  **Run the Script**
-    Double-click `start.bat` or run it in a terminal:
+2.  **Double-click the file, or right-click and select "Open in Terminal" (Windows 11) to run the command**
+    ```bash
+    PS C:\mambochat> .\build_and_start.bat
+    ```
+    **If you downloaded a release package such as `mambochat-v113-winx64.zip`, double-click or run this file instead:**
     ```bash
     PS C:\mambochat> .\start.bat
-    ```
-> **Note**: This script may require environment adjustments. If you encounter issues, feel free to open an Issue.
+    ```    
+> `build_and_start.bat` checks for and downloads dependencies before launching, while `start.bat` launches directly.
+> Note: This script has not been tested across different environments. If you encounter any issues, please feel free to open an Issue.
 
-## 💻 Local Development Guide
-
-For secondary development, you can run the frontend and backend separately.
 
 ### Backend
 

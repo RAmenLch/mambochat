@@ -68,15 +68,20 @@
         *   `./uploads`: 存放上传的文件和头像。
 
 ## 🚀 快速开始 (Windows 一键启动)
-1.  **克隆仓库或通过github下载压缩包**
+1.  **克隆源码或通过github下载压缩包**
     ```bash
     git clone https://github.com/RAmenLch/mambochat.git
     cd mambochat
     ```
 2.  **双击或右键点击"在终端中打开"(WIN11)并执行命令**
     ```bash
-      PS C:\mambochat> .\start.bat
+    PS C:\mambochat> .\build_and_start.bat
     ```
+    **如果是下载的发布版压缩包如`mambochat-v113-winx64.zip`,则双击或执行该文件**
+    ```bash
+    PS C:\mambochat> .\start.bat
+    ```    
+> build_and_start.bat 检查并下载依赖后启动  start.bat 直接启动
 > 注: 该脚本未在不同环境下经历测试,若出现问题欢迎创建 Issue
 
 ## 💻 本地开发指南
