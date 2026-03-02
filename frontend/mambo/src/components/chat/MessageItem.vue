@@ -28,7 +28,11 @@
               {{ getMinimizedTooltipContent(subMessage) }}
             </div>
           </template>
-          <div class="minimized-item" @click="restoreSubMessage(subMessage.id)">
+          <div
+            class="minimized-item"
+            :class="{ 'is-inactive': isSubMessageInactive(subMessage) }"
+            @click="restoreSubMessage(subMessage.id)"
+          >
             <!-- MCP Tool Specific Minimized View -->
             <template v-if="subMessage.type === 'McpTool'">
               <el-icon>
@@ -81,6 +85,7 @@
               :parent-message="message"
               :index="index + 1"
               :is-minimize-disabled="isLastVisibleSubMessage"
+              :is-inactive="isSubMessageInactive(subMessage)"
               @edit="(payload) => handleEditRequest(subMessage, payload)"
               @copy="handleCopySingle(subMessage)"
             />
@@ -95,6 +100,7 @@
             :show-header="!useSinglePartitionView"
             :index="group.sub_messages[0].sortOrder + 1"
             :is-minimize-disabled="isLastVisibleSubMessage"
+            :is-inactive="isSubMessageInactive(group.sub_messages[0])"
             @edit="(payload) => handleEditRequest(group.sub_messages[0], payload)"
             @copy="handleCopySingle(group.sub_messages[0])"
           />
@@ -223,6 +229,7 @@ import type {
   McpToolContent,
 } from '@/api/types'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
+import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -282,11 +289,42 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const interactionStore = useChatInteractionStore()
+const sessionStore = useChatSessionStore()
 const settingsStore = useSettingsStore()
 const { globalSettings } = storeToRefs(settingsStore)
+const { messageRecencyRanks } = storeToRefs(sessionStore)
 
 const showActions = ref(false)
 const isZipCardVisible = ref(false)
+
+/**
+ * 计算当前消息的新旧程度排名。
+ * 0: 正在生成。
+ * 1: 最新的一条已完成消息。
+ * N: 第N条已完成消息。
+ */
+const currentMessageRank = computed(() => {
+  return messageRecencyRanks.value.get(props.message.id) ?? 999
+})
+
+/**
+ * 判断子消息是否处于“虚状态”（不参与上下文）。
+ * 规则：
+ * 1. 父消息正在生成 -> 强制 Active。
+ * 2. CPL = 0 -> Inactive。
+ * 3. CPL > 0 且排名 > CPL -> Inactive。
+ */
+function isSubMessageInactive(subMessage: SubMessage): boolean {
+  if (props.message.status === 'generating') return false
+
+  const cpl = subMessage.config?.context_participation_length
+  if (cpl === undefined || cpl === null) return false
+  if (cpl === 0) return true
+  if (cpl > 0) {
+    return currentMessageRank.value > cpl
+  }
+  return false
+}
 
 /**
  * 过滤出所有用于在消息气泡中显示的子消息 (排除 'Usage', 'ZipHistory' 和 'Suggest' 类型)。
@@ -471,7 +509,7 @@ const editDialogVisible = ref(false)
 const editingSubMessage = ref<SubMessage | null>(null)
 const originalEditingContent = ref('')
 
-// 编辑状态：代码块定位信息
+//编辑状态：代码块定位信息
 const editingRange = ref<{ start: number; end: number } | null>(null)
 const editingMarkup = ref('```')
 const editingLanguage = ref('')
@@ -694,7 +732,6 @@ function getMinimizedTooltipContent(subMessage: SubMessage): string {
   flex-direction: column;
   min-width: 80px;
 }
-
 .minimized-sub-messages-container {
   display: flex;
   flex-wrap: wrap;
@@ -721,6 +758,19 @@ function getMinimizedTooltipContent(subMessage: SubMessage): string {
   border-color: var(--el-color-primary);
   color: var(--el-color-primary);
 }
+
+/* 虚状态样式 - 最小化模式 (调整后) */
+.minimized-item.is-inactive {
+  opacity: 1;
+  border-style: dashed;
+  background-color: var(--el-fill-color-lighter);
+  color: var(--el-text-color-regular);
+}
+.minimized-item.is-inactive:hover {
+  border-color: var(--el-text-color-placeholder);
+  color: var(--el-text-color-regular);
+}
+
 .is-user .minimized-item {
   background-color: var(--el-color-primary-light-9);
   border-color: var(--el-color-primary-light-8);
@@ -728,6 +778,16 @@ function getMinimizedTooltipContent(subMessage: SubMessage): string {
 .is-user .minimized-item:hover {
   border-color: var(--el-color-primary);
   color: var(--el-color-primary);
+}
+.is-user .minimized-item.is-inactive {
+  opacity: 1;
+  border-style: dashed;
+  border-color: var(--el-color-primary-light-5);
+  background-color: var(--el-color-primary-light-9);
+}
+.is-user .minimized-item.is-inactive:hover {
+  border-color: var(--el-color-primary-light-3);
+  color: var(--el-color-primary-dark-2);
 }
 .minimized-item-title {
   white-space: nowrap;

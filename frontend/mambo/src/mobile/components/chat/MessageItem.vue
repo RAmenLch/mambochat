@@ -19,6 +19,7 @@
           :key="sub.id"
           size="small"
           type="info"
+          :class="{ 'is-inactive': isSubMessageInactive(sub) }"
           @click.stop="restoreSubMessage(sub.id)"
         >
           <el-icon><Document /></el-icon>
@@ -41,6 +42,7 @@
             :parent-message="message"
             :index="index + 1"
             :show-header="normalSubMessages.length > 1 || subMessage.type !== 'Normal'"
+            :is-inactive="isSubMessageInactive(subMessage)"
             @edit="(payload) => handleEditRequest(subMessage, payload)"
             @copy="handleCopySingle(subMessage)"
           />
@@ -116,6 +118,7 @@ import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import type { Message, SubMessage, SubMessageCreate, MessageStatus } from '@/api/types'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
+import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -139,8 +142,10 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const interactionStore = useChatInteractionStore()
+const sessionStore = useChatSessionStore()
 const settingsStore = useSettingsStore()
 const { globalSettings } = storeToRefs(settingsStore)
+const { messageRecencyRanks } = storeToRefs(sessionStore)
 
 // --- Interaction State ---
 const showActions = ref(false)
@@ -149,6 +154,31 @@ const toggleActions = () => {
   if (props.message.status !== 'generating') {
     showActions.value = !showActions.value
   }
+}
+
+/**
+ * 计算当前消息的新旧程度排名。
+ * 0: 正在生成。
+ * 1: 最新的一条已完成消息。
+ * N: 第N条已完成消息。
+ */
+const currentMessageRank = computed(() => {
+  return messageRecencyRanks.value.get(props.message.id) ?? 999
+})
+
+/**
+ * 判断子消息是否处于“虚状态”（不参与上下文）。
+ */
+function isSubMessageInactive(subMessage: SubMessage): boolean {
+  if (props.message.status === 'generating') return false
+
+  const cpl = subMessage.config?.context_participation_length
+  if (cpl === undefined || cpl === null) return false
+  if (cpl === 0) return true
+  if (cpl > 0) {
+    return currentMessageRank.value > cpl
+  }
+  return false
 }
 
 // --- Data Logic ---
@@ -386,6 +416,14 @@ async function handleCommand(command: string) {
   gap: 4px;
   margin-bottom: 4px;
   flex-wrap: wrap;
+}
+
+/* 虚状态样式 - 最小化模式 */
+.minimized-bar .el-tag.is-inactive {
+  opacity: 1;
+  border-style: dashed;
+  background-color: var(--el-fill-color-lighter);
+  color: var(--el-text-color-regular);
 }
 
 .sub-messages-container {

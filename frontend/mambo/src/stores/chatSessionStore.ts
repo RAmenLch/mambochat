@@ -50,6 +50,45 @@ export const useChatSessionStore = defineStore('chatSession', () => {
   );
 
   /**
+   * 计算每条消息的“新旧程度排名”。
+   * 用于 Context Participation Length (CPL) 的 UI 展示判断。
+   *
+   * 规则：
+   * 1. 正在生成的消息排名为 0 (视为最新，始终参与上下文)。
+   * 2. 排除正在生成的消息，剩余消息按 sortOrder 降序排列。
+   * 3. 最新的一条已完成消息排名为 1，次新为 2，以此类推。
+   */
+  const messageRecencyRanks = computed((): Map<string, number> => {
+    const ranks = new Map<string, number>();
+    const generatingIds: string[] = [];
+    const completedMessages: Message[] = [];
+
+    // 分类消息：分离生成中和已完成的消息
+    currentChatMessages.value.forEach(msg => {
+      if (msg.status === 'generating') {
+        generatingIds.push(msg.id);
+      } else {
+        completedMessages.push(msg);
+      }
+    });
+
+    // 对已完成的消息按 sortOrder 降序排序 (最新的在前)
+    completedMessages.sort((a, b) => b.sortOrder - a.sortOrder);
+
+    // 分配排名 (从 1 开始)
+    completedMessages.forEach((msg, index) => {
+      ranks.set(msg.id, index + 1);
+    });
+
+    // 标记正在生成的消息为 0
+    generatingIds.forEach(id => {
+      ranks.set(id, 0);
+    });
+
+    return ranks;
+  });
+
+  /**
    * 为 Token 估算器提供上下文。
    * 包含系统提示、挂载的系统资源内容、和经过`context_participation_length`规则筛选的最近消息历史。
    */
@@ -395,6 +434,7 @@ export const useChatSessionStore = defineStore('chatSession', () => {
     // Getters
     currentChat,
     isGenerating,
+    messageRecencyRanks,
     contextForTokenEstimation,
 
     // Actions

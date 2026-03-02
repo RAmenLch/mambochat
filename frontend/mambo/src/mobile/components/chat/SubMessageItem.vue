@@ -7,6 +7,7 @@
     :class="{
       'is-user': parentMessage.role === 'user',
       'is-file': subMessage.type === 'File',
+      'is-inactive': isInactive,
     }"
   >
     <!-- 文件类型消息 -->
@@ -149,11 +150,13 @@ const props = withDefaults(
     parentMessage: Message
     showHeader?: boolean
     index?: number
+    isInactive?: boolean
   }>(),
   {
     id: '',
     showHeader: false,
     index: 1,
+    isInactive: false,
   },
 )
 
@@ -289,10 +292,36 @@ async function handleBlockCopy(content: string) {
   background-color: var(--color-background-soft);
   overflow: hidden;
   margin-bottom: 4px;
+  transition: all 0.3s ease;
 }
+
+.sub-message-item.is-inactive {
+  opacity: 1;
+  border-style: dashed;
+  border-color: var(--el-border-color);
+  background-color: var(--el-fill-color-lighter);
+}
+
+.sub-message-item.is-inactive:hover {
+  border-style: solid;
+  border-color: var(--el-text-color-placeholder);
+}
+
 .is-user .sub-message-item {
   background-color: var(--el-color-primary-light-9);
   border-color: var(--el-color-primary-light-8);
+}
+
+.is-user .sub-message-item.is-inactive {
+  opacity: 1;
+  border-style: dashed;
+  border-color: var(--el-color-primary-light-5);
+  background-color: var(--el-color-primary-light-9);
+}
+
+.is-user .sub-message-item.is-inactive:hover {
+  border-style: solid;
+  border-color: var(--el-color-primary-light-5);
 }
 
 /* File Styles */
