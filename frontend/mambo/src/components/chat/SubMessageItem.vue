@@ -7,6 +7,7 @@
     :class="{
       'is-user': parentMessage.role === 'user',
       'is-file': subMessage.type === 'File',
+      'is-inactive': isInactive,
     }"
   >
     <!-- 文件类型消息的专属渲染 -->
@@ -230,16 +231,17 @@ const props = withDefaults(
     showHeader?: boolean
     index?: number
     isMinimizeDisabled?: boolean
+    isInactive?: boolean
   }>(),
   {
     id: '',
     showHeader: false,
     index: 1,
     isMinimizeDisabled: false,
+    isInactive: false,
   },
 )
 
-// 修复：将 range, language, markup 设为可选属性，以兼容全量编辑
 const emit = defineEmits<{
   (
     e: 'edit',
@@ -358,7 +360,6 @@ watch(
 )
 
 function handleHeaderEditClick() {
-  // 全量编辑：只传递 content
   const payload = { content: props.subMessage.content }
   emit('edit', payload)
 }
@@ -369,7 +370,6 @@ function handleCodeBlockEdit(payload: {
   language: string
   markup: string
 }) {
-  // 代码块编辑：传递完整参数
   emit('edit', {
     content: payload.code,
     range: payload.range,
@@ -427,11 +427,41 @@ function scrollToTop() {
   overflow: hidden;
   --sub-message-bg: var(--color-background-soft);
   position: relative;
+  transition: all 0.3s ease;
 }
+
+.sub-message-item.is-inactive {
+  opacity: 1;
+  border-style: dashed;
+  border-color: var(--el-border-color);
+  background-color: var(--el-fill-color-lighter);
+  --sub-message-bg: var(--el-fill-color-lighter);
+}
+
+.sub-message-item.is-inactive:hover {
+  border-style: solid;
+  border-color: var(--el-text-color-placeholder);
+}
+.sub-message-item.is-inactive .message-content {
+  /* color: var(--el-text-color-regular); */
+}
+
 .is-user .sub-message-item {
   background-color: var(--el-color-primary-light-9);
   border-color: var(--el-color-primary-light-8);
   --sub-message-bg: var(--el-color-primary-light-9);
+}
+
+.is-user .sub-message-item.is-inactive {
+  opacity: 1;
+  border-style: dashed;
+  border-color: var(--el-color-primary-light-5);
+  background-color: var(--el-color-primary-light-9);
+}
+
+.is-user .sub-message-item.is-inactive:hover {
+  border-style: solid;
+  border-color: var(--el-color-primary-light-5);
 }
 
 .sub-message-item.is-file {
