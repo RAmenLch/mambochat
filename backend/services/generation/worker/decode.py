@@ -56,7 +56,8 @@ class OpenAiDecode(BaseDecode):
         if mode == "updates":
             return None
         if mode == "messages" and isinstance(message,AIMessage):
-            return message.content
+            return "\n".join([subm.get("text","") for subm in message.content_blocks if subm.get("type","") == 'text'])
+
         else:
             return None
 
@@ -65,7 +66,9 @@ class OpenAiDecode(BaseDecode):
         if mode == "updates":
             return None
         if mode == "messages" and isinstance(message,AIMessage):
-            return message.additional_kwargs.get("reasoning") or message.additional_kwargs.get("reasoning_content")
+            return message.additional_kwargs.get("reasoning") or message.additional_kwargs.get("reasoning_content") \
+            or "".join(
+                [sub.get("reasoning", "") for sub in message.content_blocks if sub.get("type", "") == "reasoning"])
         else:
             return None
 
