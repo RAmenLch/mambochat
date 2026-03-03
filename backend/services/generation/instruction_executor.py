@@ -6,9 +6,9 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend import schemas
-from backend.crud import message_crud, chat_crud, file_crud
+from backend.crud import message_crud, chat_crud
 from backend.services.stream_manager_service import stream_manager
-from backend.services.storage_service import storage_service
+from backend.services.file_service import FileService
 from backend.services.generation.instructions import (
     BaseInstruction,
     CreateSubMessage,
@@ -200,28 +200,17 @@ class InstructionExecutor:
             print(f"[InstructionExecutor] Failed to update config for {instruction.sub_message_id}: {e}")
 
     async def _execute_save_and_persist_file(self, instruction: SaveAndPersistFile):
-        """处理文件保存逻辑：解码 Base64 -> IO 存储 -> 数据库记录"""
-        # 1. 解码 Base64 数据
+        """处理文件保存逻辑：解码 Base64 -> 统一文件服务存储"""
         file_bytes = base64.b64decode(instruction.base64_data)
-        size = len(file_bytes)
 
-        # 2. 执行物理存储 IO
-        # 如果此处发生异常，执行器会抛出异常中断流程，防止后续的 CreateSubMessage 被执行
-        storage_path = await storage_service.save_from_bytes(
+        file_service = FileService(self.db_session)
+        await file_service.save_file_from_bytes(
             data=file_bytes,
             filename=instruction.filename,
-            sub_path="chat_attachments"
-        )
-
-        # 3. 创建数据库记录
-        await file_crud.create_file(
-            db=self.db_session,
-            filename=instruction.filename,
-            storage_path=storage_path,
             mime_type=instruction.mime_type,
-            size=size,
             management_type=[instruction.management_type],
-            file_id=instruction.file_id  # 使用指令预生成的 ID
+            sub_path="chat_attachments",
+            file_id=instruction.file_id
         )
 
     async def _execute_update_chat_name(self, instruction: UpdateChatName):
@@ -288,7 +277,6 @@ class InstructionExecutor:
         执行用户通知指令。
         将结构化的通知信息广播到全局通知流，供前端消费。
         """
-        # serializes the generic BaseModel context to a dictionary
         context_data = instruction.context.model_dump(mode='json') if instruction.context else {}
 
         notification_payload = {

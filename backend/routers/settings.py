@@ -5,9 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import Any, Optional
 
-from backend.crud import setting_crud, provider_crud, file_crud
+from backend.crud import setting_crud, provider_crud
 from backend.services import provider_service
-from backend.services.storage_service import storage_service
+from backend.services.file_service import FileService
 from backend.models import setting_model
 from backend import schemas
 from backend.database import get_db
@@ -41,7 +41,7 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
     keys = [
         "default_model_id", "title_generation_model_id", "zip_history_system_prompt",
         "last_selected_provider_id", "default_max_context_messages", "default_temperature",
-        "default_top_p", "default_stream", "default_enable_suggest", "proxy_enabled", "proxy_url", # 添加 default_enable_suggest
+        "default_top_p", "default_stream", "default_enable_suggest", "proxy_enabled", "proxy_url",
         "user_avatar_file_id", "ai_avatar_file_id",
         "frontend_editor", "kb_default_chunk_size", "kb_default_chunk_overlap", "send_message_shortcut",
         "language"
@@ -52,20 +52,22 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
     )
     settings_map = {s.key: s for s in result.scalars().all()}
 
+    file_service = FileService(db)
+
     # --- 获取头像URL ---
     user_avatar_url = None
     user_avatar_file_id = _get_typed_setting(settings_map.get("user_avatar_file_id"), None, str)
     if user_avatar_file_id:
-        file_record = await file_crud.get_file(db, user_avatar_file_id)
+        file_record = await file_service.get_file(user_avatar_file_id)
         if file_record:
-            user_avatar_url = storage_service.get_url(file_record.storage_path)
+            user_avatar_url = file_service.get_url(file_record.storage_path)
 
     ai_avatar_url = None
     ai_avatar_file_id = _get_typed_setting(settings_map.get("ai_avatar_file_id"), None, str)
     if ai_avatar_file_id:
-        file_record = await file_crud.get_file(db, ai_avatar_file_id)
+        file_record = await file_service.get_file(ai_avatar_file_id)
         if file_record:
-            ai_avatar_url = storage_service.get_url(file_record.storage_path)
+            ai_avatar_url = file_service.get_url(file_record.storage_path)
 
     # --- 获取其他配置 ---
     default_model_id = _get_typed_setting(settings_map.get("default_model_id"), None, str)
@@ -76,7 +78,7 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
     temperature = _get_typed_setting(settings_map.get("default_temperature"), 1.0, float)
     top_p = _get_typed_setting(settings_map.get("default_top_p"), 1.0, float)
     stream = _get_typed_setting(settings_map.get("default_stream"), True, bool)
-    enable_suggest = _get_typed_setting(settings_map.get("default_enable_suggest"), False, bool) # 获取新配置，默认为 False
+    enable_suggest = _get_typed_setting(settings_map.get("default_enable_suggest"), False, bool)
     proxy_enabled = _get_typed_setting(settings_map.get("proxy_enabled"), False, bool)
     proxy_url = _get_typed_setting(settings_map.get("proxy_url"), None, str)
 
@@ -176,7 +178,6 @@ async def update_global_settings(
 
 async def _validate_avatar_file(file: UploadFile):
     """辅助函数，用于校验上传的头像文件"""
-    # 校验文件类型
     ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"]
     if file.content_type not in ALLOWED_MIME_TYPES:
         raise HTTPException(
@@ -184,7 +185,6 @@ async def _validate_avatar_file(file: UploadFile):
             detail=f"Invalid file type. Allowed types are: {', '.join(ALLOWED_MIME_TYPES)}"
         )
 
-    # 校验文件大小 (限制为 5MB)
     MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
     if file.size > MAX_FILE_SIZE:
         raise HTTPException(
@@ -200,47 +200,29 @@ async def _update_avatar(db: AsyncSession, file: UploadFile, avatar_key: str):
     old_setting = await setting_crud.get_setting(db, avatar_key)
     old_file_id = old_setting.value if old_setting else None
 
-    # 1. 保存新文件到物理存储
-    storage_path = await storage_service.save(file, sub_path="avatars")
+    file_service = FileService(db)
 
-    try:
-        # 2. 在数据库中创建新文件记录
-        new_file_record = await file_crud.create_file(
-            db=db,
-            filename=file.filename,
-            storage_path=storage_path,
-            mime_type=file.content_type,
-            size=file.size,
-            management_type=[FileManagementType.GLOBAL_SETTING.value]
-        )
+    new_file_record = await file_service.save_file(
+        file=file,
+        management_type=[FileManagementType.GLOBAL_SETTING.value],
+        sub_path="avatars"
+    )
 
-        # 3. 更新全局配置中的文件ID
-        await setting_crud.update_setting(
-            db,
-            schemas.GlobalSetting(key=avatar_key, value=new_file_record.id)
-        )
-    except Exception as e:
-        # 如果数据库操作失败，回滚物理文件保存
-        await storage_service.delete(storage_path)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update database: {e}"
-        )
+    await setting_crud.update_setting(
+        db,
+        schemas.GlobalSetting(key=avatar_key, value=new_file_record.id)
+    )
 
-    # 4. 清理旧头像（物理文件和数据库记录）
     if old_file_id:
-        deleted_file_record = await file_crud.delete_file(db, old_file_id)
-        if deleted_file_record:
-            await storage_service.delete(deleted_file_record.storage_path)
+        await file_service.delete_file(old_file_id)
 
-    # 5. 构建并返回响应
     response_file = schemas.File(
         id=new_file_record.id,
         filename=new_file_record.filename,
         mime_type=new_file_record.mime_type,
         size=new_file_record.size,
         created_at=new_file_record.created_at,
-        url=storage_service.get_url(new_file_record.storage_path)
+        url=file_service.get_url(new_file_record.storage_path)
     )
     return response_file
 
@@ -252,16 +234,11 @@ async def _delete_avatar(db: AsyncSession, avatar_key: str):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Avatar not found.")
 
     file_id = setting.value
+    file_service = FileService(db)
 
-    # 1. 从数据库中获取文件记录并删除
-    deleted_file = await file_crud.delete_file(db, file_id)
+    await file_service.delete_file(file_id)
 
-    # 2. 清空全局配置中的文件ID
     await setting_crud.update_setting(db, schemas.GlobalSetting(key=avatar_key, value=None))
-
-    # 3. 删除物理文件
-    if deleted_file:
-        await storage_service.delete(deleted_file.storage_path)
 
 
 @router.put("/settings/avatar/user", response_model=schemas.File, summary="上传用户头像")

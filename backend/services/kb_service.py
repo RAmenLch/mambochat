@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
 
 from backend import schemas
-from backend.crud import kb_crud, resource_crud, file_crud, provider_crud, setting_crud
+from backend.crud import kb_crud, resource_crud, provider_crud, setting_crud
 from backend.models import resource_model, kb_model
 from backend.schemas import kb as kb_schemas
 from backend.schemas.enums import (
@@ -23,18 +23,18 @@ from backend.schemas.enums import (
     ProviderWorkerType,
     KBFileStatus, ResourceItemType
 )
-from backend.services.storage_service import storage_service
+from backend.services.file_service import FileService
 from backend.services.stream_manager_service import stream_manager
 from backend.config.timezone_config import get_configured_now
 
 SUP_DIM = [384, 768, 1024, 1536, 2560, 3072, 4096]
-
 
 _KNOWN_TEXT_APPLICATION_TYPES = {
     "application/json", "application/xml", "application/sql",
     "application/javascript", "application/x-sh", "application/x-yaml",
     "application/x-ipynb+json",
 }
+
 
 def _is_vectorizable_text_type(mime_type: str) -> bool:
     """
@@ -45,6 +45,7 @@ def _is_vectorizable_text_type(mime_type: str) -> bool:
     if mime_type.startswith("text/"):
         return True
     return mime_type in _KNOWN_TEXT_APPLICATION_TYPES
+
 
 logger = logging.getLogger(__name__)
 
@@ -155,23 +156,25 @@ class AbstractContentExtractor(ABC):
 
 
 class FileExtractor(AbstractContentExtractor):
-    """适用于 FILE 和 KB_FILE 类型，从存储系统读取物理文件"""
+    """适用于 FILE 和 KB_FILE 类型，从文件服务读取文件内容"""
 
     async def extract(self, resource: schemas.ResourceWithVersions, db: AsyncSession) -> str:
         if not resource.latest_version or not resource.latest_version.content:
             raise ValueError("Resource content (file_id) is empty.")
 
         file_id = resource.latest_version.content
-        db_file = await file_crud.get_file(db, file_id)
+        file_service = FileService(db)
+
+        db_file = await file_service.get_file(file_id)
         if not db_file:
-            raise ValueError(f"Physical file record not found for ID: {file_id}")
+            raise ValueError(f"File record not found for ID: {file_id}")
 
         if not _is_vectorizable_text_type(db_file.mime_type):
             raise ValueError(
                 f"Unsupported file type for vectorization: {db_file.mime_type}. Only text files are supported.")
 
         try:
-            content_bytes = await storage_service.read_bytes(db_file.storage_path)
+            content_bytes = await file_service.get_file_content(file_id)
             try:
                 return content_bytes.decode('utf-8')
             except UnicodeDecodeError:

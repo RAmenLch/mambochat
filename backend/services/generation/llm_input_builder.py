@@ -5,8 +5,8 @@ from types import SimpleNamespace
 from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_core.tools import BaseTool
 
-from backend.crud import chat_crud, message_crud, setting_crud, file_crud, provider_crud, resource_crud
-from backend.services.storage_service import storage_service
+from backend.crud import chat_crud, message_crud, setting_crud, provider_crud, resource_crud
+from backend.services.file_service import FileService
 from backend.schemas import enums as schemas_enums, AIModel
 from backend.schemas.message import McpToolContent
 from backend.services.generation.llm_io import LLMInput
@@ -606,7 +606,8 @@ class LLMInputBuilder:
         if file_id in self._file_content_cache:
             return self._file_content_cache[file_id]
 
-        db_file = await file_crud.get_file(self.db, file_id)
+        file_service = FileService(self.db)
+        db_file = await file_service.get_file(file_id)
         if not db_file:
             return None
 
@@ -614,12 +615,12 @@ class LLMInputBuilder:
         # 处理图片多模态
         if db_file.mime_type.startswith("image/") \
                 and self._enable_image_with_model and self._model_supports_images():
-            img_bytes = await storage_service.read_bytes(db_file.storage_path)
+            img_bytes = await file_service.get_file_content(file_id)
             b64_data = base64.b64encode(img_bytes).decode('utf-8')
             result = {"type": "image_url", "image_url": {"url": f"data:{db_file.mime_type};base64,{b64_data}"}}
 
         elif _is_text_mime_type(db_file.mime_type):
-            text_bytes = await storage_service.read_bytes(db_file.storage_path)
+            text_bytes = await file_service.get_file_content(file_id)
             content = text_bytes.decode('utf-8')
             result = {"type": "text", "text": f"\n--- File: {db_file.filename} ---\n{content}\n--- End of File ---"}
 

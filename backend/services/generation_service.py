@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import AsyncGenerator, Tuple, List, Optional
 
 from backend.services.stream_manager_service import stream_manager
-from backend.crud import chat_crud, message_crud, file_crud, resource_crud, setting_crud, provider_crud
+from backend.crud import chat_crud, message_crud, resource_crud, setting_crud, provider_crud
 from backend import schemas
 from backend.models import chat_model
 from backend.database import AsyncSessionLocal
@@ -23,6 +23,7 @@ from backend.services.generation.worker.deepseek_worker import DeepSeekWorker
 from backend.schemas.enums import FileManagementType, MessageStatus, MessageRole, SubMessageType, ProviderWorkerType
 from backend.config.timezone_config import get_configured_now, TZ
 from backend.services.generation.worker.anthropic_worker import AnthropicWorker
+from backend.services.file_service import FileService
 
 # 定义生成任务启动的超时阈值
 GENERATION_START_TIMEOUT = timedelta(minutes=10)
@@ -129,12 +130,12 @@ async def create_user_message_and_prepare_generation(
         sub_msg.sortOrder = i
 
     # 在创建消息前，处理用户原始提交的文件类型子消息
+    file_service = FileService(db)
     for sub_message in request.sub_messages:
         if sub_message.type == 'File':
             file_id = sub_message.content
             # 智能更新文件管理类型：如果是临时类型则移除临时标记并加入新类型，否则合并类型
-            await file_crud.update_file_management_type(
-                db,
+            await file_service.update_management_type(
                 file_id=file_id,
                 new_type=FileManagementType.SUB_MESSAGE.value,
                 merge=True  # 使用智能合并模式

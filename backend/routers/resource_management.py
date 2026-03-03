@@ -10,15 +10,14 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend import schemas
-from backend.crud import resource_crud, file_crud, kb_crud
+from backend.crud import resource_crud, kb_crud
 from backend.database import get_db, AsyncSessionLocal
 from backend.models import resource_model
 from backend.schemas import kb as kb_schemas
 from backend.schemas.enums import FileManagementType, ResourceType, ResourceItemType, KBFileStatus
 from backend.services import chat_service, resource_service
 from backend.services.kb_service import KnowledgeBaseService
-from backend.services.storage_service import storage_service
-from backend.routers.file_management import correct_mime_type, is_mime_type_allowed
+from backend.services.file_service import FileService
 
 router = APIRouter(prefix="/resources", tags=["Resource Management"])
 
@@ -77,7 +76,8 @@ async def _hydrate_resources(resources: List[schemas.Resource], db: AsyncSession
         return
 
     # 2. 批量查询文件信息
-    file_records = await file_crud.get_files_by_ids(db, list(file_ids))
+    file_service = FileService(db)
+    file_records = await file_service.batch_get_files(list(file_ids))
 
     # 3. 填充信息
     for record in file_records:
@@ -87,7 +87,7 @@ async def _hydrate_resources(resources: List[schemas.Resource], db: AsyncSession
             mime_type=record.mime_type,
             size=record.size,
             created_at=record.created_at,
-            url=storage_service.get_url(record.storage_path)
+            url=file_service.get_url(record.storage_path)
         )
 
         # 将文件信息回填到所有引用该文件的版本对象中
@@ -167,28 +167,12 @@ async def upload_resource_file(
     if not parent_id and not resource_id:
         raise HTTPException(status_code=400, detail="Either parent_id or resource_id must be provided.")
 
-    # 修正 MIME 类型（必须在 save 之前，因为 sniff 会 read+seek）
-    final_mime_type = await correct_mime_type(file)
+    file_service = FileService(db)
 
-    if not is_mime_type_allowed(final_mime_type):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"不支持的文件类型: {final_mime_type}。"
-        )
-
-    # 1. 保存物理文件
-    try:
-        storage_path = await storage_service.save(file, sub_path="resources")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"File storage failed: {e}")
-
-    db_file = await file_crud.create_file(
-        db=db,
-        filename=file.filename,
-        storage_path=storage_path,
-        mime_type=final_mime_type,  # ★ 使用修正后的类型（原来是 file.content_type or "application/octet-stream"）
-        size=file.size,
-        management_type=[FileManagementType.RESOURCE.value]
+    db_file = await file_service.save_file(
+        file=file,
+        management_type=[FileManagementType.RESOURCE.value],
+        sub_path="resources"
     )
 
     result_resource = None
@@ -297,7 +281,8 @@ async def read_resource(resource_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.put("/{resource_id}", response_model=schemas.Resource, summary="更新资源基本信息")
-async def update_resource(resource_id: str, resource_update: schemas.ResourceUpdate, db: AsyncSession = Depends(get_db)):
+async def update_resource(resource_id: str, resource_update: schemas.ResourceUpdate,
+                          db: AsyncSession = Depends(get_db)):
     """
     更新资源的基本信息，如名称、描述。
     注意：移动操作请使用 /move 接口。
@@ -318,7 +303,8 @@ async def delete_resource(resource_id: str, db: AsyncSession = Depends(get_db)):
     会自动清理关联的向量数据和知识库切片。
     """
     # 1. 查找所有需要删除的资源ID（包括子孙节点）
-    cte = select(resource_model.Resource.id, resource_model.Resource.kb_id).where(resource_model.Resource.id == resource_id).cte(name="hierarchy", recursive=True)
+    cte = select(resource_model.Resource.id, resource_model.Resource.kb_id).where(
+        resource_model.Resource.id == resource_id).cte(name="hierarchy", recursive=True)
     child = resource_model.Resource
     cte = cte.union_all(select(child.id, child.kb_id).join(cte, child.parentId == cte.c.id))
 
@@ -356,23 +342,28 @@ async def delete_resource(resource_id: str, db: AsyncSession = Depends(get_db)):
 
 # --- Version Operations ---
 
-@router.post("/{resource_id}/versions", response_model=schemas.ResourceVersion, status_code=status.HTTP_201_CREATED, summary="为资源创建新版本")
-async def create_version_for_resource(resource_id: str, version_create: schemas.ResourceVersionCreate, db: AsyncSession = Depends(get_db)):
+@router.post("/{resource_id}/versions", response_model=schemas.ResourceVersion, status_code=status.HTTP_201_CREATED,
+             summary="为资源创建新版本")
+async def create_version_for_resource(resource_id: str, version_create: schemas.ResourceVersionCreate,
+                                      db: AsyncSession = Depends(get_db)):
     """
     为指定的资源创建一个新的版本快照。
     """
-    new_version = await resource_crud.create_resource_version(db, resource_id=resource_id, version_create=version_create)
+    new_version = await resource_crud.create_resource_version(db, resource_id=resource_id,
+                                                              version_create=version_create)
     if not new_version:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found or is a folder")
     return new_version
 
 
 @router.put("/versions/{version_id}", response_model=schemas.ResourceVersion, summary="更新指定版本")
-async def update_version(version_id: str, version_update: schemas.ResourceVersionUpdate, db: AsyncSession = Depends(get_db)):
+async def update_version(version_id: str, version_update: schemas.ResourceVersionUpdate,
+                         db: AsyncSession = Depends(get_db)):
     """
     更新指定版本快照的内容、名称或其他元数据。
     """
-    updated_version = await resource_crud.update_resource_version(db, version_id=version_id, version_update=version_update)
+    updated_version = await resource_crud.update_resource_version(db, version_id=version_id,
+                                                                  version_update=version_update)
     if not updated_version:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource version not found")
     return updated_version

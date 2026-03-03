@@ -7,8 +7,8 @@ from typing import List
 
 from backend.services import generation_service
 from backend.services.stream_manager_service import stream_manager
-from backend.services.storage_service import storage_service
-from backend.crud import chat_crud, message_crud, setting_crud, file_crud
+from backend.services.file_service import FileService
+from backend.crud import chat_crud, message_crud, setting_crud
 from backend import schemas
 from backend.models import chat_model
 from backend.database import get_db
@@ -44,7 +44,8 @@ async def _hydrate_and_validate_messages(
     # 2. 批量查询文件信息并创建查找表
     file_info_map = {}
     if file_ids_to_hydrate:
-        file_records = await file_crud.get_files_by_ids(db, list(file_ids_to_hydrate))
+        file_service = FileService(db)
+        file_records = await file_service.batch_get_files(list(file_ids_to_hydrate))
         for record in file_records:
             file_info_map[record.id] = schemas.File(
                 id=record.id,
@@ -52,7 +53,7 @@ async def _hydrate_and_validate_messages(
                 mime_type=record.mime_type,
                 size=record.size,
                 created_at=record.created_at,
-                url=storage_service.get_url(record.storage_path)
+                url=file_service.get_url(record.storage_path)
             )
 
     # 3. 构建包含状态和文件信息的响应对象列表
@@ -284,4 +285,3 @@ async def stream_response(
         generation_service.subscribe_to_stream(db, assistant_message_id),
         media_type="text/event-stream"
     )
-
