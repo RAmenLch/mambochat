@@ -13,7 +13,7 @@ import type {
   SubMessageUpdate,
   GenerateRequest,
   PrepareGenerateResponse,
-  FileResponse, UpdateMessageResponse,
+  UpdateMessageResponse,
   SearchRequest, SearchResponse
 } from './types';
 
@@ -100,24 +100,6 @@ export const updateSubMessage = (subMessageId: string, data: SubMessageUpdate): 
  */
 export const deleteMessage = (messageId: string): Promise<Message> => {
   return apiClient.delete(`/messages/${messageId}`)
-};
-
-/**
- * 上传单个文件到服务器。
- * @param file 用户选择的 File 对象。
- * @returns 返回已上传文件的元数据。
- */
-export const uploadFile = (file: File): Promise<FileResponse> => {
-  const formData = new FormData();
-  formData.append('file', file);
-
-  // 解决方案：在此处为本次请求单独覆盖 Content-Type
-  // 这会覆盖 apiClient 实例的全局默认 'application/json' 设置
-  return apiClient.post('/files/upload', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
-  });
 };
 
 /**

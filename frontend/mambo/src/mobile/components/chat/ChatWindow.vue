@@ -124,7 +124,7 @@ import { useProviderStore } from '@/stores/providerStore'
 import { useResourceStore } from '@/stores/resourceStore'
 import { useChatInput } from '@/composables/useChatInput'
 import { useTokenEstimator } from '@/composables/useTokenEstimator'
-import { uploadFile } from '@/api/chatService'
+import { uploadFile } from '@/api/fileService'
 import type { AIModel, ChatUpdate, Resource, SubMessageCreate } from '@/api/types'
 
 interface GroupedModels {

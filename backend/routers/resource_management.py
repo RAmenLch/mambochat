@@ -111,7 +111,7 @@ async def read_resource_children(
     根据父节点ID列表并行加载子节点内容。
     注意：此接口返回 ResourceSimple，不包含 latest_version，因此不进行文件详情填充。
     """
-    return await resource_crud.get_resources_by_parent_ids(db, parent_ids=parent_ids)
+    return await resource_crud.get_resources_by_parent_ids(db, parent_ids=parentIds)
 
 
 @router.post("", response_model=schemas.Resource, status_code=status.HTTP_201_CREATED, summary="创建新资源或文件夹")

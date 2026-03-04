@@ -87,6 +87,7 @@
               :is-minimize-disabled="isLastVisibleSubMessage"
               :is-inactive="isSubMessageInactive(subMessage)"
               @edit="(payload) => handleEditRequest(subMessage, payload)"
+              @edit-file="handleFileEdit"
               @copy="handleCopySingle(subMessage)"
             />
           </div>
@@ -211,7 +212,7 @@
   <MessageEditDialog
     v-model:visible="editDialogVisible"
     :initial-content="originalEditingContent"
-    :is-user-message="message.role === 'user'"
+    :can-regenerate="!editingFileInfo && message.role === 'user'"
     @save="handleSaveEdit"
     @save-and-resend="handleSaveAndResend"
   />
@@ -227,6 +228,7 @@ import type {
   SubMessageCreate,
   MessageStatus,
   McpToolContent,
+  FileResponse,
 } from '@/api/types'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
@@ -253,6 +255,7 @@ import MessageEditDialog from './dialogs/MessageEditDialog.vue'
 import UsageInfo from './UsageInfo.vue'
 import ZipHistoryCard from './ZipHistoryCard.vue'
 import { copyToClipboard } from '@/utils/clipboard'
+import { getFileContent, updateFileContent } from '@/api/fileService'
 
 interface SubMessageGroup {
   type: 'file' | 'normal'
@@ -432,6 +435,7 @@ const zipBookmarkText = computed(() => {
  * 根据状态返回 CSS 类名
  */
 const zipBookmarkClass = computed(() => ({
+
   'is-generating': zipStatus.value === 'generating',
   'is-enabled': zipStatus.value === 'enabled',
   'is-disabled': zipStatus.value === 'disabled',
@@ -508,6 +512,7 @@ function toggleSingleViewCollapse() {
 const editDialogVisible = ref(false)
 const editingSubMessage = ref<SubMessage | null>(null)
 const originalEditingContent = ref('')
+const editingFileInfo = ref<FileResponse | null>(null)
 
 //编辑状态：代码块定位信息
 const editingRange = ref<{ start: number; end: number } | null>(null)
@@ -521,6 +526,7 @@ watch(editDialogVisible, (newValue) => {
     editingRange.value = null
     editingMarkup.value = '```'
     editingLanguage.value = ''
+    editingFileInfo.value = null
   }
 })
 
@@ -532,6 +538,7 @@ function handleEditRequest(subMessage: SubMessage, payload: EditPayload) {
 
   editingSubMessage.value = subMessage
   originalEditingContent.value = payload.content
+  editingFileInfo.value = null
 
   if (payload.range) {
     // 代码块局部编辑
@@ -546,6 +553,20 @@ function handleEditRequest(subMessage: SubMessage, payload: EditPayload) {
   }
 
   editDialogVisible.value = true
+}
+
+async function handleFileEdit(file: FileResponse) {
+  try {
+    const response = await getFileContent(file.id)
+    editingFileInfo.value = file
+    editingSubMessage.value = null
+    editingRange.value = null
+    originalEditingContent.value = response.content
+    editDialogVisible.value = true
+  } catch (error) {
+    ElMessage.error(t('chat.message.fileLoadFailed'))
+    console.error('Failed to load file content:', error)
+  }
 }
 
 function getUpdatedFullContent(newPartialContent: string): string {
@@ -572,8 +593,28 @@ function getUpdatedFullContent(newPartialContent: string): string {
     fullOriginalContent.substring(0, start) + newBlockString + fullOriginalContent.substring(end)
   )
 }
+async function handleSaveEdit(newContent: string) {
+  const currentEditingFile = editingFileInfo.value;
 
-function handleSaveEdit(newContent: string) {
+  if (currentEditingFile) {
+    try {
+      const updatedFile = await updateFileContent(currentEditingFile.id, newContent)
+
+      const msg = sessionStore.currentChatMessages.find(m => m.id === props.message.id)
+      if (msg) {
+        // [修复] 使用缓存的 currentEditingFile 进行查找
+        const subMsg = msg.sub_messages.find(sm => sm.file_info?.id === currentEditingFile.id)
+        if (subMsg) {
+          subMsg.file_info = updatedFile
+        }
+      }
+    } catch (error) {
+      console.error('Failed to save file content:', error)
+    }
+    return
+  }
+
+  // Case 2: 普通消息编辑
   if (!editingSubMessage.value) return
   const updatedContent = getUpdatedFullContent(newContent)
   interactionStore.updateSubMessage({

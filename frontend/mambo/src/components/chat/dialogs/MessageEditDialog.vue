@@ -39,7 +39,7 @@
         <div class="footer-buttons">
           <el-button @click="handleClose">{{ t('common.action.cancel') }}</el-button>
           <el-button type="primary" @click="handleSaveOnly">{{ t('chat.edit.saveOnly') }}</el-button>
-          <el-button v-if="isUserMessage" type="success" @click="handleSaveAndResend">
+          <el-button v-if="canRegenerate" type="success" @click="handleSaveAndResend">
             {{ t('chat.edit.saveAndRegenerate') }}
           </el-button>
         </div>
@@ -71,7 +71,7 @@ const { t } = useI18n()
 const props = defineProps<{
   visible: boolean
   initialContent: string
-  isUserMessage: boolean
+  canRegenerate: boolean
   title?: string
 }>()
 

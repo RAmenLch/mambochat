@@ -336,6 +336,7 @@ export default {
       codeCopied: '代码已复制到剪贴板',
       copyFailed: '复制失败',
       backToTop: '回到顶部',
+      fileLoadFailed:'文件加载失败',
       mcp: {
         invalidCall: '无效的工具调用',
         unknownTool: '未知工具',
@@ -439,6 +440,10 @@ export default {
       downloadFile: '下载文件',
       kbLinked: '已关联知识库',
       folderNoContent: '文件夹无需编辑内容',
+      editableHint:'支持在线编辑',
+      loadContentError: "加载文件内容失败",
+      saveContentSuccess: "文件内容保存成功",
+      editableTooltip: "小于256KB的文本类型文件可在线编辑"
     },
     meta: {
       title: '基本信息',

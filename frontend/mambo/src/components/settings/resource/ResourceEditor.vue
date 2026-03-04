@@ -27,86 +27,166 @@
       <div class="content-column">
         <template v-if="resource.itemType === 'resource'">
           <!-- Case A: File Resource -->
-          <div v-if="resource.resourceType === 'file'" class="file-uploader-area">
-            <!-- Sub-case A1: File Exists (Show Info/Preview) -->
-            <div v-if="currentFileInfo" class="file-info-card">
-              <!-- Image Preview -->
-              <div v-if="isImage" class="file-preview-image">
-                <el-image
-                  :src="fileDownloadUrl"
-                  :preview-src-list="[fileDownloadUrl]"
-                  fit="contain"
-                  class="preview-img"
-                >
-                  <template #error>
-                    <div class="image-slot">
-                      <el-icon><Picture /></el-icon>
-                      <span>{{ t('resource.editor.imageLoadError') }}</span>
+          <div v-if="resource.resourceType === 'file'" class="file-uploader-area" :class="{ 'is-editable-layout': isEditableFile }">
+
+            <!-- Sub-case A1: Editable File (New Layout) -->
+            <div v-if="isEditableFile" class="editable-file-layout">
+              <!-- Left: Compact Info -->
+              <div class="file-info-compact">
+                <!-- Icon & Editable Badge with Tooltip -->
+                <div class="file-preview-icon compact">
+                  <el-icon :size="56"><Document /></el-icon>
+                  <el-tooltip :content="t('resource.editor.editableTooltip')" placement="top" effect="dark">
+                    <div class="editable-badge">
+                      <el-icon><EditPen /></el-icon>
                     </div>
-                  </template>
-                </el-image>
-              </div>
-
-              <!-- Generic File Icon -->
-              <div v-else class="file-preview-icon">
-                <el-icon :size="64"><Document /></el-icon>
-              </div>
-
-              <div class="file-meta-content">
-                <h3 class="file-name" :title="currentFileInfo.filename">
-                  {{ currentFileInfo.filename }}
-                </h3>
-                <div class="file-details">
-                  <el-tag size="small" type="info">{{ currentFileInfo.mime_type }}</el-tag>
-                  <span class="file-size">{{ formatFileSize(currentFileInfo.size) }}</span>
+                  </el-tooltip>
                 </div>
-                <div class="file-actions">
-                  <a :href="fileDownloadUrl" target="_blank" class="download-link">
-                    <el-button type="primary" link icon="Download">
-                      {{ t('resource.editor.downloadFile') }}
+
+                <!-- Meta Info (Restored from original) -->
+                <div class="file-meta-content">
+                  <h3 class="file-name" :title="currentFileInfo?.filename">
+                    {{ currentFileInfo?.filename }}
+                  </h3>
+                  <div class="editable-status-text">
+                    <el-icon><Select /></el-icon> {{ t('resource.editor.editableHint') }}
+                  </div>
+                  <div class="file-details">
+                    <el-tag size="small" type="info" class="mime-tag">{{ currentFileInfo?.mime_type }}</el-tag>
+                    <span class="file-size">{{ formatFileSize(currentFileInfo?.size || 0) }}</span>
+                  </div>
+                  <div class="file-actions">
+                    <a :href="fileDownloadUrl" target="_blank" class="download-link">
+                      <el-button type="primary" link icon="Download">
+                        {{ t('resource.editor.downloadFile') }}
+                      </el-button>
+                    </a>
+                  </div>
+                  <p v-if="resource.kb_id" class="kb-badge">
+                    <el-tag size="small" type="warning" effect="plain">{{ t('resource.editor.kbLinked') }}</el-tag>
+                  </p>
+                </div>
+
+                <el-divider class="compact-divider" />
+
+                <!-- Upload Actions (Restored from original) -->
+                <div class="upload-actions compact-upload">
+                  <el-upload
+                    class="upload-demo"
+                    action="#"
+                    :auto-upload="false"
+                    :show-file-list="false"
+                    :on-change="handleFileChange"
+                    :disabled="isUploading"
+                  >
+                    <template #trigger>
+                      <el-button type="primary" :loading="isUploading" plain>
+                        <el-icon class="el-icon--left"><Upload /></el-icon>
+                        {{ t('resource.editor.uploadNew') }}
+                      </el-button>
+                    </template>
+                  </el-upload>
+                  <div class="upload-tip">
+                    {{ t('resource.editor.uploadAutoVersion') }}<br />
+                    <span v-if="resource.kb_id" class="warning-text">
+                      {{ t('resource.editor.kbWarning') }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Right: Editor Area -->
+              <div class="file-editor-wrapper" v-loading="isFileContentLoading">
+                <ResourceUniversalEditor
+                  v-model="editableFileContent"
+                  language="plaintext"
+                  :monaco-options="editorOptions"
+                />
+              </div>
+            </div>
+
+            <!-- Sub-case A2: Non-editable File (Original Layout) -->
+            <template v-else>
+              <!-- Sub-case A2.1: File Exists (Show Info/Preview) -->
+              <div v-if="currentFileInfo" class="file-info-card">
+                <!-- Image Preview -->
+                <div v-if="isImage" class="file-preview-image">
+                  <el-image
+                    :src="fileDownloadUrl"
+                    :preview-src-list="[fileDownloadUrl]"
+                    fit="contain"
+                    class="preview-img"
+                  >
+                    <template #error>
+                      <div class="image-slot">
+                        <el-icon><Picture /></el-icon>
+                        <span>{{ t('resource.editor.imageLoadError') }}</span>
+                      </div>
+                    </template>
+                  </el-image>
+                </div>
+
+                <!-- Generic File Icon -->
+                <div v-else class="file-preview-icon">
+                  <el-icon :size="64"><Document /></el-icon>
+                </div>
+
+                <div class="file-meta-content">
+                  <h3 class="file-name" :title="currentFileInfo.filename">
+                    {{ currentFileInfo.filename }}
+                  </h3>
+                  <div class="file-details">
+                    <el-tag size="small" type="info">{{ currentFileInfo.mime_type }}</el-tag>
+                    <span class="file-size">{{ formatFileSize(currentFileInfo.size) }}</span>
+                  </div>
+                  <div class="file-actions">
+                    <a :href="fileDownloadUrl" target="_blank" class="download-link">
+                      <el-button type="primary" link icon="Download">
+                        {{ t('resource.editor.downloadFile') }}
+                      </el-button>
+                    </a>
+                  </div>
+                  <p v-if="resource.kb_id" class="kb-badge">
+                    <el-tag size="small" type="warning" effect="plain">{{ t('resource.editor.kbLinked') }}</el-tag>
+                  </p>
+                </div>
+              </div>
+
+              <!-- Sub-case A2.2: No File (Empty State) -->
+              <div v-else class="file-empty-state">
+                <el-icon :size="64" class="empty-icon"><DocumentAdd /></el-icon>
+                <p class="empty-text">{{ t('resource.editor.noFile') }}</p>
+                <p class="empty-subtext">{{ t('resource.editor.uploadPrompt') }}</p>
+              </div>
+
+              <!-- Upload Action Area (Only for non-editable or empty) -->
+              <div class="upload-actions">
+                <el-upload
+                  class="upload-demo"
+                  action="#"
+                  :auto-upload="false"
+                  :show-file-list="false"
+                  :on-change="handleFileChange"
+                  :disabled="isUploading"
+                >
+                  <template #trigger>
+                    <el-button type="primary" :loading="isUploading">
+                      <el-icon class="el-icon--left"><Upload /></el-icon>
+                      {{ currentFileInfo ? t('resource.editor.uploadNew') : t('resource.editor.uploadFile') }}
                     </el-button>
-                  </a>
+                  </template>
+                </el-upload>
+                <div class="upload-tip">
+                  <template v-if="currentFileInfo">
+                    {{ t('resource.editor.uploadAutoVersion') }}<br />
+                    <span v-if="resource.kb_id" class="warning-text">
+                      {{ t('resource.editor.kbWarning') }}
+                    </span>
+                  </template>
+                  <template v-else> {{ t('resource.editor.uploadTip') }} </template>
                 </div>
-                <p v-if="resource.kb_id" class="kb-badge">
-                  <el-tag size="small" type="warning" effect="plain">{{ t('resource.editor.kbLinked') }}</el-tag>
-                </p>
               </div>
-            </div>
-
-            <!-- Sub-case A2: No File (Empty State) -->
-            <div v-else class="file-empty-state">
-              <el-icon :size="64" class="empty-icon"><DocumentAdd /></el-icon>
-              <p class="empty-text">{{ t('resource.editor.noFile') }}</p>
-              <p class="empty-subtext">{{ t('resource.editor.uploadPrompt') }}</p>
-            </div>
-
-            <!-- Upload Action Area -->
-            <div class="upload-actions">
-              <el-upload
-                class="upload-demo"
-                action="#"
-                :auto-upload="false"
-                :show-file-list="false"
-                :on-change="handleFileChange"
-                :disabled="isUploading"
-              >
-                <template #trigger>
-                  <el-button type="primary" :loading="isUploading">
-                    <el-icon class="el-icon--left"><Upload /></el-icon>
-                    {{ currentFileInfo ? t('resource.editor.uploadNew') : t('resource.editor.uploadFile') }}
-                  </el-button>
-                </template>
-              </el-upload>
-              <div class="upload-tip">
-                <template v-if="currentFileInfo">
-                  {{ t('resource.editor.uploadAutoVersion') }}<br />
-                  <span v-if="resource.kb_id" class="warning-text">
-                    {{ t('resource.editor.kbWarning') }}
-                  </span>
-                </template>
-                <template v-else> {{ t('resource.editor.uploadTip') }} </template>
-              </div>
-            </div>
+            </template>
           </div>
 
           <!-- Case B: Text Resource (Prompt/Template) -->
@@ -130,10 +210,10 @@
           <el-empty :description="t('resource.editor.folderNoContent')" :image-size="100" />
         </div>
 
-        <!-- Footer Actions (Attached to content area) -->
+        <!-- Footer Actions -->
         <div
           class="editor-footer"
-          v-if="resource.itemType === 'resource' && resource.resourceType !== 'file'"
+          v-if="resource.itemType === 'resource' && (resource.resourceType !== 'file' || isEditableFile)"
         >
           <el-button @click="resetForm">{{ t('resource.editor.reset') }}</el-button>
           <el-button type="success" @click="openNewVersionDialog">{{ t('resource.editor.saveAsNew') }}</el-button>
@@ -182,7 +262,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type UploadFile } from 'element-plus'
-import { Document, Upload, Picture, DocumentAdd } from '@element-plus/icons-vue'
+import { Document, Upload, Picture, DocumentAdd, EditPen, Select } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 import type { editor } from 'monaco-editor'
 
@@ -221,6 +301,9 @@ const loadedVersionInEditor = ref<ResourceVersion | null>(null)
 const viewMode = ref<'editor' | 'kb_config'>('editor')
 const isUploading = ref(false)
 
+const editableFileContent = ref('')
+const isFileContentLoading = ref(false)
+
 const form = reactive({
   name: '',
   description: '',
@@ -251,6 +334,10 @@ const isImage = computed(() => {
   return mime ? mime.startsWith('image/') : false
 })
 
+const isEditableFile = computed(() => {
+  return currentFileInfo.value?.editable ?? false
+})
+
 const fileDownloadUrl = computed(() => {
   return currentFileInfo.value?.url ?? ''
 })
@@ -264,6 +351,11 @@ const isFormDirty = computed(() => {
     form.name !== original.name || form.description !== (original.description || '')
 
   if (original.itemType === 'resource' && originalVersion) {
+    if (original.resourceType === 'file' && isEditableFile.value) {
+      const isContentDirty = editableFileContent.value !== (originalVersion.content || '')
+      return isMetaDirty || isContentDirty
+    }
+
     if (original.resourceType === 'file') return isMetaDirty
 
     const isVersionMetaDirty =
@@ -326,6 +418,10 @@ watch(
           resetForm()
         }
       }
+
+      if (isEditableFile.value && currentVersion.value) {
+        loadFileContent()
+      }
     } else {
       form.name = ''
       form.description = ''
@@ -333,10 +429,17 @@ watch(
       form.attributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES }
       form.versionName = ''
       form.versionCommitMessage = ''
+      editableFileContent.value = ''
     }
   },
   { immediate: true },
 )
+
+watch(currentVersion, (newVersion) => {
+  if (newVersion && isEditableFile.value) {
+    loadFileContent()
+  }
+})
 
 function formatFileSize(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -348,6 +451,21 @@ function formatFileSize(bytes: number): string {
 
 function toggleKbView() {
   viewMode.value = 'kb_config'
+}
+
+async function loadFileContent() {
+  if (!props.resource || !currentVersion.value) return
+
+  isFileContentLoading.value = true
+  try {
+    await resourceStore.fetchFileContent(props.resource.id, currentVersion.value.id)
+    editableFileContent.value = currentVersion.value.content || ''
+  } catch (error) {
+    console.error('Failed to load file content:', error)
+    ElMessage.error(t('resource.editor.loadContentError'))
+  } finally {
+    isFileContentLoading.value = false
+  }
 }
 
 function resetForm() {
@@ -369,6 +487,12 @@ function resetForm() {
       form.attributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES }
     }
     loadedVersionInEditor.value = null
+
+    if (isEditableFile.value && versionToLoad) {
+       editableFileContent.value = versionToLoad.content || ''
+    } else {
+       editableFileContent.value = ''
+    }
   }
 }
 
@@ -383,22 +507,33 @@ async function handleSaveChanges() {
     })
   }
 
-  if (resource.itemType === 'resource' && resource.resourceType !== 'file') {
-    const targetVersionId = loadedVersionInEditor.value?.id ?? resource.latest_version?.id
+  if (resource.itemType === 'resource') {
+    if (resource.resourceType === 'file' && isEditableFile.value && currentVersion.value) {
+       if (editableFileContent.value !== currentVersion.value.content) {
+         await resourceStore.saveFileContent(
+           resource.id,
+           currentVersion.value.id,
+           editableFileContent.value
+         )
+       }
+    }
+    else if (resource.resourceType !== 'file') {
+      const targetVersionId = loadedVersionInEditor.value?.id ?? resource.latest_version?.id
 
-    if (targetVersionId) {
-      const payload = {
-        name: form.versionName,
-        commitMessage: form.versionCommitMessage,
-        content: form.content,
-        attributes: form.attributes,
-      }
-      await resourceStore.updateResourceVersionItem(resource.id, targetVersionId, payload)
+      if (targetVersionId) {
+        const payload = {
+          name: form.versionName,
+          commitMessage: form.versionCommitMessage,
+          content: form.content,
+          attributes: form.attributes,
+        }
+        await resourceStore.updateResourceVersionItem(resource.id, targetVersionId, payload)
 
-      if (loadedVersionInEditor.value) {
-        const updatedVersion = resource.versions.find((v) => v.id === targetVersionId)
-        if (updatedVersion) {
-          loadedVersionInEditor.value = { ...updatedVersion, ...payload }
+        if (loadedVersionInEditor.value) {
+          const updatedVersion = resource.versions.find((v) => v.id === targetVersionId)
+          if (updatedVersion) {
+            loadedVersionInEditor.value = { ...updatedVersion, ...payload }
+          }
         }
       }
     }
@@ -438,6 +573,10 @@ function loadVersionIntoEditor(version: ResourceVersion) {
   }
   loadedVersionInEditor.value = version
 
+  if (version.file_info?.editable) {
+    loadFileContent()
+  }
+
   if (viewMode.value !== 'editor') {
     viewMode.value = 'editor'
   }
@@ -473,14 +612,30 @@ async function handleConfirmNewVersion() {
   if (!newVersionFormRef.value || !props.resource) return
   await newVersionFormRef.value.validate(async (valid) => {
     if (valid) {
-      const versionData: ResourceVersionCreate = {
-        ...newVersionDialog.form,
-        content: form.content,
-        attributes: form.attributes,
+      if (isEditableFile.value && currentFileInfo.value) {
+        try {
+          const blob = new Blob([editableFileContent.value], { type: currentFileInfo.value.mime_type })
+          const file = new File([blob], currentFileInfo.value.filename, { type: currentFileInfo.value.mime_type })
+
+          await uploadResourceFile(file, undefined, props.resource.id)
+          ElMessage.success(t('resource.editor.uploadSuccess'))
+          newVersionDialog.visible = false
+          await resourceStore.fetchResourceDetails(props.resource.id)
+        } catch (error) {
+          console.error(error)
+          ElMessage.error(t('resource.editor.uploadError'))
+        }
       }
-      await resourceStore.createNewVersion(props.resource!.id, versionData)
-      newVersionDialog.visible = false
-      ElMessage.success(t('resource.editor.uploadSuccess'))
+      else {
+        const versionData: ResourceVersionCreate = {
+          ...newVersionDialog.form,
+          content: form.content,
+          attributes: form.attributes,
+        }
+        await resourceStore.createNewVersion(props.resource!.id, versionData)
+        newVersionDialog.visible = false
+        ElMessage.success(t('resource.editor.uploadSuccess'))
+      }
     }
   })
 }
@@ -593,6 +748,91 @@ async function handleConfirmNewVersion() {
   overflow-y: auto;
 }
 
+.file-uploader-area.is-editable-layout {
+  padding: 20px;
+}
+
+/* Editable File Layout */
+.editable-file-layout {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  gap: 20px;
+  align-items: stretch;
+}
+
+.file-info-compact {
+  flex: 0 0 260px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px 16px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background-color: var(--el-fill-color-lighter);
+  height: fit-content;
+  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.02);
+}
+
+.file-preview-icon.compact {
+  width: 80px;
+  height: 80px;
+  position: relative;
+  margin-bottom: 12px;
+}
+
+.editable-badge {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  background-color: var(--el-color-success);
+  color: white;
+  border-radius: 50%;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border: 2px solid white;
+  cursor: help;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.editable-status-text {
+  font-size: 12px;
+  color: var(--el-color-success);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: -4px;
+}
+
+.compact-divider {
+  margin: 16px 0;
+  width: 100%;
+}
+
+.compact-upload {
+  width: 100%;
+}
+
+.compact-upload .upload-tip {
+  margin-top: 8px;
+}
+
+.file-editor-wrapper {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--el-border-color);
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background-color: #fff;
+  padding: 0 6px;
+}
+
+/* Non-editable File Styles */
 .file-info-card {
   display: flex;
   flex-direction: column;
@@ -655,6 +895,15 @@ async function handleConfirmNewVersion() {
   display: flex;
   gap: 8px;
   align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.mime-tag {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file-size {

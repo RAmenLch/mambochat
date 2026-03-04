@@ -18,6 +18,7 @@ import {
   updateKBFileConfig as apiUpdateKBFileConfig,
   runKBFileTask as apiRunKBFileTask,
 } from '@/api/kbService';
+import { getFileContent, updateFileContent } from '@/api/fileService';
 import { buildChatTree } from '@/utils/treeHelper';
 import { useTreeStoreActions } from '@/composables/useTreeStoreActions';
 import type {
@@ -68,7 +69,6 @@ export const useResourceStore = defineStore('resource', () => {
         await moveResource(req);
       },
     },
-    // onDeleteItem is not needed here as there are no store-level side effects.
   });
 
   // --- Getters ---
@@ -231,6 +231,57 @@ export const useResourceStore = defineStore('resource', () => {
     }
   }
 
+  /**
+   * 获取可编辑文件的文本内容。
+   * 仅当文件 editable 为 true 时调用。
+   */
+  async function fetchFileContent(resourceId: string, versionId: string) {
+    const resource = resources.value.find(r => r.id === resourceId);
+    if (!resource) return;
+
+    const version = resource.versions?.find(v => v.id === versionId) || resource.latest_version;
+    if (!version || !version.file_info) return;
+
+    try {
+      const response = await getFileContent(version.file_info.id);
+      version.content = response.content;
+
+      if (resource.latest_version?.id === versionId) {
+        resource.latest_version.content = response.content;
+      }
+    } catch (error) {
+      console.error(`Failed to fetch file content for version ${versionId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * 保存可编辑文件的文本内容。
+   * 直接更新文件实体，不创建新版本。
+   */
+  async function saveFileContent(resourceId: string, versionId: string, content: string) {
+    const resource = resources.value.find(r => r.id === resourceId);
+    if (!resource) return;
+
+    const version = resource.versions?.find(v => v.id === versionId) || resource.latest_version;
+    if (!version || !version.file_info) return;
+
+    try {
+      const updatedFileInfo = await updateFileContent(version.file_info.id, content);
+
+      version.file_info = updatedFileInfo;
+      version.content = content;
+
+      if (resource.latest_version?.id === versionId) {
+        resource.latest_version.file_info = updatedFileInfo;
+        resource.latest_version.content = content;
+      }
+    } catch (error) {
+      console.error(`Failed to save file content for version ${versionId}:`, error);
+      throw error;
+    }
+  }
+
   // --- Knowledge Base Specific Actions ---
 
   /**
@@ -309,6 +360,8 @@ export const useResourceStore = defineStore('resource', () => {
     createNewVersion,
     setActiveResourceVersion,
     fetchResourceDetails,
+    fetchFileContent,
+    saveFileContent,
     // KB Specific Actions
     uploadKBFile,
     updateKBFileConfig,

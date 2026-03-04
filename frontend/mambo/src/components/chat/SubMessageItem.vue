@@ -41,6 +41,15 @@
           </div>
           <div class="file-card-size">{{ formattedFileSize }}</div>
         </div>
+
+        <el-button
+          v-if="subMessage.file_info.editable"
+          :icon="Edit"
+          circle
+          class="file-card-action"
+          @click="handleFileEdit"
+        />
+
         <a :href="subMessage.file_info.url" download class="file-card-download">
           <el-button :icon="Download" circle />
         </a>
@@ -199,7 +208,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { SubMessage, Message, SubMessageConfig, McpToolContent } from '@/api/types'
+import type { SubMessage, Message, SubMessageConfig, McpToolContent, FileResponse } from '@/api/types'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { ElMessage } from 'element-plus'
 import {
@@ -248,6 +257,7 @@ const emit = defineEmits<{
     payload: { content: string; range?: ParsedBlock['range']; language?: string; markup?: string },
   ): void
   (e: 'copy'): void
+  (e: 'edit-file', file: FileResponse): void
 }>()
 
 const interactionStore = useChatInteractionStore()
@@ -376,6 +386,12 @@ function handleCodeBlockEdit(payload: {
     language: payload.language,
     markup: payload.markup,
   })
+}
+
+function handleFileEdit() {
+  if (props.subMessage.file_info) {
+    emit('edit-file', props.subMessage.file_info)
+  }
 }
 
 function toggleCollapse() {
@@ -528,6 +544,10 @@ function scrollToTop() {
 .file-card-size {
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+.file-card-action {
+  flex-shrink: 0;
+  margin-right: 8px;
 }
 .file-card-download {
   flex-shrink: 0;

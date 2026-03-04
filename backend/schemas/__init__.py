@@ -19,7 +19,7 @@ from .chat import (
 )
 from .setting import GlobalSetting, GlobalSettingsUpdate
 
-from .file import File,FileBase
+from .file import File,FileBase,FileUpdate,FileContentResponse
 
 from .resource import (Resource, ResourceVersion,
                        ResourceVersionBase,ResourceBase,

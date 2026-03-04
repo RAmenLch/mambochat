@@ -339,6 +339,7 @@ export default {
       codeCopied: 'Code copied to clipboard',
       copyFailed: 'Copy failed',
       backToTop: 'Back to Top',
+      fileLoadFailed:'File load failed',
       mcp: {
         invalidCall: 'Invalid tool call',
         unknownTool: 'Unknown tool',
@@ -446,6 +447,10 @@ export default {
       downloadFile: 'Download File',
       kbLinked: 'KB Linked',
       folderNoContent: 'Folders do not require content editing',
+      editableHint:'Editable online',
+      loadContentError: "Failed to load file content",
+      saveContentSuccess: "File content saved",
+      editableTooltip:"Text files smaller than 256KB can be edited online"
     },
     meta: {
       title: 'Basic Info',

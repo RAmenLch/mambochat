@@ -15,7 +15,7 @@ export interface MoveRequest {
 
 /**
  * 定义树形结构数据的基本接口。
- * 任何需要使用通用树组件 (ExplorerTree) 的数据模型都应满足此结构。
+ * 任何需要使用通用树组件 的数据模型都应满足此结构。
  */
 export interface BaseTreeItem {
   id: string
@@ -41,6 +41,7 @@ export interface FileResponse {
   size: number
   created_at: string // ISO 8601 date string
   url: string
+  editable: boolean // 标识当前文件是否支持在线编辑
 }
 
 export type GlobalNotification =

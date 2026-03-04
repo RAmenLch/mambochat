@@ -119,7 +119,7 @@ import { ElScrollbar, ElMessage } from 'element-plus';
 import { UploadFilled } from '@element-plus/icons-vue';
 import type { Ref } from 'vue';
 import type { ChatUpdate, SubMessageCreate, AIModel, Resource } from '@/api/types';
-import { uploadFile } from '@/api/chatService';
+import { uploadFile } from '@/api/fileService';
 
 // --- Stores & Composables ---
 import { useChatListStore } from '@/stores/chatListStore';
