@@ -47,14 +47,7 @@ async def _hydrate_and_validate_messages(
         file_service = FileService(db)
         file_records = await file_service.batch_get_files(list(file_ids_to_hydrate))
         for record in file_records:
-            file_info_map[record.id] = schemas.File(
-                id=record.id,
-                filename=record.filename,
-                mime_type=record.mime_type,
-                size=record.size,
-                created_at=record.created_at,
-                url=file_service.get_url(record.storage_path)
-            )
+            file_info_map[record.id] = file_service.convert_to_schema(record)
 
     # 3. 构建包含状态和文件信息的响应对象列表
     message_responses = []

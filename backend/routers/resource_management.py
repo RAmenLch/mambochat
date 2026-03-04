@@ -39,7 +39,7 @@ async def _hydrate_resources(resources: List[schemas.Resource], db: AsyncSession
             select(resource_model.Resource)
             .options(
                 selectinload(resource_model.Resource.latest_version),
-                selectinload(resource_model.Resource.versions)  # 补充加载 versions
+                selectinload(resource_model.Resource.versions)
             )
             .filter(resource_model.Resource.id.in_(resource_ids))
         )
@@ -81,14 +81,7 @@ async def _hydrate_resources(resources: List[schemas.Resource], db: AsyncSession
 
     # 3. 填充信息
     for record in file_records:
-        file_info = schemas.File(
-            id=record.id,
-            filename=record.filename,
-            mime_type=record.mime_type,
-            size=record.size,
-            created_at=record.created_at,
-            url=file_service.get_url(record.storage_path)
-        )
+        file_info = file_service.convert_to_schema(record)
 
         # 将文件信息回填到所有引用该文件的版本对象中
         if record.id in version_map:
@@ -118,7 +111,7 @@ async def read_resource_children(
     根据父节点ID列表并行加载子节点内容。
     注意：此接口返回 ResourceSimple，不包含 latest_version，因此不进行文件详情填充。
     """
-    return await resource_crud.get_resources_by_parent_ids(db, parent_ids=parentIds)
+    return await resource_crud.get_resources_by_parent_ids(db, parent_ids=parent_ids)
 
 
 @router.post("", response_model=schemas.Resource, status_code=status.HTTP_201_CREATED, summary="创建新资源或文件夹")

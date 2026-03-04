@@ -216,15 +216,7 @@ async def _update_avatar(db: AsyncSession, file: UploadFile, avatar_key: str):
     if old_file_id:
         await file_service.delete_file(old_file_id)
 
-    response_file = schemas.File(
-        id=new_file_record.id,
-        filename=new_file_record.filename,
-        mime_type=new_file_record.mime_type,
-        size=new_file_record.size,
-        created_at=new_file_record.created_at,
-        url=file_service.get_url(new_file_record.storage_path)
-    )
-    return response_file
+    return file_service.convert_to_schema(new_file_record)
 
 
 async def _delete_avatar(db: AsyncSession, avatar_key: str):

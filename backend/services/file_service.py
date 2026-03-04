@@ -12,6 +12,7 @@ from backend.models.base_model import generate_uuid
 from backend.crud import file_crud
 from backend.services.storage_service import storage_service, LocalStorageService
 from backend.utils.file_utils import FileUtils
+from backend import schemas
 
 
 class FileService:
@@ -22,6 +23,21 @@ class FileService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    def convert_to_schema(self, db_file: File) -> schemas.File:
+        """
+        将 File 模型对象转换为 schemas.File 响应对象。
+        统一处理 editable 字段判定和 URL 生成。
+        """
+        return schemas.File(
+            id=db_file.id,
+            filename=db_file.filename,
+            mime_type=db_file.mime_type,
+            size=db_file.size,
+            created_at=db_file.created_at,
+            url=self.get_url(db_file.storage_path),
+            editable=(db_file.storage_type == 'db')
+        )
 
     async def save_file(
             self,
@@ -151,6 +167,23 @@ class FileService:
             except FileNotFoundError:
                 raise HTTPException(status_code=404, detail="Physical file not found")
 
+    async def get_text_content(self, file_id: str) -> str:
+        """
+        获取文件的文本内容。
+        仅支持 storage_type 为 'db' 的文件，以确保安全性和性能。
+        """
+        file = await self.get_file(file_id)
+        if not file:
+            raise HTTPException(status_code=404, detail="File not found")
+
+        if file.storage_type != 'db':
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Content retrieval is only supported for database-stored text files."
+            )
+
+        return file.content or ""
+
     async def get_file_for_download(self, storage_path: str) -> Union[Response, FileResponse]:
         file = await self.get_file_by_path(storage_path)
         if not file:
@@ -246,4 +279,3 @@ class FileService:
                 return False
 
         return False
-

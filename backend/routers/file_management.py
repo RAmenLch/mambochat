@@ -39,14 +39,36 @@ async def upload_temporary_file(
         sub_path="chat_attachments"
     )
 
-    return schemas.File(
-        id=db_file.id,
-        filename=db_file.filename,
-        mime_type=db_file.mime_type,
-        size=db_file.size,
-        created_at=db_file.created_at,
-        url=file_service.get_url(db_file.storage_path)
-    )
+    return file_service.convert_to_schema(db_file)
+
+
+@router.get(
+    "/{file_id}/content",
+    response_model=schemas.FileContentResponse,
+    summary="获取文件文本内容"
+)
+async def get_file_text_content(file_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    获取文件的文本内容，仅支持数据库存储的小型文本文件。
+    """
+    file_service = FileService(db)
+    content = await file_service.get_text_content(file_id)
+    return schemas.FileContentResponse(content=content)
+
+
+@router.put(
+    "/{file_id}",
+    response_model=schemas.File,
+    summary="编辑文件内容"
+)
+async def edit_file_content(
+        file_id: str,
+        data: schemas.FileUpdate,
+        db: AsyncSession = Depends(get_db)
+):
+    file_service = FileService(db)
+    updated_file = await file_service.edit_file(file_id, data.content)
+    return file_service.convert_to_schema(updated_file)
 
 
 @router.get(
@@ -63,4 +85,3 @@ async def download_file(storage_path: str, db: AsyncSession = Depends(get_db)):
     """
     file_service = FileService(db)
     return await file_service.get_file_for_download(storage_path)
-
