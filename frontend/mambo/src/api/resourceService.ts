@@ -12,7 +12,9 @@ import type {
   ResourceVersionUpdate,
   MoveRequest,
   ResourceSearchRequest,
-  ResourceSearchResponse
+  ResourceSearchResponse,
+  SkillCreate,
+  SkillValidationResult
 } from './types';
 
 /**
@@ -95,4 +97,19 @@ export const setActiveVersion = (resourceId: string, versionId: string): Promise
  */
 export const searchResources = (data: ResourceSearchRequest): Promise<ResourceSearchResponse> => {
   return apiClient.post('/resources/search', data);
+};
+
+/**
+ * 创建新的 SKILL 资源
+ * 后端会自动创建对应的文件夹和 SKILL.md 文件
+ */
+export const createSkill = (data: SkillCreate): Promise<Resource> => {
+  return apiClient.post('/resources/skills', data);
+};
+
+/**
+ * 验证 SKILL 是否符合规范
+ */
+export const validateSkill = (resourceId: string): Promise<SkillValidationResult> => {
+  return apiClient.get(`/resources/skills/${resourceId}/validate`);
 };

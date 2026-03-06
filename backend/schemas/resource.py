@@ -144,3 +144,16 @@ class ResourceSearchResultItem(BaseModel):
 class ResourceSearchResponse(BaseModel):
     total: int
     items: List[ResourceSearchResultItem]
+
+
+class SkillValidationResult(BaseModel):
+    """Skill 规范校验结果"""
+    is_valid: bool = Field(..., description="是否完全符合规范")
+    errors: List[str] = Field(default_factory=list, description="导致校验失败的错误信息列表")
+    warnings: List[str] = Field(default_factory=list, description="不影响有效性但建议修复的警告信息列表")
+
+class SkillCreate(BaseModel):
+    """创建 SKILL 时的请求体"""
+    name: str = Field(..., min_length=1, max_length=64, description="Skill 名称 (需符合规范)")
+    description: str = Field(..., min_length=1, max_length=1024, description="Skill 描述")
+    parentId: Optional[str] = Field(None, description="父文件夹ID")

@@ -119,31 +119,46 @@ async def create_resource(resource: schemas.ResourceCreate, db: AsyncSession = D
     """
     创建一个新的资源项（'resource'）或 'folder'）。
     """
+    kb_node = None
+
+    if resource.parentId and resource.parentId != "root":
+        ancestors = await resource_crud.get_batch_resource_ancestors(db, [resource.parentId])
+
+        # 拦截约束：如果处于 SKILL 文件夹内，限制可创建的资源类型
+        skill_node = next((res for res in ancestors if res.resourceType == ResourceType.SKILL.value), None)
+        if skill_node:
+            is_valid_folder = resource.itemType == ResourceItemType.FOLDER and not resource.resourceType
+            is_valid_file = resource.itemType == ResourceItemType.RESOURCE and resource.resourceType == ResourceType.FILE
+            if not (is_valid_folder or is_valid_file):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Only regular folders and files can be created inside a SKILL directory."
+                )
+
+        # 预先获取 kb_node
+        kb_node = next((res for res in ancestors if res.resourceType == ResourceType.KNOWLEDGE_BASE.value), None)
+
     # 1. 先创建资源
     new_resource = await resource_crud.create_resource(db=db, resource=resource)
 
     # 2. 补充逻辑：如果提供了 parentId 且不是 root，尝试自动推导并赋值 kb_id
     # 这样可以确保在知识库下新建资源时，自动成为知识库成员
-    if resource.parentId and resource.parentId != "root" and not new_resource.kb_id:
-        ancestors = await resource_crud.get_batch_resource_ancestors(db, [resource.parentId])
-        kb_node = next((res for res in ancestors if res.resourceType == ResourceType.KNOWLEDGE_BASE.value), None)
+    if kb_node and not new_resource.kb_id:
+        # 赋值 kb_id
+        new_resource.kb_id = kb_node.id
 
-        if kb_node:
-            # 赋值 kb_id
-            new_resource.kb_id = kb_node.id
+        # 如果是资源类型（非文件夹），且没有配置切分参数，设置默认配置
+        if new_resource.itemType == ResourceItemType.RESOURCE.value and not new_resource.kb_config:
+            default_config = kb_schemas.KBTextSplitterConfig(
+                splitter_type=kb_schemas.KBSplitterType.SIMPLE,
+                chunk_size=500,
+                chunk_overlap=50
+            ).model_dump()
+            new_resource.kb_config = default_config
 
-            # 如果是资源类型（非文件夹），且没有配置切分参数，设置默认配置
-            if new_resource.itemType == ResourceItemType.RESOURCE.value and not new_resource.kb_config:
-                default_config = kb_schemas.KBTextSplitterConfig(
-                    splitter_type=kb_schemas.KBSplitterType.SIMPLE,
-                    chunk_size=500,
-                    chunk_overlap=50
-                ).model_dump()
-                new_resource.kb_config = default_config
-
-            # 提交更改
-            await db.commit()
-            await db.refresh(new_resource)
+        # 提交更改
+        await db.commit()
+        await db.refresh(new_resource)
 
     # 如果创建时带有初始内容（文件ID），尝试填充
     await _hydrate_resources([new_resource], db)

@@ -419,6 +419,7 @@ export default {
       moveWarning:
         'Moving resources out of or between knowledge bases will cause existing chunks and vector data to be lost. Continue?',
       moveWarningTitle: 'Warning',
+      newSkill: 'NEW SKILL',
     },
     explorer: {
       uploadingCount: 'Uploading {count} files...',
@@ -497,6 +498,7 @@ export default {
       submessage_template: 'Message Template',
       knowledge_base: 'Knowledge Base',
       file: 'File',
+      skill: 'Skill',
       unknown: 'Unknown',
     },
     selector: {
@@ -528,6 +530,16 @@ export default {
       typeMismatch: 'Only resources of type {type} can be selected',
       searchFailed: 'Search failed, please try again later',
     },
+    skill: {
+      valid: 'Valid',
+      invalid: 'Invalid',
+      validate: 'Validate',
+      editFile: 'Edit SKILL.md',
+      errors: 'Validation Errors',
+      structure: 'File Structure',
+      preview: 'Preview',
+      noContent: 'SKILL.md content is empty or not loaded.',
+    }
   },
   kb: {
     search: {
@@ -663,5 +675,6 @@ export default {
       clipboardError: 'Cannot access clipboard. Please check browser permissions.',
     },
   },
+
 }
 

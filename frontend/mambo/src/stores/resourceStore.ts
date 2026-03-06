@@ -12,6 +12,8 @@ import {
   createResourceVersion,
   setActiveVersion,
   getResourceDetails,
+  createSkill,
+  validateSkill,
 } from '@/api/resourceService';
 import {
   uploadResourceFile,
@@ -32,6 +34,8 @@ import type {
   ResourceVersionUpdate,
   KBSplitterConfig,
   KBRunTaskRequest,
+  SkillCreate,
+  SkillValidationResult,
 } from '@/api/types';
 
 /**
@@ -41,6 +45,7 @@ import type {
 export const useResourceStore = defineStore('resource', () => {
   // --- State ---
   const resources = ref<ResourceWithVersions[]>([]);
+  const skillValidationStatus = ref<Map<string, SkillValidationResult>>(new Map());
 
   // --- Actions (Composable) ---
 
@@ -338,12 +343,53 @@ export const useResourceStore = defineStore('resource', () => {
     // 注意：任务启动后的状态更新通常由 SSE 订阅或轮询处理，此处不直接修改本地状态
   }
 
+  // --- Skill Specific Actions ---
+
+  /**
+   * 创建新的 SKILL 资源。
+   * 后端会自动创建对应的文件夹和 SKILL.md 文件。
+   */
+  async function addSkillItem(data: SkillCreate) {
+    try {
+      const newSkill = await createSkill(data);
+      const newItemWithVersions: ResourceWithVersions = {
+        ...newSkill,
+        versions: newSkill.latest_version ? [newSkill.latest_version] : [],
+      };
+      resources.value.push(newItemWithVersions);
+
+      if (newSkill.itemType === 'folder') {
+        loadedFolderIds.value.add(newSkill.id);
+      }
+
+      return newSkill;
+    } catch (error) {
+      console.error('Store: Create skill failed', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 验证 SKILL 是否符合规范并更新本地缓存状态。
+   */
+  async function checkSkillValidation(resourceId: string) {
+    try {
+      const result = await validateSkill(resourceId);
+      skillValidationStatus.value.set(resourceId, result);
+      return result;
+    } catch (error) {
+      console.error(`Failed to validate skill ${resourceId}:`, error);
+      throw error;
+    }
+  }
+
   return {
     // State
     resources,
     isResourcesLoading,
     loadedFolderIds,
     loadingFolders,
+    skillValidationStatus,
     // Getters
     resourceTree,
     // Actions from Composable
@@ -366,5 +412,8 @@ export const useResourceStore = defineStore('resource', () => {
     uploadKBFile,
     updateKBFileConfig,
     runKBFileTask,
+    // Skill Specific Actions
+    addSkillItem,
+    checkSkillValidation,
   };
 });

@@ -25,13 +25,30 @@
 
       <template #item-icon="{ data: itemData }">
         <el-icon>
-          <!-- 优先匹配知识库类型 -->
-          <Collection v-if="itemData.resourceType === 'knowledge_base'" />
+          <Reading v-if="itemData.resourceType === 'skill'" />
+          <Collection v-else-if="itemData.resourceType === 'knowledge_base'" />
           <Folder v-else-if="itemData.itemType === 'folder'" />
           <Memo v-else-if="itemData.resourceType === 'submessage_template'" />
           <Cpu v-else-if="itemData.resourceType === 'system_prompt'" />
           <Document v-else />
         </el-icon>
+      </template>
+
+      <template #item-suffix="{ data: itemData }">
+        <el-tooltip
+          v-if="itemData.resourceType === 'skill' && skillValidationStatus.has(itemData.id)"
+          :content="skillValidationStatus.get(itemData.id)?.is_valid ? t('resource.skill.valid') : t('resource.skill.invalid')"
+          placement="top"
+        >
+          <el-icon
+            :color="skillValidationStatus.get(itemData.id)?.is_valid ? '#67C23A' : '#F56C6C'"
+            :size="10"
+            style="margin-right: 4px;"
+          >
+            <CircleCheckFilled v-if="skillValidationStatus.get(itemData.id)?.is_valid" />
+            <CircleCloseFilled v-else />
+          </el-icon>
+        </el-tooltip>
       </template>
     </ExplorerTree>
   </el-aside>
@@ -56,6 +73,9 @@
           <el-dropdown-item command="newKB">
             <el-icon><Collection /></el-icon>{{ t('resource.tree.newKB') }}
           </el-dropdown-item>
+          <el-dropdown-item command="newSkill">
+            <el-icon><Reading /></el-icon>{{ t('resource.tree.newSkill') }}
+          </el-dropdown-item>
         </template>
         <template v-if="contextMenuItem">
           <el-dropdown-item
@@ -76,7 +96,7 @@
 
   <!-- 1. 通用实体表单 (新建资源/文件夹/重命名) -->
   <EntityFormDialog
-    v-if="dialogState.payload.value?.type !== 'newKB'"
+    v-if="dialogState.payload.value?.type !== 'newKB' && dialogState.payload.value?.type !== 'newSkill'"
     v-model:visible="dialogState.visible.value"
     :title="dialogProps.title"
     :initial-name="dialogProps.initialName"
@@ -86,10 +106,17 @@
 
   <!-- 2. 知识库专用表单 (新建知识库) -->
   <KnowledgeBaseFormDialog
-    v-else
+    v-else-if="dialogState.payload.value?.type === 'newKB'"
     v-model:visible="dialogState.visible.value"
     :embedding-model-options="embeddingModelOptions"
     @confirm="handleKBConfirm"
+  />
+
+  <!-- 3. SKILL 专用表单 -->
+  <SkillFormDialog
+    v-else-if="dialogState.payload.value?.type === 'newSkill'"
+    v-model:visible="dialogState.visible.value"
+    @confirm="handleSkillConfirm"
   />
 </template>
 
@@ -107,6 +134,9 @@ import {
   Memo,
   Collection,
   Cpu,
+  Reading,
+  CircleCheckFilled,
+  CircleCloseFilled,
 } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import type { AllowDropType } from 'element-plus/es/components/tree/src/tree.type'
@@ -126,6 +156,7 @@ import KnowledgeBaseFormDialog, {
   type KBConfirmPayload,
   type ModelGroup,
 } from '@/components/settings/dialogs/KnowledgeBaseFormDialog.vue'
+import SkillFormDialog from '@/components/settings/dialogs/SkillFormDialog.vue'
 
 import type {
   Resource,
@@ -157,7 +188,7 @@ const emit = defineEmits<{
 // --- Store ---
 const resourceStore = useResourceStore()
 const providerStore = useProviderStore()
-const { resources, loadingFolders } = storeToRefs(resourceStore)
+const { resources, loadingFolders, skillValidationStatus } = storeToRefs(resourceStore)
 
 // --- Constants ---
 const creatableResourceTypes = computed(() => [
@@ -211,6 +242,13 @@ const checkDropPermission = (
 ): boolean => {
   const draggingData = draggingNode.data as Resource
   const dropData = dropNode.data as Resource
+
+  // Constraint for SKILL folder: Only allow plain folders or plain files
+  if (dropType === 'inner' && dropData.resourceType === 'skill') {
+    const isPlainFolder = draggingData.itemType === 'folder' && !draggingData.resourceType
+    const isPlainFile = draggingData.resourceType === 'file'
+    return isPlainFolder || isPlainFile
+  }
 
   if (draggingData.resourceType === 'knowledge_base') {
     const targetKBId = findKBParentId(dropNode)
@@ -269,6 +307,8 @@ const {
         return { title: t('resource.tree.newFolder'), initialName: t('resource.tree.newFolder') }
       case 'newKB':
         return { title: '', initialName: '' }
+      case 'newSkill':
+        return { title: t('resource.tree.newSkill'), initialName: '' }
       default:
         return { title: '', initialName: '' }
     }
@@ -396,6 +436,23 @@ const handleKBConfirm = async (payload: KBConfirmPayload) => {
   dialogState.visible.value = false
 }
 
+// --- SKILL Specific Handlers ---
+
+const handleSkillConfirm = async (payload: { name: string; description: string }) => {
+  const parentId = dialogState.payload.value?.parentId ?? null
+  const newItem = await resourceStore.addSkillItem({
+    name: payload.name,
+    description: payload.description,
+    parentId: parentId,
+  })
+
+  if (newItem) {
+    emit('item-created', newItem)
+    resourceStore.checkSkillValidation(newItem.id)
+  }
+  dialogState.visible.value = false
+}
+
 // --- Lifecycle ---
 onMounted(() => {
   resourceStore.initializeList()
@@ -439,4 +496,3 @@ function handleNodeClick(data: BaseTreeItem) {
   animation: none !important;
 }
 </style>
-

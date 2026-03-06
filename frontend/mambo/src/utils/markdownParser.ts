@@ -28,6 +28,92 @@ export interface ParsedBlock {
 }
 
 /**
+ * markdown-it 插件：将文档开头的 YAML Frontmatter 渲染为 HTML 表格。
+ * 仅匹配文档首行 `---` 开始、以 `---` 结束的围栏块，
+ * 解析其中的 key: value 键值对（支持多行续行），输出为两列表格。
+ */
+function frontMatterTablePlugin(md: MarkdownIt) {
+  md.block.ruler.before('hr', 'front_matter_table', function (state, startLine, endLine, silent) {
+    // 仅匹配文档最开头、且顶层缩进为 0
+    if (startLine !== 0 || state.blkIndent !== 0) return false
+
+    // 检查第一行是否为 ---
+    const firstLineStart = state.bMarks[startLine] + state.tShift[startLine]
+    const firstLineEnd = state.eMarks[startLine]
+    const firstLine = state.src.slice(firstLineStart, firstLineEnd).trim()
+    if (firstLine !== '---') return false
+
+    // 向下搜索闭合的 ---
+    let closingLine = startLine + 1
+    let found = false
+    while (closingLine < endLine) {
+      const pos = state.bMarks[closingLine] + state.tShift[closingLine]
+      const max = state.eMarks[closingLine]
+      const line = state.src.slice(pos, max).trim()
+      if (line === '---') {
+        found = true
+        break
+      }
+      closingLine++
+    }
+    if (!found) return false
+    if (silent) return true
+
+    // 提取 frontmatter 区域的每一行
+    const contentLines: string[] = []
+    for (let i = startLine + 1; i < closingLine; i++) {
+      const pos = state.bMarks[i] + state.tShift[i]
+      const max = state.eMarks[i]
+      contentLines.push(state.src.slice(pos, max))
+    }
+
+    // 解析 key: value 键值对（支持值跨多行续写）
+    const entries: Array<{ key: string; value: string }> = []
+    let currentKey = ''
+    let currentValue = ''
+
+    for (const line of contentLines) {
+      // 非空白字符开头 + 包含冒号 → 视为新键值对
+      if (line.length > 0 && line[0] !== ' ' && line[0] !== '\t') {
+        const colonIdx = line.indexOf(':')
+        if (colonIdx > 0) {
+          if (currentKey) {
+            entries.push({ key: currentKey, value: currentValue.trim() })
+          }
+          currentKey = line.slice(0, colonIdx).trim()
+          currentValue = line.slice(colonIdx + 1).trim()
+          continue
+        }
+      }
+      // 续行：追加到当前 value
+      if (currentKey) {
+        currentValue += ' ' + line.trim()
+      }
+    }
+    if (currentKey) {
+      entries.push({ key: currentKey, value: currentValue.trim() })
+    }
+
+    // 构建 HTML 表格
+    const escape = md.utils.escapeHtml
+    let html =
+      '<table class="frontmatter-table">\n<thead><tr><th>Property</th><th>Value</th></tr></thead>\n<tbody>\n'
+    for (const { key, value } of entries) {
+      html += `<tr><td><strong>${escape(key)}</strong></td><td>${escape(value)}</td></tr>\n`
+    }
+    html += '</tbody>\n</table>\n'
+
+    // 生成 html_block token，融入 markdown-it 的标准渲染流程
+    const token = state.push('html_block', '', 0)
+    token.content = html
+    token.map = [startLine, closingLine + 1]
+
+    state.line = closingLine + 1
+    return true
+  })
+}
+
+/**
  * 配置并导出一个 markdown-it 实例。
  */
 export const md = new MarkdownIt({
@@ -35,6 +121,7 @@ export const md = new MarkdownIt({
   breaks: true,
   linkify: true,
 })
+  .use(frontMatterTablePlugin)
   .use(markdownItLinkAttributes, {
     attrs: {
       target: '_blank',

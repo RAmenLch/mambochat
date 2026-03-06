@@ -413,6 +413,7 @@ export default {
       delete: '删除',
       moveWarning: '将资源移出知识库或移动到其他知识库会导致原有的切片和向量数据丢失，是否继续？',
       moveWarningTitle: '警告',
+      newSkill: '新建 SKILL',
     },
     explorer: {
       uploadingCount: '正在上传 {count} 个文件...',
@@ -490,6 +491,7 @@ export default {
       submessage_template: '消息模板',
       knowledge_base: '知识库',
       file: '文件',
+      skill: 'SKILL',
       unknown: '未知',
     },
     selector: {
@@ -521,6 +523,16 @@ export default {
       typeMismatch: '只能选择类型为 {type} 的资源',
       searchFailed: '搜索失败，请稍后重试',
     },
+    skill: {
+      valid: '符合规范',
+      invalid: '不符合规范',
+      validate: '验证规范',
+      editFile: '编辑 SKILL.md',
+      errors: '验证错误',
+      structure: '文件结构',
+      preview: '内容预览',
+      noContent: 'SKILL.md 内容为空或未加载。',
+    }
   },
   kb: {
     search: {

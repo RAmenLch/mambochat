@@ -70,7 +70,7 @@ class ResourceType(str, Enum):
     SUBMESSAGE_TEMPLATE = "submessage_template"
     KB_FILE = "kb_file"  # 旧版知识库文件类型（保留用于兼容）
     FILE = "file"        # 通用文件资源类型，支持向量化
-
+    SKILL = "skill"
 
 class KBFileStatus(str, Enum):
     """定义知识库文件的整体处理状态"""

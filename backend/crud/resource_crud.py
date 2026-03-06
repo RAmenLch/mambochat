@@ -99,10 +99,6 @@ async def create_resource(db: AsyncSession, resource: schemas.ResourceCreate) ->
         resource.sortOrder = (max_order if max_order is not None else -1) + 1
 
     # 排除非模型字段，以创建 Resource 实例
-    # 注意：resource.itemType 是枚举，SQLAlchemy 模型中定义为 String，但通常驱动会自动处理或我们需要取 .value
-    # Pydantic model_dump 会根据配置导出枚举值或枚举对象，这里直接传入给 Model 构造函数
-    # SQLAlchemy Model 接收枚举对象时，如果列是 String，通常会自动转换为 value，或者我们需要在 dump 时处理
-    # 这里假设 Pydantic 配置或 SQLAlchemy 能够处理 Enum -> String 的转换
     resource_data = resource.model_dump(exclude={'initial_content', 'initial_attributes'})
 
     # 显式处理枚举转字符串，确保兼容性
@@ -172,6 +168,7 @@ async def create_resource_version(db: AsyncSession, resource_id: str, version_cr
     db_resource = await get_resource(db, resource_id=resource_id)
 
     # 使用枚举值进行判断
+    # 注意: 并非Folder类型不可创建version,而是普通的Folder不创建version,如KB在其自有的服务会创建version
     if not db_resource or db_resource.itemType != ResourceItemType.RESOURCE.value:
         return None
 

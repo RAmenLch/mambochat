@@ -19,10 +19,11 @@ from backend.routers import (
     resource_management,
     system_config,
     mcp_management,
-    kb_management
+    kb_management,skill_management
 )
 from backend.services.cleanup_service import cleanup_zombie_files
 from backend.services.kb_service import SUP_DIM
+
 
 scheduler = AsyncIOScheduler(timezone=TZ)
 
@@ -82,6 +83,8 @@ app.include_router(notifications.router, prefix="/api", tags=["Notifications"])
 app.include_router(mcp_management.router, prefix="/api/mcp", tags=["MCP Management"])
 # 修改路由前缀，从 /api/kb 改为 /api/resource/kb
 app.include_router(kb_management.router, prefix="/api/resources/kb", tags=["Knowledge Base Management"])
+app.include_router(skill_management.router, prefix="/api/resources/skills", tags=["Skills Management"])
+
 app.include_router(file_management.router)
 
 

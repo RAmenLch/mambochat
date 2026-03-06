@@ -10,7 +10,24 @@ export type ResourceType =
   | 'knowledge_base_chunk'
   | 'kb_file'
   | 'file'
+  | 'skill'
   | string
+
+export interface SkillCreate {
+  name: string
+  description: string
+  parentId?: string | null
+}
+
+//  SKILL 验证结果
+export interface SkillValidationResult {
+  is_valid: boolean
+  errors: string[]
+  warnings: string[]
+}
+
+
+
 
 // --- Knowledge Base Types ---
 

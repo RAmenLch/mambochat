@@ -15,14 +15,21 @@
     <!-- Main Panel: Editor Area -->
     <el-main class="resource-editor-panel">
       <template v-if="activeResourceDetails">
-        <!-- Case 1: Knowledge Base Configuration (Root Node) -->
+        <!-- Case 1: Knowledge Base Configuration -->
         <KnowledgeBaseConfig
           v-if="activeResourceDetails.resourceType === 'knowledge_base'"
           :resource="activeResourceDetails"
           @select-file="handleFileSelected"
         />
 
-        <!-- Case 2: Unified Resource Editor (Files, Prompts, Templates) -->
+        <!-- Case 2: Skill Overview -->
+        <SkillOverview
+          v-else-if="activeResourceDetails.resourceType === 'skill'"
+          :resource="activeResourceDetails"
+          @edit-file="handleFileSelected"
+        />
+
+        <!-- Case 3: Unified Resource Editor -->
         <ResourceEditor
           v-else
           :resource="activeResourceDetails"
@@ -46,6 +53,7 @@ import { useResourceStore } from '@/stores/resourceStore'
 import ResourceTreePanel from './resource/ResourceTreePanel.vue'
 import ResourceEditor from './resource/ResourceEditor.vue'
 import KnowledgeBaseConfig from './kb/KnowledgeBaseConfig.vue'
+import SkillOverview from './skill/SkillOverview.vue'
 import type { Resource, ResourceWithVersions, BaseTreeItem } from '@/api/types'
 
 const { t } = useI18n()
@@ -56,7 +64,6 @@ const { isResourcesLoading, resources, resourceTree } = storeToRefs(resourceStor
 
 // --- State ---
 const selectedResourceId = ref<string | null>(null)
-// 状态：控制 ResourceEditor 的初始视图模式
 const initialViewMode = ref<'editor' | 'kb_config'>('editor')
 
 // --- Computed Properties ---
@@ -75,33 +82,31 @@ onMounted(() => {
 // --- Handlers ---
 
 /**
- * 处理树节点点击事件，选择资源进行编辑
+ * 处理树节点点击事件
  */
 async function handleNodeClick(data: BaseTreeItem) {
   selectedResourceId.value = data.id
-  // 常规点击树节点，默认进入编辑器模式
   initialViewMode.value = 'editor'
 
   const resource = data as unknown as Resource
-  const isKnowledgeBase = resource.resourceType === 'knowledge_base'
+  // Knowledge Base 和 Skill 是特殊文件夹，需要加载详情以展示配置页
+  const isSpecialFolder = resource.resourceType === 'knowledge_base' || resource.resourceType === 'skill'
 
-  // 获取标准资源或知识库（具有配置页面的文件夹）的详细信息
-  if (data.itemType === 'resource' || isKnowledgeBase) {
+  if (data.itemType === 'resource' || isSpecialFolder) {
     await resourceStore.fetchResourceDetails(data.id)
   }
 }
 
 /**
- * 处理新资源或文件夹创建后的事件
+ * 处理新资源创建后的事件
  */
 async function handleItemCreated(newItem: Resource) {
   selectedResourceId.value = newItem.id
-  // 新建资源默认进入编辑器模式
   initialViewMode.value = 'editor'
 
-  const isKnowledgeBase = newItem.resourceType === 'knowledge_base'
+  const isSpecialFolder = newItem.resourceType === 'knowledge_base' || newItem.resourceType === 'skill'
 
-  if (newItem.itemType === 'resource' || isKnowledgeBase) {
+  if (newItem.itemType === 'resource' || isSpecialFolder) {
     await resourceStore.fetchResourceDetails(newItem.id)
   }
 }
@@ -116,7 +121,7 @@ function handleItemDeleted(deletedId: string) {
 }
 
 /**
- * 处理资源成功移动后的事件
+ * 处理资源移动后的事件
  */
 async function handleMoveSuccess(movedIds: string[]) {
   if (selectedResourceId.value && movedIds.includes(selectedResourceId.value)) {
@@ -125,15 +130,11 @@ async function handleMoveSuccess(movedIds: string[]) {
 }
 
 /**
- * 处理来自 KnowledgeBaseConfig 的 'select-file' 事件
- * 切换到统一编辑器并强制进入 kb_config 模式
+ * 处理文件选择事件，切换到编辑器视图
  */
-async function handleFileSelected(file: Resource) {
+async function handleFileSelected(file: Resource, viewMode: 'editor' | 'kb_config' = 'kb_config') {
   selectedResourceId.value = file.id
-  // 设置为 kb_config，让 ResourceEditor 打开时直接显示配置页
-  initialViewMode.value = 'kb_config'
-
-  // 调用 fetchResourceDetails 获取完整的资源信息（包含版本列表）
+  initialViewMode.value = viewMode // 使用传入的模式
   await resourceStore.fetchResourceDetails(file.id)
 }
 </script>
