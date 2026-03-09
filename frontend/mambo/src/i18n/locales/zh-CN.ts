@@ -532,6 +532,20 @@ export default {
       structure: '文件结构',
       preview: '内容预览',
       noContent: 'SKILL.md 内容为空或未加载。',
+      tabCreate: '手动创建',
+      tabFile: '文件导入',
+      tabGithub: 'GitHub 导入',
+      uploadTip: '支持上传单个 SKILL.md 文件、ZIP 压缩包，或直接选择文件夹。',
+      dropFile: '将文件拖到此处，或',
+      clickUpload: '点击上传',
+      fileTip: '仅支持 .md 或 .zip 文件',
+      selectFolder: '选择 Skill 文件夹',
+      githubUrl: '仓库地址',
+      nameRequired: 'Skill 名称不能为空',
+      selectFileFirst: '请先选择文件或文件夹',
+      urlRequired: 'GitHub 地址不能为空',
+      importSuccess: '成功导入 {count} 个 Skill',
+      importPartial: '部分导入失败'
     }
   },
   kb: {

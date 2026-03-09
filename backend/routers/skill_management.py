@@ -1,11 +1,12 @@
 # backend/routers/skill_management.py
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import re
+from typing import Optional, Dict
+
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
-from typing import Optional, Dict
-from pydantic import BaseModel, Field
 
 from backend.database import get_db
 from backend import schemas
@@ -13,14 +14,14 @@ from backend.schemas.enums import ResourceType, ResourceItemType, FileManagement
 from backend.models import resource_model
 from backend.crud import resource_crud
 from backend.services.file_service import FileService
+from backend.services.skill_import_service import SkillImportService
 from backend.utils.skills_utils import SkillValidator, build_file_node_tree
-from schemas.resource import SkillCreate
 
 router = APIRouter()
 
 
 @router.post("", response_model=schemas.Resource, status_code=status.HTTP_201_CREATED, summary="新建 SKILL")
-async def create_skill(skill_in: SkillCreate, db: AsyncSession = Depends(get_db)):
+async def create_skill(skill_in: schemas.SkillCreate, db: AsyncSession = Depends(get_db)):
     """
     新建一个 SKILL 文件夹，并自动初始化包含 frontmatter 的 SKILL.md 文件。
     """
@@ -41,7 +42,7 @@ async def create_skill(skill_in: SkillCreate, db: AsyncSession = Depends(get_db)
         md_content = f"---\nname: {skill_in.name}\ndescription: {skill_in.description}\n---\n"
         md_bytes = md_content.encode('utf-8')
 
-        # 3. 保存文件 (FileService)
+        # 3. 保存文件
         file_service = FileService(db)
         db_file = await file_service.save_file_from_bytes(
             data=md_bytes,
@@ -134,3 +135,28 @@ async def validate_skill(resource_id: str, db: AsyncSession = Depends(get_db)):
         errors=validation_result.errors,
         warnings=validation_result.warnings
     )
+
+
+@router.post("/import/file", response_model=schemas.SkillImportResponse, summary="导入文件/ZIP Skill")
+async def import_skill_file(
+    file: UploadFile = File(...),
+    parent_id: Optional[str] = Form(None),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    上传单个 SKILL.md 或包含 Skills 的 ZIP 包进行导入。
+    """
+    import_service = SkillImportService(db)
+    return await import_service.import_from_file(file, parent_id)
+
+
+@router.post("/import/github", response_model=schemas.SkillImportResponse, summary="从 GitHub 导入 Skill")
+async def import_skill_github(
+    request: schemas.GithubImportRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    从指定的 GitHub 仓库 URL 导入符合规范的 Skills。
+    """
+    import_service = SkillImportService(db)
+    return await import_service.import_from_github(request.repo_url, request.parent_id)

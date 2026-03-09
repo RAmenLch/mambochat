@@ -1,5 +1,6 @@
 # backend/utils/skills_utils.py
 
+import os
 import re
 import yaml
 from typing import List, Optional, Literal, Dict, Any
@@ -15,7 +16,7 @@ MAX_SKILL_COMPATIBILITY_LENGTH = 500
 
 
 # ==========================================
-# 2. 内存文件树数据结构 (Pydantic)
+# 2. 内存文件树数据结构
 # ==========================================
 class FileNode(BaseModel):
     """表示内存中的文件或目录节点"""
@@ -122,7 +123,7 @@ class SkillValidator:
             return
 
         if not isinstance(frontmatter_data, dict):
-            self._errors.append(f"[{file_path}] YAML frontmatter 必须是一个键值对(Mapping)结构。")
+            self._errors.append(f"[{file_path}] YAML frontmatter 必须是一个键值对结构。")
             return
 
         # 3. 校验必须字段
@@ -148,7 +149,7 @@ class SkillValidator:
 
         metadata = frontmatter_data.get("metadata")
         if metadata is not None and not isinstance(metadata, dict):
-            self._warnings.append(f"[{file_path}] 'metadata' 应当是一个字典(dict)，但得到了 {type(metadata).__name__}。")
+            self._warnings.append(f"[{file_path}] 'metadata' 应当是一个字典，但得到了 {type(metadata).__name__}。")
 
         raw_tools = frontmatter_data.get("allowed-tools") or frontmatter_data.get("allowed_tools")
         if raw_tools is not None and not isinstance(raw_tools, (str, list)):
@@ -234,3 +235,43 @@ def build_file_node_tree(resources: List[Any], file_contents: Dict[str, str], ro
         return node
 
     return _build_node(root_id)
+
+
+def identify_skill_roots(root_dir: str) -> List[str]:
+    """
+    扫描目录，识别所有符合规范的 Skill 根目录路径。
+    逻辑：
+    1. 找到所有 SKILL.md 文件。
+    2. 按路径深度排序。
+    3. 过滤掉作为已知 Skill 子目录的 SKILL.md（防止嵌套 Skill 被识别为独立 Skill）。
+
+    :param root_dir: 解压后的临时目录根路径。
+    :return: 有效 Skill 目录的绝对路径列表。
+    """
+    skill_files = []
+
+    # 遍历目录寻找所有 SKILL.md
+    for dirpath, dirnames, filenames in os.walk(root_dir):
+        if "SKILL.md" in filenames:
+            skill_files.append(os.path.join(dirpath, "SKILL.md"))
+
+    # 按路径深度升序排序，确保父级 Skill 先被处理
+    skill_files.sort(key=lambda x: x.count(os.sep))
+
+    valid_skill_dirs = []
+
+    for skill_file_path in skill_files:
+        current_skill_dir = os.path.dirname(skill_file_path)
+
+        # 检查当前 Skill 是否已被包含在已确认的 Skill 目录中
+        is_nested = False
+        for existing_dir in valid_skill_dirs:
+            # 如果当前目录是已确认目录的子目录，则视为嵌套依赖，跳过
+            if current_skill_dir.startswith(existing_dir + os.sep):
+                is_nested = True
+                break
+
+        if not is_nested:
+            valid_skill_dirs.append(current_skill_dir)
+
+    return valid_skill_dirs

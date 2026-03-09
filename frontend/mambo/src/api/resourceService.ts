@@ -14,7 +14,8 @@ import type {
   ResourceSearchRequest,
   ResourceSearchResponse,
   SkillCreate,
-  SkillValidationResult
+  SkillValidationResult,
+  SkillImportResponse
 } from './types';
 
 /**
@@ -113,3 +114,40 @@ export const createSkill = (data: SkillCreate): Promise<Resource> => {
 export const validateSkill = (resourceId: string): Promise<SkillValidationResult> => {
   return apiClient.get(`/resources/skills/${resourceId}/validate`);
 };
+
+
+/**
+ * 通过文件/压缩包导入 Skill
+ * @param file 文件对象 (SKILL.md 或 .zip)
+ * @param parentId 目标父文件夹 ID
+ */
+export const importSkillFromFile = (
+  file: File,
+  parentId: string | null = null
+): Promise<SkillImportResponse> => {
+  const formData = new FormData()
+  formData.append('file', file)
+  if (parentId) {
+    formData.append('parent_id', parentId)
+  }
+  return apiClient.post('/resources/skills/import/file', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
+  })
+}
+
+/**
+ * 通过 GitHub 仓库导入 Skill
+ * @param repoUrl 仓库地址
+ * @param parentId 目标父文件夹 ID
+ */
+export const importSkillFromGithub = (
+  repoUrl: string,
+  parentId: string | null = null
+): Promise<SkillImportResponse> => {
+  return apiClient.post('/resources/skills/import/github', {
+    repo_url: repoUrl,
+    parent_id: parentId
+  })
+}

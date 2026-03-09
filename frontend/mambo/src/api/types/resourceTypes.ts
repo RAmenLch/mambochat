@@ -236,3 +236,17 @@ export interface ResourceSearchResponse {
   total: number
   items: ResourceSearchResultItem[]
 }
+
+export interface SkillImportResultItem {
+  name: string
+  status: 'success' | 'failed'
+  resource_id: string | null
+  error: string | null
+}
+
+export interface SkillImportResponse {
+  total_detected: number
+  success_count: number
+  failed_count: number
+  details: SkillImportResultItem[]
+}

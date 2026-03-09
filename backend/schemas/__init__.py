@@ -27,5 +27,5 @@ from .resource import (Resource, ResourceVersion,
                        ResourceVersionCreate,ResourceWithVersions,
                        ResourceVersionUpdate,ResourceReorderItem,MoveAction,ResourceMoveRequest,ResourceSimple,
                        ResourceSearchRequest,ResourceSearchResultItem,ResourceSearchResponse,
-                       SkillCreate,SkillValidationResult
+                       SkillCreate,SkillValidationResult,SkillImportResponse,SkillImportResultItem,GithubImportRequest
                        )

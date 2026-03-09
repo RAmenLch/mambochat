@@ -539,6 +539,20 @@ export default {
       structure: 'File Structure',
       preview: 'Preview',
       noContent: 'SKILL.md content is empty or not loaded.',
+      tabCreate: "Manual Create",
+      tabFile: "Import File",
+      tabGithub: "Import from GitHub",
+      uploadTip: "Supports single SKILL.md, ZIP package, or Folder.",
+      dropFile: "Drop file here or",
+      clickUpload: "click to upload",
+      fileTip: "Only .md or .zip files are supported",
+      selectFolder: "Select Skill Folder",
+      githubUrl: "Repository URL",
+      nameRequired: "Skill name is required",
+      selectFileFirst: "Please select a file or folder first",
+      urlRequired: "GitHub URL is required",
+      importSuccess: "Successfully imported {count} skill(s)",
+      importPartial: "Partial import failed"
     }
   },
   kb: {

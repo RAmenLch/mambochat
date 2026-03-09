@@ -76,6 +76,20 @@ async def get_resources_by_parent_ids(db: AsyncSession, parent_ids: List[str]) -
     return result.scalars().all()
 
 
+async def get_child_names_by_parent_id(db: AsyncSession, parent_id: Optional[str]) -> List[str]:
+    """
+    获取指定父节点下所有直接子资源的名称列表，用于冲突检测。
+    """
+    stmt = select(resource_model.Resource.name)
+    if parent_id is None:
+        stmt = stmt.filter(resource_model.Resource.parentId.is_(None))
+    else:
+        stmt = stmt.filter(resource_model.Resource.parentId == parent_id)
+
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
+
 async def get_resource_with_versions(db: AsyncSession, resource_id: str) -> Optional[resource_model.Resource]:
     """通过ID获取单个资源及其所有版本列表。"""
     result = await db.execute(
@@ -249,7 +263,7 @@ async def batch_update_resources_order(db: AsyncSession, updates: List[schemas.R
 
 async def move_resources(db: AsyncSession, move_request: schemas.ResourceMoveRequest) -> bool:
     """
-    移动资源或文件夹到指定位置（Inside, Before, After）。
+    移动资源或文件夹到指定位置。
     处理目标位置的排序挤占逻辑。
     """
     if not move_request.item_ids:
@@ -368,7 +382,7 @@ async def search_resources_and_versions(
     if target_resource_ids_query is not None:
         q_content = q_content.where(resource_model.Resource.id.in_(target_resource_ids_query))
 
-    # 4. 构建 Resource 元数据 (Name, Description) 搜索查询
+    # 4. 构建 Resource 元数据 搜索查询
     name_match = match_op(resource_model.Resource.name)
     desc_match = match_op(resource_model.Resource.description)
 
@@ -394,10 +408,10 @@ async def search_resources_and_versions(
     if target_resource_ids_query is not None:
         q_meta = q_meta.where(resource_model.Resource.id.in_(target_resource_ids_query))
 
-    # 5. 合并查询 (Union All)
+    # 5. 合并查询
     union_query = union_all(q_content, q_meta).subquery()
 
-    # 6. 获取总数 (Count)
+    # 6. 获取总数
     count_stmt = select(func.count()).select_from(union_query)
     count_result = await db.execute(count_stmt)
     total_count = count_result.scalar() or 0
@@ -443,13 +457,10 @@ async def get_batch_resource_ancestors(db: AsyncSession, resource_ids: List[str]
         return []
 
     # 3. 查询完整的 ORM 对象
-    # === 修改开始 ===
-    # 添加 .options(joinedload(resource_model.Resource.latest_version))
     resources_result = await db.execute(
         select(resource_model.Resource)
         .options(joinedload(resource_model.Resource.latest_version))
         .where(resource_model.Resource.id.in_(ancestor_ids))
     )
-    # === 修改结束 ===
 
     return resources_result.scalars().all()

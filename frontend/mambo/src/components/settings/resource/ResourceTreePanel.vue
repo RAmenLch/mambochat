@@ -116,7 +116,9 @@
   <SkillFormDialog
     v-else-if="dialogState.payload.value?.type === 'newSkill'"
     v-model:visible="dialogState.visible.value"
+    :parent-id="dialogState.payload.value?.parentId"
     @confirm="handleSkillConfirm"
+    @import-success="handleSkillImportSuccess"
   />
 </template>
 
@@ -166,6 +168,7 @@ import type {
   ResourceType,
   BaseTreeItem,
   MoveRequest,
+  SkillImportResponse,
 } from '@/api/types'
 
 const { t } = useI18n()
@@ -451,6 +454,19 @@ const handleSkillConfirm = async (payload: { name: string; description: string }
     resourceStore.checkSkillValidation(newItem.id)
   }
   dialogState.visible.value = false
+}
+
+/**
+ * 处理 Skill 导入成功后的刷新逻辑
+ */
+const handleSkillImportSuccess = async (result: SkillImportResponse) => {
+  dialogState.visible.value = false
+  const parentId = dialogState.payload.value?.parentId
+  if (parentId) {
+    await resourceStore.fetchResourceChildren(parentId)
+  } else {
+    await resourceStore.initializeList()
+  }
 }
 
 // --- Lifecycle ---
