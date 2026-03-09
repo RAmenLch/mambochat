@@ -90,7 +90,8 @@ async function handleNodeClick(data: BaseTreeItem) {
 
   const resource = data as unknown as Resource
   // Knowledge Base 和 Skill 是特殊文件夹，需要加载详情以展示配置页
-  const isSpecialFolder = resource.resourceType === 'knowledge_base' || resource.resourceType === 'skill'
+  const isSpecialFolder =
+    resource.resourceType === 'knowledge_base' || resource.resourceType === 'skill'
 
   if (data.itemType === 'resource' || isSpecialFolder) {
     await resourceStore.fetchResourceDetails(data.id)
@@ -101,10 +102,13 @@ async function handleNodeClick(data: BaseTreeItem) {
  * 处理新资源创建后的事件
  */
 async function handleItemCreated(newItem: Resource) {
+  // 确保新创建的 ID 被选中
   selectedResourceId.value = newItem.id
   initialViewMode.value = 'editor'
 
-  const isSpecialFolder = newItem.resourceType === 'knowledge_base' || newItem.resourceType === 'skill'
+  // 如果是 Skill 或 知识库，需要 fetchDetails 才能显示 Overview 页面
+  const isSpecialFolder =
+    newItem.resourceType === 'knowledge_base' || newItem.resourceType === 'skill'
 
   if (newItem.itemType === 'resource' || isSpecialFolder) {
     await resourceStore.fetchResourceDetails(newItem.id)

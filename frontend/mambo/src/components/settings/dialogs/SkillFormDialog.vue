@@ -3,123 +3,193 @@
   <el-dialog
     :model-value="visible"
     :title="t('resource.tree.newSkill')"
-    width="600px"
+    width="700px"
+    class="skill-form-dialog"
     @update:model-value="$emit('update:visible', $event)"
     @close="resetState"
   >
-    <el-tabs v-model="activeTab" class="import-tabs">
-      <!-- Tab 1: 手动创建 -->
-      <el-tab-pane :label="t('resource.skill.tabCreate')" name="create">
-        <el-form :model="manualForm" label-position="top" ref="manualFormRef">
-          <el-form-item
-            :label="t('resource.meta.name')"
-            prop="name"
-            :rules="[{ required: true, message: 'Name is required' }]"
-          >
-            <el-input v-model="manualForm.name" />
-          </el-form-item>
-          <el-form-item :label="t('resource.meta.description')" prop="description">
-            <el-input v-model="manualForm.description" type="textarea" :rows="3" />
-          </el-form-item>
-        </el-form>
-      </el-tab-pane>
-
-      <!-- Tab 2: 文件导入 -->
-      <el-tab-pane :label="t('resource.skill.tabFile')" name="file">
-        <div class="upload-section">
-          <el-alert
-            :title="t('resource.skill.uploadTip')"
-            type="info"
-            show-icon
-            :closable="false"
-            style="margin-bottom: 16px;"
-          />
-
-          <!-- 单文件/ZIP 上传 -->
-          <el-upload
-            ref="uploadRef"
-            drag
-            action="#"
-            :auto-upload="false"
-            :limit="1"
-            :on-change="handleFileChange"
-            :on-exceed="handleExceed"
-            accept=".md,.zip"
-          >
-            <el-icon class="el-icon--upload"><upload-filled /></el-icon>
-            <div class="el-upload__text">
-              {{ t('resource.skill.dropFile') }} <em>{{ t('resource.skill.clickUpload') }}</em>
+    <div class="dialog-content">
+      <el-tabs v-model="activeTab" type="border-card" class="skill-tabs">
+        <!-- Tab 1: 手动创建 -->
+        <el-tab-pane name="create">
+          <template #label>
+            <div class="tab-label">
+              <el-icon><Edit /></el-icon>
+              <span>{{ t('resource.skill.tabCreate') }}</span>
             </div>
-            <template #tip>
-              <div class="el-upload__tip">
-                {{ t('resource.skill.fileTip') }}
-              </div>
-            </template>
-          </el-upload>
+          </template>
 
-          <el-divider>{{ t('common.or') }}</el-divider>
+          <el-form
+            :model="manualForm"
+            label-position="top"
+            ref="manualFormRef"
+            :rules="manualRules"
+            style="padding: 10px 0"
+          >
+            <el-form-item :label="t('resource.skill.nameLabel')" prop="name">
+              <el-input
+                v-model="manualForm.name"
+                :placeholder="t('resource.skill.namePlaceholder')"
+              />
+            </el-form-item>
+            <el-form-item :label="t('resource.skill.descLabel')" prop="description">
+              <el-input
+                v-model="manualForm.description"
+                type="textarea"
+                :rows="4"
+                :placeholder="t('resource.skill.descPlaceholder')"
+              />
+            </el-form-item>
+          </el-form>
+        </el-tab-pane>
 
-          <!-- 文件夹上传 (webkitdirectory) -->
-          <div class="folder-upload-wrapper">
-             <input
-              ref="folderInputRef"
-              type="file"
-              webkitdirectory
-              directory
-              multiple
-              style="display: none"
-              @change="handleFolderSelect"
-            />
-            <el-button type="primary" plain @click="triggerFolderSelect">
-              <el-icon class="el-icon--left"><FolderAdd /></el-icon>
-              {{ t('resource.skill.selectFolder') }}
-            </el-button>
-            <div class="folder-tip" v-if="selectedFolderName">
-              <el-icon><Folder /></el-icon>
-              <span>{{ selectedFolderName }}</span>
+        <!-- Tab 2: 文件/文件夹导入 -->
+        <el-tab-pane name="file">
+          <template #label>
+            <div class="tab-label">
+              <el-icon><Files /></el-icon>
+              <span>{{ t('resource.skill.tabFile') }}</span>
             </div>
-          </div>
-        </div>
-      </el-tab-pane>
+          </template>
 
-      <!-- Tab 3: GitHub 导入 -->
-      <el-tab-pane :label="t('resource.skill.tabGithub')" name="github">
-        <el-form :model="githubForm" label-position="top">
-          <el-form-item :label="t('resource.skill.githubUrl')">
-            <el-input
-              v-model="githubForm.url"
-              placeholder="https://github.com/user/repo"
-              clearable
+          <div class="file-import-section">
+            <div class="action-bar">
+              <el-upload
+                ref="uploadRef"
+                action="#"
+                :auto-upload="false"
+                :show-file-list="false"
+                :on-change="handleFileChange"
+                accept=".md,.zip"
+              >
+                <el-button type="primary">
+                  <el-icon class="el-icon--left"><Upload /></el-icon>
+                  {{ t('resource.skill.clickUpload') }} (.md/.zip)
+                </el-button>
+              </el-upload>
+
+              <el-button type="success" plain @click="triggerFolderSelect">
+                <el-icon class="el-icon--left"><FolderOpened /></el-icon>
+                {{ t('resource.skill.selectFolder') }}
+              </el-button>
+              <input
+                ref="folderInputRef"
+                type="file"
+                webkitdirectory
+                directory
+                multiple
+                hidden
+                @change="handleFolderSelect"
+              />
+            </div>
+
+            <!-- 预览区域 -->
+            <div
+              class="preview-container"
+              v-if="pendingFiles.length > 0 || folderTreeData.length > 0"
             >
-              <template #prefix>
-                <el-icon><Link /></el-icon>
-              </template>
-            </el-input>
-          </el-form-item>
-        </el-form>
-      </el-tab-pane>
-    </el-tabs>
+              <div class="preview-header">
+                <span class="title">
+                  <el-icon><View /></el-icon>
+                  {{
+                    isFolderMode
+                      ? t('resource.skill.folderPreview')
+                      : t('resource.skill.fileSelected')
+                  }}
+                </span>
+                <el-button link type="danger" @click="clearFileSelection">
+                  {{ t('resource.skill.clear') }}
+                </el-button>
+              </div>
+
+              <div class="preview-body">
+                <div v-if="!isFolderMode" class="file-item">
+                  <el-icon><Document /></el-icon>
+                  <span>{{ pendingFiles[0]?.name }}</span>
+                </div>
+                <el-tree
+                  v-else
+                  :data="folderTreeData"
+                  :props="{ label: 'name', children: 'children' }"
+                  default-expand-all
+                  class="preview-tree"
+                >
+                  <template #default="{ data }">
+                    <span class="custom-tree-node">
+                      <el-icon>
+                        <component :is="data.children ? 'Folder' : 'Document'" />
+                      </el-icon>
+                      <span>{{ data.name }}</span>
+                    </span>
+                  </template>
+                </el-tree>
+              </div>
+            </div>
+
+            <el-empty v-else :image-size="80" :description="t('resource.skill.selectHint')" />
+          </div>
+        </el-tab-pane>
+
+        <!-- Tab 3: GitHub 导入 -->
+        <el-tab-pane name="github">
+          <template #label>
+            <div class="tab-label">
+              <el-icon><Link /></el-icon>
+              <span>{{ t('resource.skill.tabGithub') }}</span>
+            </div>
+          </template>
+
+          <div class="github-section">
+            <el-alert
+              :title="t('resource.skill.importFromRepo')"
+              type="info"
+              show-icon
+              :closable="false"
+            />
+            <el-form :model="githubForm" label-position="top" style="margin-top: 20px">
+              <el-form-item :label="t('resource.skill.githubUrl')">
+                <el-input
+                  v-model="githubForm.url"
+                  :placeholder="t('resource.skill.repoPlaceholder')"
+                >
+                  <template #prefix
+                    ><el-icon><Link /></el-icon
+                  ></template>
+                </el-input>
+              </el-form-item>
+            </el-form>
+          </div>
+        </el-tab-pane>
+      </el-tabs>
+    </div>
 
     <template #footer>
-      <span class="dialog-footer">
-        <el-button @click="$emit('update:visible', false)">{{ t('common.action.cancel') }}</el-button>
-        <el-button
-          type="primary"
-          @click="handleConfirm"
-          :loading="isSubmitting"
-        >
+      <div class="dialog-footer">
+        <el-button @click="$emit('update:visible', false)">
+          {{ t('common.action.cancel') }}
+        </el-button>
+        <el-button type="primary" :loading="isSubmitting" @click="handleConfirm">
           {{ t('common.action.confirm') }}
         </el-button>
-      </span>
+      </div>
     </template>
   </el-dialog>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage, genFileId, type UploadInstance, type UploadProps, type UploadRawFile } from 'element-plus'
-import { UploadFilled, FolderAdd, Folder, Link } from '@element-plus/icons-vue'
+import { ElMessage, type FormInstance } from 'element-plus'
+import {
+  Edit,
+  Files,
+  Link,
+  Upload,
+  FolderOpened,
+  View,
+  Document,
+  Folder,
+} from '@element-plus/icons-vue'
 import JSZip from 'jszip'
 import { importSkillFromFile, importSkillFromGithub } from '@/api/resourceService'
 import type { SkillImportResponse } from '@/api/types'
@@ -140,64 +210,45 @@ const { t } = useI18n()
 // --- State ---
 const activeTab = ref('create')
 const isSubmitting = ref(false)
-const uploadRef = ref<UploadInstance>()
+const manualFormRef = ref<FormInstance>()
 const folderInputRef = ref<HTMLInputElement>()
+const uploadRef = ref()
 
-const manualForm = ref({ name: '', description: '' })
-const githubForm = ref({ url: '' })
-const selectedFolderName = ref('')
-const pendingFiles = ref<File[]>([]) // 用于存储待上传的文件
+const manualForm = reactive({ name: '', description: '' })
+const githubForm = reactive({ url: '' })
+
+const isFolderMode = ref(false)
+const folderTreeData = ref<any[]>([])
+const pendingFiles = ref<File[]>([])
+
+// --- Validation Rules ---
+const manualRules = {
+  name: [{ required: true, message: t('resource.skill.nameRequired'), trigger: 'blur' }],
+  description: [{ required: true, message: t('resource.skill.descRequired'), trigger: 'blur' }],
+}
 
 // --- Handlers ---
-
 const resetState = () => {
-  manualForm.value = { name: '', description: '' }
-  githubForm.value = { url: '' }
-  selectedFolderName.value = ''
+  manualForm.name = ''
+  manualForm.description = ''
+  githubForm.url = ''
   pendingFiles.value = []
+  folderTreeData.value = []
+  isFolderMode.value = false
   activeTab.value = 'create'
-  uploadRef.value?.clearFiles()
 }
 
-const handleConfirm = async () => {
-  isSubmitting.value = true
-  try {
-    if (activeTab.value === 'create') {
-      // 原有的手动创建逻辑
-      if (!manualForm.value.name) {
-        ElMessage.warning(t('resource.skill.nameRequired'))
-        return
-      }
-      emit('confirm', { ...manualForm.value })
-      emit('update:visible', false)
-    } else if (activeTab.value === 'file') {
-      await handleFileImport()
-    } else if (activeTab.value === 'github') {
-      await handleGithubImport()
-    }
-  } catch (error) {
-    console.error(error)
-  } finally {
-    isSubmitting.value = false
+const clearFileSelection = () => {
+  pendingFiles.value = []
+  folderTreeData.value = []
+  isFolderMode.value = false
+}
+
+const handleFileChange = (file: any) => {
+  if (file.status === 'ready') {
+    isFolderMode.value = false
+    pendingFiles.value = [file.raw]
   }
-}
-
-// --- File Import Logic ---
-
-const handleFileChange: UploadProps['onChange'] = (uploadFile) => {
-  // 单文件替换逻辑
-  if (uploadFile.status === 'ready') {
-    selectedFolderName.value = '' // 清空文件夹选择
-    pendingFiles.value = [uploadFile.raw as File]
-  }
-}
-
-const handleExceed: UploadProps['onExceed'] = (files) => {
-  uploadRef.value!.clearFiles()
-  const file = files[0] as UploadRawFile
-  file.uid = genFileId()
-  uploadRef.value!.handleStart(file)
-  pendingFiles.value = [file]
 }
 
 const triggerFolderSelect = () => {
@@ -208,104 +259,201 @@ const handleFolderSelect = async (event: Event) => {
   const input = event.target as HTMLInputElement
   if (!input.files || input.files.length === 0) return
 
-  uploadRef.value?.clearFiles() // 清空拖拽区的文件
-  pendingFiles.value = []
-
+  isFolderMode.value = true
   const files = Array.from(input.files)
 
-  // 获取根目录名称用于显示
-  const relativePath = files[0].webkitRelativePath
-  const rootFolder = relativePath.split('/')[0]
-  selectedFolderName.value = rootFolder
+  // 1. 构建预览树结构
+  const rootFolderName = files[0].webkitRelativePath.split('/')[0]
+  const rootNode = { name: rootFolderName, children: [] }
 
-  // 前端打包逻辑：将文件夹内容打包为 ZIP
+  files.forEach((file) => {
+    const pathParts = file.webkitRelativePath.split('/').slice(1) // 去掉根目录名
+    let currentLevel = rootNode.children
+
+    pathParts.forEach((part, index) => {
+      let existingNode: any = currentLevel.find((n: any) => n.name === part)
+      if (!existingNode) {
+        existingNode = { name: part }
+        if (index < pathParts.length - 1) {
+          existingNode.children = []
+        }
+        currentLevel.push(existingNode)
+      }
+      currentLevel = existingNode.children
+    })
+  })
+  folderTreeData.value = [rootNode]
+
+  // 2. 打包 ZIP 用于上传
   const zip = new JSZip()
-
-  // 遍历文件添加到 zip
-  for (const file of files) {
-    // webkitRelativePath 包含了根文件夹名称，这正是我们需要的结构
+  files.forEach((file) => {
     zip.file(file.webkitRelativePath, file)
-  }
-
+  })
   const blob = await zip.generateAsync({ type: 'blob' })
-  // 创建以根文件夹命名的 zip 文件
-  const zipFile = new File([blob], `${rootFolder}.zip`, { type: 'application/zip' })
-
-  pendingFiles.value = [zipFile]
+  pendingFiles.value = [new File([blob], `${rootFolderName}.zip`, { type: 'application/zip' })]
 }
 
-const handleFileImport = async () => {
-  if (pendingFiles.value.length === 0) {
-    ElMessage.warning(t('resource.skill.selectFileFirst'))
-    return
-  }
-
-  const fileToUpload = pendingFiles.value[0]
-
-  try {
-    const result = await importSkillFromFile(fileToUpload, props.parentId || null)
-    handleImportResult(result)
-  } catch (error: any) {
-    ElMessage.error(error.response?.data?.detail || t('common.error.general'))
-  }
-}
-
-// --- Github Import Logic ---
-
-const handleGithubImport = async () => {
-  if (!githubForm.value.url) {
-    ElMessage.warning(t('resource.skill.urlRequired'))
-    return
-  }
-
-  try {
-    const result = await importSkillFromGithub(githubForm.value.url, props.parentId || null)
-    handleImportResult(result)
-  } catch (error: any) {
-    ElMessage.error(error.response?.data?.detail || t('common.error.general'))
-  }
-}
-
-// --- Result Handling ---
-
-const handleImportResult = (result: SkillImportResponse) => {
-  if (result.success_count > 0) {
-    ElMessage.success(t('resource.skill.importSuccess', { count: result.success_count }))
-    emit('import-success', result)
-    emit('update:visible', false)
-  }
-
-  if (result.failed_count > 0) {
-    // 展示部分失败详情，这里简单展示第一条错误
-    const firstError = result.details.find(d => d.status === 'failed')
-    if (firstError) {
-        ElMessage.warning(`${t('resource.skill.importPartial')}: ${firstError.name} - ${firstError.error}`)
+const handleConfirm = async () => {
+  if (activeTab.value === 'create') {
+    await manualFormRef.value?.validate((valid) => {
+      if (valid) {
+        emit('confirm', { ...manualForm })
+      }
+    })
+  } else if (activeTab.value === 'file') {
+    if (pendingFiles.value.length === 0) {
+      return ElMessage.warning(t('resource.skill.selectFileFirst'))
     }
+    await performFileImport()
+  } else {
+    if (!githubForm.url) {
+      return ElMessage.warning(t('resource.skill.urlRequired'))
+    }
+    await performGithubImport()
+  }
+}
+
+const performFileImport = async () => {
+  isSubmitting.value = true
+  try {
+    const res = await importSkillFromFile(pendingFiles.value[0], props.parentId)
+    handleImportResponse(res)
+  } catch (err: any) {
+    ElMessage.error(err.response?.data?.detail || t('common.error.general'))
+  } finally {
+    isSubmitting.value = false
+  }
+}
+
+const performGithubImport = async () => {
+  isSubmitting.value = true
+  try {
+    const res = await importSkillFromGithub(githubForm.url, props.parentId)
+    handleImportResponse(res)
+  } catch (err: any) {
+    ElMessage.error(err.response?.data?.detail || t('common.error.general'))
+  } finally {
+    isSubmitting.value = false
+  }
+}
+
+const handleImportResponse = (res: SkillImportResponse) => {
+  if (res.success_count > 0) {
+    ElMessage.success(t('resource.skill.importSuccess', { count: res.success_count }))
+    emit('import-success', res)
+  } else {
+    ElMessage.error(res.details[0]?.error || t('resource.skill.importFailed'))
   }
 }
 </script>
 
 <style scoped>
-.import-tabs {
-  min-height: 300px;
+.dialog-content {
+  margin-top: -10px;
 }
 
-.upload-section {
-  padding: 10px 0;
+.skill-tabs {
+  border: none;
+  box-shadow: none;
+  border-radius: 8px;
+  overflow: hidden;
 }
 
-.folder-upload-wrapper {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
+:deep(.el-tabs--border-card) {
+  background: transparent;
+  border: 1px solid var(--el-border-color-lighter);
 }
 
-.folder-tip {
+:deep(.el-tabs__content) {
+  padding: 20px;
+}
+
+.tab-label {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--el-text-color-secondary);
+}
+
+/* File Import Section */
+.file-import-section {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.action-bar {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  padding: 30px;
+  border: 2px dashed var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-fill-color-blank);
+  transition: border-color 0.3s;
+}
+
+.action-bar:hover {
+  border-color: var(--el-color-primary-light-3);
+}
+
+.preview-container {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-fill-color-blank);
+  overflow: hidden;
+}
+
+.preview-header {
+  padding: 10px 16px;
+  background: var(--el-fill-color-light);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.preview-header .title {
   font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--el-text-color-primary);
+}
+
+.preview-body {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.file-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--el-color-primary);
+  font-size: 14px;
+}
+
+.preview-tree {
+  background: transparent;
+}
+
+.custom-tree-node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+/* Github Section */
+.github-section {
+  padding: 10px 0;
+}
+
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
 }
 </style>

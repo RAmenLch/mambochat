@@ -37,13 +37,17 @@
       <template #item-suffix="{ data: itemData }">
         <el-tooltip
           v-if="itemData.resourceType === 'skill' && skillValidationStatus.has(itemData.id)"
-          :content="skillValidationStatus.get(itemData.id)?.is_valid ? t('resource.skill.valid') : t('resource.skill.invalid')"
+          :content="
+            skillValidationStatus.get(itemData.id)?.is_valid
+              ? t('resource.skill.valid')
+              : t('resource.skill.invalid')
+          "
           placement="top"
         >
           <el-icon
             :color="skillValidationStatus.get(itemData.id)?.is_valid ? '#67C23A' : '#F56C6C'"
             :size="10"
-            style="margin-right: 4px;"
+            style="margin-right: 4px"
           >
             <CircleCheckFilled v-if="skillValidationStatus.get(itemData.id)?.is_valid" />
             <CircleCloseFilled v-else />
@@ -96,7 +100,9 @@
 
   <!-- 1. 通用实体表单 (新建资源/文件夹/重命名) -->
   <EntityFormDialog
-    v-if="dialogState.payload.value?.type !== 'newKB' && dialogState.payload.value?.type !== 'newSkill'"
+    v-if="
+      dialogState.payload.value?.type !== 'newKB' && dialogState.payload.value?.type !== 'newSkill'
+    "
     v-model:visible="dialogState.visible.value"
     :title="dialogProps.title"
     :initial-name="dialogProps.initialName"
@@ -462,10 +468,23 @@ const handleSkillConfirm = async (payload: { name: string; description: string }
 const handleSkillImportSuccess = async (result: SkillImportResponse) => {
   dialogState.visible.value = false
   const parentId = dialogState.payload.value?.parentId
-  if (parentId) {
+
+  // 核心修复：强制刷新父节点或根节点
+  if (parentId && parentId !== 'root') {
+    // 1. 如果是在某个文件夹下导入，先清除该文件夹的加载状态
+    resourceStore.loadedFolderIds.delete(parentId)
+    // 2. 重新拉取子节点
     await resourceStore.fetchResourceChildren(parentId)
   } else {
+    // 3. 如果在根目录导入，全量初始化
     await resourceStore.initializeList()
+  }
+
+  // 4. (可选) 如果导入了单个，可以尝试选中第一个成功的
+  const firstSuccess = result.details.find((d) => d.status === 'success')
+  if (firstSuccess && firstSuccess.resource_id) {
+    // 触发点击事件以在右侧展示
+    emit('item-created', { id: firstSuccess.resource_id } as any)
   }
 }
 
