@@ -11,6 +11,11 @@ from backend.schemas import enums as schemas_enums, AIModel
 from backend.schemas.message import McpToolContent
 from backend.services.generation.llm_io import LLMInput
 from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
+from backend.services.generation.resource_dispatcher import ResourceDispatcher
+from backend.services.generation.tools.base_tool_provider import BaseToolProvider
+from backend.services.generation.tools.mcp_tool_provider import MCPToolProvider
+from backend.services.generation.tools.suggest_tool_provider import SuggestToolProvider
+from backend.services.generation.tools.kb_tool_provider import KBToolProvider
 
 # 以 application/* 开头但本质是文本的 MIME 类型
 _KNOWN_TEXT_APPLICATION_TYPES = {
@@ -83,6 +88,9 @@ class LLMInputBuilder:
         self.history = []
         self.settings = {}
 
+        # 新增：工具提供者列表
+        self.providers: List[BaseToolProvider] = []
+
     # --- 配置方法 (Fluent API) ---
 
     def slice_until_message(self, message_id: str, include_target: bool = False) -> "LLMInputBuilder":
@@ -151,6 +159,74 @@ class LLMInputBuilder:
         self._history_override = history
         return self
 
+    async def _setup_providers_and_resources(self) -> str:
+        """
+        解析资源、初始化所有的 ToolProvider，并聚合系统提示词。
+        返回聚合后的系统提示词扩展部分。
+        """
+        self.providers = []
+        extended_prompts = []
+
+        # 1. 资源分发解析
+        knowledge_bases = []
+        if self._enable_resource_merge and self.chat.resource_prompt_list:
+            dispatcher = ResourceDispatcher(self.db)
+            dispatch_result = await dispatcher.dispatch(self.chat.resource_prompt_list)
+
+            # 拼接普通文本资源
+            for content in dispatch_result["system_prompts"]:
+                extended_prompts.append(content)
+            for content in dispatch_result["submessage_templates"]:
+                extended_prompts.append(content)
+
+            # 收集知识库资源用于初始化 KBToolProvider
+            knowledge_bases = dispatch_result["knowledge_bases"]
+
+        # 2. 初始化 Providers
+        # 2.1 KB Provider
+        if knowledge_bases:
+            self.providers.append(KBToolProvider(self.db, knowledge_bases))
+
+        # 解析模型参数
+        params = {}
+        if self.chat and self.chat.modelParameters:
+            try:
+                params = json.loads(self.chat.modelParameters) if isinstance(self.chat.modelParameters,
+                                                                             str) else self.chat.modelParameters
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # 2.2 MCP Provider (使用独立的 enabled_mcp_ids 字段)
+        mcp_ids = self.chat.enabled_mcp_ids or []
+        if mcp_ids:
+            self.providers.append(MCPToolProvider(self.db, mcp_ids))
+
+        # 2.3 Suggest Provider
+        enable_suggest = params.get("enable_suggest", False)
+        if enable_suggest:
+            self.providers.append(SuggestToolProvider(enable_suggest=True))
+
+        # 3. 收集所有工具和提示词注入
+        all_tools = []
+        for provider in self.providers:
+            # 获取工具 (此处可能抛出 McpConnectionError，由上层 Manager 捕获)
+            tools = await provider.get_tools()
+            if tools:
+                all_tools.extend(tools)
+
+            # 获取提示词注入
+            injection = provider.get_system_prompt_injection()
+            if injection:
+                extended_prompts.append(injection)
+
+        # 聚合工具到 Builder 实例
+        if all_tools:
+            if self._tools is None:
+                self._tools = []
+            self._tools.extend(all_tools)
+
+        return "\n\n".join(extended_prompts) if extended_prompts else ""
+
     def enable_resource_prompt_merge(self) -> "LLMInputBuilder":
         """
         启用资源挂载功能。
@@ -217,37 +293,33 @@ class LLMInputBuilder:
 
         system_prompt = self._system_prompt_override
         if system_prompt is None:
-            system_prompt = self.chat.systemPrompt
+            system_prompt = self.chat.systemPrompt or ""
 
-        # 资源挂载逻辑：提取并追加资源内容
-        if self._enable_resource_merge and self.chat.resource_prompt_list:
-            resources = await resource_crud.get_resources_by_ids(self.db, self.chat.resource_prompt_list)
-            resource_contents = [res.latest_version.content for res in resources if
-                                 res.latest_version and res.latest_version.content]
-            if resource_contents:
-                merged_content = "\n\n".join(resource_contents)
-                system_prompt = (system_prompt or "") + "\n\n" + merged_content
+        # 2. 统筹资源与工具 Providers，获取扩展的提示词
+        extended_prompt = await self._setup_providers_and_resources()
+        if extended_prompt:
+            system_prompt = system_prompt + "\n\n" + extended_prompt if system_prompt else extended_prompt
 
-        # 2. 应用压缩历史逻辑
+        # 3. 应用压缩历史逻辑
         effective_history = self.history
         if self._enable_zip_history:
             effective_history = await self._apply_zip_history_logic(effective_history)
 
-        # 3. 应用切片逻辑
+        # 4. 应用切片逻辑
         effective_history = self._apply_slicing(effective_history)
 
-        # 4.应用 max_context_messages 筛选逻辑
+        # 5.应用 max_context_messages 筛选逻辑
         if self._enable_max_context_messages:
             effective_history = self._apply_max_context_limit(effective_history)
 
-        # 5. 核心转换：将消息对象集合转化为 Payload 结构
+        # 6. 核心转换：将消息对象集合转化为 Payload 结构
         messages_payload = await self._build_payload(effective_history)
 
-        # 6. 注入 System Prompt
+        # 7. 注入 System Prompt
         if system_prompt:
             messages_payload.insert(0, {"role": "system", "content": system_prompt})
 
-        # 7. 组装参数
+        # 8. 组装参数
         api_params = {}
         if not self._global_model_keys:
             api_params = self._map_parameters(self.chat.modelParameters)
@@ -678,3 +750,10 @@ class LLMInputBuilder:
             structured['stream'] = flat_params['stream']
 
         return structured
+
+    def get_providers(self) -> List[BaseToolProvider]:
+        """
+        获取已初始化的所有工具提供者。
+        必须在调用 build() 之后调用此方法，否则返回空列表。
+        """
+        return self.providers

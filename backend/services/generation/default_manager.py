@@ -26,8 +26,6 @@ from backend.services.generation.llm_input_builder import LLMInputBuilder
 
 # Tool Providers
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
-from backend.services.generation.tools.mcp_tool_provider import MCPToolProvider
-from backend.services.generation.tools.suggest_tool_provider import SuggestToolProvider
 
 
 class DefaultGenerateManager(AbstractGenerateManager):
@@ -78,14 +76,11 @@ class DefaultGenerateManager(AbstractGenerateManager):
         )
 
         try:
-            # 2. 预加载素材以检查配置
-            await builder._load_materials()
-
-            # 3. 初始化并配置工具提供者
-            await self._setup_providers(builder)
-
-            # 4. 构建 LLMInput
+            # 2. 构建 LLMInput (内部已包含素材预加载、资源解析与 Provider 初始化)
             llm_input = await builder.build()
+
+            # 3. 从构建器中获取已配置好的工具提供者列表
+            self.providers = builder.get_providers()
 
         except McpConnectionError as e:
             # 熔断处理：如果 MCP 服务不可用，直接生成错误消息并终止，不消耗 LLM Token
@@ -122,62 +117,6 @@ class DefaultGenerateManager(AbstractGenerateManager):
         # 6. 正常结束处理
         async for instruction in self._finalize_generation():
             yield instruction
-
-    async def _setup_providers(self, builder: LLMInputBuilder):
-        """配置并注入工具提供者 (MCP, Suggest)，处理 System Prompt 注入"""
-        self.providers = []
-
-        # 解析模型参数
-        params = {}
-        if builder.chat and builder.chat.modelParameters:
-            try:
-                if isinstance(builder.chat.modelParameters, str):
-                    params = json.loads(builder.chat.modelParameters)
-                else:
-                    params = builder.chat.modelParameters
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-        # 1. 配置 MCP Provider
-        mcp_config_map = {}
-        raw_mcp_config = params.get("enabled_mcp_ids")
-        if isinstance(raw_mcp_config, list):
-            mcp_config_map = {mcp_id: {} for mcp_id in raw_mcp_config}
-        elif isinstance(raw_mcp_config, dict):
-            mcp_config_map = raw_mcp_config
-
-        if mcp_config_map:
-            self.providers.append(MCPToolProvider(self.db_session, mcp_config_map))
-
-        # 2. 配置 Suggest Provider
-        enable_suggest = params.get("enable_suggest", False)
-        if enable_suggest:
-            self.providers.append(SuggestToolProvider(enable_suggest=True))
-
-        # 3. 获取所有工具并注入 Builder
-        all_tools = []
-        prompt_injections = []
-
-        for provider in self.providers:
-            # 获取工具 (此处可能抛出 McpConnectionError)
-            tools = await provider.get_tools()
-            if tools:
-                all_tools.extend(tools)
-
-            # 获取 Prompt 注入
-            injection = provider.get_system_prompt_injection()
-            if injection:
-                prompt_injections.append(injection)
-
-        if all_tools:
-            builder.set_tools(all_tools)
-
-        # 4. 处理 System Prompt 注入
-        if prompt_injections:
-            # 获取当前的 System Prompt (可能是 Chat 配置的，也可能是之前 override 的)
-            current_prompt = builder._system_prompt_override or builder.chat.systemPrompt or ""
-            new_prompt = current_prompt + "\n\n" + "\n".join(prompt_injections)
-            builder.set_system_prompt(new_prompt)
 
     async def _process_stream_event(self, mode: str, event: any) -> AsyncGenerator[BaseInstruction, None]:
         """

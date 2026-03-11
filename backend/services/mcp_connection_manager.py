@@ -2,7 +2,6 @@
 
 import os
 import traceback
-import asyncio
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,23 +35,22 @@ class McpConnectionManager:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get_tools_and_check_status(self, mcp_config_map: Dict[str, Dict[str, Any]]) -> List[BaseTool]:
+    async def get_tools_and_check_status(self, mcp_ids: List[str]) -> List[BaseTool]:
         """
         加载指定 ID 的 MCP 服务，验证连接并获取工具。
         如果连接失败，会更新数据库状态并抛出异常以阻断生成流程。
 
         Args:
-            mcp_config_map: 一个字典，键为 MCP ID，值为运行时需要注入的动态配置（如环境变量）。
-                            例如: {"system-knowledge-base": {"MAMBOCHAT_RESOURCE_ID": "..."}}
+            mcp_ids: MCP Server ID 列表。
         """
-        if not mcp_config_map:
+        if not mcp_ids:
             return []
 
         # 1. 加载配置
         configs = {}
         id_map = {}  # server_id -> config_object
 
-        for mcp_id, runtime_env in mcp_config_map.items():
+        for mcp_id in mcp_ids:
             config = await mcp_service.load_mcp_config_by_id(self.db, mcp_id)
             if not config or not config.isEnabled:
                 continue
@@ -61,17 +59,11 @@ class McpConnectionManager:
 
             # 构建 MultiServerMCPClient 所需的配置字典
             if config.transportType == schemas_enums.McpTransportType.STDIO:
-                # 环境变量优先级: 系统环境 < 静态配置 < 运行时动态配置
+                # 环境变量优先级: 系统环境 < 静态配置
                 current_env = os.environ.copy()
-                
+
                 if config.env:
                     current_env.update(config.env)
-                
-                if runtime_env and isinstance(runtime_env, dict):
-                    # 将运行时传入的配置作为环境变量注入
-                    # 确保所有值都是字符串
-                    str_runtime_env = {k: str(v) for k, v in runtime_env.items()}
-                    current_env.update(str_runtime_env)
 
                 configs[config.id] = {
                     "transport": "stdio",

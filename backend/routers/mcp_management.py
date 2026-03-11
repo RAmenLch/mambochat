@@ -95,7 +95,7 @@ async def test_mcp_server(server_id: str, db: AsyncSession = Depends(get_db)):
     manager = McpConnectionManager(db)
     try:
         # 传递空字典作为运行时配置，仅测试基础连接
-        tools = await manager.get_tools_and_check_status({server_id: {}})
+        tools = await manager.get_tools_and_check_status([server_id])
         return {
             "status": "healthy",
             "tools_count": len(tools),

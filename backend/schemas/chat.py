@@ -20,8 +20,11 @@ class ChatBase(BaseModel):
     parentId: Optional[str] = Field(None, description="父文件夹的ID")
     sortOrder: int = Field(0, description="排序权重")
 
-    # 新增：资源挂载ID列表
+    # 资源挂载ID列表
     resource_prompt_list: Optional[List[str]] = Field(None, description="挂载的资源ID列表")
+
+    # 新增：启用的外部 MCP 服务 ID 列表
+    enabled_mcp_ids: Optional[List[str]] = Field(default_factory=list, description="启用的外部 MCP 服务 ID 列表")
 
     @field_validator("modelParameters", mode="before")
     @classmethod
@@ -32,7 +35,6 @@ class ChatBase(BaseModel):
             except json.JSONDecodeError:
                 return None
         return v
-
 
 class ChatCreate(ChatBase):
     pass
@@ -56,8 +58,10 @@ class ChatUpdate(BaseModel):
     parentId: Optional[str] = None
     sortOrder: Optional[int] = None
 
-    # 新增：资源挂载ID列表
+    # 资源挂载ID列表
     resource_prompt_list: Optional[List[str]] = None
+    # 启用的外部 MCP 服务 ID 列表
+    enabled_mcp_ids: Optional[List[str]] = None
 
 
 # noinspection PyDataclass

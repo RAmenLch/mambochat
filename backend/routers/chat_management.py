@@ -27,8 +27,8 @@ def _validate_model_parameters(params: Dict[str, Any]):
     Raises HTTPException for any validation failures.
     """
     for key, value in params.items():
-        # These parameters are managed by the system but not defined in the central config
-        if key in ["max_context_messages", "stream", "enabled_mcp_ids","enable_suggest"]:
+        # 移除了 "enabled_mcp_ids"，因为它已独立为 Chat 表的专属字段
+        if key in ["max_context_messages", "stream", "enable_suggest"]:
             continue
 
         definition = _param_definition_map.get(key)
@@ -301,18 +301,11 @@ async def update_chat_settings(
                 if not res:
                     raise HTTPException(status_code=400, detail=f"Resource ID {rid} not found.")
 
-                # 检查是否为文件夹
+                # 检查是否为文件夹，仅允许挂载具体资源
                 if res.itemType != ResourceItemType.RESOURCE.value:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Item {rid} is a folder, cannot be mounted as a resource prompt."
-                    )
-
-                # 检查资源类型
-                if res.resourceType not in [ResourceType.SYSTEM_PROMPT.value, ResourceType.SUBMESSAGE_TEMPLATE.value]:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Resource {rid} type is not supported for mounting. Only SYSTEM_PROMPT and SUBMESSAGE_TEMPLATE are allowed."
+                        detail=f"Item {rid} is a folder, cannot be mounted as a resource."
                     )
 
     updated_chat = await chat_crud.update_chat(db, chat_id=chat_id, chat_update=chat_update)

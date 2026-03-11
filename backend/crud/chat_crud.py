@@ -78,7 +78,6 @@ async def create_chat(db: AsyncSession, chat: schemas.ChatCreate) -> chat_model.
         # 如果文件夹为空(None)，则从 0 开始；否则在最大值基础上 +1
         chat.sortOrder = (max_order if max_order is not None else -1) + 1
 
-    # [原有逻辑]
     chat_data = chat.model_dump()
     if chat_data.get("modelParameters") is not None:
         chat_data["modelParameters"] = json.dumps(chat_data["modelParameters"])

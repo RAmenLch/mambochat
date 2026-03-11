@@ -23,8 +23,11 @@ class Chat(Base):
     modelParameters = Column(TEXT, nullable=True)  # Store as JSON string
     aiModelId = Column(String(36), ForeignKey("AIModel.id"), nullable=True)
 
-    # 新增：资源挂载列表，存储资源ID的JSON数组
+    # 资源挂载列表，存储资源ID的JSON数组
     resource_prompt_list = Column(JSON, nullable=True)
+
+    # 新增：启用的 MCP 服务 ID 列表，存储字符串数组
+    enabled_mcp_ids = Column(JSON, nullable=True, default=list)
 
     # 关系: 反向引用到 AIModel
     ai_model = relationship("AIModel", back_populates="chats")

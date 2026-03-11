@@ -1,3 +1,5 @@
+# backend/services/generation/tools/mcp_tool_provider.py
+
 import json
 from typing import List, Optional, Dict, Any, AsyncGenerator
 
@@ -23,9 +25,9 @@ class MCPToolProvider(BaseToolProvider):
     负责管理通过 MCP 协议连接的外部工具，并处理其 UI 交互逻辑。
     """
 
-    def __init__(self, db_session: AsyncSession, mcp_config: Dict[str, Any]):
+    def __init__(self, db_session: AsyncSession, mcp_ids: List[str]):
         self.db_session = db_session
-        self.mcp_config = mcp_config
+        self.mcp_ids = mcp_ids
         self.conn_manager = McpConnectionManager(db_session)
 
         # 缓存已加载的工具名称，用于快速匹配
@@ -42,11 +44,11 @@ class MCPToolProvider(BaseToolProvider):
         """
         使用 McpConnectionManager 连接并获取工具。
         """
-        if not self.mcp_config:
+        if not self.mcp_ids:
             return []
 
         # 获取工具并检查状态 (如果服务不可用，此处可能会抛出 McpConnectionError，由上层 Manager 捕获)
-        tools = await self.conn_manager.get_tools_and_check_status(self.mcp_config)
+        tools = await self.conn_manager.get_tools_and_check_status(self.mcp_ids)
 
         # 更新名称缓存
         self._loaded_tool_names = {t.name for t in tools}
