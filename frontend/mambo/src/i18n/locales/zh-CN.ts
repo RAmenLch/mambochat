@@ -1,5 +1,6 @@
 // src/i18n/locales/zh-CN.ts
 export default {
+  locale: 'zh-CN',
   common: {
     test: '测试文本',
     status: {
@@ -336,7 +337,7 @@ export default {
       codeCopied: '代码已复制到剪贴板',
       copyFailed: '复制失败',
       backToTop: '回到顶部',
-      fileLoadFailed:'文件加载失败',
+      fileLoadFailed: '文件加载失败',
       mcp: {
         invalidCall: '无效的工具调用',
         unknownTool: '未知工具',
@@ -441,10 +442,10 @@ export default {
       downloadFile: '下载文件',
       kbLinked: '已关联知识库',
       folderNoContent: '文件夹无需编辑内容',
-      editableHint:'支持在线编辑',
-      loadContentError: "加载文件内容失败",
-      saveContentSuccess: "文件内容保存成功",
-      editableTooltip: "小于256KB的文本类型文件可在线编辑"
+      editableHint: '支持在线编辑',
+      loadContentError: '加载文件内容失败',
+      saveContentSuccess: '文件内容保存成功',
+      editableTooltip: '小于256KB的文本类型文件可在线编辑',
     },
     meta: {
       title: '基本信息',
@@ -533,20 +534,26 @@ export default {
       preview: '内容预览',
       noContent: 'SKILL.md 内容为空或未加载。',
       tabCreate: '手动创建',
-      tabFile: '文件导入',
+      tabFile: '文件/文件夹导入',
       tabGithub: 'GitHub 导入',
-      uploadTip: '支持上传单个 SKILL.md 文件、ZIP 压缩包，或直接选择文件夹。',
-      dropFile: '将文件拖到此处，或',
+      namePlaceholder: '例如：代码助手',
+      descPlaceholder: '描述该 Skill 的功能和用途...',
+      descRequired: 'Skill 描述不能为空',
       clickUpload: '点击上传',
-      fileTip: '仅支持 .md 或 .zip 文件',
-      selectFolder: '选择 Skill 文件夹',
-      githubUrl: '仓库地址',
-      nameRequired: 'Skill 名称不能为空',
-      selectFileFirst: '请先选择文件或文件夹',
-      urlRequired: 'GitHub 地址不能为空',
+      selectFolder: '选择文件夹',
+      importFromRepo: '从公开仓库导入',
+      repoPlaceholder: 'https://github.com/username/repo',
+      previewTitle: '预览',
+      folderPreview: '文件夹结构预览',
+      fileSelected: '已选择文件',
+      clear: '清空选择',
+      selectHint: '请选择文件或文件夹进行导入',
       importSuccess: '成功导入 {count} 个 Skill',
-      importPartial: '部分导入失败'
-    }
+      importFailed: '导入失败',
+      nameLabel: 'Skill 名称',
+      descLabel: 'Skill 描述',
+      githubUrl: 'github 仓库 URL',
+    },
   },
   kb: {
     search: {

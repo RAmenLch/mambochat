@@ -1,5 +1,6 @@
 // src/i18n/locales/en.ts
 export default {
+  locale: 'en',
   common: {
     test: 'Test Text',
     status: {
@@ -339,7 +340,7 @@ export default {
       codeCopied: 'Code copied to clipboard',
       copyFailed: 'Copy failed',
       backToTop: 'Back to Top',
-      fileLoadFailed:'File load failed',
+      fileLoadFailed: 'File load failed',
       mcp: {
         invalidCall: 'Invalid tool call',
         unknownTool: 'Unknown tool',
@@ -448,10 +449,10 @@ export default {
       downloadFile: 'Download File',
       kbLinked: 'KB Linked',
       folderNoContent: 'Folders do not require content editing',
-      editableHint:'Editable online',
-      loadContentError: "Failed to load file content",
-      saveContentSuccess: "File content saved",
-      editableTooltip:"Text files smaller than 256KB can be edited online"
+      editableHint: 'Editable online',
+      loadContentError: 'Failed to load file content',
+      saveContentSuccess: 'File content saved',
+      editableTooltip: 'Text files smaller than 256KB can be edited online',
     },
     meta: {
       title: 'Basic Info',
@@ -539,21 +540,27 @@ export default {
       structure: 'File Structure',
       preview: 'Preview',
       noContent: 'SKILL.md content is empty or not loaded.',
-      tabCreate: "Manual Create",
-      tabFile: "Import File",
-      tabGithub: "Import from GitHub",
-      uploadTip: "Supports single SKILL.md, ZIP package, or Folder.",
-      dropFile: "Drop file here or",
-      clickUpload: "click to upload",
-      fileTip: "Only .md or .zip files are supported",
-      selectFolder: "Select Skill Folder",
-      githubUrl: "Repository URL",
-      nameRequired: "Skill name is required",
-      selectFileFirst: "Please select a file or folder first",
-      urlRequired: "GitHub URL is required",
-      importSuccess: "Successfully imported {count} skill(s)",
-      importPartial: "Partial import failed"
-    }
+      tabCreate: 'Manual Create',
+      tabFile: 'File/Folder Import',
+      tabGithub: 'GitHub Import',
+      namePlaceholder: 'e.g. CodeAssistant',
+      descPlaceholder: 'Describe what this skill does...',
+      descRequired: 'Skill description is required',
+      clickUpload: 'Click to Upload',
+      selectFolder: 'Select Folder',
+      importFromRepo: 'Import from Public Repository',
+      repoPlaceholder: 'https://github.com/username/repo',
+      previewTitle: 'Preview',
+      folderPreview: 'Folder Structure Preview',
+      fileSelected: 'File Selected',
+      clear: 'Clear',
+      selectHint: 'Select a file or folder to import',
+      importSuccess: 'Successfully imported {count} skill(s)',
+      importFailed: 'Import failed',
+      nameLabel: 'Skill Name',
+      descLabel: 'Skill Description',
+      githubUrl: 'github URL',
+    },
   },
   kb: {
     search: {
@@ -689,6 +696,5 @@ export default {
       clipboardError: 'Cannot access clipboard. Please check browser permissions.',
     },
   },
-
 }
 

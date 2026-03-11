@@ -4,7 +4,6 @@ import os
 import re
 import zipfile
 import tempfile
-import shutil
 import yaml
 import httpx
 from typing import List, Optional, Dict
@@ -18,10 +17,23 @@ from backend.services.file_service import FileService
 from backend.utils.skills_utils import SkillValidator, FileNode, identify_skill_roots
 from backend.models import resource_model
 
+
 class SkillImportService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.file_service = FileService(db)
+
+    def _extract_name_from_md(self, content: bytes) -> Optional[str]:
+        """尝试从 SKILL.md 内容中提前解析出 name 字段"""
+        try:
+            text = content.decode('utf-8')
+            match = re.match(r"^---\s*\n(.*?)\n---", text, re.DOTALL)
+            if match:
+                data = yaml.safe_load(match.group(1))
+                return data.get("name")
+        except Exception:
+            pass
+        return None
 
     async def import_from_file(self, file: UploadFile, parent_id: Optional[str]) -> schemas.SkillImportResponse:
         """
@@ -37,19 +49,29 @@ class SkillImportService:
                 with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                     zip_ref.extractall(tmpdir)
 
-                root_name = os.path.splitext(file.filename)[0]
-                return await self._process_directory(tmpdir, root_name, parent_id)
+                # 清理压缩包防止干扰
+                os.remove(zip_path)
+
+                # 直接处理 tmpdir，内部相对路径会自动生成正确的目录结构
+                return await self._process_directory(tmpdir, parent_id)
 
             elif file.filename == "SKILL.md":
-                skill_dir = os.path.join(tmpdir, "skill_root")
-                os.makedirs(skill_dir)
-                skill_md_path = os.path.join(skill_dir, "SKILL.md")
                 content = await file.read()
+
+                # 提前解析 name，以此作为目录名，避免 skill_root 校验报错
+                frontmatter_name = self._extract_name_from_md(content)
+                if not frontmatter_name:
+                    frontmatter_name = "unnamed_skill"
+
+                safe_name = self._sanitize_name(frontmatter_name)
+                skill_dir = os.path.join(tmpdir, safe_name)
+                os.makedirs(skill_dir)
+
+                skill_md_path = os.path.join(skill_dir, "SKILL.md")
                 with open(skill_md_path, "wb") as buffer:
                     buffer.write(content)
 
-                root_name = "skill_root"
-                return await self._process_directory(tmpdir, root_name, parent_id)
+                return await self._process_directory(tmpdir, parent_id)
 
             else:
                 raise HTTPException(status_code=400,
@@ -100,6 +122,7 @@ class SkillImportService:
 
                 with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                     zip_ref.extractall(tmpdir)
+                os.remove(zip_path)
 
                 # GitHub zip typically extracts to a folder like repo-branch
                 extracted_items = os.listdir(tmpdir)
@@ -112,13 +135,19 @@ class SkillImportService:
                 if not extracted_dir:
                     raise HTTPException(status_code=500, detail="Failed to locate extracted directory.")
 
+                # 将解压出来的顶层目录重命名为 owner_repo
+                # 这样相对路径机制就会自动帮我们建立一个 owner_repo 的父目录
                 root_name = f"{owner}_{repo}"
-                return await self._process_directory(extracted_dir, root_name, parent_id)
+                safe_root_name = self._sanitize_name(root_name)
+                new_dir = os.path.join(tmpdir, safe_root_name)
+                os.rename(extracted_dir, new_dir)
 
-    async def _process_directory(self, disk_root: str, root_name: str,
-                                 parent_id: Optional[str]) -> schemas.SkillImportResponse:
+                return await self._process_directory(tmpdir, parent_id)
+
+    async def _process_directory(self, disk_root: str, parent_id: Optional[str]) -> schemas.SkillImportResponse:
         """
         核心处理逻辑：识别、校验、创建资源。
+        （去除了强制创建 Root Folder 的逻辑，完全依赖相对路径生成结构）
         """
         # 1. Identify Skill Roots
         skill_dirs = identify_skill_roots(disk_root)
@@ -134,23 +163,6 @@ class SkillImportService:
                 failed_count=0,
                 details=[schemas.SkillImportResultItem(name="N/A", status="failed", error="No valid SKILL.md found.")]
             )
-
-        # 2. Create Root Folder (Container)
-        # Sanitize name
-        safe_root_name = self._sanitize_name(root_name)
-
-        # Check conflict for root folder
-        existing_names = await resource_crud.get_child_names_by_parent_id(self.db, parent_id)
-        if safe_root_name in existing_names:
-            raise HTTPException(status_code=400,
-                                detail=f"Root folder name conflict: '{safe_root_name}' already exists in target location.")
-
-        root_folder_schema = schemas.ResourceCreate(
-            name=safe_root_name,
-            itemType=ResourceItemType.FOLDER,
-            parentId=parent_id
-        )
-        root_folder_res = await resource_crud.create_resource(self.db, root_folder_schema)
 
         # 3. Process each Skill
         for skill_abs_path in skill_dirs:
@@ -182,7 +194,7 @@ class SkillImportService:
 
             try:
                 # Create intermediate folders and Skill folder
-                skill_resource = await self._create_skill_resources(relative_path, root_folder_res.id, frontmatter_name)
+                skill_resource = await self._create_skill_resources(relative_path, parent_id, frontmatter_name)
 
                 # Create files inside Skill
                 await self._create_files_recursive(skill_abs_path, skill_resource.id)
@@ -194,8 +206,6 @@ class SkillImportService:
                     resource_id=skill_resource.id
                 ))
             except Exception as e:
-                # Note: Since FileService commits immediately, we might have orphan files if this step fails midway.
-                # But as per requirement, we rely on the orphan cleaner.
                 failed_count += 1
                 details.append(schemas.SkillImportResultItem(
                     name=frontmatter_name,
@@ -252,7 +262,7 @@ class SkillImportService:
                     return None
         return None
 
-    async def _create_skill_resources(self, relative_path: str, root_parent_id: str,
+    async def _create_skill_resources(self, relative_path: str, root_parent_id: Optional[str],
                                       skill_name: str) -> resource_model.Resource:
         """
         根据相对路径创建中间文件夹，最后创建 Skill 文件夹。
@@ -264,8 +274,11 @@ class SkillImportService:
         if len(parts) > 1:
             for folder_name in parts[:-1]:
                 safe_name = self._sanitize_name(folder_name)
-                # Check if exists
-                children = await resource_crud.get_resources_by_parent_ids(self.db, [current_parent_id])
+
+                # 修复：如果 parentId 是 None，传递 "root" 给查询函数以获取根目录资源
+                query_parent_id = current_parent_id if current_parent_id else "root"
+                children = await resource_crud.get_resources_by_parent_ids(self.db, [query_parent_id])
+
                 existing = next((c for c in children if c.name == safe_name), None)
 
                 if existing:
@@ -285,9 +298,6 @@ class SkillImportService:
         # Check conflict
         existing_names = await resource_crud.get_child_names_by_parent_id(self.db, current_parent_id)
         if safe_skill_name in existing_names:
-            # Conflict handling logic: if exists, we might append suffix or fail.
-            # Plan says: "Check conflict... if conflict mark failed".
-            # But here we are inside a loop, we should raise to let outer loop catch it.
             raise ValueError(f"Skill name conflict: '{safe_skill_name}' already exists in the destination.")
 
         skill_schema = schemas.ResourceCreate(
@@ -303,10 +313,6 @@ class SkillImportService:
         for item in os.listdir(disk_path):
             item_path = os.path.join(disk_path, item)
             if os.path.isfile(item_path):
-                # Skip SKILL.md as it is represented by the folder itself (metadata wise)
-                # But technically we should store it as a file resource if the system treats files as resources.
-                # Based on existing logic: SKILL folder contains SKILL.md as a file resource.
-
                 with open(item_path, "rb") as f:
                     content_bytes = f.read()
 
