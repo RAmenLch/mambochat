@@ -98,9 +98,10 @@ export const useChatSessionStore = defineStore('chatSession', () => {
     const systemPrompt = chat.systemPrompt || '';
 
     // 提取挂载资源的内容
-    const systemResourceContent = systemPromptResources.value
-      .map(r => r.latest_version?.content || '')
-      .join('\n');
+  const systemResourceContent = systemPromptResources.value
+    .filter(r => r.resourceType !== 'knowledge_base')
+    .map(r => r.latest_version?.content || '')
+    .join('\n');
 
     let anchorIndex = -1;
     let anchorContent = '';
@@ -436,7 +437,7 @@ export const useChatSessionStore = defineStore('chatSession', () => {
     isGenerating,
     messageRecencyRanks,
     contextForTokenEstimation,
-
+    systemPromptResources,
     // Actions
     selectChat,
     clearSession,

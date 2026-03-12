@@ -207,30 +207,18 @@ const displayModelName = computed(() => {
  * 目标 ID: system-ddgs-search
  */
 const isWebSearchEnabled = computed((): boolean => {
-  const mcpIds = props.currentChat?.modelParameters?.enabled_mcp_ids;
+  const mcpIds = props.currentChat?.enabled_mcp_ids;
   if (!mcpIds) return false;
-
-  if (Array.isArray(mcpIds)) {
-    return mcpIds.includes('system-ddgs-search');
-  } else if (typeof mcpIds === 'object') {
-    return Object.prototype.hasOwnProperty.call(mcpIds, 'system-ddgs-search');
-  }
-  return false;
+  return mcpIds.includes('system-ddgs-search');
 });
 
 /**
  * 检查指定 MCP 工具是否在当前会话中启用。
  */
 const isMcpToolEnabled = (mcpId: string): boolean => {
-  const mcpIds = props.currentChat?.modelParameters?.enabled_mcp_ids;
+  const mcpIds = props.currentChat?.enabled_mcp_ids;
   if (!mcpIds) return false;
-
-  if (Array.isArray(mcpIds)) {
-    return mcpIds.includes(mcpId);
-  } else if (typeof mcpIds === 'object') {
-    return Object.prototype.hasOwnProperty.call(mcpIds, mcpId);
-  }
-  return false;
+  return mcpIds.includes(mcpId);
 };
 
 /**

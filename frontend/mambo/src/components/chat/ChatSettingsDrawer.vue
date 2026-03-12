@@ -36,7 +36,7 @@
             :placeholder="$t('chat.settings.systemPromptPlaceholder')"
           />
 
-          <!-- 挂载资源预览区 -->
+          <!-- 挂载资源预览区 (仅显示 System Prompt 和 Submessage Template) -->
           <div v-if="mountedSystemResources.length > 0" class="mounted-resources-wrapper">
             <MountedResourceTags v-model="mountedSystemResources" />
           </div>
@@ -134,9 +134,10 @@
 
   <!-- Reusable Resource Selector Dialog -->
   <ResourceSelectorDialog
-    v-model:visible="promptDialogVisible"
-    source="settings"
-    @mount-resources="handleMountResources"
+      v-model:visible="promptDialogVisible"
+      source="settings"
+      @mount-resources="handleMountResources"
+      @mount-knowledge-base="handleMountKnowledgeBase"
   />
 </template>
 
@@ -147,10 +148,13 @@ import { ElMessage } from 'element-plus';
 import { QuestionFilled } from '@element-plus/icons-vue';
 import { useSystemConfigStore } from '@/stores/systemConfigStore';
 import { useProviderStore } from '@/stores/providerStore';
+import { useChatSessionStore } from '@/stores/chatSessionStore';
 import { getResourceDetails } from '@/api/resourceService';
 import type { Chat, ChatUpdate, AIModel, Resource, LLMParameterDefinition } from '@/api/types';
 import ResourceSelectorDialog from './dialogs/ResourceSelectorDialog.vue';
 import MountedResourceTags from '@/components/common/MountedResourceTags.vue';
+import { useChatListStore } from '@/stores/chatListStore';
+const chatListStore = useChatListStore();
 
 interface GroupedModels {
   label: string;
@@ -189,6 +193,7 @@ const emit = defineEmits<{
 const { t } = useI18n();
 const systemConfigStore = useSystemConfigStore();
 const providerStore = useProviderStore();
+const chatSessionStore = useChatSessionStore();
 
 // --- Dialog Visibility State ---
 const promptDialogVisible = ref(false);
@@ -202,6 +207,7 @@ const chatSettingsForm = reactive<ChatSettingsForm>({
 });
 
 // --- Mounted Resources State ---
+// 仅用于管理 System Prompt 和 Submessage Template 类型的资源
 const mountedSystemResources = ref<Resource[]>([]);
 
 // --- Methods ---
@@ -289,10 +295,14 @@ watch(chatConfigSnapshot, async (newConfig, oldConfig) => {
           const promises = newConfig.resource_prompt_list.map(id => getResourceDetails(id));
           const results = await Promise.all(promises);
 
+          // 过滤：仅保留 System Prompt 和 Submessage Template
           const orderedResults = newConfig.resource_prompt_list
             .map(id => results.find(r => r.id === id))
             .filter((r) => !!r) as Resource[];
-          mountedSystemResources.value = orderedResults;
+
+          mountedSystemResources.value = orderedResults.filter(
+            r => r.resourceType === 'system_prompt' || r.resourceType === 'submessage_template'
+          );
         } catch (error) {
           console.error('Failed to load mounted resources:', error);
         }
@@ -390,7 +400,16 @@ function handleSaveSettings() {
     }
   }
 
-  const resourcePromptList = mountedSystemResources.value.map(r => r.id);
+  // 1. 获取抽屉中编辑的资源 ID (System Prompt / Template)
+  const drawerResourceIds = mountedSystemResources.value.map(r => r.id);
+
+  // 2. 获取当前挂载的知识库 ID (从 Session Store 中获取，避免覆盖)
+  const currentKbIds = chatSessionStore.systemPromptResources
+    .filter(r => r.resourceType === 'knowledge_base')
+    .map(r => r.id);
+
+  // 3. 合并生成最终的 resource_prompt_list
+  const resourcePromptList = [...drawerResourceIds, ...currentKbIds];
 
   emit('save', {
     name: chatSettingsForm.name,
@@ -399,6 +418,21 @@ function handleSaveSettings() {
     modelParameters: finalModelParameters,
     resource_prompt_list: resourcePromptList.length > 0 ? resourcePromptList : null,
   });
+}
+async function handleMountKnowledgeBase(resources: Resource[]) {
+  if (!props.chatData) return;
+
+  const currentList = props.chatData.resource_prompt_list || [];
+  const newIds = resources.map(r => r.id).filter(id => !currentList.includes(id));
+
+  if (newIds.length > 0) {
+    const updatedList = [...currentList, ...newIds];
+    // 立即更新后端，ChatWindow 会自动响应变化显示在 AttachmentPreview 中
+    await chatListStore.updateChatSettings(props.chatData.id, {
+      resource_prompt_list: updatedList
+    });
+    ElMessage.success(`已启用知识库: ${resources.map(r => r.name).join(', ')}`);
+  }
 }
 </script>
 

@@ -289,7 +289,7 @@
     <!-- Footer: 仅在资源模式下显示 (KB模式有内部Footer) -->
     <template #footer v-if="selectorMode === 'resource'">
       <div class="action-buttons">
-        <!-- 新增: 提供给AI助手检索按钮 -->
+        <!-- 提供给AI助手检索按钮 -->
         <el-button
           v-if="showKbSearchButton"
           type="primary"
@@ -308,6 +308,8 @@
         >
           {{ $t('resource.action.append', { count: selectedResources.length }) }}
         </el-button>
+
+        <!-- 挂载按钮：在Settings场景下选中知识库时隐藏 -->
         <el-button
           v-if="showMountButton"
           type="primary"
@@ -325,7 +327,6 @@
 import { ref, computed, watch, onMounted, nextTick } from 'vue';
 import { ElTree, ElMessage } from 'element-plus';
 import type { TreeNodeData } from 'element-plus/es/components/tree/src/tree.type';
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import type Node from 'element-plus/es/components/tree/src/model/node';
 import { Folder, Document, Memo, Loading, Picture, Download, Search, Collection } from '@element-plus/icons-vue';
 import { storeToRefs } from 'pinia';
@@ -346,7 +347,7 @@ const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void;
   (e: 'mount-resources', resources: Resource[]): void;
   (e: 'append-resources', resources: Resource[]): void;
-  (e: 'mount-knowledge-base', resource: Resource): void;
+  (e: 'mount-knowledge-base', resources: Resource[]): void;
 }>();
 
 // --- Store & I18n ---
@@ -405,6 +406,14 @@ const isImage = computed(() => {
 // 按钮显示逻辑
 const showMountButton = computed(() => {
   if (selectedResources.value.length === 0) return false;
+
+  // [Change] 在 Settings 场景下，如果选中的全是知识库，隐藏“挂载”按钮
+  // 避免知识库进入 Settings 的挂载预览区
+  if (props.source === 'settings') {
+    const allKb = selectedResources.value.every(r => r.resourceType === 'knowledge_base');
+    if (allKb) return false;
+  }
+
   if (props.source === 'settings') return true;
 
   // Toolbar: 允许挂载 submessage_template 和 file
@@ -423,11 +432,12 @@ const showAppendButton = computed(() => {
   );
 });
 
-// 新增: 判断是否显示知识库检索按钮
+// 判断是否显示知识库检索按钮
 const showKbSearchButton = computed(() => {
   if (selectorMode.value !== 'resource') return false;
-  if (selectedResources.value.length !== 1) return false;
-  return selectedResources.value[0].resourceType === 'knowledge_base';
+  if (selectedResources.value.length === 0) return false;
+  // 仅当选中资源全为知识库时显示
+  return selectedResources.value.every(r => r.resourceType === 'knowledge_base');
 });
 
 function filterTreeByType(nodes: ResourceNode[]): ResourceNode[] {
@@ -744,10 +754,10 @@ function handleAppend() {
   emit('update:visible', false);
 }
 
-// 新增: 处理知识库挂载
+// 处理知识库挂载
 function handleMountKnowledgeBase() {
-  if (selectedResources.value.length !== 1) return;
-  emit('mount-knowledge-base', selectedResources.value[0]);
+  if (selectedResources.value.length === 0) return;
+  emit('mount-knowledge-base', selectedResources.value); // 传递数组
   emit('update:visible', false);
 }
 
@@ -755,14 +765,12 @@ function handleMountKnowledgeBase() {
 
 const handleKBSelection = (items: KBSearchResultItem[]) => {
   // 将 KB 切片转换为 Resource 对象
-  // 关键点：将切片内容放入 latest_version.content 中
-  // 父组件（聊天界面）需要读取这个 content 字段来注入输入框
   const resources: Resource[] = items.map(item => ({
-    id: item.chunk_id, // 使用切片ID作为资源ID
+    id: item.chunk_id,
     name: `片段: ${item.resource_name}`,
     description: `来自知识库: ${item.kb_name} (相似度: ${item.score.toFixed(4)})`,
     itemType: 'resource',
-    resourceType: 'knowledge_base_chunk', // 标记为切片类型，方便父组件识别
+    resourceType: 'knowledge_base_chunk',
     parentId: item.kb_id,
     sortOrder: 0,
     createdAt: new Date().toISOString(),
@@ -772,7 +780,7 @@ const handleKBSelection = (items: KBSearchResultItem[]) => {
       resourceId: item.chunk_id,
       name: 'v1',
       commitMessage: null,
-      content: item.chunk_content, // 【重要】这里存放需要注入的文本内容
+      content: item.chunk_content,
       attributes: { score: item.score },
       sortOrder: 0,
       createdAt: new Date().toISOString(),

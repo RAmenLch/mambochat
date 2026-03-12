@@ -302,7 +302,7 @@ async def update_chat_settings(
                     raise HTTPException(status_code=400, detail=f"Resource ID {rid} not found.")
 
                 # 检查是否为文件夹，仅允许挂载具体资源
-                if res.itemType != ResourceItemType.RESOURCE.value:
+                if res.resourceType is None:
                     raise HTTPException(
                         status_code=400,
                         detail=f"Item {rid} is a folder, cannot be mounted as a resource."
