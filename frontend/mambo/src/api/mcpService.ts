@@ -1,7 +1,14 @@
 // frontend/mambo/src/api/mcpService.ts
 
 import apiClient from './index';
-import type { McpServer, McpCreateRequest, McpUpdateRequest, McpTestResponse } from './types';
+import type {
+  McpServer,
+  McpCreateRequest,
+  McpUpdateRequest,
+  McpTestResponse,
+  McpToolResponse,
+  McpToolUpdate
+} from './types';
 
 /**
  * 获取所有可用 MCP 服务列表
@@ -52,4 +59,37 @@ export const deleteMcp = (id: string): Promise<void> => {
  */
 export const testMcpServer = (id: string): Promise<McpTestResponse> => {
   return apiClient.post(`/mcp/${id}/test`);
+};
+
+/**
+ * 同步服务器工具列表
+ * @param serverId MCP 服务 ID
+ */
+export const syncMcpTools = (serverId: string): Promise<McpToolResponse[]> => {
+  return apiClient.post(`/mcp/${serverId}/sync`);
+};
+
+/**
+ * 获取服务器工具列表
+ * @param serverId MCP 服务 ID
+ */
+export const getMcpTools = (serverId: string): Promise<McpToolResponse[]> => {
+  return apiClient.get(`/mcp/${serverId}/tools`);
+};
+
+/**
+ * 更新工具配置
+ * @param toolId 工具 ID
+ * @param data 更新数据
+ */
+export const updateMcpTool = (toolId: string, data: McpToolUpdate): Promise<McpToolResponse> => {
+  return apiClient.patch(`/mcp/tools/${toolId}`, data);
+};
+
+/**
+ * 删除失效工具
+ * @param toolId 工具 ID
+ */
+export const deleteMcpTool = (toolId: string): Promise<void> => {
+  return apiClient.delete(`/mcp/tools/${toolId}`);
 };

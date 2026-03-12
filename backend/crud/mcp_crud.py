@@ -1,10 +1,10 @@
 # backend/crud/mcp_crud.py
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from typing import List, Optional
 
-from backend.models.mcp_model import McpServer
+from backend.models.mcp_model import McpServer, McpTool
 from backend.schemas.mcp import McpServerCreate, McpServerUpdate
 
 
@@ -77,12 +77,15 @@ async def update_mcp_server(db: AsyncSession, server_id: str, update_data: McpSe
 
 async def delete_mcp_server(db: AsyncSession, server_id: str) -> bool:
     """
-    删除 MCP 服务器配置。
+    删除 MCP 服务器配置及关联的工具元数据。
     """
     db_server = await get_mcp_server(db, server_id)
     if not db_server:
         return False
 
+    await db.execute(delete(McpTool).where(McpTool.server_id == server_id))
+
     await db.delete(db_server)
     await db.commit()
     return True
+

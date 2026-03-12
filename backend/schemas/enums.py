@@ -88,3 +88,12 @@ class McpTransportType(str, Enum):
     """定义 MCP 服务器的传输类型"""
     STDIO = "stdio"
     SSE = "sse"
+
+class ToolReviewMode(str, Enum):
+    NONE = "none"
+    REQUIRE_REVIEW = "require_review"
+
+
+class ToolStatus(str, Enum):
+    ONLINE = "online"
+    OFFLINE = "offline"

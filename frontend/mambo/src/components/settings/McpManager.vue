@@ -49,7 +49,6 @@
         </template>
       </el-table-column>
 
-      <!-- 新增：健康状态列 -->
       <el-table-column :label="t('settings.mcp.columns.status')" width="100" align="center">
         <template #default="{ row }">
           <div class="health-status-cell">
@@ -70,7 +69,6 @@
         </template>
       </el-table-column>
 
-      <!-- 新增：监测详情列 -->
       <el-table-column :label="t('settings.mcp.columns.monitor')" min-width="160">
         <template #default="{ row }">
           <div class="monitor-cell">
@@ -88,6 +86,12 @@
               <span>{{ t('settings.mcp.checkError') }}</span>
             </div>
           </div>
+        </template>
+      </el-table-column>
+
+      <el-table-column label="工具管理" width="100" align="center">
+        <template #default="{ row }">
+          <el-button link type="primary" @click="openToolDrawer(row.id)">查看工具</el-button>
         </template>
       </el-table-column>
 
@@ -120,7 +124,6 @@
       @save="handleSave"
     />
 
-    <!-- 故障详情弹窗 -->
     <el-dialog
       v-model="errorDialogVisible"
       :title="t('settings.mcp.errorDetail.title')"
@@ -147,6 +150,97 @@
         <el-button @click="errorDialogVisible = false">{{ t('common.action.close') }}</el-button>
       </template>
     </el-dialog>
+
+    <el-drawer
+      v-model="toolDrawerVisible"
+      size="800px"
+      destroy-on-close
+    >
+      <template #header>
+        <div class="drawer-header">
+          <span class="drawer-title">MCP 工具列表</span>
+          <el-button
+            type="primary"
+            :icon="Refresh"
+            :loading="isSyncingTools"
+            @click="handleSyncTools"
+          >
+            手动同步
+          </el-button>
+        </div>
+      </template>
+
+      <el-table :data="currentServerTools" style="width: 100%" v-loading="isToolsLoading">
+        <el-table-column label="工具信息" min-width="180">
+          <template #default="{ row }">
+            <div class="tool-info-cell">
+              <span>{{ row.name }}</span>
+              <el-tooltip placement="top" effect="light">
+                <template #content>
+                  <div class="tool-tooltip-content">
+                    <p v-if="row.description"><strong>描述:</strong> {{ row.description }}</p>
+                    <p><strong>Input Schema:</strong></p>
+                    <pre>{{ formatJson(row.input_schema) }}</pre>
+                  </div>
+                </template>
+                <el-icon class="info-icon"><InfoFilled /></el-icon>
+              </el-tooltip>
+            </div>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="在线状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="row.status === 'online' ? 'success' : 'info'" size="small">
+              {{ row.status === 'online' ? '正常' : '已失效' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="启用状态" width="100">
+          <template #default="{ row }">
+            <el-switch
+              :model-value="row.is_enabled"
+              @change="(val: boolean | string | number) => handleToolSwitchChange(row, Boolean(val))"
+            />
+          </template>
+        </el-table-column>
+
+        <el-table-column label="审核模式" width="140">
+          <template #default="{ row }">
+            <el-select
+              :model-value="row.review_mode"
+              @change="(val: ToolReviewMode) => handleToolReviewChange(row, val)"
+              size="small"
+            >
+              <el-option label="不干涉" value="none" />
+              <el-option label="需审核" value="require_review" />
+            </el-select>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="最后同步时间" width="160">
+          <template #default="{ row }">
+            {{ formatTime(row.last_synced_at) }}
+          </template>
+        </el-table-column>
+
+        <el-table-column label="操作" width="80" fixed="right">
+          <template #default="{ row }">
+            <el-popconfirm
+              title="确定要删除该失效工具吗？"
+              @confirm="handleDeleteTool(row)"
+            >
+              <template #reference>
+                <el-button link type="danger" :disabled="row.status === 'online'">
+                  删除
+                </el-button>
+              </template>
+            </el-popconfirm>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-drawer>
   </div>
 </template>
 
@@ -154,27 +248,30 @@
 import { ref, onMounted, reactive } from 'vue';
 import { storeToRefs } from 'pinia';
 import { ElMessage } from 'element-plus';
-import { Plus, Refresh, WarningFilled } from '@element-plus/icons-vue';
+import { Plus, Refresh, WarningFilled, InfoFilled } from '@element-plus/icons-vue';
 import { useMcpStore } from '@/stores/mcpStore';
-import type { McpServer, McpCreateRequest, McpHealthStatus } from '@/api/types';
+import type { McpServer, McpCreateRequest, McpHealthStatus, McpToolResponse, ToolReviewMode } from '@/api/types';
 import McpFormDialog from './dialogs/McpFormDialog.vue';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
 const mcpStore = useMcpStore();
-const { availableServices } = storeToRefs(mcpStore);
+const { availableServices, currentServerTools } = storeToRefs(mcpStore);
 
 const isLoading = ref(false);
 const dialogVisible = ref(false);
 const isSubmitting = ref(false);
 const editingMcp = ref<McpServer | null>(null);
 
-// 测试状态管理
 const testingRowIds = reactive(new Set<string>());
 
-// 错误详情弹窗管理
 const errorDialogVisible = ref(false);
 const currentErrorMcp = ref<McpServer | null>(null);
+
+const toolDrawerVisible = ref(false);
+const activeServerId = ref('');
+const isToolsLoading = ref(false);
+const isSyncingTools = ref(false);
 
 onMounted(async () => {
   isLoading.value = true;
@@ -238,7 +335,58 @@ const showErrorDetail = (row: McpServer) => {
   errorDialogVisible.value = true;
 };
 
-// --- Helpers ---
+const openToolDrawer = async (serverId: string) => {
+  activeServerId.value = serverId;
+  toolDrawerVisible.value = true;
+  isToolsLoading.value = true;
+  try {
+    await mcpStore.fetchTools(serverId);
+  } catch (error) {
+    ElMessage.error('获取工具列表失败');
+  } finally {
+    isToolsLoading.value = false;
+  }
+};
+
+const handleSyncTools = async () => {
+  if (!activeServerId.value) return;
+  isSyncingTools.value = true;
+  try {
+    await mcpStore.syncTools(activeServerId.value);
+    ElMessage.success('同步成功');
+  } catch (error) {
+    ElMessage.error('同步失败');
+  } finally {
+    isSyncingTools.value = false;
+  }
+};
+
+const handleToolSwitchChange = async (row: McpToolResponse, val: boolean) => {
+  try {
+    await mcpStore.updateToolConfig(row.id, { is_enabled: val });
+    ElMessage.success('更新成功');
+  } catch (error) {
+    ElMessage.error('更新失败');
+  }
+};
+
+const handleToolReviewChange = async (row: McpToolResponse, val: ToolReviewMode) => {
+  try {
+    await mcpStore.updateToolConfig(row.id, { review_mode: val });
+    ElMessage.success('更新成功');
+  } catch (error) {
+    ElMessage.error('更新失败');
+  }
+};
+
+const handleDeleteTool = async (row: McpToolResponse) => {
+  try {
+    await mcpStore.removeTool(row.id);
+    ElMessage.success('删除成功');
+  } catch (error) {
+    ElMessage.error('删除失败');
+  }
+};
 
 const getStatusClass = (status: McpHealthStatus) => {
   switch (status) {
@@ -249,7 +397,6 @@ const getStatusClass = (status: McpHealthStatus) => {
 };
 
 const getStatusTitle = (status: McpHealthStatus) => {
-  // 复用 chat.toolbar.mcpStatus 中的翻译
   switch (status) {
     case 'healthy': return t('chat.toolbar.mcpStatus.healthy');
     case 'unhealthy': return t('chat.toolbar.mcpStatus.unhealthy');
@@ -268,10 +415,18 @@ const formatTime = (isoString: string) => {
     second: '2-digit'
   });
 };
+
+const formatJson = (obj: Record<string, unknown> | null) => {
+  if (!obj) return '无';
+  try {
+    return JSON.stringify(obj, null, 2);
+  } catch (e) {
+    return String(obj);
+  }
+};
 </script>
 
 <style scoped>
-/* 样式保持不变 */
 .mcp-manager {
   height: 100%;
   display: flex;
@@ -325,7 +480,6 @@ const formatTime = (isoString: string) => {
   text-overflow: ellipsis;
 }
 
-/* Status Column Styles */
 .health-status-cell {
   display: flex;
   align-items: center;
@@ -355,7 +509,6 @@ const formatTime = (isoString: string) => {
   border: 1px solid var(--el-color-info-light-5);
 }
 
-/* Monitor Column Styles */
 .monitor-cell {
   display: flex;
   flex-direction: column;
@@ -385,7 +538,6 @@ const formatTime = (isoString: string) => {
   text-decoration: underline;
 }
 
-/* Error Dialog Styles */
 .error-detail-content {
   display: flex;
   flex-direction: column;
@@ -417,5 +569,49 @@ const formatTime = (isoString: string) => {
   white-space: pre-wrap;
   word-break: break-all;
   color: var(--el-color-danger-dark-2);
+}
+
+.drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.drawer-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.tool-info-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.info-icon {
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+}
+
+.tool-tooltip-content {
+  max-width: 400px;
+  max-height: 300px;
+  overflow: auto;
+}
+
+.tool-tooltip-content p {
+  margin: 4px 0;
+}
+
+.tool-tooltip-content pre {
+  margin: 8px 0 0 0;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-family: monospace;
+  font-size: 12px;
+  background-color: var(--el-fill-color-light);
+  padding: 8px;
+  border-radius: 4px;
 }
 </style>

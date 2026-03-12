@@ -7,9 +7,19 @@ import {
   createMcp as apiCreateMcp,
   updateMcp as apiUpdateMcp,
   deleteMcp as apiDeleteMcp,
-  testMcpServer as apiTestMcpServer
+  testMcpServer as apiTestMcpServer,
+  syncMcpTools as apiSyncMcpTools,
+  getMcpTools as apiGetMcpTools,
+  updateMcpTool as apiUpdateMcpTool,
+  deleteMcpTool as apiDeleteMcpTool
 } from '@/api/mcpService';
-import type { McpServer, McpCreateRequest, McpUpdateRequest } from '@/api/types';
+import type {
+  McpServer,
+  McpCreateRequest,
+  McpUpdateRequest,
+  McpToolResponse,
+  McpToolUpdate
+} from '@/api/types';
 
 /**
  * 管理 MCP (Model Context Protocol) 服务的全局状态。
@@ -21,6 +31,11 @@ export const useMcpStore = defineStore('mcp', () => {
    * 包含系统内置(isSystem=true)和用户自定义(isSystem=false)的服务。
    */
   const availableServices = ref<McpServer[]>([]);
+
+  /**
+   * 缓存当前正在查看的 Server 下的工具列表。
+   */
+  const currentServerTools = ref<McpToolResponse[]>([]);
 
   /**
    * 获取用户自定义的 MCP 服务列表（非系统内置）。
@@ -107,6 +122,7 @@ export const useMcpStore = defineStore('mcp', () => {
       if (response.status === 'healthy') {
         service.last_status = 'healthy';
         service.last_error = null;
+        await syncTools(id);
       } else {
         // 业务逻辑返回失败
         service.last_status = 'unhealthy';
@@ -114,23 +130,83 @@ export const useMcpStore = defineStore('mcp', () => {
         // 主动抛出错误，以便 UI 层捕获并显示错误提示
         throw new Error(service.last_error || 'Connection failed');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       // 捕获网络错误或上述抛出的业务错误
       service.last_status = 'unhealthy';
       service.last_test_at = new Date().toISOString();
 
-      // 如果 error.message 与 service.last_error 不一致，说明是网络层面的新错误（未被业务逻辑捕获）
+      const errorMessage = error instanceof Error ? error.message : 'Unknown network error';
+      // 如果 errorMessage 与 service.last_error 不一致，说明是网络层面的新错误（未被业务逻辑捕获）
       // 或者是首次赋值
-      if (service.last_error !== error.message) {
-         service.last_error = error.message || 'Unknown network error';
+      if (service.last_error !== errorMessage) {
+         service.last_error = errorMessage || 'Unknown network error';
       }
 
       throw error;
     }
   }
 
+  /**
+   * 同步指定服务的工具列表
+   */
+  async function syncTools(serverId: string) {
+    try {
+      const tools = await apiSyncMcpTools(serverId);
+      currentServerTools.value = tools;
+    } catch (error) {
+      console.error(`Failed to sync tools for server ${serverId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取指定服务的工具列表
+   */
+  async function fetchTools(serverId: string) {
+    try {
+      const tools = await apiGetMcpTools(serverId);
+      currentServerTools.value = tools;
+    } catch (error) {
+      console.error(`Failed to fetch tools for server ${serverId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * 更新工具配置
+   */
+  async function updateToolConfig(toolId: string, data: McpToolUpdate) {
+    try {
+      const updatedTool = await apiUpdateMcpTool(toolId, data);
+      const index = currentServerTools.value.findIndex(t => t.id === toolId);
+      if (index !== -1) {
+        currentServerTools.value[index] = {
+          ...currentServerTools.value[index],
+          ...updatedTool
+        };
+      }
+    } catch (error) {
+      console.error(`Failed to update tool ${toolId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * 删除失效工具
+   */
+  async function removeTool(toolId: string) {
+    try {
+      await apiDeleteMcpTool(toolId);
+      currentServerTools.value = currentServerTools.value.filter(t => t.id !== toolId);
+    } catch (error) {
+      console.error(`Failed to remove tool ${toolId}:`, error);
+      throw error;
+    }
+  }
+
   return {
     availableServices,
+    currentServerTools,
     userMcpServices,
     activeUserMcpServices,
     fetchAvailableServices,
@@ -138,5 +214,9 @@ export const useMcpStore = defineStore('mcp', () => {
     updateMcp,
     deleteMcp,
     testConnection,
+    syncTools,
+    fetchTools,
+    updateToolConfig,
+    removeTool
   };
 });
