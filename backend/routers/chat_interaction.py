@@ -25,6 +25,7 @@ async def _start_generation_task(
         assistant_message_id: str
 ):
     """启动后台生成任务。"""
+    await stream_manager.mark_task_running(assistant_message_id)
     background_tasks.add_task(generation_service._run_managed_generation_task, chat_id, assistant_message_id)
 
 
@@ -327,16 +328,25 @@ async def review_tool_call(
             all_decided = False
             break
 
+    is_resuming = False
+
     # 3. 若全部决策完成，使用乐观锁尝试唤醒 Agent
     if all_decided and pending_review_subs:
         sub_ids = [sub.id for sub in pending_review_subs]
-        # 只有成功将所有待审核子消息状态更新为 COMPLETED 的请求才负责触发恢复
         affected_rows = await message_crud.batch_update_sub_messages_status_optimistic(
             db, sub_ids, MessageStatus.PENDING_REVIEW, MessageStatus.COMPLETED
         )
 
         if affected_rows == len(sub_ids):
             await _start_generation_task(background_tasks, db_message.chatId, message_id)
+            is_resuming = True
 
     # 4. 返回更新后的消息对象
-    return (await _hydrate_and_validate_messages([db_message], db))[0]
+    hydrated_messages = await _hydrate_and_validate_messages([db_message], db)
+    response_message = hydrated_messages[0]
+
+    # 5. 弥补时间差：如果刚刚触发了后台任务，强制将返回状态覆写为 GENERATING
+    if is_resuming:
+        response_message.status = schemas.MessageStatus.GENERATING
+
+    return response_message

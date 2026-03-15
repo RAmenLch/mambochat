@@ -30,7 +30,10 @@
           </template>
           <div
             class="minimized-item"
-            :class="{ 'is-inactive': isSubMessageInactive(subMessage) }"
+            :class="{
+              'is-inactive': isSubMessageInactive(subMessage),
+              'has-review': hasReview(subMessage)
+            }"
             @click="restoreSubMessage(subMessage.id)"
           >
             <!-- MCP Tool / Review Tool Specific Minimized View -->
@@ -324,6 +327,27 @@ const displayableSubMessages = computed(() =>
   ),
 )
 
+const reviewedToolCallIds = computed(() => {
+  const ids = new Set<string>();
+  displayableSubMessages.value.forEach(sm => {
+    if (sm.type === 'ReviewTool') {
+      try {
+        const content = JSON.parse(sm.content) as ReviewToolContent;
+        ids.add(content.tool_call_id);
+      } catch {}
+    }
+  });
+  return ids;
+});
+
+function hasReview(subMessage: SubMessage): boolean {
+  if (subMessage.type !== 'McpTool') return false;
+  try {
+    const content = JSON.parse(subMessage.content) as McpToolContent;
+    return reviewedToolCallIds.value.has(content.tool_call_id);
+  } catch { return false; }
+}
+
 const minimizedSubMessages = computed(() => {
   const allSubMessages = displayableSubMessages.value;
 
@@ -344,6 +368,9 @@ const minimizedSubMessages = computed(() => {
     if (sm.type === 'ReviewTool') {
       try {
         const content = JSON.parse(sm.content) as ReviewToolContent;
+        if (content.decision) {
+          return false;
+        }
         return !mcpToolCallIds.has(content.tool_call_id);
       } catch { return true; }
     }
@@ -801,6 +828,20 @@ function getMinimizedTooltipContent(subMessage: SubMessage): string {
   border-color: var(--el-color-primary-light-3);
   color: var(--el-color-primary-dark-2);
 }
+
+.minimized-item.has-review {
+  border-color: var(--el-color-warning);
+  background-color: var(--el-color-warning-light-9);
+}
+.minimized-item.has-review:hover {
+  border-color: var(--el-color-warning-dark-2);
+  color: var(--el-color-warning-dark-2);
+}
+.is-user .minimized-item.has-review {
+  border-color: var(--el-color-warning);
+  background-color: var(--el-color-warning-light-8);
+}
+
 .minimized-item-title {
   white-space: nowrap;
 }

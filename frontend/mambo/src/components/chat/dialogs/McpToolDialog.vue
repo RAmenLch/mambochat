@@ -58,17 +58,30 @@
             </div>
           </div>
 
-          <div v-if="msg.type === 'ReviewTool'" class="tool-actions">
-            <el-button type="danger" plain @click="submitDecision(msg.id, 'reject')">
-              {{ t('chat.message.reject', '拒绝调用') }}
-            </el-button>
-            <div class="right-actions">
-              <el-button type="warning" plain @click="submitDecision(msg.id, 'edit')">
-                {{ t('chat.message.editAndApprove', '修改并同意') }}
+          <div v-if="msg.type === 'ReviewTool'" class="tool-actions-wrapper">
+            <div v-if="!getToolDecision(msg)" class="tool-actions">
+              <el-button type="danger" plain @click="submitDecision(msg.id, 'reject')">
+                {{ t('chat.message.reject', '拒绝调用') }}
               </el-button>
-              <el-button type="primary" @click="submitDecision(msg.id, 'approve')">
-                {{ t('chat.message.approve', '同意调用') }}
-              </el-button>
+              <div class="right-actions">
+                <el-button type="warning" plain @click="submitDecision(msg.id, 'edit')">
+                  {{ t('chat.message.editAndApprove', '修改并同意') }}
+                </el-button>
+                <el-button type="primary" @click="submitDecision(msg.id, 'approve')">
+                  {{ t('chat.message.approve', '同意调用') }}
+                </el-button>
+              </div>
+            </div>
+
+            <div v-else class="tool-decision-result">
+              <h4>{{ t('chat.message.reviewResult', '审核结果') }}</h4>
+              <el-alert
+                :type="getToolDecision(msg)?.type === 'approve' ? 'success' : (getToolDecision(msg)?.type === 'reject' ? 'error' : 'warning')"
+                :title="getDecisionText(getToolDecision(msg))"
+                :description="getToolDecision(msg)?.message || ''"
+                :closable="false"
+                show-icon
+              />
             </div>
           </div>
         </div>
@@ -204,6 +217,24 @@ function isPropRequired(toolName: string | undefined, propName: string): boolean
   return false;
 }
 
+function getToolDecision(msg: SubMessage): ToolDecision | null {
+  const content = getParsedContent(msg);
+  if (msg.type === 'ReviewTool' && content) {
+    return (content as ReviewToolContent).decision || null;
+  }
+  return null;
+}
+
+function getDecisionText(decision: ToolDecision | null): string {
+  if (!decision) return '';
+  switch (decision.type) {
+    case 'approve': return t('chat.message.decisionApprove', '已同意调用');
+    case 'edit': return t('chat.message.decisionEdit', '已修改并同意');
+    case 'reject': return t('chat.message.decisionReject', '已拒绝调用');
+    default: return '';
+  }
+}
+
 async function submitDecision(subMessageId: string, type: 'approve' | 'edit' | 'reject') {
   if (!props.parentMessage) return;
 
@@ -276,16 +307,24 @@ h4 {
   color: var(--el-color-error);
   background-color: var(--el-color-error-light-9);
 }
+.tool-actions-wrapper {
+  margin-top: 24px;
+}
 .tool-actions {
   display: flex;
   justify-content: space-between;
-  margin-top: 24px;
   padding-top: 16px;
   border-top: 1px solid var(--el-border-color-lighter);
 }
 .right-actions {
   display: flex;
   gap: 12px;
+}
+.tool-decision-result {
+  margin-top: 24px;
+}
+.tool-decision-result h4 {
+  margin-bottom: 12px;
 }
 .parse-error {
   padding: 20px;

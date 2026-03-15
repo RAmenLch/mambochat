@@ -25,11 +25,11 @@
 
     <el-button
       v-if="isPendingReview"
-      type="warning"
+      color="#9c27b0"
       class="action-button review-button"
       @click="$emit('open-review')"
     >
-      <el-icon><Warning /></el-icon>
+      <el-icon><Bell /></el-icon>
     </el-button>
     <el-button
       v-else-if="!isGenerating"
@@ -49,7 +49,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import type { PropType } from 'vue'
-import { Promotion, VideoPause, Warning } from '@element-plus/icons-vue'
+import { Promotion, VideoPause, Bell } from '@element-plus/icons-vue'
 import type { editor } from 'monaco-editor'
 import MultiPartInput from './MultiPartInput.vue'
 import ChatUniversalEditor from '@/components/common/ChatUniversalEditor.vue'

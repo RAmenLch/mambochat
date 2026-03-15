@@ -25,7 +25,6 @@ from backend.config.timezone_config import get_configured_now, TZ
 from backend.services.generation.worker.anthropic_worker import AnthropicWorker
 from backend.services.file_service import FileService
 
-# 定义生成任务启动的超时阈值
 GENERATION_START_TIMEOUT = timedelta(minutes=10)
 
 
@@ -36,14 +35,15 @@ async def _calculate_message_status(message: chat_model.Message) -> schemas.Mess
     if message.role != MessageRole.ASSISTANT:
         return MessageStatus.COMPLETED
 
-    # 检查内存中是否存在针对此消息的取消请求
     cancellation_requested = await stream_manager.is_cancellation_requested(message.id)
+
+    if await stream_manager.is_task_running(message.id):
+        return MessageStatus.COMPLETED if cancellation_requested else MessageStatus.GENERATING
 
     # 1. 基于子消息状态判断
     if message.sub_messages:
         sub_statuses = {sm.status for sm in message.sub_messages}
 
-        # 优先检查是否存在待审核的工具调用
         if MessageStatus.PENDING_REVIEW.value in sub_statuses:
             for sm in message.sub_messages:
                 if sm.type == SubMessageType.REVIEW_TOOL.value and sm.status == MessageStatus.PENDING_REVIEW.value:
@@ -56,28 +56,28 @@ async def _calculate_message_status(message: chat_model.Message) -> schemas.Mess
                         continue
 
         if MessageStatus.GENERATING.value in sub_statuses:
-            # 如果仍在生成但已请求取消，则乐观地返回最终状态
             return MessageStatus.COMPLETED if cancellation_requested else MessageStatus.GENERATING
         if MessageStatus.FAILED.value in sub_statuses:
             return MessageStatus.FAILED
-        return MessageStatus.COMPLETED
 
-    # 2. 无子消息时的判断
-    # 检查是否有活跃的流，有则说明正在生成
+    # 2. 检查是否有活跃的流
     if await stream_manager.is_stream_active(message.id):
         return MessageStatus.COMPLETED if cancellation_requested else MessageStatus.GENERATING
 
-    # 无活跃流，检查是否超时（后台任务可能启动失败）
-    created_at = message.createdAt
-    if created_at.tzinfo is None:
-        created_at = TZ.localize(created_at)
+    # 3. 无活跃流，且没有任何子消息，检查是否超时
+    if not message.sub_messages:
+        created_at = message.createdAt
+        if created_at.tzinfo is None:
+            created_at = TZ.localize(created_at)
 
-    time_since_creation = get_configured_now() - created_at
-    if time_since_creation > GENERATION_START_TIMEOUT:
-        return MessageStatus.FAILED
+        time_since_creation = get_configured_now() - created_at
+        if time_since_creation > GENERATION_START_TIMEOUT:
+            return MessageStatus.FAILED
 
-    # 未超时，但无子消息和活跃流，可能处于任务启动的短暂间隙
-    return MessageStatus.COMPLETED if cancellation_requested else MessageStatus.GENERATING
+        return MessageStatus.COMPLETED if cancellation_requested else MessageStatus.GENERATING
+
+    # 4. 有子消息，且没有 generating/failed/pending_review，且流已关闭
+    return MessageStatus.COMPLETED
 
 
 async def prepare_for_regeneration(
@@ -128,28 +128,25 @@ async def create_user_message_and_prepare_generation(
 
                 template_sub_message = schemas.SubMessageCreate(
                     content=latest_version.content or "",
-                    sortOrder=-1,  # 临时值，稍后重新排序
+                    sortOrder=-1,
                     type=SubMessageType.NORMAL,
                     config=schemas.SubMessageConfig(**config_data),
                     status=MessageStatus.COMPLETED
                 )
                 injected_sub_messages.append(template_sub_message)
 
-    # 组合注入的模板和用户输入的内容，并重新排序
     all_sub_messages = injected_sub_messages + request.sub_messages
     for i, sub_msg in enumerate(all_sub_messages):
         sub_msg.sortOrder = i
 
-    # 在创建消息前，处理用户原始提交的文件类型子消息
     file_service = FileService(db)
     for sub_message in request.sub_messages:
         if sub_message.type == 'File':
             file_id = sub_message.content
-            # 智能更新文件管理类型：如果是临时类型则移除临时标记并加入新类型，否则合并类型
             await file_service.update_management_type(
                 file_id=file_id,
                 new_type=FileManagementType.SUB_MESSAGE.value,
-                merge=True  # 使用智能合并模式
+                merge=True
             )
 
     user_message_create = schemas.MessageCreate(
@@ -177,8 +174,6 @@ async def _ensure_chat_model_configured(db: AsyncSession, chat_id: str) -> None:
             await db.refresh(db_chat)
 
 
-# --- Worker Factory Logic ---
-
 def _create_worker_instance(worker_type: str):
     """Worker 工厂方法"""
     if worker_type == ProviderWorkerType.GOOGLE:
@@ -194,7 +189,6 @@ def _create_worker_instance(worker_type: str):
 async def _get_worker_for_chat(db: AsyncSession, chat_id: str):
     """
     根据会话配置的服务商类型，返回对应的 Worker 实例。
-    用于主对话流程。
     """
     db_chat = await chat_crud.get_chat(db, chat_id=chat_id)
     worker_type = ProviderWorkerType.OPENAI
@@ -207,11 +201,9 @@ async def _get_worker_for_chat(db: AsyncSession, chat_id: str):
 async def _get_worker_from_settings(db: AsyncSession, setting_keys: List[str]):
     """
     根据全局设置列表（按优先级）查找模型，并返回对应的 Worker 实例。
-    用于标题生成等使用全局模型配置的任务。
     """
     target_model_id = None
 
-    # 1. 遍历 Key 列表，找到第一个配置了有效值的设置项
     for key in setting_keys:
         setting = await setting_crud.get_setting(db, key)
         if setting and setting.value:
@@ -220,7 +212,6 @@ async def _get_worker_from_settings(db: AsyncSession, setting_keys: List[str]):
 
     worker_type = ProviderWorkerType.OPENAI
 
-    # 2. 如果找到了模型ID，查询其 Provider 的 worker_type
     if target_model_id:
         model = await provider_crud.get_model(db, target_model_id)
         if model and model.provider:
@@ -229,27 +220,20 @@ async def _get_worker_from_settings(db: AsyncSession, setting_keys: List[str]):
     return _create_worker_instance(worker_type)
 
 
-# --- Background Tasks ---
-
 async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
     """
-    后台任务：协调整个生成过程。它实例化 Executor、Worker 和 Manager，
-    通过指令流驱动生成。任务结束时负责清理底层持久化状态。
+    后台任务：协调整个生成过程。
     """
     from backend.checkpointer import adelete_thread
     async with AsyncSessionLocal() as db:
         final_status = None
         try:
-            # 在实例化 Manager 之前，确保 Chat 数据是就绪的 (AI Model ID 已配置)
             await _ensure_chat_model_configured(db, chat_id)
 
-            # 1. 实例化核心组件
             worker = await _get_worker_for_chat(db, chat_id)
             manager = DefaultGenerateManager(db_session=db)
             executor = InstructionExecutor(db_session=db)
 
-            # 2. 执行生成循环：Manager 产出指令 -> Executor 执行指令
-            # resume_payload 逻辑已内聚在 manager 调用的 builder.build() 中
             async for instruction in manager.run(worker, chat_id, assistant_message_id):
                 exec_result = await executor.execute(
                     instruction=instruction,
@@ -278,8 +262,8 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
                 print(f"Failed to even create an error message for {assistant_message_id}: {inner_e}")
 
         finally:
+            await stream_manager.mark_task_completed(assistant_message_id)
             await stream_manager.close_stream(assistant_message_id)
-            # 如果任务进入终态（非审核中断挂起），则清理底层的 Checkpointer 线程数据
             if final_status in [MessageStatus.COMPLETED, MessageStatus.FAILED]:
                 asyncio.create_task(adelete_thread(assistant_message_id))
 
@@ -287,12 +271,10 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
 async def run_title_generation_task(chat_id: str):
     """
     后台任务：为指定的会话生成并更新标题。
-    使用全局配置的 'title_generation_model_id' 或 'default_model_id'。
     """
     task_id = f"title-gen-{chat_id}"
     async with AsyncSessionLocal() as db:
         try:
-            # 1. 根据全局配置获取 Worker
             worker = await _get_worker_from_settings(db, ["title_generation_model_id", "default_model_id"])
 
             manager = TitleGenerateManager(db_session=db)
@@ -308,7 +290,6 @@ async def run_title_generation_task(chat_id: str):
         except Exception as e:
             print(f"[Title Generation Service Error] for chat {chat_id}: {e}")
         finally:
-            # 清理可能存在的取消请求状态
             await stream_manager.close_stream(task_id)
 
 
@@ -319,12 +300,10 @@ async def run_zip_history_generation_task(chat_id: str, target_message_id: str):
     task_id = f"zip-history-gen-{target_message_id}"
     async with AsyncSessionLocal() as db:
         try:
-            # 实例化核心组件 (此处暂时跟随 Chat 模型，如有独立配置需求可改为 _get_worker_from_settings)
             worker = await _get_worker_for_chat(db, chat_id)
             manager = ZipHistoryGenerateManager(db_session=db)
             executor = InstructionExecutor(db_session=db)
 
-            # 状态检查与初始化
             target_message = await message_crud.get_message(db, target_message_id)
             if target_message:
                 for sub in target_message.sub_messages:
@@ -343,7 +322,6 @@ async def run_zip_history_generation_task(chat_id: str, target_message_id: str):
                             pass
                         break
 
-            # 在 ZipHistoryManager 中，assistant_message_id 被用作 target_message_id
             async for instruction in manager.run(worker, chat_id, target_message_id):
                 await executor.execute(
                     instruction=instruction,
@@ -354,7 +332,6 @@ async def run_zip_history_generation_task(chat_id: str, target_message_id: str):
         except Exception as e:
             print(f"[Zip History Generation Service Error] for message {target_message_id}: {e}")
         finally:
-            # 此类任务不直接面向客户端流，但清理取消状态以防万一
             await stream_manager.close_stream(task_id)
 
 
@@ -369,10 +346,8 @@ async def subscribe_to_stream(
     if not message:
         return
 
-    # 计算初始的聚合状态
     calculated_status = await _calculate_message_status(message)
 
-    # 准备并发送初始的替换事件，包含子消息和聚合状态
     sub_messages_data = [schemas.SubMessage.model_validate(sm).model_dump(mode='json') for sm in message.sub_messages]
     initial_event_data = {
         "type": "replace",
@@ -381,16 +356,14 @@ async def subscribe_to_stream(
     }
     yield f"data: {json.dumps(initial_event_data)}\n\n"
 
-    # 如果生成任务已经明确结束（完成或失败），则无需继续订阅
     if calculated_status in [MessageStatus.COMPLETED, MessageStatus.FAILED]:
         return
 
-    # 订阅实时事件流
     queue = await stream_manager.subscribe(assistant_message_id)
     try:
         while True:
             chunk_data = await queue.get()
-            if chunk_data is None:  # 流结束的信号
+            if chunk_data is None:
                 break
             yield f"data: {json.dumps(chunk_data)}\n\n"
             queue.task_done()
