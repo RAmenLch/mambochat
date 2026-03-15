@@ -1,39 +1,38 @@
 from langchain_core.messages import AIMessageChunk,AIMessage, ToolMessage
 
+# backend/services/generation/worker/decode.py
+
+from langchain_core.messages import AIMessageChunk, AIMessage, ToolMessage
+
 class BaseDecode:
     @staticmethod
-    def get_text_content(mode,message):
+    def get_text_content(mode, message):
         pass
 
     @staticmethod
-    def get_reasoning_content(mode,message):
+    def get_reasoning_content(mode, message):
         pass
 
     @staticmethod
-    def get_toolcall_content(mode,message:AIMessageChunk| AIMessage):
-        if mode == "updates" and isinstance(message,AIMessage):
-            return message.tool_calls # 示例 [{'name': 'ddgs_search', 'args': {'query': '今日广州天气', 'max_results': 5}, 'id': '019bcccc33c40a0867a2879848bddca0', 'type': 'tool_call'}]
+    def get_toolcall_content(mode, message: AIMessageChunk | AIMessage):
+        if mode == "updates" and isinstance(message, AIMessage):
+            return message.tool_calls
         else:
             return None
 
     @staticmethod
-    def get_toolcall_result(mode,message:ToolMessage):
-        if mode == "updates" and isinstance(message,ToolMessage):
-            return {"id": message.tool_call_id, "text": message.text} # text 工具调用mcp方法返回的json
+    def get_toolcall_result(mode, message: ToolMessage):
+        if mode == "updates" and isinstance(message, ToolMessage):
+            return {"id": message.tool_call_id, "text": message.text}
         else:
             return None
 
-
-
     @staticmethod
-    def get_usage(mode,message:AIMessage):
-        if isinstance(message,ToolMessage):
+    def get_usage(mode, message: AIMessage):
+        if isinstance(message, ToolMessage):
             return None
 
-        if (mode == "messages"
-                # and message.response_metadata.get("finish_reason","").lower() == "stop"
-                and message.usage_metadata
-        ):
+        if (mode == "messages" and message.usage_metadata):
             usage = {}
             if "input_tokens" in message.usage_metadata:
                 usage["prompt_tokens"] = message.usage_metadata.get("input_tokens")
@@ -44,37 +43,66 @@ class BaseDecode:
             if "output_token_details" in message.usage_metadata:
                 usage["completion_tokens_details"] = {}
                 usage["completion_tokens_details"]["reasoning_tokens"] \
-                        = message.usage_metadata.get("output_token_details").get("reasoning")
+                    = message.usage_metadata.get("output_token_details").get("reasoning")
             return usage
         else:
             return None
 
+    @staticmethod
+    def get_hitl_interrupt(mode, event):
+        if mode == "updates" and isinstance(event, dict) and "__interrupt__" in event:
+            return event["__interrupt__"][0].value
+        return None
+
+    @staticmethod
+    def get_hitl_middleware_data(mode, event):
+        if mode == "updates" and isinstance(event, dict) and "HumanInTheLoopMiddleware.after_model" in event:
+            data = event["HumanInTheLoopMiddleware.after_model"]
+            if not data:
+                return None
+            messages = data.get("messages", [])
+            approved_calls = []
+            rejected_results = []
+
+            for msg in messages:
+                if isinstance(msg, AIMessage) and msg.tool_calls:
+                    approved_calls.extend(msg.tool_calls)
+                elif isinstance(msg, ToolMessage):
+                    rejected_results.append({
+                        "id": msg.tool_call_id,
+                        "name": msg.name,
+                        "content": msg.content
+                    })
+
+            return {"approved_calls": approved_calls, "rejected_results": rejected_results}
+        return None
+
 
 class OpenAiDecode(BaseDecode):
     @staticmethod
-    def get_text_content(mode,message:AIMessageChunk| AIMessage):
+    def get_text_content(mode, message: AIMessageChunk | AIMessage):
         if mode == "updates":
             return None
-        if mode == "messages" and isinstance(message,AIMessage):
+        if mode == "messages" and isinstance(message, AIMessage):
             return message.content
         else:
             return None
 
     @staticmethod
-    def get_reasoning_content(mode,message:AIMessageChunk| AIMessage):
+    def get_reasoning_content(mode, message: AIMessageChunk | AIMessage):
         if mode == "updates":
             return None
-        if mode == "messages" and isinstance(message,AIMessage):
+        if mode == "messages" and isinstance(message, AIMessage):
             return message.additional_kwargs.get("reasoning") or message.additional_kwargs.get("reasoning_content")
         else:
             return None
 
     @staticmethod
-    def get_image_url(mode,message:AIMessageChunk| AIMessage):
-        if mode == "updates" and isinstance(message,AIMessage):
+    def get_image_url(mode, message: AIMessageChunk | AIMessage):
+        if mode == "updates" and isinstance(message, AIMessage):
             if "images" in message.additional_kwargs:
                 for image in message.additional_kwargs["images"]:
-                    return image # {"image_url":{"url":"data:image..."}}
+                    return image
                 else:
                     return None
             else:

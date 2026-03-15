@@ -50,6 +50,22 @@ export const useChatSessionStore = defineStore('chatSession', () => {
   );
 
   /**
+   * 获取当前处于待审核状态的子消息列表。
+   */
+  const pendingReviewSubMessages = computed((): SubMessage[] => {
+    return currentChatMessages.value.flatMap(msg =>
+      msg.status === 'pending_review'
+        ? msg.sub_messages.filter(sm => sm.type === 'ReviewTool' && sm.status === 'pending_review')
+        : []
+    );
+  });
+
+  /**
+   * 判断当前是否处于等待审核状态。
+   */
+  const isPendingReview = computed((): boolean => pendingReviewSubMessages.value.length > 0);
+
+  /**
    * 计算每条消息的“新旧程度排名”。
    * 用于 Context Participation Length (CPL) 的 UI 展示判断。
    *
@@ -435,6 +451,8 @@ export const useChatSessionStore = defineStore('chatSession', () => {
     // Getters
     currentChat,
     isGenerating,
+    pendingReviewSubMessages,
+    isPendingReview,
     messageRecencyRanks,
     contextForTokenEstimation,
     systemPromptResources,

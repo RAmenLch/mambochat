@@ -13,10 +13,6 @@
       @paste="handlePaste"
     />
     <div v-else class="input-field editor-wrapper">
-      <!--
-        使用 ChatUniversalEditor 替代 UniversalEditor。
-        ChatUniversalEditor 包含发送快捷键和文件粘贴逻辑。
-      -->
       <ChatUniversalEditor
         ref="universalEditorRef"
         :model-value="singlePartDraft"
@@ -26,8 +22,17 @@
         @paste-file="(files) => $emit('files-pasted', files)"
       />
     </div>
+
     <el-button
-      v-if="!isGenerating"
+      v-if="isPendingReview"
+      type="warning"
+      class="action-button review-button"
+      @click="$emit('open-review')"
+    >
+      <el-icon><Warning /></el-icon>
+    </el-button>
+    <el-button
+      v-else-if="!isGenerating"
       type="primary"
       class="action-button"
       :disabled="isSendButtonDisabled"
@@ -44,7 +49,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import type { PropType } from 'vue'
-import { Promotion, VideoPause } from '@element-plus/icons-vue'
+import { Promotion, VideoPause, Warning } from '@element-plus/icons-vue'
 import type { editor } from 'monaco-editor'
 import MultiPartInput from './MultiPartInput.vue'
 import ChatUniversalEditor from '@/components/common/ChatUniversalEditor.vue'
@@ -79,6 +84,10 @@ const props = defineProps({
     type: Number,
     required: true,
   },
+  isPendingReview: {
+    type: Boolean,
+    default: false,
+  }
 })
 
 const emit = defineEmits<{
@@ -90,6 +99,7 @@ const emit = defineEmits<{
   (e: 'undo'): void
   (e: 'redo'): void
   (e: 'files-pasted', files: FileList): void
+  (e: 'open-review'): void
 }>()
 
 const multiPartInputRef = ref<InstanceType<typeof MultiPartInput>>()
@@ -112,17 +122,11 @@ const monacoOptions = computed<editor.IStandaloneEditorConstructionOptions>(() =
     vertical: 'auto',
     horizontal: 'hidden',
   },
-  // Monaco 内部只控制上下 padding，左右 padding 由外部容器控制
   padding: { top: 12, bottom: 12 },
   fontSize: 14,
   fontFamily: 'var(--el-font-family)',
 }))
 
-/**
- * 处理外层容器的粘贴事件。
- * 1. 当使用 MultiPartInput 时，此函数处理粘贴。
- * 2. 当焦点不在编辑器内部（例如点击了输入框边缘的 padding 区域）时，此函数作为后备处理。
- */
 function handlePaste(event: ClipboardEvent) {
   if (!event.clipboardData) return
 
@@ -135,8 +139,6 @@ function handlePaste(event: ClipboardEvent) {
 }
 
 function handleGlobalKeydown(event: KeyboardEvent) {
-  // 仅处理 MultiPartInput 的自定义撤销/重做逻辑
-  // 单输入框模式下的撤销/重做由编辑器原生支持
   if (event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === 'z') {
     if (props.isMultiPartMode) {
       event.preventDefault()
@@ -186,16 +188,10 @@ defineExpose({
   display: flex;
   flex-direction: column;
   background-color: #ffffff;
-  /* 恢复左右 padding，Monaco Editor 需要这个来保持左右间距 */
   padding: 0 12px;
   height: 100%;
 }
 
-/*
-  适配 UniversalEditor 内部 el-input 的样式。
-  外层已设置左右 padding，这里只需设置上下 padding，并去除左右 padding 以免双重缩进。
-  Monaco Editor 的上下 padding 由 options 控制，左右由 .editor-wrapper 控制。
-*/
 .editor-wrapper :deep(.el-textarea__inner) {
   border: none;
   box-shadow: none;
@@ -209,5 +205,11 @@ defineExpose({
   flex-shrink: 0;
   align-self: flex-end;
   height: calc(100% - 2px);
+}
+
+.review-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 </style>

@@ -1,32 +1,40 @@
 // frontend/mambo/src/api/types/chatTypes.ts
 
-import type { FileResponse } from './common';
+import type { FileResponse } from './common'
 
 export type MessageRole = 'user' | 'assistant' | 'system'
 export type ChatItemType = 'chat' | 'folder'
-export type MessageStatus = 'generating' | 'completed' | 'failed'
+export type MessageStatus = 'generating' | 'completed' | 'failed' | 'pending_review'
 
 // --- SubMessage Types ---
 
-export type SubMessageType = 'Normal' | 'Reasoning' | 'File' | 'Usage' | 'ZipHistory' | 'McpTool' | 'Suggest'
+export type SubMessageType =
+  | 'Normal'
+  | 'Reasoning'
+  | 'File'
+  | 'Usage'
+  | 'ZipHistory'
+  | 'McpTool'
+  | 'Suggest'
+  | 'ReviewTool'
 
 export interface SubMessageConfig {
   is_collapsed: boolean
   is_minimal?: boolean
   context_participation_length?: number
-  zip_enable?: boolean | null // 压缩历史是否启用
+  zip_enable?: boolean | null
 }
 
 export interface SubMessage {
   id: string
   content: string
-  createdAt: string // ISO 8601 date string
+  createdAt: string
   messageId: string
   sortOrder: number
   type: SubMessageType
   config: SubMessageConfig
   status: MessageStatus
-  file_info?: FileResponse // 用于承载文件类型消息的完整文件元数据
+  file_info?: FileResponse
 }
 
 export interface SubMessageCreate {
@@ -47,7 +55,7 @@ export interface SubMessageUpdate {
 
 export interface Message {
   id: string
-  createdAt: string // ISO 8601 date string
+  createdAt: string
   role: MessageRole
   chatId: string
   sortOrder: number
@@ -88,8 +96,8 @@ export interface Chat {
   parentId: string | null
   sortOrder: number
   lastOpenedAt: string | null
-  isLoaded?: boolean // 标记该节点的子节点是否已加载
-  resource_prompt_list?: string[] | null // 挂载的资源 ID 列表
+  isLoaded?: boolean
+  resource_prompt_list?: string[] | null
   enabled_mcp_ids?: string[] | null
 }
 
@@ -142,6 +150,27 @@ export interface McpToolContent {
   arguments: string
   result: string | null
   is_error: boolean
+}
+
+export interface ReviewToolContent {
+  tool_call_id: string
+  name: string
+  arguments: Record<string, unknown>
+  description: string | null
+  interrupt_index: number
+  batch_id: string
+  decision: ToolDecision | null
+}
+
+export interface ToolDecision {
+  type: 'approve' | 'edit' | 'reject'
+  edited_action?: Record<string, unknown> | null
+  message?: string | null
+}
+
+export interface ReviewToolRequest {
+  sub_message_id: string
+  decision: ToolDecision
 }
 
 // --- Search Types (Chat) ---

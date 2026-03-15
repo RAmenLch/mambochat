@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.base_model import generate_uuid
 from backend.schemas import enums as schemas_enums
+from backend.schemas.message import ReviewToolContent
 from backend.services.stream_manager_service import stream_manager
 from backend.services.mcp_connection_manager import McpConnectionError
 from backend.services.generation.instructions import (
@@ -21,11 +22,10 @@ from backend.services.generation.instructions import (
     InterruptGeneration
 )
 from backend.services.generation.abstract_manager import AbstractGenerateManager
-from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.llm_input_builder import LLMInputBuilder
-
-# Tool Providers
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
+
+from services.generation.worker.chat_worker import ChatWorker
 
 
 class DefaultGenerateManager(AbstractGenerateManager):
@@ -37,29 +37,27 @@ class DefaultGenerateManager(AbstractGenerateManager):
     2. 接管原 ReActAgentChatGenerateManager 的能力，通过 LangChain/LangGraph 的事件流驱动。
     3. 解析 OpenAiWorker 输出的 messages (流式) 和 updates (状态) 事件，转换为前端指令。
     4. 通过 ToolProvider 架构管理 MCP 和 Suggest 等工具的生命周期。
+    5. 处理人机交互审核 (HITL) 中断与恢复流程。
     """
 
     def __init__(self, db_session: AsyncSession):
         super().__init__(db_session)
-        # 状态追踪 ID
         self._reasoning_id: Optional[str] = None
         self._content_id: Optional[str] = None
         self._final_usage_data: Optional[Dict] = None
 
-        # 工具提供者列表
         self.providers: List[BaseToolProvider] = []
+        self._hitl_tools_config: Dict[str, bool] = {}
 
     async def _execute_generation(
             self,
-            worker: AbstractGenerateWorker,
+            worker: ChatWorker,
             chat_id: str,
             assistant_message_id: str
     ) -> AsyncGenerator[BaseInstruction, None]:
 
-        # 1. 初始化构建器
         builder = LLMInputBuilder(self.db_session, chat_id=chat_id)
 
-        # 预配置构建器 (切片、过滤、多模态支持)
         (
             builder
             .slice_until_message(assistant_message_id)
@@ -67,8 +65,10 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 schemas_enums.SubMessageType.NORMAL.value,
                 schemas_enums.SubMessageType.MCP_TOOL.value,
                 schemas_enums.SubMessageType.FILE.value,
-                schemas_enums.SubMessageType.SUGGEST.value
+                schemas_enums.SubMessageType.SUGGEST.value,
+                schemas_enums.SubMessageType.REVIEW_TOOL.value
             )
+            .enable_tools()
             .enable_image_with_model()
             .enable_cpl_filter()
             .enable_resource_prompt_merge()
@@ -76,14 +76,11 @@ class DefaultGenerateManager(AbstractGenerateManager):
         )
 
         try:
-            # 2. 构建 LLMInput (内部已包含素材预加载、资源解析与 Provider 初始化)
             llm_input = await builder.build()
-
-            # 3. 从构建器中获取已配置好的工具提供者列表
             self.providers = builder.get_providers()
+            self._hitl_tools_config = getattr(llm_input, 'hitl_interrupt_on', {})
 
         except McpConnectionError as e:
-            # 熔断处理：如果 MCP 服务不可用，直接生成错误消息并终止，不消耗 LLM Token
             error_id = generate_uuid()
             yield CreateSubMessage(
                 sub_message_id=error_id,
@@ -95,16 +92,13 @@ class DefaultGenerateManager(AbstractGenerateManager):
             yield SetFinalStatus(status=schemas_enums.MessageStatus.FAILED)
             return
 
-        # 5. 执行生成循环
-        # V2 Worker 返回的是 (mode, event) 元组流
+        should_interrupt = False # <--- 将变量提升到循环外部以便在 finalize 时使用
+
         async for mode, event in worker.generate(llm_input):
 
-            # 检查取消请求
             if await stream_manager.is_cancellation_requested(assistant_message_id):
                 raise asyncio.CancelledError("Generation was cancelled by user request.")
 
-            # 处理流式事件
-            should_interrupt = False
             async for instruction in self._process_stream_event(mode, event):
                 if isinstance(instruction, InterruptGeneration):
                     should_interrupt = True
@@ -114,17 +108,72 @@ class DefaultGenerateManager(AbstractGenerateManager):
             if should_interrupt:
                 break
 
-        # 6. 正常结束处理
-        async for instruction in self._finalize_generation():
+        # 将是否中断的标志传递给 finalize
+        async for instruction in self._finalize_generation(is_interrupted=should_interrupt):
             yield instruction
 
+
+
     async def _process_stream_event(self, mode: str, event: any) -> AsyncGenerator[BaseInstruction, None]:
-        """
-        核心解析逻辑：根据 mode 和 event 类型分发处理。
-        依赖 Decode 工具类提取信息。
-        """
         Decode = self.decode
-        # --- 1. 处理文本内容 (Content) ---
+
+        interrupt_data = Decode.get_hitl_interrupt(mode, event)
+        if interrupt_data and "action_requests" in interrupt_data:
+            current_batch_id = generate_uuid()
+            for idx, action_req in enumerate(interrupt_data["action_requests"]):
+                tool_call_id = action_req.get("id") or generate_uuid()
+                name = action_req.get("name")
+                args = action_req.get("args", {})
+
+                review_content = ReviewToolContent(
+                    tool_call_id=tool_call_id,
+                    name=name,
+                    arguments=args,
+                    description=action_req.get("description"),
+                    interrupt_index=idx,
+                    batch_id=current_batch_id,
+                    decision=None
+                )
+
+                sub_id = generate_uuid()
+                yield CreateSubMessage(
+                    sub_message_id=sub_id,
+                    type=schemas_enums.SubMessageType.REVIEW_TOOL.value,
+                    sortOrder=2,
+                    status=schemas_enums.MessageStatus.PENDING_REVIEW,
+                    initial_content=review_content.to_json_string(),
+                    config={"context_participation_length": 0}
+                )
+            yield InterruptGeneration()
+            return
+
+        middleware_data = Decode.get_hitl_middleware_data(mode, event)
+        if middleware_data:
+            approved_calls = middleware_data.get("approved_calls", [])
+            rejected_results = middleware_data.get("rejected_results", [])
+
+            for call in approved_calls:
+                tool_call_id = call.get("id")
+                name = call.get("name")
+                args = call.get("args") or {}
+                for provider in self.providers:
+                    if provider.matches_tool_name(name):
+                        async for instruction in provider.create_call_instruction(tool_call_id, name, args):
+                            yield instruction
+                        break
+
+            for res in rejected_results:
+                tool_call_id = res.get("id")
+                name = res.get("name")
+                content = res.get("content")
+                for provider in self.providers:
+                    if provider.matches_tool_name(name):
+                        async for instruction in provider.create_call_instruction(tool_call_id, name, {}):
+                            yield instruction
+                        async for instruction in provider.create_result_instruction(tool_call_id, content, True):
+                            yield instruction
+                        break
+
         text_content = Decode.get_text_content(mode, event)
         if text_content:
             if not self._content_id:
@@ -137,7 +186,6 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 )
             yield AppendToSubMessage(sub_message_id=self._content_id, content=text_content)
 
-        # --- 2. 处理推理内容 (Reasoning) ---
         reasoning_content = Decode.get_reasoning_content(mode, event)
         if reasoning_content:
             if not self._reasoning_id:
@@ -151,55 +199,44 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 )
             yield AppendToSubMessage(sub_message_id=self._reasoning_id, content=reasoning_content)
 
-        # --- 3. 处理工具调用请求 (Tool Calls) ---
-        # 通常在 mode='updates' 且 message 为 AIMessage 时出现
-        from langchain_core.messages.tool import ToolCall
-        tool_calls: list[ToolCall] = Decode.get_toolcall_content(mode, event)
+        tool_calls = Decode.get_toolcall_content(mode, event)
         if tool_calls:
             for tool_call in tool_calls:
-                # tool_call 结构: {'id': '...', 'name': '...', 'args': {...}, ...}
                 tool_call_id = tool_call.get("id")
                 name = tool_call.get("name")
                 args = tool_call.get("args") or {}
 
-                # 查找匹配的 Provider 并生成指令
+                if self._hitl_tools_config.get(name):
+                    continue
+
                 for provider in self.providers:
                     if provider.matches_tool_name(name):
                         async for instruction in provider.create_call_instruction(tool_call_id, name, args):
                             yield instruction
                         break
 
-        # --- 4. 处理工具执行结果 (Tool Results) ---
-        # 通常在 mode='updates' 且 message 为 ToolMessage 时出现
         tool_result = Decode.get_toolcall_result(mode, event)
         if tool_result:
-            # tool_result 结构: {'id': '...', 'text': '...'}
             tool_call_id = tool_result.get("id")
             result_text = tool_result.get("text")
             is_error = tool_result.get("is_error", False)
 
-            # 遍历所有 Provider 尝试处理结果
-            # Provider 内部会根据 tool_call_id 缓存判断是否属于自己管理
             for provider in self.providers:
                 async for instruction in provider.create_result_instruction(tool_call_id, result_text, is_error):
                     yield instruction
 
-        # --- 5. 处理生成的图片 (Images) ---
         image_data = Decode.get_image_url(mode, event)
         if image_data:
-            # image_data 结构: {"image_url": {"url": "data:image/..."}}
             url = image_data.get("image_url", {}).get("url")
             if url and url.startswith("data:image"):
                 async for instruction in self._handle_generated_image(url):
                     yield instruction
 
-        # --- 6.处理 Usage ----
         usage_data = Decode.get_usage(mode, event)
         if usage_data:
             self._final_usage_data = usage_data
 
     async def _handle_generated_image(self, base64_url: str) -> AsyncGenerator[BaseInstruction, None]:
-        """处理 Base64 图片数据：保存文件并创建子消息"""
         try:
             if ',' in base64_url:
                 header, encoded_data = base64_url.split(',', 1)
@@ -214,7 +251,6 @@ class DefaultGenerateManager(AbstractGenerateManager):
             file_id = generate_uuid()
             sub_message_id = generate_uuid()
 
-            # 1. 保存文件指令
             yield SaveAndPersistFile(
                 file_id=file_id,
                 filename=filename,
@@ -223,7 +259,6 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 management_type=schemas_enums.FileManagementType.SUB_MESSAGE.value
             )
 
-            # 2. 创建文件子消息指令
             yield CreateSubMessage(
                 sub_message_id=sub_message_id,
                 type=schemas_enums.SubMessageType.FILE.value,
@@ -240,9 +275,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
                     content=f"\n\n**处理生成图片时出错: {e}**"
                 )
 
-    async def _finalize_generation(self) -> AsyncGenerator[BaseInstruction, None]:
-        """生成结束后的收尾工作"""
-        # 1. 完成 Content
+    async def _finalize_generation(self, is_interrupted: bool = False) -> AsyncGenerator[BaseInstruction, None]:
         if self._content_id:
             yield UpdateSubMessageStatus(
                 sub_message_id=self._content_id,
@@ -250,7 +283,6 @@ class DefaultGenerateManager(AbstractGenerateManager):
             )
             self._content_id = None
 
-        # 2. 完成 Reasoning (并最小化)
         if self._reasoning_id:
             yield UpdateSubMessageConfig(
                 sub_message_id=self._reasoning_id,
@@ -273,8 +305,11 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 initial_content=usage_content,
                 config={"context_participation_length": 0}
             )
-        # 3. 设置最终状态
-        yield SetFinalStatus(status=schemas_enums.MessageStatus.COMPLETED)
+
+        # 核心修复：如果是因为审核中断而收尾，绝不能发出 COMPLETED 终态指令
+        if not is_interrupted:
+            yield SetFinalStatus(status=schemas_enums.MessageStatus.COMPLETED)
+
 
     async def _cleanup_on_exception(
             self,
@@ -282,7 +317,6 @@ class DefaultGenerateManager(AbstractGenerateManager):
             final_status: schemas_enums.MessageStatus,
             exception: Optional[Exception] = None
     ) -> AsyncGenerator[BaseInstruction, None]:
-        """异常发生时的清理逻辑"""
 
         error_content = None
         if exception:
@@ -294,7 +328,6 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 else:
                     error_content = f"发生未处理的异常: {str(exception)}"
 
-        # 1. 更新 Reasoning 状态
         if self._reasoning_id:
             yield UpdateSubMessageConfig(
                 sub_message_id=self._reasoning_id,
@@ -302,11 +335,9 @@ class DefaultGenerateManager(AbstractGenerateManager):
             )
             yield UpdateSubMessageStatus(sub_message_id=self._reasoning_id, status=final_status)
 
-        # 2. 更新 Content 状态
         if self._content_id:
             yield UpdateSubMessageStatus(sub_message_id=self._content_id, status=final_status)
 
-        # 3. 生成错误消息
         if error_content:
             if self._content_id:
                 yield AppendToSubMessage(

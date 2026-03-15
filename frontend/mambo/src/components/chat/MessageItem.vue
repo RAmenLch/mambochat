@@ -33,11 +33,12 @@
             :class="{ 'is-inactive': isSubMessageInactive(subMessage) }"
             @click="restoreSubMessage(subMessage.id)"
           >
-            <!-- MCP Tool Specific Minimized View -->
-            <template v-if="subMessage.type === 'McpTool'">
+            <!-- MCP Tool / Review Tool Specific Minimized View -->
+            <template v-if="subMessage.type === 'McpTool' || subMessage.type === 'ReviewTool'">
               <el-icon>
+                <Warning v-if="subMessage.type === 'ReviewTool'" style="color: var(--el-color-warning)" />
                 <Loading
-                  v-if="getMinimizedMcpInfo(subMessage).status === 'generating'"
+                  v-else-if="getMinimizedMcpInfo(subMessage).status === 'generating'"
                   class="is-loading"
                 />
                 <CircleCheck
@@ -46,7 +47,9 @@
                 />
                 <CircleClose v-else style="color: var(--el-color-error)" />
               </el-icon>
-              <span class="minimized-item-title">{{ $t('chat.message.toolCall') }}</span>
+              <span class="minimized-item-title">
+                {{ subMessage.type === 'ReviewTool' ? $t('chat.message.pendingReview', '待审核') : $t('chat.message.toolCall') }}
+              </span>
             </template>
             <!-- Generic Minimized View -->
             <template v-else>
@@ -229,6 +232,7 @@ import type {
   MessageStatus,
   McpToolContent,
   FileResponse,
+  ReviewToolContent
 } from '@/api/types'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
@@ -249,6 +253,7 @@ import {
   Loading,
   CircleCheck,
   CircleClose,
+  Warning
 } from '@element-plus/icons-vue'
 import SubMessageItem from './SubMessageItem.vue'
 import MessageEditDialog from './dialogs/MessageEditDialog.vue'
@@ -266,10 +271,6 @@ interface MinimizedMcpInfo {
   status: 'generating' | 'success' | 'error'
 }
 
-/**
- * 编辑请求的负载类型
- * 支持全量编辑（仅 content）和代码块编辑（包含 range, language, markup）
- */
 interface EditPayload {
   content: string
   range?: {
@@ -288,6 +289,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'suggestion-click', text: string): void
+  (e: 'open-tool-dialog', message: Message, subMessageId: string): void
 }>()
 
 const { t } = useI18n()
@@ -300,23 +302,10 @@ const { messageRecencyRanks } = storeToRefs(sessionStore)
 const showActions = ref(false)
 const isZipCardVisible = ref(false)
 
-/**
- * 计算当前消息的新旧程度排名。
- * 0: 正在生成。
- * 1: 最新的一条已完成消息。
- * N: 第N条已完成消息。
- */
 const currentMessageRank = computed(() => {
   return messageRecencyRanks.value.get(props.message.id) ?? 999
 })
 
-/**
- * 判断子消息是否处于“虚状态”（不参与上下文）。
- * 规则：
- * 1. 父消息正在生成 -> 强制 Active。
- * 2. CPL = 0 -> Inactive。
- * 3. CPL > 0 且排名 > CPL -> Inactive。
- */
 function isSubMessageInactive(subMessage: SubMessage): boolean {
   if (props.message.status === 'generating') return false
 
@@ -329,56 +318,63 @@ function isSubMessageInactive(subMessage: SubMessage): boolean {
   return false
 }
 
-/**
- * 过滤出所有用于在消息气泡中显示的子消息 (排除 'Usage', 'ZipHistory' 和 'Suggest' 类型)。
- */
 const displayableSubMessages = computed(() =>
   props.message.sub_messages.filter(
     (sm) => sm.type !== 'Usage' && sm.type !== 'ZipHistory' && sm.type !== 'Suggest',
   ),
 )
 
-/**
- * 筛选出被最小化的子消息
- */
-const minimizedSubMessages = computed(() =>
-  displayableSubMessages.value.filter((sm) => sm.config?.is_minimal === true),
-)
+const minimizedSubMessages = computed(() => {
+  const allSubMessages = displayableSubMessages.value;
 
-/**
- * 筛选出正常显示的子消息 (排除最小化)
- */
+  const tools = allSubMessages.filter(sm => sm.type === 'McpTool' || sm.type === 'ReviewTool');
+
+  const mcpToolCallIds = new Set(
+    tools.filter(sm => sm.type === 'McpTool')
+         .map(sm => {
+           try {
+             const content = JSON.parse(sm.content) as McpToolContent;
+             return content.tool_call_id;
+           } catch { return null; }
+         })
+         .filter(Boolean)
+  );
+
+  const deduplicatedTools = tools.filter(sm => {
+    if (sm.type === 'ReviewTool') {
+      try {
+        const content = JSON.parse(sm.content) as ReviewToolContent;
+        return !mcpToolCallIds.has(content.tool_call_id);
+      } catch { return true; }
+    }
+    return true;
+  });
+
+  const normalMinimized = allSubMessages.filter(sm =>
+    sm.config?.is_minimal === true && sm.type !== 'McpTool' && sm.type !== 'ReviewTool'
+  );
+
+  return [...normalMinimized, ...deduplicatedTools].sort((a, b) => a.sortOrder - b.sortOrder);
+});
+
 const normalSubMessages = computed(() =>
-  displayableSubMessages.value.filter((sm) => !sm.config?.is_minimal),
+  displayableSubMessages.value.filter((sm) =>
+    !sm.config?.is_minimal && sm.type !== 'McpTool' && sm.type !== 'ReviewTool'
+  ),
 )
 
-/**
- * 判断当前是否只剩下一个可见的子消息
- */
 const isLastVisibleSubMessage = computed(() => normalSubMessages.value.length === 1)
 
-/**
- * 提取出 'Usage' 类型的子消息，用于在工具栏中显示。
- */
 const usageSubMessage = computed(() => props.message.sub_messages.find((sm) => sm.type === 'Usage'))
 
-/**
- * 提取出 'ZipHistory' 类型的子消息，用于显示历史摘要卡片。
- */
 const zipHistorySubMessage = computed(() =>
   props.message.sub_messages.find((sm) => sm.type === 'ZipHistory'),
 )
 
-/**
- * 提取出 'Suggest' 类型的子消息，用于显示建议气泡。
- */
 const suggestSubMessage = computed(() =>
   props.message.sub_messages.find((sm) => sm.type === 'Suggest'),
 )
 
-/**
- * 解析建议内容列表
- */
 const suggestionList = computed((): string[] => {
   if (!suggestSubMessage.value || !suggestSubMessage.value.content) return []
   try {
@@ -389,9 +385,6 @@ const suggestionList = computed((): string[] => {
   }
 })
 
-/**
- * 计算历史摘要的当前状态
- */
 const zipStatus = computed(() => {
   if (!zipHistorySubMessage.value) return null
   if (zipHistorySubMessage.value.status === 'generating') return 'generating'
@@ -399,9 +392,6 @@ const zipStatus = computed(() => {
   return 'disabled'
 })
 
-/**
- * 根据状态返回对应的图标组件
- */
 const zipBookmarkIcon = computed(() => {
   switch (zipStatus.value) {
     case 'generating':
@@ -415,9 +405,6 @@ const zipBookmarkIcon = computed(() => {
   }
 })
 
-/**
- * 根据状态返回显示的文本
- */
 const zipBookmarkText = computed(() => {
   switch (zipStatus.value) {
     case 'generating':
@@ -431,11 +418,7 @@ const zipBookmarkText = computed(() => {
   }
 })
 
-/**
- * 根据状态返回 CSS 类名
- */
 const zipBookmarkClass = computed(() => ({
-
   'is-generating': zipStatus.value === 'generating',
   'is-enabled': zipStatus.value === 'enabled',
   'is-disabled': zipStatus.value === 'disabled',
@@ -444,7 +427,6 @@ const zipBookmarkClass = computed(() => ({
 const isSingleSubMessage = computed(() => normalSubMessages.value.length === 1)
 const firstSubMessage = computed(() => normalSubMessages.value[0])
 
-// Groups consecutive file sub-messages for grid layout, while keeping others separate.
 const groupedSubMessages = computed((): SubMessageGroup[] => {
   if (!normalSubMessages.value || normalSubMessages.value.length === 0) {
     return []
@@ -471,7 +453,6 @@ const groupedSubMessages = computed((): SubMessageGroup[] => {
   return result
 })
 
-// 决定是否使用简化的单分区视图（无头部，有特殊背景和折叠效果）
 const useSinglePartitionView = computed(() => {
   return normalSubMessages.value.length === 1 && firstSubMessage.value?.type === 'Normal'
 })
@@ -514,7 +495,6 @@ const editingSubMessage = ref<SubMessage | null>(null)
 const originalEditingContent = ref('')
 const editingFileInfo = ref<FileResponse | null>(null)
 
-//编辑状态：代码块定位信息
 const editingRange = ref<{ start: number; end: number } | null>(null)
 const editingMarkup = ref('```')
 const editingLanguage = ref('')
@@ -532,7 +512,6 @@ watch(editDialogVisible, (newValue) => {
 
 function handleEditRequest(subMessage: SubMessage, payload: EditPayload) {
   if (!subMessage || !payload) {
-    console.error('handleEditRequest called with invalid arguments', { subMessage, payload })
     return
   }
 
@@ -541,12 +520,10 @@ function handleEditRequest(subMessage: SubMessage, payload: EditPayload) {
   editingFileInfo.value = null
 
   if (payload.range) {
-    // 代码块局部编辑
     editingRange.value = payload.range
     editingMarkup.value = payload.markup || '```'
     editingLanguage.value = payload.language || ''
   } else {
-    // 全量编辑
     editingRange.value = null
     editingMarkup.value = '```'
     editingLanguage.value = ''
@@ -565,7 +542,6 @@ async function handleFileEdit(file: FileResponse) {
     editDialogVisible.value = true
   } catch (error) {
     ElMessage.error(t('chat.message.fileLoadFailed'))
-    console.error('Failed to load file content:', error)
   }
 }
 
@@ -574,25 +550,20 @@ function getUpdatedFullContent(newPartialContent: string): string {
 
   const fullOriginalContent = editingSubMessage.value.content
 
-  // 1. 全量编辑：直接返回新内容
   if (!editingRange.value) {
     return newPartialContent
   }
 
-  // 2. 代码块局部编辑：基于坐标进行字符串切片替换
   const { start, end } = editingRange.value
-
-  // 构造新的代码块字符串
-  // 格式：Fence + Lang + \n + Content + \n + Fence
   const fence = editingMarkup.value
   const lang = editingLanguage.value
   const newBlockString = `${fence}${lang}\n${newPartialContent}\n${fence}`
 
-  // 拼接字符串
   return (
     fullOriginalContent.substring(0, start) + newBlockString + fullOriginalContent.substring(end)
   )
 }
+
 async function handleSaveEdit(newContent: string) {
   const currentEditingFile = editingFileInfo.value;
 
@@ -602,7 +573,6 @@ async function handleSaveEdit(newContent: string) {
 
       const msg = sessionStore.currentChatMessages.find(m => m.id === props.message.id)
       if (msg) {
-        // [修复] 使用缓存的 currentEditingFile 进行查找
         const subMsg = msg.sub_messages.find(sm => sm.file_info?.id === currentEditingFile.id)
         if (subMsg) {
           subMsg.file_info = updatedFile
@@ -614,7 +584,6 @@ async function handleSaveEdit(newContent: string) {
     return
   }
 
-  // Case 2: 普通消息编辑
   if (!editingSubMessage.value) return
   const updatedContent = getUpdatedFullContent(newContent)
   interactionStore.updateSubMessage({
@@ -696,12 +665,14 @@ function handleZipBookmarkClick() {
   isZipCardVisible.value = !isZipCardVisible.value
 }
 
-/**
- * 恢复一个最小化的子消息
- */
 function restoreSubMessage(subMessageId: string) {
   const subMessage = props.message.sub_messages.find((sm) => sm.id === subMessageId)
   if (!subMessage) return
+
+  if (subMessage.type === 'McpTool' || subMessage.type === 'ReviewTool') {
+    emit('open-tool-dialog', props.message, subMessageId);
+    return;
+  }
 
   interactionStore.updateSubMessage({
     subMessageId: subMessageId,
@@ -709,9 +680,6 @@ function restoreSubMessage(subMessageId: string) {
   })
 }
 
-/**
- * 为最小化按钮获取一个简短的标题
- */
 function getPartitionTitleForMinimized(subMessage: SubMessage): string {
   if (subMessage.type === 'Reasoning') return t('chat.message.reasoning')
   if (subMessage.type === 'File') return '文件'
@@ -726,15 +694,12 @@ function getPartitionTitleForMinimized(subMessage: SubMessage): string {
   return '分区'
 }
 
-/**
- * 解析最小化的 McpTool 子消息以获取其状态。
- */
 function getMinimizedMcpInfo(subMessage: SubMessage): MinimizedMcpInfo {
   if (subMessage.status === 'generating') {
     return { status: 'generating' }
   }
   try {
-    const content: McpToolContent = JSON.parse(subMessage.content)
+    const content = JSON.parse(subMessage.content)
     return {
       status: content.is_error ? 'error' : 'success',
     }
@@ -743,14 +708,21 @@ function getMinimizedMcpInfo(subMessage: SubMessage): MinimizedMcpInfo {
   }
 }
 
-/**
- * 为最小化的子消息生成工具提示内容。
- */
 function getMinimizedTooltipContent(subMessage: SubMessage): string {
-  if (subMessage.type === 'McpTool') {
-    const content: McpToolContent = JSON.parse(subMessage.content)
-    const args = content.arguments ? `Args: ${content.arguments}` : ''
-    return `${t('chat.message.toolCall')}: ${content.name || 'Unknown'}\n${args}`.trim()
+  if (subMessage.type === 'McpTool' || subMessage.type === 'ReviewTool') {
+    try {
+      const content = JSON.parse(subMessage.content)
+      let argsStr = ''
+      if (typeof content.arguments === 'string') {
+        argsStr = content.arguments
+      } else if (typeof content.arguments === 'object') {
+        argsStr = JSON.stringify(content.arguments)
+      }
+      const args = argsStr ? `Args: ${argsStr}` : ''
+      return `${t('chat.message.toolCall')}: ${content.name || 'Unknown'}\n${args}`.trim()
+    } catch {
+      return t('chat.message.toolCall')
+    }
   }
   return subMessage.content.substring(0, 100) + (subMessage.content.length > 100 ? '...' : '')
 }
@@ -800,7 +772,6 @@ function getMinimizedTooltipContent(subMessage: SubMessage): string {
   color: var(--el-color-primary);
 }
 
-/* 虚状态样式 - 最小化模式 (调整后) */
 .minimized-item.is-inactive {
   opacity: 1;
   border-style: dashed;
@@ -837,7 +808,7 @@ function getMinimizedTooltipContent(subMessage: SubMessage): string {
 .sub-messages-container {
   display: flex;
   flex-direction: column;
-  gap: 8px; /* Spacing between groups */
+  gap: 8px;
   width: 100%;
   position: relative;
   transition: max-height 0.25s ease-out;
@@ -847,7 +818,7 @@ function getMinimizedTooltipContent(subMessage: SubMessage): string {
 .file-group-container {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px; /* Spacing between files in a group */
+  gap: 8px;
 }
 
 .sub-messages-container.is-single {
@@ -909,7 +880,6 @@ function getMinimizedTooltipContent(subMessage: SubMessage): string {
   transition: all 0.2s;
 }
 
-/* Enabled State (Green) */
 .zip-history-bookmark.is-enabled {
   background-color: var(--el-color-success-light-9);
   border-color: var(--el-color-success-light-5);
@@ -919,7 +889,6 @@ function getMinimizedTooltipContent(subMessage: SubMessage): string {
   background-color: var(--el-color-success-light-8);
 }
 
-/* Disabled State (Gray/Info) */
 .zip-history-bookmark.is-disabled {
   background-color: var(--el-color-info-light-9);
   border-color: var(--el-color-info-light-7);
@@ -929,7 +898,6 @@ function getMinimizedTooltipContent(subMessage: SubMessage): string {
   background-color: var(--el-color-info-light-8);
 }
 
-/* Generating State (Blue/Primary) */
 .zip-history-bookmark.is-generating {
   background-color: var(--el-color-primary-light-9);
   border-color: var(--el-color-primary-light-5);
@@ -937,7 +905,6 @@ function getMinimizedTooltipContent(subMessage: SubMessage): string {
   cursor: default;
 }
 
-/* Loading Icon Animation */
 .zip-history-bookmark .el-icon.is-loading {
   animation: rotating 2s linear infinite;
 }

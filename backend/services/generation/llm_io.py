@@ -18,6 +18,11 @@ class LLMInput(BaseModel):
     tool_choice: Optional[Union[str, Dict]] = None
     timeout: int = 60  # 默认超时时间
 
+    hitl_interrupt_on: Dict[str, bool] = Field(default_factory=dict, description="需要人工审核中断的工具名称映射")
+    thread_id: str = Field(..., description="当前生成的 Assistant 消息 ID，用作 LangGraph 的 thread_id")
+    resume_payload: Optional[Dict[str, Any]] = None
+
+
     def set_system_prompt(self, content: str):
         """设置或更新系统提示词，确保只有一个系统消息且在首位"""
         # 移除现有的系统消息

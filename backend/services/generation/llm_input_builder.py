@@ -1,3 +1,5 @@
+# backend/services/generation/llm_input_builder.py
+
 import json
 import base64
 from typing import List, Dict, Any, Optional, Set, Tuple
@@ -5,10 +7,10 @@ from types import SimpleNamespace
 from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_core.tools import BaseTool
 
-from backend.crud import chat_crud, message_crud, setting_crud, provider_crud, resource_crud
+from backend.crud import chat_crud, message_crud, setting_crud, provider_crud, resource_crud, mcp_crud
 from backend.services.file_service import FileService
 from backend.schemas import enums as schemas_enums, AIModel
-from backend.schemas.message import McpToolContent
+from backend.schemas.message import McpToolContent, ReviewToolContent
 from backend.services.generation.llm_io import LLMInput
 from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 from backend.services.generation.resource_dispatcher import ResourceDispatcher
@@ -41,7 +43,8 @@ class LLMInputBuilder:
     LLM 输入构建器。
     负责从数据库或内存加载素材（Chat, Provider, Settings, Messages），
     并根据配置执行过滤、切片、多模态转换，最终生成标准化的 LLMInput 对象。
-    支持内部缓存以优化在 ReAct 循环中的重复构建性能。
+    支持内部缓存以优化 ReAct 循环中的重复构建性能。
+    新增 HITL 审核机制，支持工具审核和恢复指令生成。
     """
 
     def __init__(self, db: AsyncSession, chat_id: str):
@@ -76,6 +79,7 @@ class LLMInputBuilder:
         self._append_prompt: Optional[str] = None
         self._tools: Optional[List[BaseTool]] = None
         self._enable_max_context_messages: bool = False  # 启用 max_context_messages 筛选
+        self._enable_tools: bool = False  # <--- 新增：默认不启用外部工具(MCP, Suggest等)
 
         # 内部数据缓存 (用于减少 I/O)
         self._cached_chat = None
@@ -87,9 +91,13 @@ class LLMInputBuilder:
         self.chat = None
         self.history = []
         self.settings = {}
+        self._target_msg = None
 
         # 新增：工具提供者列表
         self.providers: List[BaseToolProvider] = []
+
+        # 新增：记录需要 HITL 审核的工具映射
+        self._hitl_interrupt_on: Dict[str, bool] = {}
 
     # --- 配置方法 (Fluent API) ---
 
@@ -159,74 +167,6 @@ class LLMInputBuilder:
         self._history_override = history
         return self
 
-    async def _setup_providers_and_resources(self) -> str:
-        """
-        解析资源、初始化所有的 ToolProvider，并聚合系统提示词。
-        返回聚合后的系统提示词扩展部分。
-        """
-        self.providers = []
-        extended_prompts = []
-
-        # 1. 资源分发解析
-        knowledge_bases = []
-        if self._enable_resource_merge and self.chat.resource_prompt_list:
-            dispatcher = ResourceDispatcher(self.db)
-            dispatch_result = await dispatcher.dispatch(self.chat.resource_prompt_list)
-
-            # 拼接普通文本资源
-            for content in dispatch_result["system_prompts"]:
-                extended_prompts.append(content)
-            for content in dispatch_result["submessage_templates"]:
-                extended_prompts.append(content)
-
-            # 收集知识库资源用于初始化 KBToolProvider
-            knowledge_bases = dispatch_result["knowledge_bases"]
-
-        # 2. 初始化 Providers
-        # 2.1 KB Provider
-        if knowledge_bases:
-            self.providers.append(KBToolProvider(self.db, knowledge_bases))
-
-        # 解析模型参数
-        params = {}
-        if self.chat and self.chat.modelParameters:
-            try:
-                params = json.loads(self.chat.modelParameters) if isinstance(self.chat.modelParameters,
-                                                                             str) else self.chat.modelParameters
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-        # 2.2 MCP Provider (使用独立的 enabled_mcp_ids 字段)
-        mcp_ids = self.chat.enabled_mcp_ids or []
-        if mcp_ids:
-            self.providers.append(MCPToolProvider(self.db, mcp_ids))
-
-        # 2.3 Suggest Provider
-        enable_suggest = params.get("enable_suggest", False)
-        if enable_suggest:
-            self.providers.append(SuggestToolProvider(enable_suggest=True))
-
-        # 3. 收集所有工具和提示词注入
-        all_tools = []
-        for provider in self.providers:
-            # 获取工具 (此处可能抛出 McpConnectionError，由上层 Manager 捕获)
-            tools = await provider.get_tools()
-            if tools:
-                all_tools.extend(tools)
-
-            # 获取提示词注入
-            injection = provider.get_system_prompt_injection()
-            if injection:
-                extended_prompts.append(injection)
-
-        # 聚合工具到 Builder 实例
-        if all_tools:
-            if self._tools is None:
-                self._tools = []
-            self._tools.extend(all_tools)
-
-        return "\n\n".join(extended_prompts) if extended_prompts else ""
-
     def enable_resource_prompt_merge(self) -> "LLMInputBuilder":
         """
         启用资源挂载功能。
@@ -272,10 +212,18 @@ class LLMInputBuilder:
 
     def enable_max_context_messages(self) -> "LLMInputBuilder":
         """
-        [新增] 启用基于 max_context_messages 参数的历史消息筛选。
+        启用基于 max_context_messages 参数的历史消息筛选。
         筛选逻辑：保留最新的 N 条历史消息（不包含当前最新的用户问题），N 为偶数。
         """
         self._enable_max_context_messages = True
+        return self
+
+    def enable_tools(self) -> "LLMInputBuilder":
+        """
+        启用外部工具支持 (如 MCP, Suggest 等)。
+        通常仅在主对话生成时启用，以避免标题生成或历史摘要等任务意外触发工具调用和 HITL 审核。
+        """
+        self._enable_tools = True
         return self
 
     # --- 核心构建方法 ---
@@ -295,7 +243,7 @@ class LLMInputBuilder:
         if system_prompt is None:
             system_prompt = self.chat.systemPrompt or ""
 
-        # 2. 统筹资源与工具 Providers，获取扩展的提示词
+        # 2. 统筹资源与工具 Providers，获取扩展的提示词 (同时填充 self._hitl_interrupt_on)
         extended_prompt = await self._setup_providers_and_resources()
         if extended_prompt:
             system_prompt = system_prompt + "\n\n" + extended_prompt if system_prompt else extended_prompt
@@ -328,6 +276,52 @@ class LLMInputBuilder:
         if provider.use_proxy and self.settings.get("proxy_enabled") == "True":
             proxy_url = self.settings.get("proxy_url")
 
+        # 9. 组装 HITL 恢复指令 (resume_payload) 逻辑
+        resume_payload = None
+        if self._cutoff_message_id:
+            target_msg = self._target_msg
+            if not target_msg:
+                target_msg = await message_crud.get_message(self.db, message_id=self._cutoff_message_id)
+
+            if target_msg and target_msg.role == schemas_enums.MessageRole.ASSISTANT.value:
+                # 1. 找出当前 Assistant 消息下所有已做出决策的审核记录
+                decided_reviews = []
+                for sub in target_msg.sub_messages:
+                    if sub.type == schemas_enums.SubMessageType.REVIEW_TOOL.value:
+                        try:
+                            content = ReviewToolContent.from_json_string(sub.content)
+                            if content.decision is not None:
+                                decided_reviews.append((sub.createdAt, content))
+                        except (ValueError, ImportError):
+                            pass
+
+                if decided_reviews:
+                    # 2. 找出最新的一批 batch_id (通过创建时间降序排序)
+                    decided_reviews.sort(key=lambda x: x[0], reverse=True)
+                    latest_batch_id = decided_reviews[0][1].batch_id
+
+                    # 3. 提取该最新批次的所有决策
+                    latest_batch_decisions = [item[1] for item in decided_reviews if item[1].batch_id == latest_batch_id]
+
+                    # 4. 严格按照 interrupt_index 排序，确保与 LangGraph 中断事件顺序一致
+                    latest_batch_decisions.sort(key=lambda x: x.interrupt_index)
+
+                    # 5. 构建 LangGraph 需要的 Command(resume=...) 格式
+                    resume_decisions = []
+                    for item in latest_batch_decisions:
+                        decision_dict = {"type": item.decision.type.value}
+                        if item.decision.type.value == "edit" and item.decision.edited_action:
+                            decision_dict["edited_action"] = item.decision.edited_action
+                        if item.decision.type.value == "reject" and item.decision.message:
+                            decision_dict["message"] = item.decision.message
+                        resume_decisions.append(decision_dict)
+
+                    resume_payload = {"decisions": resume_decisions}
+
+        # 仅在开启了需要审核的工具时，才强制要求 _cutoff_message_id
+        if not self._cutoff_message_id and self._hitl_interrupt_on:
+            raise ValueError("Build failed: assistant_message_id (_cutoff_message_id) is required when HITL is enabled.")
+
         return LLMInput(
             model_id=model.modelId,
             messages=messages_payload,
@@ -336,8 +330,12 @@ class LLMInputBuilder:
             api_key=provider.apiKey,
             proxy_url=proxy_url,
             tools=self._tools,
-            tool_choice=None
+            tool_choice=None,
+            hitl_interrupt_on=self._hitl_interrupt_on,
+            thread_id=self._cutoff_message_id or self.chat_id,
+            resume_payload=resume_payload
         )
+
 
     # --- 内部处理逻辑 ---
 
@@ -355,12 +353,15 @@ class LLMInputBuilder:
         # 2. 加载历史消息
         if self._history_override is not None:
             self.history = self._history_override
+            if self._cutoff_message_id:
+                self._target_msg = next((m for m in self.history if getattr(m, 'id', None) == self._cutoff_message_id), None)
         else:
             all_msgs = await message_crud.get_messages_by_chat(self.db, self.chat_id)
 
             if self._cutoff_message_id:
                 try:
                     idx = next(i for i, m in enumerate(all_msgs) if m.id == self._cutoff_message_id)
+                    self._target_msg = all_msgs[idx]
                     # 如果包含目标，切片终点是 idx + 1；如果不包含，终点是 idx
                     end_index = idx + 1 if self._cutoff_include else idx
                     self.history = all_msgs[:end_index]
@@ -404,6 +405,82 @@ class LLMInputBuilder:
         self._cached_model = model
         return model
 
+    async def _setup_providers_and_resources(self) -> str:
+        """
+        解析资源、初始化所有的 ToolProvider，并聚合系统提示词。
+        返回聚合后的系统提示词扩展部分。
+        """
+        self.providers = []
+        extended_prompts = []
+
+        # 1. 资源分发解析
+        knowledge_bases = []
+        if self._enable_resource_merge and self.chat.resource_prompt_list:
+            dispatcher = ResourceDispatcher(self.db)
+            dispatch_result = await dispatcher.dispatch(self.chat.resource_prompt_list)
+
+            # 拼接普通文本资源
+            for content in dispatch_result["system_prompts"]:
+                extended_prompts.append(content)
+            for content in dispatch_result["submessage_templates"]:
+                extended_prompts.append(content)
+
+            # 收集知识库资源用于初始化 KBToolProvider
+            knowledge_bases = dispatch_result["knowledge_bases"]
+
+        # 2. 初始化 Providers
+        # 2.1 KB Provider (知识库属于资源，不受 enable_tools 限制)
+        if knowledge_bases:
+            self.providers.append(KBToolProvider(self.db, knowledge_bases))
+
+        # 仅在启用工具时加载 MCP 和 Suggest
+        if self._enable_tools:
+            # 解析模型参数
+            params = {}
+            if self.chat and self.chat.modelParameters:
+                try:
+                    params = json.loads(self.chat.modelParameters) if isinstance(self.chat.modelParameters,
+                                                                                 str) else self.chat.modelParameters
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # 2.2 MCP Provider (处理外部工具与 HITL 审核机制)
+            mcp_ids = self.chat.enabled_mcp_ids or []
+            if mcp_ids:
+                self.providers.append(MCPToolProvider(self.db, mcp_ids))
+
+                # 查询当前启用的 MCP 工具，筛选出需要审核的工具
+                mcp_tools = await mcp_crud.get_tools_by_server_ids(self.db, mcp_ids)
+                for tool in mcp_tools:
+                    if tool.review_mode == schemas_enums.ToolReviewMode.REQUIRE_REVIEW.value:
+                        self._hitl_interrupt_on[tool.name] = True
+
+            # 2.3 Suggest Provider
+            enable_suggest = params.get("enable_suggest", False)
+            if enable_suggest:
+                self.providers.append(SuggestToolProvider(enable_suggest=True))
+
+        # 3. 收集所有工具和提示词注入
+        all_tools = []
+        for provider in self.providers:
+            # 获取工具 (此处可能抛出 McpConnectionError，由上层 Manager 捕获)
+            tools = await provider.get_tools()
+            if tools:
+                all_tools.extend(tools)
+
+            # 获取提示词注入
+            injection = provider.get_system_prompt_injection()
+            if injection:
+                extended_prompts.append(injection)
+
+        # 聚合工具到 Builder 实例
+        if all_tools:
+            if self._tools is None:
+                self._tools = []
+            self._tools.extend(all_tools)
+
+        return "\n\n".join(extended_prompts) if extended_prompts else ""
+
     def _apply_slicing(self, history: List[Any]) -> List[Any]:
         """应用配置的切片策略。"""
         if not history:
@@ -426,8 +503,8 @@ class LLMInputBuilder:
         逻辑：
         1. 获取 chat.modelParameters 中的 max_context_messages。
         2. 确保该值为偶数（奇数+1）。
-        3. 将历史消息分为“历史上下文”和“最新消息”。
-        4. 从“历史上下文”中保留最后 N 条，并与“最新消息”合并。
+        3. 将历史消息分为"历史上下文"和"最新消息"。
+        4. 从"历史上下文"中保留最后 N 条，并与"最新消息"合并。
         """
         if not history:
             return []
@@ -757,3 +834,5 @@ class LLMInputBuilder:
         必须在调用 build() 之后调用此方法，否则返回空列表。
         """
         return self.providers
+
+

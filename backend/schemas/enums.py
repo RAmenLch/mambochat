@@ -12,6 +12,7 @@ class MessageStatus(str, Enum):
     GENERATING = "generating"
     COMPLETED = "completed"
     FAILED = "failed"
+    PENDING_REVIEW = "pending_review"
 
 
 class SubMessageType(str, Enum):
@@ -23,6 +24,7 @@ class SubMessageType(str, Enum):
     ZIP_HISTORY = "ZipHistory"
     MCP_TOOL = "McpTool"
     SUGGEST = "Suggest"
+    REVIEW_TOOL = "ReviewTool"
 
 
 class FileManagementType(str, Enum):
@@ -97,3 +99,9 @@ class ToolReviewMode(str, Enum):
 class ToolStatus(str, Enum):
     ONLINE = "online"
     OFFLINE = "offline"
+
+class ToolDecisionType(str, Enum):
+    """工具调用审核的决策类型"""
+    APPROVE = "approve"
+    EDIT = "edit"
+    REJECT = "reject"

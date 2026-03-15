@@ -10,6 +10,35 @@ import json
 from backend.models import chat_model
 from backend import schemas
 
+from backend.models.chat_model import SubMessage
+from backend.schemas.enums import MessageStatus
+
+async def batch_update_sub_messages_status_optimistic(
+        db: AsyncSession,
+        sub_message_ids: List[str],
+        old_status: MessageStatus,
+        new_status: MessageStatus
+) -> int:
+    """
+    使用乐观锁机制批量更新子消息状态。
+    仅当子消息当前状态严格等于 old_status 时，才将其更新为 new_status。
+    返回成功更新的行数 (rowcount)。用于并发审核请求时的防重入控制。
+    """
+    if not sub_message_ids:
+        return 0
+
+    stmt = (
+        update(SubMessage)
+        .where(SubMessage.id.in_(sub_message_ids))
+        .where(SubMessage.status == old_status.value)
+        .values(status=new_status.value)
+    )
+
+    result = await db.execute(stmt)
+    await db.commit()
+
+    return result.rowcount
+
 async def get_message(db: AsyncSession, message_id: str) -> Optional[chat_model.Message]:
     """通过ID获取单条消息（包含其所有子消息）"""
     result = await db.execute(

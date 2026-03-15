@@ -10,11 +10,20 @@ import {
   stopGeneration as stopGenerationAPI,
   getChatWithMessages,
   initiateHistoryCompression as initiateHistoryCompressionAPI,
-} from '@/api/chatService';
+  submitToolReview as submitToolReviewAPI,
+} from '@/api/chatService'
 import { subscribeToMessageStream } from '@/services/sseService';
 import { useChatSessionStore } from './chatSessionStore';
 import { useChatListStore } from './chatListStore';
-import type { Message, SubMessage, SubMessageCreate, SubMessageUpdate, MessageStatus } from '@/api/types';
+import type {
+  Message,
+  SubMessage,
+  SubMessageCreate,
+  SubMessageUpdate,
+  MessageStatus,
+  ReviewToolRequest,
+
+} from '@/api/types'
 
 /**
  * 处理所有与当前会话的交互动作。
@@ -341,6 +350,37 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     }
   }
 
+  async function submitToolReview(
+    messageId: string,
+    subMessageId: string,
+    decision: ReviewToolRequest['decision'],
+  ) {
+    try {
+      const updatedMessage = await submitToolReviewAPI(messageId, {
+        sub_message_id: subMessageId,
+        decision,
+      })
+
+      // 用后端返回的最新消息替换本地状态
+      const index = sessionStore.currentChatMessages.findIndex((m) => m.id === messageId)
+      if (index !== -1) {
+        sessionStore.currentChatMessages.splice(index, 1, updatedMessage)
+
+        // 如果决策提交后，消息状态变回 generating，则重新订阅 SSE 流以接收后续生成内容
+        if (updatedMessage.status === 'generating') {
+          _subscribeToMessageStream(updatedMessage)
+        }
+      }
+    } catch (error) {
+      console.error('Failed to submit tool review:', error)
+      // 发生错误时刷新会话以保证状态同步
+      if (sessionStore.currentChatId) {
+        await sessionStore.selectChat(sessionStore.currentChatId, true)
+      }
+      throw error
+    }
+  }
+
   return {
     sendMessage,
     regenerateFrom,
@@ -350,6 +390,7 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     cancelGeneration,
     initiateHistoryCompression,
     updateZipHistorySubMessage,
-    _subscribeToMessageStream
-  };
+    _subscribeToMessageStream,
+    submitToolReview,
+  }
 });

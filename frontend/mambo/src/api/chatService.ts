@@ -14,8 +14,10 @@ import type {
   GenerateRequest,
   PrepareGenerateResponse,
   UpdateMessageResponse,
-  SearchRequest, SearchResponse
-} from './types';
+  SearchRequest,
+  SearchResponse,
+  ReviewToolRequest,
+} from './types'
 
 /**
  * [新增] 懒加载获取会话/文件夹子节点
@@ -147,4 +149,13 @@ export const generateChatTitle = (chatId: string): Promise<{ message: string }> 
  */
 export const searchChats = (data: SearchRequest): Promise<SearchResponse> => {
   return apiClient.post('/chats/search', data);
+};
+
+/**
+ * [新增] 提交工具调用审核决策
+ * @param messageId 主消息ID
+ * @param data 审核决策数据
+ */
+export const submitToolReview = (messageId: string, data: ReviewToolRequest): Promise<Message> => {
+  return apiClient.post(`/messages/${messageId}/review-tool`, data);
 };

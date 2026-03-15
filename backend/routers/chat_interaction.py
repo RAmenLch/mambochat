@@ -13,6 +13,8 @@ from backend import schemas
 from backend.models import chat_model
 from backend.database import get_db
 from backend.routers.chat_management import _apply_default_model_to_chat_object
+from backend.schemas import SubMessageType, MessageStatus
+from backend.schemas.message import ToolApprovalRequest
 
 router = APIRouter()
 
@@ -278,3 +280,63 @@ async def stream_response(
         generation_service.subscribe_to_stream(db, assistant_message_id),
         media_type="text/event-stream"
     )
+
+@router.post(
+    "/messages/{message_id}/review-tool",
+    response_model=schemas.Message,
+    summary="提交工具调用审核决策",
+    response_model_exclude_none=True
+)
+async def review_tool_call(
+        message_id: str,
+        request: ToolApprovalRequest,
+        background_tasks: BackgroundTasks,
+        db: AsyncSession = Depends(get_db)
+):
+    """
+    提交对特定工具调用的审核决策。
+    如果当前消息下所有处于待审核状态的工具都已完成决策，则自动触发 Agent 恢复生成。
+    """
+    from backend.schemas.message import ReviewToolContent
+
+    # 1. 校验并更新当前子消息的决策内容
+    db_sub = await message_crud.get_sub_message(db, request.sub_message_id)
+    if not db_sub or db_sub.messageId != message_id or db_sub.type != SubMessageType.REVIEW_TOOL.value:
+        raise HTTPException(status_code=404, detail="Review tool request not found.")
+
+    review_content = ReviewToolContent.from_json_string(db_sub.content)
+    review_content.decision = request.decision
+
+    await message_crud.update_sub_message(
+        db,
+        request.sub_message_id,
+        schemas.SubMessageUpdate(content=review_content.to_json_string())
+    )
+
+    # 2. 检查同一批次（同一 Message 下）的所有审核请求是否都已决策
+    db_message = await message_crud.get_message(db, message_id=message_id)
+    pending_review_subs = [
+        sub for sub in db_message.sub_messages
+        if sub.type == SubMessageType.REVIEW_TOOL.value and sub.status == MessageStatus.PENDING_REVIEW.value
+    ]
+
+    all_decided = True
+    for sub in pending_review_subs:
+        content = ReviewToolContent.from_json_string(sub.content)
+        if content.decision is None:
+            all_decided = False
+            break
+
+    # 3. 若全部决策完成，使用乐观锁尝试唤醒 Agent
+    if all_decided and pending_review_subs:
+        sub_ids = [sub.id for sub in pending_review_subs]
+        # 只有成功将所有待审核子消息状态更新为 COMPLETED 的请求才负责触发恢复
+        affected_rows = await message_crud.batch_update_sub_messages_status_optimistic(
+            db, sub_ids, MessageStatus.PENDING_REVIEW, MessageStatus.COMPLETED
+        )
+
+        if affected_rows == len(sub_ids):
+            await _start_generation_task(background_tasks, db_message.chatId, message_id)
+
+    # 4. 返回更新后的消息对象
+    return (await _hydrate_and_validate_messages([db_message], db))[0]

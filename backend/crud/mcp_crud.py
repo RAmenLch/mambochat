@@ -89,3 +89,15 @@ async def delete_mcp_server(db: AsyncSession, server_id: str) -> bool:
     await db.commit()
     return True
 
+async def get_tools_by_server_ids(db: AsyncSession, server_ids: List[str]) -> List[McpTool]:
+    """
+    根据 MCP 服务器 ID 列表批量获取关联的工具配置。
+    用于在构建 LLM 上下文时快速判断哪些工具开启了审核模式。
+    """
+    if not server_ids:
+        return []
+
+    result = await db.execute(
+        select(McpTool).filter(McpTool.server_id.in_(server_ids))
+    )
+    return list(result.scalars().all())

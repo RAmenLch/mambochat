@@ -42,6 +42,19 @@ async def _calculate_message_status(message: chat_model.Message) -> schemas.Mess
     # 1. 基于子消息状态判断
     if message.sub_messages:
         sub_statuses = {sm.status for sm in message.sub_messages}
+
+        # 优先检查是否存在待审核的工具调用
+        if MessageStatus.PENDING_REVIEW.value in sub_statuses:
+            for sm in message.sub_messages:
+                if sm.type == SubMessageType.REVIEW_TOOL.value and sm.status == MessageStatus.PENDING_REVIEW.value:
+                    try:
+                        from backend.schemas.message import ReviewToolContent
+                        content = ReviewToolContent.from_json_string(sm.content)
+                        if content.decision is None:
+                            return MessageStatus.PENDING_REVIEW
+                    except (ValueError, ImportError):
+                        continue
+
         if MessageStatus.GENERATING.value in sub_statuses:
             # 如果仍在生成但已请求取消，则乐观地返回最终状态
             return MessageStatus.COMPLETED if cancellation_requested else MessageStatus.GENERATING
@@ -57,8 +70,6 @@ async def _calculate_message_status(message: chat_model.Message) -> schemas.Mess
     # 无活跃流，检查是否超时（后台任务可能启动失败）
     created_at = message.createdAt
     if created_at.tzinfo is None:
-        # 如果数据库返回的是不带时区的时间，我们假设它处于配置的时区
-        # 使用 pytz 的 localize 方法正确处理时区（包括可能的夏令时等）
         created_at = TZ.localize(created_at)
 
     time_since_creation = get_configured_now() - created_at
@@ -223,36 +234,41 @@ async def _get_worker_from_settings(db: AsyncSession, setting_keys: List[str]):
 async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
     """
     后台任务：协调整个生成过程。它实例化 Executor、Worker 和 Manager，
-    通过指令流驱动生成。
+    通过指令流驱动生成。任务结束时负责清理底层持久化状态。
     """
+    from backend.checkpointer import adelete_thread
     async with AsyncSessionLocal() as db:
+        final_status = None
         try:
             # 在实例化 Manager 之前，确保 Chat 数据是就绪的 (AI Model ID 已配置)
             await _ensure_chat_model_configured(db, chat_id)
 
-            # 1. 实例化核心组件 (使用 Chat 绑定的模型)
+            # 1. 实例化核心组件
             worker = await _get_worker_for_chat(db, chat_id)
             manager = DefaultGenerateManager(db_session=db)
             executor = InstructionExecutor(db_session=db)
 
             # 2. 执行生成循环：Manager 产出指令 -> Executor 执行指令
+            # resume_payload 逻辑已内聚在 manager 调用的 builder.build() 中
             async for instruction in manager.run(worker, chat_id, assistant_message_id):
-                await executor.execute(
+                exec_result = await executor.execute(
                     instruction=instruction,
                     chat_id=chat_id,
                     assistant_message_id=assistant_message_id
                 )
+                if isinstance(exec_result, MessageStatus):
+                    final_status = exec_result
 
         except asyncio.CancelledError:
             print(f"[Generation Service] Task cancelled for message '{assistant_message_id}'.")
-            # Manager 内部已处理了取消并生成了清理指令，此处只需记录
+            final_status = MessageStatus.COMPLETED
         except Exception as e:
             print(f"[Generation Service Error] for message {assistant_message_id}: {e}")
-            # Manager 内部已处理大部分异常。如果异常抛出到这里，说明 Manager 初始化失败或严重崩溃。
+            final_status = MessageStatus.FAILED
             try:
                 error_sub_message_create = schemas.SubMessageCreate(
                     id=generate_uuid(),
-                    content=f"生成流程启动失败: {e}",
+                    content=f"生成流程发生异常: {e}",
                     sortOrder=0,
                     type=SubMessageType.NORMAL,
                     status=MessageStatus.FAILED
@@ -263,6 +279,9 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
 
         finally:
             await stream_manager.close_stream(assistant_message_id)
+            # 如果任务进入终态（非审核中断挂起），则清理底层的 Checkpointer 线程数据
+            if final_status in [MessageStatus.COMPLETED, MessageStatus.FAILED]:
+                asyncio.create_task(adelete_thread(assistant_message_id))
 
 
 async def run_title_generation_task(chat_id: str):

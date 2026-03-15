@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Optional, List, Union, Dict, Any
 import json
 
-from backend.schemas.enums import MessageRole, MessageStatus, SubMessageType
+from backend.schemas.enums import MessageRole, MessageStatus, SubMessageType, ToolDecisionType
 from backend.schemas.file import File as FileSchema  # 导入文件模型以供类型提示
 
 
@@ -158,3 +158,46 @@ class Message(MessageBase):
     class Config:
         from_attributes = True
 
+
+
+
+
+class ToolDecision(BaseModel):
+    """工具调用的用户决策结果"""
+    type: ToolDecisionType
+    edited_action: Optional[Dict[str, Any]] = Field(None, description="编辑后的工具调用参数（仅在 type=edit 时有效）")
+    message: Optional[str] = Field(None, description="拒绝原因或其他附加信息")
+
+
+# 接收前端审核决策的请求模型
+class ToolApprovalRequest(BaseModel):
+    sub_message_id: str
+    decision: ToolDecision
+
+class ReviewToolContent(BaseModel):
+    """
+    专门用于处理 SubMessageType.REVIEW_TOOL 的 content 字段结构。
+    强制要求强类型，拒绝 Union，确保全链路结构化。
+    """
+    tool_call_id: str
+    name: str
+    arguments: Dict[str, Any] = Field(..., description="必须是已解析的字典，若上游为JSON字符串需在Decode层完成解析")
+    description: Optional[str] = Field(None, description="审核描述说明")
+    interrupt_index: int = Field(..., description="中断事件中的序号，用于严格保证多工具并发时的决策数组顺序")
+    batch_id: str = Field(..., description="中断批次号")
+    decision: Optional[ToolDecision] = Field(None, description="用户的决策结果，None 表示尚未做出决策")
+
+    def to_json_string(self) -> str:
+        """序列化为存储在 DB content 字段的 JSON 字符串"""
+        return self.model_dump_json(exclude_none=False)
+
+    @classmethod
+    def from_json_string(cls, json_str: str) -> 'ReviewToolContent':
+        """从 DB content 字符串反序列化"""
+        if not json_str:
+            raise ValueError("Empty content")
+        try:
+            data = json.loads(json_str)
+            return cls(**data)
+        except (json.JSONDecodeError, TypeError) as e:
+            raise ValueError(f"Invalid JSON for ReviewToolContent: {e}")
