@@ -111,13 +111,16 @@ class ChatWorker(AbstractGenerateWorker):
             messages = self._convert_messages(llm_input.messages)
             input_data = {"messages": messages}
 
-        async for mode, event in agent.astream(
+        async for stream1 in agent.astream(
                 input=input_data,
                 stream_mode=["messages", "updates"],
                 config=thread_config,
                 version="v2"
         ):
+            mode = stream1["type"]
+            event = stream1["data"]
             if mode == "updates":
+                print(stream1)
                 if "model" in event:
                     for message in event["model"]['messages']:
                         yield mode, message

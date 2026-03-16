@@ -2,7 +2,7 @@
 <template>
   <el-dialog
     v-model="internalVisible"
-    :title="t('chat.message.toolCall')"
+    :title="mode === 'review_all' ? t('chat.message.batchReview', '批量审核工具') : t('chat.message.toolCall', '工具调用')"
     width="600px"
     destroy-on-close
     @close="handleClose"
@@ -24,16 +24,30 @@
 
           <div class="tool-arguments">
             <h4>{{ t('chat.message.arguments', '参数') }}</h4>
-            <el-form label-position="top" :disabled="msg.type === 'McpTool'">
-              <template v-for="(propDef, propName) in getToolSchemaProperties(getParsedContent(msg)?.name)" :key="propName">
-                <el-form-item :label="String(propName)" :required="isPropRequired(getParsedContent(msg)?.name, String(propName))">
+
+            <!-- Read-only view for completed McpTool -->
+            <div v-if="msg.type === 'McpTool'">
+              <div v-if="Object.keys(editForms[msg.id] || {}).length > 0" class="readonly-args-box">
+                <div v-for="(val, key) in editForms[msg.id]" :key="key" class="arg-row">
+                  <span class="arg-key">{{ key }}:</span>
+                  <span class="arg-val">{{ typeof val === 'object' ? JSON.stringify(val) : val }}</span>
+                </div>
+              </div>
+              <div v-else class="no-args">{{ t('chat.message.noArguments', '无参数配置') }}</div>
+            </div>
+
+            <!-- Editable form for ReviewTool -->
+            <el-form v-else label-position="top">
+              <template v-for="propName in getCombinedArgKeys(msg)" :key="propName">
+                <el-form-item :label="String(propName)" :required="isPropRequired(msg, String(propName))">
                   <el-input-number
-                    v-if="propDef.type === 'integer' || propDef.type === 'number'"
+                    v-if="getSchemaProperty(msg, String(propName))?.type === 'integer' || getSchemaProperty(msg, String(propName))?.type === 'number'"
                     v-model="editForms[msg.id][String(propName)]"
                     controls-position="right"
+                    style="width: 100%"
                   />
                   <el-switch
-                    v-else-if="propDef.type === 'boolean'"
+                    v-else-if="getSchemaProperty(msg, String(propName))?.type === 'boolean'"
                     v-model="editForms[msg.id][String(propName)]"
                   />
                   <el-input
@@ -42,10 +56,12 @@
                     type="textarea"
                     autosize
                   />
-                  <div class="prop-desc" v-if="propDef.description">{{ propDef.description }}</div>
+                  <div class="prop-desc" v-if="getSchemaProperty(msg, String(propName))?.description">
+                    {{ getSchemaProperty(msg, String(propName))?.description }}
+                  </div>
                 </el-form-item>
               </template>
-              <div v-if="Object.keys(getToolSchemaProperties(getParsedContent(msg)?.name)).length === 0" class="no-args">
+              <div v-if="getCombinedArgKeys(msg).length === 0" class="no-args">
                 {{ t('chat.message.noArguments', '无参数配置') }}
               </div>
             </el-form>
@@ -99,23 +115,20 @@ import { ref, watch, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useMcpStore } from '@/stores/mcpStore';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
-import type { SubMessage, Message, McpToolContent, ReviewToolContent, ToolDecision } from '@/api/types';
+import { useChatSessionStore } from '@/stores/chatSessionStore';
+import type { SubMessage, McpToolContent, ReviewToolContent, ToolDecision, SchemaProperty } from '@/api/types';
 import { ElMessage } from 'element-plus';
-
-interface SchemaProperty {
-  type: string;
-  description?: string;
-  [key: string]: unknown;
-}
 
 const { t } = useI18n();
 const mcpStore = useMcpStore();
 const interactionStore = useChatInteractionStore();
+const sessionStore = useChatSessionStore();
 
 const props = defineProps<{
   visible: boolean;
-  parentMessage: Message | null;
+  parentMessageId: string | null;
   initialSubMessageId?: string;
+  mode?: 'review_all' | 'single';
 }>();
 
 const emit = defineEmits<{
@@ -126,15 +139,52 @@ const internalVisible = ref(false);
 const activeTabId = ref('');
 const editForms = ref<Record<string, Record<string, unknown>>>({});
 
+const liveParentMessage = computed(() => {
+  if (!props.parentMessageId) return null;
+  return sessionStore.currentChatMessages.find(m => m.id === props.parentMessageId) || null;
+});
+
 const toolMessages = computed(() => {
-  if (!props.parentMessage) return [];
-  return props.parentMessage.sub_messages.filter(sm => sm.type === 'McpTool' || sm.type === 'ReviewTool');
+  if (!liveParentMessage.value) return [];
+  const allTools = liveParentMessage.value.sub_messages.filter(sm => sm.type === 'McpTool' || sm.type === 'ReviewTool');
+
+  if (props.mode === 'review_all') {
+    return allTools.filter(sm => {
+      if (sm.type !== 'ReviewTool') return false;
+      const content = getParsedContent(sm) as ReviewToolContent | null;
+      return content && !content.decision;
+    });
+  } else {
+    const initialMsg = allTools.find(sm => sm.id === props.initialSubMessageId);
+    if (!initialMsg) return [];
+
+    const initialContent = getParsedContent(initialMsg) as McpToolContent | ReviewToolContent | null;
+    const targetToolCallId = initialContent?.tool_call_id;
+
+    if (!targetToolCallId) return [initialMsg];
+
+    return allTools.filter(sm => {
+      const content = getParsedContent(sm) as McpToolContent | ReviewToolContent | null;
+      return content?.tool_call_id === targetToolCallId;
+    });
+  }
+});
+
+watch(() => toolMessages.value, (newVal) => {
+  if (internalVisible.value && props.mode === 'review_all') {
+    if (newVal.length === 0) {
+      handleClose();
+    } else if (!newVal.find(m => m.id === activeTabId.value)) {
+      activeTabId.value = newVal[0].id;
+    }
+  }
 });
 
 watch(() => props.visible, (newVal) => {
   internalVisible.value = newVal;
   if (newVal && toolMessages.value.length > 0) {
-    activeTabId.value = props.initialSubMessageId || toolMessages.value[0].id;
+    const targetId = toolMessages.value.find(m => m.id === props.initialSubMessageId) ? props.initialSubMessageId : toolMessages.value[0].id;
+    activeTabId.value = targetId || '';
     initForms();
   }
 });
@@ -167,6 +217,89 @@ function getTabLabel(msg: SubMessage): string {
   return `${prefix} ${name}`;
 }
 
+/**
+ * 获取工具的 Input Schema 属性映射。
+ * 优先从 submessage.content 中获取，若不存在则回退到 mcpStore 查找。
+ */
+function getToolSchemaProperties(msg: SubMessage): Record<string, SchemaProperty> {
+  const content = getParsedContent(msg);
+  if (content && content.input_schema) {
+    return content.input_schema;
+  }
+
+  // Fallback to store if input_schema is missing in content
+  const toolName = content?.name;
+  if (!toolName) return {};
+
+  for (const server of mcpStore.activeUserMcpServices) {
+    const tool = mcpStore.currentServerTools.find(t => t.name === toolName);
+    if (tool && tool.input_schema && typeof tool.input_schema === 'object' && 'properties' in tool.input_schema) {
+      return (tool.input_schema.properties as Record<string, SchemaProperty>) || {};
+    }
+  }
+  return {};
+}
+
+function getSchemaProperty(msg: SubMessage, propName: string): SchemaProperty | undefined {
+  const props = getToolSchemaProperties(msg);
+  return props[propName];
+}
+
+function getCombinedArgKeys(msg: SubMessage): string[] {
+  const keys = new Set<string>(Object.keys(editForms.value[msg.id] || {}));
+  const schemaProps = getToolSchemaProperties(msg);
+  Object.keys(schemaProps).forEach(k => keys.add(k));
+  return Array.from(keys);
+}
+
+function isPropRequired(msg: SubMessage, propName: string): boolean {
+  const toolName = getParsedContent(msg)?.name;
+  if (!toolName) return false;
+
+  // Check local schema first
+  const localSchema = getParsedContent(msg)?.input_schema;
+  if (localSchema) {
+     // Note: The local schema provided in example is just properties map, required array is usually in the root of JSON schema.
+     // If the backend sends the full schema structure in input_schema, we should check `required`.
+     // But based on example `input_schema: {"a": {...}}`, it seems it sends the properties map directly.
+     // We might not have 'required' info here unless backend sends it.
+     // Fallback to store logic for 'required' check if possible.
+  }
+
+  // Fallback to store
+  for (const server of mcpStore.activeUserMcpServices) {
+    const tool = mcpStore.currentServerTools.find(t => t.name === toolName);
+    if (tool && tool.input_schema && typeof tool.input_schema === 'object' && 'required' in tool.input_schema) {
+      const requiredArr = tool.input_schema.required as string[];
+      return Array.isArray(requiredArr) && requiredArr.includes(propName);
+    }
+  }
+  return false;
+}
+
+/**
+ * 根据Schema定义转换数据类型，确保表单模型的数据类型正确。
+ */
+function convertValueBySchema(value: unknown, schema?: SchemaProperty): unknown {
+  if (value === null || value === undefined) return schema?.default ?? value;
+  if (!schema || !schema.type) return value;
+
+  switch (schema.type) {
+    case 'integer':
+    case 'number':
+      // 如果是字符串则转换，如果是数字则直接返回
+      const num = Number(value);
+      return isNaN(num) ? value : num;
+    case 'boolean':
+      if (typeof value === 'string') {
+        return value === 'true';
+      }
+      return Boolean(value);
+    default:
+      return value;
+  }
+}
+
 function initForms() {
   const forms: Record<string, Record<string, unknown>> = {};
   toolMessages.value.forEach(msg => {
@@ -182,6 +315,8 @@ function initForms() {
           } catch {
             argsObj = {};
           }
+        } else if (typeof mcpContent.arguments === 'object') {
+          argsObj = mcpContent.arguments;
         }
       } else if (msg.type === 'ReviewTool') {
         const reviewContent = content as ReviewToolContent;
@@ -189,32 +324,25 @@ function initForms() {
       }
     }
 
-    forms[msg.id] = JSON.parse(JSON.stringify(argsObj));
+    const schemaProps = getToolSchemaProperties(msg);
+    const processedArgs: Record<string, unknown> = {};
+
+    // 处理已有的参数值
+    for (const key in argsObj) {
+      const propSchema = schemaProps[key];
+      processedArgs[key] = convertValueBySchema(argsObj[key], propSchema);
+    }
+
+    // 初始化Schema中定义但Arguments中缺失的参数（使用默认值）
+    for (const key in schemaProps) {
+        if (processedArgs[key] === undefined && schemaProps[key].default !== undefined) {
+            processedArgs[key] = schemaProps[key].default;
+        }
+    }
+
+    forms[msg.id] = processedArgs;
   });
   editForms.value = forms;
-}
-
-function getToolSchemaProperties(toolName?: string): Record<string, SchemaProperty> {
-  if (!toolName) return {};
-  for (const server of mcpStore.activeUserMcpServices) {
-    const tool = mcpStore.currentServerTools.find(t => t.name === toolName);
-    if (tool && tool.input_schema && typeof tool.input_schema === 'object' && 'properties' in tool.input_schema) {
-      return (tool.input_schema.properties as Record<string, SchemaProperty>) || {};
-    }
-  }
-  return {};
-}
-
-function isPropRequired(toolName: string | undefined, propName: string): boolean {
-  if (!toolName) return false;
-  for (const server of mcpStore.activeUserMcpServices) {
-    const tool = mcpStore.currentServerTools.find(t => t.name === toolName);
-    if (tool && tool.input_schema && typeof tool.input_schema === 'object' && 'required' in tool.input_schema) {
-      const requiredArr = tool.input_schema.required as string[];
-      return Array.isArray(requiredArr) && requiredArr.includes(propName);
-    }
-  }
-  return false;
 }
 
 function getToolDecision(msg: SubMessage): ToolDecision | null {
@@ -236,25 +364,29 @@ function getDecisionText(decision: ToolDecision | null): string {
 }
 
 async function submitDecision(subMessageId: string, type: 'approve' | 'edit' | 'reject') {
-  if (!props.parentMessage) return;
+  if (!liveParentMessage.value) return;
 
   const decision: ToolDecision = { type };
 
   if (type === 'edit') {
-    decision.edited_action = editForms.value[subMessageId];
+    const msg = toolMessages.value.find(m => m.id === subMessageId);
+    const content = msg ? getParsedContent(msg) : null;
+    const toolName = content?.name || 'Unknown';
+
+    decision.edited_action = {
+      name: toolName,
+      args: editForms.value[subMessageId] || {}
+    };
   } else if (type === 'reject') {
     decision.message = "User rejected the tool call.";
   }
 
   try {
-    await interactionStore.submitToolReview(props.parentMessage.id, subMessageId, decision);
+    await interactionStore.submitToolReview(liveParentMessage.value.id, subMessageId, decision);
     ElMessage.success(t('chat.message.reviewSubmitted', '审核已提交'));
 
-    const remainingReviews = toolMessages.value.filter(sm => sm.type === 'ReviewTool' && sm.id !== subMessageId);
-    if (remainingReviews.length === 0) {
+    if (props.mode === 'single') {
       handleClose();
-    } else {
-      activeTabId.value = remainingReviews[0].id;
     }
   } catch (error) {
     ElMessage.error(t('chat.message.reviewFailed', '审核提交失败'));
@@ -263,6 +395,7 @@ async function submitDecision(subMessageId: string, type: 'approve' | 'edit' | '
 </script>
 
 <style scoped>
+/* ... existing styles ... */
 .tool-detail-container {
   padding: 10px;
 }
@@ -292,6 +425,31 @@ h4 {
   font-size: 13px;
   color: var(--el-text-color-placeholder);
   padding: 8px 0;
+}
+.readonly-args-box {
+  background-color: var(--color-background-soft);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 4px;
+  padding: 12px;
+}
+.arg-row {
+  display: flex;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.arg-row:last-child {
+  margin-bottom: 0;
+}
+.arg-key {
+  font-weight: 600;
+  color: var(--el-text-color-regular);
+  width: 120px;
+  flex-shrink: 0;
+}
+.arg-val {
+  color: var(--el-text-color-primary);
+  word-break: break-all;
+  font-family: monospace;
 }
 .result-box {
   background-color: var(--el-fill-color-light);

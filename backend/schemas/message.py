@@ -17,7 +17,7 @@ class McpToolContent(BaseModel):
     name: str
     # arguments 可能是 JSON 字符串（来自 LLM 原始输出）或已解析的字典
     arguments: Union[str, Dict[str, Any]]
-
+    input_schema: Optional[Dict[str, Any]] = None
     # 执行结果，None 表示尚未执行
     result: Optional[str] = None
     is_error: bool = False
@@ -159,13 +159,16 @@ class Message(MessageBase):
         from_attributes = True
 
 
-
+class EditedAction(BaseModel):
+    """编辑后的工具调用动作"""
+    name: str = Field(..., description="被编辑的工具名称")
+    args: Dict[str, Any] = Field(..., description="编辑后的工具参数")
 
 
 class ToolDecision(BaseModel):
     """工具调用的用户决策结果"""
     type: ToolDecisionType
-    edited_action: Optional[Dict[str, Any]] = Field(None, description="编辑后的工具调用参数（仅在 type=edit 时有效）")
+    edited_action: Optional[EditedAction] = Field(None, description="编辑后的工具调用参数（仅在 type=edit 时有效）")
     message: Optional[str] = Field(None, description="拒绝原因或其他附加信息")
 
 
@@ -186,7 +189,7 @@ class ReviewToolContent(BaseModel):
     interrupt_index: int = Field(..., description="中断事件中的序号，用于严格保证多工具并发时的决策数组顺序")
     batch_id: str = Field(..., description="中断批次号")
     decision: Optional[ToolDecision] = Field(None, description="用户的决策结果，None 表示尚未做出决策")
-
+    input_schema: Optional[Dict[str, Any]] = None
     def to_json_string(self) -> str:
         """序列化为存储在 DB content 字段的 JSON 字符串"""
         return self.model_dump_json(exclude_none=False)

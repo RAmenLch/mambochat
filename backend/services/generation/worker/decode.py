@@ -60,19 +60,28 @@ class BaseDecode:
             data = event["HumanInTheLoopMiddleware.after_model"]
             if not data:
                 return None
-            messages = data.get("messages", [])
-            approved_calls = []
-            rejected_results = []
 
+            messages = data.get("messages", [])
+            rejected_results = []
+            rejected_ids = set()
+
+            # 1. 第一遍遍历：收集所有被中间件拦截/拒绝的工具调用
             for msg in messages:
-                if isinstance(msg, AIMessage) and msg.tool_calls:
-                    approved_calls.extend(msg.tool_calls)
-                elif isinstance(msg, ToolMessage):
+                if isinstance(msg, ToolMessage):
+                    rejected_ids.add(msg.tool_call_id)
                     rejected_results.append({
                         "id": msg.tool_call_id,
                         "name": msg.name,
                         "content": msg.content
                     })
+
+            # 2. 第二遍遍历：提取真正被批准的工具调用（过滤掉已被拒绝的）
+            approved_calls = []
+            for msg in messages:
+                if isinstance(msg, AIMessage) and msg.tool_calls:
+                    for call in msg.tool_calls:
+                        if call.get("id") not in rejected_ids:
+                            approved_calls.append(call)
 
             return {"approved_calls": approved_calls, "rejected_results": rejected_results}
         return None

@@ -4,6 +4,7 @@ import asyncio
 import json
 from typing import AsyncGenerator, Optional, Dict, List
 
+from langchain_core.tools import BaseTool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.base_model import generate_uuid
@@ -48,6 +49,9 @@ class DefaultGenerateManager(AbstractGenerateManager):
 
         self.providers: List[BaseToolProvider] = []
         self._hitl_tools_config: Dict[str, bool] = {}
+        self._pending_hitl_tool_calls = []
+        # 新增：工具名称映射表，用于快速检索工具定义（含 Schema）
+        self._tool_map: Dict[str, BaseTool] = {}
 
     async def _execute_generation(
             self,
@@ -80,6 +84,10 @@ class DefaultGenerateManager(AbstractGenerateManager):
             self.providers = builder.get_providers()
             self._hitl_tools_config = getattr(llm_input, 'hitl_interrupt_on', {})
 
+            # 新增：填充工具映射表，以便后续处理流事件时能直接获取工具的 args (Schema)
+            if llm_input.tools:
+                self._tool_map = {t.name: t for t in llm_input.tools if hasattr(t, 'name')}
+
         except McpConnectionError as e:
             error_id = generate_uuid()
             yield CreateSubMessage(
@@ -92,7 +100,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
             yield SetFinalStatus(status=schemas_enums.MessageStatus.FAILED)
             return
 
-        should_interrupt = False # <--- 将变量提升到循环外部以便在 finalize 时使用
+        should_interrupt = False
 
         async for mode, event in worker.generate(llm_input):
 
@@ -108,11 +116,8 @@ class DefaultGenerateManager(AbstractGenerateManager):
             if should_interrupt:
                 break
 
-        # 将是否中断的标志传递给 finalize
         async for instruction in self._finalize_generation(is_interrupted=should_interrupt):
             yield instruction
-
-
 
     async def _process_stream_event(self, mode: str, event: any) -> AsyncGenerator[BaseInstruction, None]:
         Decode = self.decode
@@ -120,15 +125,30 @@ class DefaultGenerateManager(AbstractGenerateManager):
         interrupt_data = Decode.get_hitl_interrupt(mode, event)
         if interrupt_data and "action_requests" in interrupt_data:
             current_batch_id = generate_uuid()
+
+            reviewable_tool_calls = [
+                tc for tc in self._pending_hitl_tool_calls
+                if self._hitl_tools_config.get(tc.get("name"))
+            ]
+
             for idx, action_req in enumerate(interrupt_data["action_requests"]):
-                tool_call_id = action_req.get("id") or generate_uuid()
+                if idx < len(reviewable_tool_calls):
+                    tool_call_id = reviewable_tool_calls[idx].get("id")
+                else:
+                    tool_call_id = action_req.get("id") or generate_uuid()
+
                 name = action_req.get("name")
                 args = action_req.get("args", {})
+
+                # 新增：从映射表获取工具定义，提取其 Schema
+                target_tool = self._tool_map.get(name)
+                input_schema = target_tool.args if target_tool else None
 
                 review_content = ReviewToolContent(
                     tool_call_id=tool_call_id,
                     name=name,
                     arguments=args,
+                    input_schema=input_schema,  # 注入 Schema
                     description=action_req.get("description"),
                     interrupt_index=idx,
                     batch_id=current_batch_id,
@@ -156,9 +176,16 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 tool_call_id = call.get("id")
                 name = call.get("name")
                 args = call.get("args") or {}
+
+                # 获取工具定义
+                target_tool = self._tool_map.get(name)
+
                 for provider in self.providers:
                     if provider.matches_tool_name(name):
-                        async for instruction in provider.create_call_instruction(tool_call_id, name, args):
+                        # 适配 Provider 新签名，传入 tool_def
+                        async for instruction in provider.create_call_instruction(
+                                tool_call_id, name, args, tool_def=target_tool
+                        ):
                             yield instruction
                         break
 
@@ -166,9 +193,15 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 tool_call_id = res.get("id")
                 name = res.get("name")
                 content = res.get("content")
+
+                target_tool = self._tool_map.get(name)
+
                 for provider in self.providers:
                     if provider.matches_tool_name(name):
-                        async for instruction in provider.create_call_instruction(tool_call_id, name, {}):
+                        # 适配 Provider 新签名，传入 tool_def
+                        async for instruction in provider.create_call_instruction(
+                                tool_call_id, name, {}, tool_def=target_tool
+                        ):
                             yield instruction
                         async for instruction in provider.create_result_instruction(tool_call_id, content, True):
                             yield instruction
@@ -201,17 +234,28 @@ class DefaultGenerateManager(AbstractGenerateManager):
 
         tool_calls = Decode.get_toolcall_content(mode, event)
         if tool_calls:
+            has_hitl_tool = any(self._hitl_tools_config.get(tc.get("name")) for tc in tool_calls)
+
+            if has_hitl_tool:
+                self._pending_hitl_tool_calls = tool_calls
+
             for tool_call in tool_calls:
                 tool_call_id = tool_call.get("id")
                 name = tool_call.get("name")
                 args = tool_call.get("args") or {}
 
-                if self._hitl_tools_config.get(name):
+                if has_hitl_tool:
                     continue
+
+                # 获取工具定义
+                target_tool = self._tool_map.get(name)
 
                 for provider in self.providers:
                     if provider.matches_tool_name(name):
-                        async for instruction in provider.create_call_instruction(tool_call_id, name, args):
+                        # 适配 Provider 新签名，传入 tool_def
+                        async for instruction in provider.create_call_instruction(
+                                tool_call_id, name, args, tool_def=target_tool
+                        ):
                             yield instruction
                         break
 

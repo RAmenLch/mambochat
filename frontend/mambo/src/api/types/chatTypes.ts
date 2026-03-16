@@ -135,6 +135,16 @@ export interface ChatReorderItem {
   sortOrder: number
 }
 
+
+// --- Schema Property Type ---
+export interface SchemaProperty {
+  type: string;
+  title?: string;
+  description?: string;
+  default?: unknown;
+  [key: string]: unknown;
+}
+
 // --- Mcp Types ---
 
 export interface McpService {
@@ -149,7 +159,8 @@ export interface McpToolContent {
   name: string
   arguments: string
   result: string | null
-  is_error: boolean
+  is_error: boolean,
+  input_schema?: Record<string, SchemaProperty>
 }
 
 export interface ReviewToolContent {
@@ -160,11 +171,12 @@ export interface ReviewToolContent {
   interrupt_index: number
   batch_id: string
   decision: ToolDecision | null
+  input_schema?: Record<string, SchemaProperty>
 }
 
 export interface ToolDecision {
   type: 'approve' | 'edit' | 'reject'
-  edited_action?: Record<string, unknown> | null
+  edited_action?: { name: string; args: Record<string, unknown> } | null
   message?: string | null
 }
 

@@ -276,7 +276,6 @@ class LLMInputBuilder:
         if provider.use_proxy and self.settings.get("proxy_enabled") == "True":
             proxy_url = self.settings.get("proxy_url")
 
-        # 9. 组装 HITL 恢复指令 (resume_payload) 逻辑
         resume_payload = None
         if self._cutoff_message_id:
             target_msg = self._target_msg
@@ -301,7 +300,8 @@ class LLMInputBuilder:
                     latest_batch_id = decided_reviews[0][1].batch_id
 
                     # 3. 提取该最新批次的所有决策
-                    latest_batch_decisions = [item[1] for item in decided_reviews if item[1].batch_id == latest_batch_id]
+                    latest_batch_decisions = [item[1] for item in decided_reviews if
+                                              item[1].batch_id == latest_batch_id]
 
                     # 4. 严格按照 interrupt_index 排序，确保与 LangGraph 中断事件顺序一致
                     latest_batch_decisions.sort(key=lambda x: x.interrupt_index)
@@ -311,7 +311,8 @@ class LLMInputBuilder:
                     for item in latest_batch_decisions:
                         decision_dict = {"type": item.decision.type.value}
                         if item.decision.type.value == "edit" and item.decision.edited_action:
-                            decision_dict["edited_action"] = item.decision.edited_action
+                            # 修复：调用 .model_dump() 将强类型转换为字典
+                            decision_dict["edited_action"] = item.decision.edited_action.model_dump()
                         if item.decision.type.value == "reject" and item.decision.message:
                             decision_dict["message"] = item.decision.message
                         resume_decisions.append(decision_dict)
@@ -320,7 +321,8 @@ class LLMInputBuilder:
 
         # 仅在开启了需要审核的工具时，才强制要求 _cutoff_message_id
         if not self._cutoff_message_id and self._hitl_interrupt_on:
-            raise ValueError("Build failed: assistant_message_id (_cutoff_message_id) is required when HITL is enabled.")
+            raise ValueError(
+                "Build failed: assistant_message_id (_cutoff_message_id) is required when HITL is enabled.")
 
         return LLMInput(
             model_id=model.modelId,

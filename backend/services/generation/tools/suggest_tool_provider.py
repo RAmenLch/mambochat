@@ -50,16 +50,19 @@ class SuggestToolProvider(BaseToolProvider):
             self,
             tool_call_id: str,
             name: str,
-            arguments: Dict[str, Any]
+            arguments: Dict[str, Any],
+            tool_def: Optional[BaseTool] = None  # 适配新签名
     ) -> AsyncGenerator[BaseInstruction, None]:
         """
         解析 suggest 工具调用，生成 SUGGEST 类型的子消息。
         """
+        # 提取 Schema 定义
+        input_schema = tool_def.args if tool_def else None
+
         suggest_list = arguments.get("suggest_list", [])
 
         # 确保是列表格式
         if not isinstance(suggest_list, list):
-            # 尝试兼容处理，如果 LLM 传错了格式
             if isinstance(suggest_list, str):
                 suggest_list = [suggest_list]
             else:
@@ -72,10 +75,12 @@ class SuggestToolProvider(BaseToolProvider):
         yield CreateSubMessage(
             sub_message_id=sub_id,
             type=schemas_enums.SubMessageType.SUGGEST.value,
-            sortOrder=99,  # 建议通常放在最后
+            sortOrder=99,
             status=schemas_enums.MessageStatus.COMPLETED,
             initial_content=content_json,
-            config={"context_participation_length": 0}
+            config={
+                "context_participation_length": 0
+            }
         )
         yield InterruptGeneration()
 

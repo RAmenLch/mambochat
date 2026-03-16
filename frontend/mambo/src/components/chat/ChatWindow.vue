@@ -112,8 +112,9 @@
 
     <McpToolDialog
       v-model:visible="toolDialogVisible"
-      :parent-message="toolDialogMessage"
+      :parent-message-id="toolDialogMessageId"
       :initial-sub-message-id="toolDialogInitialId"
+      :mode="toolDialogMode"
     />
   </div>
 </template>
@@ -239,8 +240,9 @@ const previousPreviewHeight = ref(0);
 const isDraggingOver = ref(false);
 
 const toolDialogVisible = ref(false);
-const toolDialogMessage = ref<Message | null>(null);
+const toolDialogMessageId = ref<string | null>(null);
 const toolDialogInitialId = ref<string | undefined>(undefined);
+const toolDialogMode = ref<'review_all' | 'single'>('single');
 
 onMounted(() => {
   systemConfigStore.fetchSystemConfig();
@@ -261,9 +263,10 @@ const pendingReviewSubMessages = computed<SubMessage[]>(() => {
 
 const isPendingReview = computed(() => pendingReviewSubMessages.value.length > 0);
 
-function handleOpenToolDialog(message: Message, subMessageId: string) {
-  toolDialogMessage.value = message;
+function handleOpenToolDialog(message: Message, subMessageId: string, mode: 'review_all' | 'single' = 'single') {
+  toolDialogMessageId.value = message.id;
   toolDialogInitialId.value = subMessageId;
+  toolDialogMode.value = mode;
   toolDialogVisible.value = true;
 }
 
@@ -272,7 +275,7 @@ function handleOpenReviewFromInput() {
     const pendingSubMsg = pendingReviewSubMessages.value[0];
     const parentMsg = currentChatMessages.value.find(m => m.id === pendingSubMsg.messageId);
     if (parentMsg) {
-      handleOpenToolDialog(parentMsg, pendingSubMsg.id);
+      handleOpenToolDialog(parentMsg, pendingSubMsg.id, 'review_all');
     }
   }
 }

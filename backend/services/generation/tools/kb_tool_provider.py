@@ -116,16 +116,18 @@ class KBToolProvider(BaseToolProvider):
             self,
             tool_call_id: str,
             name: str,
-            arguments: Dict[str, Any]
+            arguments: Dict[str, Any],
+            tool_def: Optional[BaseTool] = None  # 适配新签名
     ) -> AsyncGenerator[BaseInstruction, None]:
-        # 1. 序列化参数
-        args_str = json.dumps(arguments, ensure_ascii=False)
+        # 1. 提取原生工具定义中的 Schema
+        input_schema = tool_def.args if tool_def else None
 
-        # 2. 构建 McpToolContent 对象 (复用 MCP 数据结构)
+        # 2. 构建 McpToolContent 对象 (复用 MCP 数据结构以保持协议一致)
         tool_content = McpToolContent(
             tool_call_id=tool_call_id,
             name=name,
-            arguments=args_str
+            arguments=arguments,
+            input_schema=input_schema  # 注入 Schema
         )
 
         # 3. 缓存状态
