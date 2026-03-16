@@ -20,7 +20,8 @@ from backend.checkpointer import get_checkpointer
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.llm_io import LLMInput
 from backend.services.generation.worker.decode import OpenAiDecode, BaseDecode
-from schemas.agent import AgentState
+from backend.schemas.agent import AgentState
+from backend.services.generation.agent.custom_middleware import ToolMessageOrderingMiddleware
 
 
 class ChatWorker(AbstractGenerateWorker):
@@ -91,6 +92,10 @@ class ChatWorker(AbstractGenerateWorker):
                 description_prefix="需要审核的操作"
             )
             middlewares.append(middleware)
+            # 用于解决经过HumanInTheLoopMiddleware会导致ToolMessage失去顺序的问题
+            # 大量模型不会传入tool_call_id,强依赖消息顺序
+            ordering_middleware = ToolMessageOrderingMiddleware()
+            middlewares.append(ordering_middleware)
             active_checkpointer = get_checkpointer()
             # 只有在使用 checkpointer 时，才需要配置 thread_id
             thread_config = {"configurable": {"thread_id": llm_input.thread_id}}
