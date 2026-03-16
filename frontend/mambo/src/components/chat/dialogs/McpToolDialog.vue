@@ -117,7 +117,7 @@ import { useMcpStore } from '@/stores/mcpStore';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { useChatSessionStore } from '@/stores/chatSessionStore';
 import type { SubMessage, McpToolContent, ReviewToolContent, ToolDecision, SchemaProperty } from '@/api/types';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 
 const { t } = useI18n();
 const mcpStore = useMcpStore();
@@ -378,7 +378,23 @@ async function submitDecision(subMessageId: string, type: 'approve' | 'edit' | '
       args: editForms.value[subMessageId] || {}
     };
   } else if (type === 'reject') {
-    decision.message = "User rejected the tool call.";
+    try {
+      const { value } = await ElMessageBox.prompt(
+        t('chat.message.rejectReasonPrompt', '请输入拒绝理由（可选）：'),
+        t('chat.message.reject', '拒绝调用'),
+        {
+          confirmButtonText: t('common.action.confirm', '确定'),
+          cancelButtonText: t('common.action.cancel', '取消'),
+          inputType: 'textarea',
+          inputPlaceholder: t('chat.message.rejectReasonPlaceholder', '若不提供，将使用默认理由...'),
+        }
+      );
+      // 如果用户输入了理由，则使用用户的输入，否则使用默认文案
+      decision.message = value?.trim() ? value.trim() : "User rejected the tool call.";
+    } catch {
+      // 用户点击了取消，中止提交操作
+      return;
+    }
   }
 
   try {

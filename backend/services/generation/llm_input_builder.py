@@ -313,8 +313,16 @@ class LLMInputBuilder:
                         if item.decision.type.value == "edit" and item.decision.edited_action:
                             # 修复：调用 .model_dump() 将强类型转换为字典
                             decision_dict["edited_action"] = item.decision.edited_action.model_dump()
-                        if item.decision.type.value == "reject" and item.decision.message:
-                            decision_dict["message"] = item.decision.message
+                        if item.decision.type.value == "reject":
+                            # 获取原始理由，若无则默认为空字符串
+                            raw_reason = item.decision.message or ""
+                            # 按照你的需求注入上下文
+                            injected_message = (
+                                f"{item.tool_call_id} 本批次 调用工具:{item.name}拒绝执行; "
+                                f"拒绝理由 {raw_reason}"
+                            )
+
+                            decision_dict["message"] = injected_message
                         resume_decisions.append(decision_dict)
 
                     resume_payload = {"decisions": resume_decisions}
