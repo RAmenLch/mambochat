@@ -199,7 +199,7 @@ class LLMInputBuilder:
             proxy_url = self.settings.get("proxy_url")
 
         resume_payload = None
-        if self._cutoff_message_id:
+        if self._cutoff_message_id and self._enable_tools:
             target_msg = self._target_msg
             if not target_msg:
                 target_msg = await message_crud.get_message(self.db, message_id=self._cutoff_message_id)

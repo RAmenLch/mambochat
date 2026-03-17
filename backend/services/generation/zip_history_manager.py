@@ -58,6 +58,7 @@ class ZipHistoryGenerateManager(AbstractGenerateManager):
         llm_input = await (
             builder
             .slice_until_message(self.target_message_id, include_target=True)
+            .filter_sub_message_types(schemas_enums.SubMessageType.NORMAL.value)
             .set_system_prompt(system_prompt)
             .build()
         )
