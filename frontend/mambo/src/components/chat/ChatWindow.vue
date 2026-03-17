@@ -292,13 +292,13 @@ async function handleMountResources(resources: Resource[]) {
         addUploadedFile(fileInfo);
         hasFileAdded = true;
       } else {
-        ElMessage.warning(`资源 "${resource.name}" 文件信息为空，已跳过`);
+        ElMessage.warning(t('chat.attachment.resourceFileEmpty', { name: resource.name }));
       }
     }
   }
 
   if (hasFileAdded) {
-    ElMessage.success('已从资源库添加文件');
+    ElMessage.success(t('chat.attachment.resourceFileAdded'));
   }
 }
 
@@ -325,7 +325,7 @@ async function handleMountKnowledgeBase(resources: Resource[]) {
     await chatListStore.updateChatSettings(currentChat.value.id, {
       resource_prompt_list: updatedList
     });
-    ElMessage.success(`已启用知识库: ${resources.map(r => r.name).join(', ')}`);
+    ElMessage.success(t('chat.attachment.kbEnabled', { names: resources.map(r => r.name).join(', ') }));
   }
 }
 
@@ -338,7 +338,7 @@ async function handleRemoveKnowledgeBase(resourceId: string) {
   await chatListStore.updateChatSettings(currentChat.value.id, {
     resource_prompt_list: updatedList.length > 0 ? updatedList : null
   });
-  ElMessage.success('已停用知识库检索');
+  ElMessage.success(t('chat.attachment.kbDisabled'));
 }
 
 async function handleFileUploads(files: FileList) {
@@ -350,7 +350,7 @@ async function handleFileUploads(files: FileList) {
       addUploadedFile(fileInfo);
     } catch (error) {
       console.error(`Failed to upload file ${file.name}:`, error);
-      ElMessage.error(`文件 ${file.name} 上传失败`);
+      ElMessage.error(t('chat.attachment.fileUploadFailed', { name: file.name }));
     }
   }
 }
@@ -458,7 +458,7 @@ async function handleToggleWebSearch() {
     : [...currentIds, SEARCH_TOOL_ID];
 
   await chatListStore.updateChatSettings(currentChat.value.id, { enabled_mcp_ids: newIds });
-  ElMessage.success(`联网搜索已${newIds.includes(SEARCH_TOOL_ID) ? '启用' : '禁用'}`);
+  ElMessage.success(newIds.includes(SEARCH_TOOL_ID) ? t('chat.toolbar.webSearchEnabled') : t('chat.toolbar.webSearchDisabled'));
 }
 
 async function handleToggleMcpTool(mcpId: string) {

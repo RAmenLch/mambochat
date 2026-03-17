@@ -9,13 +9,13 @@
     <div class="group-text-wrapper" v-if="group.textSubMessage">
       <!-- 悬浮操作栏 -->
       <div class="group-floating-actions" :class="{ 'is-visible': isHovered && !isGenerating }">
-        <el-tooltip :content="$t('common.action.edit', '编辑')" placement="top" :show-after="500">
+        <el-tooltip :content="$t('common.action.edit')" placement="top" :show-after="500">
           <el-button :icon="Edit" circle size="small" @click="handleEdit" />
         </el-tooltip>
-        <el-tooltip :content="$t('common.action.copy', '复制')" placement="top" :show-after="500">
+        <el-tooltip :content="$t('common.action.copy')" placement="top" :show-after="500">
           <el-button :icon="CopyDocument" circle size="small" @click="handleCopy" />
         </el-tooltip>
-        <el-tooltip :content="isTextCollapsed ? $t('common.action.expand', '展开') : $t('common.action.collapse', '折叠')" placement="top" :show-after="500">
+        <el-tooltip :content="isTextCollapsed ? $t('common.action.expand') : $t('common.action.collapse')" placement="top" :show-after="500">
           <el-button :icon="isTextCollapsed ? ArrowDownBold : ArrowUpBold" circle size="small" @click="toggleCollapse" />
         </el-tooltip>
       </div>
@@ -55,11 +55,14 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import type { Message, SubMessage, McpToolContent, ReviewToolContent } from '@/api/types';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import SubMessageItem from '../SubMessageItem.vue';
 import type { BubbleSectionGroup } from '@/composables/useAssistantTimeline';
 import { Edit, CopyDocument, ArrowUpBold, ArrowDownBold, Warning, Loading, CircleClose, CircleCheck } from '@element-plus/icons-vue';
+
+const { t } = useI18n();
 
 const props = withDefaults(defineProps<{
   group: BubbleSectionGroup;
@@ -113,7 +116,7 @@ function getParsedContent(tool: SubMessage): McpToolContent | ReviewToolContent 
 
 function getToolName(tool: SubMessage): string {
   const content = getParsedContent(tool);
-  return content?.name || 'Unknown Tool';
+  return content?.name || t('chat.message.mcp.unknownTool');
 }
 
 function isToolError(tool: SubMessage): boolean {
@@ -135,10 +138,8 @@ function isToolError(tool: SubMessage): boolean {
   padding-bottom: 0;
 }
 
-/* 【关键修改】移除透明度，改为虚线边框提示 */
 .bubble-section-group.is-inactive {
   opacity: 1;
-  border-left: 2px dashed var(--el-border-color);
   padding-left: 8px;
 }
 

@@ -12,6 +12,7 @@ export default {
       connectionFailed: '连接失败',
       unspecified: '未指定',
       unknownModel: '未知模型',
+      unknown: '未知', // [新增]
     },
     time: {
       today: '今天',
@@ -49,6 +50,8 @@ export default {
       createSuccess: '创建成功',
       moveSuccess: '移动成功',
       updateSuccess: '更新成功',
+      copySuccess: '已复制到剪贴板', // [新增]
+      copyFailed: '复制失败', // [新增]
     },
     error: {
       unknown: '发生未知错误',
@@ -303,6 +306,8 @@ export default {
       noTools: '暂无可用工具',
       testConnection: '测试连接',
       webSearch: '联网搜索(不好用别用)',
+      webSearchEnabled: '联网搜索已启用', // [新增]
+      webSearchDisabled: '联网搜索已禁用', // [新增]
       chatPartition: '聊天分区',
       chatSettings: '会话设置',
       mcpStatus: {
@@ -318,13 +323,23 @@ export default {
     attachment: {
       knowledgeBase: '知识库',
       imageLoadFailed: '图片加载失败',
+      resourceFileEmpty: '资源 "{name}" 文件信息为空，已跳过', // [新增]
+      resourceFileAdded: '已从资源库添加文件', // [新增]
+      kbEnabled: '已启用知识库: {names}', // [新增]
+      kbDisabled: '已停用知识库检索', // [新增]
+      fileUploadFailed: '文件 {name} 上传失败', // [新增]
     },
     message: {
+      ai_assistant: 'AI 助手', // [新增]
       toolCall: '工具调用',
       reasoning: '思考',
+      expandReasoning: '展开思考', // [新增]
+      minimizeReasoning: '最小化思考', // [新增]
+      reasoningCollapsed: '思考', // [新增]
       content: '正文',
       zipGenerating: '摘要生成中...',
       zipHistory: '历史摘要',
+      compressHistoryStart: '已开始在后台压缩历史对话，您可以继续聊天。', // [新增]
       regenerate: '重新回答',
       expand: '展开',
       collapse: '折叠',
@@ -338,6 +353,10 @@ export default {
       copyFailed: '复制失败',
       backToTop: '回到顶部',
       fileLoadFailed: '文件加载失败',
+      pendingReview: '待审核', // [新增]
+      toolCallReviewed: '工具调用(已审核)', // [新增]
+      file: '文件', // [新增]
+      partition: '分区', // [新增]
       mcp: {
         invalidCall: '无效的工具调用',
         unknownTool: '未知工具',
@@ -687,4 +706,3 @@ export default {
     },
   },
 }
-

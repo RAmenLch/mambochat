@@ -172,7 +172,12 @@ const normalSubMessages = computed(() =>
   ),
 )
 
-const usageSubMessage = computed(() => props.message.sub_messages.find((sm) => sm.type === 'Usage'))
+const usageSubMessage = computed(() => {
+  const usageMessages = props.message.sub_messages.filter((sm) => sm.type === 'Usage');
+  if (usageMessages.length === 0) return undefined;
+  // 按创建时间降序排序，取最新的一个 (ISO 8601 字符串可以直接比较)
+  return usageMessages.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+});
 const zipHistorySubMessage = computed(() => props.message.sub_messages.find((sm) => sm.type === 'ZipHistory'))
 const suggestSubMessage = computed(() => props.message.sub_messages.find((sm) => sm.type === 'Suggest'))
 
@@ -365,21 +370,21 @@ async function handleDelete() {
 async function handleCopySingle(subMessage: SubMessage) {
   try {
     await copyToClipboard(subMessage.content)
-    ElMessage.success('已复制到剪贴板')
-  } catch { ElMessage.error('复制失败') }
+    ElMessage.success(t('common.msg.copySuccess'))
+  } catch { ElMessage.error(t('common.msg.copyFailed')) }
 }
 
 async function handleCopy() {
   const contentToCopy = normalSubMessages.value.map((sm) => sm.content).join('\n--------------------------\n')
   try {
     await copyToClipboard(contentToCopy)
-    ElMessage.success('已复制到剪贴板')
-  } catch { ElMessage.error('复制失败') }
+    ElMessage.success(t('common.msg.copySuccess'))
+  } catch { ElMessage.error(t('common.msg.copyFailed')) }
 }
 
 function handleCompressHistory() {
   interactionStore.initiateHistoryCompression(props.message.id)
-  ElMessage.info('已开始在后台压缩历史对话，您可以继续聊天。')
+  ElMessage.info(t('chat.message.compressHistoryStart'))
 }
 
 function handleZipBookmarkClick() {

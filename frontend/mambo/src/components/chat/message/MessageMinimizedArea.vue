@@ -35,8 +35,8 @@
           <span class="minimized-item-title">
             {{
               subMessage.type === 'ReviewTool'
-              ? $t('chat.message.pendingReview', '待审核')
-              : (hasReview(subMessage) ? $t('chat.message.toolCallReviewed', '工具调用(已审核)') : $t('chat.message.toolCall', '工具调用'))
+              ? $t('chat.message.pendingReview')
+              : (hasReview(subMessage) ? $t('chat.message.toolCallReviewed') : $t('chat.message.toolCall'))
             }}
           </span>
         </template>
@@ -133,7 +133,7 @@ const minimizedSubMessages = computed(() => {
 
 function getPartitionTitleForMinimized(subMessage: SubMessage): string {
   if (subMessage.type === 'Reasoning') return t('chat.message.reasoning')
-  if (subMessage.type === 'File') return '文件'
+  if (subMessage.type === 'File') return t('chat.message.file')
   if (subMessage.type === 'Normal') {
     const normalSubMessages = props.displayableSubMessages.filter((sm) => sm.type === 'Normal')
     if (normalSubMessages.length <= 1) return t('chat.message.content')
@@ -142,7 +142,7 @@ function getPartitionTitleForMinimized(subMessage: SubMessage): string {
       return `${t('chat.message.content')}(${normalIndex + 1})`
     }
   }
-  return '分区'
+  return t('chat.message.partition')
 }
 
 function getMinimizedMcpInfo(subMessage: SubMessage) {
@@ -166,7 +166,7 @@ function getMinimizedTooltipContent(subMessage: SubMessage): string {
         argsStr = JSON.stringify(content.arguments)
       }
       const args = argsStr ? `Args: ${argsStr}` : ''
-      return `${t('chat.message.toolCall')}: ${content.name || 'Unknown'}\n${args}`.trim()
+      return `${t('chat.message.toolCall')}: ${content.name || t('common.status.unknown')}\n${args}`.trim()
     } catch {
       return t('chat.message.toolCall')
     }

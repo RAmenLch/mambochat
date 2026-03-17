@@ -5,13 +5,13 @@
     <div class="bubble-global-header">
       <div class="header-left">
         <el-icon><Cpu /></el-icon>
-        <span class="bubble-title">AI Assistant</span>
+        <span class="bubble-title">{{$t("chat.message.ai_assistant")}}</span>
       </div>
       <div class="header-right">
-        <el-tooltip v-if="reasoningSection" :content="isReasoningMinimized ? $t('chat.message.expandReasoning', '展开思考') : $t('chat.message.minimizeReasoning', '最小化思考')" placement="top">
+        <el-tooltip v-if="reasoningSection" :content="isReasoningMinimized ? $t('chat.message.expandReasoning') : $t('chat.message.minimizeReasoning')" placement="top">
           <el-button :icon="isReasoningMinimized ? FullScreen : Minus" circle text size="small" @click="toggleReasoningMinimize" :disabled="isGenerating && !hasPendingReviews" />
         </el-tooltip>
-        <el-tooltip :content="isBubbleCollapsed ? $t('common.action.expand', '展开气泡') : $t('common.action.collapse', '折叠气泡')" placement="top">
+        <el-tooltip :content="isBubbleCollapsed ? $t('common.action.expand') : $t('common.action.collapse')" placement="top">
           <el-button :icon="isBubbleCollapsed ? ArrowDownBold : ArrowUpBold" circle text size="small" @click="isBubbleCollapsed = !isBubbleCollapsed" />
         </el-tooltip>
       </div>
@@ -29,14 +29,13 @@
             <Warning v-else-if="hasPendingReviews" />
             <Check v-else />
           </el-icon>
-          <span>{{ $t('chat.message.reasoningCollapsed', '思考过程 (已折叠)') }}</span>
+          <span>{{ $t('chat.message.reasoningCollapsed') }}</span>
         </div>
 
         <!-- 展开态 -->
         <div v-else class="reasoning-expanded">
           <div class="section-title" @click="toggleReasoningMinimize">
-            <el-icon size="12"><Opportunity /></el-icon>
-            {{ $t('chat.message.reasoning', '思考过程') }}
+            {{ $t('chat.message.reasoning') }}
           </div>
           <div class="section-content">
             <BubbleSectionGroup
@@ -136,7 +135,6 @@ function isInactive(group: BubbleSectionGroupComponent): boolean {
   width: 100%;
   background-color: var(--el-bg-color); /* 白色底 */
   border: 1px solid var(--el-border-color-light);
-  border-left: 3px solid var(--el-color-primary);
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);

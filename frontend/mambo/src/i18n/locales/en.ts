@@ -12,6 +12,7 @@ export default {
       connectionFailed: 'Connection Failed',
       unspecified: 'Unspecified',
       unknownModel: 'Unknown Model',
+      unknown: 'Unknown', // [新增]
     },
     time: {
       today: 'Today',
@@ -49,6 +50,8 @@ export default {
       createSuccess: 'Created successfully',
       moveSuccess: 'Moved successfully',
       updateSuccess: 'Updated successfully',
+      copySuccess: 'Copied to clipboard', // [新增]
+      copyFailed: 'Copy failed', // [新增]
     },
     error: {
       unknown: 'An unknown error occurred',
@@ -306,6 +309,8 @@ export default {
       noTools: 'No tools available',
       testConnection: 'Test Connection',
       webSearch: 'Web Search (Experimental)',
+      webSearchEnabled: 'Web search enabled', // [新增]
+      webSearchDisabled: 'Web search disabled', // [新增]
       chatPartition: 'Chat Partitions',
       chatSettings: 'Chat Settings',
       mcpStatus: {
@@ -321,13 +326,23 @@ export default {
     attachment: {
       knowledgeBase: 'Knowledge Base',
       imageLoadFailed: 'Image load failed',
+      resourceFileEmpty: 'Resource "{name}" file info is empty, skipped', // [新增]
+      resourceFileAdded: 'Files added from resources', // [新增]
+      kbEnabled: 'Knowledge base enabled: {names}', // [新增]
+      kbDisabled: 'Knowledge base retrieval disabled', // [新增]
+      fileUploadFailed: 'File {name} upload failed', // [新增]
     },
     message: {
+      ai_assistant: 'AI Assistant', // [新增]
       toolCall: 'Tool Call',
       reasoning: 'Reasoning',
+      expandReasoning: 'Expand Reasoning', // [新增]
+      minimizeReasoning: 'Minimize Reasoning', // [新增]
+      reasoningCollapsed: 'Reasoning', // [新增]
       content: 'Content',
       zipGenerating: 'Generating summary...',
       zipHistory: 'History Summary',
+      compressHistoryStart: 'Started compressing chat history in the background. You can continue chatting.', // [新增]
       regenerate: 'Regenerate',
       expand: 'Expand',
       collapse: 'Collapse',
@@ -341,6 +356,10 @@ export default {
       copyFailed: 'Copy failed',
       backToTop: 'Back to Top',
       fileLoadFailed: 'File load failed',
+      pendingReview: 'Pending Review', // [新增]
+      toolCallReviewed: 'Tool Call (Reviewed)', // [新增]
+      file: 'File', // [新增]
+      partition: 'Partition', // [新增]
       mcp: {
         invalidCall: 'Invalid tool call',
         unknownTool: 'Unknown tool',
@@ -697,4 +716,3 @@ export default {
     },
   },
 }
-
