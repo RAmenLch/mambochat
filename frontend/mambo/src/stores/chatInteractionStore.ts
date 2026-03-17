@@ -53,6 +53,17 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
         const chatWithMessages = await getChatWithMessages(chatId);
         sessionStore.currentChatMessages = chatWithMessages.messages.sort((a, b) => a.sortOrder - b.sortOrder);
 
+        const finalMessage = sessionStore.currentChatMessages.find(m => m.id === assistantMessageId);
+        if (finalMessage) {
+          // 检查是否还有待审核的 ReviewTool
+          const hasPendingReview = finalMessage.sub_messages.some(
+            sm => sm.type === 'ReviewTool' && sm.status === 'pending_review'
+          );
+          // 如果没有待审核的工具，则自动最小化所有 Reasoning 子消息 (收起大气泡)
+          if (!hasPendingReview) {
+            await batchUpdateSubMessagesMinimalState(assistantMessageId, true);
+          }
+        }
         // 检查是否需要触发自动标题生成
         if (
           sessionStore.currentChat &&
@@ -85,6 +96,7 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     });
     sessionStore.activeSubscriptions.set(assistantMessageId, controller);
   }
+
 
   /**
    * 发送新消息。
@@ -370,6 +382,16 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
         if (updatedMessage.status === 'generating') {
           _subscribeToMessageStream(updatedMessage)
         }
+        else if (updatedMessage.status === 'completed') {
+          // 如果状态为 completed，说明无需继续生成。检查是否还有其他待审核工具
+          const hasPendingReview = updatedMessage.sub_messages.some(
+            sm => sm.type === 'ReviewTool' && sm.status === 'pending_review'
+          );
+          // 如果所有工具都已审批完毕，自动最小化 Reasoning 气泡
+          if (!hasPendingReview) {
+            await batchUpdateSubMessagesMinimalState(messageId, true);
+          }
+        }
       }
     } catch (error) {
       console.error('Failed to submit tool review:', error)
@@ -378,6 +400,48 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
         await sessionStore.selectChat(sessionStore.currentChatId, true)
       }
       throw error
+    }
+  }
+
+
+    /**
+   * [新增] 批量更新指定消息下所有 Reasoning 子消息的 minimal 状态
+   * 用于实现大气泡的整体最小化/展开逻辑
+   * @param messageId - 目标消息ID
+   * @param isMinimal - 是否最小化
+   */
+  async function batchUpdateSubMessagesMinimalState(messageId: string, isMinimal: boolean) {
+    const message = sessionStore.currentChatMessages.find(m => m.id === messageId);
+    if (!message) return;
+
+    // 筛选出所有的 Reasoning 子消息
+    const reasoningSubMessages = message.sub_messages.filter(sm => sm.type === 'Reasoning');
+    if (reasoningSubMessages.length === 0) return;
+
+    let hasChanges = false;
+
+    // 1. 乐观更新 UI 状态
+    reasoningSubMessages.forEach(sm => {
+      if (sm.config.is_minimal !== isMinimal) {
+        sm.config = { ...sm.config, is_minimal: isMinimal };
+        hasChanges = true;
+      }
+    });
+
+    if (!hasChanges) return;
+
+    // 2. 异步同步到后端 (并发请求更新)
+    try {
+      const updatePromises = reasoningSubMessages.map(sm =>
+        updateSubMessageAPI(sm.id, { config: { ...sm.config, is_minimal: isMinimal } })
+      );
+      await Promise.all(updatePromises);
+    } catch (error) {
+      console.error(`Failed to batch update minimal state for message ${messageId}:`, error);
+      // 发生错误时，强制刷新会话以确保数据一致性
+      if (sessionStore.currentChatId) {
+        await sessionStore.selectChat(sessionStore.currentChatId, true);
+      }
     }
   }
 
@@ -391,6 +455,7 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     initiateHistoryCompression,
     updateZipHistorySubMessage,
     _subscribeToMessageStream,
+    batchUpdateSubMessagesMinimalState,
     submitToolReview,
   }
 });

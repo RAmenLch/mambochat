@@ -2,8 +2,9 @@
 
 import asyncio
 import json
-from typing import AsyncGenerator, Optional, Dict, List
+from typing import AsyncGenerator, Optional, Dict, List, Set
 
+from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,22 +37,42 @@ class DefaultGenerateManager(AbstractGenerateManager):
     职责：
     1. 负责标准的对话生成流程，支持文本、推理 (Reasoning)、工具调用 (MCP/Suggest) 和多模态图片生成。
     2. 接管原 ReActAgentChatGenerateManager 的能力，通过 LangChain/LangGraph 的事件流驱动。
-    3. 解析 OpenAiWorker 输出的 messages (流式) 和 updates (状态) 事件，转换为前端指令。
+    3. 解析 Worker 输出的 messages (流式) 和 updates (状态) 事件，转换为前端指令。
     4. 通过 ToolProvider 架构管理 MCP 和 Suggest 等工具的生命周期。
     5. 处理人机交互审核 (HITL) 中断与恢复流程。
+
+    子消息 ID 规则：
+    - 每轮 LLM 调用由 lc_run_id 唯一标识。
+    - Reasoning 子消息 ID = "{lc_run_uuid}-R"
+    - Normal(正文) 子消息 ID = "{lc_run_uuid}-N"
+    - 在 updates 事件到达时立即闭合对应轮次的子消息。
     """
 
     def __init__(self, db_session: AsyncSession):
         super().__init__(db_session)
-        self._reasoning_id: Optional[str] = None
-        self._content_id: Optional[str] = None
         self._final_usage_data: Optional[Dict] = None
+
+        # 追踪已创建但尚未闭合的流式子消息 ID
+        self._created_stream_ids: Set[str] = set()
 
         self.providers: List[BaseToolProvider] = []
         self._hitl_tools_config: Dict[str, bool] = {}
         self._pending_hitl_tool_calls = []
-        # 新增：工具名称映射表，用于快速检索工具定义（含 Schema）
+        # 工具名称映射表，用于快速检索工具定义（含 Schema）
         self._tool_map: Dict[str, BaseTool] = {}
+
+    @staticmethod
+    def _extract_run_uuid(lc_run_id: str) -> Optional[str]:
+        """
+        从 LangChain 的 lc_run id 中提取纯 UUID 部分。
+        例如: 'lc_run--019cf715-726a-73e3-a399-7da13a7e0e3e' -> '019cf715-726a-73e3-a399-7da13a7e0e3e'
+        """
+        if not lc_run_id:
+            return None
+        if lc_run_id.startswith("lc_run--"):
+            return lc_run_id[len("lc_run--"):]
+        # 兼容：如果已经是纯 UUID 或其他格式，直接返回
+        return lc_run_id
 
     async def _execute_generation(
             self,
@@ -84,7 +105,6 @@ class DefaultGenerateManager(AbstractGenerateManager):
             self.providers = builder.get_providers()
             self._hitl_tools_config = getattr(llm_input, 'hitl_interrupt_on', {})
 
-            # 新增：填充工具映射表，以便后续处理流事件时能直接获取工具的 args (Schema)
             if llm_input.tools:
                 self._tool_map = {t.name: t for t in llm_input.tools if hasattr(t, 'name')}
 
@@ -122,6 +142,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
     async def _process_stream_event(self, mode: str, event: any) -> AsyncGenerator[BaseInstruction, None]:
         Decode = self.decode
 
+        # --- 1. HITL 中断处理 ---
         interrupt_data = Decode.get_hitl_interrupt(mode, event)
         if interrupt_data and "action_requests" in interrupt_data:
             current_batch_id = generate_uuid()
@@ -140,7 +161,6 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 name = action_req.get("name")
                 args = action_req.get("args", {})
 
-                # 新增：从映射表获取工具定义，提取其 Schema
                 target_tool = self._tool_map.get(name)
                 input_schema = target_tool.args if target_tool else None
 
@@ -148,7 +168,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
                     tool_call_id=tool_call_id,
                     name=name,
                     arguments=args,
-                    input_schema=input_schema,  # 注入 Schema
+                    input_schema=input_schema,
                     description=action_req.get("description"),
                     interrupt_index=idx,
                     batch_id=current_batch_id,
@@ -167,6 +187,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
             yield InterruptGeneration()
             return
 
+        # --- 2. HITL 中间件恢复数据 ---
         middleware_data = Decode.get_hitl_middleware_data(mode, event)
         if middleware_data:
             approved_calls = middleware_data.get("approved_calls", [])
@@ -176,13 +197,10 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 tool_call_id = call.get("id")
                 name = call.get("name")
                 args = call.get("args") or {}
-
-                # 获取工具定义
                 target_tool = self._tool_map.get(name)
 
                 for provider in self.providers:
                     if provider.matches_tool_name(name):
-                        # 适配 Provider 新签名，传入 tool_def
                         async for instruction in provider.create_call_instruction(
                                 tool_call_id, name, args, tool_def=target_tool
                         ):
@@ -193,12 +211,10 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 tool_call_id = res.get("id")
                 name = res.get("name")
                 content = res.get("content")
-
                 target_tool = self._tool_map.get(name)
 
                 for provider in self.providers:
                     if provider.matches_tool_name(name):
-                        # 适配 Provider 新签名，传入 tool_def
                         async for instruction in provider.create_call_instruction(
                                 tool_call_id, name, {}, tool_def=target_tool
                         ):
@@ -207,31 +223,64 @@ class DefaultGenerateManager(AbstractGenerateManager):
                             yield instruction
                         break
 
+        # --- 3. 提取当前事件的 lc_run_uuid ---
+        lc_run_uuid = None
+        if hasattr(event, 'id') and event.id:
+            lc_run_uuid = self._extract_run_uuid(event.id)
+
+        # --- 4. 流式正文内容 ---
         text_content = Decode.get_text_content(mode, event)
-        if text_content:
-            if not self._content_id:
-                self._content_id = generate_uuid()
+        if text_content and lc_run_uuid:
+            content_id = f"{lc_run_uuid}-N"
+            if content_id not in self._created_stream_ids:
+                self._created_stream_ids.add(content_id)
                 yield CreateSubMessage(
-                    sub_message_id=self._content_id,
+                    sub_message_id=content_id,
                     type=schemas_enums.SubMessageType.NORMAL.value,
                     sortOrder=1,
                     status=schemas_enums.MessageStatus.GENERATING
                 )
-            yield AppendToSubMessage(sub_message_id=self._content_id, content=text_content)
+            yield AppendToSubMessage(sub_message_id=content_id, content=text_content)
 
+        # --- 5. 流式推理内容 ---
         reasoning_content = Decode.get_reasoning_content(mode, event)
-        if reasoning_content:
-            if not self._reasoning_id:
-                self._reasoning_id = generate_uuid()
+        if reasoning_content and lc_run_uuid:
+            reasoning_id = f"{lc_run_uuid}-R"
+            if reasoning_id not in self._created_stream_ids:
+                self._created_stream_ids.add(reasoning_id)
                 yield CreateSubMessage(
-                    sub_message_id=self._reasoning_id,
+                    sub_message_id=reasoning_id,
                     type=schemas_enums.SubMessageType.REASONING.value,
                     sortOrder=0,
                     status=schemas_enums.MessageStatus.GENERATING,
                     config={"context_participation_length": 0}
                 )
-            yield AppendToSubMessage(sub_message_id=self._reasoning_id, content=reasoning_content)
+            yield AppendToSubMessage(sub_message_id=reasoning_id, content=reasoning_content)
 
+        # --- 6. 轮次闭合：当 updates 模式的 AIMessage 到达时 ---
+        if mode == "updates" and isinstance(event, AIMessage) and lc_run_uuid:
+            reasoning_id = f"{lc_run_uuid}-R"
+            content_id = f"{lc_run_uuid}-N"
+
+            if reasoning_id in self._created_stream_ids:
+                yield UpdateSubMessageConfig(
+                    sub_message_id=reasoning_id,
+                    config={"is_minimal": True}
+                )
+                yield UpdateSubMessageStatus(
+                    sub_message_id=reasoning_id,
+                    status=schemas_enums.MessageStatus.COMPLETED
+                )
+                self._created_stream_ids.discard(reasoning_id)
+
+            if content_id in self._created_stream_ids:
+                yield UpdateSubMessageStatus(
+                    sub_message_id=content_id,
+                    status=schemas_enums.MessageStatus.COMPLETED
+                )
+                self._created_stream_ids.discard(content_id)
+
+        # --- 7. 工具调用 (来自 updates AIMessage) ---
         tool_calls = Decode.get_toolcall_content(mode, event)
         if tool_calls:
             has_hitl_tool = any(self._hitl_tools_config.get(tc.get("name")) for tc in tool_calls)
@@ -247,18 +296,17 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 if has_hitl_tool:
                     continue
 
-                # 获取工具定义
                 target_tool = self._tool_map.get(name)
 
                 for provider in self.providers:
                     if provider.matches_tool_name(name):
-                        # 适配 Provider 新签名，传入 tool_def
                         async for instruction in provider.create_call_instruction(
                                 tool_call_id, name, args, tool_def=target_tool
                         ):
                             yield instruction
                         break
 
+        # --- 8. 工具执行结果 ---
         tool_result = Decode.get_toolcall_result(mode, event)
         if tool_result:
             tool_call_id = tool_result.get("id")
@@ -269,6 +317,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 async for instruction in provider.create_result_instruction(tool_call_id, result_text, is_error):
                     yield instruction
 
+        # --- 9. 生成图片 ---
         image_data = Decode.get_image_url(mode, event)
         if image_data:
             url = image_data.get("image_url", {}).get("url")
@@ -276,6 +325,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 async for instruction in self._handle_generated_image(url):
                     yield instruction
 
+        # --- 10. 用量统计 ---
         usage_data = Decode.get_usage(mode, event)
         if usage_data:
             self._final_usage_data = usage_data
@@ -313,36 +363,38 @@ class DefaultGenerateManager(AbstractGenerateManager):
             )
         except Exception as e:
             print(f"Error processing generated image: {e}")
-            if self._content_id:
+            # 尝试找到最近的正文子消息追加错误信息
+            content_ids = [sid for sid in self._created_stream_ids if sid.endswith('-N')]
+            if content_ids:
                 yield AppendToSubMessage(
-                    sub_message_id=self._content_id,
+                    sub_message_id=content_ids[-1],
                     content=f"\n\n**处理生成图片时出错: {e}**"
                 )
 
     async def _finalize_generation(self, is_interrupted: bool = False) -> AsyncGenerator[BaseInstruction, None]:
-        if self._content_id:
+        """
+        收尾阶段。
+        正常情况下，所有流式子消息已在 updates 事件中闭合。
+        此处处理可能的残余（如异常中断的流）、Usage 统计和最终状态。
+        """
+        # 安全网：闭合任何未被 updates 事件正常关闭的子消息
+        for sub_id in list(self._created_stream_ids):
+            if sub_id.endswith('-R'):
+                yield UpdateSubMessageConfig(
+                    sub_message_id=sub_id,
+                    config={"is_minimal": True}
+                )
             yield UpdateSubMessageStatus(
-                sub_message_id=self._content_id,
+                sub_message_id=sub_id,
                 status=schemas_enums.MessageStatus.COMPLETED
             )
-            self._content_id = None
-
-        if self._reasoning_id:
-            yield UpdateSubMessageConfig(
-                sub_message_id=self._reasoning_id,
-                config={"is_minimal": True}
-            )
-            yield UpdateSubMessageStatus(
-                sub_message_id=self._reasoning_id,
-                status=schemas_enums.MessageStatus.COMPLETED
-            )
-            self._reasoning_id = None
+        self._created_stream_ids.clear()
 
         if self._final_usage_data:
-            self._usage_id = generate_uuid()
+            usage_id = generate_uuid()
             usage_content = json.dumps(self._final_usage_data)
             yield CreateSubMessage(
-                sub_message_id=self._usage_id,
+                sub_message_id=usage_id,
                 type=schemas_enums.SubMessageType.USAGE.value,
                 sortOrder=99,
                 status=schemas_enums.MessageStatus.COMPLETED,
@@ -350,10 +402,9 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 config={"context_participation_length": 0}
             )
 
-        # 核心修复：如果是因为审核中断而收尾，绝不能发出 COMPLETED 终态指令
+        # 核心：如果是因为审核中断而收尾，绝不能发出 COMPLETED 终态指令
         if not is_interrupted:
             yield SetFinalStatus(status=schemas_enums.MessageStatus.COMPLETED)
-
 
     async def _cleanup_on_exception(
             self,
@@ -372,20 +423,23 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 else:
                     error_content = f"发生未处理的异常: {str(exception)}"
 
-        if self._reasoning_id:
-            yield UpdateSubMessageConfig(
-                sub_message_id=self._reasoning_id,
-                config={"is_minimal": True}
-            )
-            yield UpdateSubMessageStatus(sub_message_id=self._reasoning_id, status=final_status)
-
-        if self._content_id:
-            yield UpdateSubMessageStatus(sub_message_id=self._content_id, status=final_status)
+        # 闭合所有仍然活跃的流式子消息
+        last_content_id = None
+        for sub_id in list(self._created_stream_ids):
+            if sub_id.endswith('-R'):
+                yield UpdateSubMessageConfig(
+                    sub_message_id=sub_id,
+                    config={"is_minimal": True}
+                )
+            if sub_id.endswith('-N'):
+                last_content_id = sub_id
+            yield UpdateSubMessageStatus(sub_message_id=sub_id, status=final_status)
+        self._created_stream_ids.clear()
 
         if error_content:
-            if self._content_id:
+            if last_content_id:
                 yield AppendToSubMessage(
-                    sub_message_id=self._content_id,
+                    sub_message_id=last_content_id,
                     content=f"\n\n**错误:** {error_content}"
                 )
             else:

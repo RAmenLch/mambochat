@@ -44,7 +44,7 @@ class ChatWorker(AbstractGenerateWorker):
         lc_messages = []
         for msg in messages:
             role = msg.get("role")
-            content = msg.get("content", "")
+            content = msg.get("content", "") or ''
             name = msg.get("name")
 
             if role == "system":

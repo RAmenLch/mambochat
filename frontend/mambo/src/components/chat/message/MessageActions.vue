@@ -77,6 +77,13 @@ import {
   ArrowUpBold, ArrowDownBold, Clock
 } from '@element-plus/icons-vue'
 
+interface EditPayload {
+  content: string
+  range?: { start: number; end: number }
+  language?: string
+  markup?: string
+}
+
 defineProps<{
   showActions: boolean
   isGenerating: boolean
@@ -90,7 +97,7 @@ defineProps<{
 defineEmits<{
   (e: 'regenerate'): void
   (e: 'toggle-collapse'): void
-  (e: 'edit-request', subMessage: SubMessage | undefined, payload: any): void
+  (e: 'edit-request', subMessage: SubMessage | undefined, payload: EditPayload): void
   (e: 'copy-all'): void
   (e: 'compress-history'): void
   (e: 'delete'): void

@@ -2,6 +2,7 @@
 
 import json
 import base64
+from datetime import datetime as dt
 from typing import List, Dict, Any, Optional, Set, Tuple
 from types import SimpleNamespace
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,11 +29,6 @@ _KNOWN_TEXT_APPLICATION_TYPES = {
 
 
 def _is_text_mime_type(mime_type: str) -> bool:
-    """
-    判断 MIME 类型是否可作为文本注入 LLM 上下文。
-    - text/* 前缀通用放行
-    - 已知的文本类 application/* 类型放行
-    """
     if mime_type.startswith("text/"):
         return True
     return mime_type in _KNOWN_TEXT_APPLICATION_TYPES
@@ -43,16 +39,14 @@ class LLMInputBuilder:
     LLM 输入构建器。
     负责从数据库或内存加载素材（Chat, Provider, Settings, Messages），
     并根据配置执行过滤、切片、多模态转换，最终生成标准化的 LLMInput 对象。
-    支持内部缓存以优化 ReAct 循环中的重复构建性能。
-    新增 HITL 审核机制，支持工具审核和恢复指令生成。
+
+    多轮拆分：
+    对于 Assistant 消息，按时间顺序遍历所有子消息（包括被内容过滤的 Reasoning），
+    以 McpTool 后出现的任意非 McpTool 子消息作为轮次分界线，自动拆分为
+    多个 assistant→tool 消息序列。边界检测与内容过滤完全解耦。
     """
 
     def __init__(self, db: AsyncSession, chat_id: str):
-        """
-        初始化构建器。
-        :param db: 数据库会话
-        :param chat_id: 当前操作的会话ID，用于确定上下文范围
-        """
         if not chat_id:
             raise ValueError("LLMInputBuilder requires a chat_id")
 
@@ -73,15 +67,14 @@ class LLMInputBuilder:
         self._history_override: Optional[List[Any]] = None
         self._enable_resource_merge: bool = False
 
-        # 新增配置项
         self._content_limit: Optional[int] = None
         self._flatten_history: bool = False
         self._append_prompt: Optional[str] = None
         self._tools: Optional[List[BaseTool]] = None
-        self._enable_max_context_messages: bool = False  # 启用 max_context_messages 筛选
-        self._enable_tools: bool = False  # <--- 新增：默认不启用外部工具(MCP, Suggest等)
+        self._enable_max_context_messages: bool = False
+        self._enable_tools: bool = False
 
-        # 内部数据缓存 (用于减少 I/O)
+        # 内部数据缓存
         self._cached_chat = None
         self._cached_settings = None
         self._cached_model = None
@@ -93,149 +86,85 @@ class LLMInputBuilder:
         self.settings = {}
         self._target_msg = None
 
-        # 新增：工具提供者列表
         self.providers: List[BaseToolProvider] = []
-
-        # 新增：记录需要 HITL 审核的工具映射
         self._hitl_interrupt_on: Dict[str, bool] = {}
 
     # --- 配置方法 (Fluent API) ---
 
     def slice_until_message(self, message_id: str, include_target: bool = False) -> "LLMInputBuilder":
-        """
-        设置上下文截断点。
-        :param message_id: 截断点的消息ID
-        :param include_target: 是否包含该消息本身。
-                               False(默认): 截取到此消息之前 (用于 ReAct 上下文构建)
-                               True: 包含此消息 (用于 ZipHistory 摘要构建)
-        """
         self._cutoff_message_id = message_id
         self._cutoff_include = include_target
         return self
 
     def slice(self, start: int, end: Optional[int] = None) -> "LLMInputBuilder":
-        """设置常规切片范围。"""
         self._slice_range = slice(start, end)
         return self
 
     def slice_head_tail(self, head: int, tail: int) -> "LLMInputBuilder":
-        """设置头尾切片，常用于标题生成或长对话摘要。"""
         self._head_tail = (head, tail)
         return self
 
     def filter_sub_message_types(self, *types: str) -> "LLMInputBuilder":
-        """设置允许的子消息类型过滤。"""
         self._type_filter = set(types)
         return self
 
     def enable_cpl_filter(self) -> "LLMInputBuilder":
-        """启用上下文参与长度 (Context Participation Length) 过滤。"""
         self._enable_cpl_filter = True
         return self
 
     def enable_image_with_model(self) -> "LLMInputBuilder":
-        """启用多模态图片处理。"""
         self._enable_image_with_model = True
         return self
 
     def disable_zip_history(self) -> "LLMInputBuilder":
-        """禁用压缩历史逻辑，则直接忽略ZipHistory。"""
         self._enable_zip_history = False
         return self
 
     def use_global_model(self, setting_keys: List[str]) -> "LLMInputBuilder":
-        """
-        配置 Builder 使用全局设置中的模型，而非当前会话的模型。
-        按顺序查找 setting_keys，使用第一个找到的有效模型 ID。
-        """
         self._global_model_keys = setting_keys
         return self
 
     def set_system_prompt(self, prompt: str) -> "LLMInputBuilder":
-        """
-        强制设置 System Prompt，忽略 Chat 中的设置。
-        """
         self._system_prompt_override = prompt
         return self
 
     def set_history_override(self, history: List[Any]) -> "LLMInputBuilder":
-        """
-        注入内存中的历史记录列表。
-        设置此项后，Builder 将跳过从数据库加载消息的步骤，直接使用此列表。
-        适用于 ReAct 循环中包含未持久化消息的场景。
-        """
         self._history_override = history
         return self
 
     def enable_resource_prompt_merge(self) -> "LLMInputBuilder":
-        """
-        启用资源挂载功能。
-        如果 Chat 配置了 resource_prompt_list，则提取资源内容并追加到 System Prompt。
-        """
         self._enable_resource_merge = True
         return self
 
     def limit_sub_message_content(self, max_length: int) -> "LLMInputBuilder":
-        """
-        限制每个子消息文本内容的长度。
-        超过长度将被截断并追加 '...'。
-        """
         self._content_limit = max_length
         return self
 
     def flatten_history_to_single_user_message(self) -> "LLMInputBuilder":
-        """
-        将所有历史记录聚合成一条 User 消息。
-        格式通常为:
-        User: xxx
-        Assistant: xxx
-        ...
-        """
         self._flatten_history = True
         return self
 
     def append_user_message(self, content: str) -> "LLMInputBuilder":
-        """
-        在历史记录末尾追加一条 User 消息（通常作为 Trigger Prompt）。
-        Builder 会自动处理与上一条 User 消息的合并。
-        """
         self._append_prompt = content
         return self
 
     def set_tools(self, tools: List[BaseTool]) -> "LLMInputBuilder":
-        """
-        设置 LangChain 工具列表。
-        这些工具将直接传递给 Worker (Agent)。
-        """
         self._tools = tools
         return self
 
     def enable_max_context_messages(self) -> "LLMInputBuilder":
-        """
-        启用基于 max_context_messages 参数的历史消息筛选。
-        筛选逻辑：保留最新的 N 条历史消息（不包含当前最新的用户问题），N 为偶数。
-        """
         self._enable_max_context_messages = True
         return self
 
     def enable_tools(self) -> "LLMInputBuilder":
-        """
-        启用外部工具支持 (如 MCP, Suggest 等)。
-        通常仅在主对话生成时启用，以避免标题生成或历史摘要等任务意外触发工具调用和 HITL 审核。
-        """
         self._enable_tools = True
         return self
 
     # --- 核心构建方法 ---
 
     async def build(self) -> LLMInput:
-        """
-        激活构建流程。
-        执行数据加载、逻辑应用、结构转换，返回 LLMInput 实例。
-        """
         await self._load_materials()
 
-        # 1. 确定模型和 System Prompt
         model = await self._resolve_model()
         provider = model.provider
 
@@ -243,31 +172,24 @@ class LLMInputBuilder:
         if system_prompt is None:
             system_prompt = self.chat.systemPrompt or ""
 
-        # 2. 统筹资源与工具 Providers，获取扩展的提示词 (同时填充 self._hitl_interrupt_on)
         extended_prompt = await self._setup_providers_and_resources()
         if extended_prompt:
             system_prompt = system_prompt + "\n\n" + extended_prompt if system_prompt else extended_prompt
 
-        # 3. 应用压缩历史逻辑
         effective_history = self.history
         if self._enable_zip_history:
             effective_history = await self._apply_zip_history_logic(effective_history)
 
-        # 4. 应用切片逻辑
         effective_history = self._apply_slicing(effective_history)
 
-        # 5.应用 max_context_messages 筛选逻辑
         if self._enable_max_context_messages:
             effective_history = self._apply_max_context_limit(effective_history)
 
-        # 6. 核心转换：将消息对象集合转化为 Payload 结构
         messages_payload = await self._build_payload(effective_history)
 
-        # 7. 注入 System Prompt
         if system_prompt:
             messages_payload.insert(0, {"role": "system", "content": system_prompt})
 
-        # 8. 组装参数
         api_params = {}
         if not self._global_model_keys:
             api_params = self._map_parameters(self.chat.modelParameters)
@@ -283,7 +205,6 @@ class LLMInputBuilder:
                 target_msg = await message_crud.get_message(self.db, message_id=self._cutoff_message_id)
 
             if target_msg and target_msg.role == schemas_enums.MessageRole.ASSISTANT.value:
-                # 1. 找出当前 Assistant 消息下所有已做出决策的审核记录
                 decided_reviews = []
                 for sub in target_msg.sub_messages:
                     if sub.type == schemas_enums.SubMessageType.REVIEW_TOOL.value:
@@ -295,39 +216,29 @@ class LLMInputBuilder:
                             pass
 
                 if decided_reviews:
-                    # 2. 找出最新的一批 batch_id (通过创建时间降序排序)
                     decided_reviews.sort(key=lambda x: x[0], reverse=True)
                     latest_batch_id = decided_reviews[0][1].batch_id
 
-                    # 3. 提取该最新批次的所有决策
                     latest_batch_decisions = [item[1] for item in decided_reviews if
                                               item[1].batch_id == latest_batch_id]
-
-                    # 4. 严格按照 interrupt_index 排序，确保与 LangGraph 中断事件顺序一致
                     latest_batch_decisions.sort(key=lambda x: x.interrupt_index)
 
-                    # 5. 构建 LangGraph 需要的 Command(resume=...) 格式
                     resume_decisions = []
                     for item in latest_batch_decisions:
                         decision_dict = {"type": item.decision.type.value}
                         if item.decision.type.value == "edit" and item.decision.edited_action:
-                            # 修复：调用 .model_dump() 将强类型转换为字典
                             decision_dict["edited_action"] = item.decision.edited_action.model_dump()
                         if item.decision.type.value == "reject":
-                            # 获取原始理由，若无则默认为空字符串
                             raw_reason = item.decision.message or ""
-                            # 按照你的需求注入上下文
                             injected_message = (
                                 f"{item.tool_call_id} 本批次 调用工具:{item.name}拒绝执行; "
                                 f"拒绝理由 {raw_reason}"
                             )
-
                             decision_dict["message"] = injected_message
                         resume_decisions.append(decision_dict)
 
                     resume_payload = {"decisions": resume_decisions}
 
-        # 仅在开启了需要审核的工具时，才强制要求 _cutoff_message_id
         if not self._cutoff_message_id and self._hitl_interrupt_on:
             raise ValueError(
                 "Build failed: assistant_message_id (_cutoff_message_id) is required when HITL is enabled.")
@@ -346,12 +257,9 @@ class LLMInputBuilder:
             resume_payload=resume_payload
         )
 
-
     # --- 内部处理逻辑 ---
 
     async def _load_materials(self):
-        """加载构建所需的数据库素材，优先使用内部缓存。"""
-        # 1. 加载 Chat (带缓存)
         if not self._cached_chat:
             self.chat = await chat_crud.get_chat(self.db, self.chat_id)
             if not self.chat:
@@ -360,28 +268,24 @@ class LLMInputBuilder:
         else:
             self.chat = self._cached_chat
 
-        # 2. 加载历史消息
         if self._history_override is not None:
             self.history = self._history_override
             if self._cutoff_message_id:
-                self._target_msg = next((m for m in self.history if getattr(m, 'id', None) == self._cutoff_message_id), None)
+                self._target_msg = next(
+                    (m for m in self.history if getattr(m, 'id', None) == self._cutoff_message_id), None)
         else:
             all_msgs = await message_crud.get_messages_by_chat(self.db, self.chat_id)
-
             if self._cutoff_message_id:
                 try:
                     idx = next(i for i, m in enumerate(all_msgs) if m.id == self._cutoff_message_id)
                     self._target_msg = all_msgs[idx]
-                    # 如果包含目标，切片终点是 idx + 1；如果不包含，终点是 idx
                     end_index = idx + 1 if self._cutoff_include else idx
                     self.history = all_msgs[:end_index]
                 except StopIteration:
-                    # 如果找不到目标ID，通常意味着数据不一致，这里选择返回全部
                     self.history = all_msgs
             else:
                 self.history = all_msgs
 
-        # 3. 加载全局设置 (带缓存)
         if not self._cached_settings:
             all_settings = await setting_crud.get_all_settings(self.db)
             self.settings = {s.key: s.value for s in all_settings}
@@ -390,12 +294,10 @@ class LLMInputBuilder:
             self.settings = self._cached_settings
 
     async def _resolve_model(self) -> "AIModel":
-        """决定最终使用哪个模型，支持缓存。"""
         if self._cached_model:
             return self._cached_model
 
         model = None
-        # 1. 尝试从全局设置获取
         if self._global_model_keys:
             for key in self._global_model_keys:
                 setting = self.settings.get(key)
@@ -407,7 +309,6 @@ class LLMInputBuilder:
             if not model:
                 raise ValueError(f"未能从全局设置 {self._global_model_keys} 中找到有效的模型配置")
         else:
-            # 2. 默认：使用 Chat 绑定的模型
             if not self.chat.ai_model:
                 raise ValueError("会话未配置模型")
             model = self.chat.ai_model
@@ -416,36 +317,25 @@ class LLMInputBuilder:
         return model
 
     async def _setup_providers_and_resources(self) -> str:
-        """
-        解析资源、初始化所有的 ToolProvider，并聚合系统提示词。
-        返回聚合后的系统提示词扩展部分。
-        """
         self.providers = []
         extended_prompts = []
 
-        # 1. 资源分发解析
         knowledge_bases = []
         if self._enable_resource_merge and self.chat.resource_prompt_list:
             dispatcher = ResourceDispatcher(self.db)
             dispatch_result = await dispatcher.dispatch(self.chat.resource_prompt_list)
 
-            # 拼接普通文本资源
             for content in dispatch_result["system_prompts"]:
                 extended_prompts.append(content)
             for content in dispatch_result["submessage_templates"]:
                 extended_prompts.append(content)
 
-            # 收集知识库资源用于初始化 KBToolProvider
             knowledge_bases = dispatch_result["knowledge_bases"]
 
-        # 2. 初始化 Providers
-        # 2.1 KB Provider (知识库属于资源，不受 enable_tools 限制)
         if knowledge_bases:
             self.providers.append(KBToolProvider(self.db, knowledge_bases))
 
-        # 仅在启用工具时加载 MCP 和 Suggest
         if self._enable_tools:
-            # 解析模型参数
             params = {}
             if self.chat and self.chat.modelParameters:
                 try:
@@ -454,36 +344,29 @@ class LLMInputBuilder:
                 except (json.JSONDecodeError, TypeError):
                     pass
 
-            # 2.2 MCP Provider (处理外部工具与 HITL 审核机制)
             mcp_ids = self.chat.enabled_mcp_ids or []
             if mcp_ids:
                 self.providers.append(MCPToolProvider(self.db, mcp_ids))
 
-                # 查询当前启用的 MCP 工具，筛选出需要审核的工具
                 mcp_tools = await mcp_crud.get_tools_by_server_ids(self.db, mcp_ids)
                 for tool in mcp_tools:
                     if tool.review_mode == schemas_enums.ToolReviewMode.REQUIRE_REVIEW.value:
                         self._hitl_interrupt_on[tool.name] = True
 
-            # 2.3 Suggest Provider
             enable_suggest = params.get("enable_suggest", False)
             if enable_suggest:
                 self.providers.append(SuggestToolProvider(enable_suggest=True))
 
-        # 3. 收集所有工具和提示词注入
         all_tools = []
         for provider in self.providers:
-            # 获取工具 (此处可能抛出 McpConnectionError，由上层 Manager 捕获)
             tools = await provider.get_tools()
             if tools:
                 all_tools.extend(tools)
 
-            # 获取提示词注入
             injection = provider.get_system_prompt_injection()
             if injection:
                 extended_prompts.append(injection)
 
-        # 聚合工具到 Builder 实例
         if all_tools:
             if self._tools is None:
                 self._tools = []
@@ -492,7 +375,6 @@ class LLMInputBuilder:
         return "\n\n".join(extended_prompts) if extended_prompts else ""
 
     def _apply_slicing(self, history: List[Any]) -> List[Any]:
-        """应用配置的切片策略。"""
         if not history:
             return []
 
@@ -508,18 +390,9 @@ class LLMInputBuilder:
         return history
 
     def _apply_max_context_limit(self, history: List[Any]) -> List[Any]:
-        """
-        应用 max_context_messages 限制。
-        逻辑：
-        1. 获取 chat.modelParameters 中的 max_context_messages。
-        2. 确保该值为偶数（奇数+1）。
-        3. 将历史消息分为"历史上下文"和"最新消息"。
-        4. 从"历史上下文"中保留最后 N 条，并与"最新消息"合并。
-        """
         if not history:
             return []
 
-        # 解析参数
         params = self.chat.modelParameters
         if not params:
             return history
@@ -534,30 +407,23 @@ class LLMInputBuilder:
         if not limit or not isinstance(limit, int):
             return history
 
-        # 强制偶数
         if limit % 2 != 0:
             limit += 1
 
-        # 如果只有一条消息（通常只有最新的用户问题），直接返回
         if len(history) <= 1:
             return history
 
-        # 分离最后一条消息（假设为当前触发的问题）
         last_message = history[-1]
         history_context = history[:-1]
 
-        # 如果历史上下文长度小于等于限制，无需截断
         if len(history_context) <= limit:
             return history
 
-        # 截取历史上下文的最后 limit 条
         sliced_context = history_context[-limit:]
 
-        # 重新组合
         return sliced_context + [last_message]
 
     async def _apply_zip_history_logic(self, history: List[Any]) -> List[Any]:
-        """处理压缩历史逻辑：发现启用的 ZipHistory 则截断之前的内容并插入摘要。"""
         last_enabled_zip_index = -1
         zip_content = None
 
@@ -589,116 +455,164 @@ class LLMInputBuilder:
         return history
 
     async def _build_payload(self, history: List[Any]) -> List[Dict[str, Any]]:
-        """将消息对象列表转换为 LLM 字典列表。"""
+        """
+        将消息对象列表转换为 LLM 字典列表。
+
+        对 Assistant 消息使用多轮拆分逻辑 (_convert_assistant_to_rounds)，
+        自动按 McpTool 子消息分界为多个 assistant→tool 消息序列，
+        避免 LLM 将原本多轮进行的工具调用误解为单轮并发执行。
+        """
         payload = []
         total_count = len(history)
 
         for i, msg in enumerate(history):
             recency_rank = total_count - i
 
-            # 1. 转换主消息
-            llm_msg = await self._convert_message_to_llm_dict(msg, recency_rank)
-            if llm_msg:
-                payload.append(llm_msg)
-
-            # 2. 如果是 Assistant 消息，检查并提取关联的工具执行结果（Role: Tool）
             if msg.role == schemas_enums.MessageRole.ASSISTANT.value:
-                tool_results = self._extract_tool_results(msg)
-                if tool_results:
-                    payload.extend(tool_results)
+                round_messages = await self._convert_assistant_to_rounds(msg, recency_rank)
+                payload.extend(round_messages)
+            else:
+                llm_msg = await self._convert_message_to_llm_dict(msg, recency_rank)
+                if llm_msg:
+                    payload.append(llm_msg)
 
-        # 3. 处理历史聚合 (Flatten)
         if self._flatten_history and payload:
             flattened_content = ""
             for msg in payload:
                 role_label = "User" if msg["role"] == "user" else "Assistant"
-                # 处理内容可能是字符串也可能是 list (多模态)
-                content_str = ""
                 raw_content = msg.get("content")
 
+                content_str = ""
                 if isinstance(raw_content, str):
                     content_str = raw_content
                 elif isinstance(raw_content, list):
-                    # 简化处理：如果是 flatten 模式，只取文本部分
                     texts = [item["text"] for item in raw_content if item.get("type") == "text"]
                     content_str = "\n".join(texts)
 
                 if content_str:
                     flattened_content += f"{role_label}: {content_str}\n\n"
 
-            # 重置 payload 为单条消息
             payload = [{"role": "user", "content": flattened_content.strip()}]
 
-        # 4. 处理追加提示词 (Append Prompt)
         if self._append_prompt:
             payload.append({"role": "user", "content": self._append_prompt})
 
-        # 5. 合并连续角色消息
         return self._merge_consecutive_roles(payload)
 
-    def _extract_tool_results(self, msg: Any) -> List[Dict[str, Any]]:
-        """从消息的子消息中提取工具执行结果，生成 role: tool 的消息列表。"""
-        results = []
-        for sub in msg.sub_messages:
-            if sub.type == schemas_enums.SubMessageType.MCP_TOOL.value:
-                try:
-                    tool_content = McpToolContent.from_json_string(sub.content)
-                    result_msg = tool_content.to_openai_tool_result_message()
-                    if result_msg:
-                        results.append(result_msg)
-                except (ValueError, TypeError):
-                    continue
-        return results
+    # ==================== 核心改动区域 ====================
+
+    async def _convert_assistant_to_rounds(self, msg: Any, recency_rank: int) -> List[Dict[str, Any]]:
+        """
+        将一个 Assistant 消息拆分为多轮 LLM 消息序列。
+
+        核心设计：**边界检测与内容过滤完全解耦**。
+        - 边界检测：遍历 ALL 子消息（包括被 CPL/类型过滤掉的 Reasoning 等），
+          当 McpTool 之后出现任意非 McpTool 子消息时，视为新一轮 LLM 调用的开始。
+        - 内容填充：仅将通过 _should_include_sub_message 的子消息纳入 payload。
+
+        这保证了即使 Reasoning 触发了工具调用（Reasoning→Tool→Reasoning→Tool...），
+        每个工具调用仍被正确拆分为独立的串行轮次，而非被合并为一次并发调用。
+
+        不依赖子消息 ID 格式，保持版本稳定性。
+        """
+        # 按 createdAt 排序，保证时间顺序
+        sorted_subs = sorted(
+            msg.sub_messages,
+            key=lambda s: (getattr(s, 'createdAt', None) or dt.min, getattr(s, 'sortOrder', 0))
+        )
+
+        rounds: List[Dict[str, List]] = []
+        current_round: Dict[str, List] = {"content_parts": [], "tool_calls": [], "tool_results": []}
+        seen_tool_in_round = False
+
+        for sub in sorted_subs:
+            is_mcp_tool = (sub.type == schemas_enums.SubMessageType.MCP_TOOL.value)
+
+            if is_mcp_tool:
+                # ── McpTool: 始终参与边界标记，仅在通过过滤时填充数据 ──
+                seen_tool_in_round = True
+
+                if self._should_include_sub_message(sub, recency_rank):
+                    try:
+                        tool_content = McpToolContent.from_json_string(sub.content)
+                        current_round["tool_calls"].append(tool_content.to_openai_tool_call())
+                        result_msg = tool_content.to_openai_tool_result_message()
+                        if result_msg:
+                            current_round["tool_results"].append(result_msg)
+                    except (ValueError, TypeError):
+                        continue
+            else:
+                # ── 非 McpTool: 任何此类子消息出现在工具之后即为新轮次起点 ──
+                if seen_tool_in_round:
+                    # 关闭当前轮次（仅当有实际内容时才入列）
+                    if current_round["content_parts"] or current_round["tool_calls"]:
+                        rounds.append(current_round)
+                    current_round = {"content_parts": [], "tool_calls": [], "tool_results": []}
+                    seen_tool_in_round = False
+
+                # 内容填充：仅通过过滤的子消息才产出 payload
+                if self._should_include_sub_message(sub, recency_rank):
+                    part = await self._convert_sub_message_to_part(sub)
+                    if part:
+                        current_round["content_parts"].append(part)
+
+        # 收集最后一轮
+        if current_round["content_parts"] or current_round["tool_calls"]:
+            rounds.append(current_round)
+
+        # 转换为 LLM 字典序列
+        result = []
+        for round_data in rounds:
+            assistant_msg: Dict[str, Any] = {"role": "assistant"}
+
+            if round_data["content_parts"]:
+                if len(round_data["content_parts"]) == 1 and round_data["content_parts"][0].get("type") == "text":
+                    assistant_msg["content"] = round_data["content_parts"][0]["text"]
+                else:
+                    assistant_msg["content"] = round_data["content_parts"]
+            else:
+                assistant_msg["content"] = None
+
+            if round_data["tool_calls"]:
+                assistant_msg["tool_calls"] = round_data["tool_calls"]
+
+            result.append(assistant_msg)
+            result.extend(round_data["tool_results"])
+
+        return result
+
+    # ==================== 核心改动区域结束 ====================
 
     async def _convert_message_to_llm_dict(self, msg: Any, recency_rank: int) -> Optional[Dict[str, Any]]:
-        """将单条消息转换为 LLM 字典格式，包含工具调用解析。"""
+        """
+        将非 Assistant 消息转换为 LLM 字典格式。
+        Assistant 消息应使用 _convert_assistant_to_rounds 处理。
+        """
         content_parts = []
-        tool_calls = []
 
         for sub in msg.sub_messages:
-            # 1. 过滤逻辑
             if not self._should_include_sub_message(sub, recency_rank):
                 continue
 
-            # 2. 特殊类型处理：工具调用 (MCP_TOOL)
             if sub.type == schemas_enums.SubMessageType.MCP_TOOL.value:
-                try:
-                    # 使用 McpToolContent 解析并生成 OpenAI 格式的工具调用请求
-                    tool_content = McpToolContent.from_json_string(sub.content)
-                    tool_calls.append(tool_content.to_openai_tool_call())
-                except (ValueError, TypeError):
-                    continue
                 continue
 
-            # 3. 内容转换
             part = await self._convert_sub_message_to_part(sub)
             if part:
                 content_parts.append(part)
 
-        # 4. 构建返回对象
-        if not content_parts and not tool_calls:
+        if not content_parts:
             return None
 
-        res = {"role": msg.role}
+        res: Dict[str, Any] = {"role": msg.role}
 
-        # 如果是 tool 类型的消息（通常由 ReAct 循环虚拟生成），必须携带 tool_call_id
         if msg.role == "tool" and hasattr(msg, "tool_call_id"):
             res["tool_call_id"] = msg.tool_call_id
 
-        # 处理 Content
-        if content_parts:
-            # 如果只有一个文本部分，简化为字符串
-            if len(content_parts) == 1 and content_parts[0]["type"] == "text":
-                res["content"] = content_parts[0]["text"]
-            else:
-                res["content"] = content_parts
+        if len(content_parts) == 1 and content_parts[0]["type"] == "text":
+            res["content"] = content_parts[0]["text"]
         else:
-            # 有 tool_calls 但无 content，OpenAI 允许 content 为 null
-            res["content"] = None
-
-        # 处理 Tool Calls
-        if tool_calls:
-            res["tool_calls"] = tool_calls
+            res["content"] = content_parts
 
         return res
 
@@ -727,7 +641,6 @@ class LLMInputBuilder:
         else:
             part = {"type": "text", "text": sub.content}
 
-        # 应用内容截断
         if part and part.get("type") == "text" and self._content_limit:
             text = part["text"]
             if len(text) > self._content_limit:
@@ -736,13 +649,11 @@ class LLMInputBuilder:
         return part
 
     def _model_supports_images(self) -> bool:
-        """检查已解析的模型元配置中是否包含 image 模态。"""
         if not self._cached_model:
             return False
 
         meta = self._cached_model.meta_config
 
-        # 1. 处理数据库可能返回的 JSON 字符串
         if isinstance(meta, str):
             try:
                 meta = json.loads(meta)
@@ -751,7 +662,7 @@ class LLMInputBuilder:
 
         if not meta:
             return False
-        # 2. 统一获取 input_modalities (兼容 Dict 和 Pydantic 对象)
+
         input_modalities = []
         if isinstance(meta, dict):
             input_modalities = meta.get('input_modalities')
@@ -761,7 +672,6 @@ class LLMInputBuilder:
         return 'image' in (input_modalities or [])
 
     async def _process_file_part(self, file_id: str) -> Optional[Dict[str, Any]]:
-        """处理文件内容的转换与读取，支持缓存以减少 I/O。"""
         if file_id in self._file_content_cache:
             return self._file_content_cache[file_id]
 
@@ -771,7 +681,6 @@ class LLMInputBuilder:
             return None
 
         result = None
-        # 处理图片多模态
         if db_file.mime_type.startswith("image/") \
                 and self._enable_image_with_model and self._model_supports_images():
             img_bytes = await file_service.get_file_content(file_id)
@@ -789,22 +698,18 @@ class LLMInputBuilder:
         return result
 
     def _merge_consecutive_roles(self, payload: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """合并连续的同角色消息（可选，部分 API 要求角色交替）。"""
         if not payload:
             return []
         merged = []
         for msg in payload:
-            # 注意：如果消息包含 tool_calls，通常不合并，因为 tool_calls 结构复杂
             has_tool_calls = "tool_calls" in msg
             last_has_tool_calls = merged and "tool_calls" in merged[-1]
-
-            # 如果是 tool 类型的消息，绝对不能合并，因为每个 tool 消息都有唯一的 tool_call_id
             is_tool_message = msg.get("role") == "tool"
 
             if (merged and merged[-1]["role"] == msg["role"]
                     and not has_tool_calls
                     and not last_has_tool_calls
-                    and not is_tool_message  # <--- 新增此条件
+                    and not is_tool_message
                     and isinstance(merged[-1].get("content"), str)
                     and isinstance(msg.get("content"), str)):
 
@@ -814,7 +719,6 @@ class LLMInputBuilder:
         return merged
 
     def _map_parameters(self, model_params_data: Any) -> Dict[str, Any]:
-        """将数据库存储的扁平化参数映射为 LLM API 所需的层级结构。"""
         flat_params = {}
         if model_params_data:
             flat_params = json.loads(model_params_data) if isinstance(model_params_data, str) else model_params_data
@@ -823,7 +727,7 @@ class LLMInputBuilder:
         param_def_map = {p.key: p for p in SUPPORTED_LLM_PARAMETERS}
 
         for key, value in flat_params.items():
-            if key in ["max_context_messages", "stream", "enabled_mcp_ids","enable_suggest"]:
+            if key in ["max_context_messages", "stream", "enabled_mcp_ids", "enable_suggest"]:
                 continue
 
             definition = param_def_map.get(key)
@@ -839,10 +743,4 @@ class LLMInputBuilder:
         return structured
 
     def get_providers(self) -> List[BaseToolProvider]:
-        """
-        获取已初始化的所有工具提供者。
-        必须在调用 build() 之后调用此方法，否则返回空列表。
-        """
         return self.providers
-
-

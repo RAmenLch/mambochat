@@ -15,27 +15,42 @@
     </div>
 
     <div class="message-body">
-      <!-- Minimized SubMessages Area -->
-      <MessageMinimizedArea
-        :displayable-sub-messages="displayableSubMessages"
-        :current-message-rank="currentMessageRank"
-        :is-generating="message.status === 'generating'"
-        :is-user="message.role === 'user'"
-        @restore="restoreSubMessage"
-      />
+      <!-- User Message Area -->
+      <template v-if="message.role === 'user'">
+        <!-- Minimized SubMessages Area -->
+        <MessageMinimizedArea
+          :displayable-sub-messages="displayableSubMessages"
+          :current-message-rank="currentMessageRank"
+          :is-generating="message.status === 'generating'"
+          :is-user="true"
+          @restore="restoreSubMessage"
+        />
 
-      <!-- Main Content Area -->
-      <MessageContentArea
-        :message="message"
-        :normal-sub-messages="normalSubMessages"
-        :is-single-view-collapsed="isSingleViewCollapsed"
-        :current-message-rank="currentMessageRank"
-        :is-generating="message.status === 'generating'"
-        :is-user="message.role === 'user'"
-        @edit="handleEditRequest"
-        @edit-file="handleFileEdit"
-        @copy="handleCopySingle"
-      />
+        <!-- Main Content Area -->
+        <MessageContentArea
+          :message="message"
+          :normal-sub-messages="normalSubMessages"
+          :is-single-view-collapsed="isSingleViewCollapsed"
+          :current-message-rank="currentMessageRank"
+          :is-generating="message.status === 'generating'"
+          :is-user="true"
+          @edit="handleEditRequest"
+          @edit-file="handleFileEdit"
+          @copy="handleCopySingle"
+        />
+      </template>
+
+      <!-- Assistant Message Area (Big Bubble) -->
+      <template v-else-if="message.role === 'assistant'">
+        <AssistantBubble
+          :message="message"
+          :is-generating="message.status === 'generating'"
+          :current-message-rank="currentMessageRank"
+          @edit="handleEditRequest"
+          @copy="handleCopySingle"
+          @open-tool-dialog="(toolId) => $emit('open-tool-dialog', message, toolId, 'single')"
+        />
+      </template>
 
       <!-- Zip History Bookmark and Card -->
       <div v-if="zipHistorySubMessage" class="zip-history-section">
@@ -113,6 +128,7 @@ import ZipHistoryCard from './ZipHistoryCard.vue'
 import MessageMinimizedArea from './message/MessageMinimizedArea.vue'
 import MessageContentArea from './message/MessageContentArea.vue'
 import MessageActions from './message/MessageActions.vue'
+import AssistantBubble from './message/AssistantBubble.vue'
 
 interface EditPayload {
   content: string
@@ -197,7 +213,7 @@ const zipBookmarkClass = computed(() => ({
   'is-disabled': zipStatus.value === 'disabled',
 }))
 
-const isSingleSubMessage = computed(() => normalSubMessages.value.length === 1)
+const isSingleSubMessage = computed(() => props.message.role === 'user' && normalSubMessages.value.length === 1)
 const firstSubMessage = computed(() => normalSubMessages.value[0])
 
 const roleClass = computed(() => ({
@@ -403,6 +419,7 @@ function restoreSubMessage(subMessageId: string) {
   display: flex;
   flex-direction: column;
   min-width: 80px;
+  width: 100%;
 }
 
 .zip-history-section {

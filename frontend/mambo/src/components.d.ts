@@ -8,8 +8,10 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AssistantBubble: typeof import('./components/chat/message/AssistantBubble.vue')['default']
     AttachmentPreview: typeof import('./components/chat/AttachmentPreview.vue')['default']
     AvatarUploader: typeof import('./components/settings/AvatarUploader.vue')['default']
+    BubbleSectionGroup: typeof import('./components/chat/message/BubbleSectionGroup.vue')['default']
     ChatHeader: typeof import('./components/chat/ChatHeader.vue')['default']
     ChatInputBox: typeof import('./components/chat/ChatInputBox.vue')['default']
     ChatList: typeof import('./components/chat/ChatList.vue')['default']
