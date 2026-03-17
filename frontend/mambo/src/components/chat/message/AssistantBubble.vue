@@ -1,4 +1,3 @@
-<!-- frontend/mambo/src/components/chat/message/AssistantBubble.vue -->
 <template>
   <div class="assistant-bubble-container" :class="{ 'is-collapsed': isBubbleCollapsed }">
 
@@ -23,12 +22,12 @@
 
       <!-- 思考区域 (Reasoning) -->
       <div class="bubble-section reasoning-section" v-if="reasoningSection">
-        <!-- 最小化态 (已改为圆角矩形) -->
+        <!-- 最小化态 -->
         <div v-if="isReasoningMinimized" class="reasoning-minimized-block" @click="toggleReasoningMinimize">
           <el-icon>
             <Loading v-if="isGenerating && !hasPendingReviews" class="is-loading" />
-            <Warning v-else-if="hasPendingReviews" style="color: var(--el-color-warning)" />
-            <Check v-else style="color: var(--el-color-success)" />
+            <Warning v-else-if="hasPendingReviews" />
+            <Check v-else />
           </el-icon>
           <span>{{ $t('chat.message.reasoningCollapsed', '思考过程 (已折叠)') }}</span>
         </div>
@@ -36,7 +35,8 @@
         <!-- 展开态 -->
         <div v-else class="reasoning-expanded">
           <div class="section-title" @click="toggleReasoningMinimize">
-            {{ $t('chat.message.reasoning', '思考过程') }} ▼
+            <el-icon size="12"><Opportunity /></el-icon>
+            {{ $t('chat.message.reasoning', '思考过程') }}
           </div>
           <div class="section-content">
             <BubbleSectionGroup
@@ -46,6 +46,7 @@
               :parent-message="message"
               :is-generating="isGenerating"
               :is-inactive="isInactive(group)"
+              is-reasoning
               @edit="(subMsg, payload) => $emit('edit', subMsg, payload)"
               @copy="(subMsg) => $emit('copy', subMsg)"
               @open-tool-dialog="(toolId) => $emit('open-tool-dialog', toolId)"
@@ -86,7 +87,7 @@ import type { Message, SubMessage } from '@/api/types';
 import { useAssistantTimeline, type BubbleSectionGroup } from '@/composables/useAssistantTimeline';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import BubbleSectionGroupComponent from './BubbleSectionGroup.vue';
-import { Cpu, Minus, FullScreen, ArrowUpBold, ArrowDownBold, Loading, Warning, Check } from '@element-plus/icons-vue';
+import { Cpu, Minus, FullScreen, ArrowUpBold, ArrowDownBold, Loading, Warning, Check, Opportunity } from '@element-plus/icons-vue';
 
 const BubbleSectionGroup = BubbleSectionGroupComponent;
 
@@ -130,12 +131,15 @@ function isInactive(group: BubbleSectionGroupComponent): boolean {
 </script>
 
 <style scoped>
+/* ========== 大气泡容器 ========== */
 .assistant-bubble-container {
   width: 100%;
-  background-color: var(--color-background-soft);
+  background-color: var(--el-bg-color); /* 白色底 */
   border: 1px solid var(--el-border-color-light);
+  border-left: 3px solid var(--el-color-primary);
   border-radius: 8px;
   overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
   transition: max-height 0.3s ease;
 }
 
@@ -143,12 +147,13 @@ function isInactive(group: BubbleSectionGroupComponent): boolean {
   max-height: 40px;
 }
 
+/* ========== 头部控制栏 ========== */
 .bubble-global-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 4px 12px;
-  background-color: rgba(0, 0, 0, 0.03);
+  background: linear-gradient(135deg, var(--el-color-primary-light-9) 0%, transparent 60%);
   border-bottom: 1px solid var(--el-border-color-lighter);
   height: 36px;
 }
@@ -157,9 +162,9 @@ function isInactive(group: BubbleSectionGroupComponent): boolean {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--el-text-color-secondary);
+  color: var(--el-color-primary);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .header-right {
@@ -168,63 +173,83 @@ function isInactive(group: BubbleSectionGroupComponent): boolean {
   gap: 4px;
 }
 
+/* ========== 气泡主体 ========== */
 .bubble-body {
-  padding: 12px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 20px;
+  background-color: #ffffff; /* 确保主体是纯白 */
 }
 
+/* ========== 思考区域（极浅白色背景） ========== */
 .reasoning-section {
   position: relative;
 }
 
-/* 已修正为圆角矩形 */
 .reasoning-minimized-block {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 12px;
-  background-color: var(--el-fill-color-light);
-  border: 1px solid var(--el-border-color);
-  border-radius: 6px; /* 已修正为 6px 圆角矩形 */
+  padding: 6px 14px;
+  background-color: #fafafa; /* 极浅的灰白 */
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
   font-size: 13px;
-  color: var(--el-text-color-regular);
+  color: var(--el-text-color-primary); /* 深色文字 */
   cursor: pointer;
   user-select: none;
   transition: all 0.2s;
 }
 .reasoning-minimized-block:hover {
-  background-color: var(--el-fill-color);
-  border-color: var(--el-color-primary-light-5);
-  color: var(--el-color-primary);
+  background-color: #f5f5f5;
+  border-color: var(--el-border-color);
 }
 .reasoning-minimized-block .is-loading {
   animation: rotating 2s linear infinite;
 }
 
 .reasoning-expanded {
-  padding-left: 12px;
-  border-left: 3px solid var(--el-border-color);
+  padding: 12px 16px;
+  border-left: 3px solid var(--el-border-color); /* 中性灰竖线 */
+  background-color: #fafafa; /* 极浅的灰白，区别于纯白正文 */
+  border-radius: 0 8px 8px 0;
 }
 
 .section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 12px;
-  color: var(--el-text-color-secondary);
+  color: var(--el-text-color-regular);
   font-weight: bold;
   margin-bottom: 8px;
   cursor: pointer;
   user-select: none;
-  display: inline-block;
 }
 .section-title:hover {
   color: var(--el-text-color-primary);
 }
 
-.normal-section {
-  padding-left: 4px;
+/* 思考区域文字强制深色 */
+.reasoning-section :deep(.message-content) {
+  color: var(--el-text-color-primary) !important;
+}
+.reasoning-section :deep(.content-block strong),
+.reasoning-section :deep(.content-block b) {
+  color: var(--el-text-color-primary) !important;
 }
 
+/* ========== 正文区域（纯白背景） ========== */
+.normal-section {
+  /* 继承主体的白色背景即可 */
+}
+
+.normal-section :deep(.message-content) {
+  color: var(--el-text-color-primary);
+}
+
+/* ========== 加载动画 ========== */
 .typing-indicator {
   display: flex;
   align-items: center;
@@ -235,7 +260,7 @@ function isInactive(group: BubbleSectionGroupComponent): boolean {
   height: 8px;
   width: 8px;
   border-radius: 50%;
-  background-color: #909399;
+  background-color: var(--el-color-primary-light-3);
   margin: 0 3px;
   animation: bounce 1.4s infinite ease-in-out both;
 }

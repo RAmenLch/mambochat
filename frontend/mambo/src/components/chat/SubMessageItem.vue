@@ -439,9 +439,9 @@ function scrollToTop() {
   max-width: 100%;
   border: 1px solid var(--el-border-color-light);
   border-radius: 6px;
-  background-color: var(--color-background-soft);
+  background-color: var(--el-bg-color);           /* ← 改为白色 */
   overflow: hidden;
-  --sub-message-bg: var(--color-background-soft);
+  --sub-message-bg: var(--el-bg-color);            /* ← 同步 */
   position: relative;
   transition: all 0.3s ease;
 }
@@ -653,7 +653,7 @@ function scrollToTop() {
   position: relative;
   word-break: break-word;
   line-height: 1.7;
-  color: var(--color-text);
+  color: var(--el-text-color-primary);
   min-height: 20px;
   transition: max-height 0.25s ease-out;
   max-height: none;

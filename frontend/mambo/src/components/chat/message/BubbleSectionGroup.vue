@@ -1,14 +1,13 @@
-<!-- frontend/mambo/src/components/chat/message/BubbleSectionGroup.vue -->
 <template>
   <div
     class="bubble-section-group"
-    :class="{ 'is-inactive': isInactive }"
+    :class="{ 'is-inactive': isInactive, 'is-reasoning': isReasoning }"
     @mouseenter="isHovered = true"
     @mouseleave="isHovered = false"
   >
     <!-- 文本内容区域 -->
     <div class="group-text-wrapper" v-if="group.textSubMessage">
-      <!-- 悬浮操作栏 (已改为圆角矩形) -->
+      <!-- 悬浮操作栏 -->
       <div class="group-floating-actions" :class="{ 'is-visible': isHovered && !isGenerating }">
         <el-tooltip :content="$t('common.action.edit', '编辑')" placement="top" :show-after="500">
           <el-button :icon="Edit" circle size="small" @click="handleEdit" />
@@ -31,7 +30,7 @@
       />
     </div>
 
-    <!-- 工具调用小气泡 (完全回滚至原版 minimized-item 样式，仅外显名称) -->
+    <!-- 工具调用小气泡 -->
     <div class="group-tools-wrapper" v-if="group.toolSubMessages.length > 0">
       <div
         v-for="tool in group.toolSubMessages"
@@ -47,7 +46,6 @@
           <CircleCheck v-else style="color: var(--el-color-success)" />
         </el-icon>
         <span class="minimized-item-title">
-          <!-- 仅外显工具名称 -->
           {{ getToolName(tool) }}
         </span>
       </div>
@@ -63,12 +61,15 @@ import SubMessageItem from '../SubMessageItem.vue';
 import type { BubbleSectionGroup } from '@/composables/useAssistantTimeline';
 import { Edit, CopyDocument, ArrowUpBold, ArrowDownBold, Warning, Loading, CircleClose, CircleCheck } from '@element-plus/icons-vue';
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   group: BubbleSectionGroup;
   parentMessage: Message;
   isGenerating: boolean;
   isInactive: boolean;
-}>();
+  isReasoning?: boolean;
+}>(), {
+  isReasoning: false,
+});
 
 const emit = defineEmits<{
   (e: 'edit', subMessage: SubMessage, payload: any): void;
@@ -126,15 +127,24 @@ function isToolError(tool: SubMessage): boolean {
 .bubble-section-group {
   position: relative;
   padding: 8px 0;
-  border-bottom: 1px dashed var(--el-border-color-lighter);
+  border-bottom: 1px dashed var(--el-border-color-extra-light);
   transition: opacity 0.3s;
 }
 .bubble-section-group:last-child {
   border-bottom: none;
   padding-bottom: 0;
 }
+
+/* 【关键修改】移除透明度，改为虚线边框提示 */
 .bubble-section-group.is-inactive {
-  opacity: 0.6;
+  opacity: 1;
+  border-left: 2px dashed var(--el-border-color);
+  padding-left: 8px;
+}
+
+/* 思考区域内的分隔线 */
+.bubble-section-group.is-reasoning {
+  border-bottom-color: var(--el-border-color-extra-light);
 }
 
 .group-text-wrapper {
@@ -147,10 +157,10 @@ function isToolError(tool: SubMessage): boolean {
   right: 0;
   display: flex;
   gap: 4px;
-  background-color: var(--color-background-soft);
+  background-color: var(--el-bg-color);
   padding: 2px;
-  border-radius: 6px; /* 已修正为圆角矩形 */
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   opacity: 0;
   visibility: hidden;
   transition: opacity 0.2s, visibility 0.2s;
@@ -169,14 +179,14 @@ function isToolError(tool: SubMessage): boolean {
   padding-left: 4px;
 }
 
-/* 完全复用原版 minimized-item 的样式 */
+/* 【关键修改】工具小气泡设为较浅的灰色 */
 .minimized-item {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
-  border-radius: 6px; /* 原版就是圆角矩形 */
-  background-color: var(--color-background-soft);
+  border-radius: 6px;
+  background-color: var(--el-fill-color-light); /* 较浅的灰色 */
   border: 1px solid var(--el-border-color-light);
   color: var(--el-text-color-regular);
   font-size: 13px;
@@ -189,15 +199,17 @@ function isToolError(tool: SubMessage): boolean {
 .minimized-item:hover {
   border-color: var(--el-color-primary);
   color: var(--el-color-primary);
+  background-color: var(--el-fill-color); /* hover 时稍深 */
 }
 .minimized-item.has-review {
-  border-color: var(--el-color-warning);
+  border-color: var(--el-color-warning-light-3);
   background-color: var(--el-color-warning-light-9);
 }
 .minimized-item.has-review:hover {
-  border-color: var(--el-color-warning-dark-2);
+  border-color: var(--el-color-warning);
   color: var(--el-color-warning-dark-2);
 }
+
 .minimized-item-title {
   white-space: nowrap;
 }
