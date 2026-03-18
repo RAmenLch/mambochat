@@ -1,12 +1,14 @@
+<!-- frontend/mambo/src/components/settings/AgentManager.vue -->
 <template>
-  <div class="agent-manager-container">
-    <div class="sidebar">
-      <AgentTreePanel />
-    </div>
-    <div class="main-content">
+  <el-container class="agent-manager-container">
+    <!-- 左侧：Agent 树 -->
+    <AgentTreePanel />
+
+    <!-- 右侧：编辑器 -->
+    <el-main class="agent-editor-panel">
       <AgentEditor />
-    </div>
-  </div>
+    </el-main>
+  </el-container>
 </template>
 
 <script setup lang="ts">
@@ -16,21 +18,17 @@ import AgentEditor from './agent/AgentEditor.vue';
 
 <style scoped>
 .agent-manager-container {
-  display: flex;
   height: 100%;
-  width: 100%;
+  border: 1px solid var(--el-border-color);
+  border-radius: 4px; /* 与 Resource 保持一致 */
   background-color: var(--el-bg-color);
-  border-radius: 8px;
   overflow: hidden;
-  border: 1px solid var(--el-border-color-lighter);
 }
-.sidebar {
-  width: 280px;
-  flex-shrink: 0;
-  background-color: var(--el-bg-color-page);
-}
-.main-content {
-  flex-grow: 1;
-  min-width: 0;
+
+.agent-editor-panel {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 </style>

@@ -52,45 +52,23 @@
           </div>
         </el-card>
 
-        <!-- 2. 设定与资源挂载 -->
-        <el-card shadow="never" class="config-card">
-          <template #header>
-            <div class="card-header-with-action">
-              <span class="card-title">{{ $t('agent.settingsAndResources') }}</span>
-              <el-button type="primary" link @click="resourceSelectorVisible = true">
-                <el-icon><Collection /></el-icon> {{ $t('agent.mountResource') }}
-              </el-button>
-            </div>
-          </template>
-
-          <el-form-item :label="$t('agent.systemPrompt')">
-            <el-input
-              v-model="form.systemPrompt"
-              type="textarea"
-              :rows="6"
-              :placeholder="$t('agent.sysPromptPlaceholder')"
-            />
-          </el-form-item>
-
-          <div v-if="mountedResources.length > 0" class="mounted-resources-wrapper">
-            <div class="wrapper-title">{{ $t('agent.mountedResources') }}</div>
-            <MountedResourceTags v-model="mountedResources" color-by-type />
-          </div>
-        </el-card>
-
-        <!-- 3. 模型配置 -->
+        <!-- 2. 模型配置 -->
         <el-card shadow="never" class="config-card">
           <template #header>
             <span class="card-title">{{ $t('agent.modelConfig') }}</span>
           </template>
 
-          <el-form-item :label="$t('agent.bindModel')">
-            <el-select v-model="form.aiModelId" :placeholder="$t('agent.modelPlaceholder')" style="width: 100%" clearable>
-              <el-option-group v-for="group in filteredGroupedModels" :key="group.label" :label="group.label">
-                <el-option v-for="item in group.options" :key="item.id" :label="item.name" :value="item.id" />
-              </el-option-group>
-            </el-select>
-          </el-form-item>
+          <el-row :gutter="40">
+            <el-col :span="12">
+              <el-form-item :label="$t('agent.bindModel')">
+                <el-select v-model="form.aiModelId" :placeholder="$t('agent.modelPlaceholder')" style="width: 100%" clearable>
+                  <el-option-group v-for="group in filteredGroupedModels" :key="group.label" :label="group.label">
+                    <el-option v-for="item in group.options" :key="item.id" :label="item.name" :value="item.id" />
+                  </el-option-group>
+                </el-select>
+              </el-form-item>
+            </el-col>
+          </el-row>
 
           <el-row :gutter="40" v-if="form.aiModelId">
             <el-col :span="12">
@@ -172,51 +150,120 @@
           </el-row>
         </el-card>
 
-        <!-- 4. 高级配置 -->
+        <!-- 3. 设定与能力 (2x2 四等分布局) -->
         <el-card shadow="never" class="config-card">
           <template #header>
-            <span class="card-title">{{ $t('agent.advancedConfig') }}</span>
+            <span class="card-title">{{ $t('agent.settingsAndResources') }}</span>
           </template>
 
-          <el-row :gutter="20">
-            <el-col :span="24">
-              <el-form-item :label="$t('agent.enableMcp')">
-                <el-select
-                  v-model="form.enabledMcpIds"
-                  multiple
-                  :placeholder="$t('agent.mcpPlaceholder')"
-                  style="width: 100%"
-                >
-                  <el-option
-                    v-for="tool in activeUserMcpServices"
-                    :key="tool.id"
-                    :label="tool.name"
-                    :value="tool.id"
-                  />
-                </el-select>
-              </el-form-item>
-            </el-col>
+          <!-- 第一行：系统提示词 & 挂载资源 -->
+          <el-row :gutter="32" class="settings-row">
+            <!-- 左上：系统提示词 -->
             <el-col :span="12">
-              <el-form-item :label="$t('agent.agentParams')">
-                <el-input disabled :placeholder="$t('agent.reservedInterface')" />
+              <el-form-item :label="$t('agent.systemPrompt')">
+                <el-input
+                  v-model="form.systemPrompt"
+                  type="textarea"
+                  :rows="8"
+                  :placeholder="$t('agent.sysPromptPlaceholder')"
+                  class="prompt-textarea"
+                />
               </el-form-item>
             </el-col>
+
+            <!-- 右上：挂载资源 -->
+            <el-col :span="12">
+              <el-form-item :label="$t('agent.mountedResources')">
+                <div class="mount-container">
+                  <div class="mount-action">
+                    <el-button type="primary" plain size="small" @click="resourceSelectorVisible = true">
+                      <el-icon><Collection /></el-icon> {{ $t('agent.mountResource') }}
+                    </el-button>
+                  </div>
+                  <div v-if="mountedResources.length > 0" class="tag-list-wrapper">
+                    <MountedResourceTags v-model="mountedResources" color-by-type />
+                  </div>
+                  <div v-else class="empty-mount">
+                    {{ $t('agent.noResources', '暂无挂载资源') }}
+                  </div>
+                </div>
+              </el-form-item>
+            </el-col>
+          </el-row>
+
+          <!-- 第二行：MCP 工具 & 子 Agent -->
+          <el-row :gutter="32" class="settings-row">
+            <!-- 左下：MCP 工具 -->
+            <el-col :span="12">
+              <el-form-item :label="$t('agent.enableMcp')">
+                <div class="mount-container">
+                  <div class="mount-action">
+                    <el-dropdown trigger="click" @command="handleAddMcp" placement="bottom-start">
+                      <el-button type="primary" plain size="small">
+                        <el-icon><Connection /></el-icon> {{ $t('agent.mountMcp', '挂载 MCP 工具') }}
+                      </el-button>
+                      <template #dropdown>
+                        <el-dropdown-menu class="mcp-dropdown-menu">
+                          <el-dropdown-item v-for="mcp in availableMcps" :key="mcp.id" :command="mcp.id">
+                            {{ mcp.name }}
+                          </el-dropdown-item>
+                          <el-dropdown-item v-if="availableMcps.length === 0" disabled>
+                            {{ $t('common.noData', '暂无可用工具') }}
+                          </el-dropdown-item>
+                        </el-dropdown-menu>
+                      </template>
+                    </el-dropdown>
+                  </div>
+                  <div v-if="mountedMcpList.length > 0" class="tag-list-wrapper">
+                    <el-tag
+                      v-for="mcp in mountedMcpList"
+                      :key="mcp.id"
+                      closable
+                      type="info"
+                      effect="light"
+                      class="custom-tag"
+                      @close="handleRemoveMcp(mcp.id)"
+                    >
+                      <div class="tag-inner">
+                        <el-icon class="tag-icon"><Connection /></el-icon>
+                        <span class="tag-text">{{ mcp.name }}</span>
+                      </div>
+                    </el-tag>
+                  </div>
+                  <div v-else class="empty-mount">
+                    {{ $t('agent.noMcp', '暂无挂载工具') }}
+                  </div>
+                </div>
+              </el-form-item>
+            </el-col>
+
+            <!-- 右下：子 Agent -->
             <el-col :span="12">
               <el-form-item :label="$t('agent.subAgents')">
-                <div class="sub-agents-wrapper">
-                  <el-button type="primary" link @click="agentSelectorVisible = true">
-                    <el-icon><Plus /></el-icon> {{ $t('agent.mountSubAgent') }}
-                  </el-button>
-                  <div v-if="mountedSubAgents.length > 0" class="mounted-sub-agents">
+                <div class="mount-container">
+                  <div class="mount-action">
+                    <el-button type="primary" plain size="small" @click="agentSelectorVisible = true">
+                      <el-icon><Plus /></el-icon> {{ $t('agent.mountSubAgent') }}
+                    </el-button>
+                  </div>
+                  <div v-if="mountedSubAgents.length > 0" class="tag-list-wrapper">
                     <el-tag
                       v-for="subAgent in mountedSubAgents"
                       :key="subAgent.id"
                       closable
+                      type="primary"
+                      effect="light"
+                      class="custom-tag"
                       @close="handleRemoveSubAgent(subAgent.id)"
-                      class="sub-agent-tag"
                     >
-                      {{ subAgent.name }}
+                      <div class="tag-inner">
+                        <el-avatar :size="14" :src="subAgent.agentAvatarUrl" :icon="User" class="tag-avatar" />
+                        <span class="tag-text">{{ subAgent.name }}</span>
+                      </div>
                     </el-tag>
+                  </div>
+                  <div v-else class="empty-mount">
+                    {{ $t('agent.noSubAgents', '暂无子 Agent') }}
                   </div>
                 </div>
               </el-form-item>
@@ -253,7 +300,7 @@ import { ref, reactive, watch, computed, onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useI18n } from 'vue-i18n';
 import { ElMessage } from 'element-plus';
-import { User, QuestionFilled, Collection, Plus } from '@element-plus/icons-vue';
+import { User, QuestionFilled, Collection, Plus, Connection } from '@element-plus/icons-vue';
 
 import { useAgentStore } from '@/stores/agentStore';
 import { useProviderStore } from '@/stores/providerStore';
@@ -300,6 +347,28 @@ const form = reactive({
   enabledMcpIds: [] as string[],
   subAgents: [] as string[]
 });
+
+// --- MCP 挂载逻辑 ---
+const availableMcps = computed(() => {
+  return activeUserMcpServices.value.filter(mcp => !form.enabledMcpIds.includes(mcp.id));
+});
+
+const mountedMcpList = computed(() => {
+  return form.enabledMcpIds.map(id => {
+    return activeUserMcpServices.value.find(mcp => mcp.id === id) || { id, name: 'Unknown MCP' };
+  });
+});
+
+function handleAddMcp(mcpId: string) {
+  if (!form.enabledMcpIds.includes(mcpId)) {
+    form.enabledMcpIds.push(mcpId);
+  }
+}
+
+function handleRemoveMcp(mcpId: string) {
+  form.enabledMcpIds = form.enabledMcpIds.filter(id => id !== mcpId);
+}
+// --------------------
 
 const filteredGroupedModels = computed(() => {
   return groupedModels.value
@@ -507,7 +576,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* 保持原有样式不变，追加子 Agent 的样式 */
 .agent-editor {
   display: flex;
   flex-direction: column;
@@ -520,6 +588,7 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 16px 24px;
+  box-sizing: border-box;
   background-color: var(--el-bg-color);
   border-bottom: 1px solid var(--el-border-color-lighter);
   flex-shrink: 0;
@@ -533,7 +602,7 @@ onMounted(() => {
 
 .header-title h2 {
   margin: 0;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--el-text-color-primary);
 }
@@ -555,12 +624,6 @@ onMounted(() => {
   color: var(--el-text-color-primary);
 }
 
-.card-header-with-action {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
 .basic-info-layout {
   display: flex;
   gap: 32px;
@@ -574,36 +637,97 @@ onMounted(() => {
   flex-grow: 1;
 }
 
-.mounted-resources-wrapper {
-  margin-top: 16px;
-  padding: 16px;
+/* 设定与知识 2x2 布局样式 */
+.settings-row {
+  margin-bottom: 20px;
+}
+.settings-row:last-child {
+  margin-bottom: 0;
+}
+
+.prompt-textarea {
+  height: 100%;
+}
+:deep(.prompt-textarea .el-textarea__inner) {
+  height: 190px; /* 强制高度，与右侧容器对齐 */
+}
+
+/* 统一的挂载容器样式 (资源、MCP、子Agent) */
+.mount-container {
+  width: 100%;
+  height: 190px; /* 统一高度 */
   background-color: var(--color-background-soft);
   border: 1px dashed var(--el-border-color);
   border-radius: 6px;
+  padding: 12px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
 }
-.wrapper-title {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
+.mount-action {
   margin-bottom: 12px;
-  font-weight: 600;
+  flex-shrink: 0;
 }
 
+/* Tag 流式布局 */
+.tag-list-wrapper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+}
+.custom-tag {
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 4px;
+}
+.tag-inner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tag-icon {
+  font-size: 14px;
+}
+.tag-avatar {
+  background-color: transparent;
+}
+.tag-text {
+  font-size: 13px;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty-mount {
+  flex-grow: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 13px;
+  color: var(--el-text-color-placeholder);
+}
+.mcp-dropdown-menu {
+  max-height: 250px;
+  overflow-y: auto;
+}
+
+/* 模型参数样式 */
 .label-icon {
   margin-left: 6px;
   color: var(--el-text-color-secondary);
   cursor: help;
 }
-
 .parameter-control-wrapper {
   display: flex;
   align-items: center;
   width: 100%;
 }
-
 .parameter-input {
   flex-grow: 1;
 }
-
 .parameter-switch {
   margin-left: 16px;
   flex-shrink: 0;
@@ -615,20 +739,5 @@ onMounted(() => {
   align-items: center;
   height: 100%;
   background-color: var(--el-bg-color);
-}
-
-.sub-agents-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: 100%;
-}
-.mounted-sub-agents {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.sub-agent-tag {
-  margin-right: 8px;
 }
 </style>

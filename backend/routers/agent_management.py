@@ -118,10 +118,13 @@ async def update_agent_settings(
         agent_update: schemas.AgentUpdate,
         db: AsyncSession = Depends(get_db)
 ):
-    updated_agent = await agent_crud.update_agent(db, agent_id=agent_id, agent_update=agent_update)
-    if updated_agent is None:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    return await _attach_avatar_url(db, updated_agent)
+    try:
+        updated_agent = await agent_crud.update_agent(db, agent_id=agent_id, agent_update=agent_update)
+        if updated_agent is None:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        return await _attach_avatar_url(db, updated_agent)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.delete(

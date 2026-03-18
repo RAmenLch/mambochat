@@ -147,6 +147,7 @@ onMounted(() => {
   border-right: 1px solid var(--el-border-color);
   background-color: var(--color-background-soft);
 }
+
 .panel-header {
   display: flex;
   justify-content: space-between;
@@ -156,10 +157,14 @@ onMounted(() => {
   border-bottom: 1px solid var(--el-border-color-lighter);
   cursor: default;
 }
+
 .panel-header h4 {
   margin: 0;
   font-size: 16px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
 }
+
 .delete-item { color: var(--el-color-danger); }
 
 .tree-agent-avatar {

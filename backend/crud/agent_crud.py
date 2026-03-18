@@ -10,6 +10,35 @@ from backend import schemas
 from backend.schemas.enums import MoveAction
 
 
+async def check_subagent_cycle(db: AsyncSession, target_agent_id: str, new_subagents: List[str]) -> bool:
+    """检查更新 subAgents 是否会引起循环依赖"""
+    if not new_subagents:
+        return False
+
+    queue = list(new_subagents)
+    visited = set()
+
+    while queue:
+        current_id = queue.pop(0)
+
+        if current_id == target_agent_id:
+            return True
+
+        if current_id in visited:
+            continue
+
+        visited.add(current_id)
+
+        stmt = select(agent_model.Agent.subAgents).where(agent_model.Agent.id == current_id)
+        result = await db.execute(stmt)
+        current_subagents = result.scalar()
+
+        if current_subagents and isinstance(current_subagents, list):
+            queue.extend(current_subagents)
+
+    return False
+
+
 async def get_agent(db: AsyncSession, agent_id: str) -> Optional[agent_model.Agent]:
     """通过ID获取单个 Agent（或文件夹）"""
     result = await db.execute(
@@ -88,6 +117,11 @@ async def update_agent(db: AsyncSession, agent_id: str, agent_update: schemas.Ag
         return None
 
     update_data = agent_update.model_dump(exclude_unset=True)
+
+    if "subAgents" in update_data and update_data["subAgents"] is not None:
+        has_cycle = await check_subagent_cycle(db, target_agent_id=agent_id, new_subagents=update_data["subAgents"])
+        if has_cycle:
+            raise ValueError("Circular dependency detected: An agent cannot have itself as a sub-agent (directly or indirectly).")
 
     for key, value in update_data.items():
         setattr(db_agent, key, value)
