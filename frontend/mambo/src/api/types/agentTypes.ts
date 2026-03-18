@@ -1,0 +1,43 @@
+// frontend/mambo/src/api/types/agentTypes.ts
+export type AgentItemType = 'agent' | 'folder';
+export type AgentType = 'ReActAgent';
+
+export interface Agent {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  name: string;
+  description: string | null;
+  itemType: AgentItemType;
+  parentId: string | null;
+  sortOrder: number;
+  AgentType: AgentType;
+  systemPrompt: string | null;
+  modelParameters: Record<string, any> | null;
+  agentParameters: Record<string, any> | null;
+  aiModelId: string | null;
+  agentAvatarId: string | null;
+  agentAvatarUrl: string | null;
+  resourcePromptList: string[] | null;
+  enabledMcpIds: string[] | null;
+  subAgents: string[] | null;
+}
+
+export interface AgentCreate {
+  name: string;
+  description?: string | null;
+  itemType?: AgentItemType;
+  parentId?: string | null;
+  sortOrder?: number;
+  AgentType?: AgentType;
+  systemPrompt?: string | null;
+  modelParameters?: Record<string, any> | null;
+  agentParameters?: Record<string, any> | null;
+  aiModelId?: string | null;
+  agentAvatarId?: string | null;
+  resourcePromptList?: string[] | null;
+  enabledMcpIds?: string[] | null;
+  subAgents?: string[] | null;
+}
+
+export interface AgentUpdate extends Partial<AgentCreate> {}

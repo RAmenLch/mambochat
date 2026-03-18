@@ -34,7 +34,7 @@ class FileManagementType(str, Enum):
     GLOBAL_SETTING = "global_setting"  # 被全局设置（如头像）引用的文件
     KB_DOCUMENT = "kb_document"      # 旧版知识库文件（保留用于兼容）
     RESOURCE = "resource"            # 通用资源文件，统一管理所有上传到资源中心的文件
-
+    AGENT_AVATAR = "agent_avatar"
 
 class MoveAction(str, Enum):
     """定义节点移动的操作类型"""
@@ -105,3 +105,13 @@ class ToolDecisionType(str, Enum):
     APPROVE = "approve"
     EDIT = "edit"
     REJECT = "reject"
+
+class AgentItemType(str, Enum):
+    """定义 Agent 树状目录结构中的节点类型"""
+    AGENT = "agent"
+    FOLDER = "folder"
+
+
+class AgentTypeEnum(str, Enum):
+    """定义 Agent 初始化的类型标识符"""
+    REACT = "ReActAgent"

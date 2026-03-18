@@ -20,7 +20,7 @@ from backend.checkpointer import get_checkpointer
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.llm_io import LLMInput
 from backend.services.generation.worker.decode import OpenAiDecode, BaseDecode
-from backend.schemas.agent import AgentState
+from backend.schemas.lc_agent import AgentState
 from backend.services.generation.agent.custom_middleware import ToolMessageOrderingMiddleware
 
 

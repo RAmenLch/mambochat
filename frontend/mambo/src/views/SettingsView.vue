@@ -3,7 +3,7 @@
   <!-- 移动端视图 -->
   <MobileSettingsView v-if="isMobile" />
 
-  <!-- 桌面端视图 (原有逻辑) -->
+  <!-- 桌面端视图 -->
   <el-container v-else class="settings-container">
     <el-header class="settings-header">
       <div class="brand-container">
@@ -16,7 +16,7 @@
       </div>
 
       <div class="header-actions">
-        <!-- 新增：关于按钮 -->
+        <!-- 关于按钮 -->
         <el-button link @click="aboutDialogVisible = true">
           <template #icon>
             <el-icon :size="18"><InfoFilled /></el-icon>
@@ -31,7 +31,8 @@
     </el-header>
 
     <el-main class="settings-main">
-      <div class="settings-content" :class="{ 'is-full-width': activeTab === 'resourceManager' }">
+      <!-- 新增动态 class 判断：当 tab 是 agentManager 时，也应用全宽样式以适应左右分栏 -->
+      <div class="settings-content" :class="{ 'is-full-width': activeTab === 'resourceManager' || activeTab === 'agentManager' }">
         <el-tabs v-model="activeTab">
           <el-tab-pane :label="t('settings.tabs.providerModel')" name="providerModel">
             <ProviderModelManager />
@@ -45,11 +46,15 @@
           <el-tab-pane :label="t('settings.tabs.resourceManager')" name="resourceManager">
             <ResourceManager />
           </el-tab-pane>
+          <!-- 新增 Agent 管理 Tab -->
+          <el-tab-pane label="Agent 管理" name="agentManager">
+            <AgentManager />
+          </el-tab-pane>
         </el-tabs>
       </div>
     </el-main>
 
-    <!-- 新增：关于弹窗 -->
+    <!-- 关于弹窗 -->
     <el-dialog
       v-model="aboutDialogVisible"
       width="420px"
@@ -97,6 +102,7 @@ import ProviderModelManager from '@/components/settings/ProviderModelManager.vue
 import GlobalSettings from '@/components/settings/GlobalSettings.vue'
 import ResourceManager from '@/components/settings/ResourceManager.vue'
 import McpManager from '@/components/settings/McpManager.vue'
+import AgentManager from '@/components/settings/AgentManager.vue' // 引入新增的 AgentManager
 import { useIsMobile } from '@/composables/useIsMobile'
 
 // 异步加载移动端组件
@@ -127,7 +133,6 @@ watch(
 </script>
 
 <style scoped>
-/* 桌面端样式保持不变 */
 .settings-container {
   height: 100vh;
   background-color: #f5f7fa;

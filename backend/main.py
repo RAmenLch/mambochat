@@ -32,7 +32,8 @@ from backend.routers import (
     system_config,
     mcp_management,
     kb_management,
-    skill_management
+    skill_management,
+    agent_management
 )
 from backend.services.cleanup_service import cleanup_zombie_files
 from backend.services.kb_service import SUP_DIM
@@ -126,6 +127,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- 挂载路由 ---
 app.include_router(chat_management.router, prefix="/api", tags=["Chat Management"])
 app.include_router(resource_management.router, prefix="/api", tags=["Resource Management"])
 app.include_router(chat_interaction.router, prefix="/api", tags=["Chat Interaction"])
@@ -137,9 +139,11 @@ app.include_router(notifications.router, prefix="/api", tags=["Notifications"])
 app.include_router(mcp_management.router, prefix="/api/mcp", tags=["MCP Management"])
 app.include_router(kb_management.router, prefix="/api/resources/kb", tags=["Knowledge Base Management"])
 app.include_router(skill_management.router, prefix="/api/resources/skills", tags=["Skills Management"])
+app.include_router(agent_management.router, prefix="/api", tags=["Agent Management"]) # <-- [新增] 挂载 Agent 路由
 app.include_router(file_management.router)
 
 
 @app.get("/")
 async def root():
     return {"message": "LLM-API Client Backend is running."}
+

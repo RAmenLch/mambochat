@@ -29,3 +29,5 @@ from .resource import (Resource, ResourceVersion,
                        ResourceSearchRequest,ResourceSearchResultItem,ResourceSearchResponse,
                        SkillCreate,SkillValidationResult,SkillImportResponse,SkillImportResultItem,GithubImportRequest
                        )
+
+from .agent import (AgentBase,AgentCreate,AgentUpdate,AgentResponse,AgentMoveRequest)

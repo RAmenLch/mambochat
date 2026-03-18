@@ -1,4 +1,4 @@
-// src/i18n/locales/en.ts
+// frontend/mambo/src/i18n/locales/en.ts
 export default {
   locale: 'en',
   common: {
@@ -12,7 +12,7 @@ export default {
       connectionFailed: 'Connection Failed',
       unspecified: 'Unspecified',
       unknownModel: 'Unknown Model',
-      unknown: 'Unknown', // [新增]
+      unknown: 'Unknown',
     },
     time: {
       today: 'Today',
@@ -50,8 +50,8 @@ export default {
       createSuccess: 'Created successfully',
       moveSuccess: 'Moved successfully',
       updateSuccess: 'Updated successfully',
-      copySuccess: 'Copied to clipboard', // [新增]
-      copyFailed: 'Copy failed', // [新增]
+      copySuccess: 'Copied to clipboard',
+      copyFailed: 'Copy failed',
     },
     error: {
       unknown: 'An unknown error occurred',
@@ -309,8 +309,8 @@ export default {
       noTools: 'No tools available',
       testConnection: 'Test Connection',
       webSearch: 'Web Search (Experimental)',
-      webSearchEnabled: 'Web search enabled', // [新增]
-      webSearchDisabled: 'Web search disabled', // [新增]
+      webSearchEnabled: 'Web search enabled',
+      webSearchDisabled: 'Web search disabled',
       chatPartition: 'Chat Partitions',
       chatSettings: 'Chat Settings',
       mcpStatus: {
@@ -326,23 +326,23 @@ export default {
     attachment: {
       knowledgeBase: 'Knowledge Base',
       imageLoadFailed: 'Image load failed',
-      resourceFileEmpty: 'Resource "{name}" file info is empty, skipped', // [新增]
-      resourceFileAdded: 'Files added from resources', // [新增]
-      kbEnabled: 'Knowledge base enabled: {names}', // [新增]
-      kbDisabled: 'Knowledge base retrieval disabled', // [新增]
-      fileUploadFailed: 'File {name} upload failed', // [新增]
+      resourceFileEmpty: 'Resource "{name}" file info is empty, skipped',
+      resourceFileAdded: 'Files added from resources',
+      kbEnabled: 'Knowledge base enabled: {names}',
+      kbDisabled: 'Knowledge base retrieval disabled',
+      fileUploadFailed: 'File {name} upload failed',
     },
     message: {
-      ai_assistant: 'AI Assistant', // [新增]
+      ai_assistant: 'AI Assistant',
       toolCall: 'Tool Call',
       reasoning: 'Reasoning',
-      expandReasoning: 'Expand Reasoning', // [新增]
-      minimizeReasoning: 'Minimize Reasoning', // [新增]
-      reasoningCollapsed: 'Reasoning', // [新增]
+      expandReasoning: 'Expand Reasoning',
+      minimizeReasoning: 'Minimize Reasoning',
+      reasoningCollapsed: 'Reasoning',
       content: 'Content',
       zipGenerating: 'Generating summary...',
       zipHistory: 'History Summary',
-      compressHistoryStart: 'Started compressing chat history in the background. You can continue chatting.', // [新增]
+      compressHistoryStart: 'Started compressing chat history in the background. You can continue chatting.',
       regenerate: 'Regenerate',
       expand: 'Expand',
       collapse: 'Collapse',
@@ -356,10 +356,10 @@ export default {
       copyFailed: 'Copy failed',
       backToTop: 'Back to Top',
       fileLoadFailed: 'File load failed',
-      pendingReview: 'Pending Review', // [新增]
-      toolCallReviewed: 'Tool Call (Reviewed)', // [新增]
-      file: 'File', // [新增]
-      partition: 'Partition', // [新增]
+      pendingReview: 'Pending Review',
+      toolCallReviewed: 'Tool Call (Reviewed)',
+      file: 'File',
+      partition: 'Partition',
       mcp: {
         invalidCall: 'Invalid tool call',
         unknownTool: 'Unknown tool',
@@ -715,4 +715,53 @@ export default {
       clipboardError: 'Cannot access clipboard. Please check browser permissions.',
     },
   },
+  agent: {
+    title: 'Agent Management',
+    basicInfo: 'Basic Info',
+    avatar: 'Agent Avatar',
+    name: 'Name',
+    namePlaceholder: 'Give the Agent a catchy name',
+    type: 'Agent Type',
+    description: 'Description',
+    descPlaceholder: 'Briefly describe the Agent\'s functions and use cases...',
+    settingsAndResources: 'Settings & Knowledge',
+    mountResource: 'Mount Resource / KB',
+    systemPrompt: 'System Prompt',
+    sysPromptPlaceholder: 'Enter the core system prompt, defining its role, goals, and behavior...',
+    mountedResources: 'Mounted Resources',
+    modelConfig: 'Model Configuration',
+    bindModel: 'Bind Model',
+    modelPlaceholder: 'Select the AI model to power this Agent',
+    contextMessages: 'Context Messages',
+    contextMessagesTip: 'Number of historical messages sent to the model. 0 means send all.',
+    streamOutput: 'Stream Output',
+    streamOutputTip: 'If enabled, the model returns results progressively. If disabled, waits for the full result.',
+    advancedConfig: 'Advanced Configuration',
+    enableMcp: 'Enable MCP Tools',
+    mcpPlaceholder: 'Empower the Agent with external tools',
+    agentParams: 'Agent Parameters',
+    subAgents: 'Sub Agents',
+    mountSubAgent: 'Mount Sub Agent',
+    emptyState: 'Please select or create an Agent on the left',
+    saveSuccess: 'Agent configuration saved',
+    saveFailed: 'Save failed',
+    avatarUploadSuccess: 'Avatar uploaded successfully',
+    avatarUploadFailed: 'Avatar upload failed',
+    avatarDeleteSuccess: 'Avatar deleted',
+    avatarDeleteFailed: 'Failed to delete avatar',
+    reservedInterface: 'Reserved interface, not yet open',
+    tree: {
+      list: 'Agent List',
+      newAgent: 'New Agent',
+      newFolder: 'New Folder',
+      rename: 'Rename',
+      delete: 'Delete',
+    },
+    selector: {
+      title: 'Select Sub Agents',
+      searchPlaceholder: 'Search Agent name or description...',
+      noData: 'No Agents available',
+      selected: '{count} Agents selected',
+    }
+  }
 }

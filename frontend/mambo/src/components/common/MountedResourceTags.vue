@@ -11,7 +11,8 @@
       :key="resource.id"
       :data-resource-id="resource.id"
       closable
-      type="info"
+      disable-transitions
+      :type="colorByType ? getTagType(resource) : 'info'"
       class="draggable-tag"
       :class="{ 'is-dragging': draggedResourceId === resource.id }"
       draggable="true"
@@ -33,10 +34,16 @@
       >
         <template #content>
           <div class="resource-content-preview">
-            {{ resource.latest_version?.content || '' }}
+            <div v-if="colorByType" class="preview-type-badge">{{ getResourceTypeLabel(resource) }}</div>
+            {{ getPreviewText(resource) }}
           </div>
         </template>
-        <span class="resource-tag-name">{{ resource.name }}</span>
+        <span class="resource-tag-name">
+          <el-icon v-if="colorByType" class="tag-type-icon">
+            <component :is="getTagIcon(resource)" />
+          </el-icon>
+          {{ resource.name }}
+        </span>
       </el-tooltip>
     </el-tag>
   </transition-group>
@@ -44,7 +51,8 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import type { PropType } from 'vue';
+import type { PropType, Component } from 'vue';
+import { Search, Document, Memo, Tickets } from '@element-plus/icons-vue';
 import type { Resource } from '@/api/types/resourceTypes';
 
 const props = defineProps({
@@ -52,6 +60,10 @@ const props = defineProps({
     type: Array as PropType<Resource[]>,
     required: true,
     default: () => [],
+  },
+  colorByType: {
+    type: Boolean,
+    default: false,
   },
 });
 
@@ -62,6 +74,60 @@ const emit = defineEmits<{
 const draggedResourceId = ref<string | null>(null);
 let lastSwapTime = 0;
 const SWAP_THROTTLE_MS = 100;
+
+// --- Color-by-type helpers ---
+
+type ElTagType = '' | 'success' | 'warning' | 'info' | 'danger' | 'primary';
+
+function getTagType(resource: Resource): ElTagType {
+  switch (resource.resourceType) {
+    case 'knowledge_base': return 'primary';
+    case 'system_prompt': return 'success';
+    case 'submessage_template': return 'warning';
+    case 'file': return '';
+    default: return 'info';
+  }
+}
+
+function getTagIcon(resource: Resource): Component {
+  switch (resource.resourceType) {
+    case 'knowledge_base': return Search;
+    case 'system_prompt': return Document;
+    case 'submessage_template': return Memo;
+    case 'file': return Tickets;
+    default: return Document;
+  }
+}
+
+function getResourceTypeLabel(resource: Resource): string {
+  switch (resource.resourceType) {
+    case 'knowledge_base': return '知识库';
+    case 'system_prompt': return '系统提示词';
+    case 'submessage_template': return '消息模板';
+    case 'file': return '文件';
+    default: return resource.resourceType || '资源';
+  }
+}
+
+function getPreviewText(resource: Resource): string {
+  if (resource.resourceType === 'knowledge_base') {
+    return resource.description || '知识库资源（检索增强）';
+  }
+  if (resource.resourceType === 'file') {
+    const fileInfo = resource.latest_version?.file_info;
+    if (fileInfo) {
+      const size = fileInfo.size;
+      const sizeStr = size < 1024 ? `${size} B` : size < 1048576 ? `${(size / 1024).toFixed(1)} KB` : `${(size / 1048576).toFixed(1)} MB`;
+      return `${fileInfo.filename} (${sizeStr})`;
+    }
+    return '(无文件信息)';
+  }
+  const content = resource.latest_version?.content;
+  if (!content) return '(无内容)';
+  return content.length > 500 ? content.substring(0, 500) + '...' : content;
+}
+
+// --- Drag & Drop ---
 
 const handleDragStart = (resourceId: string, event: DragEvent) => {
   draggedResourceId.value = resourceId;
@@ -133,11 +199,18 @@ const handleRemove = (resourceId: string) => {
 }
 
 .resource-tag-name {
-  display: inline-block;
-  max-width: 150px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.tag-type-icon {
+  font-size: 12px;
+  flex-shrink: 0;
 }
 
 /* 排序动画 */
@@ -166,6 +239,15 @@ const handleRemove = (resourceId: string) => {
   max-height: 400px;
   overflow-y: auto;
   padding-right: 5px;
+}
+
+.preview-type-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
 }
 
 .resource-content-preview::-webkit-scrollbar {

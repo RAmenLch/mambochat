@@ -18,7 +18,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 from backend.models.base_model import Base
 # 确保导入了所有模型
-from backend.models import file_model, chat_model, kb_model, mcp_model, provider_model, resource_model, setting_model
+from backend.models import (file_model, chat_model, kb_model, mcp_model,
+                            provider_model, resource_model, setting_model,agent_model)
 
 from backend.database import DATABASE_URL
 

@@ -1,4 +1,4 @@
-// src/i18n/locales/zh-CN.ts
+// frontend/mambo/src/i18n/locales/zh-CN.ts
 export default {
   locale: 'zh-CN',
   common: {
@@ -12,7 +12,7 @@ export default {
       connectionFailed: '连接失败',
       unspecified: '未指定',
       unknownModel: '未知模型',
-      unknown: '未知', // [新增]
+      unknown: '未知',
     },
     time: {
       today: '今天',
@@ -50,8 +50,8 @@ export default {
       createSuccess: '创建成功',
       moveSuccess: '移动成功',
       updateSuccess: '更新成功',
-      copySuccess: '已复制到剪贴板', // [新增]
-      copyFailed: '复制失败', // [新增]
+      copySuccess: '已复制到剪贴板',
+      copyFailed: '复制失败',
     },
     error: {
       unknown: '发生未知错误',
@@ -306,8 +306,8 @@ export default {
       noTools: '暂无可用工具',
       testConnection: '测试连接',
       webSearch: '联网搜索(不好用别用)',
-      webSearchEnabled: '联网搜索已启用', // [新增]
-      webSearchDisabled: '联网搜索已禁用', // [新增]
+      webSearchEnabled: '联网搜索已启用',
+      webSearchDisabled: '联网搜索已禁用',
       chatPartition: '聊天分区',
       chatSettings: '会话设置',
       mcpStatus: {
@@ -323,23 +323,23 @@ export default {
     attachment: {
       knowledgeBase: '知识库',
       imageLoadFailed: '图片加载失败',
-      resourceFileEmpty: '资源 "{name}" 文件信息为空，已跳过', // [新增]
-      resourceFileAdded: '已从资源库添加文件', // [新增]
-      kbEnabled: '已启用知识库: {names}', // [新增]
-      kbDisabled: '已停用知识库检索', // [新增]
-      fileUploadFailed: '文件 {name} 上传失败', // [新增]
+      resourceFileEmpty: '资源 "{name}" 文件信息为空，已跳过',
+      resourceFileAdded: '已从资源库添加文件',
+      kbEnabled: '已启用知识库: {names}',
+      kbDisabled: '已停用知识库检索',
+      fileUploadFailed: '文件 {name} 上传失败',
     },
     message: {
-      ai_assistant: 'AI 助手', // [新增]
+      ai_assistant: 'AI 助手',
       toolCall: '工具调用',
       reasoning: '思考',
-      expandReasoning: '展开思考', // [新增]
-      minimizeReasoning: '最小化思考', // [新增]
-      reasoningCollapsed: '思考', // [新增]
+      expandReasoning: '展开思考',
+      minimizeReasoning: '最小化思考',
+      reasoningCollapsed: '思考',
       content: '正文',
       zipGenerating: '摘要生成中...',
       zipHistory: '历史摘要',
-      compressHistoryStart: '已开始在后台压缩历史对话，您可以继续聊天。', // [新增]
+      compressHistoryStart: '已开始在后台压缩历史对话，您可以继续聊天。',
       regenerate: '重新回答',
       expand: '展开',
       collapse: '折叠',
@@ -353,10 +353,10 @@ export default {
       copyFailed: '复制失败',
       backToTop: '回到顶部',
       fileLoadFailed: '文件加载失败',
-      pendingReview: '待审核', // [新增]
-      toolCallReviewed: '工具调用(已审核)', // [新增]
-      file: '文件', // [新增]
-      partition: '分区', // [新增]
+      pendingReview: '待审核',
+      toolCallReviewed: '工具调用(已审核)',
+      file: '文件',
+      partition: '分区',
       mcp: {
         invalidCall: '无效的工具调用',
         unknownTool: '未知工具',
@@ -705,4 +705,53 @@ export default {
       clipboardError: '无法访问剪贴板，请检查浏览器权限。',
     },
   },
+  agent: {
+    title: 'Agent 管理',
+    basicInfo: '基本信息',
+    avatar: 'Agent 头像',
+    name: '名称',
+    namePlaceholder: '给 Agent 起个响亮的名字',
+    type: 'Agent 类型',
+    description: '描述',
+    descPlaceholder: '简要描述该 Agent 的功能与适用场景...',
+    settingsAndResources: '设定与知识',
+    mountResource: '挂载资源 / 知识库',
+    systemPrompt: '系统提示词',
+    sysPromptPlaceholder: '输入 Agent 的核心系统提示词，定义其角色、目标和行为准则...',
+    mountedResources: '已挂载资源',
+    modelConfig: '模型配置',
+    bindModel: '绑定模型',
+    modelPlaceholder: '选择驱动该 Agent 的 AI 模型',
+    contextMessages: '上下文消息数',
+    contextMessagesTip: '设置发送给模型的历史消息数量。0 表示发送全部历史。',
+    streamOutput: '流式输出',
+    streamOutputTip: '启用后，模型将以流的方式逐步返回结果，实现打字机效果。关闭则等待完整结果后一次性返回。',
+    advancedConfig: '高级配置',
+    enableMcp: '启用 MCP 工具',
+    mcpPlaceholder: '为 Agent 赋予外部工具能力',
+    agentParams: 'Agent 专属参数',
+    subAgents: '子 Agent',
+    mountSubAgent: '挂载子 Agent',
+    emptyState: '请在左侧选择或新建一个 Agent',
+    saveSuccess: 'Agent 配置已保存',
+    saveFailed: '保存失败',
+    avatarUploadSuccess: '头像上传成功',
+    avatarUploadFailed: '头像上传失败',
+    avatarDeleteSuccess: '头像已删除',
+    avatarDeleteFailed: '删除头像失败',
+    reservedInterface: '保留接口，暂未开放',
+    tree: {
+      list: 'Agent 列表',
+      newAgent: '新建 Agent',
+      newFolder: '新建文件夹',
+      rename: '重命名',
+      delete: '删除',
+    },
+    selector: {
+      title: '选择子 Agent',
+      searchPlaceholder: '搜索 Agent 名称或描述...',
+      noData: '暂无可选的 Agent',
+      selected: '已选择 {count} 个 Agent',
+    }
+  }
 }

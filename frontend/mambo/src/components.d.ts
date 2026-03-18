@@ -8,6 +8,10 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AgentEditor: typeof import('./components/settings/agent/AgentEditor.vue')['default']
+    AgentManager: typeof import('./components/settings/AgentManager.vue')['default']
+    AgentSelectorDialog: typeof import('./components/settings/agent/dialogs/AgentSelectorDialog.vue')['default']
+    AgentTreePanel: typeof import('./components/settings/agent/AgentTreePanel.vue')['default']
     AssistantBubble: typeof import('./components/chat/message/AssistantBubble.vue')['default']
     AttachmentPreview: typeof import('./components/chat/AttachmentPreview.vue')['default']
     AvatarUploader: typeof import('./components/settings/AvatarUploader.vue')['default']
