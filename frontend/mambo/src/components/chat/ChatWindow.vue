@@ -55,7 +55,7 @@
           :current-chat="currentChat"
           :messages="currentChatMessages"
           :estimated-tokens="estimatedTokens"
-          @open-settings="settingsDrawerVisible = true"
+          @open-settings="handleOpenSettings"
           @toggle-multi-part-mode="toggleMultiPartMode"
           @trigger-file-upload="handleTriggerFileUpload"
           @open-resource-selector="resourceSelectorVisible = true"
@@ -102,6 +102,12 @@
       @save="handleSaveSettings"
     />
 
+    <ChatAgentSettingsDrawer
+      v-model:visible="agentSettingsDrawerVisible"
+      :chat-data="currentChat"
+      @save="handleSaveAgentSettings"
+    />
+
     <ResourceSelectorDialog
       v-model:visible="resourceSelectorVisible"
       source="toolbar"
@@ -141,6 +147,7 @@ import { useTokenEstimator } from '@/composables/useTokenEstimator';
 import MessageItem from './MessageItem.vue';
 import ChatToolbar from './ChatToolbar.vue';
 import ChatSettingsDrawer from './ChatSettingsDrawer.vue';
+import ChatAgentSettingsDrawer from './ChatAgentSettingsDrawer.vue';
 import ResourceSelectorDialog from './dialogs/ResourceSelectorDialog.vue';
 import ChatHeader from './ChatHeader.vue';
 import AttachmentPreview from './AttachmentPreview.vue';
@@ -234,6 +241,7 @@ const fileInputRef = ref<HTMLInputElement | null>(null);
 const chatInputBoxRef = ref<InstanceType<typeof ChatInputBox>>();
 const attachmentPreviewRef = ref<InstanceType<typeof AttachmentPreview> | null>(null);
 const settingsDrawerVisible = ref(false);
+const agentSettingsDrawerVisible = ref(false);
 const resourceSelectorVisible = ref(false);
 const userHasScrolledUp = ref(false);
 const previousPreviewHeight = ref(0);
@@ -446,6 +454,21 @@ async function handleSaveSettings(settings: ChatUpdate) {
   await chatListStore.updateChatSettings(currentChat.value.id, finalSettings);
   settingsDrawerVisible.value = false;
   ElMessage.success(t('chat.settings.saveSuccess'));
+}
+
+async function handleSaveAgentSettings(settings: ChatUpdate) {
+  if (!currentChat.value) return;
+  await chatListStore.updateChatSettings(currentChat.value.id, settings);
+  agentSettingsDrawerVisible.value = false;
+  ElMessage.success(t('chat.settings.saveSuccess'));
+}
+
+function handleOpenSettings() {
+  if (currentChat.value?.chatMode === 'agent') {
+    agentSettingsDrawerVisible.value = true;
+  } else {
+    settingsDrawerVisible.value = true;
+  }
 }
 
 async function handleToggleWebSearch() {

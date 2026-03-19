@@ -5,6 +5,7 @@ import type { FileResponse } from './common'
 export type MessageRole = 'user' | 'assistant' | 'system'
 export type ChatItemType = 'chat' | 'folder'
 export type MessageStatus = 'generating' | 'completed' | 'failed' | 'pending_review'
+export type ChatMode = 'normal' | 'agent'
 
 // --- SubMessage Types ---
 
@@ -99,6 +100,8 @@ export interface Chat {
   isLoaded?: boolean
   resource_prompt_list?: string[] | null
   enabled_mcp_ids?: string[] | null
+  chatMode?: ChatMode
+  agentId?: string | null
 }
 
 export type ChatNode = Chat & { children?: ChatNode[] }
@@ -112,6 +115,8 @@ export interface ChatCreate {
   parentId?: string | null
   sortOrder?: number
   enabled_mcp_ids?: string[] | null
+  chatMode?: ChatMode
+  agentId?: string | null
 }
 
 export interface ChatUpdate {
@@ -123,6 +128,8 @@ export interface ChatUpdate {
   sortOrder?: number
   resource_prompt_list?: string[] | null
   enabled_mcp_ids?: string[] | null
+  chatMode?: ChatMode
+  agentId?: string | null
 }
 
 export interface ChatWithMessages extends Chat {

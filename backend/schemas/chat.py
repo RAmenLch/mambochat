@@ -5,7 +5,7 @@ from typing import Optional, List, Dict
 import json
 
 from backend.schemas.message import Message, SubMessageCreate
-from backend.schemas.enums import MoveAction
+from backend.schemas.enums import MoveAction, ChatMode
 
 
 # --- Chat Schemas ---
@@ -23,8 +23,9 @@ class ChatBase(BaseModel):
     # 资源挂载ID列表
     resource_prompt_list: Optional[List[str]] = Field(None, description="挂载的资源ID列表")
 
-    # 新增：启用的外部 MCP 服务 ID 列表
     enabled_mcp_ids: Optional[List[str]] = Field(default_factory=list, description="启用的外部 MCP 服务 ID 列表")
+    chatMode: ChatMode = Field(ChatMode.NORMAL, description="聊天模式: 'normal' 或 'agent'")
+    agentId: Optional[str] = Field(None, description="绑定的 Agent ID（当 chatMode 为 'agent' 时有效）")
 
     @field_validator("modelParameters", mode="before")
     @classmethod
@@ -62,7 +63,8 @@ class ChatUpdate(BaseModel):
     resource_prompt_list: Optional[List[str]] = None
     # 启用的外部 MCP 服务 ID 列表
     enabled_mcp_ids: Optional[List[str]] = None
-
+    chatMode: Optional[ChatMode] = None
+    agentId: Optional[str] = None
 
 # noinspection PyDataclass
 class ChatWithMessages(Chat):

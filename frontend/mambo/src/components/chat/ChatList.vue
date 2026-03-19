@@ -107,6 +107,8 @@
       :title="dialogProps.title"
       :initial-name="dialogProps.initialName"
       :select-config="dialogProps.selectConfig"
+      :show-chat-mode="dialogProps.showChatMode"
+      :agent-select-config="dialogProps.agentSelectConfig"
       @confirm="onDialogConfirm"
     />
 
@@ -132,12 +134,13 @@ import { useChatListStore } from '@/stores/chatListStore';
 import { useChatSessionStore, LAST_ACTIVE_CHAT_KEY } from '@/stores/chatSessionStore';
 import { useProviderStore } from '@/stores/providerStore';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { useAgentStore } from '@/stores/agentStore';
 
 import { buildChatTree } from '@/utils/treeHelper';
 import { useTreeController, type DialogPayload, type DialogConfirmPayload } from '@/composables/useTreeController';
 
 import ExplorerTree from '@/components/common/ExplorerTree.vue';
-import EntityFormDialog, { type SelectConfigOption } from '@/components/common/EntityFormDialog.vue';
+import EntityFormDialog, { type SelectConfigOption, type ConfirmPayload } from '@/components/common/EntityFormDialog.vue';
 import SearchDialog from '@/components/chat/dialogs/SearchDialog.vue';
 import ChatHeader from '@/components/chat/ChatHeader.vue';
 
@@ -165,6 +168,7 @@ const chatListStore = useChatListStore();
 const chatSessionStore = useChatSessionStore();
 const providerStore = useProviderStore();
 const settingsStore = useSettingsStore();
+const agentStore = useAgentStore();
 const router = useRouter();
 const route = useRoute();
 
@@ -172,6 +176,7 @@ const { chatList, isChatListLoading, loadingFolders, loadedFolderIds, refreshing
 const { currentChatId, currentChat } = storeToRefs(chatSessionStore);
 const { providers } = storeToRefs(providerStore);
 const { globalSettings } = storeToRefs(settingsStore);
+const { agentList } = storeToRefs(agentStore);
 
 // -- Data Transformation --
 const treeData = computed(() => buildChatTree(chatList.value, loadedFolderIds.value) as unknown as BaseTreeItem[]);
@@ -188,6 +193,16 @@ const modelOptions = computed((): SelectConfigOption[] => {
         }))
     }))
     .filter(p => p.options.length > 0);
+});
+
+// 构造 Agent 选择项，使用 allAgents
+const agentOptions = computed((): SelectConfigOption[] => {
+  return agentStore.allAgents
+    .filter(a => a.itemType === 'agent')
+    .map(a => ({
+      label: a.name,
+      value: a.id
+    }));
 });
 
 const isTitleRefreshing = computed(() => refreshingTitleChatId.value === currentChat.value?.id);
@@ -227,11 +242,16 @@ const {
         return {
           title: t('chat.sidebar.newChat'),
           initialName: t('chat.sidebar.initChatName'),
+          showChatMode: true, // [新增] 开启模式选择
           selectConfig: {
             label: t('chat.settings.model'),
             options: modelOptions.value,
             initialValue: globalSettings.value.default_model_id || undefined,
           },
+          agentSelectConfig: { // [新增] Agent 选择配置
+            label: t('chat.settings.agent', 'Agent'),
+            options: agentOptions.value,
+          }
         };
       case 'newFolder':
         return {
@@ -244,8 +264,10 @@ const {
   },
   handleDialogConfirm: async (
     dialogPayload: DialogPayload<Chat>,
-    formPayload: DialogConfirmPayload
+    rawFormPayload: DialogConfirmPayload
   ): Promise<Chat | null> => {
+    const formPayload = rawFormPayload as unknown as ConfirmPayload; // [修改] 类型断言
+
     if (dialogPayload.type === 'rename' && dialogPayload.targetItem) {
       await chatListStore.updateChatSettings(dialogPayload.targetItem.id, { name: formPayload.name });
       return null;
@@ -256,7 +278,9 @@ const {
     if (dialogPayload.type === 'newChat') {
       newItem = await chatListStore.createNewItem({
         name: formPayload.name,
-        aiModelId: formPayload.selectValue,
+        aiModelId: formPayload.chatMode === 'normal' ? formPayload.selectValue : null, // [修改]
+        chatMode: formPayload.chatMode, // [新增]
+        agentId: formPayload.chatMode === 'agent' ? formPayload.agentId : null, // [新增]
         itemType: 'chat',
         parentId: dialogPayload.parentId || null,
       });
@@ -277,8 +301,8 @@ const {
 // -- Lifecycle --
 onMounted(async () => {
   await providerStore.fetchProviders();
+  await agentStore.fetchAllAgents();
   await chatListStore.initializeList();
-
   await router.isReady();
 
   let targetChatId = route.params.id as string;

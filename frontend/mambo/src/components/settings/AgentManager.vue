@@ -20,7 +20,7 @@ import AgentEditor from './agent/AgentEditor.vue';
 .agent-manager-container {
   height: 100%;
   border: 1px solid var(--el-border-color);
-  border-radius: 4px; /* 与 Resource 保持一致 */
+  border-radius: 4px;
   background-color: var(--el-bg-color);
   overflow: hidden;
 }

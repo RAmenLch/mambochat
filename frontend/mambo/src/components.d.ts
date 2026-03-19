@@ -16,6 +16,7 @@ declare module 'vue' {
     AttachmentPreview: typeof import('./components/chat/AttachmentPreview.vue')['default']
     AvatarUploader: typeof import('./components/settings/AvatarUploader.vue')['default']
     BubbleSectionGroup: typeof import('./components/chat/message/BubbleSectionGroup.vue')['default']
+    ChatAgentSettingsDrawer: typeof import('./components/chat/ChatAgentSettingsDrawer.vue')['default']
     ChatHeader: typeof import('./components/chat/ChatHeader.vue')['default']
     ChatInputBox: typeof import('./components/chat/ChatInputBox.vue')['default']
     ChatList: typeof import('./components/chat/ChatList.vue')['default']

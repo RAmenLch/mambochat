@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional, Dict, Any
 
-from backend.crud import chat_crud, setting_crud, provider_crud, resource_crud
+from backend.crud import chat_crud, setting_crud, provider_crud, resource_crud, agent_crud
 from backend.services import chat_service
 from backend import schemas
 from backend.models import chat_model
@@ -27,7 +27,6 @@ def _validate_model_parameters(params: Dict[str, Any]):
     Raises HTTPException for any validation failures.
     """
     for key, value in params.items():
-        # 移除了 "enabled_mcp_ids"，因为它已独立为 Chat 表的专属字段
         if key in ["max_context_messages", "stream", "enable_suggest"]:
             continue
 
@@ -91,6 +90,11 @@ async def create_chat(chat: schemas.ChatCreate, db: AsyncSession = Depends(get_d
     - All provided model parameters are validated against the system configuration.
     """
     if chat.itemType == 'chat':
+        if chat.agentId:
+            db_agent = await agent_crud.get_agent(db, agent_id=chat.agentId)
+            if not db_agent:
+                raise HTTPException(status_code=404, detail=f"Agent ID {chat.agentId} not found")
+
         if not chat.aiModelId:
             default_model_setting = await setting_crud.get_setting(db, key="default_model_id")
             if default_model_setting and default_model_setting.value:
@@ -284,6 +288,11 @@ async def update_chat_settings(
         db_model = await provider_crud.get_model(db, model_id=chat_update.aiModelId)
         if not db_model:
             raise HTTPException(status_code=404, detail=f"AI model ID {chat_update.aiModelId} not found")
+
+    if chat_update.agentId:
+        db_agent = await agent_crud.get_agent(db, agent_id=chat_update.agentId)
+        if not db_agent:
+            raise HTTPException(status_code=404, detail=f"Agent ID {chat_update.agentId} not found")
 
     if chat_update.modelParameters is not None:
         _validate_model_parameters(chat_update.modelParameters)

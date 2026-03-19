@@ -5,6 +5,7 @@ from sqlalchemy.orm import relationship
 from backend.models.base_model import Base, generate_uuid
 from backend.schemas.enums import MessageStatus,SubMessageType
 from backend.config.timezone_config import get_configured_now
+from schemas.enums import ChatMode
 
 
 class Chat(Base):
@@ -22,7 +23,11 @@ class Chat(Base):
     systemPrompt = Column(TEXT, nullable=True)
     modelParameters = Column(TEXT, nullable=True)  # Store as JSON string
     aiModelId = Column(String(36), ForeignKey("AIModel.id"), nullable=True)
+    chatMode = Column(String(20), nullable=False, default=ChatMode.NORMAL)
+    agentId = Column(String(36), ForeignKey("Agent.id", ondelete="SET NULL"), nullable=True)
 
+    # 关系: 反向引用到 Agent
+    agent = relationship("Agent")
     # 资源挂载列表，存储资源ID的JSON数组
     resource_prompt_list = Column(JSON, nullable=True)
 

@@ -38,7 +38,11 @@ async def duplicate_chat_with_messages(db: AsyncSession, chat_id: str) -> Option
         aiModelId=original_chat.aiModelId,
         itemType='chat',
         parentId=original_chat.parentId,
-        sortOrder=new_sort_order
+        sortOrder=new_sort_order,
+        resource_prompt_list=original_chat.resource_prompt_list,
+        enabled_mcp_ids=original_chat.enabled_mcp_ids,
+        chatMode=original_chat.chatMode,
+        agentId=original_chat.agentId
     )
     new_chat = await chat_crud.create_chat(db, chat=new_chat_data)
 

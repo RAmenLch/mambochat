@@ -3,8 +3,16 @@
   <div class="chat-toolbar">
     <div class="toolbar-left">
       <div class="model-display">
-        <el-icon><Cpu /></el-icon>
-        <span>{{ t('chat.toolbar.currentModel') }}: <strong>{{ displayModelName }}</strong></span>
+        <!-- [新增] Agent 模式显示 -->
+        <template v-if="currentChat?.chatMode === 'agent'">
+          <el-icon><User /></el-icon>
+          <span>Agent: <strong>{{ displayAgentName }}</strong></span>
+        </template>
+        <!-- 普通模式显示 -->
+        <template v-else>
+          <el-icon><Cpu /></el-icon>
+          <span>{{ t('chat.toolbar.currentModel') }}: <strong>{{ displayModelName }}</strong></span>
+        </template>
       </div>
       <div class="zip-history-list-trigger" v-if="zipHistoryItems.length > 0">
         <el-popover
@@ -152,12 +160,13 @@ import { storeToRefs } from 'pinia';
 import { useI18n } from 'vue-i18n';
 import { useProviderStore } from '@/stores/providerStore';
 import { useMcpStore } from '@/stores/mcpStore';
+import { useAgentStore } from '@/stores/agentStore'; // [新增]
 import type { Chat, Message, McpHealthStatus } from '@/api/types';
 import type { PropType } from 'vue';
 import { ElMessage } from 'element-plus';
 import {
   Cpu, Setting, Files, Tickets, Upload, Collection,
-  QuestionFilled, Search, Suitcase, Refresh
+  QuestionFilled, Search, Suitcase, Refresh, User // [新增 User]
 } from '@element-plus/icons-vue';
 
 const props = defineProps({
@@ -188,6 +197,7 @@ defineEmits([
 const { t } = useI18n();
 const providerStore = useProviderStore();
 const mcpStore = useMcpStore();
+const agentStore = useAgentStore(); // [新增]
 
 const { activeUserMcpServices } = storeToRefs(mcpStore);
 
@@ -200,6 +210,13 @@ const displayModelName = computed(() => {
   }
   const model = providerStore.allModels.find(m => m.id === props.currentChat.aiModelId);
   return model ? model.name : t('common.status.unknownModel');
+});
+
+// [新增] 获取 Agent 名称
+const displayAgentName = computed(() => {
+  if (!props.currentChat?.agentId) return t('common.status.unspecified', '未指定');
+  const agent = agentStore.agentList.find(a => a.id === props.currentChat!.agentId);
+  return agent ? agent.name : t('common.status.unknownModel', '未知 Agent');
 });
 
 /**

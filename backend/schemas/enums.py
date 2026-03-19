@@ -2,6 +2,11 @@
 from enum import Enum
 
 
+class ChatMode(str, Enum):
+    """定义会话的模式"""
+    NORMAL = "normal"
+    AGENT = "agent"
+
 class MessageRole(str, Enum):
     USER = "user"
     ASSISTANT = "assistant"
