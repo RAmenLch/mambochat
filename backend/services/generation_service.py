@@ -5,7 +5,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import AsyncGenerator, Tuple, List, Optional
+from typing import AsyncGenerator, Tuple, List, Optional, Type
 
 from backend.services.generation.executor.dispatcher import InstructionDispatcher
 from backend.services.stream_manager_service import stream_manager
@@ -17,15 +17,28 @@ from backend.models.base_model import generate_uuid
 from backend.services.generation.managers.default_manager import DefaultGenerateManager
 from backend.services.generation.managers.title_manager import TitleGenerateManager
 from backend.services.generation.managers.zip_history_manager import ZipHistoryGenerateManager
+
+from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.worker.openai_worker import OpenAiWorker
 from backend.services.generation.worker.google_worker import GoogleWorker
 from backend.services.generation.worker.deepseek_worker import DeepSeekWorker
+from backend.services.generation.worker.anthropic_worker import AnthropicWorker
+
 from backend.schemas.enums import FileManagementType, MessageStatus, MessageRole, SubMessageType, ProviderWorkerType
 from backend.config.timezone_config import get_configured_now, TZ
-from backend.services.generation.worker.anthropic_worker import AnthropicWorker
 from backend.services.file_service import FileService
 
 GENERATION_START_TIMEOUT = timedelta(minutes=10)
+
+# ==========================================
+# 阶段二：应用注册表模式重构工作者工厂
+# ==========================================
+WORKER_REGISTRY: dict[str, Type[AbstractGenerateWorker]] = {
+    ProviderWorkerType.OPENAI: OpenAiWorker,
+    ProviderWorkerType.GOOGLE: GoogleWorker,
+    ProviderWorkerType.DEEPSEEK: DeepSeekWorker,
+    ProviderWorkerType.ANTHROPIC: AnthropicWorker,
+}
 
 
 async def _calculate_message_status(message: chat_model.Message) -> schemas.MessageStatus:
@@ -174,19 +187,13 @@ async def _ensure_chat_model_configured(db: AsyncSession, chat_id: str) -> None:
             await db.refresh(db_chat)
 
 
-def _create_worker_instance(worker_type: str):
-    """Worker 工厂方法"""
-    if worker_type == ProviderWorkerType.GOOGLE:
-        return GoogleWorker()
-    elif worker_type == ProviderWorkerType.DEEPSEEK:
-        return DeepSeekWorker()
-    elif worker_type == ProviderWorkerType.ANTHROPIC:
-        return AnthropicWorker()
-    else:
-        return OpenAiWorker()
+def _create_worker_instance(worker_type: str) -> AbstractGenerateWorker:
+    """Worker 工厂方法 (OCP 友好)"""
+    worker_class = WORKER_REGISTRY.get(worker_type, OpenAiWorker)
+    return worker_class()
 
 
-async def _get_worker_for_chat(db: AsyncSession, chat_id: str):
+async def _get_worker_for_chat(db: AsyncSession, chat_id: str) -> AbstractGenerateWorker:
     """
     根据会话配置的服务商类型，返回对应的 Worker 实例。
     """
@@ -198,7 +205,7 @@ async def _get_worker_for_chat(db: AsyncSession, chat_id: str):
     return _create_worker_instance(worker_type)
 
 
-async def _get_worker_from_settings(db: AsyncSession, setting_keys: List[str]):
+async def _get_worker_from_settings(db: AsyncSession, setting_keys: List[str]) -> AbstractGenerateWorker:
     """
     根据全局设置列表（按优先级）查找模型，并返回对应的 Worker 实例。
     """
@@ -245,6 +252,13 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
         except Exception as e:
             print(f"[Generation Service Error] for message {assistant_message_id}: {e}")
             final_status = MessageStatus.FAILED
+
+            # ==========================================
+            # 阶段四：增强全局异常捕获的数据库事务安全性
+            # 先回滚之前可能失败的事务，确保 session 干净
+            # ==========================================
+            await db.rollback()
+
             try:
                 error_sub_message_create = schemas.SubMessageCreate(
                     id=generate_uuid(),
@@ -254,6 +268,8 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
                     status=MessageStatus.FAILED
                 )
                 await message_crud.create_sub_message(db, assistant_message_id, error_sub_message_create)
+                # 显式提交补偿性写入
+                await db.commit()
             except Exception as inner_e:
                 print(f"Failed to even create an error message for {assistant_message_id}: {inner_e}")
 

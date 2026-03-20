@@ -15,7 +15,7 @@ class StreamContext:
     流处理上下文。
     在 Manager 和各个 Handler 之间共享状态，避免方法参数过长。
     """
-    decode: type[BaseDecode]
+    decode: BaseDecode
     mode: str
     event: Any
     lc_run_uuid: Optional[str]

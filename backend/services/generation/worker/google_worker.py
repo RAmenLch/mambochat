@@ -14,9 +14,8 @@ class GoogleWorker(ChatWorker):
     由 Manager 负责翻译。
     """
 
-    @staticmethod
-    def get_decode() -> type[BaseDecode]:
-        return GoogleDecode
+    def get_decode(self) -> BaseDecode:
+        return GoogleDecode()
 
     def _create_model(self, llm_input: LLMInput) -> ChatGoogleGenerativeAI:
         """

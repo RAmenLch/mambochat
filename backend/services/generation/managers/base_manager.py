@@ -20,7 +20,7 @@ class AbstractGenerateManager(ABC):
 
     def __init__(self, db_session: AsyncSession):
         self.db_session = db_session
-        self.decode: type[BaseDecode] = BaseDecode
+        self.decode: BaseDecode = None
     async def run(
             self,
             worker: AbstractGenerateWorker,

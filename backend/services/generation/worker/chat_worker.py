@@ -21,7 +21,7 @@ from langgraph.types import Command
 from backend.checkpointer import get_checkpointer
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.core.llm_io import LLMInput
-from backend.services.generation.worker.decode import BaseDecode
+from backend.services.generation.worker.decode import BaseDecode,DefaultLangChainDecode
 from backend.schemas.lc_agent import AgentState
 from backend.services.generation.agent.custom_middleware import ToolMessageOrderingMiddleware
 
@@ -35,9 +35,8 @@ class ChatWorker(AbstractGenerateWorker):
     输出流为 LangChain 的原生消息块 (BaseMessageChunk) 或状态更新，
     由 Manager 负责翻译。
     """
-    @staticmethod
-    def get_decode() -> type[BaseDecode]:
-        return BaseDecode
+    def get_decode(self) -> BaseDecode:
+        return DefaultLangChainDecode()
 
     def _convert_messages(self, messages: List[Dict[str, Any]]) -> List[BaseMessage]:
         """

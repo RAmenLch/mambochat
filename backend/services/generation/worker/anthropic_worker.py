@@ -19,9 +19,8 @@ class AnthropicWorker(ChatWorker):
     由 Manager 负责翻译。
     """
 
-    @staticmethod
-    def get_decode() -> type[BaseDecode]:
-        return AnthropicDecode
+    def get_decode(self) -> BaseDecode:
+        return AnthropicDecode()
 
     def _exchange_image_message(self, content: Any):
         if isinstance(content, list):

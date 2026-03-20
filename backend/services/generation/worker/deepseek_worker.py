@@ -15,9 +15,8 @@ class DeepSeekWorker(ChatWorker):
     继承自 ChatWorker，针对 DeepSeek 的思考模式（Reasoning Mode）进行了适配。
     """
 
-    @staticmethod
-    def get_decode() -> type[BaseDecode]:
-        return OpenAiDecode
+    def get_decode(self) -> BaseDecode:
+        return OpenAiDecode()
 
     def _convert_messages(self, messages: List[Dict[str, Any]]) -> List[BaseMessage]:
         """

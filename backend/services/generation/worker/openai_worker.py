@@ -15,9 +15,9 @@ class OpenAiWorker(ChatWorker):
     输出流为 LangChain 的原生消息块 (BaseMessageChunk) 或状态更新，
     由 Manager 负责翻译。
     """
-    @staticmethod
-    def get_decode() -> type[BaseDecode]:
-        return OpenAiDecode
+
+    def get_decode(self) -> BaseDecode:
+        return OpenAiDecode()
 
     def _create_model(self, llm_input: LLMInput) -> ExtendedChatOpenAI:
         """

@@ -1,19 +1,26 @@
+# backend/services/generation/managers/zip_history_manager.py
+
 from typing import AsyncGenerator, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.schemas import enums as schemas_enums
 from backend.models.base_model import generate_uuid
+
+# 1. 导入核心层指令
 from backend.services.generation.core.instructions import (
     BaseInstruction,
     UpdateZipHistorySubMessage,
     SetFinalStatus
 )
+
+# 2. 导入抽象基类和 Worker
 from backend.services.generation.managers.base_manager import AbstractGenerateManager
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
+
+# 3. 导入装配层的 Director 和 Loader
 from backend.services.generation.builders.director import LLMInputDirector
-
-
+from backend.services.generation.builders.material_loader import GenerationMaterialLoader
 
 DEFAULT_ZIP_HISTORY_PROMPT = (
     "你是一个对话历史压缩工具。请根据用户提供的对话历史，生成一段简洁、精确、信息完整的摘要。"
@@ -42,20 +49,19 @@ class ZipHistoryGenerateManager(AbstractGenerateManager):
 
         self.target_message_id = assistant_message_id
 
-        # 1. 初始化指挥官
-        director = LLMInputDirector(self.db_session, chat_id=chat_id)
+        # 1. 使用独立的 Loader 获取物料 (替代原先的 director._load_materials)
+        materials = await GenerationMaterialLoader.load(self.db_session, chat_id)
+        settings = materials.settings
 
-        # 2. 预加载素材以获取设置
-        await director._load_materials()
-
-        # 3. 获取 System Prompt
-        system_prompt = director.settings.get("zip_history_system_prompt")
+        # 2. 获取 System Prompt
+        system_prompt = settings.get("zip_history_system_prompt")
         if not system_prompt:
             system_prompt = DEFAULT_ZIP_HISTORY_PROMPT
 
-        # 4. 配置指挥官
-        # slice_until_message: 截断到目标消息之前 (不包含目标消息)
-        # 保持默认的 zip_history 逻辑开启，以便基于已有的压缩历史进行增量压缩
+        # 3. 初始化并配置指挥官
+        director = LLMInputDirector(self.db_session, chat_id=chat_id)
+
+        # slice_until_message: 截断到目标消息之前 (包含目标消息用于上下文)
         llm_input = await (
             director
             .slice_until_message(self.target_message_id, include_target=True)
@@ -64,16 +70,16 @@ class ZipHistoryGenerateManager(AbstractGenerateManager):
             .build()
         )
 
-        language = director.settings.get("language")
+        language = settings.get("language")
         en_prompt = "Please output a summary of the conversation history:"
         cn_prompt = "请输出历史摘要:"
         prompt = cn_prompt if language == "zh-CN" else en_prompt
 
-        # 5. 后处理：追加触发提示
+        # 4. 后处理：追加触发提示
         # 适配新架构：将消息追加到 context.messages 中
         llm_input.context.messages.append({"role": "user", "content": prompt})
 
-        # 6. 执行生成并累积结果
+        # 5. 执行生成并累积结果
         accumulated_content = ""
 
         async for mode, event in worker.generate(llm_input):
@@ -81,7 +87,7 @@ class ZipHistoryGenerateManager(AbstractGenerateManager):
             if text_chunk:
                 accumulated_content += text_chunk
 
-        # 7. 生成更新指令
+        # 6. 生成更新指令
         if accumulated_content:
             # 确保有 ID
             if not self.sub_message_id:
@@ -96,7 +102,6 @@ class ZipHistoryGenerateManager(AbstractGenerateManager):
             yield SetFinalStatus(status=schemas_enums.MessageStatus.COMPLETED)
         else:
             raise RuntimeError("模型未返回任何摘要内容")
-
 
     async def _cleanup_on_exception(
             self,

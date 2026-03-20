@@ -1,6 +1,6 @@
 # backend/services/generation/executor/dispatcher.py
 
-from typing import Dict, Type, Callable, Awaitable, Optional
+from typing import Dict, Type, Callable, Awaitable, Optional, TypeVar, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend import schemas
@@ -11,11 +11,11 @@ from backend.services.generation.core.instructions import (
 )
 from backend.services.generation.executor import handlers
 
-# 定义 Handler 函数的类型提示
-InstructionHandler = Callable[
-    [BaseInstruction, str, str, AsyncSession],
-    Awaitable[Optional[schemas.enums.MessageStatus]]
-]
+# ==========================================
+# 阶段三：强化指令分发器的泛型类型安全
+# 定义泛型类型变量，绑定到 BaseInstruction
+# ==========================================
+T_Instruction = TypeVar('T_Instruction', bound=BaseInstruction)
 
 
 class InstructionDispatcher:
@@ -26,12 +26,24 @@ class InstructionDispatcher:
 
     def __init__(self, db_session: AsyncSession):
         self.db_session = db_session
-        self._handlers: Dict[Type[BaseInstruction], InstructionHandler] = {}
+        # 内部字典存储异构的 Handlers，为了兼容各种具体的 Instruction 子类，入参类型放宽为 Any
+        self._handlers: Dict[
+            Type[BaseInstruction],
+            Callable[[Any, str, str, AsyncSession], Awaitable[Optional[schemas.enums.MessageStatus]]]
+        ] = {}
         self._register_default_handlers()
 
-    def register(self, instruction_type: Type[BaseInstruction], handler: InstructionHandler) -> None:
-        """注册自定义的指令处理器"""
-        self._handlers[instruction_type] = handler
+    def register(
+        self,
+        instruction_type: Type[T_Instruction],
+        handler: Callable[[T_Instruction, str, str, AsyncSession], Awaitable[Optional[schemas.enums.MessageStatus]]]
+    ) -> None:
+        """
+        注册自定义的指令处理器。
+        使用泛型约束，确保传入的 handler 接收的指令类型与 instruction_type 严格一致，
+        从而在编写代码时获得 IDE 的严格类型检查和代码提示。
+        """
+        self._handlers[instruction_type] = handler  # type: ignore
 
     def _register_default_handlers(self) -> None:
         """注册所有内置的指令处理器"""
