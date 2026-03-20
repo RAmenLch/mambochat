@@ -13,13 +13,15 @@ from langchain_core.messages import (
     AIMessageChunk
 )
 from langchain_core.tools import BaseTool
+from langgraph.graph.state import CompiledStateGraph
 from langchain.agents import create_agent
 from langchain.agents.middleware import HumanInTheLoopMiddleware
 from langgraph.types import Command
+
 from backend.checkpointer import get_checkpointer
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.llm_io import LLMInput
-from backend.services.generation.worker.decode import OpenAiDecode, BaseDecode
+from backend.services.generation.worker.decode import BaseDecode
 from backend.schemas.lc_agent import AgentState
 from backend.services.generation.agent.custom_middleware import ToolMessageOrderingMiddleware
 
@@ -78,17 +80,18 @@ class ChatWorker(AbstractGenerateWorker):
         model = self._create_model(llm_input)
 
         tools: List[BaseTool] = []
-        if llm_input.tools:
-            tools = [t for t in llm_input.tools if isinstance(t, BaseTool)]
+        # 适配新架构：从 agent_config 读取 tools
+        if llm_input.agent_config.tools:
+            tools = [t for t in llm_input.agent_config.tools if isinstance(t, BaseTool)]
 
         middlewares = []
         active_checkpointer = None
         thread_config = None  # 默认不传 config
 
-        # 仅当明确需要审核时，才挂载中间件并启用 checkpointer
-        if getattr(llm_input, 'hitl_interrupt_on', None):
+        # 适配新架构：从 agent_config 读取 HITL 配置
+        if llm_input.agent_config.hitl_interrupt_on:
             middleware = HumanInTheLoopMiddleware(
-                interrupt_on=llm_input.hitl_interrupt_on,
+                interrupt_on=llm_input.agent_config.hitl_interrupt_on,
                 description_prefix="需要审核的操作"
             )
             middlewares.append(middleware)
@@ -98,9 +101,9 @@ class ChatWorker(AbstractGenerateWorker):
             middlewares.append(ordering_middleware)
             active_checkpointer = get_checkpointer()
             # 只有在使用 checkpointer 时，才需要配置 thread_id
-            thread_config = {"configurable": {"thread_id": llm_input.thread_id}}
+            thread_config = {"configurable": {"thread_id": llm_input.agent_config.thread_id}}
 
-        agent = create_agent(
+        agent: CompiledStateGraph = create_agent(
             model,
             tools,
             middleware=middlewares,  # 传递列表，即使为空也不会报 NoneType 错误
@@ -108,12 +111,13 @@ class ChatWorker(AbstractGenerateWorker):
             state_schema=AgentState if middlewares else None
         )
 
-        # 从 llm_input 中获取 resume_payload
-        resume_payload = getattr(llm_input, 'resume_payload', None)
+        # 适配新架构：从 agent_config 中获取 resume_payload
+        resume_payload = llm_input.agent_config.resume_payload
         if resume_payload:
             input_data = Command(resume=resume_payload)
         else:
-            messages = self._convert_messages(llm_input.messages)
+            # 适配新架构：从 context 中获取 messages
+            messages = self._convert_messages(llm_input.context.messages)
             input_data = {"messages": messages}
 
         async for stream1 in agent.astream(
@@ -136,3 +140,4 @@ class ChatWorker(AbstractGenerateWorker):
                     yield mode, event
             else:
                 yield mode, event[0]
+

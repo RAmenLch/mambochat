@@ -18,17 +18,17 @@ class AnthropicWorker(ChatWorker):
     输出流为 LangChain 的原生消息块 (BaseMessageChunk) 或状态更新，
     由 Manager 负责翻译。
     """
+
     @staticmethod
     def get_decode() -> type[BaseDecode]:
         return AnthropicDecode
 
-
-    def _exchange_image_message(self,content:Any):
-        if isinstance(content,list):
+    def _exchange_image_message(self, content: Any):
+        if isinstance(content, list):
             inner_content = []
             for subm in content:
-                if subm.get("type","") == "image_url":
-                    image_data = subm.get("image_url",{}).get("url","").split(";")
+                if subm.get("type", "") == "image_url":
+                    image_data = subm.get("image_url", {}).get("url", "").split(";")
                     if len(image_data) < 2:
                         continue
                     else:
@@ -37,15 +37,15 @@ class AnthropicWorker(ChatWorker):
                             "source": {
                                 "type": "base64",
                                 "media_type": image_data[0][5:],
-                                "data":image_data[1][7:]
+                                "data": image_data[1][7:]
                             }
                         }
                         inner_content.append(imageA)
-                else: inner_content.append(subm)
+                else:
+                    inner_content.append(subm)
             return inner_content
         else:
             return content
-
 
     def _convert_messages(self, messages: List[Dict[str, Any]]) -> List[BaseMessage]:
         """
@@ -78,27 +78,30 @@ class AnthropicWorker(ChatWorker):
 
         return lc_messages
 
-
     def _create_model(self, llm_input: LLMInput) -> ChatAnthropic:
         """
-        根据 LLMInput 配置创建 ExtendedChatOpenAI 实例。
+        根据 LLMInput 配置创建 ChatAnthropic 实例。
         """
-        # 提取基础参数
-        model_kwargs = llm_input.parameters.copy()
-        stream = model_kwargs.pop("stream", True) # 既然是 Worker，默认应该支持流式
+        # 提取基础参数 (适配新架构：从 llm_config 读取)
+        model_kwargs = llm_input.llm_config.parameters.copy()
+        stream = model_kwargs.pop("stream", True)  # 既然是 Worker，默认应该支持流式
         thinking = model_kwargs.pop("thinking", {"type": "enabled", "budget_tokens": 32000})
-        # 处理代理
-        openai_proxy = llm_input.proxy_url if llm_input.proxy_url else None
 
-        url = llm_input.api_host.rstrip("/").rstrip("/v1")
+        # 处理代理 (适配新架构：从 llm_config 读取)
+        openai_proxy = llm_input.llm_config.proxy_url if llm_input.llm_config.proxy_url else None
+
+        # 适配新架构：从 llm_config 读取 api_host
+        url = llm_input.llm_config.api_host.rstrip("/").rstrip("/v1")
+
         return ChatAnthropic(
-            model_name=llm_input.model_id,
-            api_key=llm_input.api_key,
+            model_name=llm_input.llm_config.model_id,
+            api_key=llm_input.llm_config.api_key,
             base_url=url,
             thinking=thinking,
             model_kwargs=model_kwargs,
             anthropic_proxy=openai_proxy,
-            timeout=llm_input.timeout,
+            timeout=llm_input.llm_config.timeout,
             streaming=stream,
             stop=None
         )
+

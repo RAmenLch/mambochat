@@ -16,7 +16,8 @@ from backend.services.generation.instructions import (
 )
 from backend.services.generation.abstract_manager import AbstractGenerateManager
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
-from backend.services.generation.llm_input_builder import LLMInputBuilder
+from backend.services.generation.llm_input_director import LLMInputDirector
+
 
 
 class TitleGenerationContext(BaseModel):
@@ -86,12 +87,12 @@ class TitleGenerateManager(AbstractGenerateManager):
         # 1. 获取动态提示词
         system_prompt, trigger_prompt = await TitlePromptProvider.get_prompts(self.db_session)
 
-        # 2. 初始化构建器
-        builder = LLMInputBuilder(self.db_session, chat_id=chat_id)
+        # 2. 初始化指挥官
+        director = LLMInputDirector(self.db_session, chat_id=chat_id)
 
-        # 3. 配置构建器
+        # 3. 配置指挥官
         llm_input = await (
-            builder
+            director
             .use_global_model(["title_generation_model_id", "default_model_id"])
             .set_system_prompt(system_prompt)
             .slice_head_tail(head=2, tail=2)
@@ -103,9 +104,9 @@ class TitleGenerateManager(AbstractGenerateManager):
             .build()
         )
 
-        # 强制 JSON 模式
-        llm_input.set_parameter('response_format', {'type': 'json_object'})
-        llm_input.set_parameter("stream", False)
+        # 强制 JSON 模式 (适配新架构：通过 llm_config 修改参数)
+        llm_input.llm_config.parameters['response_format'] = {'type': 'json_object'}
+        llm_input.llm_config.parameters['stream'] = False
 
         # 4. 执行生成并累积结果
         accumulated_content = ""
@@ -135,6 +136,7 @@ class TitleGenerateManager(AbstractGenerateManager):
             yield self._create_error_notification("模型未返回任何内容")
             yield SetFinalStatus(status=schemas.enums.MessageStatus.FAILED)
 
+
     def _create_error_notification(self, message: str) -> NotifyUser:
         """辅助方法：创建错误通知指令"""
         return NotifyUser(
@@ -154,4 +156,5 @@ class TitleGenerateManager(AbstractGenerateManager):
         异常清理逻辑：发送全局通知。
         """
         if exception:
+            print(f"生成标题时发生系统异常: {str(exception)}")
             yield self._create_error_notification(f"生成标题时发生系统异常: {str(exception)}")

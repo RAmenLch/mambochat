@@ -19,7 +19,6 @@ class DeepSeekWorker(ChatWorker):
     def get_decode() -> type[BaseDecode]:
         return OpenAiDecode
 
-
     def _convert_messages(self, messages: List[Dict[str, Any]]) -> List[BaseMessage]:
         """
         将 LLMInput 中的字典格式消息转换为 LangChain 的 Message 对象。
@@ -96,17 +95,20 @@ class DeepSeekWorker(ChatWorker):
         根据 LLMInput 配置创建自定义的 ChatDeepSeek 实例。
         使用自定义的 ChatDeepSeek 类以修复工具调用时的 payload 构建问题。
         """
-        model_kwargs = llm_input.parameters.copy()
+        # 适配新架构：从 llm_config提取基础参数
+        model_kwargs = llm_input.model_config.parameters.copy()
         stream = model_kwargs.pop("stream", True)
 
-        openai_proxy = llm_input.proxy_url if llm_input.proxy_url else None
+        # 适配新架构：从 llm_config处理代理
+        openai_proxy = llm_input.model_config.proxy_url if llm_input.model_config.proxy_url else None
 
         return ChatDeepSeek(
-            model=llm_input.model_id,
-            api_key=llm_input.api_key,
-            base_url=llm_input.api_host.rstrip("/"),
+            model=llm_input.model_config.model_id,
+            api_key=llm_input.model_config.api_key,
+            base_url=llm_input.model_config.api_host.rstrip("/"),
             model_kwargs=model_kwargs,
             openai_proxy=openai_proxy,
-            timeout=llm_input.timeout,
+            timeout=llm_input.model_config.timeout,
             streaming=stream
         )
+

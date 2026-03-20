@@ -24,7 +24,7 @@ from backend.services.generation.instructions import (
     InterruptGeneration
 )
 from backend.services.generation.abstract_manager import AbstractGenerateManager
-from backend.services.generation.llm_input_builder import LLMInputBuilder
+from backend.services.generation.llm_input_director import LLMInputDirector
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
 
 from services.generation.worker.chat_worker import ChatWorker
@@ -81,10 +81,10 @@ class DefaultGenerateManager(AbstractGenerateManager):
             assistant_message_id: str
     ) -> AsyncGenerator[BaseInstruction, None]:
 
-        builder = LLMInputBuilder(self.db_session, chat_id=chat_id)
+        director = LLMInputDirector(self.db_session, chat_id=chat_id)
 
         (
-            builder
+            director
             .slice_until_message(assistant_message_id)
             .filter_sub_message_types(
                 schemas_enums.SubMessageType.NORMAL.value,
@@ -101,12 +101,14 @@ class DefaultGenerateManager(AbstractGenerateManager):
         )
 
         try:
-            llm_input = await builder.build()
-            self.providers = builder.get_providers()
-            self._hitl_tools_config = getattr(llm_input, 'hitl_interrupt_on', {})
+            llm_input = await director.build()
+            self.providers = director.get_providers()
 
-            if llm_input.tools:
-                self._tool_map = {t.name: t for t in llm_input.tools if hasattr(t, 'name')}
+            # 适配新架构：从 agent_config 中读取配置
+            self._hitl_tools_config = getattr(llm_input.agent_config, 'hitl_interrupt_on', {})
+
+            if llm_input.agent_config.tools:
+                self._tool_map = {t.name: t for t in llm_input.agent_config.tools if hasattr(t, 'name')}
 
         except McpConnectionError as e:
             error_id = generate_uuid()
