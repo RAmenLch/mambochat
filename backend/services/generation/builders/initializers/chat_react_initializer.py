@@ -1,4 +1,4 @@
-# backend/services/generation/initializer/chat_react_initializer.py
+# backend/services/generation/builders/initializers/chat_react_initializer.py
 
 import json
 from typing import Tuple, List, Dict, Any, Optional
@@ -7,9 +7,13 @@ from langchain_core.tools import BaseTool
 
 from backend.schemas.enums import ChatMode, ToolReviewMode, AgentTypeEnum
 from backend.crud import mcp_crud
-from backend.services.generation.llm_io import AgentConfig
-from backend.services.generation.initializer.base_initializer import AbstractAgentInitializer
-from backend.services.generation.resource_dispatcher import ResourceDispatcher
+
+# 导入核心层和同级组件
+from backend.services.generation.core.llm_io import AgentConfig
+from backend.services.generation.builders.initializers.base_initializer import AbstractAgentInitializer
+from backend.services.generation.builders.resource_dispatcher import ResourceDispatcher
+
+# 导入工具 Provider
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
 from backend.services.generation.tools.mcp_tool_provider import MCPToolProvider
 from backend.services.generation.tools.suggest_tool_provider import SuggestToolProvider
@@ -19,7 +23,7 @@ from backend.services.generation.tools.kb_tool_provider import KBToolProvider
 class ChatBasedReActInitializer(AbstractAgentInitializer):
     """
     基于 Chat 表配置的 ReAct Agent 初始化器。
-    当前阶段的主力初始化器，提取原 llm_input_builder 中的工具与资源装配逻辑。
+    负责提取工具与资源装配逻辑，生成 AgentConfig。
     """
 
     def __init__(
@@ -72,8 +76,7 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
             params = {}
             if self.chat and self.chat.modelParameters:
                 try:
-                    params = json.loads(self.chat.modelParameters) if isinstance(self.chat.modelParameters,
-                                                                                 str) else self.chat.modelParameters
+                    params = json.loads(self.chat.modelParameters) if isinstance(self.chat.modelParameters, str) else self.chat.modelParameters
                 except (json.JSONDecodeError, TypeError):
                     pass
 
@@ -120,4 +123,3 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
 
     def get_providers(self) -> List[BaseToolProvider]:
         return self.providers
-

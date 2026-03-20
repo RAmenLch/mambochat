@@ -1,4 +1,4 @@
-# backend/services/generation/llm_io.py
+# backend/services/generation/core/llm_io.py
 
 from typing import List, Dict, Any, Optional, Union
 from pydantic import BaseModel, Field, ConfigDict
@@ -10,14 +10,16 @@ from backend.schemas.enums import AgentTypeEnum
 class ModelConfig(BaseModel):
     """
     大语言模型本身的运行配置。
-    包含模型标识、连接信息以及生成参数。
+    包含模型标识、连接信息以及生成参数。纯数据结构，不含任何业务逻辑。
     """
     model_id: str = Field(..., description="模型唯一标识符")
     api_host: str = Field(..., description="API 请求地址")
     api_key: str = Field(..., description="API 密钥")
     proxy_url: Optional[str] = Field(None, description="代理地址，例如 http://127.0.0.1:7890")
-    parameters: Dict[str, Any] = Field(default_factory=dict,
-                                       description="模型的生成参数 (如 temperature, top_p, stream 等)")
+    parameters: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="模型的生成参数 (如 temperature, top_p, stream 等)"
+    )
     timeout: int = Field(60, description="请求超时时间(秒)")
 
 
@@ -45,7 +47,7 @@ class AgentConfig(BaseModel):
     Agent 运行与调度配置。
     包含工具列表、HITL(人机交互)中断配置、线程管理等。
     """
-    # 【注意这里】：这里必须是 model_config，这是 Pydantic V2 的系统保留字，用来配置模型行为
+    # Pydantic V2 系统保留字，允许传入 LangChain 的 BaseTool 等非 Pydantic 类型
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     agent_type: AgentTypeEnum = Field(default=AgentTypeEnum.REACT, description="Agent 的类型标识")
@@ -66,9 +68,8 @@ class AgentConfig(BaseModel):
 class LLMInput(BaseModel):
     """
     V2 版本的标准 LLM 输入对象。
-    将模型配置、消息上下文、Agent 调度配置彻底解耦。
+    聚合了模型配置、消息上下文和 Agent 调度配置，作为 Worker 的唯一输入参数。
     """
     llm_config: ModelConfig
     context: MessageContext
     agent_config: AgentConfig
-

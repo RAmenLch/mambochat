@@ -12,7 +12,7 @@ from backend.schemas import enums as schemas_enums
 from backend.schemas.kb import KBSearchRequest
 from backend.schemas.message import McpToolContent
 from backend.models.base_model import generate_uuid
-from backend.services.generation.instructions import (
+from backend.services.generation.core.instructions import (
     BaseInstruction,
     CreateSubMessage,
     UpdateSubMessageContent,

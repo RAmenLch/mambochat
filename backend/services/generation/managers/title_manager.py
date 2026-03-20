@@ -8,15 +8,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend import schemas
 from backend.crud import setting_crud
 from backend.schemas import SubMessageType
-from backend.services.generation.instructions import (
+from backend.services.generation.core.instructions import (
     BaseInstruction,
     SetFinalStatus,
     UpdateChatName,
     NotifyUser
 )
-from backend.services.generation.abstract_manager import AbstractGenerateManager
+from backend.services.generation.managers.base_manager import AbstractGenerateManager
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
-from backend.services.generation.llm_input_director import LLMInputDirector
+from backend.services.generation.builders.director import LLMInputDirector
 
 
 

@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any, AsyncGenerator
 
 from langchain_core.tools import BaseTool
-from backend.services.generation.instructions import BaseInstruction
+from backend.services.generation.core.instructions import BaseInstruction
 
 
 class BaseToolProvider(ABC):

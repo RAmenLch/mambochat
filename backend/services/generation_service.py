@@ -7,16 +7,16 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import AsyncGenerator, Tuple, List, Optional
 
+from backend.services.generation.executor.dispatcher import InstructionDispatcher
 from backend.services.stream_manager_service import stream_manager
 from backend.crud import chat_crud, message_crud, resource_crud, setting_crud, provider_crud
 from backend import schemas
 from backend.models import chat_model
 from backend.database import AsyncSessionLocal
-from backend.services.generation.instruction_executor import InstructionExecutor
 from backend.models.base_model import generate_uuid
-from backend.services.generation.default_manager import DefaultGenerateManager
-from backend.services.generation.title_manager import TitleGenerateManager
-from backend.services.generation.zip_history_manager import ZipHistoryGenerateManager
+from backend.services.generation.managers.default_manager import DefaultGenerateManager
+from backend.services.generation.managers.title_manager import TitleGenerateManager
+from backend.services.generation.managers.zip_history_manager import ZipHistoryGenerateManager
 from backend.services.generation.worker.openai_worker import OpenAiWorker
 from backend.services.generation.worker.google_worker import GoogleWorker
 from backend.services.generation.worker.deepseek_worker import DeepSeekWorker
@@ -232,14 +232,10 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
 
             worker = await _get_worker_for_chat(db, chat_id)
             manager = DefaultGenerateManager(db_session=db)
-            executor = InstructionExecutor(db_session=db)
+            executor = InstructionDispatcher(db_session=db)
 
             async for instruction in manager.run(worker, chat_id, assistant_message_id):
-                exec_result = await executor.execute(
-                    instruction=instruction,
-                    chat_id=chat_id,
-                    assistant_message_id=assistant_message_id
-                )
+                exec_result = await executor.execute(instruction, chat_id, assistant_message_id)
                 if isinstance(exec_result, MessageStatus):
                     final_status = exec_result
 
@@ -278,7 +274,7 @@ async def run_title_generation_task(chat_id: str):
             worker = await _get_worker_from_settings(db, ["title_generation_model_id", "default_model_id"])
 
             manager = TitleGenerateManager(db_session=db)
-            executor = InstructionExecutor(db_session=db)
+            executor = InstructionDispatcher(db_session=db)
 
             async for instruction in manager.run(worker, chat_id, task_id):
                 await executor.execute(
@@ -302,7 +298,7 @@ async def run_zip_history_generation_task(chat_id: str, target_message_id: str):
         try:
             worker = await _get_worker_for_chat(db, chat_id)
             manager = ZipHistoryGenerateManager(db_session=db)
-            executor = InstructionExecutor(db_session=db)
+            executor = InstructionDispatcher(db_session=db)
 
             target_message = await message_crud.get_message(db, target_message_id)
             if target_message:

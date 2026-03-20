@@ -1,26 +1,28 @@
-# backend/services/generation/llm_input_director.py
+# backend/services/generation/builders/director.py
 
 import json
 from typing import List, Dict, Any, Optional, Set, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_core.tools import BaseTool
 
-from backend.crud import chat_crud, message_crud, setting_crud, provider_crud
+from backend.crud import provider_crud
 from backend.schemas import enums as schemas_enums
 from backend.schemas.message import ReviewToolContent
 from backend.schemas.provider import AIModel
 from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 
-from backend.services.generation.llm_io import LLMInput, ModelConfig
-from backend.services.generation.initializer.chat_react_initializer import ChatBasedReActInitializer
-from backend.services.generation.context_builder import MessageContextBuilder
+# 【导入新的核心模型和拆分后的组件】
+from backend.services.generation.core.llm_io import LLMInput, ModelConfig
+from backend.services.generation.builders.material_loader import GenerationMaterialLoader, GenerationMaterials
+from backend.services.generation.builders.context_builder import MessageContextBuilder
+from services.generation.builders.initializers.chat_react_initializer import ChatBasedReActInitializer
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
 
 
 class LLMInputDirector:
     """
     LLM 输入装配指挥官。
-    对外暴露 Fluent API，对内统筹模型配置、Agent 初始化与消息上下文装配。
+    对外暴露 Fluent API，对内统筹物料加载、模型配置、Agent 初始化与消息上下文装配。
     """
 
     def __init__(self, db: AsyncSession, chat_id: str):
@@ -30,7 +32,7 @@ class LLMInputDirector:
         self.db = db
         self.chat_id = chat_id
 
-        # --- 配置状态 ---
+        # --- 配置状态 (Fluent API 赋值) ---
         self._cutoff_message_id: Optional[str] = None
         self._cutoff_include: bool = False
         self._slice_range: Optional[slice] = None
@@ -43,7 +45,6 @@ class LLMInputDirector:
         self._system_prompt_override: Optional[str] = None
         self._history_override: Optional[List[Any]] = None
         self._enable_resource_merge: bool = False
-
         self._content_limit: Optional[int] = None
         self._flatten_history: bool = False
         self._append_prompt: Optional[str] = None
@@ -52,14 +53,10 @@ class LLMInputDirector:
         self._enable_tools: bool = False
 
         # --- 运行时缓存 ---
-        self.chat = None
-        self.history = []
-        self.settings: Dict[str, str] = {}
-        self._target_msg = None
         self._providers: List[BaseToolProvider] = []
 
     # ==================== Fluent API ====================
-
+    # (保持原样，返回 self 以支持链式调用)
     def slice_until_message(self, message_id: str, include_target: bool = False) -> "LLMInputDirector":
         self._cutoff_message_id = message_id
         self._cutoff_include = include_target
@@ -132,24 +129,29 @@ class LLMInputDirector:
     # ==================== 核心构建逻辑 ====================
 
     async def build(self) -> LLMInput:
-        """
-        统筹装配流程，生成最终的 LLMInput 对象。
-        """
-        # 1. 准备基础物料 (Chat, Settings, History)
-        await self._load_materials()
+        """统筹装配流程，生成最终的 LLMInput 对象。"""
+
+        # 1. 委托 Loader 获取基础物料 (解耦 DB 查询)
+        materials = await GenerationMaterialLoader.load(
+            db=self.db,
+            chat_id=self.chat_id,
+            cutoff_message_id=self._cutoff_message_id,
+            cutoff_include=self._cutoff_include,
+            history_override=self._history_override
+        )
 
         # 2. 解析模型与 Provider
-        model = await self._resolve_model()
+        model = await self._resolve_model(materials)
         provider = model.provider
 
         # 3. 构建 LLMConfig
         api_params = {}
         if not self._global_model_keys:
-            api_params = self._map_parameters(self.chat.modelParameters)
+            api_params = self._map_parameters(materials.chat.modelParameters)
 
         proxy_url = None
-        if provider.use_proxy and self.settings.get("proxy_enabled") == "True":
-            proxy_url = self.settings.get("proxy_url")
+        if provider.use_proxy and materials.settings.get("proxy_enabled") == "True":
+            proxy_url = materials.settings.get("proxy_url")
 
         llm_config = ModelConfig(
             model_id=model.modelId,
@@ -160,13 +162,13 @@ class LLMInputDirector:
         )
 
         # 4. 解析 HITL 恢复载荷
-        resume_payload = self._extract_resume_payload()
+        resume_payload = self._extract_resume_payload(materials.target_msg)
 
         # 5. 初始化 AgentConfig (委托给 Initializer)
         thread_id = self._cutoff_message_id or self.chat_id
         initializer = ChatBasedReActInitializer(
             db=self.db,
-            chat=self.chat,
+            chat=materials.chat,
             thread_id=thread_id,
             resume_payload=resume_payload,
             enable_tools=self._enable_tools,
@@ -178,12 +180,11 @@ class LLMInputDirector:
 
         # 校验 HITL 冲突
         if not self._cutoff_message_id and agent_config.hitl_interrupt_on:
-            raise ValueError(
-                "Build failed: assistant_message_id (_cutoff_message_id) is required when HITL is enabled.")
+            raise ValueError("Build failed: assistant_message_id is required when HITL is enabled.")
 
         # 6. 合并 System Prompt
         base_system_prompt = self._system_prompt_override if self._system_prompt_override is not None else (
-                    self.chat.systemPrompt or "")
+                    materials.chat.systemPrompt or "")
         final_system_prompt = base_system_prompt
         if extended_prompt:
             final_system_prompt = final_system_prompt + "\n\n" + extended_prompt if final_system_prompt else extended_prompt
@@ -191,7 +192,7 @@ class LLMInputDirector:
         # 7. 构建 MessageContext (委托给 ContextBuilder)
         max_context_messages = None
         if self._enable_max_context_messages:
-            params = self.chat.modelParameters
+            params = materials.chat.modelParameters
             if isinstance(params, str):
                 try:
                     params = json.loads(params)
@@ -216,7 +217,7 @@ class LLMInputDirector:
         )
 
         message_context = await context_builder.build(
-            raw_history=self.history,
+            raw_history=materials.history,
             system_prompt=final_system_prompt
         )
 
@@ -233,37 +234,11 @@ class LLMInputDirector:
 
     # ==================== 内部辅助方法 ====================
 
-    async def _load_materials(self):
-        self.chat = await chat_crud.get_chat(self.db, self.chat_id)
-        if not self.chat:
-            raise ValueError(f"Chat {self.chat_id} not found.")
-
-        if self._history_override is not None:
-            self.history = self._history_override
-            if self._cutoff_message_id:
-                self._target_msg = next((m for m in self.history if getattr(m, 'id', None) == self._cutoff_message_id),
-                                        None)
-        else:
-            all_msgs = await message_crud.get_messages_by_chat(self.db, self.chat_id)
-            if self._cutoff_message_id:
-                try:
-                    idx = next(i for i, m in enumerate(all_msgs) if m.id == self._cutoff_message_id)
-                    self._target_msg = all_msgs[idx]
-                    end_index = idx + 1 if self._cutoff_include else idx
-                    self.history = all_msgs[:end_index]
-                except StopIteration:
-                    self.history = all_msgs
-            else:
-                self.history = all_msgs
-
-        all_settings = await setting_crud.get_all_settings(self.db)
-        self.settings = {s.key: s.value for s in all_settings}
-
-    async def _resolve_model(self) -> AIModel:
+    async def _resolve_model(self, materials: GenerationMaterials) -> AIModel:
         model = None
         if self._global_model_keys:
             for key in self._global_model_keys:
-                setting = self.settings.get(key)
+                setting = materials.settings.get(key)
                 if setting:
                     model = await provider_crud.get_model(self.db, model_id=setting)
                     if model:
@@ -271,9 +246,9 @@ class LLMInputDirector:
             if not model:
                 raise ValueError(f"未能从全局设置 {self._global_model_keys} 中找到有效的模型配置")
         else:
-            if not self.chat.ai_model:
+            if not materials.chat.ai_model:
                 raise ValueError("会话未配置模型")
-            model = self.chat.ai_model
+            model = materials.chat.ai_model
         return model
 
     def _map_parameters(self, model_params_data: Any) -> Dict[str, Any]:
@@ -320,13 +295,9 @@ class LLMInputDirector:
 
         return 'image' in (input_modalities or [])
 
-    def _extract_resume_payload(self) -> Optional[Dict[str, Any]]:
+    def _extract_resume_payload(self, target_msg: Optional[Any]) -> Optional[Dict[str, Any]]:
         """从被截断的目标消息中提取 HITL 恢复所需的决策载荷"""
-        if not (self._cutoff_message_id and self._enable_tools):
-            return None
-
-        target_msg = self._target_msg
-        if not target_msg:
+        if not (self._cutoff_message_id and self._enable_tools and target_msg):
             return None
 
         if target_msg.role != schemas_enums.MessageRole.ASSISTANT.value:
@@ -363,4 +334,3 @@ class LLMInputDirector:
             resume_decisions.append(decision_dict)
 
         return {"decisions": resume_decisions}
-

@@ -2,7 +2,7 @@ from typing import List, Dict, Any
 
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, AIMessage, ToolMessage
 
-from backend.services.generation.llm_io import LLMInput
+from backend.services.generation.core.llm_io import LLMInput
 from backend.services.generation.worker.chat_worker import ChatWorker
 from langchain_anthropic import ChatAnthropic
 

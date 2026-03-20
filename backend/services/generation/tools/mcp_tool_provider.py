@@ -8,7 +8,7 @@ from langchain_core.tools import BaseTool
 
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
 from backend.services.mcp_connection_manager import McpConnectionManager
-from backend.services.generation.instructions import (
+from backend.services.generation.core.instructions import (
     BaseInstruction,
     CreateSubMessage,
     UpdateSubMessageContent,

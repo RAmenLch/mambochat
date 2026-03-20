@@ -1,9 +1,10 @@
-# backend/services/generation/initializer/base_initializer.py
+# backend/services/generation/builders/initializers/base_initializer.py
 
 from abc import ABC, abstractmethod
 from typing import Tuple, List
 
-from backend.services.generation.llm_io import AgentConfig
+# 依赖核心层的纯数据结构
+from backend.services.generation.core.llm_io import AgentConfig
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
 
 
@@ -33,4 +34,3 @@ class AbstractAgentInitializer(ABC):
         供上层 Manager 在解析 Worker 流式事件时，生成对应的 UI 指令。
         """
         pass
-

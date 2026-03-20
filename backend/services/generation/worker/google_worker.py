@@ -1,5 +1,5 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
-from backend.services.generation.llm_io import LLMInput
+from backend.services.generation.core.llm_io import LLMInput
 from backend.services.generation.worker.chat_worker import ChatWorker
 from backend.services.generation.worker.decode import BaseDecode, GoogleDecode
 

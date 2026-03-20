@@ -4,7 +4,7 @@ from typing import List, Optional, Dict, Any, AsyncGenerator
 from langchain_core.tools import BaseTool, tool
 
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
-from backend.services.generation.instructions import (
+from backend.services.generation.core.instructions import (
     BaseInstruction,
     CreateSubMessage, InterruptGeneration
 )

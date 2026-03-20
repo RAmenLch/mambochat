@@ -4,14 +4,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.schemas import enums as schemas_enums
 from backend.models.base_model import generate_uuid
-from backend.services.generation.instructions import (
+from backend.services.generation.core.instructions import (
     BaseInstruction,
     UpdateZipHistorySubMessage,
     SetFinalStatus
 )
-from backend.services.generation.abstract_manager import AbstractGenerateManager
+from backend.services.generation.managers.base_manager import AbstractGenerateManager
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
-from backend.services.generation.llm_input_director import LLMInputDirector
+from backend.services.generation.builders.director import LLMInputDirector
 
 
 

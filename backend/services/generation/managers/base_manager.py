@@ -6,7 +6,7 @@ from typing import AsyncGenerator, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
-from backend.services.generation.instructions import BaseInstruction
+from backend.services.generation.core.instructions import BaseInstruction
 from backend.schemas import enums as schemas_enums
 from backend.services.generation.worker.decode import BaseDecode
 
@@ -84,3 +84,4 @@ class AbstractGenerateManager(ABC):
         负责关闭未完成的子消息、生成错误提示等。
         """
         pass
+

@@ -1,4 +1,5 @@
-# backend/services/generation/instructions.py
+# backend/services/generation/core/instructions.py
+
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Generic, TypeVar
 
@@ -6,8 +7,9 @@ from backend.schemas.enums import MessageStatus, SubMessageType, FileManagementT
 
 
 class BaseInstruction(BaseModel):
-    """所有生成指令的基类。"""
+    """所有生成指令的抽象基类。"""
     pass
+
 
 class InterruptGeneration(BaseInstruction):
     """
@@ -19,10 +21,7 @@ class InterruptGeneration(BaseInstruction):
 
 
 class CreateSubMessage(BaseInstruction):
-    """指令：创建一个新的子消息。
-
-    Manager 必须在发出此指令前预先生成 UUID 并赋值给 sub_message_id。
-    """
+    """指令：创建一个新的子消息。"""
     sub_message_id: str = Field(..., description="预生成的子消息UUID")
     type: str = SubMessageType.NORMAL.value
     sortOrder: int
@@ -32,31 +31,31 @@ class CreateSubMessage(BaseInstruction):
 
 
 class AppendToSubMessage(BaseInstruction):
-    """指令：向指定的子消息追加内容。"""
+    """指令：向指定的流式子消息追加文本内容。"""
     sub_message_id: str = Field(..., description="目标子消息UUID")
     content: str
 
 
 class UpdateSubMessageContent(BaseInstruction):
-    """指令：完全替换指定子消息的内容。"""
+    """指令：完全替换指定子消息的内容 (非流式更新)。"""
     sub_message_id: str = Field(..., description="目标子消息UUID")
     content: str
 
 
 class UpdateSubMessageStatus(BaseInstruction):
-    """指令：更新指定子消息的状态。"""
+    """指令：更新指定子消息的状态 (如从 GENERATING 变为 COMPLETED)。"""
     sub_message_id: str = Field(..., description="目标子消息UUID")
     status: MessageStatus
 
 
 class UpdateSubMessageConfig(BaseInstruction):
-    """指令：更新指定子消息的配置项。"""
+    """指令：更新指定子消息的配置项字典。"""
     sub_message_id: str = Field(..., description="目标子消息UUID")
     config: Dict = Field(..., description="新的配置字典")
 
 
 class SetFinalStatus(BaseInstruction):
-    """指令：设置整个生成任务的最终状态。"""
+    """指令：设置整个生成任务 (父消息) 的最终状态。"""
     status: MessageStatus
 
 
@@ -66,26 +65,12 @@ class UpdateChatName(BaseInstruction):
     new_name: str
 
 
-
 T = TypeVar('T', bound=BaseModel)
+
 class NotifyUser(BaseInstruction, Generic[T]):
     """
-    指令：向前端发送全局通知。
-
+    指令：向前端发送全局通知 (如错误提示、系统警告)。
     使用泛型设计以支持类型安全的上下文传递。
-    不同业务场景应定义具体的 Context 模型，例如 TitleGenerationContext。
-
-    示例用法:
-        class TitleErrorContext(BaseModel):
-            chat_id: str
-            failed_step: str
-
-        yield NotifyUser(
-            category="title_generation_error",
-            context=TitleErrorContext(chat_id="xxx", failed_step="parse_json"),
-            level="error",
-            message="标题解析失败"
-        )
     """
     category: str = Field(..., description="业务事件分类，例如 'title_generation_error'")
     context: T = Field(..., description="结构化的上下文数据模型，必须继承自 BaseModel")
@@ -94,12 +79,9 @@ class NotifyUser(BaseInstruction, Generic[T]):
 
 
 class SaveAndPersistFile(BaseInstruction):
-    """指令：保存物理文件并在数据库创建记录。
-
+    """
+    指令：保存物理文件并在数据库创建记录。
     通常在 Worker 生成图片等二进制资源后使用。
-    Manager 负责提供预生成的 file_id 和 base64 数据。
-    Executor 负责解码、IO 保存，并在 DB 创建记录。
-    此指令通常紧随一个引用此 file_id 的 CreateSubMessage 指令。
     """
     file_id: str = Field(..., description="预生成的文件UUID")
     filename: str
@@ -109,10 +91,9 @@ class SaveAndPersistFile(BaseInstruction):
 
 
 class UpdateZipHistorySubMessage(BaseInstruction):
-    """指令：创建或更新一个ZipHistory类型的子消息。
-
-    注意：在新的架构中，建议逐步废弃此专用指令，转而使用组合的 Create/Update 指令。
-    但为了兼容现有业务逻辑，暂时保留并适配 sub_message_id。
+    """
+    指令：创建或更新一个 ZipHistory 类型的子消息。
+    专属业务指令，用于对话历史压缩场景。
     """
     sub_message_id: str = Field(..., description="预生成的子消息UUID")
     target_message_id: str = Field(..., description="挂载的目标父消息ID")

@@ -1,4 +1,4 @@
-# backend/services/generation/resource_dispatcher.py
+# backend/services/generation/builders/resource_dispatcher.py
 
 from typing import List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession

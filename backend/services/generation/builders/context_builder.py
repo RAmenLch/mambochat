@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.schemas import enums as schemas_enums
 from backend.schemas.message import McpToolContent
 from backend.services.file_service import FileService
-from backend.services.generation.llm_io import MessageContext
+from backend.services.generation.core.llm_io import MessageContext
 
 # 以 application/* 开头但本质是文本的 MIME 类型
 _KNOWN_TEXT_APPLICATION_TYPES = {
