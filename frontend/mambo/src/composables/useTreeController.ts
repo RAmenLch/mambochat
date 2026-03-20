@@ -1,6 +1,6 @@
 // frontend/mambo/src/composables/useTreeController.ts
 
-import { ref, computed, type Ref, type ComputedRef, type CSSProperties } from 'vue';
+import { ref, computed, type Ref, type ComputedRef } from 'vue';
 import { ElMessage, ElMessageBox, type ElDropdown } from 'element-plus';
 import type Node from 'element-plus/es/components/tree/src/model/node';
 import { useI18n } from 'vue-i18n';
@@ -63,7 +63,7 @@ export interface UseTreeControllerReturn<T> {
   treeRef: Ref<InstanceType<typeof ExplorerTree> | undefined>;
   contextMenuRef: Ref<InstanceType<typeof ElDropdown> | undefined>;
   contextMenuItem: Ref<T | null>;
-  contextMenuPosition: CSSProperties;
+  contextMenuPosition: Record<string, any>; // 修改：使用 Record 代替 CSSProperties
   dialogState: ReturnType<typeof useDialogState<DialogPayload<T>>>;
   dialogProps: ComputedRef<EntityFormDialogProps>;
 
@@ -74,7 +74,7 @@ export interface UseTreeControllerReturn<T> {
 
   handleNodeContextMenu: (event: MouseEvent, data: BaseTreeItem, node: Node) => void;
   openRootContextMenu: (event: MouseEvent) => void;
-  handleMenuCommand: (command: string) => void;
+  handleMenuCommand: (command: string) => Promise<T | null>; // 修改：返回 Promise<T | null>
   onDialogConfirm: (payload: DialogConfirmPayload) => Promise<void>;
 }
 
@@ -122,16 +122,19 @@ export function useTreeController<T extends BaseTreeItem, TCreate, TUpdate>(
     }
   };
 
-  const handleDuplicate = async (item: T) => {
+  // 修改：返回 newItem 以便外部处理跳转
+  const handleDuplicate = async (item: T): Promise<T | null> => {
     if (!crudHandlers.duplicateItem) {
       console.warn('Duplicate handler is not implemented.');
-      return;
+      return null;
     }
     const newItem = await crudHandlers.duplicateItem(item.id);
     if (newItem) {
       ElMessage.success(t('common.msg.duplicateSuccess'));
       await treeRef.value?.scrollToKey(newItem.id);
+      return newItem;
     }
+    return null;
   };
 
   // --- Event Handlers for Template Binding ---
@@ -164,27 +167,29 @@ export function useTreeController<T extends BaseTreeItem, TCreate, TUpdate>(
     openContextMenu(event, null);
   };
 
-  const handleMenuCommand = (command: string) => {
+  // 修改：异步函数，返回操作结果
+  const handleMenuCommand = async (command: string): Promise<T | null> => {
     const item = contextMenuItem.value;
     const parentId = item ? (item.itemType === 'folder' ? item.id : item.parentId) : null;
 
     switch (command) {
       case 'rename':
         if (item) dialogState.open({ type: 'rename', targetItem: item });
-        break;
+        return null;
       case 'delete':
-        if (item) handleDelete(item);
-        break;
+        if (item) await handleDelete(item);
+        return null;
       case 'duplicate':
-        if (item) handleDuplicate(item);
-        break;
+        if (item) return await handleDuplicate(item);
+        return null;
       default:
         if (command.startsWith('new')) {
           dialogState.open({ type: command, parentId });
+          return null;
         } else {
           console.warn(`Unknown context menu command: ${command}`);
+          return null;
         }
-        break;
     }
   };
 

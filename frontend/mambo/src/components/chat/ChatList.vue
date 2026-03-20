@@ -405,6 +405,7 @@ function getItemPath(itemId: string): string {
   return path.join(' / ');
 }
 
+// [修复] 修改此函数以处理复制后的跳转逻辑
 async function handleMenuCommand(command: string) {
   if (command === 'search') {
     const selectedItem = contextMenuItem.value;
@@ -427,7 +428,13 @@ async function handleMenuCommand(command: string) {
     return;
   }
 
-  await originalHandleMenuCommand(command);
+  // 获取 originalHandleMenuCommand 的返回值
+  const result = await originalHandleMenuCommand(command);
+
+  // 如果返回了新的 Chat 对象（目前只有 duplicate 会返回），则选中它
+  if (result && result.itemType === 'chat') {
+    await handleSelectChat(result.id);
+  }
 }
 
 async function handleSearchResultSelect(data: { chatId: string; subMessageId: string | null }) {
