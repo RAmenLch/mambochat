@@ -155,7 +155,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive } from 'vue';
+import { computed, reactive,onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useI18n } from 'vue-i18n';
 import { useProviderStore } from '@/stores/providerStore';
@@ -198,7 +198,11 @@ const { t } = useI18n();
 const providerStore = useProviderStore();
 const mcpStore = useMcpStore();
 const agentStore = useAgentStore(); // [新增]
-
+onMounted(() => {
+  if (agentStore.allAgents.length === 0 && !agentStore.isAllAgentsLoading) {
+    agentStore.fetchAllAgents();
+  }
+});
 const { activeUserMcpServices } = storeToRefs(mcpStore);
 
 // 本地状态：正在测试连接的 MCP ID 集合
@@ -212,13 +216,13 @@ const displayModelName = computed(() => {
   return model ? model.name : t('common.status.unknownModel');
 });
 
-// [新增] 获取 Agent 名称
 const displayAgentName = computed(() => {
   if (!props.currentChat?.agentId) return t('common.status.unspecified', '未指定');
-  const agent = agentStore.agentList.find(a => a.id === props.currentChat!.agentId);
+  const agent = agentStore.allAgents.find(a => a.id === props.currentChat!.agentId) ||
+                agentStore.agentList.find(a => a.id === props.currentChat!.agentId);
+
   return agent ? agent.name : t('common.status.unknownModel', '未知 Agent');
 });
-
 /**
  * 检查当前会话是否已启用系统联网搜索工具。
  * 目标 ID: system-ddgs-search

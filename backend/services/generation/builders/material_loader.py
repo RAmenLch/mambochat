@@ -4,7 +4,9 @@ from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.crud import chat_crud, message_crud, setting_crud
+# 引入 agent_crud 以及枚举 ChatMode
+from backend.crud import chat_crud, message_crud, setting_crud, agent_crud
+from backend.schemas.enums import ChatMode
 
 
 @dataclass
@@ -14,12 +16,13 @@ class GenerationMaterials:
     history: List[Any]
     settings: Dict[str, str]
     target_msg: Optional[Any] = None
+    agent: Optional[Any] = None  # 新增 Agent 载体，用于 Chat -> Agent 模式
 
 
 class GenerationMaterialLoader:
     """
     生成物料加载器。
-    负责从数据库中提取 Chat、History 和 Settings，并处理截断 (Cutoff) 逻辑。
+    负责从数据库中提取 Chat、Agent、History 和 Settings，并处理截断 (Cutoff) 逻辑。
     """
 
     @staticmethod
@@ -35,6 +38,11 @@ class GenerationMaterialLoader:
         chat = await chat_crud.get_chat(db, chat_id)
         if not chat:
             raise ValueError(f"Chat {chat_id} not found.")
+
+        # 1.5 加载 Agent (如果会话模式为 Agent 且绑定了有效的 AgentId)
+        agent = None
+        if chat.chatMode == ChatMode.AGENT.value and chat.agentId:
+            agent = await agent_crud.get_agent(db, chat.agentId)
 
         # 2. 加载全局设置
         all_settings = await setting_crud.get_all_settings(db)
@@ -61,9 +69,11 @@ class GenerationMaterialLoader:
             else:
                 history = all_msgs
 
+        # 4. 组装并返回所有基础物料
         return GenerationMaterials(
             chat=chat,
             history=history,
             settings=settings,
-            target_msg=target_msg
+            target_msg=target_msg,
+            agent=agent
         )

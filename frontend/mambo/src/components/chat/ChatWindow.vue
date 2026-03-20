@@ -17,19 +17,27 @@
         @refresh-title="handleRefreshTitle"
       />
 
-      <el-scrollbar ref="scrollbarRef" class="message-list-scrollbar" v-loading="isChatHistoryLoading" @scroll="handleScroll">
-        <div class="message-list-wrapper">
-          <MessageItem
-            v-for="(message, index) in currentChatMessages"
-            :key="message.id"
-            :id="'msg-' + message.id"
-            :message="message"
-            :is-last-message="index === currentChatMessages.length - 1"
-            @suggestion-click="handleSuggestionClick"
-            @open-tool-dialog="handleOpenToolDialog"
-          />
-        </div>
-      </el-scrollbar>
+      <div class="scroll-area-wrapper">
+        <el-scrollbar ref="scrollbarRef" class="message-list-scrollbar" v-loading="isChatHistoryLoading" @scroll="handleScroll">
+          <div class="message-list-wrapper">
+            <MessageItem
+              v-for="(message, index) in currentChatMessages"
+              :key="message.id"
+              :id="'msg-' + message.id"
+              :message="message"
+              :is-last-message="index === currentChatMessages.length - 1"
+              @suggestion-click="handleSuggestionClick"
+              @open-tool-dialog="handleOpenToolDialog"
+            />
+          </div>
+        </el-scrollbar>
+
+        <ChatNavigator
+          :messages="currentChatMessages"
+          :active-message-id="currentVisibleMessageId"
+          @jump="handleJumpToMessage"
+        />
+      </div>
 
       <div
         class="input-container-wrapper"
@@ -153,6 +161,7 @@ import ChatHeader from './ChatHeader.vue';
 import AttachmentPreview from './AttachmentPreview.vue';
 import ChatInputBox from './ChatInputBox.vue';
 import McpToolDialog from './dialogs/McpToolDialog.vue';
+import ChatNavigator from './ChatNavigator.vue';
 
 interface GroupedModels { label: string; options: AIModel[]; }
 
@@ -215,11 +224,9 @@ const { startResize: startResizeInputArea } = useResizablePanels(inputAreaHeight
 
 const pendingMessageTextForTokenEstimation = computed(() => {
   const parts: string[] = [];
-
   if (currentUserInputText.value) {
     parts.push(currentUserInputText.value);
   }
-
   attachedSubmessageResources.value.forEach(resource => {
     if (resource.resourceType === 'submessage_template' && resource.latest_version) {
       const cpl = resource.latest_version.attributes?.context_participation_length;
@@ -230,7 +237,6 @@ const pendingMessageTextForTokenEstimation = computed(() => {
       }
     }
   });
-
   return parts.join('\n');
 });
 
@@ -246,6 +252,9 @@ const resourceSelectorVisible = ref(false);
 const userHasScrolledUp = ref(false);
 const previousPreviewHeight = ref(0);
 const isDraggingOver = ref(false);
+
+// 新增：当前视口可见的消息ID
+const currentVisibleMessageId = ref<string | null>(null);
 
 const toolDialogVisible = ref(false);
 const toolDialogMessageId = ref<string | null>(null);
@@ -290,7 +299,6 @@ function handleOpenReviewFromInput() {
 
 async function handleMountResources(resources: Resource[]) {
   let hasFileAdded = false;
-
   for (const resource of resources) {
     if (resource.resourceType === 'submessage_template') {
       addAttachedResource(resource);
@@ -304,7 +312,6 @@ async function handleMountResources(resources: Resource[]) {
       }
     }
   }
-
   if (hasFileAdded) {
     ElMessage.success(t('chat.attachment.resourceFileAdded'));
   }
@@ -324,10 +331,8 @@ async function handleAppendResources(resources: Resource[]) {
 
 async function handleMountKnowledgeBase(resources: Resource[]) {
   if (!currentChat.value) return;
-
   const currentList = currentChat.value.resource_prompt_list || [];
   const newIds = resources.map(r => r.id).filter(id => !currentList.includes(id));
-
   if (newIds.length > 0) {
     const updatedList = [...currentList, ...newIds];
     await chatListStore.updateChatSettings(currentChat.value.id, {
@@ -339,10 +344,8 @@ async function handleMountKnowledgeBase(resources: Resource[]) {
 
 async function handleRemoveKnowledgeBase(resourceId: string) {
   if (!currentChat.value) return;
-
   const currentList = currentChat.value.resource_prompt_list || [];
   const updatedList = currentList.filter(id => id !== resourceId);
-
   await chatListStore.updateChatSettings(currentChat.value.id, {
     resource_prompt_list: updatedList.length > 0 ? updatedList : null
   });
@@ -351,7 +354,6 @@ async function handleRemoveKnowledgeBase(resourceId: string) {
 
 async function handleFileUploads(files: FileList) {
   if (!files || files.length === 0) return;
-
   for (const file of Array.from(files)) {
     try {
       const fileInfo = await uploadFile(file);
@@ -390,14 +392,12 @@ function handleTriggerFileUpload() {
 async function onFileSelected(event: Event) {
   const target = event.target as HTMLInputElement;
   if (!target.files) return;
-
   await handleFileUploads(target.files);
   target.value = '';
 }
 
 async function handleSendMessage() {
   if (isSendButtonDisabled.value) return;
-
   const textParts = isMultiPartMode.value
     ? multiPartDraft.value.map(p => p.content)
     : [singlePartDraft.value];
@@ -442,15 +442,12 @@ function handleRefreshTitle() {
 
 async function handleSaveSettings(settings: ChatUpdate) {
   if (!currentChat.value) return;
-
   const finalSettings = { ...settings };
-
   if (settings.resource_prompt_list !== undefined) {
     const kbIds = attachedKnowledgeBases.value.map(r => r.id);
     const promptIds = settings.resource_prompt_list || [];
     finalSettings.resource_prompt_list = [...new Set([...promptIds, ...kbIds])];
   }
-
   await chatListStore.updateChatSettings(currentChat.value.id, finalSettings);
   settingsDrawerVisible.value = false;
   ElMessage.success(t('chat.settings.saveSuccess'));
@@ -473,32 +470,63 @@ function handleOpenSettings() {
 
 async function handleToggleWebSearch() {
   if (!currentChat.value) return;
-
   const SEARCH_TOOL_ID = 'system-ddgs-search';
   const currentIds = currentChat.value.enabled_mcp_ids || [];
   const newIds = currentIds.includes(SEARCH_TOOL_ID)
     ? currentIds.filter(id => id !== SEARCH_TOOL_ID)
     : [...currentIds, SEARCH_TOOL_ID];
-
   await chatListStore.updateChatSettings(currentChat.value.id, { enabled_mcp_ids: newIds });
   ElMessage.success(newIds.includes(SEARCH_TOOL_ID) ? t('chat.toolbar.webSearchEnabled') : t('chat.toolbar.webSearchDisabled'));
 }
 
 async function handleToggleMcpTool(mcpId: string) {
   if (!currentChat.value) return;
-
   const currentIds = currentChat.value.enabled_mcp_ids || [];
   const newIds = currentIds.includes(mcpId)
     ? currentIds.filter(id => id !== mcpId)
     : [...currentIds, mcpId];
-
   await chatListStore.updateChatSettings(currentChat.value.id, { enabled_mcp_ids: newIds });
 }
 
+
+
+// 计算当前视口可见的消息ID (只检测用户消息)
 const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
   const el = scrollbarRef.value?.wrapRef;
   if (!el) return;
+
   userHasScrolledUp.value = el.scrollHeight - el.clientHeight - scrollTop > 20;
+
+  const containerRect = el.getBoundingClientRect();
+  // 设定检测线为视口顶部往下 30% 处，符合阅读视线习惯
+  const detectY = containerRect.top + containerRect.height * 0.3;
+
+  let activeUserId: string | null = null;
+
+  // 仅筛选出用户消息
+  const userMsgs = currentChatMessages.value.filter(m => m.role === 'user');
+
+  // 倒序遍历，找到最后一个突破检测线的用户消息
+  for (let i = userMsgs.length - 1; i >= 0; i--) {
+    const msg = userMsgs[i];
+    const dom = document.getElementById(`msg-${msg.id}`);
+    if (dom) {
+      const rect = dom.getBoundingClientRect();
+      if (rect.top <= detectY) {
+        activeUserId = msg.id;
+        break;
+      }
+    }
+  }
+
+  // 如果所有用户消息都在检测线下方，则默认选中第一条
+  if (!activeUserId && userMsgs.length > 0) {
+    activeUserId = userMsgs[0].id;
+  }
+
+  if (activeUserId) {
+    currentVisibleMessageId.value = activeUserId;
+  }
 };
 
 const scrollToBottom = (force = false) => {
@@ -568,7 +596,6 @@ function handleSuggestionClick(text: string) {
 
 watch([uploadedFiles, attachedSubmessageResources, attachedKnowledgeBases], async () => {
   await nextTick();
-
   const previewEl = (attachmentPreviewRef.value?.$el as HTMLDivElement);
   const currentPreviewHeight = previewEl?.offsetHeight ?? 0;
   const heightDifference = currentPreviewHeight - previousPreviewHeight.value;
@@ -577,7 +604,6 @@ watch([uploadedFiles, attachedSubmessageResources, attachedKnowledgeBases], asyn
     const newTotalHeight = inputAreaHeight.value + heightDifference;
     inputAreaHeight.value = Math.max(MIN_INPUT_HEIGHT, Math.min(newTotalHeight, MAX_INPUT_HEIGHT));
   }
-
   previousPreviewHeight.value = currentPreviewHeight;
 }, { deep: true });
 
@@ -594,6 +620,7 @@ watch(currentChatId, (newId) => {
   if (newId) {
     userHasScrolledUp.value = false;
     previousPreviewHeight.value = 0;
+    currentVisibleMessageId.value = null; // 重置
 
     const stopWatch = watch(isChatHistoryLoading, (loading) => {
       if (!loading) {
@@ -606,7 +633,6 @@ watch(currentChatId, (newId) => {
         nextTick(() => {
             chatInputBoxRef.value?.focus();
         });
-
         stopWatch();
       }
     }, { immediate: true });
@@ -617,7 +643,15 @@ watch(currentChatId, (newId) => {
 <style scoped>
 .chat-window-container { height: 100%; display: flex; flex-direction: column; background-color: var(--color-background); overflow: hidden; }
 .welcome-view { display: flex; justify-content: center; align-items: center; height: 100%; }
-.message-list-scrollbar { flex-grow: 1; }
+
+.scroll-area-wrapper {
+  position: relative;
+  flex-grow: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.message-list-scrollbar { width: 100%; height: 100%; }
 .message-list-wrapper { padding: 20px; }
 .input-container-wrapper { flex-shrink: 0; position: relative; display: flex; flex-direction: column; border-top: 1px solid var(--color-border); }
 .resize-handle { position: absolute; top: -3px; left: 0; width: 100%; height: 6px; cursor: ns-resize; z-index: 10; }

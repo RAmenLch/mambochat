@@ -7,15 +7,17 @@ from langchain_core.tools import BaseTool
 
 from backend.crud import provider_crud
 from backend.schemas import enums as schemas_enums
+from backend.schemas.enums import ChatMode
 from backend.schemas.message import ReviewToolContent
 from backend.schemas.provider import AIModel
 from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 
-# 【导入新的核心模型和拆分后的组件】
+# 【导入核心模型和装配组件】
 from backend.services.generation.core.llm_io import LLMInput, ModelConfig
 from backend.services.generation.builders.material_loader import GenerationMaterialLoader, GenerationMaterials
 from backend.services.generation.builders.context_builder import MessageContextBuilder
-from services.generation.builders.initializers.chat_react_initializer import ChatBasedReActInitializer
+from backend.services.generation.builders.initializers.chat_react_initializer import ChatBasedReActInitializer
+from backend.services.generation.builders.initializers.agent_react_initializer import AgentBasedReActInitializer
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
 
 
@@ -144,10 +146,14 @@ class LLMInputDirector:
         model = await self._resolve_model(materials)
         provider = model.provider
 
-        # 3. 构建 LLMConfig
+        # 3. 判断模式并提取活动配置
+        is_agent_mode = (materials.chat.chatMode == ChatMode.AGENT.value and materials.agent is not None)
+        active_params = materials.agent.modelParameters if is_agent_mode else materials.chat.modelParameters
+
+        # 4. 构建 LLMConfig
         api_params = {}
         if not self._global_model_keys:
-            api_params = self._map_parameters(materials.chat.modelParameters)
+            api_params = self._map_parameters(active_params)
 
         proxy_url = None
         if provider.use_proxy and materials.settings.get("proxy_enabled") == "True":
@@ -161,20 +167,34 @@ class LLMInputDirector:
             parameters=api_params
         )
 
-        # 4. 解析 HITL 恢复载荷
+        # 5. 解析 HITL 恢复载荷
         resume_payload = self._extract_resume_payload(materials.target_msg)
-
-        # 5. 初始化 AgentConfig (委托给 Initializer)
         thread_id = self._cutoff_message_id or self.chat_id
-        initializer = ChatBasedReActInitializer(
-            db=self.db,
-            chat=materials.chat,
-            thread_id=thread_id,
-            resume_payload=resume_payload,
-            enable_tools=self._enable_tools,
-            enable_resource_merge=self._enable_resource_merge,
-            external_tools=self._tools
-        )
+
+        # 6. 智能路由 Initializer 进行 Agent 初始化
+        if is_agent_mode:
+            initializer = AgentBasedReActInitializer(
+                db=self.db,
+                agent=materials.agent,
+                thread_id=thread_id,
+                resume_payload=resume_payload,
+                enable_tools=self._enable_tools,
+                enable_resource_merge=self._enable_resource_merge,
+                external_tools=self._tools
+            )
+            base_system_prompt = materials.agent.systemPrompt or ""
+        else:
+            initializer = ChatBasedReActInitializer(
+                db=self.db,
+                chat=materials.chat,
+                thread_id=thread_id,
+                resume_payload=resume_payload,
+                enable_tools=self._enable_tools,
+                enable_resource_merge=self._enable_resource_merge,
+                external_tools=self._tools
+            )
+            base_system_prompt = materials.chat.systemPrompt or ""
+
         agent_config, extended_prompt = await initializer.initialize()
         self._providers = initializer.get_providers()
 
@@ -182,17 +202,15 @@ class LLMInputDirector:
         if not self._cutoff_message_id and agent_config.hitl_interrupt_on:
             raise ValueError("Build failed: assistant_message_id is required when HITL is enabled.")
 
-        # 6. 合并 System Prompt
-        base_system_prompt = self._system_prompt_override if self._system_prompt_override is not None else (
-                    materials.chat.systemPrompt or "")
-        final_system_prompt = base_system_prompt
+        # 7. 合并 System Prompt
+        final_system_prompt = self._system_prompt_override if self._system_prompt_override is not None else base_system_prompt
         if extended_prompt:
             final_system_prompt = final_system_prompt + "\n\n" + extended_prompt if final_system_prompt else extended_prompt
 
-        # 7. 构建 MessageContext (委托给 ContextBuilder)
+        # 8. 构建 MessageContext (委托给 ContextBuilder)
         max_context_messages = None
         if self._enable_max_context_messages:
-            params = materials.chat.modelParameters
+            params = active_params
             if isinstance(params, str):
                 try:
                     params = json.loads(params)
@@ -221,7 +239,7 @@ class LLMInputDirector:
             system_prompt=final_system_prompt
         )
 
-        # 8. 组装并返回最终的 LLMInput
+        # 9. 组装并返回最终的 LLMInput
         return LLMInput(
             llm_config=llm_config,
             context=message_context,
@@ -246,9 +264,17 @@ class LLMInputDirector:
             if not model:
                 raise ValueError(f"未能从全局设置 {self._global_model_keys} 中找到有效的模型配置")
         else:
-            if not materials.chat.ai_model:
-                raise ValueError("会话未配置模型")
-            model = materials.chat.ai_model
+            # 优先使用 Agent 绑定的模型（如果是 Agent 模式且绑定了），否则使用 Chat 绑定的模型
+            is_agent_mode = (materials.chat.chatMode == ChatMode.AGENT.value and materials.agent is not None)
+
+            if is_agent_mode and materials.agent.aiModelId:
+                model = await provider_crud.get_model(self.db, model_id=materials.agent.aiModelId)
+                if not model:
+                    raise ValueError(f"Agent 绑定的模型 {materials.agent.aiModelId} 不存在")
+            else:
+                if not materials.chat.ai_model:
+                    raise ValueError("会话未配置模型")
+                model = materials.chat.ai_model
         return model
 
     def _map_parameters(self, model_params_data: Any) -> Dict[str, Any]:
@@ -334,3 +360,4 @@ class LLMInputDirector:
             resume_decisions.append(decision_dict)
 
         return {"decisions": resume_decisions}
+

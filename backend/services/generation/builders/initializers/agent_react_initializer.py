@@ -1,4 +1,4 @@
-# backend/services/generation/builders/initializers/chat_react_initializer.py
+# backend/services/generation/builders/initializers/agent_react_initializer.py
 
 import json
 from typing import Tuple, List, Dict, Any, Optional
@@ -20,16 +20,16 @@ from backend.services.generation.tools.suggest_tool_provider import SuggestToolP
 from backend.services.generation.tools.kb_tool_provider import KBToolProvider
 
 
-class ChatBasedReActInitializer(AbstractAgentInitializer):
+class AgentBasedReActInitializer(AbstractAgentInitializer):
     """
-    基于 Chat 表配置的 ReAct Agent 初始化器。
-    负责提取 Chat 表中的工具与资源装配逻辑，生成 AgentConfig。
+    基于独立 Agent 表配置的 ReAct Agent 初始化器。
+    负责提取 Agent 表中的工具与资源装配逻辑，生成 AgentConfig。
     """
 
     def __init__(
             self,
             db: AsyncSession,
-            chat: Any,  # 数据库 Chat 模型实例
+            agent: Any,  # 数据库 Agent 模型实例
             thread_id: str,
             resume_payload: Optional[Dict[str, Any]] = None,
             enable_tools: bool = False,
@@ -37,7 +37,7 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
             external_tools: Optional[List[BaseTool]] = None
     ):
         self.db = db
-        self.chat = chat
+        self.agent = agent
         self.thread_id = thread_id
         self.resume_payload = resume_payload
         self.enable_tools = enable_tools
@@ -51,10 +51,10 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
         extended_prompts: List[str] = []
         knowledge_bases = []
 
-        # 1. 资源挂载与分发 (从 Chat 表读取 resource_prompt_list)
-        if self.enable_resource_merge and self.chat.resource_prompt_list:
+        # 1. 资源挂载与分发 (从 Agent 表读取 resourcePromptList)
+        if self.enable_resource_merge and self.agent.resourcePromptList:
             dispatcher = ResourceDispatcher(self.db)
-            dispatch_result = await dispatcher.dispatch(self.chat.resource_prompt_list)
+            dispatch_result = await dispatcher.dispatch(self.agent.resourcePromptList)
 
             for content in dispatch_result.get("system_prompts", []):
                 extended_prompts.append(content)
@@ -70,14 +70,14 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
         # 2. 外部工具挂载 (MCP & Suggest)
         if self.enable_tools:
             params = {}
-            if self.chat and self.chat.modelParameters:
+            if self.agent and self.agent.modelParameters:
                 try:
-                    params = json.loads(self.chat.modelParameters) if isinstance(self.chat.modelParameters, str) else self.chat.modelParameters
+                    params = json.loads(self.agent.modelParameters) if isinstance(self.agent.modelParameters, str) else self.agent.modelParameters
                 except (json.JSONDecodeError, TypeError):
                     pass
 
-            # MCP 服务 (从 Chat 表读取 enabled_mcp_ids)
-            mcp_ids = self.chat.enabled_mcp_ids or []
+            # MCP 服务 (从 Agent 表读取 enabledMcpIds)
+            mcp_ids = self.agent.enabledMcpIds or []
             if mcp_ids:
                 self.providers.append(MCPToolProvider(self.db, mcp_ids))
 
@@ -87,7 +87,7 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
                     if tool.review_mode == ToolReviewMode.REQUIRE_REVIEW.value:
                         self.hitl_interrupt_on[tool.name] = True
 
-            # Suggest 建议工具 (从 Chat 的 modelParameters 中读取)
+            # Suggest 建议工具 (从 Agent 的 modelParameters 中读取)
             enable_suggest = params.get("enable_suggest", False)
             if enable_suggest:
                 self.providers.append(SuggestToolProvider(enable_suggest=True))
@@ -104,9 +104,8 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
                 extended_prompts.append(injection)
 
         # 4. 构建 AgentConfig
-        # Chat 模式默认固定使用 REACT 类型的 Agent
         agent_config = AgentConfig(
-            agent_type=AgentTypeEnum.REACT,
+            agent_type=AgentTypeEnum(self.agent.AgentType),  # 动态读取 Agent 表的类型
             tools=all_tools if all_tools else None,
             hitl_interrupt_on=self.hitl_interrupt_on,
             thread_id=self.thread_id,

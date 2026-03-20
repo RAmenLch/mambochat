@@ -20,6 +20,7 @@ declare module 'vue' {
     ChatHeader: typeof import('./components/chat/ChatHeader.vue')['default']
     ChatInputBox: typeof import('./components/chat/ChatInputBox.vue')['default']
     ChatList: typeof import('./components/chat/ChatList.vue')['default']
+    ChatNavigator: typeof import('./components/chat/ChatNavigator.vue')['default']
     ChatSettingsDrawer: typeof import('./components/chat/ChatSettingsDrawer.vue')['default']
     ChatToolbar: typeof import('./components/chat/ChatToolbar.vue')['default']
     ChatUniversalEditor: typeof import('./components/common/ChatUniversalEditor.vue')['default']
