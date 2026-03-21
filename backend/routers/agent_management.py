@@ -9,6 +9,7 @@ from backend import schemas
 from backend.models import agent_model
 from backend.database import get_db
 from backend.services.file_service import FileService
+from backend.services.resource_service import validate_mounted_resources
 from backend.schemas.enums import FileManagementType
 
 router = APIRouter()
@@ -69,6 +70,9 @@ async def _validate_avatar_file(file: UploadFile):
     summary="创建新 Agent 或文件夹"
 )
 async def create_agent(agent: schemas.AgentCreate, db: AsyncSession = Depends(get_db)):
+    if agent.resourcePromptList is not None:
+        await validate_mounted_resources(db, agent.resourcePromptList)
+
     db_agent = await agent_crud.create_agent(db=db, agent=agent)
     return await _attach_avatar_url(db, db_agent)
 
@@ -118,6 +122,9 @@ async def update_agent_settings(
         agent_update: schemas.AgentUpdate,
         db: AsyncSession = Depends(get_db)
 ):
+    if agent_update.resourcePromptList is not None:
+        await validate_mounted_resources(db, agent_update.resourcePromptList)
+
     try:
         updated_agent = await agent_crud.update_agent(db, agent_id=agent_id, agent_update=agent_update)
         if updated_agent is None:

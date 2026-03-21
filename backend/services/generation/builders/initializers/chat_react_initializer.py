@@ -50,6 +50,7 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
     async def initialize(self) -> Tuple[AgentConfig, str]:
         extended_prompts: List[str] = []
         knowledge_bases = []
+        skills = []
 
         # 1. 资源挂载与分发 (从 Chat 表读取 resource_prompt_list)
         if self.enable_resource_merge and self.chat.resource_prompt_list:
@@ -62,6 +63,7 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
                 extended_prompts.append(content)
 
             knowledge_bases = dispatch_result.get("knowledge_bases", [])
+            skills = dispatch_result.get("skills", [])
 
         # 挂载知识库工具
         if knowledge_bases:
@@ -108,6 +110,7 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
         agent_config = AgentConfig(
             agent_type=AgentTypeEnum.REACT,
             tools=all_tools if all_tools else None,
+            skills=skills if skills else None,
             hitl_interrupt_on=self.hitl_interrupt_on,
             thread_id=self.thread_id,
             resume_payload=self.resume_payload

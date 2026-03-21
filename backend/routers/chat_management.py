@@ -6,6 +6,7 @@ from typing import List, Optional, Dict, Any
 
 from backend.crud import chat_crud, setting_crud, provider_crud, resource_crud, agent_crud
 from backend.services import chat_service
+from backend.services.resource_service import validate_mounted_resources
 from backend import schemas
 from backend.models import chat_model
 from backend.database import get_db
@@ -127,6 +128,10 @@ async def create_chat(chat: schemas.ChatCreate, db: AsyncSession = Depends(get_d
         else:
             # Validate user-provided parameters
             _validate_model_parameters(chat.modelParameters)
+
+        # 验证资源挂载列表
+        if chat.resource_prompt_list is not None:
+            await validate_mounted_resources(db, chat.resource_prompt_list)
 
     return await chat_crud.create_chat(db=db, chat=chat)
 
@@ -299,23 +304,7 @@ async def update_chat_settings(
 
     # 验证资源挂载列表
     if chat_update.resource_prompt_list is not None:
-        if len(chat_update.resource_prompt_list) > 0:
-            # 批量获取资源对象
-            resources = await resource_crud.get_resources_by_ids(db, chat_update.resource_prompt_list)
-            resources_map = {res.id: res for res in resources}
-
-            # 遍历ID进行严格验证
-            for rid in chat_update.resource_prompt_list:
-                res = resources_map.get(rid)
-                if not res:
-                    raise HTTPException(status_code=400, detail=f"Resource ID {rid} not found.")
-
-                # 检查是否为文件夹，仅允许挂载具体资源
-                if res.resourceType is None:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Item {rid} is a folder, cannot be mounted as a resource."
-                    )
+        await validate_mounted_resources(db, chat_update.resource_prompt_list)
 
     updated_chat = await chat_crud.update_chat(db, chat_id=chat_id, chat_update=chat_update)
 

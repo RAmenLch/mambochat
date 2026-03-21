@@ -464,3 +464,44 @@ async def get_batch_resource_ancestors(db: AsyncSession, resource_ids: List[str]
     )
 
     return resources_result.scalars().all()
+
+
+async def get_skill_descendants_with_versions(db: AsyncSession, skill_ids: List[str]) -> List[resource_model.Resource]:
+    """
+    根据 SKILL 根节点 ID 列表，递归获取其下所有的子孙节点（包含文件夹和文件）。
+    自动预加载 latest_version 关系数据，以便后续提取底层物理文件 ID。
+    """
+    if not skill_ids:
+        return []
+
+    # 1. 递归 CTE: 查询所有子孙节点的 ID
+    # 基础查询：选出指定的 SKILL 根节点
+    cte = select(
+        resource_model.Resource.id,
+        resource_model.Resource.parentId
+    ).where(resource_model.Resource.id.in_(skill_ids)).cte(name="skill_descendants", recursive=True)
+
+    # 递归部分：查找 parentId 等于当前节点 id 的子节点
+    cte = cte.union_all(
+        select(
+            resource_model.Resource.id,
+            resource_model.Resource.parentId
+        ).join(cte, resource_model.Resource.parentId == cte.c.id)
+    )
+
+    # 获取所有涉及的节点 ID
+    stmt = select(cte.c.id)
+    result = await db.execute(stmt)
+    descendant_ids = result.scalars().all()
+
+    if not descendant_ids:
+        return []
+
+    # 2. 查询完整的 ORM 对象并预加载 latest_version
+    resources_result = await db.execute(
+        select(resource_model.Resource)
+        .options(joinedload(resource_model.Resource.latest_version))
+        .where(resource_model.Resource.id.in_(descendant_ids))
+    )
+
+    return list(resources_result.scalars().all())

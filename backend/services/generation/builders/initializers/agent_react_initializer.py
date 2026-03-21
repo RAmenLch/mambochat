@@ -50,6 +50,7 @@ class AgentBasedReActInitializer(AbstractAgentInitializer):
     async def initialize(self) -> Tuple[AgentConfig, str]:
         extended_prompts: List[str] = []
         knowledge_bases = []
+        skills = []
 
         # 1. 资源挂载与分发 (从 Agent 表读取 resourcePromptList)
         if self.enable_resource_merge and self.agent.resourcePromptList:
@@ -62,6 +63,7 @@ class AgentBasedReActInitializer(AbstractAgentInitializer):
                 extended_prompts.append(content)
 
             knowledge_bases = dispatch_result.get("knowledge_bases", [])
+            skills = dispatch_result.get("skills", [])
 
         # 挂载知识库工具
         if knowledge_bases:
@@ -107,6 +109,7 @@ class AgentBasedReActInitializer(AbstractAgentInitializer):
         agent_config = AgentConfig(
             agent_type=AgentTypeEnum(self.agent.AgentType),  # 动态读取 Agent 表的类型
             tools=all_tools if all_tools else None,
+            skills=skills if skills else None,
             hitl_interrupt_on=self.hitl_interrupt_on,
             thread_id=self.thread_id,
             resume_payload=self.resume_payload
@@ -119,4 +122,5 @@ class AgentBasedReActInitializer(AbstractAgentInitializer):
 
     def get_providers(self) -> List[BaseToolProvider]:
         return self.providers
+
 

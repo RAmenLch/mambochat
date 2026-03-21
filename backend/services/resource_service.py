@@ -233,3 +233,50 @@ async def _process_move_side_effects(
 
     # 提交更改
     await db.commit()
+
+
+async def validate_mounted_resources(db: AsyncSession, resource_ids: List[str]):
+    """
+    验证挂载的资源列表：
+    1. 资源是否存在
+    2. 是否为有效的可挂载资源（不能是纯文件夹）
+    3. 多个 KB 的情况下，名称是否相同
+    4. 多个 SKILL 的情况下，名称是否相同
+    """
+    if not resource_ids:
+        return
+
+    resources = await resource_crud.get_resources_by_ids(db, resource_ids)
+    resources_map = {res.id: res for res in resources}
+
+    kb_names = set()
+    skill_names = set()
+
+    for rid in resource_ids:
+        res = resources_map.get(rid)
+        if not res:
+            raise HTTPException(status_code=400, detail=f"Resource ID {rid} not found.")
+
+        # 检查是否为普通文件夹，仅允许挂载具体资源或特殊的资源型文件夹(KB, SKILL)
+        if res.resourceType is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Item {rid} is a folder, cannot be mounted as a resource."
+            )
+
+        if res.resourceType == ResourceType.KNOWLEDGE_BASE.value:
+            if res.name in kb_names:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Duplicate Knowledge Base name detected: '{res.name}'. Multiple KBs must have unique names."
+                )
+            kb_names.add(res.name)
+
+        elif res.resourceType == ResourceType.SKILL.value:
+            if res.name in skill_names:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Duplicate Skill name detected: '{res.name}'. Multiple Skills must have unique names."
+                )
+            skill_names.add(res.name)
+

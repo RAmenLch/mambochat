@@ -7,6 +7,22 @@ from langchain_core.tools import BaseTool
 from backend.schemas.enums import AgentTypeEnum
 
 
+class SkillFileConfig(BaseModel):
+    """
+    技能包内部文件的配置信息。
+    """
+    file_path: str = Field(..., description="文件相对于 SKILL 根目录的相对路径 (例如: SKILL_A/src/main.py)")
+    file_id: str = Field(..., description="底层物理文件的 ID (File.id)")
+
+
+class SkillConfig(BaseModel):
+    """
+    技能包的整体配置信息。
+    """
+    name: str = Field(..., description="SKILL 的名称")
+    files: List[SkillFileConfig] = Field(default_factory=list, description="该 SKILL 下的所有文件列表")
+
+
 class ModelConfig(BaseModel):
     """
     大语言模型本身的运行配置。
@@ -45,7 +61,7 @@ class MessageContext(BaseModel):
 class AgentConfig(BaseModel):
     """
     Agent 运行与调度配置。
-    包含工具列表、HITL(人机交互)中断配置、线程管理等。
+    包含工具列表、HITL(人机交互)中断配置、线程管理、技能包挂载等。
     """
     # Pydantic V2 系统保留字，允许传入 LangChain 的 BaseTool 等非 Pydantic 类型
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -53,6 +69,11 @@ class AgentConfig(BaseModel):
     agent_type: AgentTypeEnum = Field(default=AgentTypeEnum.REACT, description="Agent 的类型标识")
     tools: Optional[List[BaseTool]] = Field(None, description="挂载给 Agent 的工具列表")
     tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(None, description="强制工具调用选择")
+
+    skills: Optional[List[SkillConfig]] = Field(
+        default=None,
+        description="挂载给 Agent 的外部技能包 (SKILL) 列表"
+    )
 
     hitl_interrupt_on: Dict[str, bool] = Field(
         default_factory=dict,
