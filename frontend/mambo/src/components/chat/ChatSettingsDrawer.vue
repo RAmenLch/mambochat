@@ -135,7 +135,7 @@
   <!-- Reusable Resource Selector Dialog -->
   <ResourceSelectorDialog
       v-model:visible="promptDialogVisible"
-      source="settings"
+      context="chat-settings"
       @mount-resources="handleMountResources"
       @mount-knowledge-base="handleMountKnowledgeBase"
   />
@@ -151,7 +151,7 @@ import { useProviderStore } from '@/stores/providerStore';
 import { useChatSessionStore } from '@/stores/chatSessionStore';
 import { getResourceDetails } from '@/api/resourceService';
 import type { Chat, ChatUpdate, AIModel, Resource, LLMParameterDefinition } from '@/api/types';
-import ResourceSelectorDialog from './dialogs/ResourceSelectorDialog.vue';
+import ResourceSelectorDialog from '../common/dialogs/ResourceSelectorDialog.vue';
 import MountedResourceTags from '@/components/common/MountedResourceTags.vue';
 import { useChatListStore } from '@/stores/chatListStore';
 const chatListStore = useChatListStore();

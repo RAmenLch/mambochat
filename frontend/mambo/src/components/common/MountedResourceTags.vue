@@ -10,21 +10,16 @@
       v-for="resource in modelValue"
       :key="resource.id"
       :data-resource-id="resource.id"
-      closable
+      :closable="!readonly"
       disable-transitions
       :type="colorByType ? getTagType(resource) : 'info'"
-      class="draggable-tag"
-      :class="{ 'is-dragging': draggedResourceId === resource.id }"
-      draggable="true"
-      @dragstart="handleDragStart(resource.id, $event)"
-      @dragover.prevent="handleDragOver($event)"
-      @dragend="handleDragEnd"
-      @close="handleRemove(resource.id)"
+      :class="{ 'draggable-tag': !readonly, 'is-dragging': draggedResourceId === resource.id }"
+      :draggable="!readonly ? 'true' : 'false'"
+      @dragstart="!readonly && handleDragStart(resource.id, $event)"
+      @dragover.prevent="!readonly && handleDragOver($event)"
+      @dragend="!readonly && handleDragEnd()"
+      @close="!readonly && handleRemove(resource.id)"
     >
-      <!--
-        修复：添加 :disabled="!!draggedResourceId"
-        当正在拖拽任意元素时，禁用所有 Tooltip，防止遮挡
-      -->
       <el-tooltip
         placement="top"
         effect="dark"
@@ -52,7 +47,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import type { PropType, Component } from 'vue';
-import { Search, Document, Memo, Tickets } from '@element-plus/icons-vue';
+import { Search, Document, Memo, Tickets, Reading } from '@element-plus/icons-vue'; // [修改] 引入 Reading 替代 MagicStick
 import type { Resource } from '@/api/types/resourceTypes';
 
 const props = defineProps({
@@ -65,6 +60,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  readonly: {
+    type: Boolean,
+    default: false,
+  }
 });
 
 const emit = defineEmits<{
@@ -84,6 +83,7 @@ function getTagType(resource: Resource): ElTagType {
     case 'knowledge_base': return 'primary';
     case 'system_prompt': return 'success';
     case 'submessage_template': return 'warning';
+    case 'skill': return 'danger';
     case 'file': return '';
     default: return 'info';
   }
@@ -94,6 +94,7 @@ function getTagIcon(resource: Resource): Component {
     case 'knowledge_base': return Search;
     case 'system_prompt': return Document;
     case 'submessage_template': return Memo;
+    case 'skill': return Reading; // [修改] 使用 Reading 图标
     case 'file': return Tickets;
     default: return Document;
   }
@@ -104,6 +105,7 @@ function getResourceTypeLabel(resource: Resource): string {
     case 'knowledge_base': return '知识库';
     case 'system_prompt': return '系统提示词';
     case 'submessage_template': return '消息模板';
+    case 'skill': return '技能 (Skill)';
     case 'file': return '文件';
     default: return resource.resourceType || '资源';
   }
@@ -112,6 +114,9 @@ function getResourceTypeLabel(resource: Resource): string {
 function getPreviewText(resource: Resource): string {
   if (resource.resourceType === 'knowledge_base') {
     return resource.description || '知识库资源（检索增强）';
+  }
+  if (resource.resourceType === 'skill') {
+    return resource.description || '技能资源（供 Agent 使用）';
   }
   if (resource.resourceType === 'file') {
     const fileInfo = resource.latest_version?.file_info;
@@ -140,7 +145,6 @@ const handleDragStart = (resourceId: string, event: DragEvent) => {
 const handleDragOver = (event: DragEvent) => {
   if (!draggedResourceId.value) return;
 
-  // 节流控制
   const now = Date.now();
   if (now - lastSwapTime < SWAP_THROTTLE_MS) return;
 
@@ -213,19 +217,16 @@ const handleRemove = (resourceId: string) => {
   flex-shrink: 0;
 }
 
-/* 排序动画 */
 .list-move {
   transition: transform 0.3s ease;
 }
 
-/* 删除动画：直接消失，触发兄弟元素补位 */
 .list-leave-active {
   display: none;
 }
 </style>
 
 <style>
-/* 全局样式，用于控制 Teleport 到 body 的 Tooltip 内容 */
 .resource-preview-tooltip {
   max-width: 60vw !important;
 }

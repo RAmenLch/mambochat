@@ -45,7 +45,7 @@
               />
               <div class="agent-title-info">
                 <div class="agent-name-row">
-                  <!-- [修改] 增加点击事件和可点击样式 -->
+                  <!-- 增加点击事件和可点击样式 -->
                   <span
                     class="agent-name clickable-agent"
                     @click="openAgentSettings(selectedAgent.id)"
@@ -97,13 +97,12 @@
           <div class="preview-section ext-section">
             <div class="section-title"><el-icon><MagicStick /></el-icon> {{ $t('agent.settingsAndResources', '设定与能力') }}</div>
 
-            <!-- 挂载资源 -->
+            <!-- 扩展能力: 挂载资源 -->
             <div class="ext-item">
               <div class="ext-label">{{ $t('agent.mountedResources', '挂载资源') }}:</div>
               <div class="ext-tags" v-if="previewResources.length > 0">
-                <el-tag v-for="res in previewResources" :key="res.id" size="small" type="success" effect="light">
-                  <el-icon><Collection /></el-icon> {{ res.name }}
-                </el-tag>
+                <!-- [修改] 使用 MountedResourceTags 替代手写的 el-tag，开启 color-by-type 和 readonly -->
+                <MountedResourceTags :model-value="previewResources" color-by-type readonly />
               </div>
               <div class="ext-empty" v-else>{{ $t('common.none', '无') }}</div>
             </div>
@@ -123,7 +122,7 @@
             <div class="ext-item">
               <div class="ext-label">{{ $t('agent.subAgents', '子 Agent') }}:</div>
               <div class="ext-tags" v-if="displaySubAgents.length > 0">
-                <!-- [修改] 增加点击事件和可点击样式，增加头像显示 -->
+                <!-- 增加点击事件和可点击样式，增加头像显示 -->
                 <el-tag
                   v-for="sub in displaySubAgents"
                   :key="sub.id"
@@ -162,7 +161,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, watch, computed, ref, onMounted } from 'vue'; // [修改] 引入 onMounted
+import { reactive, watch, computed, ref, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
@@ -172,7 +171,8 @@ import { useAgentStore } from '@/stores/agentStore';
 import { useProviderStore } from '@/stores/providerStore';
 import { useMcpStore } from '@/stores/mcpStore';
 import { getResourceDetails } from '@/api/resourceService';
-import type { Chat, ChatUpdate } from '@/api/types';
+import type { Chat, ChatUpdate, Resource } from '@/api/types'; // [修改] 引入 Resource 类型
+import MountedResourceTags from '@/components/common/MountedResourceTags.vue'; // [新增] 引入组件
 
 const props = defineProps<{
   visible: boolean;
@@ -196,13 +196,13 @@ const form = reactive({
   agentId: '' as string | null,
 });
 
-// 异步获取的资源列表缓存
-const previewResources = ref<{id: string, name: string}[]>([]);
+// [修改] 异步获取的资源列表缓存，类型改为完整的 Resource[]
+const previewResources = ref<Resource[]>([]);
 
 // --- Computed ---
 
 const agentOptions = computed(() => {
-  return agentStore.allAgents // [修改] 使用 allAgents
+  return agentStore.allAgents
     .filter(a => a.itemType === 'agent')
     .map(a => ({
       label: a.name,
@@ -212,7 +212,7 @@ const agentOptions = computed(() => {
 
 const selectedAgent = computed(() => {
   if (!form.agentId) return null;
-  return agentStore.allAgents.find(a => a.id === form.agentId) || null; // [修改] 使用 allAgents
+  return agentStore.allAgents.find(a => a.id === form.agentId) || null;
 });
 
 const displayModelName = computed(() => {
@@ -232,13 +232,13 @@ const displayMcpList = computed(() => {
 const displaySubAgents = computed(() => {
   const subIds = selectedAgent.value?.subAgents || [];
   return subIds.map(id => {
-    const agent = agentStore.allAgents.find(a => a.id === id); // [修改] 使用 allAgents
+    const agent = agentStore.allAgents.find(a => a.id === id);
     return agent ? { id, name: agent.name, avatar: agent.agentAvatarUrl } : { id, name: 'Unknown Agent', avatar: null };
   });
 });
 
 // --- Lifecycle ---
-// [新增] 组件挂载时确保 Agent 列表已加载
+// 组件挂载时确保 Agent 列表已加载
 onMounted(() => {
   if (agentStore.allAgents.length === 0) {
     agentStore.fetchAllAgents();
@@ -263,9 +263,8 @@ watch(() => selectedAgent.value?.resourcePromptList, async (resourceIds) => {
   try {
     const promises = resourceIds.map(id => getResourceDetails(id).catch(() => null));
     const results = await Promise.all(promises);
-    previewResources.value = results
-      .filter(r => r !== null)
-      .map(r => ({ id: r!.id, name: r!.name }));
+    // [修改] 直接保留完整的 Resource 对象，不再 map 截断属性
+    previewResources.value = results.filter(r => r !== null) as Resource[];
   } catch (error) {
     console.error('Failed to load preview resources:', error);
     previewResources.value = [];
@@ -383,7 +382,7 @@ const openAgentSettings = (agentId: string) => {
   text-overflow: ellipsis;
 }
 
-/* [新增] Agent 名称可点击样式 */
+/* Agent 名称可点击样式 */
 .clickable-agent {
   cursor: pointer;
   color: var(--el-color-primary);
@@ -460,7 +459,7 @@ const openAgentSettings = (agentId: string) => {
   gap: 8px;
 }
 
-/* [新增] 子 Agent 标签可点击样式 */
+/* 子 Agent 标签可点击样式 */
 .clickable-tag {
   cursor: pointer;
   transition: opacity 0.3s;

@@ -74,33 +74,45 @@ class ChatWorker(AbstractGenerateWorker):
             self,
             llm_input: LLMInput
     ) -> AsyncGenerator[Tuple[str, Union[ToolMessage, AIMessageChunk, AIMessage, Dict[str, Any]]], None]:
-        """
-        启动 Agent 并流式返回执行过程中的事件。
-        """
 
-        # 1. 创建底层模型 (由子类实现)
+        # 1. 创建底层模型
         model = self._create_model(llm_input)
 
-        # 2. 通过工厂获取 Agent 图 (彻底解耦图构建逻辑)
+        # 2. 通过工厂获取 Agent 图
         graph_builder = GraphBuilderFactory.get_builder(llm_input.agent_config.agent_type)
         agent = graph_builder.build(model, llm_input.agent_config)
 
-        # 3. 准备线程配置 (如果启用了 HITL 审核中断)
+        # 3. 准备线程配置 (DeepAgent 必须挂载 thread_id 以维持 VFS 状态)
         thread_config = None
-        if llm_input.agent_config.hitl_interrupt_on:
+        if llm_input.agent_config.hitl_interrupt_on or llm_input.agent_config.agent_type == AgentTypeEnum.DEEP:
             thread_config = {"configurable": {"thread_id": llm_input.agent_config.thread_id}}
 
-        # 4. 准备输入数据
+        # 4. 纯内存 VFS 状态注入 (仅针对 DeepAgent)
+        if llm_input.agent_config.agent_type == AgentTypeEnum.DEEP and llm_input.agent_config.skills:
+            from deepagents.backends.utils import create_file_data
+
+            files_to_inject = {}
+            # 直接从 SkillFileConfig 中提取预加载的 content
+            for skill in llm_input.agent_config.skills:
+                for file_config in skill.files:
+                    if file_config.content is not None:
+                        # 构造虚拟路径
+                        virtual_path = f"/skills/{skill.name}/{file_config.file_path}"
+                        files_to_inject[virtual_path] = create_file_data(file_config.content)
+
+            if files_to_inject:
+                # 调用 LangGraph 原生 API，将内存中的文件结构持久化到当前 thread 的状态中
+                agent.update_state(thread_config, {"files": files_to_inject})
+
+        # 5. 准备输入数据
         resume_payload = llm_input.agent_config.resume_payload
         if resume_payload:
-            # 如果存在恢复载荷，说明是从 HITL 中断中恢复，使用 Command 恢复执行
             input_data = Command(resume=resume_payload)
         else:
-            # 否则是全新的生成请求，传入历史消息
             messages = self._convert_messages(llm_input.context.messages)
             input_data = {"messages": messages}
 
-        # 5. 执行流式输出
+        # 6. 执行流式输出
         async for stream1 in agent.astream(
                 input=input_data,
                 stream_mode=["messages", "updates"],

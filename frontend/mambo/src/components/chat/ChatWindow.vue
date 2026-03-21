@@ -118,7 +118,7 @@
 
     <ResourceSelectorDialog
       v-model:visible="resourceSelectorVisible"
-      source="toolbar"
+      context="chat-toolbar"
       @mount-resources="handleMountResources"
       @append-resources="handleAppendResources"
       @mount-knowledge-base="handleMountKnowledgeBase"
@@ -156,7 +156,7 @@ import MessageItem from './MessageItem.vue';
 import ChatToolbar from './ChatToolbar.vue';
 import ChatSettingsDrawer from './ChatSettingsDrawer.vue';
 import ChatAgentSettingsDrawer from './ChatAgentSettingsDrawer.vue';
-import ResourceSelectorDialog from './dialogs/ResourceSelectorDialog.vue';
+import ResourceSelectorDialog from '../common/dialogs/ResourceSelectorDialog.vue';
 import ChatHeader from './ChatHeader.vue';
 import AttachmentPreview from './AttachmentPreview.vue';
 import ChatInputBox from './ChatInputBox.vue';

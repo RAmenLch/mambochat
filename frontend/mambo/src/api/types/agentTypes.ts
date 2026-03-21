@@ -1,6 +1,6 @@
 // frontend/mambo/src/api/types/agentTypes.ts
 export type AgentItemType = 'agent' | 'folder';
-export type AgentType = 'ReActAgent';
+export type AgentType = 'ReActAgent'|'DeepAgent';
 
 export interface Agent {
   id: string;

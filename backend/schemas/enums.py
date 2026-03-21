@@ -120,3 +120,4 @@ class AgentItemType(str, Enum):
 class AgentTypeEnum(str, Enum):
     """定义 Agent 初始化的类型标识符"""
     REACT = "ReActAgent"
+    DEEP = "DeepAgent"

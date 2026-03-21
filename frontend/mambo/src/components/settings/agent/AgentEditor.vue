@@ -39,6 +39,7 @@
                   <el-form-item :label="$t('agent.type')">
                     <el-select v-model="form.AgentType" style="width: 100%">
                       <el-option label="ReAct Agent" value="ReActAgent" />
+                      <el-option label="Deep Agent" value="DeepAgent" /> <!-- [新增] Deep Agent -->
                     </el-select>
                   </el-form-item>
                 </el-col>
@@ -276,9 +277,8 @@
 
     <ResourceSelectorDialog
       v-model:visible="resourceSelectorVisible"
-      source="settings"
+      :context="form.AgentType === 'DeepAgent' ? 'agent-deep' : 'agent-react'"
       @mount-resources="handleMountResources"
-      @mount-knowledge-base="handleMountResources"
     />
 
     <AgentSelectorDialog
@@ -312,7 +312,7 @@ import { getResourceDetails } from '@/api/resourceService';
 import type { Resource, Agent } from '@/api/types';
 
 import AvatarUploader from '../AvatarUploader.vue';
-import ResourceSelectorDialog from '@/components/chat/dialogs/ResourceSelectorDialog.vue';
+import ResourceSelectorDialog from '@/components/common/dialogs/ResourceSelectorDialog.vue';
 import AgentSelectorDialog from './dialogs/AgentSelectorDialog.vue';
 import MountedResourceTags from '@/components/common/MountedResourceTags.vue';
 

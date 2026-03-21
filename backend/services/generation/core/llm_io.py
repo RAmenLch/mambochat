@@ -13,7 +13,7 @@ class SkillFileConfig(BaseModel):
     """
     file_path: str = Field(..., description="文件相对于 SKILL 根目录的相对路径 (例如: SKILL_A/src/main.py)")
     file_id: str = Field(..., description="底层物理文件的 ID (File.id)")
-
+    content: Optional[str] = Field(None, description="预加载的文件纯文本内容")
 
 class SkillConfig(BaseModel):
     """
