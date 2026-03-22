@@ -7,7 +7,7 @@ from langchain_core.tools import BaseTool
 
 from backend.crud import provider_crud
 from backend.schemas import enums as schemas_enums
-from backend.schemas.enums import ChatMode
+from backend.schemas.enums import ChatMode, AgentTypeEnum
 from backend.schemas.message import ReviewToolContent
 from backend.schemas.provider import AIModel
 from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
@@ -18,6 +18,7 @@ from backend.services.generation.builders.material_loader import GenerationMater
 from backend.services.generation.builders.context_builder import MessageContextBuilder
 from backend.services.generation.builders.initializers.chat_react_initializer import ChatBasedReActInitializer
 from backend.services.generation.builders.initializers.agent_react_initializer import AgentBasedReActInitializer
+from backend.services.generation.builders.initializers.deep_agent_initializer import DeepAgentInitializer
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
 
 
@@ -34,7 +35,7 @@ class LLMInputDirector:
         self.db = db
         self.chat_id = chat_id
 
-        # --- 配置状态 (Fluent API 赋值) ---
+        # --- 配置状态 ---
         self._cutoff_message_id: Optional[str] = None
         self._cutoff_include: bool = False
         self._slice_range: Optional[slice] = None
@@ -54,11 +55,14 @@ class LLMInputDirector:
         self._enable_max_context_messages: bool = False
         self._enable_tools: bool = False
 
+        # [修复] 新增：强制使用普通模式标记
+        self._force_normal_mode: bool = False
+
         # --- 运行时缓存 ---
         self._providers: List[BaseToolProvider] = []
 
     # ==================== Fluent API ====================
-    # (保持原样，返回 self 以支持链式调用)
+
     def slice_until_message(self, message_id: str, include_target: bool = False) -> "LLMInputDirector":
         self._cutoff_message_id = message_id
         self._cutoff_include = include_target
@@ -128,6 +132,15 @@ class LLMInputDirector:
         self._enable_tools = True
         return self
 
+    def force_normal_mode(self) -> "LLMInputDirector":
+        """
+        强制使用普通聊天模式。
+        忽略会话绑定的 Agent 配置，统一使用 ChatBasedReActInitializer (ReActAgent)。
+        适用于标题生成、历史压缩等内部简单任务。
+        """
+        self._force_normal_mode = True
+        return self
+
     # ==================== 核心构建逻辑 ====================
 
     async def build(self) -> LLMInput:
@@ -147,7 +160,10 @@ class LLMInputDirector:
         provider = model.provider
 
         # 3. 判断模式并提取活动配置
-        is_agent_mode = (materials.chat.chatMode == ChatMode.AGENT.value and materials.agent is not None)
+        # [修复] 如果设置了强制普通模式，则 is_agent_mode 为 False
+        is_agent_mode = not self._force_normal_mode and \
+                        (materials.chat.chatMode == ChatMode.AGENT.value and materials.agent is not None)
+
         active_params = materials.agent.modelParameters if is_agent_mode else materials.chat.modelParameters
 
         # 4. 构建 LLMConfig
@@ -173,17 +189,31 @@ class LLMInputDirector:
 
         # 6. 智能路由 Initializer 进行 Agent 初始化
         if is_agent_mode:
-            initializer = AgentBasedReActInitializer(
-                db=self.db,
-                agent=materials.agent,
-                thread_id=thread_id,
-                resume_payload=resume_payload,
-                enable_tools=self._enable_tools,
-                enable_resource_merge=self._enable_resource_merge,
-                external_tools=self._tools
-            )
+            # 判断 Agent 的具体类型，如果是 DeepAgent 则使用专门的 Initializer 进行装配
+            if materials.agent.AgentType == AgentTypeEnum.DEEP.value or materials.agent.AgentType == AgentTypeEnum.DEEP:
+                initializer = DeepAgentInitializer(
+                    db=self.db,
+                    agent=materials.agent,
+                    thread_id=thread_id,
+                    resume_payload=resume_payload,
+                    enable_tools=self._enable_tools,
+                    enable_resource_merge=self._enable_resource_merge,
+                    external_tools=self._tools
+                )
+            else:
+                # 默认为普通的 ReActAgent
+                initializer = AgentBasedReActInitializer(
+                    db=self.db,
+                    agent=materials.agent,
+                    thread_id=thread_id,
+                    resume_payload=resume_payload,
+                    enable_tools=self._enable_tools,
+                    enable_resource_merge=self._enable_resource_merge,
+                    external_tools=self._tools
+                )
             base_system_prompt = materials.agent.systemPrompt or ""
         else:
+            # 当 force_normal_mode 为 True 或会话本身非 Agent 模式时，使用 ChatBasedReActInitializer
             initializer = ChatBasedReActInitializer(
                 db=self.db,
                 chat=materials.chat,
@@ -265,7 +295,9 @@ class LLMInputDirector:
                 raise ValueError(f"未能从全局设置 {self._global_model_keys} 中找到有效的模型配置")
         else:
             # 优先使用 Agent 绑定的模型（如果是 Agent 模式且绑定了），否则使用 Chat 绑定的模型
-            is_agent_mode = (materials.chat.chatMode == ChatMode.AGENT.value and materials.agent is not None)
+            # [修复] 此处也需同步判断 force_normal_mode，防止在强制普通模式下错误地取 Agent 模型
+            is_agent_mode = not self._force_normal_mode and \
+                            (materials.chat.chatMode == ChatMode.AGENT.value and materials.agent is not None)
 
             if is_agent_mode and materials.agent.aiModelId:
                 model = await provider_crud.get_model(self.db, model_id=materials.agent.aiModelId)
@@ -360,4 +392,3 @@ class LLMInputDirector:
             resume_decisions.append(decision_dict)
 
         return {"decisions": resume_decisions}
-

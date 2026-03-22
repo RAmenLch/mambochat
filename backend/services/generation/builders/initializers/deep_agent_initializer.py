@@ -18,6 +18,7 @@ from backend.services.generation.tools.base_tool_provider import BaseToolProvide
 from backend.services.generation.tools.mcp_tool_provider import MCPToolProvider
 from backend.services.generation.tools.suggest_tool_provider import SuggestToolProvider
 from backend.services.generation.tools.deep_builtin_tool_provider import DeepAgentBuiltinToolProvider
+from backend.services.file_service import FileService
 
 
 class DeepAgentInitializer(AbstractAgentInitializer):
@@ -75,7 +76,7 @@ class DeepAgentInitializer(AbstractAgentInitializer):
                     except Exception:
                         # 忽略读取失败的文件，防止阻断
                         file_config.content = ""
-                        
+
         # 2. 外部工具挂载 (MCP & Suggest)
         if self.enable_tools:
             params = {}

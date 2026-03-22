@@ -93,6 +93,7 @@ class TitleGenerateManager(AbstractGenerateManager):
         # 3. 配置指挥官
         llm_input = await (
             director
+            .force_normal_mode()
             .use_global_model(["title_generation_model_id", "default_model_id"])
             .set_system_prompt(system_prompt)
             .slice_head_tail(head=2, tail=2)
