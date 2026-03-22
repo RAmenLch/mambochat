@@ -74,7 +74,10 @@ class AgentConfig(BaseModel):
         default=None,
         description="挂载给 Agent 的外部技能包 (SKILL) 列表"
     )
-
+    subagents: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="子代理的字典配置列表"
+    )
     hitl_interrupt_on: Dict[str, bool] = Field(
         default_factory=dict,
         description="需要人工审核中断的工具名称映射，例如 {'execute_sql': True}"

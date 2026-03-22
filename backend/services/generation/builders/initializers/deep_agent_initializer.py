@@ -1,12 +1,13 @@
 # backend/services/generation/builders/initializers/deep_agent_initializer.py
 
 import json
+import asyncio
 from typing import Tuple, List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_core.tools import BaseTool
 
 from backend.schemas.enums import ToolReviewMode, AgentTypeEnum
-from backend.crud import mcp_crud
+from backend.crud import mcp_crud, agent_crud
 
 # 导入核心层和同级组件
 from backend.services.generation.core.llm_io import AgentConfig
@@ -24,8 +25,7 @@ from backend.services.file_service import FileService
 class DeepAgentInitializer(AbstractAgentInitializer):
     """
     针对 DeepAgent 架构的初始化器。
-    解析数据库配置，提取技能库 (Skills) 路径与工具，生成标准化的 AgentConfig。
-    不将技能库内容硬编码拼接到 system_prompt 中，而是留给底层虚拟文件系统 (VFS) 注入。
+    解析数据库配置，提取主代理与子代理 (Subagents) 的技能库路径与工具，生成标准化的 AgentConfig。
     """
 
     def __init__(
@@ -53,9 +53,16 @@ class DeepAgentInitializer(AbstractAgentInitializer):
         extended_prompts: List[str] = []
         skills = []
 
-        # 1. 资源挂载与分发 (从 Agent 表读取 resourcePromptList)
+        # 实例化文件服务与资源分发器
+        file_service = FileService(self.db)
+        dispatcher = ResourceDispatcher(self.db)
+
+        # ==========================================
+        # 1. 主代理 (Main Agent) 资源与工具装配
+        # ==========================================
+
+        # 1.1 资源挂载与分发 (Skills & Prompts)
         if self.enable_resource_merge and self.agent.resourcePromptList:
-            dispatcher = ResourceDispatcher(self.db)
             dispatch_result = await dispatcher.dispatch(self.agent.resourcePromptList)
 
             for content in dispatch_result.get("system_prompts", []):
@@ -67,17 +74,15 @@ class DeepAgentInitializer(AbstractAgentInitializer):
             skills = dispatch_result.get("skills", [])
 
         if skills:
-            file_service = FileService(self.db)
             for skill in skills:
                 for file_config in skill.files:
                     try:
-                        # 异步读取纯文本内容并赋值
+                        # 异步读取纯文本内容并赋值，供 VFS 初始化使用
                         file_config.content = await file_service.get_text_content(file_config.file_id)
                     except Exception:
-                        # 忽略读取失败的文件，防止阻断
                         file_config.content = ""
 
-        # 2. 外部工具挂载 (MCP & Suggest)
+        # 1.2 外部工具挂载 (MCP & Suggest)
         if self.enable_tools:
             params = {}
             if self.agent and self.agent.modelParameters:
@@ -89,7 +94,8 @@ class DeepAgentInitializer(AbstractAgentInitializer):
             # MCP 服务
             mcp_ids = self.agent.enabledMcpIds or []
             if mcp_ids:
-                self.providers.append(MCPToolProvider(self.db, mcp_ids))
+                main_mcp_provider = MCPToolProvider(self.db, mcp_ids)
+                self.providers.append(main_mcp_provider)
 
                 # 提取 HITL 审核配置
                 mcp_tools = await mcp_crud.get_tools_by_server_ids(self.db, mcp_ids)
@@ -103,9 +109,10 @@ class DeepAgentInitializer(AbstractAgentInitializer):
                 self.providers.append(SuggestToolProvider(enable_suggest=True))
 
         # 强制追加 DeepAgentBuiltinToolProvider，处理内置文件操作工具的 UI 兼容
-        self.providers.append(DeepAgentBuiltinToolProvider())
+        builtin_provider = DeepAgentBuiltinToolProvider()
+        self.providers.append(builtin_provider)
 
-        # 3. 收集所有工具实例与 Provider 的提示词注入
+        # 1.3 收集主代理所有工具实例
         all_tools: List[BaseTool] = list(self.external_tools)
         for provider in self.providers:
             tools = await provider.get_tools()
@@ -116,20 +123,97 @@ class DeepAgentInitializer(AbstractAgentInitializer):
             if injection:
                 extended_prompts.append(injection)
 
-        # 4. 构建 AgentConfig
+
+        # ==========================================
+        # 2. 子代理 (Subagents) 资源与工具装配
+        # ==========================================
+        subagents_config: List[Dict[str, Any]] = []
+
+        if self.agent.subAgents:
+            # 并发获取所有子代理的数据库记录
+            sub_agents_db = await asyncio.gather(
+                *[agent_crud.get_agent(self.db, sid) for sid in self.agent.subAgents]
+            )
+
+            for sub in sub_agents_db:
+                if not sub:
+                    continue
+
+                sub_tools = []
+                sub_skills_paths = []
+                sub_interrupt_on = {}
+
+                # 2.1 子代理独立 Skills 解析 (Context Quarantine)
+                if sub.resourcePromptList:
+                    sub_dispatch = await dispatcher.dispatch(sub.resourcePromptList)
+                    sub_skills = sub_dispatch.get("skills", [])
+
+                    if sub_skills:
+                        for skill in sub_skills:
+                            for file_config in skill.files:
+                                try:
+                                    file_config.content = await file_service.get_text_content(file_config.file_id)
+                                except Exception:
+                                    file_config.content = ""
+
+                            # 记录子代理的技能路径
+                            sub_skills_paths.append(f"/skills/{skill.name}")
+
+                            # 【关键】将子代理的 SkillConfig 合并到全局 skills 中，
+                            # 以便 chat_worker.py 统一将文件内容注入到虚拟文件系统 (VFS) 中
+                            skills.append(skill)
+
+                # 2.2 子代理独立 Tools 解析
+                if sub.enabledMcpIds:
+                    sub_mcp_provider = MCPToolProvider(self.db, sub.enabledMcpIds)
+                    sub_tools.extend(await sub_mcp_provider.get_tools())
+
+                    # 【关键】将子代理的 Provider 也加入全局 providers，确保前端能正确渲染其 UI
+                    self.providers.append(sub_mcp_provider)
+
+                    # 提取子代理独立的 HITL 拦截配置
+                    sub_mcp_tools_db = await mcp_crud.get_tools_by_server_ids(self.db, sub.enabledMcpIds)
+                    for t in sub_mcp_tools_db:
+                        if t.review_mode == ToolReviewMode.REQUIRE_REVIEW.value:
+                            sub_interrupt_on[t.name] = True
+
+                # 强制为子代理挂载内置文件工具
+                sub_tools.extend(await builtin_provider.get_tools())
+
+                # 2.3 组装符合 deepagents 库规范的子代理配置字典
+                sub_dict = {
+                    "name": sub.name,
+                    "description": sub.description or f"Subagent {sub.name} for specific tasks.",
+                    "system_prompt": sub.systemPrompt or "You are a helpful sub-assistant. Return ONLY a concise summary of your findings.",
+                    "tools": sub_tools,
+                }
+
+                if sub_skills_paths:
+                    sub_dict["skills"] = sub_skills_paths
+                if sub_interrupt_on:
+                    sub_dict["interrupt_on"] = sub_interrupt_on
+
+                subagents_config.append(sub_dict)
+
+
+        # ==========================================
+        # 3. 构建最终 AgentConfig
+        # ==========================================
         agent_config = AgentConfig(
             agent_type=AgentTypeEnum.DEEP,  # 强制使用 DEEP 类型
             tools=all_tools if all_tools else None,
             skills=skills if skills else None,
+            subagents=subagents_config if subagents_config else None, # 注入子代理配置
             hitl_interrupt_on=self.hitl_interrupt_on,
             thread_id=self.thread_id,
             resume_payload=self.resume_payload
         )
 
-        # 5. 合并附加的 System Prompt
+        # 合并附加的 System Prompt
         additional_system_prompt = "\n\n".join(extended_prompts) if extended_prompts else ""
 
         return agent_config, additional_system_prompt
 
     def get_providers(self) -> List[BaseToolProvider]:
         return self.providers
+

@@ -36,6 +36,7 @@ class DeepAgentGraphBuilder(BaseGraphBuilder):
             model=model,
             tools=tools,
             skills=skill_paths if skill_paths else None,
+            subagents=agent_config.subagents,
             checkpointer=active_checkpointer,
             interrupt_on=agent_config.hitl_interrupt_on
         )

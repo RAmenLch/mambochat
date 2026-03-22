@@ -204,3 +204,13 @@ async def move_agents(db: AsyncSession, move_request: schemas.AgentMoveRequest) 
 
     await db.commit()
     return True
+
+
+async def get_agents_by_ids(db: AsyncSession, agent_ids: List[str]) -> List[agent_model.Agent]:
+    """通过ID列表批量获取 Agent"""
+    if not agent_ids:
+        return []
+    result = await db.execute(
+        select(agent_model.Agent).filter(agent_model.Agent.id.in_(agent_ids))
+    )
+    return list(result.scalars().all())
