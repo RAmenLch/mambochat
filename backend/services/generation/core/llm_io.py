@@ -66,17 +66,21 @@ class AgentConfig(BaseModel):
     # Pydantic V2 系统保留字，允许传入 LangChain 的 BaseTool 等非 Pydantic 类型
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    name: str = Field(default="default-agent", description="Agent 名称")
+    description: str = Field(default="", description="Agent 描述，用于父代理路由")
+    system_prompt: str = Field(default="", description="Agent 的系统提示词")
+
     agent_type: AgentTypeEnum = Field(default=AgentTypeEnum.REACT, description="Agent 的类型标识")
     tools: Optional[List[BaseTool]] = Field(None, description="挂载给 Agent 的工具列表")
-    tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(None, description="强制工具调用选择")
+    # tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(None, description="强制工具调用选择")
 
     skills: Optional[List[SkillConfig]] = Field(
         default=None,
         description="挂载给 Agent 的外部技能包 (SKILL) 列表"
     )
-    subagents: Optional[List[Dict[str, Any]]] = Field(
+    sub_configs: Optional[List['AgentConfig']] = Field(
         default=None,
-        description="子代理的字典配置列表"
+        description="子代理的配置树"
     )
     hitl_interrupt_on: Dict[str, bool] = Field(
         default_factory=dict,

@@ -13,9 +13,10 @@ from langchain_core.messages import (
     AIMessageChunk
 )
 from langgraph.types import Command
+from deepagents.backends.utils import create_file_data
 
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
-from backend.services.generation.core.llm_io import LLMInput
+from backend.services.generation.core.llm_io import LLMInput, AgentConfig
 from backend.services.generation.worker.decode import BaseDecode, DefaultLangChainDecode
 from backend.services.generation.graph_builders.factory import GraphBuilderFactory
 from backend.schemas.enums import AgentTypeEnum
@@ -49,16 +50,13 @@ class ChatWorker(AbstractGenerateWorker):
             elif role == "user":
                 lc_messages.append(HumanMessage(content=content, name=name))
             elif role == "assistant":
-                # --- 核心修复：安全提取并转换 tool_calls ---
                 raw_tool_calls = msg.get("tool_calls")
                 lc_tool_calls = []
 
                 if raw_tool_calls and isinstance(raw_tool_calls, list):
                     for tc in raw_tool_calls:
-                        # 1. 如果是 OpenAI 原生格式 (包含 'function' 字段)
                         if "function" in tc:
                             try:
-                                # OpenAI 的 arguments 是 JSON 字符串，需要解析为字典
                                 args_str = tc["function"].get("arguments", "{}")
                                 args_dict = json.loads(args_str) if args_str else {}
                             except json.JSONDecodeError:
@@ -69,15 +67,13 @@ class ChatWorker(AbstractGenerateWorker):
                                 "args": args_dict,
                                 "id": tc.get("id", "")
                             })
-                        # 2. 如果已经是 LangChain 标准格式
                         elif "name" in tc and "args" in tc:
                             lc_tool_calls.append({
                                 "name": tc.get("name", ""),
-                                "args": tc.get("args", {}), # 这里已经是字典
+                                "args": tc.get("args", {}),
                                 "id": tc.get("id", "")
                             })
 
-                # 构造 AIMessage
                 if lc_tool_calls:
                     lc_messages.append(AIMessage(content=content, name=name, tool_calls=lc_tool_calls))
                 else:
@@ -96,6 +92,25 @@ class ChatWorker(AbstractGenerateWorker):
 
         return lc_messages
 
+    def _collect_vfs_files_recursively(self, config: AgentConfig) -> Dict[str, Any]:
+        """
+        递归遍历 AgentConfig 树，收集所有需要注入到 VFS 的技能文件。
+        """
+        files = {}
+
+        if config.skills:
+            for skill in config.skills:
+                for file_config in skill.files:
+                    if file_config.content is not None:
+                        virtual_path = f"/skills/{skill.name}/{file_config.file_path}"
+                        files[virtual_path] = create_file_data(file_config.content)
+
+        if config.sub_configs:
+            for sub_config in config.sub_configs:
+                files.update(self._collect_vfs_files_recursively(sub_config))
+
+        return files
+
     @abstractmethod
     def _create_model(self, llm_input: LLMInput) -> BaseChatModel:
         """
@@ -109,42 +124,28 @@ class ChatWorker(AbstractGenerateWorker):
             llm_input: LLMInput
     ) -> AsyncGenerator[Tuple[str, Union[ToolMessage, AIMessageChunk, AIMessage, Dict[str, Any]]], None]:
 
-        # 1. 创建底层模型
         model = self._create_model(llm_input)
 
-        # 2. 通过工厂获取 Agent 图
         graph_builder = GraphBuilderFactory.get_builder(llm_input.agent_config.agent_type)
         agent = graph_builder.build(model, llm_input.agent_config)
 
-        # 3. 准备线程配置 (DeepAgent 必须挂载 thread_id 以维持 VFS 状态)
         thread_config = None
         if llm_input.agent_config.hitl_interrupt_on or llm_input.agent_config.agent_type == AgentTypeEnum.DEEP:
             thread_config = {"configurable": {"thread_id": llm_input.agent_config.thread_id}}
 
         files_to_inject = {}
-        # 4. 纯内存 VFS 状态注入 (仅针对 DeepAgent)
-        if llm_input.agent_config.agent_type == AgentTypeEnum.DEEP and llm_input.agent_config.skills:
-            from deepagents.backends.utils import create_file_data
-            # 直接从 SkillFileConfig 中提取预加载的 content
-            for skill in llm_input.agent_config.skills:
-                for file_config in skill.files:
-                    if file_config.content is not None:
-                        # 构造虚拟路径
-                        virtual_path = f"/skills/{skill.name}/{file_config.file_path}"
-                        files_to_inject[virtual_path] = create_file_data(file_config.content)
+        if llm_input.agent_config.agent_type == AgentTypeEnum.DEEP:
+            files_to_inject = self._collect_vfs_files_recursively(llm_input.agent_config)
 
-        # 5. 准备输入数据
         resume_payload = llm_input.agent_config.resume_payload
         if resume_payload:
             input_data = Command(resume=resume_payload)
         else:
             messages = self._convert_messages(llm_input.context.messages)
+            input_data = {"messages": messages}
             if files_to_inject:
-                input_data = {"messages": messages,"files":files_to_inject}
-            else:
-                input_data = {"messages": messages}
+                input_data["files"] = files_to_inject
 
-        # 6. 执行流式输出
         async for stream1 in agent.astream(
                 input=input_data,
                 stream_mode=["messages", "updates"],
@@ -164,6 +165,4 @@ class ChatWorker(AbstractGenerateWorker):
                 if "__interrupt__" in event or "HumanInTheLoopMiddleware.after_model" in event:
                     yield mode, event
             else:
-                # mode == "messages"
                 yield mode, event[0]
-

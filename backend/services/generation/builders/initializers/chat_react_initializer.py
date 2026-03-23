@@ -105,22 +105,27 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
             if injection:
                 extended_prompts.append(injection)
 
-        # 4. 构建 AgentConfig
-        # Chat 模式默认固定使用 REACT 类型的 Agent
+        # 4. 合并附加的 System Prompt
+        base_prompt = self.chat.systemPrompt or ""
+        additional_system_prompt = "\n\n".join(extended_prompts) if extended_prompts else ""
+        final_system_prompt = f"{base_prompt}\n\n{additional_system_prompt}".strip() if additional_system_prompt else base_prompt
+
+        # 5. 构建 AgentConfig
+        # Chat 模式默认固定使用 REACT 类型的 Agent，且没有子代理
         agent_config = AgentConfig(
+            name=self.chat.name,
+            description=f"Chat mode agent for {self.chat.name}",
+            system_prompt=final_system_prompt,
             agent_type=AgentTypeEnum.REACT,
             tools=all_tools if all_tools else None,
             skills=skills if skills else None,
+            sub_configs=None, # Chat 模式没有子代理
             hitl_interrupt_on=self.hitl_interrupt_on,
             thread_id=self.thread_id,
             resume_payload=self.resume_payload
         )
 
-        # 5. 合并附加的 System Prompt
-        additional_system_prompt = "\n\n".join(extended_prompts) if extended_prompts else ""
-
         return agent_config, additional_system_prompt
 
     def get_providers(self) -> List[BaseToolProvider]:
         return self.providers
-
