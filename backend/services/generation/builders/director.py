@@ -8,11 +8,10 @@ from langchain_core.tools import BaseTool
 from backend.crud import provider_crud
 from backend.schemas import enums as schemas_enums
 from backend.schemas.enums import ChatMode, AgentTypeEnum
-from backend.schemas.message import ReviewToolContent
+from backend.schemas.message import ReviewToolContent, McpToolContent
 from backend.schemas.provider import AIModel
 from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 
-# 【导入核心模型和装配组件】
 from backend.services.generation.core.llm_io import LLMInput, ModelConfig
 from backend.services.generation.builders.material_loader import GenerationMaterialLoader, GenerationMaterials
 from backend.services.generation.builders.context_builder import MessageContextBuilder
@@ -55,7 +54,6 @@ class LLMInputDirector:
         self._enable_max_context_messages: bool = False
         self._enable_tools: bool = False
 
-        # [修复] 新增：强制使用普通模式标记
         self._force_normal_mode: bool = False
 
         # --- 运行时缓存 ---
@@ -160,7 +158,6 @@ class LLMInputDirector:
         provider = model.provider
 
         # 3. 判断模式并提取活动配置
-        # [修复] 如果设置了强制普通模式，则 is_agent_mode 为 False
         is_agent_mode = not self._force_normal_mode and \
                         (materials.chat.chatMode == ChatMode.AGENT.value and materials.agent is not None)
 
@@ -189,7 +186,6 @@ class LLMInputDirector:
 
         # 6. 智能路由 Initializer 进行 Agent 初始化
         if is_agent_mode:
-            # 判断 Agent 的具体类型，如果是 DeepAgent 则使用专门的 Initializer 进行装配
             if materials.agent.AgentType == AgentTypeEnum.DEEP.value or materials.agent.AgentType == AgentTypeEnum.DEEP:
                 initializer = DeepAgentInitializer(
                     db=self.db,
@@ -201,7 +197,6 @@ class LLMInputDirector:
                     external_tools=self._tools
                 )
             else:
-                # 默认为普通的 ReActAgent
                 initializer = AgentBasedReActInitializer(
                     db=self.db,
                     agent=materials.agent,
@@ -213,7 +208,6 @@ class LLMInputDirector:
                 )
             base_system_prompt = materials.agent.systemPrompt or ""
         else:
-            # 当 force_normal_mode 为 True 或会话本身非 Agent 模式时，使用 ChatBasedReActInitializer
             initializer = ChatBasedReActInitializer(
                 db=self.db,
                 chat=materials.chat,
@@ -228,16 +222,31 @@ class LLMInputDirector:
         agent_config, extended_prompt = await initializer.initialize()
         self._providers = initializer.get_providers()
 
+        # 7. 恢复 Provider 的执行状态，处理跨 HTTP 请求（如 HITL 中断恢复）导致的内存状态丢失
+        if self._cutoff_message_id and materials.target_msg:
+            for sub in materials.target_msg.sub_messages:
+                if sub.type == schemas_enums.SubMessageType.MCP_TOOL.value:
+                    if sub.status in [schemas_enums.MessageStatus.GENERATING.value, schemas_enums.MessageStatus.PENDING_REVIEW.value]:
+                        try:
+                            content_obj = McpToolContent.from_json_string(sub.content)
+                            if content_obj and content_obj.tool_call_id:
+                                for tp in self._providers:
+                                    if tp.matches_tool_name(content_obj.name):
+                                        tp.restore_state(content_obj.tool_call_id, sub.id, content_obj)
+                                        break
+                        except (ValueError, TypeError, ImportError):
+                            pass
+
         # 校验 HITL 冲突
         if not self._cutoff_message_id and agent_config.hitl_interrupt_on:
             raise ValueError("Build failed: assistant_message_id is required when HITL is enabled.")
 
-        # 7. 合并 System Prompt
+        # 8. 合并 System Prompt
         final_system_prompt = self._system_prompt_override if self._system_prompt_override is not None else base_system_prompt
         if extended_prompt:
             final_system_prompt = final_system_prompt + "\n\n" + extended_prompt if final_system_prompt else extended_prompt
 
-        # 8. 构建 MessageContext (委托给 ContextBuilder)
+        # 9. 构建 MessageContext (委托给 ContextBuilder)
         max_context_messages = None
         if self._enable_max_context_messages:
             params = active_params
@@ -269,7 +278,7 @@ class LLMInputDirector:
             system_prompt=final_system_prompt
         )
 
-        # 9. 组装并返回最终的 LLMInput
+        # 10. 组装并返回最终的 LLMInput
         return LLMInput(
             llm_config=llm_config,
             context=message_context,
@@ -294,8 +303,6 @@ class LLMInputDirector:
             if not model:
                 raise ValueError(f"未能从全局设置 {self._global_model_keys} 中找到有效的模型配置")
         else:
-            # 优先使用 Agent 绑定的模型（如果是 Agent 模式且绑定了），否则使用 Chat 绑定的模型
-            # [修复] 此处也需同步判断 force_normal_mode，防止在强制普通模式下错误地取 Agent 模型
             is_agent_mode = not self._force_normal_mode and \
                             (materials.chat.chatMode == ChatMode.AGENT.value and materials.agent is not None)
 

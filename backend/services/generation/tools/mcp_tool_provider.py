@@ -67,7 +67,7 @@ class MCPToolProvider(BaseToolProvider):
             tool_call_id: str,
             name: str,
             arguments: Dict[str, Any],
-            tool_def: Optional[BaseTool] = None  # 适配新签名
+            tool_def: Optional[BaseTool] = None
     ) -> AsyncGenerator[BaseInstruction, None]:
         # 1. 提取工具定义中的 JSON Schema
         input_schema = tool_def.args if tool_def else None
@@ -119,3 +119,8 @@ class MCPToolProvider(BaseToolProvider):
                 sub_message_id=sub_id,
                 status=schemas_enums.MessageStatus.COMPLETED
             )
+
+    def restore_state(self, tool_call_id: str, sub_message_id: str, tool_content: Any) -> None:
+        self._tool_sub_msg_map[tool_call_id] = sub_message_id
+        if isinstance(tool_content, McpToolContent):
+            self._tool_info_cache[tool_call_id] = tool_content

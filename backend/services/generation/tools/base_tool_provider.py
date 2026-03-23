@@ -1,3 +1,5 @@
+# backend/services/generation/tools/base_tool_provider.py
+
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any, AsyncGenerator
 
@@ -62,3 +64,11 @@ class BaseToolProvider(ABC):
         """
         if False:
             yield
+
+    @abstractmethod
+    def restore_state(self, tool_call_id: str, sub_message_id: str, tool_content: Any) -> None:
+        """
+        从持久化存储中恢复工具的调用状态。
+        用于处理跨请求（如 HITL 中断恢复）时的内存状态重建。
+        """
+        pass

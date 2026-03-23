@@ -1,3 +1,5 @@
+# backend/services/generation/tools/suggest_tool_provider.py
+
 import json
 from typing import List, Optional, Dict, Any, AsyncGenerator
 
@@ -51,7 +53,7 @@ class SuggestToolProvider(BaseToolProvider):
             tool_call_id: str,
             name: str,
             arguments: Dict[str, Any],
-            tool_def: Optional[BaseTool] = None  # 适配新签名
+            tool_def: Optional[BaseTool] = None
     ) -> AsyncGenerator[BaseInstruction, None]:
         """
         解析 suggest 工具调用，生成 SUGGEST 类型的子消息。
@@ -94,3 +96,9 @@ class SuggestToolProvider(BaseToolProvider):
         # 因为 CreateSubMessage 时状态已经是 COMPLETED
         if False:
             yield
+
+    def restore_state(self, tool_call_id: str, sub_message_id: str, tool_content: Any) -> None:
+        """
+        Suggest 工具在调用时即已完成状态闭合，无需维护和恢复中断状态。
+        """
+        pass
