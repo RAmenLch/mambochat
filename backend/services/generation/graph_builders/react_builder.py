@@ -4,10 +4,11 @@ from langgraph.graph.state import CompiledStateGraph
 from langchain_core.language_models import BaseChatModel
 
 from backend.checkpointer import get_checkpointer
-from backend.schemas.lc_agent import AgentState
 from backend.services.generation.agent.custom_middleware import ToolMessageOrderingMiddleware
 from backend.services.generation.core.llm_io import AgentConfig
 from backend.services.generation.graph_builders.base_builder import BaseGraphBuilder
+from schemas.lc_agent import MamboContext
+
 
 class ReactGraphBuilder(BaseGraphBuilder):
     """
@@ -32,5 +33,6 @@ class ReactGraphBuilder(BaseGraphBuilder):
             model,
             tools,
             middleware=middlewares,
-            checkpointer=active_checkpointer
+            checkpointer=active_checkpointer,
+            context_schema=MamboContext
         )

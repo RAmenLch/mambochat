@@ -23,7 +23,6 @@ class AgentBasedReActInitializer(AbstractAgentInitializer):
             self,
             db: AsyncSession,
             agent: Any,
-            thread_id: str,
             resume_payload: Optional[Dict[str, Any]] = None,
             enable_tools: bool = False,
             enable_resource_merge: bool = False,
@@ -31,7 +30,6 @@ class AgentBasedReActInitializer(AbstractAgentInitializer):
     ):
         self.db = db
         self.agent = agent
-        self.thread_id = thread_id
         self.resume_payload = resume_payload
         self.enable_tools = enable_tools
         self.enable_resource_merge = enable_resource_merge
@@ -100,7 +98,6 @@ class AgentBasedReActInitializer(AbstractAgentInitializer):
             tools=all_tools if all_tools else None,
             skills=skills if skills else None,
             hitl_interrupt_on=self.hitl_interrupt_on,
-            thread_id=self.thread_id,
             resume_payload=self.resume_payload
         )
 

@@ -12,6 +12,7 @@ from langchain_core.messages import (
     ToolMessage,
     AIMessageChunk
 )
+from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command, Overwrite
 from deepagents.backends.utils import create_file_data
 
@@ -20,6 +21,7 @@ from backend.services.generation.core.llm_io import LLMInput, AgentConfig
 from backend.services.generation.worker.decode import BaseDecode, DefaultLangChainDecode
 from backend.services.generation.graph_builders.factory import GraphBuilderFactory
 from backend.schemas.enums import AgentTypeEnum
+from schemas.lc_agent import MamboContext
 
 
 class ChatWorker(AbstractGenerateWorker):
@@ -129,9 +131,9 @@ class ChatWorker(AbstractGenerateWorker):
         graph_builder = GraphBuilderFactory.get_builder(llm_input.agent_config.agent_type)
         agent = graph_builder.build(model, llm_input.agent_config)
 
-        thread_config = None
+        thread_config:RunnableConfig = None
         if llm_input.agent_config.hitl_interrupt_on or llm_input.agent_config.agent_type == AgentTypeEnum.DEEP:
-            thread_config = {"configurable": {"thread_id": llm_input.agent_config.thread_id}}
+            thread_config = {"configurable": {"thread_id": llm_input.run_time_config.chat_id}}
 
         files_to_inject = {}
         if llm_input.agent_config.agent_type == AgentTypeEnum.DEEP:
@@ -149,9 +151,14 @@ class ChatWorker(AbstractGenerateWorker):
 
         async for stream1 in agent.astream(
                 input=input_data,
-                stream_mode=["messages", "updates"],
                 config=thread_config,
-                version="v2",
+                context=MamboContext(
+                    chat_id=llm_input.run_time_config.chat_id,
+                    message_id=llm_input.run_time_config.message_id,
+                    manager_name=llm_input.run_time_config.manager_name
+                ),
+                stream_mode=["messages", "updates"],
+                version="v2"
         ):
             mode = stream1["type"]
             event = stream1["data"]

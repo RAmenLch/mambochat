@@ -25,7 +25,6 @@ class DeepAgentInitializer(AbstractAgentInitializer):
             self,
             db: AsyncSession,
             agent: Any,
-            thread_id: str,
             resume_payload: Optional[Dict[str, Any]] = None,
             enable_tools: bool = False,
             enable_resource_merge: bool = False,
@@ -33,7 +32,6 @@ class DeepAgentInitializer(AbstractAgentInitializer):
     ):
         self.db = db
         self.agent = agent
-        self.thread_id = thread_id
         self.resume_payload = resume_payload
         self.enable_tools = enable_tools
         self.enable_resource_merge = enable_resource_merge
@@ -116,7 +114,6 @@ class DeepAgentInitializer(AbstractAgentInitializer):
                     sub_init = DeepAgentInitializer(
                         db=self.db,
                         agent=sub,
-                        thread_id=self.thread_id,
                         resume_payload=self.resume_payload,
                         enable_tools=self.enable_tools,
                         enable_resource_merge=self.enable_resource_merge,
@@ -126,7 +123,6 @@ class DeepAgentInitializer(AbstractAgentInitializer):
                     sub_init = AgentBasedReActInitializer(
                         db=self.db,
                         agent=sub,
-                        thread_id=self.thread_id,
                         resume_payload=self.resume_payload,
                         enable_tools=self.enable_tools,
                         enable_resource_merge=self.enable_resource_merge,
@@ -150,7 +146,6 @@ class DeepAgentInitializer(AbstractAgentInitializer):
             skills=skills if skills else None,
             sub_configs=sub_configs if sub_configs else None,
             hitl_interrupt_on=self.hitl_interrupt_on,
-            thread_id=self.thread_id,
             resume_payload=self.resume_payload
         )
 

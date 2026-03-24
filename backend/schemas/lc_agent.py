@@ -1,11 +1,9 @@
-import operator
-from typing import TypedDict, Annotated
+from typing import TypedDict, Optional
 
-from langchain.agents import AgentState
+from backend.services.generation.core.llm_io import RunTimeConfig
 
 
-def replace_reducer(existing, new):
-    return new
-
-class MamboAgentState(AgentState):
-    files: Annotated[list, operator.add]
+class MamboContext(TypedDict):
+    chat_id:str
+    manager_name:Optional[str]
+    message_id:Optional[str]

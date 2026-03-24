@@ -19,6 +19,7 @@ from backend.services.generation.builders.initializers.chat_react_initializer im
 from backend.services.generation.builders.initializers.agent_react_initializer import AgentBasedReActInitializer
 from backend.services.generation.builders.initializers.deep_agent_initializer import DeepAgentInitializer
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
+from backend.services.generation.core.llm_io import RunTimeConfig
 
 
 class LLMInputDirector:
@@ -33,6 +34,7 @@ class LLMInputDirector:
 
         self.db = db
         self.chat_id = chat_id
+        self._manager_name:Optional[str] = None
 
         # --- 配置状态 ---
         self._cutoff_message_id: Optional[str] = None
@@ -60,6 +62,9 @@ class LLMInputDirector:
         self._providers: List[BaseToolProvider] = []
 
     # ==================== Fluent API ====================
+
+    def set_manager_name(self,name):
+        self._manager_name = name
 
     def slice_until_message(self, message_id: str, include_target: bool = False) -> "LLMInputDirector":
         self._cutoff_message_id = message_id
@@ -190,7 +195,6 @@ class LLMInputDirector:
                 initializer = DeepAgentInitializer(
                     db=self.db,
                     agent=materials.agent,
-                    thread_id=thread_id,
                     resume_payload=resume_payload,
                     enable_tools=self._enable_tools,
                     enable_resource_merge=self._enable_resource_merge,
@@ -200,7 +204,6 @@ class LLMInputDirector:
                 initializer = AgentBasedReActInitializer(
                     db=self.db,
                     agent=materials.agent,
-                    thread_id=thread_id,
                     resume_payload=resume_payload,
                     enable_tools=self._enable_tools,
                     enable_resource_merge=self._enable_resource_merge,
@@ -211,7 +214,6 @@ class LLMInputDirector:
             initializer = ChatBasedReActInitializer(
                 db=self.db,
                 chat=materials.chat,
-                thread_id=thread_id,
                 resume_payload=resume_payload,
                 enable_tools=self._enable_tools,
                 enable_resource_merge=self._enable_resource_merge,
@@ -278,11 +280,17 @@ class LLMInputDirector:
             system_prompt=final_system_prompt
         )
 
+        rt_config = RunTimeConfig(chat_id=self.chat_id,
+                      message_id=self._cutoff_message_id,
+                      manager_name=self._manager_name
+                      )
+
         # 10. 组装并返回最终的 LLMInput
         return LLMInput(
             llm_config=llm_config,
             context=message_context,
-            agent_config=agent_config
+            agent_config=agent_config,
+            run_time_config=rt_config
         )
 
     def get_providers(self) -> List[BaseToolProvider]:

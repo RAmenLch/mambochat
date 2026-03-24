@@ -30,7 +30,6 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
             self,
             db: AsyncSession,
             chat: Any,  # 数据库 Chat 模型实例
-            thread_id: str,
             resume_payload: Optional[Dict[str, Any]] = None,
             enable_tools: bool = False,
             enable_resource_merge: bool = False,
@@ -38,7 +37,6 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
     ):
         self.db = db
         self.chat = chat
-        self.thread_id = thread_id
         self.resume_payload = resume_payload
         self.enable_tools = enable_tools
         self.enable_resource_merge = enable_resource_merge
@@ -121,7 +119,6 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
             skills=skills if skills else None,
             sub_configs=None, # Chat 模式没有子代理
             hitl_interrupt_on=self.hitl_interrupt_on,
-            thread_id=self.thread_id,
             resume_payload=self.resume_payload
         )
 

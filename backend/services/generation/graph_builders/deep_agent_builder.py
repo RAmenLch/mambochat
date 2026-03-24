@@ -9,6 +9,7 @@ from backend.checkpointer import get_checkpointer
 from backend.services.generation.core.llm_io import AgentConfig
 from backend.services.generation.graph_builders.base_builder import BaseGraphBuilder
 from backend.services.generation.agent.custom_middleware import ToolMessageOrderingMiddleware
+from schemas.lc_agent import MamboContext
 
 
 class DeepAgentGraphBuilder(BaseGraphBuilder):
@@ -56,5 +57,6 @@ class DeepAgentGraphBuilder(BaseGraphBuilder):
             skills=skill_paths if skill_paths else None,
             subagents=compiled_subagents if compiled_subagents else None,
             checkpointer=active_checkpointer,
-            interrupt_on=agent_config.hitl_interrupt_on
+            interrupt_on=agent_config.hitl_interrupt_on,
+            context_schema=MamboContext
         )

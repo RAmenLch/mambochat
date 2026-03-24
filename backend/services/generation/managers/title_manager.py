@@ -102,6 +102,7 @@ class TitleGenerateManager(AbstractGenerateManager):
             .filter_sub_message_types(SubMessageType.NORMAL.value)
             .flatten_history_to_single_user_message()
             .append_user_message(trigger_prompt)
+            .set_manager_name(TitleGenerateManager.__name__)
             .build()
         )
 
