@@ -22,6 +22,7 @@ from backend.services.generation.worker.decode import BaseDecode, DefaultLangCha
 from backend.services.generation.graph_builders.factory import GraphBuilderFactory
 from backend.schemas.enums import AgentTypeEnum
 from schemas.lc_agent import MamboContext
+from backend.services.generation.agent.log_callback import RawPayloadLoggingCallback
 
 
 class ChatWorker(AbstractGenerateWorker):
@@ -152,11 +153,6 @@ class ChatWorker(AbstractGenerateWorker):
         async for stream1 in agent.astream(
                 input=input_data,
                 config=thread_config,
-                context=MamboContext(
-                    chat_id=llm_input.run_time_config.chat_id,
-                    message_id=llm_input.run_time_config.message_id,
-                    manager_name=llm_input.run_time_config.manager_name
-                ),
                 stream_mode=["messages", "updates"],
                 version="v2"
         ):

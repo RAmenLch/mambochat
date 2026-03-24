@@ -57,6 +57,5 @@ class DeepAgentGraphBuilder(BaseGraphBuilder):
             skills=skill_paths if skill_paths else None,
             subagents=compiled_subagents if compiled_subagents else None,
             checkpointer=active_checkpointer,
-            interrupt_on=agent_config.hitl_interrupt_on,
-            context_schema=MamboContext
+            interrupt_on=agent_config.hitl_interrupt_on
         )

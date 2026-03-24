@@ -33,6 +33,5 @@ class ReactGraphBuilder(BaseGraphBuilder):
             model,
             tools,
             middleware=middlewares,
-            checkpointer=active_checkpointer,
-            context_schema=MamboContext
+            checkpointer=active_checkpointer
         )

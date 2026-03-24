@@ -4,6 +4,7 @@ from backend.services.generation.worker.decode import BaseDecode, OpenAiDecode
 from backend.services.generation.worker.extended_chat_openai_model import ExtendedChatOpenAI
 from backend.services.generation.core.llm_io import LLMInput
 from backend.services.generation.worker.chat_worker import ChatWorker
+from services.generation.agent.log_callback import RawPayloadLoggingCallback
 
 
 class OpenAiWorker(ChatWorker):
@@ -41,6 +42,7 @@ class OpenAiWorker(ChatWorker):
             default_headers={
                 "HTTP-Referer": "https://github.com/RAmenLch/mambochat",  # Optional. Site URL for rankings on openrouter.ai.
                 "X-Title": "MamboChat",  # Optional. Site title for rankings on openrouter.ai.
-            }
+            },
+            callbacks=[RawPayloadLoggingCallback("abc")]
         )
 
