@@ -6,6 +6,7 @@ from langchain.agents.middleware.types import (
     ModelResponse,
 )
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
+from langgraph.config import get_config
 
 
 class ToolMessageOrderingMiddleware(AgentMiddleware):
@@ -45,6 +46,7 @@ class ToolMessageOrderingMiddleware(AgentMiddleware):
             request: ModelRequest,
             handler: Callable[[ModelRequest], ModelResponse],
     ) -> ModelResponse:
+        config  = get_config()
         current_messages = request.messages
         reordered_messages = self._reorder_tool_messages(current_messages)
 
@@ -65,6 +67,7 @@ class ToolMessageOrderingMiddleware(AgentMiddleware):
             request: ModelRequest,
             handler: Callable[[ModelRequest], ModelResponse],
     ) -> ModelResponse:
+        config  = get_config()
         current_messages = request.messages
         reordered_messages = self._reorder_tool_messages(current_messages)
 

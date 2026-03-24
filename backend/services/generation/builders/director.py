@@ -182,7 +182,7 @@ class LLMInputDirector:
 
         # 5. 解析 HITL 恢复载荷
         resume_payload = self._extract_resume_payload(materials.target_msg)
-        thread_id = self._cutoff_message_id or self.chat_id
+        thread_id = self.chat_id
 
         # 6. 智能路由 Initializer 进行 Agent 初始化
         if is_agent_mode:

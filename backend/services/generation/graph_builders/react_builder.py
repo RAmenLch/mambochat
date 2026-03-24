@@ -32,6 +32,5 @@ class ReactGraphBuilder(BaseGraphBuilder):
             model,
             tools,
             middleware=middlewares,
-            checkpointer=active_checkpointer,
-            state_schema=AgentState if middlewares else None
+            checkpointer=active_checkpointer
         )

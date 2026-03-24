@@ -8,6 +8,7 @@ from deepagents import create_deep_agent, CompiledSubAgent
 from backend.checkpointer import get_checkpointer
 from backend.services.generation.core.llm_io import AgentConfig
 from backend.services.generation.graph_builders.base_builder import BaseGraphBuilder
+from backend.services.generation.agent.custom_middleware import ToolMessageOrderingMiddleware
 
 
 class DeepAgentGraphBuilder(BaseGraphBuilder):
@@ -44,10 +45,13 @@ class DeepAgentGraphBuilder(BaseGraphBuilder):
 
         active_checkpointer = get_checkpointer()
 
+        middlewares = [ToolMessageOrderingMiddleware()]
+
         return create_deep_agent(
             name=agent_config.name,
             model=model,
             system_prompt=agent_config.system_prompt,
+            middleware = middlewares,
             tools=tools,
             skills=skill_paths if skill_paths else None,
             subagents=compiled_subagents if compiled_subagents else None,

@@ -12,7 +12,7 @@ from langchain_core.messages import (
     ToolMessage,
     AIMessageChunk
 )
-from langgraph.types import Command
+from langgraph.types import Command, Overwrite
 from deepagents.backends.utils import create_file_data
 
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
@@ -142,7 +142,8 @@ class ChatWorker(AbstractGenerateWorker):
             input_data = Command(resume=resume_payload)
         else:
             messages = self._convert_messages(llm_input.context.messages)
-            input_data = {"messages": messages}
+            # 使用 Overwrite 包裹 messages，强制系统历史覆盖 LangGraph 的状态
+            input_data = {"messages": Overwrite(value=messages)}
             if files_to_inject:
                 input_data["files"] = files_to_inject
 

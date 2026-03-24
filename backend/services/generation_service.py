@@ -231,7 +231,6 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
     """
     后台任务：协调整个生成过程。
     """
-    from backend.checkpointer import adelete_thread
     async with AsyncSessionLocal() as db:
         final_status = None
         try:
@@ -276,8 +275,6 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
         finally:
             await stream_manager.mark_task_completed(assistant_message_id)
             await stream_manager.close_stream(assistant_message_id)
-            if final_status in [MessageStatus.COMPLETED, MessageStatus.FAILED]:
-                asyncio.create_task(adelete_thread(assistant_message_id))
 
 
 async def run_title_generation_task(chat_id: str):

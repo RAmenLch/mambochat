@@ -86,7 +86,7 @@ class AgentConfig(BaseModel):
         default_factory=dict,
         description="需要人工审核中断的工具名称映射，例如 {'execute_sql': True}"
     )
-    thread_id: str = Field(..., description="当前生成的 Assistant 消息 ID，用作 LangGraph 的 thread_id")
+    thread_id: str = Field(..., description="当前生成的 Chat ID，用作 LangGraph 的 thread_id")
     resume_payload: Optional[Dict[str, Any]] = Field(
         None,
         description="用于从 HITL 中断中恢复的决策载荷"
