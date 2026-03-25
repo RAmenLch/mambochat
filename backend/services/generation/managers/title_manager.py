@@ -1,4 +1,5 @@
-# backend/services/generation/title_manager.py
+# backend/services/generation/managers/title_manager.py
+
 import json
 from typing import AsyncGenerator, Optional, Tuple
 
@@ -17,7 +18,6 @@ from backend.services.generation.core.instructions import (
 from backend.services.generation.managers.base_manager import AbstractGenerateManager
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.builders.director import LLMInputDirector
-
 
 
 class TitleGenerationContext(BaseModel):
@@ -107,14 +107,15 @@ class TitleGenerateManager(AbstractGenerateManager):
         )
 
         # 强制 JSON 模式 (适配新架构：通过 llm_config 修改参数)
-        llm_input.llm_config.parameters['response_format'] = {'type': 'json_object'}
-        llm_input.llm_config.parameters['stream'] = False
+        llm_input.agent_config.llm_config.parameters['response_format'] = {'type': 'json_object'}
+        llm_input.agent_config.llm_config.parameters['stream'] = False
 
         # 4. 执行生成并累积结果
         accumulated_content = ""
 
         async for mode, event in worker.generate(llm_input):
-            text_chunk = self.decode.get_text_content(mode, event)
+            decoder = worker.resolve_decoder(event)
+            text_chunk = decoder.get_text_content(mode, event)
             if text_chunk:
                 accumulated_content += text_chunk
 

@@ -7,9 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_core.tools import BaseTool
 
 from backend.schemas.enums import ToolReviewMode, AgentTypeEnum
-from backend.crud import mcp_crud, agent_crud
+from backend.crud import mcp_crud, agent_crud, provider_crud, setting_crud
+from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 
-from backend.services.generation.core.llm_io import AgentConfig
+from backend.services.generation.core.llm_io import AgentConfig, ModelConfig
 from backend.services.generation.builders.initializers.base_initializer import AbstractAgentInitializer
 from backend.services.generation.builders.resource_dispatcher import ResourceDispatcher
 
@@ -39,6 +40,30 @@ class DeepAgentInitializer(AbstractAgentInitializer):
 
         self.providers: List[BaseToolProvider] = []
         self.hitl_interrupt_on: Dict[str, bool] = {}
+
+    def _map_parameters(self, model_params_data: Any) -> Dict[str, Any]:
+        flat_params = {}
+        if model_params_data:
+            flat_params = json.loads(model_params_data) if isinstance(model_params_data, str) else model_params_data
+
+        structured = {}
+        param_def_map = {p.key: p for p in SUPPORTED_LLM_PARAMETERS}
+
+        for key, value in flat_params.items():
+            if key in ["max_context_messages", "stream", "enabled_mcp_ids", "enable_suggest"]:
+                continue
+
+            definition = param_def_map.get(key)
+            if definition:
+                target = structured
+                for part in definition.path[:-1]:
+                    target = target.setdefault(part, {})
+                target[definition.path[-1]] = value
+
+        if 'stream' in flat_params:
+            structured['stream'] = flat_params['stream']
+
+        return structured
 
     async def initialize(self) -> Tuple[AgentConfig, str]:
         extended_prompts: List[str] = []
@@ -104,6 +129,11 @@ class DeepAgentInitializer(AbstractAgentInitializer):
                 *[agent_crud.get_agent(self.db, sid) for sid in self.agent.subAgents]
             )
 
+            proxy_setting = await setting_crud.get_setting(self.db, "proxy_enabled")
+            proxy_url_setting = await setting_crud.get_setting(self.db, "proxy_url")
+            is_proxy_enabled = proxy_setting.value == "True" if proxy_setting else False
+            global_proxy_url = proxy_url_setting.value if proxy_url_setting else None
+
             from backend.services.generation.builders.initializers.agent_react_initializer import AgentBasedReActInitializer
 
             for sub in sub_agents_db:
@@ -130,6 +160,24 @@ class DeepAgentInitializer(AbstractAgentInitializer):
                     )
 
                 sub_config, _ = await sub_init.initialize()
+
+                if sub.aiModelId:
+                    sub_model = await provider_crud.get_model(self.db, sub.aiModelId)
+                    if sub_model and sub_model.provider:
+                        proxy_url = None
+                        if sub_model.provider.use_proxy and is_proxy_enabled:
+                            proxy_url = global_proxy_url
+
+                        api_params = self._map_parameters(sub.modelParameters)
+
+                        sub_config.llm_config = ModelConfig(
+                            model_id=sub_model.modelId,
+                            api_host=sub_model.provider.apiHost,
+                            api_key=sub_model.provider.apiKey,
+                            proxy_url=proxy_url,
+                            parameters=api_params
+                        )
+
                 sub_configs.append(sub_config)
                 self.providers.extend(sub_init.get_providers())
 

@@ -1,3 +1,5 @@
+# backend/services/generation/managers/base_manager.py
+
 import asyncio
 import traceback
 from abc import ABC, abstractmethod
@@ -8,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.core.instructions import BaseInstruction
 from backend.schemas import enums as schemas_enums
-from backend.services.generation.worker.decode import BaseDecode
 
 
 class AbstractGenerateManager(ABC):
@@ -20,7 +21,7 @@ class AbstractGenerateManager(ABC):
 
     def __init__(self, db_session: AsyncSession):
         self.db_session = db_session
-        self.decode: BaseDecode = None
+
     async def run(
             self,
             worker: AbstractGenerateWorker,
@@ -39,7 +40,6 @@ class AbstractGenerateManager(ABC):
         Yields:
             BaseInstruction: 指令流
         """
-        self.decode = worker.get_decode()
         try:
             async for instruction in self._execute_generation(worker, chat_id, assistant_message_id):
                 yield instruction
@@ -84,4 +84,3 @@ class AbstractGenerateManager(ABC):
         负责关闭未完成的子消息、生成错误提示等。
         """
         pass
-

@@ -7,11 +7,6 @@ from langchain_core.messages import AIMessageChunk, AIMessage, ToolMessage
 
 
 class BaseDecode(ABC):
-    """
-    解码器抽象基类。
-    负责将底层模型（如 LangChain）输出的原始流式事件或消息解析为系统标准格式。
-    """
-
     @abstractmethod
     def get_text_content(self, mode: str, message: Any) -> Optional[str]:
         pass
@@ -46,11 +41,6 @@ class BaseDecode(ABC):
 
 
 class DefaultLangChainDecode(BaseDecode):
-    """
-    默认的 LangChain 解码器实现。
-    包含所有模型通用的解析逻辑（如工具调用、用量统计、HITL 中断等）。
-    """
-
     def get_text_content(self, mode: str, message: Any) -> Optional[str]:
         return None
 
@@ -104,7 +94,6 @@ class DefaultLangChainDecode(BaseDecode):
             rejected_results = []
             rejected_ids = set()
 
-            # 1. 第一遍遍历：收集所有被中间件拦截/拒绝的工具调用
             for msg in messages:
                 if isinstance(msg, ToolMessage):
                     rejected_ids.add(msg.tool_call_id)
@@ -114,7 +103,6 @@ class DefaultLangChainDecode(BaseDecode):
                         "content": msg.content
                     })
 
-            # 2. 第二遍遍历：提取真正被批准的工具调用（过滤掉已被拒绝的）
             approved_calls = []
             for msg in messages:
                 if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
@@ -127,8 +115,6 @@ class DefaultLangChainDecode(BaseDecode):
 
 
 class OpenAiDecode(DefaultLangChainDecode):
-    """OpenAI 专属解码器实现"""
-
     def get_text_content(self, mode: str, message: Any) -> Optional[str]:
         if mode == "updates":
             return None
@@ -147,13 +133,11 @@ class OpenAiDecode(DefaultLangChainDecode):
         if mode == "updates" and isinstance(message, AIMessage):
             if "images" in message.additional_kwargs:
                 for image in message.additional_kwargs["images"]:
-                    return image  # {"image_url":{"url":"data:image..."}}
+                    return image
         return None
 
 
 class AnthropicDecode(DefaultLangChainDecode):
-    """Anthropic 专属解码器实现"""
-
     def get_text_content(self, mode: str, message: Any) -> Optional[str]:
         if mode == "updates":
             return None
@@ -179,8 +163,6 @@ class AnthropicDecode(DefaultLangChainDecode):
 
 
 class GoogleDecode(DefaultLangChainDecode):
-    """Google 专属解码器实现"""
-
     def get_text_content(self, mode: str, message: Any) -> Optional[str]:
         if mode == "updates":
             return None
@@ -206,3 +188,18 @@ class GoogleDecode(DefaultLangChainDecode):
                 for image in message.additional_kwargs["images"]:
                     return image
         return None
+
+
+class DecoderRegistry:
+    _decoders: Dict[str, BaseDecode] = {
+        "openai": OpenAiDecode(),
+        "anthropic": AnthropicDecode(),
+        "google_genai": GoogleDecode(),
+        "deepseek": OpenAiDecode(),
+        "default": DefaultLangChainDecode()
+    }
+
+    @classmethod
+    def get_decoder(cls, model_provider: str) -> BaseDecode:
+        provider_key = (model_provider or "").lower()
+        return cls._decoders.get(provider_key, cls._decoders["default"])

@@ -19,26 +19,13 @@ from backend.services.generation.managers.title_manager import TitleGenerateMana
 from backend.services.generation.managers.zip_history_manager import ZipHistoryGenerateManager
 
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
-from backend.services.generation.worker.openai_worker import OpenAiWorker
-from backend.services.generation.worker.google_worker import GoogleWorker
-from backend.services.generation.worker.deepseek_worker import DeepSeekWorker
-from backend.services.generation.worker.anthropic_worker import AnthropicWorker
+from backend.services.generation.worker.chat_worker import UniversalGraphWorker
 
 from backend.schemas.enums import FileManagementType, MessageStatus, MessageRole, SubMessageType, ProviderWorkerType
 from backend.config.timezone_config import get_configured_now, TZ
 from backend.services.file_service import FileService
 
 GENERATION_START_TIMEOUT = timedelta(minutes=10)
-
-# ==========================================
-# 阶段二：应用注册表模式重构工作者工厂
-# ==========================================
-WORKER_REGISTRY: dict[str, Type[AbstractGenerateWorker]] = {
-    ProviderWorkerType.OPENAI: OpenAiWorker,
-    ProviderWorkerType.GOOGLE: GoogleWorker,
-    ProviderWorkerType.DEEPSEEK: DeepSeekWorker,
-    ProviderWorkerType.ANTHROPIC: AnthropicWorker,
-}
 
 
 async def _calculate_message_status(message: chat_model.Message) -> schemas.MessageStatus:
@@ -53,7 +40,6 @@ async def _calculate_message_status(message: chat_model.Message) -> schemas.Mess
     if await stream_manager.is_task_running(message.id):
         return MessageStatus.COMPLETED if cancellation_requested else MessageStatus.GENERATING
 
-    # 1. 基于子消息状态判断
     if message.sub_messages:
         sub_statuses = {sm.status for sm in message.sub_messages}
 
@@ -73,11 +59,9 @@ async def _calculate_message_status(message: chat_model.Message) -> schemas.Mess
         if MessageStatus.FAILED.value in sub_statuses:
             return MessageStatus.FAILED
 
-    # 2. 检查是否有活跃的流
     if await stream_manager.is_stream_active(message.id):
         return MessageStatus.COMPLETED if cancellation_requested else MessageStatus.GENERATING
 
-    # 3. 无活跃流，且没有任何子消息，检查是否超时
     if not message.sub_messages:
         created_at = message.createdAt
         if created_at.tzinfo is None:
@@ -89,7 +73,6 @@ async def _calculate_message_status(message: chat_model.Message) -> schemas.Mess
 
         return MessageStatus.COMPLETED if cancellation_requested else MessageStatus.GENERATING
 
-    # 4. 有子消息，且没有 generating/failed/pending_review，且流已关闭
     return MessageStatus.COMPLETED
 
 
@@ -188,15 +171,10 @@ async def _ensure_chat_model_configured(db: AsyncSession, chat_id: str) -> None:
 
 
 def _create_worker_instance(worker_type: str) -> AbstractGenerateWorker:
-    """Worker 工厂方法 (OCP 友好)"""
-    worker_class = WORKER_REGISTRY.get(worker_type, OpenAiWorker)
-    return worker_class()
+    return UniversalGraphWorker()
 
 
 async def _get_worker_for_chat(db: AsyncSession, chat_id: str) -> AbstractGenerateWorker:
-    """
-    根据会话配置的服务商类型，返回对应的 Worker 实例。
-    """
     db_chat = await chat_crud.get_chat(db, chat_id=chat_id)
     worker_type = ProviderWorkerType.OPENAI
     if db_chat and db_chat.ai_model and db_chat.ai_model.provider:
@@ -206,9 +184,6 @@ async def _get_worker_for_chat(db: AsyncSession, chat_id: str) -> AbstractGenera
 
 
 async def _get_worker_from_settings(db: AsyncSession, setting_keys: List[str]) -> AbstractGenerateWorker:
-    """
-    根据全局设置列表（按优先级）查找模型，并返回对应的 Worker 实例。
-    """
     target_model_id = None
 
     for key in setting_keys:
@@ -252,10 +227,6 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
             print(f"[Generation Service Error] for message {assistant_message_id}: {e}")
             final_status = MessageStatus.FAILED
 
-            # ==========================================
-            # 阶段四：增强全局异常捕获的数据库事务安全性
-            # 先回滚之前可能失败的事务，确保 session 干净
-            # ==========================================
             await db.rollback()
 
             try:
@@ -267,7 +238,6 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
                     status=MessageStatus.FAILED
                 )
                 await message_crud.create_sub_message(db, assistant_message_id, error_sub_message_create)
-                # 显式提交补偿性写入
                 await db.commit()
             except Exception as inner_e:
                 print(f"Failed to even create an error message for {assistant_message_id}: {inner_e}")

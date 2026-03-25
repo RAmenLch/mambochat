@@ -12,31 +12,24 @@ from backend.schemas.message import ReviewToolContent, McpToolContent
 from backend.schemas.provider import AIModel
 from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 
-from backend.services.generation.core.llm_io import LLMInput, ModelConfig
+from backend.services.generation.core.llm_io import LLMInput, ModelConfig, RunTimeConfig
 from backend.services.generation.builders.material_loader import GenerationMaterialLoader, GenerationMaterials
 from backend.services.generation.builders.context_builder import MessageContextBuilder
 from backend.services.generation.builders.initializers.chat_react_initializer import ChatBasedReActInitializer
 from backend.services.generation.builders.initializers.agent_react_initializer import AgentBasedReActInitializer
 from backend.services.generation.builders.initializers.deep_agent_initializer import DeepAgentInitializer
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
-from backend.services.generation.core.llm_io import RunTimeConfig
 
 
 class LLMInputDirector:
-    """
-    LLM 输入装配指挥官。
-    对外暴露 Fluent API，对内统筹物料加载、模型配置、Agent 初始化与消息上下文装配。
-    """
-
     def __init__(self, db: AsyncSession, chat_id: str):
         if not chat_id:
             raise ValueError("LLMInputDirector requires a chat_id")
 
         self.db = db
         self.chat_id = chat_id
-        self._manager_name:Optional[str] = None
+        self._manager_name: Optional[str] = None
 
-        # --- 配置状态 ---
         self._cutoff_message_id: Optional[str] = None
         self._cutoff_include: bool = False
         self._slice_range: Optional[slice] = None
@@ -58,12 +51,9 @@ class LLMInputDirector:
 
         self._force_normal_mode: bool = False
 
-        # --- 运行时缓存 ---
         self._providers: List[BaseToolProvider] = []
 
-    # ==================== Fluent API ====================
-
-    def set_manager_name(self,name):
+    def set_manager_name(self, name):
         self._manager_name = name
         return self
 
@@ -137,20 +127,10 @@ class LLMInputDirector:
         return self
 
     def force_normal_mode(self) -> "LLMInputDirector":
-        """
-        强制使用普通聊天模式。
-        忽略会话绑定的 Agent 配置，统一使用 ChatBasedReActInitializer (ReActAgent)。
-        适用于标题生成、历史压缩等内部简单任务。
-        """
         self._force_normal_mode = True
         return self
 
-    # ==================== 核心构建逻辑 ====================
-
     async def build(self) -> LLMInput:
-        """统筹装配流程，生成最终的 LLMInput 对象。"""
-
-        # 1. 委托 Loader 获取基础物料 (解耦 DB 查询)
         materials = await GenerationMaterialLoader.load(
             db=self.db,
             chat_id=self.chat_id,
@@ -159,20 +139,19 @@ class LLMInputDirector:
             history_override=self._history_override
         )
 
-        # 2. 解析模型与 Provider
         model = await self._resolve_model(materials)
         provider = model.provider
 
-        # 3. 判断模式并提取活动配置
         is_agent_mode = not self._force_normal_mode and \
                         (materials.chat.chatMode == ChatMode.AGENT.value and materials.agent is not None)
 
         active_params = materials.agent.modelParameters if is_agent_mode else materials.chat.modelParameters
 
-        # 4. 构建 LLMConfig
         api_params = {}
         if not self._global_model_keys:
             api_params = self._map_parameters(active_params)
+
+        api_params["_worker_type"] = provider.worker_type
 
         proxy_url = None
         if provider.use_proxy and materials.settings.get("proxy_enabled") == "True":
@@ -186,11 +165,8 @@ class LLMInputDirector:
             parameters=api_params
         )
 
-        # 5. 解析 HITL 恢复载荷
         resume_payload = self._extract_resume_payload(materials.target_msg)
-        thread_id = self.chat_id
 
-        # 6. 智能路由 Initializer 进行 Agent 初始化
         if is_agent_mode:
             if materials.agent.AgentType == AgentTypeEnum.DEEP.value or materials.agent.AgentType == AgentTypeEnum.DEEP:
                 initializer = DeepAgentInitializer(
@@ -223,9 +199,11 @@ class LLMInputDirector:
             base_system_prompt = materials.chat.systemPrompt or ""
 
         agent_config, extended_prompt = await initializer.initialize()
+
+        agent_config.llm_config = llm_config
+
         self._providers = initializer.get_providers()
 
-        # 7. 恢复 Provider 的执行状态，处理跨 HTTP 请求（如 HITL 中断恢复）导致的内存状态丢失
         if self._cutoff_message_id and materials.target_msg:
             for sub in materials.target_msg.sub_messages:
                 if sub.type == schemas_enums.SubMessageType.MCP_TOOL.value:
@@ -240,16 +218,13 @@ class LLMInputDirector:
                         except (ValueError, TypeError, ImportError):
                             pass
 
-        # 校验 HITL 冲突
         if not self._cutoff_message_id and agent_config.hitl_interrupt_on:
             raise ValueError("Build failed: assistant_message_id is required when HITL is enabled.")
 
-        # 8. 合并 System Prompt
         final_system_prompt = self._system_prompt_override if self._system_prompt_override is not None else base_system_prompt
         if extended_prompt:
             final_system_prompt = final_system_prompt + "\n\n" + extended_prompt if final_system_prompt else extended_prompt
 
-        # 9. 构建 MessageContext (委托给 ContextBuilder)
         max_context_messages = None
         if self._enable_max_context_messages:
             params = active_params
@@ -281,24 +256,20 @@ class LLMInputDirector:
             system_prompt=final_system_prompt
         )
 
-        rt_config = RunTimeConfig(chat_id=self.chat_id,
-                      message_id=self._cutoff_message_id,
-                      manager_name=self._manager_name
-                      )
+        rt_config = RunTimeConfig(
+            chat_id=self.chat_id,
+            message_id=self._cutoff_message_id,
+            manager_name=self._manager_name
+        )
 
-        # 10. 组装并返回最终的 LLMInput
         return LLMInput(
-            llm_config=llm_config,
             context=message_context,
             agent_config=agent_config,
             run_time_config=rt_config
         )
 
     def get_providers(self) -> List[BaseToolProvider]:
-        """供 Manager 调用以获取装配好的 Provider 实例"""
         return self._providers
-
-    # ==================== 内部辅助方法 ====================
 
     async def _resolve_model(self, materials: GenerationMaterials) -> AIModel:
         model = None
@@ -326,7 +297,6 @@ class LLMInputDirector:
         return model
 
     def _map_parameters(self, model_params_data: Any) -> Dict[str, Any]:
-        """将扁平的数据库参数映射为结构化的 API 参数"""
         flat_params = {}
         if model_params_data:
             flat_params = json.loads(model_params_data) if isinstance(model_params_data, str) else model_params_data
@@ -370,7 +340,6 @@ class LLMInputDirector:
         return 'image' in (input_modalities or [])
 
     def _extract_resume_payload(self, target_msg: Optional[Any]) -> Optional[Dict[str, Any]]:
-        """从被截断的目标消息中提取 HITL 恢复所需的决策载荷"""
         if not (self._cutoff_message_id and self._enable_tools and target_msg):
             return None
 

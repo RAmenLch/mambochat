@@ -51,7 +51,6 @@ class MessageContext(BaseModel):
 
     def set_system_prompt(self, content: str) -> "MessageContext":
         """设置或更新系统提示词，确保只有一个系统消息且在首位"""
-        # 移除现有的系统消息
         self.messages = [m for m in self.messages if m.get("role") != "system"]
         if content:
             self.messages.insert(0, {"role": "system", "content": content})
@@ -66,9 +65,8 @@ class RunTimeConfig(BaseModel):
 class AgentConfig(BaseModel):
     """
     Agent 运行与调度配置。
-    包含工具列表、HITL(人机交互)中断配置、线程管理、技能包挂载等。
+    包含专属模型配置、工具列表、HITL(人机交互)中断配置、线程管理、技能包挂载等。
     """
-    # Pydantic V2 系统保留字，允许传入 LangChain 的 BaseTool 等非 Pydantic 类型
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     name: str = Field(default="default-agent", description="Agent 名称")
@@ -76,8 +74,8 @@ class AgentConfig(BaseModel):
     system_prompt: str = Field(default="", description="Agent 的系统提示词")
 
     agent_type: AgentTypeEnum = Field(default=AgentTypeEnum.REACT, description="Agent 的类型标识")
+    llm_config: Optional[ModelConfig] = Field(default=None, description="该Agent专属的模型配置")
     tools: Optional[List[BaseTool]] = Field(None, description="挂载给 Agent 的工具列表")
-    # tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(None, description="强制工具调用选择")
 
     skills: Optional[List[SkillConfig]] = Field(
         default=None,
@@ -100,9 +98,8 @@ class AgentConfig(BaseModel):
 class LLMInput(BaseModel):
     """
     V2 版本的标准 LLM 输入对象。
-    聚合了模型配置、消息上下文和 Agent 调度配置，作为 Worker 的唯一输入参数。
+    聚合了消息上下文和 Agent 调度配置（内含模型配置），作为 Worker 的唯一输入参数。
     """
-    llm_config: ModelConfig
     context: MessageContext
     agent_config: AgentConfig
     run_time_config: RunTimeConfig

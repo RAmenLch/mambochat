@@ -1,13 +1,13 @@
 # backend/services/generation/graph_builders/deep_agent_builder.py
 
 from typing import List
-from langchain_core.language_models import BaseChatModel
 from langgraph.graph.state import CompiledStateGraph
 from deepagents import create_deep_agent, CompiledSubAgent
 
 from backend.checkpointer import get_checkpointer
-from backend.services.generation.core.llm_io import AgentConfig
+from backend.services.generation.core.llm_io import AgentConfig, RunTimeConfig
 from backend.services.generation.graph_builders.base_builder import BaseGraphBuilder
+from backend.services.generation.graph_builders.model_factory import ModelFactory
 from backend.services.generation.agent.custom_middleware import ToolMessageOrderingMiddleware
 from schemas.lc_agent import MamboContext
 
@@ -18,16 +18,17 @@ class DeepAgentGraphBuilder(BaseGraphBuilder):
     基于 AgentConfig 树状结构，递归编译子代理图并将其封装挂载到父代理。
     """
 
-    def build(self, model: BaseChatModel, agent_config: AgentConfig) -> CompiledStateGraph:
-        # 局部导入以避免与 factory.py 产生循环引用
+    def build(self, agent_config: AgentConfig, run_time_config: RunTimeConfig) -> CompiledStateGraph:
         from backend.services.generation.graph_builders.factory import GraphBuilderFactory
+
+        model = ModelFactory.create_model(agent_config.llm_config, run_time_config)
 
         compiled_subagents: List[CompiledSubAgent] = []
 
         if agent_config.sub_configs:
             for sub_config in agent_config.sub_configs:
                 sub_builder = GraphBuilderFactory.get_builder(sub_config.agent_type)
-                sub_graph = sub_builder.build(model, sub_config)
+                sub_graph = sub_builder.build(sub_config, run_time_config)
 
                 compiled_subagents.append(
                     CompiledSubAgent(
@@ -52,7 +53,7 @@ class DeepAgentGraphBuilder(BaseGraphBuilder):
             name=agent_config.name,
             model=model,
             system_prompt=agent_config.system_prompt,
-            middleware = middlewares,
+            middleware=middlewares,
             tools=tools,
             skills=skill_paths if skill_paths else None,
             subagents=compiled_subagents if compiled_subagents else None,

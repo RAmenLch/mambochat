@@ -1,7 +1,8 @@
+# backend/services/generation/graph_builders/base_builder.py
+
 from abc import ABC, abstractmethod
-from langchain_core.language_models import BaseChatModel
 from langgraph.graph.state import CompiledStateGraph
-from backend.services.generation.core.llm_io import AgentConfig
+from backend.services.generation.core.llm_io import AgentConfig, RunTimeConfig
 
 class BaseGraphBuilder(ABC):
     """
@@ -9,5 +10,5 @@ class BaseGraphBuilder(ABC):
     负责将大语言模型与 Agent 配置组装成可执行的 LangGraph。
     """
     @abstractmethod
-    def build(self, model: BaseChatModel, agent_config: AgentConfig) -> CompiledStateGraph:
+    def build(self, agent_config: AgentConfig, run_time_config: RunTimeConfig) -> CompiledStateGraph:
         pass

@@ -78,14 +78,14 @@ class ZipHistoryGenerateManager(AbstractGenerateManager):
         prompt = cn_prompt if language == "zh-CN" else en_prompt
 
         # 4. 后处理：追加触发提示
-        # 适配新架构：将消息追加到 context.messages 中
         llm_input.context.messages.append({"role": "user", "content": prompt})
 
         # 5. 执行生成并累积结果
         accumulated_content = ""
 
         async for mode, event in worker.generate(llm_input):
-            text_chunk = self.decode.get_text_content(mode, event)
+            decoder = worker.resolve_decoder(event)
+            text_chunk = decoder.get_text_content(mode, event)
             if text_chunk:
                 accumulated_content += text_chunk
 

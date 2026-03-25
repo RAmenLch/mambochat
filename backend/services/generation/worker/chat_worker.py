@@ -1,9 +1,8 @@
 # backend/services/generation/worker/chat_worker.py
+
 import json
-from abc import abstractmethod
 from typing import AsyncGenerator, Any, List, Dict, Union, Tuple
 
-from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     BaseMessage,
     HumanMessage,
@@ -18,30 +17,20 @@ from deepagents.backends.utils import create_file_data
 
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.core.llm_io import LLMInput, AgentConfig
-from backend.services.generation.worker.decode import BaseDecode, DefaultLangChainDecode
+from backend.services.generation.worker.decode import BaseDecode, DecoderRegistry
 from backend.services.generation.graph_builders.factory import GraphBuilderFactory
 from backend.schemas.enums import AgentTypeEnum
-from schemas.lc_agent import MamboContext
-from backend.services.generation.agent.log_callback import RawPayloadLoggingCallback
 
 
-class ChatWorker(AbstractGenerateWorker):
-    """
-    基于 LangChain/LangGraph 的生成工作者。
+class UniversalGraphWorker(AbstractGenerateWorker):
 
-    它接收包含配置和工具的 LLMInput，将底层模型的创建委托给子类，
-    将 Agent 状态图的构建委托给 GraphBuilderFactory。
-    输出流为 LangChain 的原生消息块 (BaseMessageChunk) 或状态更新，
-    由 Manager 负责翻译。
-    """
-
-    def get_decode(self) -> BaseDecode:
-        return DefaultLangChainDecode()
+    def resolve_decoder(self, message: Any) -> BaseDecode:
+        provider = "default"
+        if hasattr(message, "response_metadata") and isinstance(message.response_metadata, dict):
+            provider = message.response_metadata.get("model_provider", "default")
+        return DecoderRegistry.get_decoder(provider)
 
     def _convert_messages(self, messages: List[Dict[str, Any]]) -> List[BaseMessage]:
-        """
-        将 LLMInput 中的字典格式消息转换为 LangChain 的 Message 对象。
-        """
         lc_messages = []
         for msg in messages:
             role = msg.get("role")
@@ -61,7 +50,7 @@ class ChatWorker(AbstractGenerateWorker):
                         if "function" in tc:
                             try:
                                 args_str = tc["function"].get("arguments", "{}")
-                                args_dict = json.loads(args_str) if args_str else {}
+                                args_dict = json.loads(args_str) if isinstance(args_str, str) else args_str
                             except json.JSONDecodeError:
                                 args_dict = {}
 
@@ -96,9 +85,6 @@ class ChatWorker(AbstractGenerateWorker):
         return lc_messages
 
     def _collect_vfs_files_recursively(self, config: AgentConfig) -> Dict[str, Any]:
-        """
-        递归遍历 AgentConfig 树，收集所有需要注入到 VFS 的技能文件。
-        """
         files = {}
 
         if config.skills:
@@ -114,25 +100,15 @@ class ChatWorker(AbstractGenerateWorker):
 
         return files
 
-    @abstractmethod
-    def _create_model(self, llm_input: LLMInput) -> BaseChatModel:
-        """
-        根据 LLMInput 配置创建具体的底层大语言模型实例。
-        由各提供商的 Worker 子类（如 OpenAiWorker, GoogleWorker 等）实现。
-        """
-        pass
-
     async def generate(
             self,
             llm_input: LLMInput
     ) -> AsyncGenerator[Tuple[str, Union[ToolMessage, AIMessageChunk, AIMessage, Dict[str, Any]]], None]:
 
-        model = self._create_model(llm_input)
-
         graph_builder = GraphBuilderFactory.get_builder(llm_input.agent_config.agent_type)
-        agent = graph_builder.build(model, llm_input.agent_config)
+        agent = graph_builder.build(llm_input.agent_config, llm_input.run_time_config)
 
-        thread_config:RunnableConfig = None
+        thread_config: RunnableConfig = None
         if llm_input.agent_config.hitl_interrupt_on or llm_input.agent_config.agent_type == AgentTypeEnum.DEEP:
             thread_config = {"configurable": {"thread_id": llm_input.run_time_config.chat_id}}
 
@@ -145,7 +121,6 @@ class ChatWorker(AbstractGenerateWorker):
             input_data = Command(resume=resume_payload)
         else:
             messages = self._convert_messages(llm_input.context.messages)
-            # 使用 Overwrite 包裹 messages，强制系统历史覆盖 LangGraph 的状态
             input_data = {"messages": Overwrite(value=messages)}
             if files_to_inject:
                 input_data["files"] = files_to_inject
