@@ -282,6 +282,10 @@ export default {
       search: 'Search',
       deleteConfirm: 'Are you sure you want to delete this item?',
       move: 'Move To',
+      archive: 'Archive to New Folder',
+      archiveTitle: 'Archive to New Folder',
+      folderName: 'Folder Name',
+      newArchiveFolder: 'New Archive Folder',
     },
     move: {
       title: 'Move to Folder',
@@ -360,6 +364,8 @@ export default {
       toolCallReviewed: 'Tool Call (Reviewed)',
       file: 'File',
       partition: 'Partition',
+      duplicateUpToHere: 'Duplicate Up To Here',
+      viewLogs: 'View Logs',
       mcp: {
         invalidCall: 'Invalid tool call',
         unknownTool: 'Unknown tool',
@@ -393,6 +399,7 @@ export default {
       enableSuggest: 'Generate Suggestions',
       enableSuggestTip:
         'When enabled, AI will provide 3-5 follow-up questions at the end of the reply.',
+      agent: 'Agent',
     },
     input: {
       placeholder: 'Type a message...',
@@ -426,6 +433,12 @@ export default {
       viewDetail: 'View Details',
       warningInput: 'Please enter search keywords',
       error: 'Search failed, please try again later',
+    },
+    logViewer: {
+      title: 'Underlying Payload Logs',
+      noLogs: 'No related logs',
+      metaData: 'Run Metadata (MetaData)',
+      payload: 'Underlying Payload (Payload)',
     },
   },
   resource: {

@@ -95,6 +95,7 @@
         @toggle-collapse="toggleSingleViewCollapse"
         @edit-request="handleEditRequest"
         @copy-all="handleCopy"
+        @duplicate-upto="$emit('duplicate-upto', message.id)"
         @compress-history="handleCompressHistory"
         @delete="handleDelete"
         @view-logs="$emit('view-logs', message.id)"
@@ -148,6 +149,7 @@ const emit = defineEmits<{
   (e: 'suggestion-click', text: string): void
   (e: 'open-tool-dialog', message: Message, subMessageId: string, mode: 'review_all' | 'single'): void
   (e: 'view-logs', messageId: string): void
+  (e: 'duplicate-upto', messageId: string): void
 }>()
 
 const { t } = useI18n()

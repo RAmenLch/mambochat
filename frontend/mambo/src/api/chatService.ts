@@ -17,7 +17,9 @@ import type {
   SearchRequest,
   SearchResponse,
   ReviewToolRequest,
-} from './types'
+  ChatDuplicateRequest,
+  ChatArchiveRequest,
+} from './types';
 
 /**
  * [新增] 懒加载获取会话/文件夹子节点
@@ -72,10 +74,17 @@ export const deleteChat = (itemId: string): Promise<Chat> => {
 };
 
 /**
- * 复制会话
+ * 复制会话 (支持截断复制)
  */
-export const duplicateChat = (chatId: string): Promise<Chat> => {
-  return apiClient.post(`/chats/${chatId}/duplicate`)
+export const duplicateChat = (chatId: string, payload?: ChatDuplicateRequest): Promise<Chat> => {
+  return apiClient.post(`/${chatId}/duplicate`, payload || {});
+};
+
+/**
+ * 批量归档会话到新文件夹
+ */
+export const archiveChats = (data: ChatArchiveRequest): Promise<Chat> => {
+  return apiClient.post('/archive', data);
 };
 
 

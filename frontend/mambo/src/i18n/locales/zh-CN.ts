@@ -279,6 +279,10 @@ export default {
       search: '搜索',
       deleteConfirm: '确定要删除此项吗？',
       move: '移动到',
+      archive: '归档到新文件夹',
+      archiveTitle: '归档到新文件夹',
+      folderName: '文件夹名称',
+      newArchiveFolder: '新建归档文件夹',
     },
     move: {
       title: '移动到文件夹',
@@ -357,6 +361,8 @@ export default {
       toolCallReviewed: '工具调用(已审核)',
       file: '文件',
       partition: '分区',
+      duplicateUpToHere: '复制会话至此消息',
+      viewLogs: '查看日志',
       mcp: {
         invalidCall: '无效的工具调用',
         unknownTool: '未知工具',
@@ -388,6 +394,7 @@ export default {
       saveSuccess: '设置已保存',
       enableSuggest: '生成回复建议',
       enableSuggestTip: '开启后，AI 将在回复末尾提供 3-5 个后续问题建议。',
+      agent: 'Agent',
     },
     input: {
       placeholder: '输入消息...',
@@ -421,6 +428,12 @@ export default {
       viewDetail: '查看详情',
       warningInput: '请输入搜索关键词',
       error: '搜索失败，请稍后重试',
+    },
+    logViewer: {
+      title: '底层报文日志',
+      noLogs: '暂无相关日志',
+      metaData: '运行元数据 (MetaData)',
+      payload: '底层报文 (Payload)',
     },
   },
   resource: {

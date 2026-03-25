@@ -1,11 +1,6 @@
 <!-- frontend/mambo/src/components/chat/ChatList.vue -->
 <template>
   <div class="chat-list-container">
-    <!--
-      显示逻辑升级：
-      显示树形列表的条件：必须处于非折叠状态，且当前宽度大于视觉阈值。
-      否则，显示竖向 Header（提前进入视觉折叠态）。
-    -->
     <template v-if="showTree">
       <ExplorerTree
         ref="treeRef"
@@ -15,6 +10,7 @@
         :loading-folder-ids="loadingFolders"
         folder-item-type="folder"
         persistence-key="mambo_chat_folder_expanded_state"
+        :enable-multi-select="true"
         class="chat-tree"
         @node-click="handleNodeClick"
         @node-contextmenu="handleNodeContextMenu"
@@ -23,7 +19,6 @@
         @node-expand="handleNodeExpand"
       >
         <template #header>
-          <!-- 添加 no-wrap 样式防止在临界宽度时换行 -->
           <div class="chat-list-header">
             <h4>{{ $t('chat.sidebar.title') }}</h4>
           </div>
@@ -60,6 +55,10 @@
             </el-dropdown-item>
 
             <template v-if="contextMenuItem">
+              <el-dropdown-item command="archive" divided>
+                <el-icon><FolderChecked /></el-icon>{{ $t('chat.sidebar.archive') }}
+              </el-dropdown-item>
+
               <el-dropdown-item command="rename" :divided="contextMenuItem.itemType === 'folder'"
                 ><el-icon><EditPen /></el-icon>{{ $t('chat.sidebar.rename') }}</el-dropdown-item
               >
@@ -80,7 +79,6 @@
       </el-dropdown>
     </template>
 
-    <!-- 显示竖向 ChatHeader 的条件：已折叠 或 正在拖拽且宽度过窄 -->
     <ChatHeader
       v-else
       mode="vertical"
@@ -94,7 +92,6 @@
 
     <el-divider />
 
-    <!-- 底部按钮：在 tree 显示时靠右，在 header 显示时居中 -->
     <div class="footer" :class="{ collapsed: !showTree }">
       <el-tooltip v-if="!showTree" :content="$t('settings.tabs.globalSettings')" placement="right">
         <el-button :icon="Setting" circle @click="goToSettings" />
@@ -119,6 +116,22 @@
       :root-path="searchRootPath"
       @select-result="handleSearchResultSelect"
     />
+
+    <el-dialog
+      v-model="archiveDialogVisible"
+      :title="$t('chat.sidebar.archiveTitle')"
+      width="400px"
+    >
+      <el-form @submit.prevent>
+        <el-form-item :label="$t('chat.sidebar.folderName')">
+          <el-input v-model="archiveFolderName" @keyup.enter="confirmArchive" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="archiveDialogVisible = false">{{ $t('common.action.cancel') }}</el-button>
+        <el-button type="primary" @click="confirmArchive" :loading="isArchiving">{{ $t('common.action.confirm') }}</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -127,7 +140,8 @@ import { onMounted, computed, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRouter, useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, EditPen, CopyDocument, Search } from '@element-plus/icons-vue';
+import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, EditPen, CopyDocument, Search, FolderChecked } from '@element-plus/icons-vue';
+import { ElMessage } from 'element-plus';
 
 import type { Chat, ChatCreate, ChatUpdate, BaseTreeItem } from '@/api/types';
 import { useChatListStore } from '@/stores/chatListStore';
@@ -144,10 +158,9 @@ import EntityFormDialog, { type SelectConfigOption, type ConfirmPayload } from '
 import SearchDialog from '@/components/chat/dialogs/SearchDialog.vue';
 import ChatHeader from '@/components/chat/ChatHeader.vue';
 
-// -- Props & Emits --
 const props = defineProps<{
   isCollapsed: boolean;
-  width: number; // 接收实时宽度
+  width: number;
 }>();
 
 const emit = defineEmits<{
@@ -156,14 +169,12 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 
-// -- Visual Threshold Logic --
 const VISUAL_COLLAPSE_THRESHOLD = 150;
 
 const showTree = computed(() => {
   return !props.isCollapsed && props.width >= VISUAL_COLLAPSE_THRESHOLD;
 });
 
-// -- Store Instances & State --
 const chatListStore = useChatListStore();
 const chatSessionStore = useChatSessionStore();
 const providerStore = useProviderStore();
@@ -178,7 +189,6 @@ const { providers } = storeToRefs(providerStore);
 const { globalSettings } = storeToRefs(settingsStore);
 const { agentList } = storeToRefs(agentStore);
 
-// -- Data Transformation --
 const treeData = computed(() => buildChatTree(chatList.value, loadedFolderIds.value) as unknown as BaseTreeItem[]);
 
 const modelOptions = computed((): SelectConfigOption[] => {
@@ -195,7 +205,6 @@ const modelOptions = computed((): SelectConfigOption[] => {
     .filter(p => p.options.length > 0);
 });
 
-// 构造 Agent 选择项，使用 allAgents
 const agentOptions = computed((): SelectConfigOption[] => {
   return agentStore.allAgents
     .filter(a => a.itemType === 'agent')
@@ -207,7 +216,6 @@ const agentOptions = computed((): SelectConfigOption[] => {
 
 const isTitleRefreshing = computed(() => refreshingTitleChatId.value === currentChat.value?.id);
 
-// -- Tree Controller Logic --
 const {
   treeRef,
   contextMenuRef,
@@ -242,14 +250,14 @@ const {
         return {
           title: t('chat.sidebar.newChat'),
           initialName: t('chat.sidebar.initChatName'),
-          showChatMode: true, // [新增] 开启模式选择
+          showChatMode: true,
           selectConfig: {
             label: t('chat.settings.model'),
             options: modelOptions.value,
             initialValue: globalSettings.value.default_model_id || undefined,
           },
-          agentSelectConfig: { // [新增] Agent 选择配置
-            label: t('chat.settings.agent', 'Agent'),
+          agentSelectConfig: {
+            label: t('chat.settings.agent'),
             options: agentOptions.value,
           }
         };
@@ -266,7 +274,7 @@ const {
     dialogPayload: DialogPayload<Chat>,
     rawFormPayload: DialogConfirmPayload
   ): Promise<Chat | null> => {
-    const formPayload = rawFormPayload as unknown as ConfirmPayload; // [修改] 类型断言
+    const formPayload = rawFormPayload as unknown as ConfirmPayload;
 
     if (dialogPayload.type === 'rename' && dialogPayload.targetItem) {
       await chatListStore.updateChatSettings(dialogPayload.targetItem.id, { name: formPayload.name });
@@ -278,9 +286,9 @@ const {
     if (dialogPayload.type === 'newChat') {
       newItem = await chatListStore.createNewItem({
         name: formPayload.name,
-        aiModelId: formPayload.chatMode === 'normal' ? formPayload.selectValue : null, // [修改]
-        chatMode: formPayload.chatMode, // [新增]
-        agentId: formPayload.chatMode === 'agent' ? formPayload.agentId : null, // [新增]
+        aiModelId: formPayload.chatMode === 'normal' ? formPayload.selectValue : null,
+        chatMode: formPayload.chatMode,
+        agentId: formPayload.chatMode === 'agent' ? formPayload.agentId : null,
         itemType: 'chat',
         parentId: dialogPayload.parentId || null,
       });
@@ -298,7 +306,6 @@ const {
   },
 });
 
-// -- Lifecycle --
 onMounted(async () => {
   await providerStore.fetchProviders();
   await agentStore.fetchAllAgents();
@@ -352,7 +359,6 @@ watch(
   }
 );
 
-// -- Component-Specific Actions --
 const handleNodeClick = (data: BaseTreeItem) => {
   if (data.itemType === 'chat') {
     handleSelectChat(data.id);
@@ -370,8 +376,6 @@ const handleSelectChat = async (chatId: string) => {
 
 const goToSettings = () => router.push('/settings');
 
-// -- Vertical Header Actions --
-
 function handleSaveTitle(newTitle: string) {
   if (currentChat.value) {
     chatListStore.updateChatSettings(currentChat.value.id, { name: newTitle });
@@ -384,7 +388,6 @@ function handleRefreshTitle() {
   }
 }
 
-// -- Search Dialog --
 const searchDialogVisible = ref(false);
 const searchRootId = ref<string | null>(null);
 const searchRootName = ref<string | null>(null);
@@ -405,7 +408,10 @@ function getItemPath(itemId: string): string {
   return path.join(' / ');
 }
 
-// [修复] 修改此函数以处理复制后的跳转逻辑
+const archiveDialogVisible = ref(false);
+const archiveFolderName = ref('');
+const isArchiving = ref(false);
+
 async function handleMenuCommand(command: string) {
   if (command === 'search') {
     const selectedItem = contextMenuItem.value;
@@ -428,12 +434,51 @@ async function handleMenuCommand(command: string) {
     return;
   }
 
-  // 获取 originalHandleMenuCommand 的返回值
+  if (command === 'archive') {
+    archiveFolderName.value = t('chat.sidebar.newArchiveFolder');
+    archiveDialogVisible.value = true;
+    return;
+  }
+
   const result = await originalHandleMenuCommand(command);
 
-  // 如果返回了新的 Chat 对象（目前只有 duplicate 会返回），则选中它
   if (result && result.itemType === 'chat') {
     await handleSelectChat(result.id);
+  }
+}
+
+async function confirmArchive() {
+  if (!archiveFolderName.value.trim()) {
+    ElMessage.warning(t('common.rule.nameRequired'));
+    return;
+  }
+
+  const selectedIds = treeRef.value?.selectedIds;
+  if (!selectedIds || selectedIds.size === 0) return;
+
+  const itemIds = Array.from(selectedIds);
+  const parentId = chatList.value.find(c => c.id === itemIds[0])?.parentId || null;
+
+  isArchiving.value = true;
+  try {
+    const newFolder = await chatListStore.archiveItems({
+      item_ids: itemIds,
+      new_folder_name: archiveFolderName.value.trim(),
+      parent_id: parentId
+    });
+    ElMessage.success(t('common.msg.operationSuccess'));
+    archiveDialogVisible.value = false;
+    treeRef.value?.clearSelection();
+
+    // [新增] 自动滚动并展开新文件夹，避免用户疑惑
+    if (newFolder) {
+      await treeRef.value?.scrollToKey(newFolder.id);
+      await treeRef.value?.expandNode(newFolder.id);
+    }
+  } catch (error) {
+    ElMessage.error(t('common.error.operationFailed'));
+  } finally {
+    isArchiving.value = false;
   }
 }
 

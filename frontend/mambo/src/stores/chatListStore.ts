@@ -11,10 +11,11 @@ import {
   moveChat,
   duplicateChat as duplicateChatAPI,
   generateChatTitle as generateChatTitleAPI,
-  getChatLineage
+  getChatLineage,
+  archiveChats as archiveChatsAPI
 } from '@/api/chatService';
 import { subscribeToGlobalNotifications } from '@/services/notificationService';
-import type { Chat, ChatCreate, ChatUpdate, MoveRequest, GlobalNotification } from '@/api/types';
+import type { Chat, ChatCreate, ChatUpdate, MoveRequest, GlobalNotification, ChatArchiveRequest } from '@/api/types';
 import { useChatSessionStore } from './chatSessionStore';
 import { useTreeStoreActions } from '@/composables/useTreeStoreActions';
 
@@ -136,6 +137,26 @@ export const useChatListStore = defineStore('chatList', () => {
   }
 
   /**
+   * 批量归档项目到新文件夹
+   */
+  async function archiveItems(request: ChatArchiveRequest) {
+    try {
+      const newFolder = await archiveChatsAPI(request);
+      const parentIdToRefresh = request.parent_id || 'root';
+      loadedFolderIds.value.delete(parentIdToRefresh);
+      await fetchChatChildren(parentIdToRefresh);
+
+      // [修复] 主动拉取新文件夹的内容，确保数据在前端是最新的，而不是盲目标记为已加载
+      await fetchChatChildren(newFolder.id);
+
+      return newFolder;
+    } catch (error) {
+      console.error('Failed to archive items:', error);
+      throw error;
+    }
+  }
+
+  /**
    * 初始化并监听来自服务器的全局通知（SSE）。
    * 用于实时更新会话标题、接收历史压缩结果以及处理异步任务错误。
    */
@@ -197,6 +218,7 @@ export const useChatListStore = defineStore('chatList', () => {
     moveChatItem,
     duplicateChat,
     resolvePath,
+    archiveItems,
 
     // Store-specific Actions
     refreshChatTitle,

@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/chat/message/MessageActions.vue -->
 <template>
   <div
     class="message-actions"
@@ -49,6 +50,14 @@
     </el-tooltip>
 
     <el-tooltip
+      :content="$t('chat.message.duplicateUpToHere')"
+      placement="top"
+      :show-after="500"
+    >
+      <el-button :icon="DocumentCopy" circle size="small" @click="$emit('duplicate-upto')" />
+    </el-tooltip>
+
+    <el-tooltip
       v-if="!isUser"
       :content="$t('chat.message.compressHistory')"
       placement="top"
@@ -82,7 +91,7 @@
 import type { SubMessage } from '@/api/types'
 import UsageInfo from '../UsageInfo.vue'
 import {
-  Refresh, RefreshLeft, Delete, Edit, CopyDocument,
+  Refresh, RefreshLeft, Delete, Edit, CopyDocument, DocumentCopy,
   ArrowUpBold, ArrowDownBold, Clock, Document
 } from '@element-plus/icons-vue'
 
@@ -108,6 +117,7 @@ defineEmits<{
   (e: 'toggle-collapse'): void
   (e: 'edit-request', subMessage: SubMessage | undefined, payload: EditPayload): void
   (e: 'copy-all'): void
+  (e: 'duplicate-upto'): void
   (e: 'compress-history'): void
   (e: 'view-logs'): void
   (e: 'delete'): void

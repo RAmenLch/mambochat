@@ -2,7 +2,7 @@
 <template>
   <el-dialog
     v-model="dialogVisible"
-    title="底层报文日志"
+    :title="$t('chat.logViewer.title')"
     width="800px"
     class="log-viewer-dialog"
     destroy-on-close
@@ -24,10 +24,10 @@
             </template>
 
             <div class="log-content">
-              <h4>运行元数据 (MetaData)</h4>
+              <h4>{{ $t('chat.logViewer.metaData') }}</h4>
               <pre class="json-block">{{ formatJson(log.configMetaData) }}</pre>
 
-              <h4 class="mt-4">底层报文 (Payload)</h4>
+              <h4 class="mt-4">{{ $t('chat.logViewer.payload') }}</h4>
               <pre class="json-block">{{ formatJson(log.rawPayload) }}</pre>
             </div>
           </el-collapse-item>
@@ -43,7 +43,7 @@
           />
         </div>
       </template>
-      <el-empty v-else description="暂无相关日志" />
+      <el-empty v-else :description="$t('chat.logViewer.noLogs')" />
     </div>
   </el-dialog>
 </template>

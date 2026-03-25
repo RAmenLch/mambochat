@@ -29,6 +29,7 @@
               @suggestion-click="handleSuggestionClick"
               @open-tool-dialog="handleOpenToolDialog"
               @view-logs="handleViewLogs"
+              @duplicate-upto="handleDuplicateUpTo"
             />
           </div>
         </el-scrollbar>
@@ -143,12 +144,14 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { useRouter } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { ElScrollbar, ElMessage } from 'element-plus';
 import { UploadFilled } from '@element-plus/icons-vue';
 import type { Ref } from 'vue';
 import type { ChatUpdate, SubMessageCreate, AIModel, Resource, Message, SubMessage } from '@/api/types';
 import { uploadFile } from '@/api/fileService';
+import { duplicateChat } from '@/api/chatService';
 
 import { useChatListStore } from '@/stores/chatListStore';
 import { useChatSessionStore } from '@/stores/chatSessionStore';
@@ -178,6 +181,7 @@ const props = defineProps<{
 }>();
 
 const { t } = useI18n();
+const router = useRouter();
 
 const chatListStore = useChatListStore();
 const chatSessionStore = useChatSessionStore();
@@ -601,6 +605,26 @@ function handleSuggestionClick(text: string) {
     chatInputBoxRef.value?.focus();
   });
 }
+
+async function handleDuplicateUpTo(messageId: string) {
+  if (!currentChatId.value) return;
+  try {
+    // 1. 调用 API 复制会话
+    const newChat = await duplicateChat(currentChatId.value, { up_to_message_id: messageId });
+    ElMessage.success(t('common.msg.duplicateSuccess'));
+
+    // 2. 将新会话推入 store 列表中，确保树能渲染出新节点
+    const exists = chatListStore.chatList.some(c => c.id === newChat.id);
+    if (!exists) {
+      chatListStore.chatList.push(newChat);
+    }
+    // await chatSessionStore.selectChat(newChat.id)
+  } catch (error) {
+    console.error('Failed to duplicate chat up to message:', error);
+    ElMessage.error(t('common.error.operationFailed'));
+  }
+}
+
 
 watch([uploadedFiles, attachedSubmessageResources, attachedKnowledgeBases], async () => {
   await nextTick();

@@ -6,7 +6,6 @@
     @dragover.prevent
     @drop.prevent="handleContainerDrop"
   >
-    <!-- ... 头部内容保持不变 ... -->
     <div class="explorer-tree-header" v-if="$slots.header">
       <slot name="header"></slot>
     </div>
@@ -37,7 +36,10 @@
         <template #default="{ node, data }">
           <span
             class="custom-tree-node"
-            :class="{ 'is-drag-over': dragOverId === data.id }"
+            :class="{
+              'is-drag-over': dragOverId === data.id,
+              'is-multi-selected': enableMultiSelect && selectedIds.has(data.id)
+            }"
             @dragover.prevent
             @dragenter.prevent="handleNodeDragEnter(data)"
             @dragleave.prevent="handleNodeDragLeave(data)"
@@ -59,7 +61,6 @@
               </el-tooltip>
             </slot>
 
-            <!-- 【新增】后缀插槽，用于放置移动端的菜单按钮或其他操作 -->
             <span class="node-suffix-wrapper" v-if="$slots['item-suffix']">
               <slot name="item-suffix" :node="node" :data="data"></slot>
             </span>
@@ -76,7 +77,6 @@
 </template>
 
 <script setup lang="ts">
-// ... 脚本部分保持不变，无需修改 ...
 import { ref, watch, nextTick, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElTree, ElMessage } from 'element-plus'
@@ -99,6 +99,7 @@ interface Props {
   persistenceKey?: string
   loadingFolderIds?: Set<string>
   customAllowDrop?: (draggingNode: Node, dropNode: Node, dropType: AllowDropType) => boolean
+  enableMultiSelect?: boolean // 新增：是否开启多选模式
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -109,6 +110,7 @@ const props = withDefaults(defineProps<Props>(), {
   persistenceKey: undefined,
   loadingFolderIds: () => new Set(),
   customAllowDrop: undefined,
+  enableMultiSelect: false, // 默认关闭，保护其他组件
 })
 
 const emit = defineEmits<{
@@ -125,6 +127,10 @@ const treeRef = ref<InstanceType<typeof ElTree>>()
 const expandedState = ref<Record<string, boolean>>({})
 const dragOverId = ref<string | null>(null)
 
+// 多选状态
+const selectedIds = ref<Set<string>>(new Set())
+const lastClickedId = ref<string | null>(null)
+
 const displayEmptyText = computed(() => props.emptyText || t('common.status.noData'))
 const loadingNodes = computed(() => props.loadingFolderIds)
 
@@ -139,11 +145,75 @@ const treeProps = {
   },
 }
 
-const handleNodeClick = (data: BaseTreeItem) => {
+const handleNodeClick = (data: BaseTreeItem, node: Node, treeNode: unknown, event: MouseEvent) => {
+  // 如果未开启多选，直接触发原有逻辑
+  if (!props.enableMultiSelect) {
+    emit('node-click', data)
+    return
+  }
+
+  // 多选逻辑
+  if (event.ctrlKey || event.metaKey) {
+    const currentParentId = selectedIds.value.size > 0
+      ? props.data.find(i => selectedIds.value.has(i.id))?.parentId
+      : data.parentId;
+
+    if (currentParentId !== data.parentId) {
+      selectedIds.value.clear();
+    }
+
+    if (selectedIds.value.has(data.id)) {
+      selectedIds.value.delete(data.id);
+    } else {
+      selectedIds.value.add(data.id);
+      lastClickedId.value = data.id;
+    }
+  } else if (event.shiftKey) {
+    if (!lastClickedId.value) {
+      selectedIds.value.clear();
+      selectedIds.value.add(data.id);
+      lastClickedId.value = data.id;
+    } else {
+      const currentParentId = selectedIds.value.size > 0
+        ? props.data.find(i => selectedIds.value.has(i.id))?.parentId
+        : data.parentId;
+
+      if (currentParentId !== data.parentId) {
+         selectedIds.value.clear();
+         selectedIds.value.add(data.id);
+         lastClickedId.value = data.id;
+      } else {
+         const siblings = props.data.filter(i => i.parentId === data.parentId).sort((a,b) => a.sortOrder - b.sortOrder);
+         const idx1 = siblings.findIndex(i => i.id === lastClickedId.value);
+         const idx2 = siblings.findIndex(i => i.id === data.id);
+
+         if (idx1 !== -1 && idx2 !== -1) {
+           const minIdx = Math.min(idx1, idx2);
+           const maxIdx = Math.max(idx1, idx2);
+           selectedIds.value.clear();
+           for (let i = minIdx; i <= maxIdx; i++) {
+             selectedIds.value.add(siblings[i].id);
+           }
+         }
+      }
+    }
+  } else {
+    selectedIds.value.clear();
+    selectedIds.value.add(data.id);
+    lastClickedId.value = data.id;
+  }
+
   emit('node-click', data)
 }
 
 const handleNodeContextMenu = (event: MouseEvent, data: BaseTreeItem, node: Node) => {
+  if (props.enableMultiSelect) {
+    if (!selectedIds.value.has(data.id)) {
+      selectedIds.value.clear();
+      selectedIds.value.add(data.id);
+      lastClickedId.value = data.id;
+    }
+  }
   emit('node-contextmenu', event, data, node)
 }
 
@@ -190,8 +260,6 @@ const handleNodeDrop = (draggingNode: Node, dropNode: Node, dropType: NodeDropTy
   }
   emit('move', req)
 }
-
-// --- Native File Drop Handlers ---
 
 const processFileUpload = async (files: FileList, parentId: string) => {
   if (files.length === 0) return
@@ -248,8 +316,6 @@ const handleNodeNativeDrop = async (data: BaseTreeItem, event: DragEvent) => {
   await processFileUpload(files, targetParentId)
 }
 
-// --- State Management ---
-
 const loadExpandedState = () => {
   if (!props.persistenceKey) return
   const savedState = localStorage.getItem(props.persistenceKey)
@@ -280,6 +346,11 @@ const handleNodeCollapse = (data: BaseTreeItem) => {
     delete expandedState.value[data.id]
     saveExpandedState()
   }
+}
+
+const clearSelection = () => {
+  selectedIds.value.clear();
+  lastClickedId.value = null;
 }
 
 watch(
@@ -329,7 +400,20 @@ const scrollToKey = async (key: string) => {
   }
 }
 
-defineExpose({ scrollToKey })
+// [新增] 展开指定节点的方法
+const expandNode = async (key: string) => {
+  await nextTick()
+  const node = treeRef.value?.getNode(key)
+  if (node && !node.expanded) {
+    node.expand()
+    const item = node.data as BaseTreeItem
+    if (item && item.itemType === props.folderItemType) {
+      emit('node-expand', item)
+    }
+  }
+}
+
+defineExpose({ scrollToKey, selectedIds, clearSelection, expandNode })
 </script>
 
 <style scoped>
@@ -362,10 +446,18 @@ defineExpose({ scrollToKey })
   position: relative;
 }
 
+/* 恢复原版单选高亮样式，完全不动它 */
 :deep(.el-tree-node.is-current > .el-tree-node__content) {
   background-color: var(--el-color-primary-light-9);
   border: 1px solid var(--el-color-primary-light-7);
 }
+
+/* 【修复点】：使用 :has 伪类，将多选的高亮应用到与单选同级的 content 容器上 */
+:deep(.el-tree-node__content:has(.is-multi-selected)) {
+  background-color: var(--el-color-primary-light-9);
+  border: 1px solid var(--el-color-primary-light-7);
+}
+
 :deep(.el-tree-node__content:hover) {
   background-color: var(--color-background-mute);
 }
@@ -384,6 +476,7 @@ defineExpose({ scrollToKey })
   background-color: var(--el-color-primary-light-8);
   outline: 1px dashed var(--el-color-primary);
 }
+
 .node-icon-wrapper {
   margin-right: 8px;
   font-size: 16px;
@@ -399,7 +492,6 @@ defineExpose({ scrollToKey })
   min-width: 0;
   margin-right: 8px;
 }
-/* 【新增】后缀容器样式 */
 .node-suffix-wrapper {
   margin-left: auto;
   display: flex;
