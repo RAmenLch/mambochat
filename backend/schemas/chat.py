@@ -127,3 +127,13 @@ class SearchResultItem(BaseModel):
 class SearchResponse(BaseModel):
     total: int
     items: List[SearchResultItem]
+
+class ChatDuplicateRequest(BaseModel):
+    """复制会话请求的验证模型"""
+    up_to_message_id: Optional[str] = Field(None, description="截断复制：仅复制到此消息ID（含）为止，后续消息将被丢弃")
+
+class ChatArchiveRequest(BaseModel):
+    """批量归档会话到新文件夹的验证模型"""
+    item_ids: List[str] = Field(..., description="要打包移动的会话或文件夹ID列表")
+    new_folder_name: str = Field(..., description="新建归档文件夹的名称", min_length=1, max_length=100)
+    parent_id: Optional[str] = Field(None, description="新建归档文件夹的父级位置ID，'root'或不传代表放置在根目录")

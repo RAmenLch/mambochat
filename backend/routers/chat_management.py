@@ -1,6 +1,6 @@
 # backend/routers/chat_management.py
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional, Dict, Any
 
@@ -323,16 +323,41 @@ async def delete_chat(chat_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post(
-    "/chats/{chat_id}/duplicate",
-    response_model=schemas.Chat,
-    status_code=status.HTTP_201_CREATED,
-    summary="复制会话"
+    "/{chat_id}/duplicate",
+    response_model=schemas.Chat,  # 响应模型根据你实际情况(Chat或ChatWithMessages)决定
+    summary="复制指定会话"
 )
-async def duplicate_chat_endpoint(chat_id: str, db: AsyncSession = Depends(get_db)):
+async def duplicate_chat_endpoint(
+    chat_id: str,
+    payload: schemas.ChatDuplicateRequest = Body(default_factory=schemas.ChatDuplicateRequest),
+    db: AsyncSession = Depends(get_db)
+):
     """
-    Creates a new session with the same configuration and message history as the given session ID.
+    复制会话。如果不传参数，则全量复制；如果传入 up_to_message_id，则触发截断复制。
     """
-    new_chat = await chat_service.duplicate_chat_with_messages(db, chat_id=chat_id)
+    new_chat = await chat_service.duplicate_chat_with_messages(
+        db,
+        chat_id=chat_id,
+        up_to_message_id=payload.up_to_message_id
+    )
     if not new_chat:
-        raise HTTPException(status_code=404, detail="Source chat not found or is a folder")
+        raise HTTPException(status_code=404, detail="Original chat not found or cannot be duplicated.")
     return new_chat
+
+
+@router.post(
+    "/archive",
+    response_model=schemas.Chat,
+    summary="新建文件夹并批量归档会话"
+)
+async def archive_chats_endpoint(
+    request: schemas.ChatArchiveRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    接收一个名称和一组项目ID，创建一个新文件夹并将这些项目全部归档到入其中。
+    """
+    new_folder = await chat_service.archive_chats_to_new_folder(db, request=request)
+    if not new_folder:
+        raise HTTPException(status_code=400, detail="Failed to archive chats. Ensure requested items exist.")
+    return new_folder

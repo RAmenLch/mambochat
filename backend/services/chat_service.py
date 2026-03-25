@@ -9,16 +9,24 @@ import re
 from backend.crud import chat_crud
 from backend import schemas
 from backend.models import chat_model
+from schemas import MessageStatus, MoveAction
 
-async def duplicate_chat_with_messages(db: AsyncSession, chat_id: str) -> Optional[chat_model.Chat]:
+
+async def duplicate_chat_with_messages(
+    db: AsyncSession,
+    chat_id: str,
+    up_to_message_id: Optional[str] = None
+) -> Optional[chat_model.Chat]:
     """
-    复制一个现有会话及其所有消息和子消息来创建一个新会话。
-    这是一个包含业务逻辑的服务层函数。
+    复制一个现有会话及其消息。
+    - 支持截断：如果提供 up_to_message_id，则仅复制排序位置小于等于该消息的数据。
+    - 状态清洗：将 GENERATING 和 PENDING_REVIEW 等中间态统一置为 FAILED。
     """
     original_chat = await chat_crud.get_chat(db, chat_id=chat_id)
     if not original_chat or original_chat.itemType != 'chat':
         return None
 
+    # 获取当前父节点下的最大 sortOrder 用于新会话的排版
     max_sort_order_result = await db.execute(
         select(func.max(chat_model.Chat.sortOrder))
         .filter(chat_model.Chat.parentId == original_chat.parentId)
@@ -31,6 +39,7 @@ async def duplicate_chat_with_messages(db: AsyncSession, chat_id: str) -> Option
     except json.JSONDecodeError:
         params = None
 
+    # 1. 创建新会话主表信息
     new_chat_data = schemas.ChatCreate(
         name=f"{original_chat.name} (副本)",
         systemPrompt=original_chat.systemPrompt,
@@ -47,7 +56,20 @@ async def duplicate_chat_with_messages(db: AsyncSession, chat_id: str) -> Option
     new_chat = await chat_crud.create_chat(db, chat=new_chat_data)
 
     if original_chat.messages:
+        # 2. 寻找截断参照的 sortOrder 值（防遍历顺序乱序隐患）
+        cutoff_sort_order = float('inf')
+        if up_to_message_id:
+            for m in original_chat.messages:
+                if m.id == up_to_message_id:
+                    cutoff_sort_order = m.sortOrder
+                    break
+
+        # 3. 遍历复制消息主表和子表
         for msg in original_chat.messages:
+            # 超过截断线的数据，直接忽略
+            if msg.sortOrder > cutoff_sort_order:
+                continue
+
             new_msg = chat_model.Message(
                 role=msg.role,
                 sortOrder=msg.sortOrder,
@@ -56,17 +78,23 @@ async def duplicate_chat_with_messages(db: AsyncSession, chat_id: str) -> Option
             db.add(new_msg)
             await db.flush()
 
-            new_sub_messages = [
-                chat_model.SubMessage(
-                    content=sub.content,
-                    sortOrder=sub.sortOrder,
-                    type=sub.type,
-                    config=sub.config,
-                    status=sub.status,
-                    messageId=new_msg.id
+            new_sub_messages = []
+            for sub in msg.sub_messages:
+                # 状态防卡死清洗
+                safe_status = sub.status
+                if safe_status in [MessageStatus.GENERATING.value, MessageStatus.PENDING_REVIEW.value]:
+                    safe_status = MessageStatus.FAILED.value
+
+                new_sub_messages.append(
+                    chat_model.SubMessage(
+                        content=sub.content,
+                        sortOrder=sub.sortOrder,
+                        type=sub.type,
+                        config=sub.config,
+                        status=safe_status,
+                        messageId=new_msg.id
+                    )
                 )
-                for sub in msg.sub_messages
-            ]
             db.add_all(new_sub_messages)
 
         await db.commit()
@@ -74,6 +102,34 @@ async def duplicate_chat_with_messages(db: AsyncSession, chat_id: str) -> Option
 
     return new_chat
 
+async def archive_chats_to_new_folder(db: AsyncSession, request: schemas.ChatArchiveRequest) -> Optional[chat_model.Chat]:
+    """
+    新建一个文件夹，并将指定的会话批量归档/移动到该文件夹中
+    """
+    if not request.item_ids:
+        return None
+
+    # 1. 自动创建一个用来归档的新文件夹
+    # 默认让其排在目标层级的最后
+    new_folder_data = schemas.ChatCreate(
+        name=request.new_folder_name,
+        itemType='folder',
+        parentId=None if request.parent_id == 'root' else request.parent_id
+    )
+    new_folder = await chat_crud.create_chat(db, chat=new_folder_data)
+
+    # 2. 复用底层 move_chats 能力，将传入的 item_ids 批量移入新文件夹内部
+    move_request = schemas.ChatMoveRequest(
+        item_ids=request.item_ids,
+        reference_id=new_folder.id,
+        action=MoveAction.INSIDE
+    )
+    success = await chat_crud.move_chats(db, move_request=move_request)
+    if not success:
+        return None
+
+    await db.refresh(new_folder)
+    return new_folder
 
 def extract_context_snippet(content: str, keyword: str, enable_regex: bool, window_size: int = 50) -> str:
     """

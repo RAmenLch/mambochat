@@ -65,6 +65,7 @@ class LLMInputDirector:
 
     def set_manager_name(self,name):
         self._manager_name = name
+        return self
 
     def slice_until_message(self, message_id: str, include_target: bool = False) -> "LLMInputDirector":
         self._cutoff_message_id = message_id
