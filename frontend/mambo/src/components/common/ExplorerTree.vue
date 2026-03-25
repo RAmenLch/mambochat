@@ -130,6 +130,7 @@ const dragOverId = ref<string | null>(null)
 // 多选状态
 const selectedIds = ref<Set<string>>(new Set())
 const lastClickedId = ref<string | null>(null)
+const currentMultiSelectParentId = ref<string | null>(null)
 
 const displayEmptyText = computed(() => props.emptyText || t('common.status.noData'))
 const loadingNodes = computed(() => props.loadingFolderIds)
@@ -154,53 +155,48 @@ const handleNodeClick = (data: BaseTreeItem, node: Node, treeNode: unknown, even
 
   // 多选逻辑
   if (event.ctrlKey || event.metaKey) {
-    const currentParentId = selectedIds.value.size > 0
-      ? props.data.find(i => selectedIds.value.has(i.id))?.parentId
-      : data.parentId;
-
-    if (currentParentId !== data.parentId) {
+    if (selectedIds.value.size > 0 && currentMultiSelectParentId.value !== data.parentId) {
       selectedIds.value.clear();
     }
 
     if (selectedIds.value.has(data.id)) {
       selectedIds.value.delete(data.id);
+      if (selectedIds.value.size === 0) {
+        currentMultiSelectParentId.value = null;
+        lastClickedId.value = null;
+      }
     } else {
       selectedIds.value.add(data.id);
       lastClickedId.value = data.id;
+      currentMultiSelectParentId.value = data.parentId;
     }
   } else if (event.shiftKey) {
-    if (!lastClickedId.value) {
+    if (!lastClickedId.value || currentMultiSelectParentId.value !== data.parentId) {
       selectedIds.value.clear();
       selectedIds.value.add(data.id);
       lastClickedId.value = data.id;
+      currentMultiSelectParentId.value = data.parentId;
     } else {
-      const currentParentId = selectedIds.value.size > 0
-        ? props.data.find(i => selectedIds.value.has(i.id))?.parentId
-        : data.parentId;
+      if (node && node.parent) {
+        const siblings = node.parent.childNodes.map(child => child.data as BaseTreeItem);
+        const idx1 = siblings.findIndex(i => i.id === lastClickedId.value);
+        const idx2 = siblings.findIndex(i => i.id === data.id);
 
-      if (currentParentId !== data.parentId) {
-         selectedIds.value.clear();
-         selectedIds.value.add(data.id);
-         lastClickedId.value = data.id;
-      } else {
-         const siblings = props.data.filter(i => i.parentId === data.parentId).sort((a,b) => a.sortOrder - b.sortOrder);
-         const idx1 = siblings.findIndex(i => i.id === lastClickedId.value);
-         const idx2 = siblings.findIndex(i => i.id === data.id);
-
-         if (idx1 !== -1 && idx2 !== -1) {
-           const minIdx = Math.min(idx1, idx2);
-           const maxIdx = Math.max(idx1, idx2);
-           selectedIds.value.clear();
-           for (let i = minIdx; i <= maxIdx; i++) {
-             selectedIds.value.add(siblings[i].id);
-           }
-         }
+        if (idx1 !== -1 && idx2 !== -1) {
+          const minIdx = Math.min(idx1, idx2);
+          const maxIdx = Math.max(idx1, idx2);
+          selectedIds.value.clear();
+          for (let i = minIdx; i <= maxIdx; i++) {
+            selectedIds.value.add(siblings[i].id);
+          }
+        }
       }
     }
   } else {
     selectedIds.value.clear();
     selectedIds.value.add(data.id);
     lastClickedId.value = data.id;
+    currentMultiSelectParentId.value = data.parentId;
   }
 
   emit('node-click', data)
@@ -212,6 +208,7 @@ const handleNodeContextMenu = (event: MouseEvent, data: BaseTreeItem, node: Node
       selectedIds.value.clear();
       selectedIds.value.add(data.id);
       lastClickedId.value = data.id;
+      currentMultiSelectParentId.value = data.parentId;
     }
   }
   emit('node-contextmenu', event, data, node)
@@ -351,6 +348,7 @@ const handleNodeCollapse = (data: BaseTreeItem) => {
 const clearSelection = () => {
   selectedIds.value.clear();
   lastClickedId.value = null;
+  currentMultiSelectParentId.value = null;
 }
 
 watch(
@@ -387,6 +385,7 @@ watch(
     if (selectedIds.value.size > 0 && !selectedIds.value.has(newId)) {
       selectedIds.value.clear()
       lastClickedId.value = null
+      currentMultiSelectParentId.value = null
     }
 
     // 等待 el-tree 处理 data prop 变更（新节点可能刚通过 chatList.push 同步插入）
