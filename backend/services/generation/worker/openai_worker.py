@@ -43,6 +43,6 @@ class OpenAiWorker(ChatWorker):
                 "HTTP-Referer": "https://github.com/RAmenLch/mambochat",  # Optional. Site URL for rankings on openrouter.ai.
                 "X-Title": "MamboChat",  # Optional. Site title for rankings on openrouter.ai.
             },
-            callbacks=[RawPayloadLoggingCallback("abc")]
+            callbacks=[RawPayloadLoggingCallback(llm_input.run_time_config)]
         )
 

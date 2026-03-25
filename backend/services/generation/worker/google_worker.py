@@ -2,6 +2,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from backend.services.generation.core.llm_io import LLMInput
 from backend.services.generation.worker.chat_worker import ChatWorker
 from backend.services.generation.worker.decode import BaseDecode, GoogleDecode
+from backend.services.generation.agent.log_callback import RawPayloadLoggingCallback
 
 
 class GoogleWorker(ChatWorker):
@@ -38,6 +39,7 @@ class GoogleWorker(ChatWorker):
             model_kwargs=model_kwargs,
             openai_proxy=openai_proxy,
             timeout=llm_input.llm_config.timeout,
-            streaming=stream
+            streaming=stream,
+            callbacks=[RawPayloadLoggingCallback(llm_input.run_time_config)]
         )
 

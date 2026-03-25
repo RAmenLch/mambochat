@@ -57,6 +57,15 @@
       <el-button :icon="Clock" circle size="small" @click="$emit('compress-history')" />
     </el-tooltip>
 
+    <el-tooltip
+      v-if="!isUser"
+      :content="$t('chat.message.viewLogs')"
+      placement="top"
+      :show-after="500"
+    >
+      <el-button :icon="Document" circle size="small" @click="$emit('view-logs')" />
+    </el-tooltip>
+
     <el-tooltip :content="$t('common.action.delete')" placement="top" :show-after="500">
       <el-button :icon="Delete" circle size="small" type="danger" plain @click="$emit('delete')" />
     </el-tooltip>
@@ -74,7 +83,7 @@ import type { SubMessage } from '@/api/types'
 import UsageInfo from '../UsageInfo.vue'
 import {
   Refresh, RefreshLeft, Delete, Edit, CopyDocument,
-  ArrowUpBold, ArrowDownBold, Clock
+  ArrowUpBold, ArrowDownBold, Clock, Document
 } from '@element-plus/icons-vue'
 
 interface EditPayload {
@@ -100,6 +109,7 @@ defineEmits<{
   (e: 'edit-request', subMessage: SubMessage | undefined, payload: EditPayload): void
   (e: 'copy-all'): void
   (e: 'compress-history'): void
+  (e: 'view-logs'): void
   (e: 'delete'): void
 }>()
 </script>

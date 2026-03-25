@@ -7,6 +7,7 @@ from backend.services.generation.worker.chat_worker import ChatWorker
 from langchain_anthropic import ChatAnthropic
 
 from backend.services.generation.worker.decode import BaseDecode, AnthropicDecode
+from backend.services.generation.agent.log_callback import RawPayloadLoggingCallback
 
 
 class AnthropicWorker(ChatWorker):
@@ -101,6 +102,7 @@ class AnthropicWorker(ChatWorker):
             anthropic_proxy=openai_proxy,
             timeout=llm_input.llm_config.timeout,
             streaming=stream,
-            stop=None
+            stop=None,
+            callbacks=[RawPayloadLoggingCallback(llm_input.run_time_config)]
         )
 

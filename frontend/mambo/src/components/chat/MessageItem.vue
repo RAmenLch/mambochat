@@ -97,6 +97,7 @@
         @copy-all="handleCopy"
         @compress-history="handleCompressHistory"
         @delete="handleDelete"
+        @view-logs="$emit('view-logs', message.id)"
       />
     </div>
   </div>
@@ -146,6 +147,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'suggestion-click', text: string): void
   (e: 'open-tool-dialog', message: Message, subMessageId: string, mode: 'review_all' | 'single'): void
+  (e: 'view-logs', messageId: string): void
 }>()
 
 const { t } = useI18n()

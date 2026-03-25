@@ -7,6 +7,7 @@ from backend.services.generation.core.llm_io import LLMInput
 from backend.services.generation.worker.chat_worker import ChatWorker
 from backend.services.generation.worker.deepseek_chat_model import ChatDeepSeek
 from backend.services.generation.worker.decode import BaseDecode, OpenAiDecode
+from backend.services.generation.agent.log_callback import RawPayloadLoggingCallback
 
 
 class DeepSeekWorker(ChatWorker):
@@ -108,6 +109,7 @@ class DeepSeekWorker(ChatWorker):
             model_kwargs=model_kwargs,
             openai_proxy=openai_proxy,
             timeout=llm_input.model_config.timeout,
-            streaming=stream
+            streaming=stream,
+            callbacks=[RawPayloadLoggingCallback(llm_input.run_time_config)]
         )
 

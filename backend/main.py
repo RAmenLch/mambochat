@@ -31,7 +31,8 @@ from backend.routers import (
     mcp_management,
     kb_management,
     skill_management,
-    agent_management
+    agent_management,
+    system_log  # <-- 新增：导入系统日志路由
 )
 from backend.services.cleanup_service import cleanup_zombie_files
 from backend.services.kb_service import SUP_DIM
@@ -114,6 +115,7 @@ app.include_router(mcp_management.router, prefix="/api/mcp", tags=["MCP Manageme
 app.include_router(kb_management.router, prefix="/api/resources/kb", tags=["Knowledge Base Management"])
 app.include_router(skill_management.router, prefix="/api/resources/skills", tags=["Skills Management"])
 app.include_router(agent_management.router, prefix="/api", tags=["Agent Management"])
+app.include_router(system_log.router, prefix="/api/logs", tags=["System Logs"])
 app.include_router(file_management.router)
 
 

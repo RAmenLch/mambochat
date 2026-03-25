@@ -28,6 +28,7 @@
               :is-last-message="index === currentChatMessages.length - 1"
               @suggestion-click="handleSuggestionClick"
               @open-tool-dialog="handleOpenToolDialog"
+              @view-logs="handleViewLogs"
             />
           </div>
         </el-scrollbar>
@@ -130,6 +131,12 @@
       :initial-sub-message-id="toolDialogInitialId"
       :mode="toolDialogMode"
     />
+
+    <LogViewerDialog
+      v-model:visible="logDialogVisible"
+      :message-id="logDialogMessageId"
+      :chat-id="currentChatId"
+    />
   </div>
 </template>
 
@@ -161,6 +168,7 @@ import ChatHeader from './ChatHeader.vue';
 import AttachmentPreview from './AttachmentPreview.vue';
 import ChatInputBox from './ChatInputBox.vue';
 import McpToolDialog from './dialogs/McpToolDialog.vue';
+import LogViewerDialog from './dialogs/LogViewerDialog.vue';
 import ChatNavigator from './ChatNavigator.vue';
 
 interface GroupedModels { label: string; options: AIModel[]; }
@@ -253,13 +261,15 @@ const userHasScrolledUp = ref(false);
 const previousPreviewHeight = ref(0);
 const isDraggingOver = ref(false);
 
-// 新增：当前视口可见的消息ID
 const currentVisibleMessageId = ref<string | null>(null);
 
 const toolDialogVisible = ref(false);
 const toolDialogMessageId = ref<string | null>(null);
 const toolDialogInitialId = ref<string | undefined>(undefined);
 const toolDialogMode = ref<'review_all' | 'single'>('single');
+
+const logDialogVisible = ref(false);
+const logDialogMessageId = ref<string | null>(null);
 
 onMounted(() => {
   systemConfigStore.fetchSystemConfig();
@@ -285,6 +295,11 @@ function handleOpenToolDialog(message: Message, subMessageId: string, mode: 'rev
   toolDialogInitialId.value = subMessageId;
   toolDialogMode.value = mode;
   toolDialogVisible.value = true;
+}
+
+function handleViewLogs(messageId: string) {
+  logDialogMessageId.value = messageId;
+  logDialogVisible.value = true;
 }
 
 function handleOpenReviewFromInput() {
@@ -488,9 +503,6 @@ async function handleToggleMcpTool(mcpId: string) {
   await chatListStore.updateChatSettings(currentChat.value.id, { enabled_mcp_ids: newIds });
 }
 
-
-
-// 计算当前视口可见的消息ID (只检测用户消息)
 const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
   const el = scrollbarRef.value?.wrapRef;
   if (!el) return;
@@ -498,15 +510,12 @@ const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
   userHasScrolledUp.value = el.scrollHeight - el.clientHeight - scrollTop > 20;
 
   const containerRect = el.getBoundingClientRect();
-  // 设定检测线为视口顶部往下 30% 处，符合阅读视线习惯
   const detectY = containerRect.top + containerRect.height * 0.3;
 
   let activeUserId: string | null = null;
 
-  // 仅筛选出用户消息
   const userMsgs = currentChatMessages.value.filter(m => m.role === 'user');
 
-  // 倒序遍历，找到最后一个突破检测线的用户消息
   for (let i = userMsgs.length - 1; i >= 0; i--) {
     const msg = userMsgs[i];
     const dom = document.getElementById(`msg-${msg.id}`);
@@ -519,7 +528,6 @@ const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
     }
   }
 
-  // 如果所有用户消息都在检测线下方，则默认选中第一条
   if (!activeUserId && userMsgs.length > 0) {
     activeUserId = userMsgs[0].id;
   }
@@ -620,7 +628,7 @@ watch(currentChatId, (newId) => {
   if (newId) {
     userHasScrolledUp.value = false;
     previousPreviewHeight.value = 0;
-    currentVisibleMessageId.value = null; // 重置
+    currentVisibleMessageId.value = null;
 
     const stopWatch = watch(isChatHistoryLoading, (loading) => {
       if (!loading) {
