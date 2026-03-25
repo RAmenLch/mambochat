@@ -9,7 +9,6 @@ from backend.services.generation.agent.custom_middleware import ToolMessageOrder
 from backend.services.generation.core.llm_io import AgentConfig, RunTimeConfig
 from backend.services.generation.graph_builders.base_builder import BaseGraphBuilder
 from backend.services.generation.graph_builders.model_factory import ModelFactory
-from schemas.lc_agent import MamboContext
 
 
 class ReactGraphBuilder(BaseGraphBuilder):
@@ -33,7 +32,7 @@ class ReactGraphBuilder(BaseGraphBuilder):
             active_checkpointer = get_checkpointer()
 
         return create_agent(
-            name =agent_config.agent_name,
+            name =agent_config.name,
             model=model,
             tools=tools,
             middleware=middlewares,
