@@ -33,8 +33,9 @@ class ReactGraphBuilder(BaseGraphBuilder):
             active_checkpointer = get_checkpointer()
 
         return create_agent(
-            model,
-            tools,
+            name =agent_config.agent_name,
+            model=model,
+            tools=tools,
             middleware=middlewares,
             checkpointer=active_checkpointer
         )
