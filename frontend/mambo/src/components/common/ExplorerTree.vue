@@ -377,7 +377,36 @@ watch(
 onMounted(() => {
   loadExpandedState()
 })
+watch(
+  () => props.currentId,
+  async (newId, oldId) => {
+    if (!newId || newId === oldId) return
 
+    // 如果新 ID 不在多选集合中，说明这是外部触发的导航，
+    // 需要清除旧的多选高亮（树内点击时 handleNodeClick 已将新 ID 加入 selectedIds）
+    if (selectedIds.value.size > 0 && !selectedIds.value.has(newId)) {
+      selectedIds.value.clear()
+      lastClickedId.value = null
+    }
+
+    // 等待 el-tree 处理 data prop 变更（新节点可能刚通过 chatList.push 同步插入）
+    await nextTick()
+
+    let node = treeRef.value?.getNode(newId)
+    if (!node) {
+      await nextTick()
+      node = treeRef.value?.getNode(newId)
+    }
+
+    if (node) {
+      // 命令式设置当前节点，移除旧节点的 is-current 并添加到新节点
+      treeRef.value?.setCurrentKey(newId)
+      await nextTick()
+      const currentEl = treeRef.value?.$el.querySelector('.is-current')
+      currentEl?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+  }
+)
 const scrollToKey = async (key: string) => {
   await nextTick()
   const node = treeRef.value?.getNode(key)

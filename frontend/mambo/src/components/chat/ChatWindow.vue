@@ -618,7 +618,7 @@ async function handleDuplicateUpTo(messageId: string) {
     if (!exists) {
       chatListStore.chatList.push(newChat);
     }
-    // await chatSessionStore.selectChat(newChat.id)
+    await chatSessionStore.selectChat(newChat.id)
   } catch (error) {
     console.error('Failed to duplicate chat up to message:', error);
     ElMessage.error(t('common.error.operationFailed'));
