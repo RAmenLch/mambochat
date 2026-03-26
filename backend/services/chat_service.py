@@ -6,10 +6,10 @@ from typing import Optional, List, Dict
 import json
 import re
 
-from backend.crud import chat_crud
+from backend.crud import chat_crud, message_crud
 from backend import schemas
 from backend.models import chat_model
-from schemas import MessageStatus, MoveAction
+from backend.schemas.enums import MessageStatus, MoveAction
 
 
 async def duplicate_chat_with_messages(
@@ -18,15 +18,14 @@ async def duplicate_chat_with_messages(
     up_to_message_id: Optional[str] = None
 ) -> Optional[chat_model.Chat]:
     """
-    复制一个现有会话及其消息。
-    - 支持截断：如果提供 up_to_message_id，则仅复制排序位置小于等于该消息的数据。
+    复制一个现有会话及其活跃路径上的消息。
+    - 支持截断：如果提供 up_to_message_id，则仅复制该消息及之前的活跃路径数据。
     - 状态清洗：将 GENERATING 和 PENDING_REVIEW 等中间态统一置为 FAILED。
     """
     original_chat = await chat_crud.get_chat(db, chat_id=chat_id)
     if not original_chat or original_chat.itemType != 'chat':
         return None
 
-    # 获取当前父节点下的最大 sortOrder 用于新会话的排版
     max_sort_order_result = await db.execute(
         select(func.max(chat_model.Chat.sortOrder))
         .filter(chat_model.Chat.parentId == original_chat.parentId)
@@ -39,7 +38,6 @@ async def duplicate_chat_with_messages(
     except json.JSONDecodeError:
         params = None
 
-    # 1. 创建新会话主表信息
     new_chat_data = schemas.ChatCreate(
         name=f"{original_chat.name} (副本)",
         systemPrompt=original_chat.systemPrompt,
@@ -55,32 +53,33 @@ async def duplicate_chat_with_messages(
     )
     new_chat = await chat_crud.create_chat(db, chat=new_chat_data)
 
-    if original_chat.messages:
-        # 2. 寻找截断参照的 sortOrder 值（防遍历顺序乱序隐患）
-        cutoff_sort_order = float('inf')
+    active_messages = await message_crud.get_messages_by_chat(db, chat_id=chat_id)
+
+    if active_messages:
         if up_to_message_id:
-            for m in original_chat.messages:
+            cutoff_index = -1
+            for i, m in enumerate(active_messages):
                 if m.id == up_to_message_id:
-                    cutoff_sort_order = m.sortOrder
+                    cutoff_index = i
                     break
+            if cutoff_index != -1:
+                active_messages = active_messages[:cutoff_index + 1]
 
-        # 3. 遍历复制消息主表和子表
-        for msg in original_chat.messages:
-            # 超过截断线的数据，直接忽略
-            if msg.sortOrder > cutoff_sort_order:
-                continue
-
+        last_new_msg_id = None
+        for msg in active_messages:
             new_msg = chat_model.Message(
                 role=msg.role,
                 sortOrder=msg.sortOrder,
-                chatId=new_chat.id
+                chatId=new_chat.id,
+                parentId=last_new_msg_id,
+                lastActiveAt=msg.lastActiveAt
             )
             db.add(new_msg)
             await db.flush()
+            last_new_msg_id = new_msg.id
 
             new_sub_messages = []
             for sub in msg.sub_messages:
-                # 状态防卡死清洗
                 safe_status = sub.status
                 if safe_status in [MessageStatus.GENERATING.value, MessageStatus.PENDING_REVIEW.value]:
                     safe_status = MessageStatus.FAILED.value
@@ -102,6 +101,7 @@ async def duplicate_chat_with_messages(
 
     return new_chat
 
+
 async def archive_chats_to_new_folder(db: AsyncSession, request: schemas.ChatArchiveRequest) -> Optional[chat_model.Chat]:
     """
     新建一个文件夹，并将指定的会话批量归档/移动到该文件夹中
@@ -109,8 +109,6 @@ async def archive_chats_to_new_folder(db: AsyncSession, request: schemas.ChatArc
     if not request.item_ids:
         return None
 
-    # 1. 自动创建一个用来归档的新文件夹
-    # 默认让其排在目标层级的最后
     new_folder_data = schemas.ChatCreate(
         name=request.new_folder_name,
         itemType='folder',
@@ -118,7 +116,6 @@ async def archive_chats_to_new_folder(db: AsyncSession, request: schemas.ChatArc
     )
     new_folder = await chat_crud.create_chat(db, chat=new_folder_data)
 
-    # 2. 复用底层 move_chats 能力，将传入的 item_ids 批量移入新文件夹内部
     move_request = schemas.ChatMoveRequest(
         item_ids=request.item_ids,
         reference_id=new_folder.id,
@@ -130,6 +127,7 @@ async def archive_chats_to_new_folder(db: AsyncSession, request: schemas.ChatArc
 
     await db.refresh(new_folder)
     return new_folder
+
 
 def extract_context_snippet(content: str, keyword: str, enable_regex: bool, window_size: int = 50) -> str:
     """
@@ -147,7 +145,6 @@ def extract_context_snippet(content: str, keyword: str, enable_regex: bool, wind
     try:
         match = re.search(pattern, content, flags)
     except re.error:
-        # 如果正则无效，返回开头部分
         return content[:window_size * 2]
 
     if not match:
@@ -156,13 +153,11 @@ def extract_context_snippet(content: str, keyword: str, enable_regex: bool, wind
     start, end = match.span()
     total_len = len(content)
 
-    # 计算截取范围
     snippet_start = max(0, start - window_size)
     snippet_end = min(total_len, end + window_size)
 
     snippet = content[snippet_start:snippet_end]
 
-    # 添加省略号
     if snippet_start > 0:
         snippet = "..." + snippet
     if snippet_end < total_len:
@@ -179,10 +174,8 @@ async def build_chat_paths(db: AsyncSession, chat_ids: List[str]) -> Dict[str, s
     if not chat_ids:
         return {}
 
-    # 获取所有相关的祖先节点
     rows = await chat_crud.get_batch_chat_ancestors(db, chat_ids)
 
-    # 构建节点查找表: id -> {name, parentId}
     node_map = {row.id: {"name": row.name, "parentId": row.parentId} for row in rows}
 
     paths = {}
@@ -193,7 +186,6 @@ async def build_chat_paths(db: AsyncSession, chat_ids: List[str]) -> Dict[str, s
         current_id = start_id
         path_segments = []
 
-        # 向上遍历直到根节点
         while current_id:
             node = node_map.get(current_id)
             if not node:
@@ -201,11 +193,9 @@ async def build_chat_paths(db: AsyncSession, chat_ids: List[str]) -> Dict[str, s
             path_segments.append(node["name"])
             current_id = node["parentId"]
 
-        # 移除自身节点（路径通常指父级目录结构）
         if path_segments:
             path_segments.pop(0)
 
-        # 反转列表并拼接，形成 Root / Folder / ...
         paths[start_id] = " / ".join(reversed(path_segments))
 
     return paths

@@ -24,7 +24,6 @@ async def _start_generation_task(
         chat_id: str,
         assistant_message_id: str
 ):
-    """启动后台生成任务。"""
     await stream_manager.mark_task_running(assistant_message_id)
     background_tasks.add_task(generation_service._run_managed_generation_task, chat_id, assistant_message_id)
 
@@ -33,18 +32,13 @@ async def _hydrate_and_validate_messages(
         db_messages: List[chat_model.Message],
         db: AsyncSession
 ) -> List[schemas.Message]:
-    """
-    一个集中的辅助函数，用于将数据库Message对象转换为包含完整文件信息和动态状态的前端schema对象。
-    """
     if not db_messages:
         return []
 
-    # 1. 收集所有文件类型的 SubMessage 的 file_id
     file_ids_to_hydrate = {
         sub.content for msg in db_messages for sub in msg.sub_messages if sub.type == 'File' and sub.content
     }
 
-    # 2. 批量查询文件信息并创建查找表
     file_info_map = {}
     if file_ids_to_hydrate:
         file_service = FileService(db)
@@ -52,7 +46,6 @@ async def _hydrate_and_validate_messages(
         for record in file_records:
             file_info_map[record.id] = file_service.convert_to_schema(record)
 
-    # 3. 构建包含状态和文件信息的响应对象列表
     message_responses = []
     for db_message in db_messages:
         message_res = schemas.Message.model_validate(db_message)
@@ -88,7 +81,9 @@ async def read_chat_with_messages(chat_id: str, db: AsyncSession = Depends(get_d
     _apply_default_model_to_chat_object(db_chat, default_model_id)
 
     chat_response = schemas.ChatWithMessages.model_validate(db_chat)
-    chat_response.messages = await _hydrate_and_validate_messages(db_chat.messages, db)
+
+    active_messages = await message_crud.get_messages_by_chat(db, chat_id=chat_id)
+    chat_response.messages = await _hydrate_and_validate_messages(active_messages, db)
 
     return chat_response
 
@@ -109,12 +104,19 @@ async def update_message_and_regenerate(
     if not db_message:
         raise HTTPException(status_code=404, detail="Message not found")
 
-    updated_user_message = await message_crud.update_message(db, message_id=message_id, message_update=message_update)
-    if not updated_user_message:
-        raise HTTPException(status_code=500, detail="Failed to update message")
+    new_message_create = schemas.MessageCreate(
+        role=db_message.role,
+        sub_messages=message_update.sub_messages,
+        parentId=db_message.parentId
+    )
+    new_user_message = await message_crud.create_message(db, message=new_message_create, chat_id=db_message.chatId)
 
     if not message_update.resend:
-        hydrated_user_message = (await _hydrate_and_validate_messages([updated_user_message], db))[0]
+        # 修复: 从活跃路径中重新获取，以避免 DetachedInstanceError 并装配 sibling 元数据
+        active_msgs = await message_crud.get_messages_by_chat(db, chat_id=db_message.chatId)
+        populated_user_msg = next((m for m in active_msgs if m.id == new_user_message.id), new_user_message)
+
+        hydrated_user_message = (await _hydrate_and_validate_messages([populated_user_msg], db))[0]
         return schemas.UpdateMessageResponse(
             user_message=hydrated_user_message,
             assistant_message=None
@@ -124,16 +126,36 @@ async def update_message_and_regenerate(
         raise HTTPException(status_code=400, detail="Resend is only applicable to user messages.")
 
     assistant_placeholder = await generation_service.prepare_for_regeneration(
-        db=db, chat_id=db_message.chatId, base_message_id=message_id
+        db=db, chat_id=db_message.chatId, base_message_id=new_user_message.id
     )
     await _start_generation_task(background_tasks, db_message.chatId, assistant_placeholder.id)
 
-    hydrated_messages = await _hydrate_and_validate_messages([updated_user_message, assistant_placeholder], db)
+    # 修复: 从活跃路径中重新获取，以避免 DetachedInstanceError 并装配 sibling 元数据
+    active_msgs = await message_crud.get_messages_by_chat(db, chat_id=db_message.chatId)
+    populated_user_msg = next((m for m in active_msgs if m.id == new_user_message.id), new_user_message)
+    populated_assistant_msg = next((m for m in active_msgs if m.id == assistant_placeholder.id), assistant_placeholder)
+
+    hydrated_messages = await _hydrate_and_validate_messages([populated_user_msg, populated_assistant_msg], db)
 
     return schemas.UpdateMessageResponse(
         user_message=hydrated_messages[0],
         assistant_message=hydrated_messages[1]
     )
+
+
+@router.put(
+    "/chats/{chat_id}/messages/{message_id}/activate",
+    response_model=List[schemas.Message],
+    summary="激活指定的消息分支路径",
+    response_model_exclude_none=True
+)
+async def activate_message_branch(chat_id: str, message_id: str, db: AsyncSession = Depends(get_db)):
+    success = await message_crud.activate_message_path(db, message_id=message_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    active_messages = await message_crud.get_messages_by_chat(db, chat_id=chat_id)
+    return await _hydrate_and_validate_messages(active_messages, db)
 
 
 @router.delete(
@@ -143,11 +165,15 @@ async def update_message_and_regenerate(
     response_model_exclude_none=True
 )
 async def delete_single_message(message_id: str, db: AsyncSession = Depends(get_db)):
-    db_message = await message_crud.delete_message(db, message_id=message_id)
-    if db_message is None:
+    db_message = await message_crud.get_message(db, message_id=message_id)
+    if not db_message:
         raise HTTPException(status_code=404, detail="Message not found")
 
+    # 修复: 在物理删除前提前完成 Hydrate，防止删除后触发懒加载导致崩溃
     hydrated_messages = await _hydrate_and_validate_messages([db_message], db)
+
+    await message_crud.delete_message(db, message_id=message_id)
+
     return hydrated_messages[0]
 
 
@@ -175,14 +201,10 @@ async def stop_generation(message_id: str):
     summary="压缩指定消息及之前的所有对话历史"
 )
 async def compress_history_above_message(
-    message_id: str,
-    background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db)
+        message_id: str,
+        background_tasks: BackgroundTasks,
+        db: AsyncSession = Depends(get_db)
 ):
-    """
-    为指定消息（及其之前）的所有对话历史启动一个后台压缩任务。
-    只能对助手的消息进行此操作。
-    """
     db_message = await message_crud.get_message(db, message_id=message_id)
     if not db_message:
         raise HTTPException(status_code=404, detail="Message not found")
@@ -218,7 +240,12 @@ async def prepare_to_generate(
     )
     await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id)
 
-    hydrated_messages = await _hydrate_and_validate_messages([user_message, assistant_placeholder], db)
+    # 修复: 从活跃路径中重新获取，以避免 DetachedInstanceError 并装配 sibling 元数据
+    active_msgs = await message_crud.get_messages_by_chat(db, chat_id=chat_id)
+    populated_user_msg = next((m for m in active_msgs if m.id == user_message.id), user_message)
+    populated_assistant_msg = next((m for m in active_msgs if m.id == assistant_placeholder.id), assistant_placeholder)
+
+    hydrated_messages = await _hydrate_and_validate_messages([populated_user_msg, populated_assistant_msg], db)
 
     return schemas.PrepareGenerateResponse(
         user_message=hydrated_messages[0],
@@ -243,7 +270,11 @@ async def prepare_to_regenerate(
     )
     await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id)
 
-    hydrated_messages = await _hydrate_and_validate_messages([assistant_placeholder], db)
+    # 修复: 从活跃路径中重新获取，以避免 DetachedInstanceError 并装配 sibling 元数据
+    active_msgs = await message_crud.get_messages_by_chat(db, chat_id=chat_id)
+    populated_assistant_msg = next((m for m in active_msgs if m.id == assistant_placeholder.id), assistant_placeholder)
+
+    hydrated_messages = await _hydrate_and_validate_messages([populated_assistant_msg], db)
     return hydrated_messages[0]
 
 
@@ -294,13 +325,8 @@ async def review_tool_call(
         background_tasks: BackgroundTasks,
         db: AsyncSession = Depends(get_db)
 ):
-    """
-    提交对特定工具调用的审核决策。
-    如果当前消息下所有处于待审核状态的工具都已完成决策，则自动触发 Agent 恢复生成。
-    """
     from backend.schemas.message import ReviewToolContent
 
-    # 1. 校验并更新当前子消息的决策内容
     db_sub = await message_crud.get_sub_message(db, request.sub_message_id)
     if not db_sub or db_sub.messageId != message_id or db_sub.type != SubMessageType.REVIEW_TOOL.value:
         raise HTTPException(status_code=404, detail="Review tool request not found.")
@@ -314,7 +340,6 @@ async def review_tool_call(
         schemas.SubMessageUpdate(content=review_content.to_json_string())
     )
 
-    # 2. 检查同一批次（同一 Message 下）的所有审核请求是否都已决策
     db_message = await message_crud.get_message(db, message_id=message_id)
     pending_review_subs = [
         sub for sub in db_message.sub_messages
@@ -330,7 +355,6 @@ async def review_tool_call(
 
     is_resuming = False
 
-    # 3. 若全部决策完成，使用乐观锁尝试唤醒 Agent
     if all_decided and pending_review_subs:
         sub_ids = [sub.id for sub in pending_review_subs]
         affected_rows = await message_crud.batch_update_sub_messages_status_optimistic(
@@ -341,11 +365,13 @@ async def review_tool_call(
             await _start_generation_task(background_tasks, db_message.chatId, message_id)
             is_resuming = True
 
-    # 4. 返回更新后的消息对象
-    hydrated_messages = await _hydrate_and_validate_messages([db_message], db)
+    # 修复: 从活跃路径中重新获取，以装配 sibling 元数据
+    active_msgs = await message_crud.get_messages_by_chat(db, chat_id=db_message.chatId)
+    populated_msg = next((m for m in active_msgs if m.id == message_id), db_message)
+
+    hydrated_messages = await _hydrate_and_validate_messages([populated_msg], db)
     response_message = hydrated_messages[0]
 
-    # 5. 弥补时间差：如果刚刚触发了后台任务，强制将返回状态覆写为 GENERATING
     if is_resuming:
         response_message.status = schemas.MessageStatus.GENERATING
 

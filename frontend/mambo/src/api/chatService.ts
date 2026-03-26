@@ -22,7 +22,7 @@ import type {
 } from './types';
 
 /**
- * [新增] 懒加载获取会话/文件夹子节点
+ * 懒加载获取会话/文件夹子节点
  * @param parentIds 父节点ID列表，传 "root" 获取根目录
  */
 export const getChatChildren = (parentIds: string[]): Promise<Chat[]> => {
@@ -32,14 +32,14 @@ export const getChatChildren = (parentIds: string[]): Promise<Chat[]> => {
 };
 
 /**
- * [新增] 移动会话/文件夹节点
+ * 移动会话/文件夹节点
  */
 export const moveChat = (data: MoveRequest): Promise<void> => {
   return apiClient.post('/chats/move', data);
 };
 
 /**
- * [新增] 获取会话链路 (用于深层链接回溯)
+ * 获取会话链路 (用于深层链接回溯)
  */
 export const getChatLineage = (chatId: string): Promise<Chat[]> => {
   return apiClient.get(`/chats/${chatId}/lineage`);
@@ -161,10 +161,19 @@ export const searchChats = (data: SearchRequest): Promise<SearchResponse> => {
 };
 
 /**
- * [新增] 提交工具调用审核决策
+ * 提交工具调用审核决策
  * @param messageId 主消息ID
  * @param data 审核决策数据
  */
 export const submitToolReview = (messageId: string, data: ReviewToolRequest): Promise<Message> => {
   return apiClient.post(`/messages/${messageId}/review-tool`, data);
+};
+
+/**
+ * 激活指定消息分支
+ * @param chatId 会话ID
+ * @param messageId 目标消息ID
+ */
+export const activateMessageBranch = (chatId: string, messageId: string): Promise<Message[]> => {
+  return apiClient.put(`/chats/${chatId}/messages/${messageId}/activate`);
 };

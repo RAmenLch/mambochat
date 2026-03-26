@@ -84,6 +84,7 @@
 
       <!-- Actions -->
       <MessageActions
+        :message="message"
         :show-actions="showActions"
         :is-generating="message.status === 'generating'"
         :is-user="message.role === 'user'"
@@ -99,6 +100,7 @@
         @compress-history="handleCompressHistory"
         @delete="handleDelete"
         @view-logs="$emit('view-logs', message.id)"
+        @switch-branch="(targetId) => $emit('switch-branch', targetId)"
       />
     </div>
   </div>
@@ -150,6 +152,7 @@ const emit = defineEmits<{
   (e: 'open-tool-dialog', message: Message, subMessageId: string, mode: 'review_all' | 'single'): void
   (e: 'view-logs', messageId: string): void
   (e: 'duplicate-upto', messageId: string): void
+  (e: 'switch-branch', targetId: string): void
 }>()
 
 const { t } = useI18n()
@@ -179,7 +182,6 @@ const normalSubMessages = computed(() =>
 const usageSubMessage = computed(() => {
   const usageMessages = props.message.sub_messages.filter((sm) => sm.type === 'Usage');
   if (usageMessages.length === 0) return undefined;
-  // 按创建时间降序排序，取最新的一个 (ISO 8601 字符串可以直接比较)
   return usageMessages.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 });
 const zipHistorySubMessage = computed(() => props.message.sub_messages.find((sm) => sm.type === 'ZipHistory'))

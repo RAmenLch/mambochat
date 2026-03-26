@@ -11,6 +11,7 @@ import {
   getChatWithMessages,
   initiateHistoryCompression as initiateHistoryCompressionAPI,
   submitToolReview as submitToolReviewAPI,
+  activateMessageBranch,
 } from '@/api/chatService'
 import { subscribeToMessageStream } from '@/services/sseService';
 import { useChatSessionStore } from './chatSessionStore';
@@ -22,7 +23,6 @@ import type {
   SubMessageUpdate,
   MessageStatus,
   ReviewToolRequest,
-
 } from '@/api/types'
 
 /**
@@ -49,22 +49,18 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     const finalize = async () => {
       sessionStore.activeSubscriptions.delete(assistantMessageId);
       try {
-        // 流结束后，从服务器获取最终权威状态
         const chatWithMessages = await getChatWithMessages(chatId);
         sessionStore.currentChatMessages = chatWithMessages.messages.sort((a, b) => a.sortOrder - b.sortOrder);
 
         const finalMessage = sessionStore.currentChatMessages.find(m => m.id === assistantMessageId);
         if (finalMessage) {
-          // 检查是否还有待审核的 ReviewTool
           const hasPendingReview = finalMessage.sub_messages.some(
             sm => sm.type === 'ReviewTool' && sm.status === 'pending_review'
           );
-          // 如果没有待审核的工具，则自动最小化所有 Reasoning 子消息 (收起大气泡)
           if (!hasPendingReview) {
             await batchUpdateSubMessagesMinimalState(assistantMessageId, true);
           }
         }
-        // 检查是否需要触发自动标题生成
         if (
           sessionStore.currentChat &&
             (
@@ -120,7 +116,6 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
       }
     } catch (error) {
       console.error('Failed to prepare generation:', error);
-      // If the API call fails, refresh the chat to ensure a consistent state.
       if (sessionStore.currentChatId) await sessionStore.selectChat(sessionStore.currentChatId, true);
     }
   }
@@ -138,7 +133,7 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     const baseMessage = sessionStore.currentChatMessages[baseMessageIndex];
 
     const sliceIndex = baseMessage.role === 'assistant' ? baseMessageIndex : baseMessageIndex + 1;
-    sessionStore._spliceMessages(sliceIndex); // 乐观地移除后续消息
+    sessionStore._spliceMessages(sliceIndex);
 
     try {
       const assistantPlaceholder = await prepareRegenerate(chatId, messageId);
@@ -160,31 +155,24 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     const chatId = sessionStore.currentChatId;
     if (!chatId) return;
 
-    // 如果是重新生成，则检查是否已有其他任务在运行
     if (payload.resend && sessionStore.isGenerating) return;
 
     try {
-      // 调用更新后的API, 它会返回更新后的用户消息和可能的助手消息占位符
       const response = await updateMessageAndRegenerate(payload.messageId, {
         sub_messages: payload.sub_messages,
         resend: payload.resend,
       });
       const { user_message, assistant_message } = response;
 
-      // 使用API返回的权威数据更新前端状态
-      const messageIndex = sessionStore.currentChatMessages.findIndex(m => m.id === user_message.id);
+      const messageIndex = sessionStore.currentChatMessages.findIndex(m => m.id === payload.messageId);
       if (messageIndex !== -1) {
-        // 直接替换整个消息对象，确保所有字段（包括sub_messages）都是最新的
         sessionStore.currentChatMessages.splice(messageIndex, 1, user_message);
       } else {
-        // 如果找不到，作为后备方案，刷新整个会话
         await sessionStore.selectChat(chatId, true);
         return;
       }
 
-      // 如果有助手消息占位符 (即 resend: true)
       if (assistant_message) {
-        // 从用户消息之后移除所有旧消息, 并插入新的助手消息占位符
         sessionStore._spliceMessages(messageIndex + 1, [assistant_message]);
         if (assistant_message.status === 'generating') {
           _subscribeToMessageStream(assistant_message);
@@ -192,7 +180,6 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
       }
     } catch (error) {
       console.error('Failed to update and/or resend message:', error);
-      // 发生任何错误时，都强制刷新会话以保证数据一致性
       if (chatId) await sessionStore.selectChat(chatId, true);
     }
   }
@@ -203,11 +190,9 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
    * @param payload - 包含子消息ID和要更新的数据。
    */
   async function updateSubMessage(payload: { subMessageId: string, data: SubMessageUpdate }) {
-    // 乐观更新UI
     for (const msg of sessionStore.currentChatMessages) {
       const subMsg = msg.sub_messages.find(sm => sm.id === payload.subMessageId);
       if (subMsg) {
-        // 合并config对象而不是直接替换
         if (payload.data.config) {
           subMsg.config = { ...subMsg.config, ...payload.data.config };
         }
@@ -234,14 +219,17 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
    * @param messageId - 要删除的消息ID。
    */
   async function deleteMessage(messageId: string) {
-    const backup = sessionStore._removeMessage(messageId); // 乐观更新UI
+    const backup = sessionStore._removeMessage(messageId);
     if (!backup) return;
 
     try {
       await deleteMessageAPI(messageId);
+      if (sessionStore.currentChatId) {
+        await sessionStore.selectChat(sessionStore.currentChatId, true);
+      }
     } catch (error) {
       console.error('Failed to delete message:', error);
-      sessionStore.currentChatMessages.push(backup); // 回滚
+      sessionStore.currentChatMessages.push(backup);
       sessionStore.currentChatMessages.sort((a,b) => a.sortOrder - b.sortOrder);
     }
   }
@@ -254,7 +242,6 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     sessionStore.activeSubscriptions.get(messageId)?.abort();
     sessionStore.activeSubscriptions.delete(messageId);
 
-    // 乐观更新UI状态
     const msg = sessionStore.currentChatMessages.find(m => m.id === messageId);
     if (msg && msg.status === 'generating') {
       msg.status = 'completed';
@@ -264,7 +251,6 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     }
      try {
       await stopGenerationAPI(messageId);
-      // 停止后，强制刷新以获取最终一致状态
     } catch (error) {
       console.error(`Failed to process stop request for ${messageId}:`, error);
     }
@@ -283,21 +269,18 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     let tempId: string | null = null;
 
     if (existingZip) {
-      // 1. 如果已存在，备份并乐观更新状态为 generating
-      // 使用 JSON.parse/stringify 进行深拷贝备份
       backupZip = JSON.parse(JSON.stringify(existingZip));
 
       const updatedZip = { ...existingZip, status: 'generating' as MessageStatus };
       sessionStore._addOrUpdateSubMessage(messageId, updatedZip);
     } else {
-      // 2. 如果不存在，创建临时占位符
       tempId = `temp_zip_${Date.now()}`;
       const optimisticSubMessage: SubMessage = {
         id: tempId,
         content: '',
         createdAt: new Date().toISOString(),
         messageId: messageId,
-        sortOrder: 999, // 临时赋予一个较大的排序值
+        sortOrder: 999,
         type: 'ZipHistory',
         config: {
           is_collapsed: false,
@@ -313,12 +296,9 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     } catch (error) {
       console.error(`Failed to initiate history compression for message ${messageId}:`, error);
 
-      // 回滚逻辑
       if (existingZip && backupZip) {
-        // 恢复原有的子消息状态
         sessionStore._addOrUpdateSubMessage(messageId, backupZip);
       } else if (tempId) {
-        // 移除临时创建的消息
         const currentParent = sessionStore.currentChatMessages.find(m => m.id === messageId);
         if (currentParent) {
           const index = currentParent.sub_messages.findIndex(sm => sm.id === tempId);
@@ -336,7 +316,6 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
    * @param data - 要更新的数据。
    */
   async function updateZipHistorySubMessage(subMessageId: string, data: SubMessageUpdate) {
-    // 乐观更新UI
     for (const msg of sessionStore.currentChatMessages) {
       const subMsg = msg.sub_messages.find(sm => sm.id === subMessageId);
       if (subMsg) {
@@ -344,7 +323,6 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
           subMsg.content = data.content;
         }
         if (data.config) {
-          // 合并config对象，而不是直接替换
           subMsg.config = { ...subMsg.config, ...data.config };
         }
         break;
@@ -355,7 +333,6 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
       await updateSubMessageAPI(subMessageId, data);
     } catch (error) {
       console.error(`Failed to update zip history sub-message ${subMessageId}:`, error);
-      // 发生错误时，强制刷新整个会话以确保数据一致性
       if (sessionStore.currentChatId) {
         await sessionStore.selectChat(sessionStore.currentChatId, true);
       }
@@ -373,21 +350,17 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
         decision,
       })
 
-      // 用后端返回的最新消息替换本地状态
       const index = sessionStore.currentChatMessages.findIndex((m) => m.id === messageId)
       if (index !== -1) {
         sessionStore.currentChatMessages.splice(index, 1, updatedMessage)
 
-        // 如果决策提交后，消息状态变回 generating，则重新订阅 SSE 流以接收后续生成内容
         if (updatedMessage.status === 'generating') {
           _subscribeToMessageStream(updatedMessage)
         }
         else if (updatedMessage.status === 'completed') {
-          // 如果状态为 completed，说明无需继续生成。检查是否还有其他待审核工具
           const hasPendingReview = updatedMessage.sub_messages.some(
             sm => sm.type === 'ReviewTool' && sm.status === 'pending_review'
           );
-          // 如果所有工具都已审批完毕，自动最小化 Reasoning 气泡
           if (!hasPendingReview) {
             await batchUpdateSubMessagesMinimalState(messageId, true);
           }
@@ -395,7 +368,6 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
       }
     } catch (error) {
       console.error('Failed to submit tool review:', error)
-      // 发生错误时刷新会话以保证状态同步
       if (sessionStore.currentChatId) {
         await sessionStore.selectChat(sessionStore.currentChatId, true)
       }
@@ -403,24 +375,15 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     }
   }
 
-
-    /**
-   * [新增] 批量更新指定消息下所有 Reasoning 子消息的 minimal 状态
-   * 用于实现大气泡的整体最小化/展开逻辑
-   * @param messageId - 目标消息ID
-   * @param isMinimal - 是否最小化
-   */
   async function batchUpdateSubMessagesMinimalState(messageId: string, isMinimal: boolean) {
     const message = sessionStore.currentChatMessages.find(m => m.id === messageId);
     if (!message) return;
 
-    // 筛选出所有的 Reasoning 子消息
     const reasoningSubMessages = message.sub_messages.filter(sm => sm.type === 'Reasoning');
     if (reasoningSubMessages.length === 0) return;
 
     let hasChanges = false;
 
-    // 1. 乐观更新 UI 状态
     reasoningSubMessages.forEach(sm => {
       if (sm.config.is_minimal !== isMinimal) {
         sm.config = { ...sm.config, is_minimal: isMinimal };
@@ -430,7 +393,6 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
 
     if (!hasChanges) return;
 
-    // 2. 异步同步到后端 (并发请求更新)
     try {
       const updatePromises = reasoningSubMessages.map(sm =>
         updateSubMessageAPI(sm.id, { config: { ...sm.config, is_minimal: isMinimal } })
@@ -438,10 +400,26 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
       await Promise.all(updatePromises);
     } catch (error) {
       console.error(`Failed to batch update minimal state for message ${messageId}:`, error);
-      // 发生错误时，强制刷新会话以确保数据一致性
       if (sessionStore.currentChatId) {
         await sessionStore.selectChat(sessionStore.currentChatId, true);
       }
+    }
+  }
+
+  /**
+   * 激活指定消息分支
+   * @param messageId - 目标消息ID
+   */
+  async function activateBranch(messageId: string) {
+    const chatId = sessionStore.currentChatId;
+    if (!chatId || sessionStore.isGenerating) return;
+
+    try {
+      const messages = await activateMessageBranch(chatId, messageId);
+      sessionStore.currentChatMessages = messages.sort((a, b) => a.sortOrder - b.sortOrder);
+    } catch (error) {
+      console.error(`Failed to activate branch for message ${messageId}:`, error);
+      if (chatId) await sessionStore.selectChat(chatId, true);
     }
   }
 
@@ -457,5 +435,6 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     _subscribeToMessageStream,
     batchUpdateSubMessagesMinimalState,
     submitToolReview,
+    activateBranch,
   }
 });

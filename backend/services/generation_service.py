@@ -82,7 +82,7 @@ async def prepare_for_regeneration(
         base_message_id: str,
 ) -> chat_model.Message:
     """
-    准备重新生成：删除指定消息之后的所有消息，并创建一个新的AI消息占位符。
+    准备重新生成：在指定的层级创建一个新的AI消息占位符分支。
     """
     db_chat = await chat_crud.get_chat(db, chat_id=chat_id)
     if not db_chat:
@@ -94,12 +94,15 @@ async def prepare_for_regeneration(
     if not ref_message or ref_message.chatId != chat_id:
         raise HTTPException(status_code=404, detail="Reference message not found in the specified chat.")
 
-    include_self = (ref_message.role == MessageRole.ASSISTANT)
-    await message_crud.delete_messages_after(db, chat_id=chat_id, message_id=base_message_id, include_self=include_self)
+    if ref_message.role == MessageRole.ASSISTANT:
+        target_parent_id = ref_message.parentId
+    else:
+        target_parent_id = ref_message.id
 
     assistant_message_create = schemas.MessageCreate(
         role=MessageRole.ASSISTANT,
-        sub_messages=[]
+        sub_messages=[],
+        parentId=target_parent_id
     )
     assistant_placeholder = await message_crud.create_message(db, message=assistant_message_create, chat_id=chat_id)
     return assistant_placeholder

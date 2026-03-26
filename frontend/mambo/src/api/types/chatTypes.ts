@@ -62,6 +62,10 @@ export interface Message {
   sortOrder: number
   sub_messages: SubMessage[]
   status: MessageStatus
+  parentId: string | null
+  lastActiveAt: string
+  sibling_ids: string[]
+  sibling_index: number
 }
 
 export interface MessageUpdate {

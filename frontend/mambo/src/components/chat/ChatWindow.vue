@@ -30,6 +30,7 @@
               @open-tool-dialog="handleOpenToolDialog"
               @view-logs="handleViewLogs"
               @duplicate-upto="handleDuplicateUpTo"
+              @switch-branch="(targetId) => handleSwitchBranch(message.id, targetId)"
             />
           </div>
         </el-scrollbar>
@@ -264,6 +265,7 @@ const resourceSelectorVisible = ref(false);
 const userHasScrolledUp = ref(false);
 const previousPreviewHeight = ref(0);
 const isDraggingOver = ref(false);
+const isSwitchingBranch = ref(false);
 
 const currentVisibleMessageId = ref<string | null>(null);
 
@@ -542,6 +544,7 @@ const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
 };
 
 const scrollToBottom = (force = false) => {
+  if (isSwitchingBranch.value) return;
   if (!force && userHasScrolledUp.value && isGenerating.value) return;
   nextTick(() => {
     const scrollbar = scrollbarRef.value;
@@ -609,11 +612,9 @@ function handleSuggestionClick(text: string) {
 async function handleDuplicateUpTo(messageId: string) {
   if (!currentChatId.value) return;
   try {
-    // 1. 调用 API 复制会话
     const newChat = await duplicateChat(currentChatId.value, { up_to_message_id: messageId });
     ElMessage.success(t('common.msg.duplicateSuccess'));
 
-    // 2. 将新会话推入 store 列表中，确保树能渲染出新节点
     const exists = chatListStore.chatList.some(c => c.id === newChat.id);
     if (!exists) {
       chatListStore.chatList.push(newChat);
@@ -625,6 +626,43 @@ async function handleDuplicateUpTo(messageId: string) {
   }
 }
 
+async function handleSwitchBranch(currentMessageId: string, targetMessageId: string) {
+  if (isGenerating.value) return;
+
+  isSwitchingBranch.value = true;
+  const scrollbarWrap = scrollbarRef.value?.wrapRef;
+  let relativeTop = 0;
+
+  if (scrollbarWrap) {
+    const currentElement = document.getElementById(`msg-${currentMessageId}`);
+    if (currentElement) {
+      const elementRect = currentElement.getBoundingClientRect();
+      const containerRect = scrollbarWrap.getBoundingClientRect();
+      relativeTop = elementRect.top - containerRect.top;
+    }
+  }
+
+  try {
+    await chatInteractionStore.activateBranch(targetMessageId);
+
+    await nextTick();
+    await new Promise(resolve => requestAnimationFrame(resolve));
+
+    if (scrollbarWrap) {
+      const targetElement = document.getElementById(`msg-${targetMessageId}`);
+      if (targetElement) {
+        const targetRect = targetElement.getBoundingClientRect();
+        const containerRect = scrollbarWrap.getBoundingClientRect();
+        const currentRelativeTop = targetRect.top - containerRect.top;
+
+        const diff = currentRelativeTop - relativeTop;
+        scrollbarWrap.scrollTop += diff;
+      }
+    }
+  } finally {
+    isSwitchingBranch.value = false;
+  }
+}
 
 watch([uploadedFiles, attachedSubmessageResources, attachedKnowledgeBases], async () => {
   await nextTick();

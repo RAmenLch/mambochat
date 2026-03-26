@@ -137,6 +137,7 @@ class MessageBase(BaseModel):
 
 class MessageCreate(MessageBase):
     sub_messages: List[SubMessageCreate]
+    parentId: Optional[str] = Field(None, description="父消息ID，如果不传则自动挂载到当前活跃路径的叶子节点")
 
 
 class MessageUpdate(BaseModel):
@@ -151,6 +152,13 @@ class Message(MessageBase):
     createdAt: datetime
     chatId: str
     sortOrder: int
+
+    # 新增树状结构与分支路由相关字段
+    parentId: Optional[str] = Field(None, description="父消息ID")
+    lastActiveAt: datetime = Field(..., description="最后活跃时间")
+    sibling_ids: List[str] = Field(default_factory=list, description="同级分支的消息ID列表(按创建时间排序)")
+    sibling_index: int = Field(0, description="当前消息在同级分支中的索引(从0开始)")
+
     sub_messages: List[SubMessage] = Field(default_factory=list)
     status: Optional[MessageStatus] = Field(None,
                                             description="消息的动态计算状态，例如 'generating', 'completed', 'failed'。仅在API响应时填充。")
@@ -190,6 +198,7 @@ class ReviewToolContent(BaseModel):
     batch_id: str = Field(..., description="中断批次号")
     decision: Optional[ToolDecision] = Field(None, description="用户的决策结果，None 表示尚未做出决策")
     input_schema: Optional[Dict[str, Any]] = None
+
     def to_json_string(self) -> str:
         """序列化为存储在 DB content 字段的 JSON 字符串"""
         return self.model_dump_json(exclude_none=False)
