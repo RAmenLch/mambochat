@@ -69,6 +69,15 @@ export default {
       nameRequired: 'Name cannot be empty',
       selectRequired: 'Please select an option',
     },
+    alert: {
+      reviewTitle: '【Review Required】',
+      reviewEmpty: '【               】',
+      completedTitle: '【Generation Completed】',
+      completedEmpty: '【                      】',
+      reviewBody: 'AI Assistant requires your review for tool call',
+      completedBody: 'AI Assistant has completed the generation',
+      permissionFailed: 'Failed to request system notification permission:'
+    },
   },
   settings: {
     nav: {

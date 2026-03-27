@@ -16,7 +16,38 @@ from backend.routers.chat_management import _apply_default_model_to_chat_object
 from backend.schemas import SubMessageType, MessageStatus
 from backend.schemas.message import ToolApprovalRequest
 
+from pydantic import BaseModel
+class TaskStatusRequest(BaseModel):
+    task_ids: List[str]
+
+class TaskStatusResponse(BaseModel):
+    running_tasks: List[str]
+
+
+
 router = APIRouter()
+
+
+
+@router.post(
+    "/tasks/status",
+    response_model=TaskStatusResponse,
+    summary="批量查询后台任务是否在运行",
+    tags=["Tasks"]
+)
+async def check_tasks_status(request: TaskStatusRequest):
+    """
+    用于前端断线重连时对齐后台异步任务的状态。
+    """
+    running = []
+    for tid in request.task_ids:
+        if await stream_manager.is_task_running(tid):
+            running.append(tid)
+    return TaskStatusResponse(running_tasks=running)
+
+
+
+
 
 
 async def _start_generation_task(

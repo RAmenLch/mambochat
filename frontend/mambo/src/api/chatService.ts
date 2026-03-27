@@ -177,3 +177,10 @@ export const submitToolReview = (messageId: string, data: ReviewToolRequest): Pr
 export const activateMessageBranch = (chatId: string, messageId: string): Promise<Message[]> => {
   return apiClient.put(`/chats/${chatId}/messages/${messageId}/activate`);
 };
+
+/**
+ * 批量查询后台任务状态
+ */
+export const checkTasksStatus = (taskIds: string[]): Promise<{ running_tasks: string[] }> => {
+  return apiClient.post('/tasks/status', { task_ids: taskIds });
+};

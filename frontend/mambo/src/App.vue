@@ -9,11 +9,16 @@ import { ElConfigProvider } from 'element-plus'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import en from 'element-plus/es/locale/lang/en'
 import { useI18n } from 'vue-i18n'
+// 1. 引入新建的提醒模块
+import { usePageAlert } from '@/composables/usePageAlert'
 
 const chatListStore = useChatListStore()
 const mcpStore = useMcpStore()
 const settingsStore = useSettingsStore()
 const { locale } = useI18n()
+
+// 2. 启动后台页面提醒功能 (标题闪烁、Logo旋转、系统通知)
+usePageAlert()
 
 // 根据全局设置计算 Element Plus 的语言包
 const elementLocale = computed(() => {

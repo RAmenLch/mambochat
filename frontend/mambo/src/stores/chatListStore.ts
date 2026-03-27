@@ -12,7 +12,7 @@ import {
   duplicateChat as duplicateChatAPI,
   generateChatTitle as generateChatTitleAPI,
   getChatLineage,
-  archiveChats as archiveChatsAPI
+  archiveChats as archiveChatsAPI, checkTasksStatus, getChatWithMessages
 } from '@/api/chatService';
 import { subscribeToGlobalNotifications } from '@/services/notificationService';
 import type { Chat, ChatCreate, ChatUpdate, MoveRequest, GlobalNotification, ChatArchiveRequest } from '@/api/types';
@@ -162,20 +162,75 @@ export const useChatListStore = defineStore('chatList', () => {
    */
   function initializeNotificationListener() {
     subscribeToGlobalNotifications({
-      onNotification: (notification: GlobalNotification) => {
-        if (notification.type === 'chat_update') {
+      onNotification: async (notification: GlobalNotification) => {
+
+        if (notification.type === 'connected') {
+          const sessionStore = useChatSessionStore();
+          const tasksToCheck: string[] = [];
+
+          if (refreshingTitleChatId.value) {
+            tasksToCheck.push(`title-gen-${refreshingTitleChatId.value}`);
+          }
+
+          const pendingZipMessages = sessionStore.currentChatMessages.filter(msg =>
+            msg.sub_messages.some(sm => sm.type === 'ZipHistory' && sm.status === 'generating')
+          );
+          pendingZipMessages.forEach(msg => {
+            tasksToCheck.push(`zip-history-gen-${msg.id}`);
+          });
+
+          if (tasksToCheck.length === 0) return;
+
+          try {
+            const { running_tasks } = await checkTasksStatus(tasksToCheck);
+
+            if (refreshingTitleChatId.value) {
+              const titleTaskId = `title-gen-${refreshingTitleChatId.value}`;
+              if (!running_tasks.includes(titleTaskId)) {
+                const targetChatId = refreshingTitleChatId.value;
+                getChatWithMessages(targetChatId).then(chatData => {
+                  const chatInList = chatList.value.find(c => c.id === targetChatId);
+                  if (chatInList && chatData.name) {
+                    chatInList.name = chatData.name;
+                  }
+                }).finally(() => {
+                  if (refreshingTitleChatId.value === targetChatId) {
+                    refreshingTitleChatId.value = null;
+                  }
+                });
+              }
+            }
+
+            if (pendingZipMessages.length > 0 && sessionStore.currentChatId) {
+              let needRefresh = false;
+              pendingZipMessages.forEach(msg => {
+                const zipTaskId = `zip-history-gen-${msg.id}`;
+                if (!running_tasks.includes(zipTaskId)) {
+                  needRefresh = true;
+                }
+              });
+
+              if (needRefresh) {
+                const chatData = await getChatWithMessages(sessionStore.currentChatId);
+                sessionStore.currentChatMessages = chatData.messages.sort((a, b) => a.sortOrder - b.sortOrder);
+              }
+            }
+
+          } catch (error) {
+            console.error('Failed to check tasks status during reconnection:', error);
+          }
+        }
+        else if (notification.type === 'chat_update') {
           const { id, name } = notification.payload;
           const chatInList = chatList.value.find(c => c.id === id);
           if (chatInList) {
             chatInList.name = name;
           }
-          // 无论是否在列表中找到，都清除加载状态
           if (refreshingTitleChatId.value === id) {
             refreshingTitleChatId.value = null;
           }
         } else if (notification.type === 'zip_history_update') {
           const sessionStore = useChatSessionStore();
-          // 仅当通知与当前活动会话相关时，才更新会话状态
           if (sessionStore.currentChatId === notification.payload.chat_id) {
             sessionStore._addOrUpdateSubMessage(
               notification.payload.message_id,
@@ -183,15 +238,10 @@ export const useChatListStore = defineStore('chatList', () => {
             );
           }
         } else if (notification.type === 'notification' && notification.category === 'title_generation_error') {
-          // 处理标题生成任务异常
           const errorChatId = notification.context.chat_id;
-
-          // 如果当前正在刷新的正是这个出错的会话，停止 Loading 状态
           if (refreshingTitleChatId.value === errorChatId) {
             refreshingTitleChatId.value = null;
           }
-
-          // 弹出错误提示，展示后端返回的具体错误信息
           ElMessage.error(notification.message);
         }
       },
@@ -200,6 +250,7 @@ export const useChatListStore = defineStore('chatList', () => {
       }
     });
   }
+
 
   return {
     // State

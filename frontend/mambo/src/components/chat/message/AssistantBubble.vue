@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/chat/message/AssistantBubble.vue -->
 <template>
   <div class="assistant-bubble-container" :class="{ 'is-collapsed': isBubbleCollapsed }">
 
@@ -5,7 +6,7 @@
     <div class="bubble-global-header">
       <div class="header-left">
         <el-icon><Cpu /></el-icon>
-        <span class="bubble-title">{{$t("chat.message.ai_assistant")}}</span>
+        <span class="bubble-title">{{ assistantName }}</span>
       </div>
       <div class="header-right">
         <el-tooltip v-if="reasoningSection" :content="isReasoningMinimized ? $t('chat.message.expandReasoning') : $t('chat.message.minimizeReasoning')" placement="top">
@@ -82,9 +83,12 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import type { Message, SubMessage } from '@/api/types';
 import { useAssistantTimeline, type BubbleSectionGroup } from '@/composables/useAssistantTimeline';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
+import { useChatSessionStore } from '@/stores/chatSessionStore';
+import { useAgentStore } from '@/stores/agentStore';
 import BubbleSectionGroupComponent from './BubbleSectionGroup.vue';
 import { Cpu, Minus, FullScreen, ArrowUpBold, ArrowDownBold, Loading, Warning, Check, Opportunity } from '@element-plus/icons-vue';
 
@@ -102,7 +106,11 @@ const emit = defineEmits<{
   (e: 'open-tool-dialog', subMessageId: string): void;
 }>();
 
+const { t } = useI18n();
 const interactionStore = useChatInteractionStore();
+const sessionStore = useChatSessionStore();
+const agentStore = useAgentStore();
+
 const messageRef = computed(() => props.message);
 
 const {
@@ -113,6 +121,17 @@ const {
 } = useAssistantTimeline(messageRef);
 
 const isBubbleCollapsed = ref(false);
+
+const assistantName = computed(() => {
+  const currentChat = sessionStore.currentChat;
+  if (currentChat?.chatMode === 'agent' && currentChat.agentId) {
+    const agent = agentStore.allAgents.find(a => a.id === currentChat.agentId);
+    if (agent && agent.name) {
+      return agent.name;
+    }
+  }
+  return t('chat.message.ai_assistant');
+});
 
 function toggleReasoningMinimize() {
   const newState = !isReasoningMinimized.value;

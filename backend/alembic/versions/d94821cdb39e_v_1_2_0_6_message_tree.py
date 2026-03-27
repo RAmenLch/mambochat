@@ -25,6 +25,53 @@ def upgrade() -> None:
     op.add_column('Message', sa.Column('lastActiveAt', sa.DateTime(), nullable=False, server_default='2000-01-01 00:00:00'))
     # ### end Alembic commands ###
 
+    # ==========================================
+    # 数据迁移逻辑：将旧的线性消息串联为树状结构
+    # ==========================================
+    bind = op.get_bind()
+
+    # 1. 提取所有旧消息，按 chatId 分组，按 createdAt 和 sortOrder 升序排序
+    query = sa.text("SELECT id, chatId, createdAt FROM Message ORDER BY chatId, createdAt ASC, sortOrder ASC")
+    results = bind.execute(query).fetchall()
+
+    updates = []
+    last_chat_id = None
+    last_message_id = None
+    current_sort_order = 1
+
+    for row in results:
+        msg_id = row[0]
+        chat_id = row[1]
+        created_at = row[2]
+
+        if chat_id != last_chat_id:
+            # 遇到新的 chat，重置 parent_id 为 None，深度层级为 1
+            last_chat_id = chat_id
+            parent_id = None
+            current_sort_order = 1
+        else:
+            # 同一个 chat，前一条消息即为当前消息的 parent，深度层级 + 1
+            parent_id = last_message_id
+            current_sort_order += 1
+
+        updates.append({
+            "p_id": msg_id,
+            "p_parent_id": parent_id,
+            "p_last_active_at": created_at,
+            "p_sort_order": current_sort_order
+        })
+
+        last_message_id = msg_id
+
+    # 2. 分批更新 parentId, lastActiveAt 和 sortOrder，防止数据量过大导致 SQLite 报错
+    if updates:
+        update_stmt = sa.text(
+            "UPDATE Message SET parentId = :p_parent_id, lastActiveAt = :p_last_active_at, sortOrder = :p_sort_order WHERE id = :p_id"
+        )
+        batch_size = 2000
+        for i in range(0, len(updates), batch_size):
+            bind.execute(update_stmt, updates[i:i + batch_size])
+
 
 def downgrade() -> None:
     """Downgrade schema."""
@@ -32,3 +79,4 @@ def downgrade() -> None:
     op.drop_column('Message', 'lastActiveAt')
     op.drop_column('Message', 'parentId')
     # ### end Alembic commands ###
+

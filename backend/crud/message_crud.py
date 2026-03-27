@@ -12,19 +12,24 @@ from backend.models import chat_model
 from backend import schemas
 from backend.models.chat_model import SubMessage
 from backend.schemas.enums import MessageStatus
-from backend.config.timezone_config import get_configured_now
+from backend.config.timezone_config import get_configured_now, TZ
 
 
 def _safe_timestamp(dt) -> float:
     """
     安全提取时间戳，解决 SQLAlchemy 混合查询时产生的 datetime 与 str 类型不一致，
     以及 naive 与 aware datetime 比较报错的问题。
+    所有数据库返回的时间（SQLite为naive）均视为配置时区时间进行转换。
     """
     if not dt:
         return 0.0
     if isinstance(dt, datetime):
         if dt.tzinfo is None:
-            return dt.replace(tzinfo=timezone.utc).timestamp()
+            # 数据库返回的时间不带时区，视为当前配置时区
+            try:
+                return TZ.localize(dt).timestamp()
+            except AttributeError:
+                return dt.replace(tzinfo=TZ).timestamp()
         return dt.timestamp()
     if isinstance(dt, str):
         try:
@@ -32,7 +37,11 @@ def _safe_timestamp(dt) -> float:
             dt_str = dt.replace("Z", "+00:00")
             parsed = datetime.fromisoformat(dt_str)
             if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
+                # 字符串解析为不带时区，视为当前配置时区
+                try:
+                    parsed = TZ.localize(parsed)
+                except AttributeError:
+                    parsed = parsed.replace(tzinfo=TZ)
             return parsed.timestamp()
         except ValueError:
             pass
@@ -70,7 +79,8 @@ async def get_message(db: AsyncSession, message_id: str) -> Optional[chat_model.
     return result.scalars().first()
 
 
-async def update_message(db: AsyncSession, message_id: str, message_update: schemas.MessageUpdate) -> Optional[chat_model.Message]:
+async def update_message(db: AsyncSession, message_id: str, message_update: schemas.MessageUpdate) -> Optional[
+    chat_model.Message]:
     db_message = await get_message(db, message_id=message_id)
     if not db_message:
         return None
@@ -109,7 +119,7 @@ async def _get_active_linear_path(db: AsyncSession, chat_id: str) -> List[chat_m
     for msg in all_messages:
         parent_map.setdefault(msg.parentId, []).append(msg)
 
-    # 修复点 1：使用 _safe_timestamp 避免类型冲突
+    # 使用 _safe_timestamp 避免类型冲突
     for pid in parent_map:
         parent_map[pid].sort(key=lambda x: _safe_timestamp(x.createdAt))
 
@@ -118,7 +128,7 @@ async def _get_active_linear_path(db: AsyncSession, chat_id: str) -> List[chat_m
     if not roots:
         return active_list
 
-    # 修复点 2：使用 _safe_timestamp
+    # 使用 _safe_timestamp
     current = max(roots, key=lambda x: _safe_timestamp(x.lastActiveAt))
 
     while current:
@@ -134,17 +144,28 @@ async def _get_active_linear_path(db: AsyncSession, chat_id: str) -> List[chat_m
         children = parent_map.get(current.id, [])
         if not children:
             break
-        # 修复点 3：使用 _safe_timestamp
-        current = max(children, key=lambda x: _safe_timestamp(x.lastActiveAt))
+
+        # 使用 _safe_timestamp
+        max_child = max(children, key=lambda x: _safe_timestamp(x.lastActiveAt))
+
+        curr_time = _safe_timestamp(current.lastActiveAt)
+        child_time = _safe_timestamp(max_child.lastActiveAt)
+
+        # 容差 0.1 秒，防止相同事务内微小精度差异
+        if curr_time - child_time > 0.1:
+            break
+
+        current = max_child
 
     return active_list
 
 
-async def get_messages_by_chat(db: AsyncSession, chat_id: str, skip: int = 0, limit: Optional[int] = None) -> List[chat_model.Message]:
+async def get_messages_by_chat(db: AsyncSession, chat_id: str, skip: int = 0, limit: Optional[int] = None) -> List[
+    chat_model.Message]:
     active_list = await _get_active_linear_path(db, chat_id)
 
     if limit is not None:
-        return active_list[skip : skip + limit]
+        return active_list[skip: skip + limit]
     return active_list[skip:]
 
 
@@ -167,12 +188,14 @@ async def create_message(db: AsyncSession, message: schemas.MessageCreate, chat_
         if parent_msg:
             sort_order = parent_msg.sortOrder + 1
 
+    now = get_configured_now()
+
     db_message = chat_model.Message(
         role=message.role,
         chatId=chat_id,
         parentId=parent_id,
         sortOrder=sort_order,
-        lastActiveAt=get_configured_now()
+        lastActiveAt=now
     )
     db.add(db_message)
     await db.flush()
@@ -187,6 +210,38 @@ async def create_message(db: AsyncSession, message: schemas.MessageCreate, chat_
             config=sub_msg_data.config.model_dump_json()
         )
         db.add(db_sub_message)
+
+    # --- 核心修复：同步更新所有祖先的 lastActiveAt ---
+    if parent_id:
+        ancestor_ids = set()
+
+        # 优先尝试从已加载的 active_list 中提取祖先，避免额外查库
+        parent_index = -1
+        for i, msg in enumerate(active_list):
+            if msg.id == parent_id:
+                parent_index = i
+                break
+
+        if parent_index != -1:
+            ancestor_ids = {msg.id for msg in active_list[:parent_index + 1]}
+        else:
+            # 如果 parent_id 不在 active_list 中，退化为全量查库回溯
+            result = await db.execute(
+                select(chat_model.Message.id, chat_model.Message.parentId).filter(chat_model.Message.chatId == chat_id))
+            all_msgs = result.all()
+            parent_map = {row.id: row.parentId for row in all_msgs}
+
+            curr = parent_id
+            while curr:
+                ancestor_ids.add(curr)
+                curr = parent_map.get(curr)
+
+        if ancestor_ids:
+            await db.execute(
+                update(chat_model.Message)
+                .where(chat_model.Message.id.in_(ancestor_ids))
+                .values(lastActiveAt=now)
+            )
 
     await db.commit()
     await db.refresh(db_message, ['sub_messages'])
@@ -264,20 +319,30 @@ async def activate_message_path(db: AsyncSession, message_id: str) -> bool:
     now = get_configured_now()
     to_update_ids = set()
 
+    # 1. 向上回溯：收集所有祖先节点
     curr = db_message
     while curr:
         to_update_ids.add(curr.id)
         curr = node_map.get(curr.parentId)
 
+    # 2. 向下延伸：找到当前激活的叶子节点（如果存在且连续）
     curr = db_message
     while True:
         children = parent_map.get(curr.id, [])
         if not children:
             break
-        # 修复点 4：使用 _safe_timestamp
-        curr = max(children, key=lambda x: _safe_timestamp(x.lastActiveAt))
+
+        max_child = max(children, key=lambda x: _safe_timestamp(x.lastActiveAt))
+
+        curr_time = _safe_timestamp(curr.lastActiveAt)
+        child_time = _safe_timestamp(max_child.lastActiveAt)
+        if curr_time - child_time > 0.1:
+            break
+
+        curr = max_child
         to_update_ids.add(curr.id)
 
+    # 3. 更新整条路径的时间戳为 now
     if to_update_ids:
         await db.execute(
             update(chat_model.Message)
@@ -316,7 +381,8 @@ async def get_sub_message(db: AsyncSession, sub_message_id: str) -> Optional[cha
     return result.scalars().first()
 
 
-async def update_sub_message(db: AsyncSession, sub_message_id: str, sub_message_update: schemas.SubMessageUpdate) -> Optional[chat_model.SubMessage]:
+async def update_sub_message(db: AsyncSession, sub_message_id: str, sub_message_update: schemas.SubMessageUpdate) -> \
+Optional[chat_model.SubMessage]:
     db_sub_message = await get_sub_message(db, sub_message_id)
     if not db_sub_message:
         return None

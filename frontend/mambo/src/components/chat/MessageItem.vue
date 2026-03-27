@@ -122,6 +122,7 @@ import type { Message, SubMessage, SubMessageCreate, MessageStatus, FileResponse
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { useAgentStore } from '@/stores/agentStore'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { User, Cpu, Loading, CircleCheck, Clock } from '@element-plus/icons-vue'
 import { copyToClipboard } from '@/utils/clipboard'
@@ -159,6 +160,7 @@ const { t } = useI18n()
 const interactionStore = useChatInteractionStore()
 const sessionStore = useChatSessionStore()
 const settingsStore = useSettingsStore()
+const agentStore = useAgentStore()
 const { globalSettings } = storeToRefs(settingsStore)
 const { messageRecencyRanks } = storeToRefs(sessionStore)
 
@@ -233,8 +235,19 @@ const roleClass = computed(() => ({
 }))
 
 const avatarUrl = computed(() => {
-  if (props.message.role === 'user') return globalSettings.value.user_avatar_url
-  if (props.message.role === 'assistant') return globalSettings.value.ai_avatar_url
+  if (props.message.role === 'user') {
+    return globalSettings.value.user_avatar_url
+  }
+  if (props.message.role === 'assistant') {
+    const currentChat = sessionStore.currentChat
+    if (currentChat?.chatMode === 'agent' && currentChat.agentId) {
+      const agent = agentStore.allAgents.find(a => a.id === currentChat.agentId)
+      if (agent && agent.agentAvatarUrl) {
+        return agent.agentAvatarUrl
+      }
+    }
+    return globalSettings.value.ai_avatar_url
+  }
   return null
 })
 

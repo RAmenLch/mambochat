@@ -69,6 +69,16 @@ export default {
       nameRequired: '名称不能为空',
       selectRequired: '请选择一项',
     },
+    alert: {
+      reviewTitle: '【请审核】',
+      reviewEmpty: '【　　　】',
+      completedTitle: '【生成完成】',
+      completedEmpty: '【　　　　】',
+      reviewBody: 'AI 助手需要您审核工具调用',
+      completedBody: 'AI 助手已完成内容生成',
+      permissionFailed: '请求系统通知权限失败:'
+    },
+
   },
   settings: {
     nav: {

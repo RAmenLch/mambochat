@@ -255,6 +255,8 @@ async def run_title_generation_task(chat_id: str):
     后台任务：为指定的会话生成并更新标题。
     """
     task_id = f"title-gen-{chat_id}"
+    await stream_manager.mark_task_running(task_id)
+
     async with AsyncSessionLocal() as db:
         try:
             worker = await _get_worker_from_settings(db, ["title_generation_model_id", "default_model_id"])
@@ -272,6 +274,7 @@ async def run_title_generation_task(chat_id: str):
         except Exception as e:
             print(f"[Title Generation Service Error] for chat {chat_id}: {e}")
         finally:
+            await stream_manager.mark_task_completed(task_id)
             await stream_manager.close_stream(task_id)
 
 
@@ -280,6 +283,8 @@ async def run_zip_history_generation_task(chat_id: str, target_message_id: str):
     后台任务：为指定消息之前的对话历史生成压缩摘要。
     """
     task_id = f"zip-history-gen-{target_message_id}"
+    await stream_manager.mark_task_running(task_id)
+
     async with AsyncSessionLocal() as db:
         try:
             worker = await _get_worker_for_chat(db, chat_id)
@@ -314,6 +319,7 @@ async def run_zip_history_generation_task(chat_id: str, target_message_id: str):
         except Exception as e:
             print(f"[Zip History Generation Service Error] for message {target_message_id}: {e}")
         finally:
+            await stream_manager.mark_task_completed(task_id)
             await stream_manager.close_stream(task_id)
 
 

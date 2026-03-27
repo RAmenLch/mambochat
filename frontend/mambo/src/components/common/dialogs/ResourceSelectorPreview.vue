@@ -4,12 +4,11 @@
     <el-empty v-if="selectedResources.length === 0" :description="$t('resource.editor.placeholder')" />
 
     <!-- 单选预览 -->
-    <el-card v-else-if="selectedResources.length === 1" shadow="never" class="preview-card">
-      <template #header>
-        <div class="preview-header">
-          <strong>{{ $t('resource.selector.previewHeader', { name: selectedResources[0].name }) }}</strong>
-        </div>
-      </template>
+    <div v-else-if="selectedResources.length === 1" class="preview-card">
+      <div class="preview-header">
+        <strong>{{ $t('resource.selector.previewHeader', { name: selectedResources[0].name }) }}</strong>
+      </div>
+
       <el-scrollbar class="preview-scrollbar" v-loading="isPreviewLoading">
         <!-- Knowledge Base Preview -->
         <template v-if="selectedResources[0].resourceType === 'knowledge_base'">
@@ -77,15 +76,14 @@
         <!-- Text Resource Preview -->
         <pre v-else class="preview-content">{{ selectedResources[0].latest_version?.content || $t('resource.selector.noContent') }}</pre>
       </el-scrollbar>
-    </el-card>
+    </div>
 
     <!-- 多选预览 -->
-    <el-card v-else shadow="never" class="preview-card">
-      <template #header>
-        <div class="preview-header">
-          <strong>{{ $t('resource.selector.multiPreview', { count: selectedResources.length }) }}</strong>
-        </div>
-      </template>
+    <div v-else class="preview-card">
+      <div class="preview-header">
+        <strong>{{ $t('resource.selector.multiPreview', { count: selectedResources.length }) }}</strong>
+      </div>
+
       <el-scrollbar class="preview-scrollbar" v-loading="isPreviewLoading">
         <div v-for="(res, index) in selectedResources" :key="res.id" class="multi-preview-item">
           <div class="multi-preview-label">#{{ index + 1 }} {{ res.name }}</div>
@@ -116,7 +114,7 @@
           <el-divider v-if="index < selectedResources.length - 1" border-style="dashed" />
         </div>
       </el-scrollbar>
-    </el-card>
+    </div>
   </el-main>
 </template>
 
@@ -151,31 +149,203 @@ const formatFileSize = (bytes: number): string => {
 </script>
 
 <style scoped>
-.resource-preview-main { padding: 0; background-color: var(--el-bg-color-page); }
-.preview-card { height: 100%; border: none; display: flex; flex-direction: column; background-color: transparent; }
-:deep(.preview-card .el-card__header) { flex-shrink: 0; background-color: #fff; }
-:deep(.preview-card .el-card__body) { flex-grow: 1; padding: 0; overflow: hidden; }
-.preview-scrollbar { padding: 20px; }
-.preview-content { white-space: pre-wrap; word-wrap: break-word; font-family: var(--el-font-family); font-size: 14px; margin: 0; }
+.resource-preview-main {
+  padding: 0;
+  background-color: var(--el-bg-color);
+  display: flex;
+  flex-direction: column;
+}
 
-.kb-preview-wrapper { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; text-align: center; height: 100%; }
-.kb-desc { color: var(--el-text-color-secondary); margin-top: 10px; max-width: 80%; }
+.preview-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
 
-.file-preview-wrapper { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; gap: 16px; width: 100%; }
-.file-preview-image { width: 100%; max-height: 400px; display: flex; justify-content: center; align-items: center; background-color: #f5f5f5; border-radius: 4px; overflow: hidden; border: 1px solid var(--el-border-color-lighter); }
-.preview-img { width: 100%; height: 100%; }
-.file-generic { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 24px; border: 1px solid var(--el-border-color-lighter); border-radius: 8px; background-color: var(--el-fill-color-lighter); width: 100%; max-width: 300px; text-align: center; }
-.file-meta { display: flex; flex-direction: column; gap: 4px; }
-.file-name { font-weight: 500; color: var(--el-text-color-primary); word-break: break-all; }
-.file-size { font-size: 12px; color: var(--el-text-color-secondary); }
-.file-empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 200px; color: var(--el-text-color-secondary); gap: 12px; }
-.image-slot { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; height: 100%; background: var(--el-fill-color-light); color: var(--el-text-color-secondary); font-size: 12px; gap: 8px; }
+.preview-header {
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  font-size: 16px;
+  color: var(--el-text-color-primary);
+  background-color: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(8px);
+  z-index: 10;
+}
 
-.file-preview-wrapper.mini { padding: 10px; flex-direction: row; justify-content: flex-start; align-items: flex-start; background-color: var(--el-fill-color-blank); border: 1px solid var(--el-border-color-lighter); border-radius: 4px; }
-.file-preview-image.mini { width: 80px; height: 80px; flex-shrink: 0; margin-right: 12px; }
-.file-generic.mini { flex-direction: row; padding: 8px; width: auto; max-width: none; background: none; border: none; gap: 8px; font-size: 13px; }
-.mini-empty { color: var(--el-text-color-placeholder); font-style: italic; font-size: 13px; padding: 8px 0; }
+.preview-scrollbar {
+  padding: 24px;
+}
 
-.multi-preview-item { margin-bottom: 10px; }
-.multi-preview-label { font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 4px; font-weight: bold; }
+.preview-content {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-family: 'Fira Code', var(--el-font-family-monospace), monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0;
+  padding: 20px;
+  background-color: var(--el-fill-color-light);
+  border-radius: 8px;
+  color: var(--el-text-color-regular);
+}
+
+.kb-preview-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+}
+
+.kb-preview-wrapper h3 {
+  margin: 16px 0 8px;
+  color: var(--el-text-color-primary);
+}
+
+.kb-desc {
+  color: var(--el-text-color-secondary);
+  font-size: 14px;
+  max-width: 400px;
+  line-height: 1.5;
+}
+
+.file-preview-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  gap: 16px;
+  width: 100%;
+}
+
+.file-preview-image {
+  width: 100%;
+  max-height: 400px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: #f5f5f5;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--el-border-color-lighter);
+}
+
+.preview-img {
+  width: 100%;
+  height: 100%;
+}
+
+.file-generic {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 32px;
+  border-radius: 12px;
+  background-color: var(--el-fill-color-lighter);
+  width: 100%;
+  max-width: 320px;
+  text-align: center;
+  margin: 0 auto;
+}
+
+.file-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.file-name {
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+  word-break: break-all;
+}
+
+.file-size {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.file-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  color: var(--el-text-color-secondary);
+  gap: 12px;
+}
+
+.image-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  gap: 8px;
+}
+
+.file-preview-wrapper.mini {
+  padding: 10px;
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: flex-start;
+  background-color: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 4px;
+}
+
+.file-preview-image.mini {
+  width: 80px;
+  height: 80px;
+  flex-shrink: 0;
+  margin-right: 12px;
+}
+
+.file-generic.mini {
+  flex-direction: row;
+  padding: 8px;
+  width: auto;
+  max-width: none;
+  background: none;
+  border: none;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.mini-empty {
+  color: var(--el-text-color-placeholder);
+  font-style: italic;
+  font-size: 13px;
+  padding: 8px 0;
+}
+
+.multi-preview-item {
+  margin-bottom: 24px;
+}
+
+.multi-preview-label {
+  font-size: 14px;
+  color: var(--el-color-primary);
+  margin-bottom: 8px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+}
+
+.multi-preview-label::before {
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 14px;
+  background-color: var(--el-color-primary);
+  border-radius: 2px;
+  margin-right: 8px;
+}
 </style>

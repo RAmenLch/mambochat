@@ -2,12 +2,16 @@
 <template>
   <div class="sidebar-wrapper">
     <div class="toolbar">
-      <el-radio-group :model-value="selectorMode" @update:model-value="val => emit('update:selectorMode', val)" size="small" class="mode-switch">
-        <el-radio-button label="resource">{{ $t('resource.selector.modeResource') }}</el-radio-button>
-        <el-radio-button label="kb">{{ $t('resource.selector.modeKb') }}</el-radio-button>
-      </el-radio-group>
-
-      <el-divider direction="vertical" class="toolbar-divider" />
+      <div class="toolbar-header">
+        <el-radio-group :model-value="selectorMode" @update:model-value="val => emit('update:selectorMode', val)" size="small">
+          <el-radio-button label="resource">{{ $t('resource.selector.modeResource') }}</el-radio-button>
+          <el-radio-button label="kb">{{ $t('resource.selector.modeKb') }}</el-radio-button>
+        </el-radio-group>
+        <div class="multi-select-switch">
+          <span class="switch-label">{{ $t('resource.selector.multiSelect') }}</span>
+          <el-switch v-model="isMultiSelectMode" size="small" />
+        </div>
+      </div>
 
       <div class="search-wrapper">
         <el-input
@@ -16,20 +20,17 @@
           clearable
           class="search-input"
           @input="handleSearchInput"
-        />
-        <el-tooltip :content="$t('resource.selector.regexTooltip')" placement="top">
-          <el-button :type="enableRegex ? 'primary' : 'default'" size="small" class="regex-btn" @click="toggleRegex">.*</el-button>
-        </el-tooltip>
-      </div>
-
-      <div class="multi-select-switch">
-        <span>{{ $t('resource.selector.multiSelect') }}</span>
-        <el-switch v-model="isMultiSelectMode" />
+        >
+          <template #append>
+            <el-tooltip :content="$t('resource.selector.regexTooltip')" placement="top">
+              <el-button :class="{ 'is-active-regex': enableRegex }" @click="toggleRegex">.*</el-button>
+            </el-tooltip>
+          </template>
+        </el-input>
       </div>
     </div>
 
     <el-aside width="100%" class="resource-tree-aside">
-      <!-- 搜索结果列表视图 -->
       <div v-if="searchText" class="search-result-container">
         <div v-if="isSearching" class="loading-state">
           <el-icon class="is-loading"><Loading /></el-icon>
@@ -63,7 +64,6 @@
         </el-scrollbar>
       </div>
 
-      <!-- 默认树形视图 -->
       <el-scrollbar v-else>
         <div v-if="isResourcesLoading && resourceTree.length === 0" class="loading-state">
           <el-skeleton :rows="5" animated />
@@ -83,7 +83,7 @@
             <span class="custom-tree-node" :class="{ 'is-selected': isResourceSelected(data.id), 'is-disabled': isNodeDisabled(data) }">
               <span class="node-content">
                 <el-icon>
-                  <Reading v-if="data.resourceType === 'skill'" /> <!-- 统一使用 Reading 图标 -->
+                  <Reading v-if="data.resourceType === 'skill'" />
                   <Collection v-else-if="data.resourceType === 'knowledge_base'" />
                   <Folder v-else-if="data.itemType === 'folder'" />
                   <Memo v-else-if="data.resourceType === 'submessage_template'" />
@@ -144,7 +144,6 @@ const selectionType = ref<ResourceType | null>(null);
 const STORAGE_KEY = 'resource_selector_multi_select_mode';
 const expandedKeys = ref<Set<string>>(new Set());
 
-// Search State
 const isSearching = ref(false);
 const enableRegex = ref(false);
 const searchResult = ref<ResourceSearchResultItem[]>([]);
@@ -326,7 +325,6 @@ const handleNodeCollapse = (data: ResourceNode) => { expandedKeys.value.delete(d
 
 const handleNodeClick = async (data: TreeNodeData) => {
   const resource = data as ResourceNode;
-  // 允许选中：普通资源、知识库文件夹、SKILL文件夹
   const isSelectable = resource.itemType === 'resource' || (resource.itemType === 'folder' && (resource.resourceType === 'knowledge_base' || resource.resourceType === 'skill'));
   if (!isSelectable || isNodeDisabled(resource)) return;
   selectResourceById(resource.id, resource.resourceType, resource);
@@ -360,35 +358,195 @@ const handleScroll = ({ scrollTop, scrollHeight, clientHeight }: any) => {
 </script>
 
 <style scoped>
-.sidebar-wrapper { display: flex; flex-direction: column; width: 320px; border-right: 1px solid var(--el-border-color-lighter); background-color: #fff; }
-.toolbar { display: flex; flex-direction: column; gap: 12px; padding: 12px; border-bottom: 1px solid var(--el-border-color-lighter); }
-.search-wrapper { display: flex; align-items: center; gap: 8px; }
-.search-input { flex-grow: 1; }
-.regex-btn { font-family: monospace; font-weight: bold; padding: 8px; }
-.multi-select-switch { display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: var(--el-text-color-regular); }
-.resource-tree-aside { flex-grow: 1; display: flex; flex-direction: column; overflow: hidden; }
+.sidebar-wrapper {
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  border-right: 1px solid var(--el-border-color-lighter);
+  background-color: var(--el-bg-color-page);
+}
 
-/* Tree & Search Results Styles */
-.custom-tree-node { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 2px 8px 2px 0; }
-.custom-tree-node.is-selected { background-color: var(--el-color-primary-light-9); }
-.custom-tree-node.is-disabled { color: var(--el-text-color-disabled); cursor: not-allowed; }
-.custom-tree-node.is-disabled .el-icon, .custom-tree-node.is-disabled .resource-type-tag { opacity: 0.6; }
-.node-content { display: flex; align-items: center; gap: 8px; overflow: hidden; }
-.node-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.loading-icon { animation: rotating 2s linear infinite; color: var(--el-text-color-secondary); margin-left: 4px; }
-.resource-type-tag { flex-shrink: 0; margin-left: 8px; }
+.toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background-color: var(--el-bg-color);
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
 
-.search-result-container { height: 100%; display: flex; flex-direction: column; }
-.search-list { padding: 10px; }
-.search-item { padding: 10px; border-bottom: 1px solid var(--el-border-color-lighter); cursor: pointer; transition: background-color 0.2s; }
-.search-item:hover { background-color: var(--el-fill-color-light); }
-.search-item.is-selected { background-color: var(--el-color-primary-light-9); }
-.search-item-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
-.search-item-title { font-weight: 500; font-size: 14px; color: var(--el-text-color-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; margin-right: 8px; }
-.search-item-path { font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.search-item-context { font-size: 12px; color: var(--el-text-color-regular); background-color: var(--el-fill-color-lighter); padding: 4px; border-radius: 4px; line-height: 1.4; word-break: break-all; }
-:deep(.highlight-text) { color: var(--el-color-primary); font-weight: bold; background-color: var(--el-color-primary-light-9); }
-.empty-state, .loading-state { padding: 40px 0; text-align: center; color: var(--el-text-color-secondary); }
-.load-more-wrapper { text-align: center; padding: 10px 0; }
-@keyframes rotating { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+.toolbar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.multi-select-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.switch-label {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.is-active-regex {
+  color: var(--el-color-primary);
+  font-weight: bold;
+}
+
+.resource-tree-aside {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 8px 0;
+}
+
+.custom-tree-node {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 4px 8px 4px 0;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.custom-tree-node:hover {
+  background-color: var(--el-fill-color-light);
+}
+
+.custom-tree-node.is-selected {
+  background-color: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+}
+
+.custom-tree-node.is-disabled {
+  color: var(--el-text-color-disabled);
+  cursor: not-allowed;
+}
+
+.custom-tree-node.is-disabled .el-icon,
+.custom-tree-node.is-disabled .resource-type-tag {
+  opacity: 0.6;
+}
+
+.node-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  overflow: hidden;
+}
+
+.node-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.loading-icon {
+  animation: rotating 2s linear infinite;
+  color: var(--el-text-color-secondary);
+  margin-left: 4px;
+}
+
+.resource-type-tag {
+  flex-shrink: 0;
+  margin-left: 8px;
+  transform: scale(0.9);
+}
+
+.search-result-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.search-list {
+  padding: 10px;
+}
+
+.search-item {
+  margin: 0 12px 8px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background-color: var(--el-bg-color);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.search-item:hover {
+  border-color: var(--el-border-color-lighter);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+
+.search-item.is-selected {
+  border-color: var(--el-color-primary-light-5);
+  background-color: var(--el-color-primary-light-9);
+}
+
+.search-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.search-item-title {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--el-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  margin-right: 8px;
+}
+
+.search-item-path {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-item-context {
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+  background-color: var(--el-fill-color-lighter);
+  padding: 4px;
+  border-radius: 4px;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+:deep(.highlight-text) {
+  color: var(--el-color-primary);
+  font-weight: bold;
+  background-color: var(--el-color-primary-light-9);
+}
+
+.empty-state, .loading-state {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--el-text-color-secondary);
+}
+
+.load-more-wrapper {
+  text-align: center;
+  padding: 10px 0;
+}
+
+@keyframes rotating {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
 </style>

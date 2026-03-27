@@ -17,20 +17,18 @@ async def _notification_stream_generator():
     """
     queue = await stream_manager.subscribe(GLOBAL_NOTIFICATIONS_STREAM_ID)
     try:
+        yield f"data: {json.dumps({'type': 'connected'})}\n\n"
+
         while True:
-            # 等待从队列中获取通知数据
             notification_data = await queue.get()
-            if notification_data is None:  # 流结束的信号
+            if notification_data is None:
                 break
 
-            # 将数据格式化为SSE事件并发送
             yield f"data: {json.dumps(notification_data)}\n\n"
             queue.task_done()
     except asyncio.CancelledError:
-        # 当客户端断开连接时，FastAPI会抛出CancelledError
         print(f"[Notifications] Client disconnected from global stream.")
     finally:
-        # 确保在任何情况下都取消订阅，以防止内存泄漏
         await stream_manager.unsubscribe(GLOBAL_NOTIFICATIONS_STREAM_ID, queue)
 
 

@@ -8,9 +8,7 @@
     @close="handleDialogClose"
   >
     <div class="resource-selector-body">
-      <!-- 模式 A: 资源浏览与选择 -->
       <el-container v-if="selectorMode === 'resource'" class="resource-selector-container">
-        <!-- 左侧：侧边栏 (树形/搜索) -->
         <ResourceSelectorSidebar
           v-model:selected-resources="selectedResources"
           v-model:is-preview-loading="isPreviewLoading"
@@ -18,14 +16,12 @@
           :context-config="contextConfig"
         />
 
-        <!-- 右侧：预览区 -->
         <ResourceSelectorPreview
           :selected-resources="selectedResources"
           :is-preview-loading="isPreviewLoading"
         />
       </el-container>
 
-      <!-- 模式 B: 知识库向量检索 -->
       <KnowledgeBaseSearchDialog
         v-else
         @cancel="selectorMode = 'resource'"
@@ -33,7 +29,6 @@
       />
     </div>
 
-    <!-- Footer: 仅在资源模式下显示 -->
     <template #footer v-if="selectorMode === 'resource'">
       <div class="action-buttons">
         <el-button
@@ -74,7 +69,7 @@ import { Search } from '@element-plus/icons-vue';
 import type { Resource, KBSearchResultItem } from '@/api/types';
 import ResourceSelectorSidebar from './ResourceSelectorSidebar.vue';
 import ResourceSelectorPreview from './ResourceSelectorPreview.vue';
-import KnowledgeBaseSearchDialog from '@/components/chat/dialogs/KnowledgeBaseSearchDialog.vue'; // 保持原路径或根据实际情况调整
+import KnowledgeBaseSearchDialog from '@/components/chat/dialogs/KnowledgeBaseSearchDialog.vue';
 
 const props = defineProps<{
   visible: boolean;
@@ -88,12 +83,10 @@ const emit = defineEmits<{
   (e: 'mount-knowledge-base', resources: Resource[]): void;
 }>();
 
-// --- State ---
 const selectorMode = ref<'resource' | 'kb'>('resource');
 const selectedResources = ref<Resource[]>([]);
 const isPreviewLoading = ref(false);
 
-// --- Context Configuration Logic ---
 const contextConfig = computed(() => {
   switch (props.context) {
     case 'chat-settings':
@@ -129,7 +122,6 @@ const contextConfig = computed(() => {
   }
 });
 
-// --- Button Display Logic ---
 const showMountButton = computed(() => {
   if (selectedResources.value.length === 0) return false;
   return selectedResources.value.every(r => contextConfig.value.canMount.includes(r.resourceType as string));
@@ -145,14 +137,12 @@ const showKbSearchButton = computed(() => {
   return selectedResources.value.every(r => contextConfig.value.canMountKb.includes(r.resourceType as string));
 });
 
-// --- Watchers ---
 watch(() => props.visible, (isVisible) => {
   if (isVisible) {
     selectorMode.value = 'resource';
   }
 });
 
-// --- Action Handlers ---
 function handleMount() {
   if (selectedResources.value.length === 0) return;
   emit('mount-resources', selectedResources.value);
@@ -213,18 +203,22 @@ function handleDialogClose() {
 .resource-selector-body {
   display: flex;
   flex-direction: column;
-  height: 60vh;
+  height: 65vh;
 }
+
 .resource-selector-container {
   flex-grow: 1;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 4px;
-  overflow: hidden;
   display: flex;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  overflow: hidden;
+  background-color: var(--el-bg-color);
 }
+
 .action-buttons {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   justify-content: flex-end;
+  padding-top: 16px;
 }
 </style>

@@ -45,6 +45,7 @@ export interface FileResponse {
 }
 
 export type GlobalNotification =
+  | { type: 'connected' }
   | {
       type: 'chat_update'
       payload: ChatUpdateNotificationPayload

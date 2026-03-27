@@ -159,6 +159,7 @@ import { useChatSessionStore } from '@/stores/chatSessionStore';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { useProviderStore } from '@/stores/providerStore';
 import { useSystemConfigStore } from '@/stores/systemConfigStore';
+import { useAgentStore } from '@/stores/agentStore';
 import { useChatInput } from '@/composables/useChatInput';
 import { useResizablePanels } from '@/composables/useResizablePanels';
 import { useTokenEstimator } from '@/composables/useTokenEstimator';
@@ -189,6 +190,7 @@ const chatSessionStore = useChatSessionStore();
 const chatInteractionStore = useChatInteractionStore();
 const providerStore = useProviderStore();
 const systemConfigStore = useSystemConfigStore();
+const agentStore = useAgentStore();
 
 const { refreshingTitleChatId } = storeToRefs(chatListStore);
 const {
@@ -279,6 +281,9 @@ const logDialogMessageId = ref<string | null>(null);
 
 onMounted(() => {
   systemConfigStore.fetchSystemConfig();
+  if (agentStore.allAgents.length === 0) {
+    agentStore.fetchAllAgents();
+  }
 });
 
 const isTitleRefreshing = computed(() => refreshingTitleChatId.value === currentChat.value?.id);
