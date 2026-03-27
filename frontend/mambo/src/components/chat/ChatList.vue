@@ -13,8 +13,8 @@
         :enable-multi-select="true"
         class="chat-tree"
         @node-click="handleNodeClick"
-        @node-contextmenu="handleNodeContextMenu"
-        @root-contextmenu="openRootContextMenu"
+        @node-contextmenu="onNodeContextMenu"
+        @root-contextmenu="onRootContextMenu"
         @move="handleMove"
         @node-expand="handleNodeExpand"
       >
@@ -41,39 +41,45 @@
         <span :style="contextMenuPosition" />
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item
-              v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'"
-              command="newChat"
-            >
-              <el-icon><Plus /></el-icon>{{ $t('chat.sidebar.newChat') }}
-            </el-dropdown-item>
-            <el-dropdown-item
-              v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'"
-              command="newFolder"
-            >
-              <el-icon><FolderAdd /></el-icon>{{ $t('chat.sidebar.newFolder') }}
-            </el-dropdown-item>
-
-            <template v-if="contextMenuItem">
-              <el-dropdown-item command="archive" divided>
+            <!-- 多选模式下的菜单 -->
+            <template v-if="selectedNodeCount > 1">
+              <el-dropdown-item command="archive">
                 <el-icon><FolderChecked /></el-icon>{{ $t('chat.sidebar.archive') }}
               </el-dropdown-item>
-
-              <el-dropdown-item command="rename" :divided="contextMenuItem.itemType === 'folder'"
-                ><el-icon><EditPen /></el-icon>{{ $t('chat.sidebar.rename') }}</el-dropdown-item
-              >
-              <el-dropdown-item v-if="contextMenuItem.itemType === 'chat'" command="duplicate"
-                ><el-icon><CopyDocument /></el-icon
-                >{{ $t('chat.sidebar.duplicate') }}</el-dropdown-item
-              >
-              <el-dropdown-item command="delete" class="delete-item"
-                ><el-icon><Delete /></el-icon>{{ $t('chat.sidebar.delete') }}</el-dropdown-item
-              >
             </template>
 
-            <el-dropdown-item command="search" :divided="true"
-              ><el-icon><Search /></el-icon>{{ $t('chat.sidebar.search') }}</el-dropdown-item
-            >
+            <!-- 单选或未选中模式下的菜单 -->
+            <template v-else>
+              <el-dropdown-item
+                v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'"
+                command="newChat"
+              >
+                <el-icon><Plus /></el-icon>{{ $t('chat.sidebar.newChat') }}
+              </el-dropdown-item>
+              <el-dropdown-item
+                v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'"
+                command="newFolder"
+              >
+                <el-icon><FolderAdd /></el-icon>{{ $t('chat.sidebar.newFolder') }}
+              </el-dropdown-item>
+
+              <template v-if="contextMenuItem">
+                <el-dropdown-item command="rename" :divided="contextMenuItem.itemType === 'folder'"
+                  ><el-icon><EditPen /></el-icon>{{ $t('chat.sidebar.rename') }}</el-dropdown-item
+                >
+                <el-dropdown-item v-if="contextMenuItem.itemType === 'chat'" command="duplicate"
+                  ><el-icon><CopyDocument /></el-icon
+                  >{{ $t('chat.sidebar.duplicate') }}</el-dropdown-item
+                >
+                <el-dropdown-item command="delete" class="delete-item"
+                  ><el-icon><Delete /></el-icon>{{ $t('chat.sidebar.delete') }}</el-dropdown-item
+                >
+              </template>
+
+              <el-dropdown-item command="search" :divided="true"
+                ><el-icon><Search /></el-icon>{{ $t('chat.sidebar.search') }}</el-dropdown-item
+              >
+            </template>
           </el-dropdown-menu>
         </template>
       </el-dropdown>
@@ -306,6 +312,21 @@ const {
   },
 });
 
+// 记录当前选中的节点数量，用于判断是否展示多选右键菜单
+const selectedNodeCount = ref(0);
+
+const onNodeContextMenu = (event: MouseEvent, data: BaseTreeItem, node: any) => {
+  selectedNodeCount.value = treeRef.value?.selectedIds?.size || 0;
+  handleNodeContextMenu(event, data, node);
+};
+
+const onRootContextMenu = (event: MouseEvent) => {
+  // 在空白处右键时清除选中状态，确保弹出全局菜单
+  treeRef.value?.clearSelection();
+  selectedNodeCount.value = 0;
+  openRootContextMenu(event);
+};
+
 onMounted(async () => {
   await providerStore.fetchProviders();
   await agentStore.fetchAllAgents();
@@ -470,7 +491,6 @@ async function confirmArchive() {
     archiveDialogVisible.value = false;
     treeRef.value?.clearSelection();
 
-    // [新增] 自动滚动并展开新文件夹，避免用户疑惑
     if (newFolder) {
       await treeRef.value?.scrollToKey(newFolder.id);
       await treeRef.value?.expandNode(newFolder.id);
