@@ -1,12 +1,11 @@
 <!-- frontend/mambo/src/mobile/components/chat/ChatWindow.vue -->
 <template>
-  <!-- 修改点：动态绑定 style，使用 fixed 定位强制适应可视区域 -->
   <div class="mobile-chat-window" :style="containerStyle">
     <!-- Header -->
     <ChatHeader
       :current-chat="currentChat"
       @toggle-drawer="$emit('toggle-drawer')"
-      @open-settings="settingsDrawerVisible = true"
+      @open-settings="handleOpenSettings"
     />
 
     <!-- Messages Area -->
@@ -20,6 +19,8 @@
             :message="message"
             :is-last-message="index === currentChatMessages.length - 1"
             @suggestion-click="handleSuggestionClick"
+            @switch-branch="handleSwitchBranch"
+            @open-tool-dialog="handleOpenToolDialog"
           />
         </div>
       </el-scrollbar>
@@ -60,7 +61,7 @@
         @open-resource-selector="resourceSelectorVisible = true"
         @toggle-mcp-tool="handleToggleMcpTool"
         @jump-to-message="handleJumpToMessage"
-        @open-settings="settingsDrawerVisible = true"
+        @open-settings="handleOpenSettings"
       />
 
       <!-- Input Box -->
@@ -81,6 +82,13 @@
       :chat-data="currentChat"
       :grouped-models="groupedModels"
       @save="handleSaveSettings"
+    />
+
+    <!-- Agent Settings Drawer -->
+    <MobileChatAgentSettingsDrawer
+      v-model:visible="agentSettingsDrawerVisible"
+      :chat-data="currentChat"
+      @save="handleSaveAgentSettings"
     />
 
     <!-- Resource Selector Dialog -->
@@ -115,6 +123,7 @@ import ChatToolbar from '@/mobile/components/chat/ChatToolbar.vue'
 import AttachmentPreview from '@/mobile/components/chat/AttachmentPreview.vue'
 import ChatInputBox from '@/mobile/components/chat/ChatInputBox.vue'
 import ChatSettingsDrawer from './ChatSettingsDrawer.vue'
+import MobileChatAgentSettingsDrawer from './MobileChatAgentSettingsDrawer.vue'
 import ResourceSelectorDialog from './dialogs/ResourceSelectorDialog.vue'
 
 import { useChatListStore } from '@/stores/chatListStore'
@@ -122,10 +131,11 @@ import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useProviderStore } from '@/stores/providerStore'
 import { useResourceStore } from '@/stores/resourceStore'
+import { useAgentStore } from '@/stores/agentStore'
 import { useChatInput } from '@/composables/useChatInput'
 import { useTokenEstimator } from '@/composables/useTokenEstimator'
 import { uploadFile } from '@/api/fileService'
-import type { AIModel, ChatUpdate, Resource, SubMessageCreate } from '@/api/types'
+import type { AIModel, ChatUpdate, Resource, SubMessageCreate, Message } from '@/api/types'
 
 interface GroupedModels {
   label: string
@@ -142,13 +152,13 @@ const chatSessionStore = useChatSessionStore()
 const chatInteractionStore = useChatInteractionStore()
 const providerStore = useProviderStore()
 const resourceStore = useResourceStore()
+const agentStore = useAgentStore()
 
 const { currentChat, currentChatMessages, isGenerating, currentChatId, contextForTokenEstimation } =
   storeToRefs(chatSessionStore)
 const { groupedModels } = storeToRefs(providerStore) as { groupedModels: Ref<GroupedModels[]> }
 const { resources: allResources } = storeToRefs(resourceStore)
 
-// --- State from Composables ---
 const {
   singlePartDraft,
   uploadedFiles,
@@ -162,22 +172,20 @@ const {
   appendContentToDraft,
 } = useChatInput(currentChatId)
 
-// --- Local State ---
 const scrollbarRef = ref<InstanceType<typeof ElScrollbar>>()
 const chatInputBoxRef = ref()
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const settingsDrawerVisible = ref(false)
+const agentSettingsDrawerVisible = ref(false)
 const resourceSelectorVisible = ref(false)
 const userHasScrolledUp = ref(false)
 
-// --- 新增：可视区域布局状态 ---
 const layoutStyle = reactive({
   top: '0px',
   height: '100%',
   width: '100%',
 })
 
-// 计算属性用于模板绑定
 const containerStyle = computed<CSSProperties>(() => ({
   position: 'fixed',
   top: layoutStyle.top,
@@ -185,33 +193,25 @@ const containerStyle = computed<CSSProperties>(() => ({
   width: layoutStyle.width,
 }))
 
-// --- 新增：核心布局修复逻辑 ---
 const updateLayout = () => {
-  // 优先使用 visualViewport
   if (window.visualViewport) {
     const vv = window.visualViewport
-    // 计算 top：由于页面可能滚动，我们需要计算可视区域在布局视口中的位置
-    // 并将容器固定在当前可视区域的位置
     const top = vv.offsetTop
     const height = vv.height
 
     layoutStyle.top = `${top}px`
     layoutStyle.height = `${height}px`
 
-    // 键盘弹起引起的视口变化时，确保输入框可见
-    // 这里我们利用 nextTick 确保 DOM 更新后滚动
     nextTick(() => {
       const wrap = scrollbarRef.value?.wrapRef
       if (wrap) wrap.scrollTop = wrap.scrollHeight
     })
   } else {
-    // 降级处理：如果浏览器不支持 visualViewport (极少见)，回退到 100dvh
     layoutStyle.top = '0px'
     layoutStyle.height = '100dvh'
   }
 }
 
-// --- Computed ---
 const isSendButtonDisabled = computed(() => isGenerating.value || !isReadyToSend.value)
 
 const hasAttachments = computed(
@@ -221,7 +221,6 @@ const hasAttachments = computed(
     attachedKnowledgeBases.value.length > 0,
 )
 
-// --- Token Estimation ---
 const pendingMessageTextForTokenEstimation = computed(() => {
   const parts: string[] = []
   if (singlePartDraft.value) {
@@ -240,7 +239,6 @@ const { estimatedTokens } = useTokenEstimator(
   pendingMessageTextForTokenEstimation,
 )
 
-// --- Knowledge Base Logic ---
 const activeKnowledgeBaseId = computed(() => {
   const params = currentChat.value?.modelParameters
   if (!params?.enabled_mcp_ids) return null
@@ -270,16 +268,17 @@ watch(
   { immediate: true },
 )
 
-// --- Lifecycle Hooks ---
 onMounted(() => {
-  updateLayout() // 初始化布局
+  updateLayout()
   if (window.visualViewport) {
-    // 监听视口变化 (键盘弹起/落下, 滚动等)
     window.visualViewport.addEventListener('resize', updateLayout)
     window.visualViewport.addEventListener('scroll', updateLayout)
   }
-  // 备用监听：某些浏览器在全屏切换时可能触发 window resize
   window.addEventListener('resize', updateLayout)
+
+  if (agentStore.allAgents.length === 0) {
+    agentStore.fetchAllAgents()
+  }
 })
 
 onUnmounted(() => {
@@ -289,8 +288,6 @@ onUnmounted(() => {
   }
   window.removeEventListener('resize', updateLayout)
 })
-
-// --- Methods ---
 
 const handleSendMessage = async () => {
   if (isSendButtonDisabled.value) return
@@ -336,7 +333,16 @@ const handleSuggestionClick = (text: string) => {
   })
 }
 
-// --- File Upload ---
+const handleSwitchBranch = async (targetId: string) => {
+  if (typeof chatInteractionStore.switchBranch === 'function') {
+    await chatInteractionStore.switchBranch(targetId)
+  }
+}
+
+const handleOpenToolDialog = (message: Message, subMessageId: string, mode: 'review_all' | 'single') => {
+  // Mobile tool review dialog integration point
+}
+
 function handleTriggerFileUpload() {
   fileInputRef.value?.click()
 }
@@ -361,7 +367,6 @@ async function handleFileUploads(files: FileList) {
   }
 }
 
-// --- Resource & KB Mounting ---
 function normalizeMcpIds(currentIds: any): Record<string, any> {
   if (!currentIds) return {}
   if (Array.isArray(currentIds)) {
@@ -438,7 +443,14 @@ async function handleToggleMcpTool(mcpId: string) {
   await chatListStore.updateChatSettings(currentChat.value.id, updatedSettings)
 }
 
-// --- Settings ---
+function handleOpenSettings() {
+  if (currentChat.value?.chatMode === 'agent') {
+    agentSettingsDrawerVisible.value = true
+  } else {
+    settingsDrawerVisible.value = true
+  }
+}
+
 async function handleSaveSettings(settings: ChatUpdate) {
   if (!currentChat.value) return
   await chatListStore.updateChatSettings(currentChat.value.id, settings)
@@ -446,7 +458,13 @@ async function handleSaveSettings(settings: ChatUpdate) {
   ElMessage.success(t('chat.settings.saveSuccess'))
 }
 
-// --- Scroll & Jump ---
+async function handleSaveAgentSettings(settings: ChatUpdate) {
+  if (!currentChat.value) return
+  await chatListStore.updateChatSettings(currentChat.value.id, settings)
+  agentSettingsDrawerVisible.value = false
+  ElMessage.success(t('chat.settings.saveSuccess'))
+}
+
 const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
   const el = scrollbarRef.value?.wrapRef
   if (!el) return
@@ -483,17 +501,14 @@ watch(
 </script>
 
 <style scoped>
-/* 移除 height: 100dvh，改为由 JS 动态控制 */
 .mobile-chat-window {
-  /* position: fixed;  <- 由 JS 动态注入，这里为了性能可以预设，但会被 style 覆盖 */
   left: 0;
   right: 0;
-  bottom: 0; /* 兜底 */
+  bottom: 0;
   display: flex;
   flex-direction: column;
   background-color: var(--color-background);
   overflow: hidden;
-  /* 移除 transition，因为在全屏键盘弹起瞬间，transition 会导致动画不同步，感觉卡顿 */
 }
 
 .mobile-messages {
@@ -524,22 +539,19 @@ watch(
   flex-direction: column;
   border-top: 1px solid var(--color-border);
   background: var(--color-background);
-  /* Safe area for iOS */
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-/* Padding for content inside input area to avoid overlap with notches */
 .mobile-input-area > * {
   padding-left: 10px;
   padding-right: 10px;
 }
 
 .mobile-input-area > .mobile-toolbar {
-  padding-left: 5px; /* Less padding for toolbar icons */
+  padding-left: 5px;
   padding-right: 5px;
 }
 
-/* Jump highlight animation */
 :deep(.jump-highlight) {
   animation: jump-pulse 0.5s ease-in-out 3;
   background-color: var(--el-color-primary-light-9);

@@ -8,6 +8,8 @@
       'is-user': parentMessage.role === 'user',
       'is-file': subMessage.type === 'File',
       'is-inactive': isInactive,
+      'is-inline': isInline,
+      'is-review-pending': subMessage.type === 'ReviewTool' && !isReviewDecided
     }"
   >
     <!-- 文件类型消息 -->
@@ -35,54 +37,48 @@
       </div>
     </div>
 
-    <!-- MCP 工具 或 普通文本 -->
+    <!-- MCP 工具 / Review 工具 或 普通文本 -->
     <template v-else>
-      <div v-if="showHeader || subMessage.type === 'McpTool'" class="sub-message-header">
-        <!-- 标题区域 -->
+      <div v-if="showHeader || isToolType" class="sub-message-header">
         <span class="partition-title">{{ partitionTitle }}</span>
 
-        <!-- 操作区域 -->
         <div class="actions">
-          <template v-if="subMessage.type !== 'McpTool' && !isGenerating">
+          <template v-if="!isToolType && !isGenerating">
             <el-icon class="action-icon" @click="handleHeaderEditClick"><Edit /></el-icon>
             <el-icon class="action-icon" @click="emit('copy')"><CopyDocument /></el-icon>
           </template>
 
-          <!-- 最小化按钮 -->
           <el-icon class="action-icon" @click="toggleMinimize" v-if="!isGenerating"
             ><Minus
           /></el-icon>
 
-          <!-- 折叠按钮 -->
           <el-icon class="action-icon" @click="toggleCollapse">
             <component :is="isCollapsed ? ArrowDownBold : ArrowUpBold" />
           </el-icon>
         </div>
       </div>
 
-      <!-- 内容区域 -->
       <div
         class="message-content"
-        :class="{ collapsed: isCollapsed, 'mcp-tool-content': subMessage.type === 'McpTool' }"
+        :class="{ collapsed: isCollapsed, 'mcp-tool-content': isToolType }"
         ref="contentRef"
       >
-        <!-- MCP 内容渲染 -->
-        <div v-if="subMessage.type === 'McpTool'" class="mcp-tool-body">
+        <!-- 工具内容渲染 -->
+        <div v-if="isToolType" class="mcp-tool-body">
           <div class="mcp-tool-summary">
             <div class="mcp-tool-status-icon">
-              <el-icon v-if="isGenerating" class="is-loading"><Loading /></el-icon>
-              <el-icon v-else-if="mcpContent && mcpContent.is_error" color="var(--el-color-error)"
-                ><CircleClose
-              /></el-icon>
+              <el-icon v-if="subMessage.type === 'ReviewTool' && !isReviewDecided" color="var(--el-color-warning)"><Warning /></el-icon>
+              <el-icon v-else-if="isGenerating" class="is-loading"><Loading /></el-icon>
+              <el-icon v-else-if="toolContent && toolContent.is_error" color="var(--el-color-error)"><CircleClose /></el-icon>
               <el-icon v-else color="var(--el-color-success)"><CircleCheck /></el-icon>
             </div>
-            <span>{{ mcpSummaryText }}</span>
+            <span :class="{'text-warning': subMessage.type === 'ReviewTool' && !isReviewDecided}">{{ toolSummaryText }}</span>
           </div>
           <div
-            v-if="!isGenerating && mcpContent?.result && !mcpContent.is_error"
+            v-if="!isGenerating && toolContent?.result && !toolContent.is_error && subMessage.type === 'McpTool'"
             class="mcp-tool-result"
           >
-            {{ mcpContent.result }}
+            {{ toolContent.result }}
           </div>
         </div>
 
@@ -121,7 +117,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { SubMessage, Message, McpToolContent } from '@/api/types'
+import type { SubMessage, Message, McpToolContent, ReviewToolContent } from '@/api/types'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { ElMessage } from 'element-plus'
 import {
@@ -135,6 +131,7 @@ import {
   CircleClose,
   CircleCheck,
   Document,
+  Warning
 } from '@element-plus/icons-vue'
 import CodeBlock from '@/components/chat/CodeBlock.vue'
 import { copyToClipboard } from '@/utils/clipboard'
@@ -151,16 +148,17 @@ const props = withDefaults(
     showHeader?: boolean
     index?: number
     isInactive?: boolean
+    isInline?: boolean
   }>(),
   {
     id: '',
     showHeader: false,
     index: 1,
     isInactive: false,
+    isInline: false,
   },
 )
 
-// 修复: 更新 emit 类型定义以适配电脑版变更 (range, language, markup 为可选)
 const emit = defineEmits<{
   (
     e: 'edit',
@@ -174,40 +172,47 @@ const isCollapsed = ref(props.subMessage.config.is_collapsed || false)
 const isGenerating = computed(() => props.subMessage.status === 'generating')
 const rootRef = ref<HTMLElement | null>(null)
 
-// --- MCP Logic ---
-const mcpContent = computed((): McpToolContent | null => {
-  if (props.subMessage.type !== 'McpTool') return null
+const isToolType = computed(() => props.subMessage.type === 'McpTool' || props.subMessage.type === 'ReviewTool')
+
+const toolContent = computed((): McpToolContent | ReviewToolContent | null => {
+  if (!isToolType.value) return null
   try {
     return JSON.parse(props.subMessage.content)
   } catch {
     return null
   }
 })
-const mcpArguments = computed(() => {
-  if (!mcpContent.value?.arguments) return null
-  try {
-    return JSON.parse(mcpContent.value.arguments)
-  } catch {
-    return null
-  }
+
+const isReviewDecided = computed(() => {
+  if (props.subMessage.type !== 'ReviewTool') return false
+  const content = toolContent.value as ReviewToolContent | null
+  return !!content?.decision
 })
-const mcpSummaryText = computed((): string => {
-  if (!mcpContent.value) return t('chat.message.mcp.invalidCall')
-  const toolName = mcpContent.value.name || t('chat.message.mcp.unknownTool')
-  const query = mcpArguments.value?.query || '...'
+
+const toolSummaryText = computed((): string => {
+  if (!toolContent.value) return t('chat.message.mcp.invalidCall')
+  const toolName = toolContent.value.name || t('chat.message.mcp.unknownTool')
+
+  if (props.subMessage.type === 'ReviewTool') {
+    if (!isReviewDecided.value) return t('chat.message.pendingReview')
+    return t('chat.message.toolCallReviewed')
+  }
+
+  const mcpContent = toolContent.value as McpToolContent
+  const query = typeof mcpContent.arguments === 'string' ? '...' : '...'
+
   if (isGenerating.value) return t('chat.message.mcp.searching', { tool: toolName, query })
-  if (mcpContent.value.is_error)
-    return t('chat.message.mcp.searchFailed', { tool: toolName, query })
+  if (mcpContent.is_error) return t('chat.message.mcp.searchFailed', { tool: toolName, query })
   return t('chat.message.mcp.searched', { tool: toolName, query })
 })
 
-// --- File Logic ---
 const fileIcon = computed(() => {
   if (props.subMessage.type === 'File' && props.subMessage.file_info) {
     return getIconForMimeType(props.subMessage.file_info.mime_type)
   }
   return Document
 })
+
 const formattedFileSize = computed(() => {
   if (props.subMessage.type !== 'File' || !props.subMessage.file_info) return ''
   const size = props.subMessage.file_info.size
@@ -216,17 +221,15 @@ const formattedFileSize = computed(() => {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`
 })
 
-// --- Content Logic ---
 const contentBlocks = computed(() => {
-  if (props.subMessage.type !== 'File' && props.subMessage.type !== 'McpTool') {
+  if (props.subMessage.type !== 'File' && !isToolType.value) {
     return parseMarkdown(props.subMessage.content)
   }
   return []
 })
 
 const partitionTitle = computed(() => {
-  if (props.subMessage.type === 'McpTool')
-    return t('chat.message.mcp.toolCallTitle', { name: mcpContent.value?.name || 'Tool' })
+  if (isToolType.value) return t('chat.message.mcp.toolCallTitle', { name: toolContent.value?.name || 'Tool' })
   if (props.subMessage.type === 'Reasoning') return t('chat.message.reasoning')
   if (props.subMessage.type === 'Normal') return t('chat.message.content')
   return `Part ${props.index}`
@@ -238,11 +241,9 @@ watch(
 )
 
 function handleHeaderEditClick() {
-  // 全量编辑：只传递 content
   emit('edit', { content: props.subMessage.content })
 }
 
-// 修复: 接收 CodeBlock 传递的完整对象参数
 function handleCodeBlockEdit(payload: {
   code: string
   range: ParsedBlock['range']
@@ -295,6 +296,13 @@ async function handleBlockCopy(content: string) {
   transition: all 0.3s ease;
 }
 
+.sub-message-item.is-inline {
+  border: none;
+  background-color: transparent;
+  margin-bottom: 0;
+  box-shadow: none;
+}
+
 .sub-message-item.is-inactive {
   opacity: 1;
   border-style: dashed;
@@ -305,6 +313,11 @@ async function handleBlockCopy(content: string) {
 .sub-message-item.is-inactive:hover {
   border-style: solid;
   border-color: var(--el-text-color-placeholder);
+}
+
+.sub-message-item.is-review-pending {
+  border-color: var(--el-color-warning-light-5);
+  background-color: var(--el-color-warning-light-9);
 }
 
 .is-user .sub-message-item {
@@ -324,17 +337,18 @@ async function handleBlockCopy(content: string) {
   border-color: var(--el-color-primary-light-5);
 }
 
-/* File Styles */
 .sub-message-item.is-file {
   background: transparent;
   border: none;
   padding: 0;
 }
+
 .file-image-thumbnail {
   width: 100%;
   border-radius: 8px;
   max-height: 200px;
 }
+
 .file-card {
   display: flex;
   align-items: center;
@@ -344,10 +358,12 @@ async function handleBlockCopy(content: string) {
   background-color: var(--color-background-soft);
   border: 1px solid var(--el-border-color-light);
 }
+
 .file-card-info {
   flex-grow: 1;
   min-width: 0;
 }
+
 .file-card-name {
   font-size: 14px;
   font-weight: 500;
@@ -355,12 +371,12 @@ async function handleBlockCopy(content: string) {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
 .file-card-size {
   font-size: 12px;
   color: var(--el-text-color-secondary);
 }
 
-/* Header Styles */
 .sub-message-header {
   display: flex;
   justify-content: space-between;
@@ -369,97 +385,108 @@ async function handleBlockCopy(content: string) {
   background-color: rgba(0, 0, 0, 0.03);
   border-bottom: 1px solid rgba(0, 0, 0, 0.05);
 }
+
 .partition-title {
   font-size: 12px;
   font-weight: bold;
   color: var(--el-text-color-secondary);
 }
+
 .actions {
   display: flex;
   gap: 16px;
   align-items: center;
 }
+
 .action-icon {
   font-size: 16px;
   color: var(--el-text-color-secondary);
   cursor: pointer;
 }
 
-/* Content Styles */
 .message-content {
-  padding: 10px;
-  font-size: 15px;
-  line-height: 1.6;
+  padding: 8px; /* Reduced from 10px */
+  font-size: 14px; /* Reduced from 15px */
+  line-height: 1.5; /* Adjusted for smaller font */
   color: var(--color-text);
   overflow-x: auto;
 }
+
+.sub-message-item.is-inline .message-content {
+  padding: 0;
+}
+
 .message-content.collapsed {
   display: none;
 }
 
-/* Markdown Styles Adaptation */
 .content-block :deep(img) {
   max-width: 100%;
   border-radius: 4px;
 }
+
 .content-block :deep(pre) {
-  margin: 10px 0;
+  margin: 8px 0; /* Reduced from 10px */
   overflow-x: auto;
+  font-size: 13px; /* Smaller code font */
 }
 
-/* --- 表格样式修复开始 --- */
 .content-block :deep(table) {
-  border-collapse: collapse; /* 关键：合并边框 */
+  border-collapse: collapse;
   width: 100%;
-  margin: 1em 0;
-  display: block; /* 允许横向滚动 */
+  margin: 0.8em 0;
+  display: block;
   overflow-x: auto;
   border-spacing: 0;
+  font-size: 13px; /* Smaller table font */
 }
 
-/* 单元格样式 */
 .content-block :deep(th),
 .content-block :deep(td) {
-  padding: 6px 10px; /* 移动端适宜的内边距 */
-  border: 1px solid var(--el-border-color); /* 关键：添加边框 */
+  padding: 4px 8px; /* Reduced from 6px 10px */
+  border: 1px solid var(--el-border-color);
   text-align: left;
 }
 
-/* 表头样式 */
 .content-block :deep(th) {
-  background-color: var(--el-fill-color-light); /* 表头背景色 */
+  background-color: var(--el-fill-color-light);
   font-weight: 600;
   color: var(--el-text-color-primary);
 }
-/* --- 表格样式修复结束 --- */
 
 .content-block :deep(blockquote) {
-  margin: 10px 0;
+  margin: 8px 0; /* Reduced from 10px */
   padding-left: 10px;
   border-left: 3px solid var(--el-border-color);
   color: var(--el-text-color-secondary);
+  font-size: 13px; /* Smaller quote font */
 }
 
-/* MCP Styles */
 .mcp-tool-body {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px; /* Reduced from 5px */
 }
+
 .mcp-tool-summary {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: 12px; /* Reduced from 13px */
   color: var(--el-text-color-secondary);
 }
+
 .mcp-tool-result {
   background-color: var(--el-fill-color-light);
-  padding: 8px;
+  padding: 6px; /* Reduced from 8px */
   border-radius: 4px;
-  font-size: 13px;
-  max-height: 150px;
+  font-size: 12px; /* Reduced from 13px */
+  max-height: 120px; /* Reduced from 150px */
   overflow-y: auto;
+}
+
+.text-warning {
+  color: var(--el-color-warning-dark-2);
 }
 
 .typing-indicator {
@@ -467,6 +494,7 @@ async function handleBlockCopy(content: string) {
   gap: 4px;
   padding: 5px;
 }
+
 .typing-indicator span {
   width: 6px;
   height: 6px;
@@ -474,6 +502,7 @@ async function handleBlockCopy(content: string) {
   border-radius: 50%;
   animation: bounce 1.4s infinite;
 }
+
 @keyframes bounce {
   0%,
   80%,
@@ -485,3 +514,4 @@ async function handleBlockCopy(content: string) {
   }
 }
 </style>
+

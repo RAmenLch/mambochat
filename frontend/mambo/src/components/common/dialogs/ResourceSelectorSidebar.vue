@@ -193,6 +193,12 @@ watch(isMultiSelectMode, (newMode) => {
   selectionType.value = null;
 });
 
+watch(() => props.selectedResources, (newVal) => {
+  if (newVal.length === 0) {
+    selectionType.value = null;
+  }
+});
+
 watch(filteredTreeData, () => {
   nextTick(() => {
     if (!treeRef.value) return;
