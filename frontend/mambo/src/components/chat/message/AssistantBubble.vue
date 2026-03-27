@@ -138,7 +138,7 @@ function toggleReasoningMinimize() {
   interactionStore.batchUpdateSubMessagesMinimalState(props.message.id, newState);
 }
 
-function isInactive(group: BubbleSectionGroupComponent): boolean {
+function isInactive(group: BubbleSectionGroup): boolean {
   if (props.isGenerating) return false;
   const cpl = group.textSubMessage?.config?.context_participation_length;
   if (cpl === undefined || cpl === null) return false;

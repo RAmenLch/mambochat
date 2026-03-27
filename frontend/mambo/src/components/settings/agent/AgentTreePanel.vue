@@ -33,12 +33,12 @@
           <Folder />
         </el-icon>
         <template v-else>
-          <el-avatar
-            v-if="(data as unknown as Agent).agentAvatarUrl"
-            :size="18"
-            :src="(data as unknown as Agent).agentAvatarUrl"
-            class="tree-agent-avatar"
-          />
+            <el-avatar
+              v-if="(data as unknown as Agent).agentAvatarUrl"
+              :size="18"
+              :src="(data as unknown as Agent).agentAvatarUrl ?? undefined"
+              class="tree-agent-avatar"
+            />
           <el-icon v-else><User /></el-icon>
         </template>
       </template>

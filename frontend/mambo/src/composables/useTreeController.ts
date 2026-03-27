@@ -16,7 +16,13 @@ import type { SelectConfigOption } from '@/components/common/EntityFormDialog.vu
 export interface EntityFormDialogProps {
   title: string;
   initialName?: string;
+  showChatMode?: boolean; // [新增] 用于控制是否显示聊天模式选择
   selectConfig?: {
+    label: string;
+    options: SelectConfigOption[];
+    initialValue?: string;
+  };
+  agentSelectConfig?: { // [新增] 用于 Agent 选择配置
     label: string;
     options: SelectConfigOption[];
     initialValue?: string;

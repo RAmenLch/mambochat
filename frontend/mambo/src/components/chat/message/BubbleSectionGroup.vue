@@ -25,7 +25,7 @@
         :parent-message="parentMessage"
         :show-header="false"
         :is-inline="true"
-        @edit="(payload) => $emit('edit', group.textSubMessage, payload)"
+        @edit="(payload) => $emit('edit', group.textSubMessage!, payload)"
         @copy="$emit('copy', group.textSubMessage)"
       />
     </div>

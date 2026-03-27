@@ -264,7 +264,9 @@ const handleFolderSelect = async (event: Event) => {
 
   // 1. 构建预览树结构
   const rootFolderName = files[0].webkitRelativePath.split('/')[0]
-  const rootNode = { name: rootFolderName, children: [] }
+
+  // 修复：显式断言 children 为 any[]，避免被推断为 never[]
+  const rootNode = { name: rootFolderName, children: [] as any[] }
 
   files.forEach((file) => {
     const pathParts = file.webkitRelativePath.split('/').slice(1) // 去掉根目录名
@@ -279,7 +281,8 @@ const handleFolderSelect = async (event: Event) => {
         }
         currentLevel.push(existingNode)
       }
-      currentLevel = existingNode.children
+      // 安全访问 children，防止 undefined
+      currentLevel = existingNode.children || []
     })
   })
   folderTreeData.value = [rootNode]

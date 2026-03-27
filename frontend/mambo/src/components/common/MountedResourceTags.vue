@@ -76,7 +76,7 @@ const SWAP_THROTTLE_MS = 100;
 
 // --- Color-by-type helpers ---
 
-type ElTagType = '' | 'success' | 'warning' | 'info' | 'danger' | 'primary';
+type ElTagType = 'success' | 'warning' | 'info' | 'danger' | 'primary';
 
 function getTagType(resource: Resource): ElTagType {
   switch (resource.resourceType) {
@@ -84,7 +84,7 @@ function getTagType(resource: Resource): ElTagType {
     case 'system_prompt': return 'success';
     case 'submessage_template': return 'warning';
     case 'skill': return 'danger';
-    case 'file': return '';
+    case 'file': return 'info';
     default: return 'info';
   }
 }

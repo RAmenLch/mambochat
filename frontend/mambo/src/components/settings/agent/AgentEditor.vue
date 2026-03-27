@@ -258,7 +258,7 @@
                       @close="handleRemoveSubAgent(subAgent.id)"
                     >
                       <div class="tag-inner">
-                        <el-avatar :size="14" :src="subAgent.agentAvatarUrl" :icon="User" class="tag-avatar" />
+                        <el-avatar :size="14" :src="subAgent.agentAvatarUrl ?? undefined" :icon="User" class="tag-avatar" />
                         <span class="tag-text">{{ subAgent.name }}</span>
                       </div>
                     </el-tag>

@@ -3,10 +3,10 @@
   <div class="sidebar-wrapper">
     <div class="toolbar">
       <div class="toolbar-header">
-        <el-radio-group :model-value="selectorMode" @update:model-value="val => emit('update:selectorMode', val)" size="small">
-          <el-radio-button label="resource">{{ $t('resource.selector.modeResource') }}</el-radio-button>
-          <el-radio-button label="kb">{{ $t('resource.selector.modeKb') }}</el-radio-button>
-        </el-radio-group>
+          <el-radio-group :model-value="selectorMode" @update:model-value="val => emit('update:selectorMode', val as 'resource' | 'kb')" size="small">
+            <el-radio-button label="resource">{{ $t('resource.selector.modeResource') }}</el-radio-button>
+            <el-radio-button label="kb">{{ $t('resource.selector.modeKb') }}</el-radio-button>
+          </el-radio-group>
         <div class="multi-select-switch">
           <span class="switch-label">{{ $t('resource.selector.multiSelect') }}</span>
           <el-switch v-model="isMultiSelectMode" size="small" />

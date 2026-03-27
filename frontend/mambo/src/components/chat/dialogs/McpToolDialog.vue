@@ -40,19 +40,22 @@
             <el-form v-else label-position="top">
               <template v-for="propName in getCombinedArgKeys(msg)" :key="propName">
                 <el-form-item :label="String(propName)" :required="isPropRequired(msg, String(propName))">
+                  <!-- 添加 as number 断言 -->
                   <el-input-number
                     v-if="getSchemaProperty(msg, String(propName))?.type === 'integer' || getSchemaProperty(msg, String(propName))?.type === 'number'"
-                    v-model="editForms[msg.id][String(propName)]"
+                    v-model="(editForms[msg.id][String(propName)] as number)"
                     controls-position="right"
                     style="width: 100%"
                   />
+                  <!-- 添加 as boolean 断言 -->
                   <el-switch
                     v-else-if="getSchemaProperty(msg, String(propName))?.type === 'boolean'"
-                    v-model="editForms[msg.id][String(propName)]"
+                    v-model="(editForms[msg.id][String(propName)] as boolean)"
                   />
+                  <!-- 添加 as string 断言 -->
                   <el-input
                     v-else
-                    v-model="editForms[msg.id][String(propName)]"
+                    v-model="(editForms[msg.id][String(propName)] as string)"
                     type="textarea"
                     autosize
                   />
