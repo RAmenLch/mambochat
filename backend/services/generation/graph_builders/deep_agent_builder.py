@@ -9,7 +9,6 @@ from backend.services.generation.core.llm_io import AgentConfig, RunTimeConfig
 from backend.services.generation.graph_builders.base_builder import BaseGraphBuilder
 from backend.services.generation.graph_builders.model_factory import ModelFactory
 from backend.services.generation.agent.custom_middleware import ToolMessageOrderingMiddleware
-from schemas.lc_agent import MamboContext
 
 
 class DeepAgentGraphBuilder(BaseGraphBuilder):
