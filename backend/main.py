@@ -47,16 +47,67 @@ logger.setLevel(logging.INFO)
 def run_alembic_migrations():
     """
     以编程方式运行 Alembic 迁移。
-    相当于在命令行执行 `alembic upgrade head`。
+
+    智能处理三种场景：
+    1. 已有 Alembic：直接执行 upgrade head
+    2. 已有 v1.1.3 表结构但未初始化 Alembic：标记基线 4442b0f1e406 为已执行，然后执行后续迁移
+    3. 全新数据库：执行完整迁移链（包含 baseline 建表）
     """
     config_path = os.path.join(os.path.dirname(__file__), "alembic.ini")
     alembic_config = Config(config_path)
     script_location = os.path.join(os.path.dirname(__file__), "alembic")
     alembic_config.set_main_option("script_location", script_location)
 
-    logger.info("正在检查并应用数据库迁移...")
-    command.upgrade(alembic_config, "head")
-    logger.info("数据库迁移完成。")
+    # 构建同步数据库 URL 用于状态检查（去掉 async 驱动前缀）
+    from backend.database import DATABASE_URL
+    sync_url = DATABASE_URL.replace("+aiosqlite", "")
+
+    # 使用同步引擎检查数据库状态
+    from sqlalchemy import create_engine, inspect
+    check_engine = create_engine(sync_url)
+
+    try:
+        inspector = inspect(check_engine)
+
+        # 1. 检查 Alembic 版本表是否存在
+        has_alembic_table = inspector.has_table("alembic_version")
+
+        if has_alembic_table:
+            # 场景1：Alembic 已正常初始化，直接执行迁移
+            logger.info("发现 Alembic 版本表，执行常规迁移...")
+            command.upgrade(alembic_config, "head")
+
+        else:
+            # 2. 检查是否已存在 v1.1.3 的表结构
+            # 以 AIProvider 和 Chat 表同时存在作为 v1.1.3 的标志（可根据实际情况调整）
+            has_v1_1_3_tables = (
+                    inspector.has_table("AIProvider") and
+                    inspector.has_table("Chat")
+            )
+
+            if has_v1_1_3_tables:
+                # 场景2：数据库已有 v1.1.3 结构，但未初始化 Alembic
+                logger.info("检测到已有 v1.1.3 数据库结构（未初始化 Alembic）")
+                logger.info("正在标记基线版本 4442b0f1e406（跳过建表语句）...")
+
+                # 关键：stamp 命令只记录版本号，不执行 SQL
+                command.stamp(alembic_config, "4442b0f1e406")
+
+                logger.info("基线版本已标记，继续执行后续迁移...")
+                command.upgrade(alembic_config, "head")
+
+            else:
+                # 场景3：全新空数据库，执行完整迁移（包含 4442b0f1e406 的建表语句）
+                logger.info("检测到全新数据库，执行完整迁移（包含基线建表）...")
+                command.upgrade(alembic_config, "head")
+
+        logger.info("数据库迁移完成。")
+
+    except Exception as e:
+        logger.error(f"数据库迁移过程中发生错误: {e}")
+        raise
+    finally:
+        check_engine.dispose()
 
 
 @asynccontextmanager
