@@ -50,11 +50,13 @@
           <MobileProviderModelManager v-else-if="activeSection === 'provider'" class="mobile-setting-component" />
           <MobileMcpManager v-else-if="activeSection === 'mcp'" class="mobile-setting-component" />
           <MobileResourceManager v-else-if="activeSection === 'resource'" class="mobile-setting-component" />
+          <!-- [新增] Agent 管理视图 -->
+          <MobileAgentManager v-else-if="activeSection === 'agent'" class="mobile-setting-component" />
         </div>
       </transition>
     </div>
 
-    <!-- 关于弹窗 (修复部分) -->
+    <!-- 关于弹窗 -->
     <el-dialog
       v-model="aboutDialogVisible"
       width="90%"
@@ -68,7 +70,7 @@
         <h2 class="about-title">
           {{ t('settings.about.title') }} <span class="about-subtitle">| {{ t('settings.about.subtitle') }}</span>
         </h2>
-        <el-tag type="info" size="small" effect="plain" class="version-tag">v1.1.3</el-tag>
+        <el-tag type="info" size="small" effect="plain" class="version-tag">v1.2.0</el-tag>
 
         <p class="about-desc">
           {{ t('settings.about.desc') }}
@@ -105,13 +107,17 @@ import {
   User,
   Monitor,
   Connection,
-  FolderOpened, Message,
+  FolderOpened,
+  Message,
+  Service // [新增] 引入 Service 图标用于 Agent
 } from '@element-plus/icons-vue'
 
 import GlobalSettings from '@/components/settings/GlobalSettings.vue'
 import MobileProviderModelManager from '@/mobile/components/settings/MobileProviderModelManager.vue'
 import MobileMcpManager from '@/mobile/components/settings/MobileMcpManager.vue'
 import MobileResourceManager from '@/mobile/components/settings/MobileResourceManager.vue'
+// [新增] 引入移动端 Agent 管理组件
+import MobileAgentManager from '@/mobile/components/settings/MobileAgentManager.vue'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -119,11 +125,13 @@ const { t } = useI18n()
 const activeSection = ref('')
 const aboutDialogVisible = ref(false)
 
+// [修改] 在菜单列表中加入 Agent 管理
 const menuItems = computed(() => [
   { id: 'global', icon: User, label: t('settings.tabs.globalSettings') },
   { id: 'provider', icon: Monitor, label: t('settings.tabs.providerModel') },
   { id: 'mcp', icon: Connection, label: t('settings.tabs.mcpManager') },
   { id: 'resource', icon: FolderOpened, label: t('settings.tabs.resourceManager') },
+  { id: 'agent', icon: Service, label: 'Agent 管理' }, // 与桌面端保持一致的文本
 ])
 
 const currentTitle = computed(() => {
@@ -266,12 +274,12 @@ const goToChat = () => {
 .slide-right-enter-from { transform: translateX(100%); }
 .slide-right-leave-to { transform: translateX(100%); }
 
-/* About Dialog Styles (修复重点) */
+/* About Dialog Styles */
 .about-content {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 10px 0 20px; /* 调整padding */
+  padding: 10px 0 20px;
   text-align: center;
 }
 
@@ -283,7 +291,7 @@ const goToChat = () => {
 
 .about-title {
   margin: 0 0 10px;
-  font-size: 18px; /* 移动端适当缩小标题 */
+  font-size: 18px;
 }
 
 .about-subtitle {
@@ -301,7 +309,7 @@ const goToChat = () => {
   color: var(--el-text-color-secondary);
   margin: 0 0 20px;
   line-height: 1.5;
-  padding: 0 10px; /* 防止文字贴边 */
+  padding: 0 10px;
 }
 
 .about-links {
@@ -321,7 +329,6 @@ const goToChat = () => {
   text-decoration: none;
 }
 
-/* 关键修复：限制图标大小 */
 .link-icon {
   width: 20px;
   height: 20px;

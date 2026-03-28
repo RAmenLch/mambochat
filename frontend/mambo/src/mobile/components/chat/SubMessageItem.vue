@@ -69,16 +69,16 @@
             <div class="mcp-tool-status-icon">
               <el-icon v-if="subMessage.type === 'ReviewTool' && !isReviewDecided" color="var(--el-color-warning)"><Warning /></el-icon>
               <el-icon v-else-if="isGenerating" class="is-loading"><Loading /></el-icon>
-              <el-icon v-else-if="toolContent && toolContent.is_error" color="var(--el-color-error)"><CircleClose /></el-icon>
+              <el-icon v-else-if="mcpToolContent && mcpToolContent.is_error" color="var(--el-color-error)"><CircleClose /></el-icon>
               <el-icon v-else color="var(--el-color-success)"><CircleCheck /></el-icon>
             </div>
             <span :class="{'text-warning': subMessage.type === 'ReviewTool' && !isReviewDecided}">{{ toolSummaryText }}</span>
           </div>
-          <div
-            v-if="!isGenerating && toolContent?.result && !toolContent.is_error && subMessage.type === 'McpTool'"
-            class="mcp-tool-result"
-          >
-            {{ toolContent.result }}
+            <div
+              v-if="!isGenerating && mcpToolContent?.result && !mcpToolContent.is_error && subMessage.type === 'McpTool'"
+              class="mcp-tool-result"
+            >
+              {{ mcpToolContent.result }}
           </div>
         </div>
 
@@ -181,6 +181,13 @@ const toolContent = computed((): McpToolContent | ReviewToolContent | null => {
   } catch {
     return null
   }
+})
+
+const mcpToolContent = computed((): McpToolContent | null => {
+  if (props.subMessage.type === 'McpTool' && toolContent.value) {
+    return toolContent.value as McpToolContent
+  }
+  return null
 })
 
 const isReviewDecided = computed(() => {

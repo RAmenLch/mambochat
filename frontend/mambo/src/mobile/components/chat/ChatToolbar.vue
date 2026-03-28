@@ -94,7 +94,7 @@
       <!-- Resource Selector -->
       <el-button :icon="Collection" circle size="small" @click="$emit('openResourceSelector')" />
 
-      <!-- 新增：Chat Settings -->
+      <!-- Chat Settings -->
       <el-button :icon="Tools" circle size="small" @click="$emit('openSettings')" />
     </div>
   </div>
@@ -108,7 +108,6 @@ import { useProviderStore } from '@/stores/providerStore'
 import { useMcpStore } from '@/stores/mcpStore'
 import type { Chat, Message } from '@/api/types'
 import type { PropType } from 'vue'
-// 新增 Tools 图标导入
 import { Cpu, Upload, Collection, Coin, Suitcase, Tickets, Tools } from '@element-plus/icons-vue'
 
 const props = defineProps({
@@ -131,7 +130,7 @@ const emit = defineEmits([
   'openResourceSelector',
   'toggleMcpTool',
   'jumpToMessage',
-  'openSettings', // 新增事件
+  'openSettings',
 ])
 
 const { t } = useI18n()
@@ -146,11 +145,9 @@ const displayModelName = computed(() => {
 })
 
 const isMcpToolEnabled = (mcpId: string): boolean => {
-  const mcpIds = props.currentChat?.modelParameters?.enabled_mcp_ids
+  const mcpIds = props.currentChat?.enabled_mcp_ids
   if (!mcpIds) return false
-  if (Array.isArray(mcpIds)) return mcpIds.includes(mcpId)
-  if (typeof mcpIds === 'object') return Object.prototype.hasOwnProperty.call(mcpIds, mcpId)
-  return false
+  return mcpIds.includes(mcpId)
 }
 
 const zipHistoryItems = computed(() => {
@@ -176,7 +173,6 @@ function handleJumpToMessage(messageId: string) {
 </script>
 
 <style scoped>
-/* 样式保持不变，略 */
 .mobile-toolbar {
   display: flex;
   justify-content: space-between;

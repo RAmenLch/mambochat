@@ -20,11 +20,9 @@
     </template>
 
     <div class="drawer-content">
-      <!-- Mode Tabs -->
       <el-tabs v-model="selectorMode" class="selector-tabs" @tab-change="handleTabChange">
         <el-tab-pane :label="$t('resource.selector.modeResource')" name="resource">
           <div class="resource-section">
-            <!-- Search Bar -->
             <div class="search-row">
               <el-input
                 v-model="searchText"
@@ -46,9 +44,7 @@
               </el-button>
             </div>
 
-            <!-- List Area -->
             <el-scrollbar class="tree-scroll-area" v-loading="isResourcesLoading && !searchText">
-              <!-- Search Results -->
               <template v-if="searchText">
                 <div v-if="isSearching" class="loading-placeholder">
                   <el-skeleton :rows="3" animated />
@@ -84,7 +80,6 @@
                 </div>
               </template>
 
-              <!-- Tree View -->
               <template v-else>
                 <el-tree
                   ref="treeRef"
@@ -107,11 +102,22 @@
                     >
                       <div class="node-left">
                         <el-icon>
-                          <Folder v-if="data.itemType === 'folder'" />
+                          <Reading v-if="data.resourceType === 'skill'" />
+                          <Collection v-else-if="data.resourceType === 'knowledge_base'" />
+                          <Folder v-else-if="data.itemType === 'folder'" />
                           <Memo v-else-if="data.resourceType === 'submessage_template'" />
                           <Document v-else />
                         </el-icon>
                         <span class="label">{{ data.name }}</span>
+                        <el-tag v-if="data.itemType === 'resource' && data.resourceType" size="small" type="info" class="resource-type-tag">
+                          {{ getReadableResourceType(data.resourceType) }}
+                        </el-tag>
+                        <el-tag v-else-if="data.itemType === 'folder' && data.resourceType === 'knowledge_base'" size="small" type="primary" class="resource-type-tag">
+                          {{ $t('resource.types.knowledge_base') }}
+                        </el-tag>
+                        <el-tag v-else-if="data.itemType === 'folder' && data.resourceType === 'skill'" size="small" type="danger" class="resource-type-tag">
+                          {{ $t('resource.types.skill') }}
+                        </el-tag>
                       </div>
                       <el-icon v-if="loadingFolders.has(data.id)" class="is-loading"
                         ><Loading
@@ -138,43 +144,41 @@
       </el-tabs>
     </div>
 
-    <!-- Footer -->
     <template #footer>
       <div class="drawer-footer-actions">
-        <!-- Append Button -->
-        <el-button
-          v-if="showAppendButton"
-          type="primary"
-          plain
-          :disabled="selectedResources.length === 0"
-          @click="handleAppend"
-          :style="{ width: showMountButton ? '50%' : '100%' }"
-        >
-          {{ $t('resource.action.append', { count: selectedResources.length }) }}
-        </el-button>
-
-        <!-- Mount Button -->
-        <el-button
-          v-if="showMountButton"
-          :type="showAppendButton ? 'primary' : 'primary'"
-          :disabled="selectedResources.length === 0"
-          @click="handleMount"
-          :style="{ width: showAppendButton ? '50%' : '100%' }"
-        >
-          {{ $t('resource.action.mount', { count: selectedResources.length }) }}
-        </el-button>
-
-        <!-- Mount Knowledge Base Search Button -->
         <el-button
           v-if="showKbSearchButton"
           type="primary"
           :icon="Search"
           :disabled="selectedResources.length === 0"
           @click="handleMountKnowledgeBase"
-          style="width: 100%"
+          style="width: 100%; margin-bottom: 8px;"
         >
           {{ $t('resource.action.mountKbSearch') }}
         </el-button>
+
+        <div class="action-buttons-row" v-if="showAppendButton || showMountButton">
+          <el-button
+            v-if="showAppendButton"
+            type="primary"
+            plain
+            :disabled="selectedResources.length === 0"
+            @click="handleAppend"
+            :style="{ width: showMountButton ? '50%' : '100%' }"
+          >
+            {{ $t('resource.action.append', { count: selectedResources.length }) }}
+          </el-button>
+
+          <el-button
+            v-if="showMountButton"
+            type="primary"
+            :disabled="selectedResources.length === 0"
+            @click="handleMount"
+            :style="{ width: showAppendButton ? '50%' : '100%' }"
+          >
+            {{ $t('resource.action.mount', { count: selectedResources.length }) }}
+          </el-button>
+        </div>
       </div>
     </template>
   </el-drawer>
@@ -184,7 +188,7 @@
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { ElTree, ElMessage } from 'element-plus'
 import type { TreeNodeData } from 'element-plus/es/components/tree/src/tree.type'
-import { Folder, Document, Memo, Loading, Search, Check } from '@element-plus/icons-vue'
+import { Folder, Document, Memo, Loading, Search, Check, Collection, Reading } from '@element-plus/icons-vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useResourceStore } from '@/stores/resourceStore'
@@ -198,26 +202,22 @@ import type {
 } from '@/api/types'
 import MobileKnowledgeBaseSearchDialog from './KnowledgeBaseSearchDialog.vue'
 
-// --- Component Interface ---
 const props = defineProps<{
-  visible: boolean
-  resourceTypeFilter?: string | null
-  source: 'settings' | 'toolbar'
+  visible: boolean;
+  context: 'chat-settings' | 'chat-toolbar' | 'agent-react' | 'agent-deep';
 }>()
 
 const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void
   (e: 'mount-resources', resources: Resource[]): void
   (e: 'append-resources', resources: Resource[]): void
-  (e: 'mount-knowledge-base', resource: Resource): void
+  (e: 'mount-knowledge-base', resources: Resource[]): void
 }>()
 
-// --- Store & I18n ---
 const resourceStore = useResourceStore()
 const { resourceTree, isResourcesLoading, loadingFolders, resources } = storeToRefs(resourceStore)
 const { t } = useI18n()
 
-// --- Local State ---
 const selectorMode = ref<'resource' | 'kb'>('resource')
 const searchText = ref('')
 const treeRef = ref<InstanceType<typeof ElTree>>()
@@ -227,7 +227,6 @@ const selectionType = ref<ResourceType | null>(null)
 const expandedKeys = ref<Set<string>>(new Set())
 const STORAGE_KEY = 'resource_selector_multi_select_mode'
 
-// --- Search State ---
 const isSearching = ref(false)
 const enableRegex = ref(false)
 const searchResult = ref<ResourceSearchResultItem[]>([])
@@ -235,13 +234,46 @@ const searchPage = ref(1)
 const searchTotal = ref(0)
 const searchDebounceTimer = ref<number | undefined>(undefined)
 
-// --- Lifecycle ---
+const contextConfig = computed(() => {
+  switch (props.context) {
+    case 'chat-settings':
+      return {
+        allowedTypes: ['system_prompt', 'submessage_template', 'knowledge_base'],
+        canMount: ['system_prompt', 'submessage_template'],
+        canAppend: [],
+        canMountKb: ['knowledge_base']
+      };
+    case 'chat-toolbar':
+      return {
+        allowedTypes: ['system_prompt', 'submessage_template', 'file', 'knowledge_base'],
+        canMount: ['submessage_template', 'file'],
+        canAppend: ['system_prompt', 'submessage_template'],
+        canMountKb: ['knowledge_base']
+      };
+    case 'agent-react':
+      return {
+        allowedTypes: ['system_prompt', 'submessage_template', 'knowledge_base'],
+        canMount: ['system_prompt', 'submessage_template', 'knowledge_base'],
+        canAppend: [],
+        canMountKb: []
+      };
+    case 'agent-deep':
+      return {
+        allowedTypes: ['system_prompt', 'submessage_template', 'knowledge_base', 'skill'],
+        canMount: ['system_prompt', 'submessage_template', 'knowledge_base', 'skill'],
+        canAppend: [],
+        canMountKb: []
+      };
+    default:
+      return { allowedTypes: [], canMount: [], canAppend: [], canMountKb: [] };
+  }
+});
+
 onMounted(() => {
   const persistedMode = localStorage.getItem(STORAGE_KEY)
   isMultiSelectMode.value = persistedMode === 'true'
 })
 
-// --- Computed ---
 const filteredTreeData = computed(() => filterTreeByType(resourceTree.value))
 
 const treeProps = {
@@ -252,33 +284,21 @@ const treeProps = {
     (data as ResourceNode).itemType === 'stub' ? 'is-hidden-node' : '',
 }
 
-// --- Button Visibility Logic ---
 const showMountButton = computed(() => {
-  if (selectedResources.value.length === 0) return false
-  if (props.source === 'settings') return true
-  return selectedResources.value.some(
-    (r) => r.resourceType === 'submessage_template' || r.resourceType === 'file',
-  )
-})
+  if (selectedResources.value.length === 0) return false;
+  return selectedResources.value.every(r => contextConfig.value.canMount.includes(r.resourceType as string));
+});
 
 const showAppendButton = computed(() => {
-  if (selectedResources.value.length === 0) return false
-  if (props.source === 'settings') return false
-  return selectedResources.value.some(
-    (r) =>
-      r.resourceType === 'system_prompt' ||
-      r.resourceType === 'submessage_template' ||
-      r.resourceType === 'knowledge_base_chunk',
-  )
-})
+  if (selectedResources.value.length === 0) return false;
+  return selectedResources.value.every(r => contextConfig.value.canAppend.includes(r.resourceType as string));
+});
 
 const showKbSearchButton = computed(() => {
-  if (selectorMode.value !== 'resource') return false
-  if (selectedResources.value.length !== 1) return false
-  return selectedResources.value[0].resourceType === 'knowledge_base'
-})
+  if (selectorMode.value !== 'resource' || selectedResources.value.length === 0) return false;
+  return selectedResources.value.every(r => contextConfig.value.canMountKb.includes(r.resourceType as string));
+});
 
-// --- Watchers ---
 watch(
   () => props.visible,
   (isVisible) => {
@@ -289,11 +309,9 @@ watch(
       searchText.value = ''
       searchResult.value = []
       selectedResources.value = []
-      // FIX: 重置 selectionType，防止下次打开时因残留类型导致其他资源被禁用
       selectionType.value = null
     } else {
       selectedResources.value = []
-      // FIX: 关闭时也需要重置
       selectionType.value = null
     }
   },
@@ -314,7 +332,6 @@ watch(filteredTreeData, () => {
   })
 })
 
-// --- Helper Methods ---
 const getReadableResourceType = (type: string | null) => {
   if (!type) return t('resource.types.unknown')
   const map: Record<string, string> = {
@@ -322,6 +339,7 @@ const getReadableResourceType = (type: string | null) => {
     submessage_template: 'submessage_template',
     knowledge_base: 'knowledge_base',
     file: 'file',
+    skill: 'skill'
   }
   const key = map[type]
   return key ? t(`resource.types.${key}`) : type
@@ -332,9 +350,9 @@ const isResourceSelected = (resourceId: string): boolean => {
 }
 
 const isNodeDisabled = (data: ResourceNode): boolean => {
-  if (!isMultiSelectMode.value || !selectionType.value) return false
-  if (data.itemType === 'folder' && data.resourceType !== 'knowledge_base') return false
-  return data.resourceType !== selectionType.value
+  if (!isMultiSelectMode.value || !selectionType.value) return false;
+  if (data.itemType === 'folder' && data.resourceType !== 'knowledge_base' && data.resourceType !== 'skill') return false;
+  return data.resourceType !== selectionType.value;
 }
 
 type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
@@ -358,22 +376,25 @@ const getMatchTypeLabel = (type: string) => {
 }
 
 function filterTreeByType(nodes: ResourceNode[]): ResourceNode[] {
-  if (!props.resourceTypeFilter) return nodes
-  const result: ResourceNode[] = []
+  const allowed = contextConfig.value.allowedTypes;
+  if (!allowed || allowed.length === 0) return nodes;
+
+  const result: ResourceNode[] = [];
   for (const node of nodes) {
     if (node.itemType === 'folder') {
-      const children = filterTreeByType(node.children || [])
-      if (children.length > 0 || node.resourceType === props.resourceTypeFilter) {
-        result.push({ ...node, children })
+      const children = filterTreeByType(node.children || []);
+      if (node.resourceType === 'knowledge_base' || node.resourceType === 'skill') {
+        if (allowed.includes(node.resourceType)) result.push({ ...node, children });
+      } else {
+        result.push({ ...node, children });
       }
-    } else if (node.resourceType === props.resourceTypeFilter) {
-      result.push(node)
+    } else if (node.resourceType && allowed.includes(node.resourceType)) {
+      result.push(node);
     }
   }
-  return result
+  return result;
 }
 
-// --- Search Methods ---
 const toggleRegex = () => {
   enableRegex.value = !enableRegex.value
   if (searchText.value) triggerSearch()
@@ -418,7 +439,6 @@ const triggerSearch = async (resetPage = true) => {
   }
 }
 
-// --- Selection Logic ---
 const selectResourceById = async (
   resourceId: string,
   resourceType?: ResourceType | null,
@@ -429,18 +449,15 @@ const selectResourceById = async (
     targetResource = initialResourceObj
   }
 
-  if (
-    targetResource &&
-    props.resourceTypeFilter &&
-    targetResource.resourceType !== props.resourceTypeFilter
-  ) {
+  const typeToCheck = targetResource?.resourceType || resourceType
+
+  if (typeToCheck && !contextConfig.value.allowedTypes.includes(typeToCheck as string)) {
     ElMessage.warning(
-      t('resource.msg.typeMismatch', { type: getReadableResourceType(props.resourceTypeFilter) }),
+      t('resource.msg.typeMismatch', { type: getReadableResourceType(typeToCheck as string) })
     )
     return
   }
 
-  const typeToCheck = targetResource?.resourceType || resourceType
   if (
     isMultiSelectMode.value &&
     selectionType.value &&
@@ -505,7 +522,7 @@ const handleNodeClick = async (data: TreeNodeData) => {
   const resource = data as ResourceNode
   const isSelectable =
     resource.itemType === 'resource' ||
-    (resource.itemType === 'folder' && resource.resourceType === 'knowledge_base')
+    (resource.itemType === 'folder' && (resource.resourceType === 'knowledge_base' || resource.resourceType === 'skill'))
   if (!isSelectable || isNodeDisabled(resource)) return
 
   selectResourceById(resource.id, resource.resourceType, resource)
@@ -518,12 +535,9 @@ const handleNodeExpand = (data: ResourceNode) => {
   }
 }
 
-// 【新增】处理目录折叠，从 expandedKeys 中移除该 ID
 const handleNodeCollapse = (data: ResourceNode) => {
   expandedKeys.value.delete(data.id)
 }
-
-// --- Tab & KB Logic ---
 
 const handleTabChange = () => {
   selectedResources.value = []
@@ -560,7 +574,6 @@ const handleKBSelectionChange = (items: KBSearchResultItem[]) => {
   selectedResources.value = kbResources
 }
 
-// --- Action Handlers ---
 function handleMount() {
   if (selectedResources.value.length === 0) return
   emit('mount-resources', selectedResources.value)
@@ -574,8 +587,8 @@ function handleAppend() {
 }
 
 function handleMountKnowledgeBase() {
-  if (selectedResources.value.length !== 1) return
-  emit('mount-knowledge-base', selectedResources.value[0])
+  if (selectedResources.value.length === 0) return
+  emit('mount-knowledge-base', selectedResources.value)
   emit('update:visible', false)
 }
 
@@ -585,6 +598,13 @@ function handleDialogClose() {
 </script>
 
 <style scoped>
+
+.resource-type-tag {
+  flex-shrink: 0;
+  margin-left: 8px;
+  transform: scale(0.9);
+}
+
 .mobile-resource-drawer {
   background-color: var(--color-background);
 }
@@ -754,10 +774,17 @@ function handleDialogClose() {
 
 .drawer-footer-actions {
   display: flex;
+  flex-direction: column;
   gap: 10px;
   padding: 10px 0;
   padding-bottom: calc(10px + env(safe-area-inset-bottom));
   background: var(--color-background);
+}
+
+.action-buttons-row {
+  display: flex;
+  gap: 10px;
+  width: 100%;
 }
 </style>
 <style>

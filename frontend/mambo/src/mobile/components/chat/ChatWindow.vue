@@ -94,7 +94,7 @@
     <!-- Resource Selector Dialog -->
     <ResourceSelectorDialog
       v-model:visible="resourceSelectorVisible"
-      source="toolbar"
+      context="chat-toolbar"
       @mount-resources="handleMountResources"
       @append-resources="handleAppendResources"
       @mount-knowledge-base="handleMountKnowledgeBase"
@@ -130,7 +130,6 @@ import { useChatListStore } from '@/stores/chatListStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useProviderStore } from '@/stores/providerStore'
-import { useResourceStore } from '@/stores/resourceStore'
 import { useAgentStore } from '@/stores/agentStore'
 import { useChatInput } from '@/composables/useChatInput'
 import { useTokenEstimator } from '@/composables/useTokenEstimator'
@@ -151,13 +150,11 @@ const chatListStore = useChatListStore()
 const chatSessionStore = useChatSessionStore()
 const chatInteractionStore = useChatInteractionStore()
 const providerStore = useProviderStore()
-const resourceStore = useResourceStore()
 const agentStore = useAgentStore()
 
-const { currentChat, currentChatMessages, isGenerating, currentChatId, contextForTokenEstimation } =
+const { currentChat, currentChatMessages, isGenerating, currentChatId, contextForTokenEstimation, systemPromptResources } =
   storeToRefs(chatSessionStore)
 const { groupedModels } = storeToRefs(providerStore) as { groupedModels: Ref<GroupedModels[]> }
-const { resources: allResources } = storeToRefs(resourceStore)
 
 const {
   singlePartDraft,
@@ -214,6 +211,10 @@ const updateLayout = () => {
 
 const isSendButtonDisabled = computed(() => isGenerating.value || !isReadyToSend.value)
 
+const attachedKnowledgeBases = computed(() => {
+  return systemPromptResources.value.filter(r => r.resourceType === 'knowledge_base')
+})
+
 const hasAttachments = computed(
   () =>
     uploadedFiles.value.length > 0 ||
@@ -237,35 +238,6 @@ const pendingMessageTextForTokenEstimation = computed(() => {
 const { estimatedTokens } = useTokenEstimator(
   contextForTokenEstimation,
   pendingMessageTextForTokenEstimation,
-)
-
-const activeKnowledgeBaseId = computed(() => {
-  const params = currentChat.value?.modelParameters
-  if (!params?.enabled_mcp_ids) return null
-  if (!Array.isArray(params.enabled_mcp_ids) && typeof params.enabled_mcp_ids === 'object') {
-    const kbConfig = params.enabled_mcp_ids['system-knowledge-base']
-    return kbConfig?.['MAMBOCHAT_RESOURCE_ID'] || null
-  }
-  return null
-})
-
-const attachedKnowledgeBases = computed(() => {
-  const id = activeKnowledgeBaseId.value
-  if (!id) return []
-  const resource = allResources.value.find((r) => r.id === id)
-  if (resource) return [resource]
-  return []
-})
-
-watch(
-  activeKnowledgeBaseId,
-  (newId) => {
-    if (newId) {
-      const exists = allResources.value.some((r) => r.id === newId)
-      if (!exists) resourceStore.fetchResourceDetails(newId)
-    }
-  },
-  { immediate: true },
 )
 
 onMounted(() => {
@@ -334,8 +306,8 @@ const handleSuggestionClick = (text: string) => {
 }
 
 const handleSwitchBranch = async (targetId: string) => {
-  if (typeof chatInteractionStore.switchBranch === 'function') {
-    await chatInteractionStore.switchBranch(targetId)
+  if (typeof chatInteractionStore.activateBranch === 'function') {
+    await chatInteractionStore.activateBranch(targetId)
   }
 }
 
@@ -367,21 +339,6 @@ async function handleFileUploads(files: FileList) {
   }
 }
 
-function normalizeMcpIds(currentIds: any): Record<string, any> {
-  if (!currentIds) return {}
-  if (Array.isArray(currentIds)) {
-    return currentIds.reduce(
-      (acc, id) => {
-        acc[id] = {}
-        return acc
-      },
-      {} as Record<string, any>,
-    )
-  }
-  if (typeof currentIds === 'object') return { ...currentIds }
-  return {}
-}
-
 async function handleMountResources(resources: Resource[]) {
   for (const resource of resources) {
     if (resource.resourceType === 'submessage_template') {
@@ -401,46 +358,39 @@ async function handleAppendResources(resources: Resource[]) {
   }
 }
 
-async function handleMountKnowledgeBase(resource: Resource) {
+async function handleMountKnowledgeBase(resources: Resource[]) {
   if (!currentChat.value) return
-  const currentParams = currentChat.value.modelParameters || {}
-  const mcpIds = normalizeMcpIds(currentParams.enabled_mcp_ids)
-  mcpIds['system-knowledge-base'] = { MAMBOCHAT_RESOURCE_ID: resource.id }
+  const currentList = currentChat.value.resource_prompt_list || []
+  const newIds = resources.map(r => r.id).filter(id => !currentList.includes(id))
 
-  const updatedSettings: ChatUpdate = {
-    modelParameters: { ...currentParams, enabled_mcp_ids: mcpIds },
+  if (newIds.length > 0) {
+    const updatedList = [...currentList, ...newIds]
+    await chatListStore.updateChatSettings(currentChat.value.id, {
+      resource_prompt_list: updatedList
+    })
+    ElMessage.success(`已启用知识库: ${resources.map(r => r.name).join(', ')}`)
   }
-  await chatListStore.updateChatSettings(currentChat.value.id, updatedSettings)
-  ElMessage.success(`已启用知识库: ${resource.name}`)
 }
 
-async function handleRemoveKnowledgeBase() {
+async function handleRemoveKnowledgeBase(resourceId: string) {
   if (!currentChat.value) return
-  const currentParams = currentChat.value.modelParameters || {}
-  const mcpIds = normalizeMcpIds(currentParams.enabled_mcp_ids)
-  if (mcpIds['system-knowledge-base']) {
-    delete mcpIds['system-knowledge-base']
-    const updatedSettings: ChatUpdate = {
-      modelParameters: { ...currentParams, enabled_mcp_ids: mcpIds },
-    }
-    await chatListStore.updateChatSettings(currentChat.value.id, updatedSettings)
-    ElMessage.success('已停用知识库检索')
-  }
+  const currentList = currentChat.value.resource_prompt_list || []
+  const updatedList = currentList.filter(id => id !== resourceId)
+
+  await chatListStore.updateChatSettings(currentChat.value.id, {
+    resource_prompt_list: updatedList.length > 0 ? updatedList : null
+  })
+  ElMessage.success('已停用知识库')
 }
 
 async function handleToggleMcpTool(mcpId: string) {
   if (!currentChat.value) return
-  const currentParams = currentChat.value.modelParameters || {}
-  const mcpIds = normalizeMcpIds(currentParams.enabled_mcp_ids)
-  if (mcpIds[mcpId]) {
-    delete mcpIds[mcpId]
-  } else {
-    mcpIds[mcpId] = {}
-  }
-  const updatedSettings: ChatUpdate = {
-    modelParameters: { ...currentParams, enabled_mcp_ids: mcpIds },
-  }
-  await chatListStore.updateChatSettings(currentChat.value.id, updatedSettings)
+  const currentIds = currentChat.value.enabled_mcp_ids || []
+  const newIds = currentIds.includes(mcpId)
+    ? currentIds.filter(id => id !== mcpId)
+    : [...currentIds, mcpId]
+
+  await chatListStore.updateChatSettings(currentChat.value.id, { enabled_mcp_ids: newIds })
 }
 
 function handleOpenSettings() {
