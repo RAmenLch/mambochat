@@ -29,7 +29,7 @@ class AgentBase(BaseModel):
     resourcePromptList: Optional[List[str]] = Field(None, description="资源挂载ID列表")
     enabledMcpIds: Optional[List[str]] = Field(None, description="启用的 MCP 服务ID列表")
     subAgents: Optional[List[str]] = Field(None, description="子 Agent ID列表")
-
+    backendIds: Optional[List[str]] = Field(default_factory=list, description="挂载的 Backend 配置 ID 列表")
 
 class AgentCreate(AgentBase):
     """用于创建 Agent 的 Schema（继承 Base 保持一致）"""

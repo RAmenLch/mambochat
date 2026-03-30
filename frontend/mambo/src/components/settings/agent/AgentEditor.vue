@@ -39,7 +39,7 @@
                   <el-form-item :label="$t('agent.type')">
                     <el-select v-model="form.AgentType" style="width: 100%">
                       <el-option label="ReAct Agent" value="ReActAgent" />
-                      <el-option label="Deep Agent" value="DeepAgent" /> <!-- [新增] Deep Agent -->
+                      <el-option label="Deep Agent" value="DeepAgent" />
                     </el-select>
                   </el-form-item>
                 </el-col>
@@ -53,7 +53,7 @@
           </div>
         </el-card>
 
-        <!-- 2. 模型配置 -->
+        <!-- 2. 模型配置 (保持不变) -->
         <el-card shadow="never" class="config-card">
           <template #header>
             <span class="card-title">{{ $t('agent.modelConfig') }}</span>
@@ -151,7 +151,7 @@
           </el-row>
         </el-card>
 
-        <!-- 3. 设定与能力 (2x2 四等分布局) -->
+        <!-- 3. 设定与能力 -->
         <el-card shadow="never" class="config-card">
           <template #header>
             <span class="card-title">{{ $t('agent.settingsAndResources') }}</span>
@@ -159,7 +159,6 @@
 
           <!-- 第一行：系统提示词 & 挂载资源 -->
           <el-row :gutter="32" class="settings-row">
-            <!-- 左上：系统提示词 -->
             <el-col :span="12">
               <el-form-item :label="$t('agent.systemPrompt')">
                 <el-input
@@ -172,7 +171,6 @@
               </el-form-item>
             </el-col>
 
-            <!-- 右上：挂载资源 -->
             <el-col :span="12">
               <el-form-item :label="$t('agent.mountedResources')">
                 <div class="mount-container">
@@ -194,7 +192,6 @@
 
           <!-- 第二行：MCP 工具 & 子 Agent -->
           <el-row :gutter="32" class="settings-row">
-            <!-- 左下：MCP 工具 -->
             <el-col :span="12">
               <el-form-item :label="$t('agent.enableMcp')">
                 <div class="mount-container">
@@ -238,7 +235,6 @@
               </el-form-item>
             </el-col>
 
-            <!-- 右下：子 Agent -->
             <el-col :span="12">
               <el-form-item :label="$t('agent.subAgents')">
                 <div class="mount-container">
@@ -270,6 +266,53 @@
               </el-form-item>
             </el-col>
           </el-row>
+
+          <!-- 第三行：Backend 挂载 (仅 DeepAgent 可见) -->
+          <el-row :gutter="32" class="settings-row" v-if="form.AgentType === 'DeepAgent'">
+            <el-col :span="24">
+              <el-form-item :label="$t('agent.mountBackend', '挂载 Backend')">
+                <div class="mount-container" style="height: auto; min-height: 120px;">
+                  <div class="mount-action">
+                    <el-dropdown trigger="click" @command="handleAddBackend" placement="bottom-start">
+                      <el-button type="warning" plain size="small">
+                        <el-icon><Monitor /></el-icon> {{ $t('agent.addBackend', '挂载 Backend') }}
+                      </el-button>
+                      <template #dropdown>
+                        <el-dropdown-menu class="mcp-dropdown-menu">
+                          <el-dropdown-item v-for="b in availableBackends" :key="b.id" :command="b.id">
+                            {{ b.name }} ({{ b.backendType }})
+                          </el-dropdown-item>
+                          <el-dropdown-item v-if="availableBackends.length === 0" disabled>
+                            {{ $t('common.noData', '暂无可用 Backend') }}
+                          </el-dropdown-item>
+                        </el-dropdown-menu>
+                      </template>
+                    </el-dropdown>
+                  </div>
+                  <div v-if="mountedBackendList.length > 0" class="tag-list-wrapper">
+                    <el-tag
+                      v-for="b in mountedBackendList"
+                      :key="b.id"
+                      closable
+                      type="warning"
+                      effect="light"
+                      class="custom-tag"
+                      @close="handleRemoveBackend(b.id)"
+                    >
+                      <div class="tag-inner">
+                        <el-icon class="tag-icon"><Monitor /></el-icon>
+                        <span class="tag-text">{{ b.name }}</span>
+                      </div>
+                    </el-tag>
+                  </div>
+                  <div v-else class="empty-mount">
+                    {{ $t('agent.noBackend', '暂无挂载 Backend') }}
+                  </div>
+                </div>
+              </el-form-item>
+            </el-col>
+          </el-row>
+
         </el-card>
 
       </el-form>
@@ -300,12 +343,13 @@ import { ref, reactive, watch, computed, onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useI18n } from 'vue-i18n';
 import { ElMessage } from 'element-plus';
-import { User, QuestionFilled, Collection, Plus, Connection } from '@element-plus/icons-vue';
+import { User, QuestionFilled, Collection, Plus, Connection, Monitor } from '@element-plus/icons-vue';
 
 import { useAgentStore } from '@/stores/agentStore';
 import { useProviderStore } from '@/stores/providerStore';
 import { useSystemConfigStore } from '@/stores/systemConfigStore';
 import { useMcpStore } from '@/stores/mcpStore';
+import { useBackendStore } from '@/stores/backendStore'; // [新增] 引入 BackendStore
 
 import { uploadAgentAvatar, deleteAgentAvatar, getAgent } from '@/api/agentService';
 import { getResourceDetails } from '@/api/resourceService';
@@ -321,10 +365,12 @@ const agentStore = useAgentStore();
 const providerStore = useProviderStore();
 const systemConfigStore = useSystemConfigStore();
 const mcpStore = useMcpStore();
+const backendStore = useBackendStore(); // [新增]
 
 const { currentAgentId, agentList } = storeToRefs(agentStore);
 const { groupedModels, allModels } = storeToRefs(providerStore);
 const { activeUserMcpServices } = storeToRefs(mcpStore);
+const { backendList } = storeToRefs(backendStore); // [新增]
 
 const isSaving = ref(false);
 const isAvatarLoading = ref(false);
@@ -345,8 +391,31 @@ const form = reactive({
   modelParameters: {} as Record<string, any>,
   agentAvatarUrl: null as string | null,
   enabledMcpIds: [] as string[],
-  subAgents: [] as string[]
+  subAgents: [] as string[],
+  backendIds: [] as string[] // [新增]
 });
+
+// --- Backend 挂载逻辑 [新增] ---
+const availableBackends = computed(() => {
+  return backendList.value.filter(b => !form.backendIds.includes(b.id));
+});
+
+const mountedBackendList = computed(() => {
+  return form.backendIds.map(id => {
+    return backendList.value.find(b => b.id === id) || { id, name: 'Unknown Backend', backendType: 'unknown' };
+  });
+});
+
+function handleAddBackend(backendId: string) {
+  if (!form.backendIds.includes(backendId)) {
+    form.backendIds.push(backendId);
+  }
+}
+
+function handleRemoveBackend(backendId: string) {
+  form.backendIds = form.backendIds.filter(id => id !== backendId);
+}
+// --------------------
 
 // --- MCP 挂载逻辑 ---
 const availableMcps = computed(() => {
@@ -413,6 +482,7 @@ watch(agentData, async (newVal) => {
     form.agentAvatarUrl = newVal.agentAvatarUrl || null;
     form.enabledMcpIds = newVal.enabledMcpIds ? [...newVal.enabledMcpIds] : [];
     form.subAgents = newVal.subAgents ? [...newVal.subAgents] : [];
+    form.backendIds = newVal.backendIds ? [...newVal.backendIds] : []; // [新增] 还原 Backend 绑定数据
 
     if (newVal.resourcePromptList && newVal.resourcePromptList.length > 0) {
       try {
@@ -550,6 +620,9 @@ async function handleSave() {
       }
     }
 
+    // [新增] 判断：如果切回了 ReActAgent，则清空 backendIds
+    const finalBackendIds = form.AgentType === 'DeepAgent' && form.backendIds.length > 0 ? form.backendIds : null;
+
     await agentStore.updateAgentSettings(currentAgentId.value, {
       name: form.name,
       description: form.description,
@@ -559,7 +632,8 @@ async function handleSave() {
       modelParameters: finalModelParameters,
       resourcePromptList: resourcePromptList.length > 0 ? resourcePromptList : null,
       enabledMcpIds: form.enabledMcpIds.length > 0 ? form.enabledMcpIds : null,
-      subAgents: form.subAgents.length > 0 ? form.subAgents : null
+      subAgents: form.subAgents.length > 0 ? form.subAgents : null,
+      backendIds: finalBackendIds // [新增]
     });
     ElMessage.success(t('agent.saveSuccess'));
   } catch (error) {
@@ -572,10 +646,14 @@ async function handleSave() {
 onMounted(() => {
   providerStore.fetchProviders();
   systemConfigStore.fetchSystemConfig();
+  if (backendStore.backendList.length === 0) {
+    backendStore.fetchBackends(); // [新增] 初始化拉取 Backend 列表
+  }
 });
 </script>
 
 <style scoped>
+/* (原有样式保持不变，截取主要部分) */
 .agent-editor {
   display: flex;
   flex-direction: column;
@@ -649,13 +727,13 @@ onMounted(() => {
   height: 100%;
 }
 :deep(.prompt-textarea .el-textarea__inner) {
-  height: 190px; /* 强制高度，与右侧容器对齐 */
+  height: 190px;
 }
 
-/* 统一的挂载容器样式 (资源、MCP、子Agent) */
+/* 统一的挂载容器样式 */
 .mount-container {
   width: 100%;
-  height: 190px; /* 统一高度 */
+  height: 190px;
   background-color: var(--color-background-soft);
   border: 1px dashed var(--el-border-color);
   border-radius: 6px;
@@ -714,7 +792,6 @@ onMounted(() => {
   overflow-y: auto;
 }
 
-/* 模型参数样式 */
 .label-icon {
   margin-left: 6px;
   color: var(--el-text-color-secondary);

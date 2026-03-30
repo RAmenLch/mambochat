@@ -21,6 +21,7 @@ export interface Agent {
   resourcePromptList: string[] | null;
   enabledMcpIds: string[] | null;
   subAgents: string[] | null;
+  backendIds: string[] | null;
 }
 
 export interface AgentCreate {
@@ -38,6 +39,7 @@ export interface AgentCreate {
   resourcePromptList?: string[] | null;
   enabledMcpIds?: string[] | null;
   subAgents?: string[] | null;
+  backendIds: string[] | null;
 }
 
 export interface AgentUpdate extends Partial<AgentCreate> {}

@@ -9,7 +9,6 @@
     @close="handleDrawerClose"
   >
     <div class="drawer-content">
-      <!-- 会话自身的可编辑设置 -->
       <el-form v-if="chatData" :model="form" label-position="top">
         <el-form-item :label="$t('chat.settings.name', '会话名称')">
           <el-input v-model.trim="form.name" :placeholder="$t('chat.settings.namePlaceholder', '请输入会话名称')" />
@@ -30,11 +29,9 @@
         <span class="preview-divider-title">{{ $t('chat.settings.agentInfoPreview', 'Agent 配置预览 (只读)') }}</span>
       </el-divider>
 
-      <!-- Agent 详细配置预览区 -->
       <el-scrollbar class="agent-preview-scrollbar" v-if="selectedAgent">
         <div class="agent-preview-container">
 
-          <!-- 1. 基本信息 -->
           <div class="preview-section">
             <div class="agent-header">
               <el-avatar
@@ -45,7 +42,6 @@
               />
               <div class="agent-title-info">
                 <div class="agent-name-row">
-                  <!-- 增加点击事件和可点击样式 -->
                   <span
                     class="agent-name clickable-agent"
                     @click="openAgentSettings(selectedAgent.id)"
@@ -62,7 +58,6 @@
             </div>
           </div>
 
-          <!-- 2. 模型配置 -->
           <div class="preview-section">
             <div class="section-title"><el-icon><Cpu /></el-icon> {{ $t('agent.modelConfig', '模型配置') }}</div>
             <div class="info-grid">
@@ -85,7 +80,6 @@
             </div>
           </div>
 
-          <!-- 3. 系统设定 -->
           <div class="preview-section">
             <div class="section-title"><el-icon><Document /></el-icon> {{ $t('agent.systemPrompt', '系统提示词') }}</div>
             <div class="prompt-box">
@@ -93,21 +87,17 @@
             </div>
           </div>
 
-          <!-- 4. 扩展能力 -->
           <div class="preview-section ext-section">
             <div class="section-title"><el-icon><MagicStick /></el-icon> {{ $t('agent.settingsAndResources', '设定与能力') }}</div>
 
-            <!-- 扩展能力: 挂载资源 -->
             <div class="ext-item">
               <div class="ext-label">{{ $t('agent.mountedResources', '挂载资源') }}:</div>
               <div class="ext-tags" v-if="previewResources.length > 0">
-                <!-- [修改] 使用 MountedResourceTags 替代手写的 el-tag，开启 color-by-type 和 readonly -->
                 <MountedResourceTags :model-value="previewResources" color-by-type readonly />
               </div>
               <div class="ext-empty" v-else>{{ $t('common.none', '无') }}</div>
             </div>
 
-            <!-- MCP 工具 -->
             <div class="ext-item">
               <div class="ext-label">{{ $t('agent.enableMcp', 'MCP 工具') }}:</div>
               <div class="ext-tags" v-if="displayMcpList.length > 0">
@@ -118,11 +108,19 @@
               <div class="ext-empty" v-else>{{ $t('common.none', '无') }}</div>
             </div>
 
-            <!-- 子 Agent -->
+            <div class="ext-item" v-if="selectedAgent.AgentType === 'DeepAgent'">
+              <div class="ext-label">{{ $t('agent.mountedBackend', '挂载 Backend') }}:</div>
+              <div class="ext-tags" v-if="displayBackendList.length > 0">
+                <el-tag v-for="b in displayBackendList" :key="b.id" size="small" type="warning" effect="light">
+                  <el-icon><Monitor /></el-icon> {{ b.name }}
+                </el-tag>
+              </div>
+              <div class="ext-empty" v-else>{{ $t('common.none', '无') }}</div>
+            </div>
+
             <div class="ext-item">
               <div class="ext-label">{{ $t('agent.subAgents', '子 Agent') }}:</div>
               <div class="ext-tags" v-if="displaySubAgents.length > 0">
-                <!-- 增加点击事件和可点击样式，增加头像显示 -->
                 <el-tag
                   v-for="sub in displaySubAgents"
                   :key="sub.id"
@@ -165,14 +163,15 @@ import { reactive, watch, computed, ref, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { User, Cpu, Document, MagicStick, Collection, Connection } from '@element-plus/icons-vue';
+import { User, Cpu, Document, MagicStick, Collection, Connection, Monitor } from '@element-plus/icons-vue';
 
 import { useAgentStore } from '@/stores/agentStore';
 import { useProviderStore } from '@/stores/providerStore';
 import { useMcpStore } from '@/stores/mcpStore';
+import { useBackendStore } from '@/stores/backendStore';
 import { getResourceDetails } from '@/api/resourceService';
-import type { Chat, ChatUpdate, Resource } from '@/api/types'; // [修改] 引入 Resource 类型
-import MountedResourceTags from '@/components/common/MountedResourceTags.vue'; // [新增] 引入组件
+import type { Chat, ChatUpdate, Resource } from '@/api/types';
+import MountedResourceTags from '@/components/common/MountedResourceTags.vue';
 
 const props = defineProps<{
   visible: boolean;
@@ -190,16 +189,14 @@ const router = useRouter();
 const agentStore = useAgentStore();
 const providerStore = useProviderStore();
 const mcpStore = useMcpStore();
+const backendStore = useBackendStore();
 
 const form = reactive({
   name: '',
   agentId: '' as string | null,
 });
 
-// [修改] 异步获取的资源列表缓存，类型改为完整的 Resource[]
 const previewResources = ref<Resource[]>([]);
-
-// --- Computed ---
 
 const agentOptions = computed(() => {
   return agentStore.allAgents
@@ -229,6 +226,14 @@ const displayMcpList = computed(() => {
   });
 });
 
+const displayBackendList = computed(() => {
+  const bIds = selectedAgent.value?.backendIds || [];
+  return bIds.map(id => {
+    const b = backendStore.backendList.find(x => x.id === id);
+    return b ? { id, name: b.name } : { id, name: 'Unknown Backend' };
+  });
+});
+
 const displaySubAgents = computed(() => {
   const subIds = selectedAgent.value?.subAgents || [];
   return subIds.map(id => {
@@ -237,15 +242,14 @@ const displaySubAgents = computed(() => {
   });
 });
 
-// --- Lifecycle ---
-// 组件挂载时确保 Agent 列表已加载
 onMounted(() => {
   if (agentStore.allAgents.length === 0) {
     agentStore.fetchAllAgents();
   }
+  if (backendStore.backendList.length === 0) {
+    backendStore.fetchBackends();
+  }
 });
-
-// --- Watchers ---
 
 watch(() => props.chatData, (newData) => {
   if (newData) {
@@ -254,7 +258,6 @@ watch(() => props.chatData, (newData) => {
   }
 }, { immediate: true, deep: true });
 
-// 监听选中的 Agent 变化，异步拉取资源名称
 watch(() => selectedAgent.value?.resourcePromptList, async (resourceIds) => {
   if (!resourceIds || resourceIds.length === 0) {
     previewResources.value = [];
@@ -263,15 +266,12 @@ watch(() => selectedAgent.value?.resourcePromptList, async (resourceIds) => {
   try {
     const promises = resourceIds.map(id => getResourceDetails(id).catch(() => null));
     const results = await Promise.all(promises);
-    // [修改] 直接保留完整的 Resource 对象，不再 map 截断属性
     previewResources.value = results.filter(r => r !== null) as Resource[];
   } catch (error) {
     console.error('Failed to load preview resources:', error);
     previewResources.value = [];
   }
 }, { immediate: true });
-
-// --- Methods ---
 
 const handleUpdateModelValue = (val: boolean) => {
   emit('update:visible', val);
@@ -298,7 +298,6 @@ const handleSaveSettings = () => {
   });
 };
 
-// 打开 Agent 设置新标签页
 const openAgentSettings = (agentId: string) => {
   const routeUrl = router.resolve({
     path: '/settings',
@@ -351,7 +350,6 @@ const openAgentSettings = (agentId: string) => {
   gap: 6px;
 }
 
-/* 1. 基本信息样式 */
 .agent-header {
   display: flex;
   align-items: center;
@@ -382,7 +380,6 @@ const openAgentSettings = (agentId: string) => {
   text-overflow: ellipsis;
 }
 
-/* Agent 名称可点击样式 */
 .clickable-agent {
   cursor: pointer;
   color: var(--el-color-primary);
@@ -402,7 +399,6 @@ const openAgentSettings = (agentId: string) => {
   overflow: hidden;
 }
 
-/* 2. 模型配置样式 */
 .info-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -423,7 +419,6 @@ const openAgentSettings = (agentId: string) => {
   font-weight: 500;
 }
 
-/* 3. 系统提示词样式 */
 .prompt-box {
   font-size: 13px;
   color: var(--el-text-color-regular);
@@ -437,7 +432,6 @@ const openAgentSettings = (agentId: string) => {
   line-height: 1.5;
 }
 
-/* 4. 扩展能力样式 */
 .ext-section {
   display: flex;
   flex-direction: column;
@@ -459,7 +453,6 @@ const openAgentSettings = (agentId: string) => {
   gap: 8px;
 }
 
-/* 子 Agent 标签可点击样式 */
 .clickable-tag {
   cursor: pointer;
   transition: opacity 0.3s;

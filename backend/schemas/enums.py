@@ -121,3 +121,7 @@ class AgentTypeEnum(str, Enum):
     """定义 Agent 初始化的类型标识符"""
     REACT = "ReActAgent"
     DEEP = "DeepAgent"
+
+class BackendType(str, Enum):
+    """定义 Backend 的类型"""
+    SSH = "ssh"
