@@ -35,3 +35,13 @@ export interface BackendUpdate extends Partial<BackendCreate> {}
 export interface SshPublicKeyResponse {
   public_key: string;
 }
+
+export interface SshTestRequest {
+  backend_id?: string | null;
+  configData: Record<string, any>;
+}
+
+export interface SshTestResponse {
+  success: boolean;
+  message: string;
+}

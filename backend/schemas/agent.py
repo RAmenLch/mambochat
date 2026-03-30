@@ -52,7 +52,7 @@ class AgentUpdate(BaseModel):
     resourcePromptList: Optional[List[str]] = None
     enabledMcpIds: Optional[List[str]] = None
     subAgents: Optional[List[str]] = None
-
+    backendIds: Optional[List[str]] = None
 
 class AgentResponse(AgentBase):
     """用于 API 响应的 Agent Schema，包含系统生成的标识和时间戳"""

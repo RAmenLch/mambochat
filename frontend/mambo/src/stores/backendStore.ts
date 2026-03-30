@@ -1,8 +1,8 @@
 // frontend/mambo/src/stores/backendStore.ts
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import { getBackends, createBackend, updateBackend, deleteBackend, getSshPublicKey } from '@/api/backendService';
-import type { BackendConfig, BackendCreate, BackendUpdate } from '@/api/types/backendTypes';
+import { getBackends, createBackend, updateBackend, deleteBackend, getSshPublicKey, testSshConnection } from '@/api/backendService';
+import type { BackendConfig, BackendCreate, BackendUpdate, SshTestRequest } from '@/api/types/backendTypes';
 
 export const useBackendStore = defineStore('backend', () => {
   const backendList = ref<BackendConfig[]>([]);
@@ -51,6 +51,11 @@ export const useBackendStore = defineStore('backend', () => {
     backendList.value = backendList.value.filter(b => b.id !== id);
   }
 
+  // [新增] 测试连接方法
+  async function testConnection(data: SshTestRequest) {
+    return await testSshConnection(data);
+  }
+
   return {
     backendList,
     isLoading,
@@ -59,6 +64,7 @@ export const useBackendStore = defineStore('backend', () => {
     fetchPublicKey,
     createNewBackend,
     updateExistingBackend,
-    removeBackend
+    removeBackend,
+    testConnection // [新增]
   };
 });

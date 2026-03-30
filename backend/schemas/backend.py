@@ -4,8 +4,9 @@ from datetime import datetime
 from backend.schemas.enums import BackendType
 import re
 
-# 密码脱敏占位符
 PASSWORD_MASK = "********"
+
+FORBIDDEN_BACKEND_NAMES = {"skills", "memories", "state", "root", "tmp", "temp"}
 
 class SSHConfigData(BaseModel):
     """SSH Backend 严格的配置结构"""
@@ -29,6 +30,8 @@ class BackendConfigBase(BaseModel):
     def validate_name(cls, v):
         if not re.match(r"^[a-zA-Z0-9_]+$", v):
             raise ValueError("Backend name 只能包含字母、数字和下划线，因为它将作为路径路由")
+        if v.lower() in FORBIDDEN_BACKEND_NAMES:
+            raise ValueError(f"Backend name 不能使用系统保留字: {', '.join(FORBIDDEN_BACKEND_NAMES)}")
         return v
 
     @field_validator('configData')
@@ -36,10 +39,9 @@ class BackendConfigBase(BaseModel):
     def validate_config_data(cls, v, info):
         backend_type = info.data.get('backendType')
         if backend_type == BackendType.SSH.value:
-            # 校验时不校验掩码
             if v.get("password") == PASSWORD_MASK:
                 temp_v = v.copy()
-                temp_v["password"] = "dummy" # 临时替换以通过基础校验
+                temp_v["password"] = "dummy"
                 SSHConfigData(**temp_v)
             else:
                 SSHConfigData(**v)
@@ -56,8 +58,11 @@ class BackendConfigUpdate(BaseModel):
     @field_validator('name')
     @classmethod
     def validate_name(cls, v):
-        if v and not re.match(r"^[a-zA-Z0-9_]+$", v):
-            raise ValueError("Backend name 只能包含字母、数字和下划线")
+        if v:
+            if not re.match(r"^[a-zA-Z0-9_]+$", v):
+                raise ValueError("Backend name 只能包含字母、数字和下划线")
+            if v.lower() in FORBIDDEN_BACKEND_NAMES:
+                raise ValueError(f"Backend name 不能使用系统保留字: {', '.join(FORBIDDEN_BACKEND_NAMES)}")
         return v
 
 class BackendConfigResponse(BackendConfigBase):
@@ -70,7 +75,6 @@ class BackendConfigResponse(BackendConfigBase):
 class SSHPublicKeyResponse(BaseModel):
     public_key: str = Field(..., description="系统全局 SSH 公钥")
 
-# --- 新增：测试相关的 Schema ---
 class SSHTestRequest(BaseModel):
     backend_id: Optional[str] = Field(None, description="如果基于已保存的配置测试，传入 ID")
     configData: Dict[str, Any] = Field(..., description="前端表单中的配置数据")

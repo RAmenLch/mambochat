@@ -75,6 +75,10 @@ class AgentConfig(BaseModel):
 
     agent_type: AgentTypeEnum = Field(default=AgentTypeEnum.REACT, description="Agent 的类型标识")
     llm_config: Optional[ModelConfig] = Field(default=None, description="该Agent专属的模型配置")
+    mounted_backends: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="挂载的 Backend 配置列表 (包含类型、路由名称和连接参数)"
+    )
     tools: Optional[List[BaseTool]] = Field(None, description="挂载给 Agent 的工具列表")
 
     skills: Optional[List[SkillConfig]] = Field(

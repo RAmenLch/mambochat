@@ -1,6 +1,6 @@
 // frontend/mambo/src/api/backendService.ts
 import apiClient from './index';
-import type { BackendConfig, BackendCreate, BackendUpdate, SshPublicKeyResponse } from './types/backendTypes';
+import type { BackendConfig, BackendCreate, BackendUpdate, SshPublicKeyResponse, SshTestRequest, SshTestResponse } from './types/backendTypes';
 
 export const getBackends = (skip = 0, limit = 100): Promise<BackendConfig[]> => {
   return apiClient.get('/backends/', { params: { skip, limit } });
@@ -24,4 +24,8 @@ export const deleteBackend = (backendId: string): Promise<void> => {
 
 export const getSshPublicKey = (): Promise<SshPublicKeyResponse> => {
   return apiClient.get('/backends/ssh/public-key');
+};
+
+export const testSshConnection = (data: SshTestRequest): Promise<SshTestResponse> => {
+  return apiClient.post('/backends/ssh/test', data);
 };

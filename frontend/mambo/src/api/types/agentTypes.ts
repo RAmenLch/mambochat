@@ -42,7 +42,7 @@ export interface AgentCreate {
   backendIds: string[] | null;
 }
 
-export interface AgentUpdate extends Partial<AgentCreate> {}
+export type AgentUpdate = Partial<AgentCreate>
 
 export interface ChatDuplicateRequest {
   up_to_message_id?: string | null;

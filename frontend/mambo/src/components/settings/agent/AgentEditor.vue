@@ -620,8 +620,9 @@ async function handleSave() {
       }
     }
 
-    // [新增] 判断：如果切回了 ReActAgent，则清空 backendIds
-    const finalBackendIds = form.AgentType === 'DeepAgent' && form.backendIds.length > 0 ? form.backendIds : null;
+    // [修复] 1. 解除 Proxy 包装，防止序列化为空数组
+    // [修复] 2. 无论清空还是切换 AgentType，都显式发送 [] 让后端清空数据，而不是发送 null
+    const finalBackendIds = form.AgentType === 'DeepAgent' ? [...form.backendIds] : [];
 
     await agentStore.updateAgentSettings(currentAgentId.value, {
       name: form.name,
@@ -630,11 +631,15 @@ async function handleSave() {
       systemPrompt: form.systemPrompt,
       aiModelId: form.aiModelId,
       modelParameters: finalModelParameters,
-      resourcePromptList: resourcePromptList.length > 0 ? resourcePromptList : null,
-      enabledMcpIds: form.enabledMcpIds.length > 0 ? form.enabledMcpIds : null,
-      subAgents: form.subAgents.length > 0 ? form.subAgents : null,
-      backendIds: finalBackendIds // [新增]
+
+      // 建议顺手把这里的其他数组也加上展开运算符 [...array] 和 [] 回退，防止遇到同样的 Bug
+      resourcePromptList: resourcePromptList.length > 0 ? [...resourcePromptList] : [],
+      enabledMcpIds: form.enabledMcpIds.length > 0 ? [...form.enabledMcpIds] : [],
+      subAgents: form.subAgents.length > 0 ? [...form.subAgents] : [],
+
+      backendIds: finalBackendIds // 使用修复后的变量
     });
+
     ElMessage.success(t('agent.saveSuccess'));
   } catch (error) {
     ElMessage.error(t('agent.saveFailed'));

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_core.tools import BaseTool
 
 from backend.schemas.enums import ToolReviewMode, AgentTypeEnum
-from backend.crud import mcp_crud, agent_crud, provider_crud, setting_crud
+from backend.crud import mcp_crud, agent_crud, provider_crud, setting_crud, backend_crud
 from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 
 from backend.services.generation.core.llm_io import AgentConfig, ModelConfig
@@ -122,6 +122,16 @@ class DeepAgentInitializer(AbstractAgentInitializer):
             if injection:
                 extended_prompts.append(injection)
 
+        mounted_backends = []
+        if self.agent.backendIds:
+            backends_db = await backend_crud.get_backends_by_ids(self.db, self.agent.backendIds)
+            for b in backends_db:
+                mounted_backends.append({
+                    "name": b.name,
+                    "backendType": b.backendType,
+                    "configData": b.configData
+                })
+
         sub_configs: List[AgentConfig] = []
 
         if self.agent.subAgents:
@@ -194,7 +204,8 @@ class DeepAgentInitializer(AbstractAgentInitializer):
             skills=skills if skills else None,
             sub_configs=sub_configs if sub_configs else None,
             hitl_interrupt_on=self.hitl_interrupt_on,
-            resume_payload=self.resume_payload
+            resume_payload=self.resume_payload,
+            mounted_backends=mounted_backends if mounted_backends else None
         )
 
         return agent_config, additional_system_prompt

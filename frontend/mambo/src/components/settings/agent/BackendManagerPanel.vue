@@ -86,8 +86,15 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">{{ $t('common.action.cancel', '取消') }}</el-button>
-        <el-button type="primary" @click="submitForm" :loading="isSaving">{{ $t('common.action.confirm', '确定') }}</el-button>
+        <div class="dialog-footer-actions">
+          <el-button type="info" plain @click="handleTestConnection" :loading="isTesting">
+            <el-icon><Connection /></el-icon> {{ $t('backend.testConnection', '测试连接') }}
+          </el-button>
+          <div class="right-actions">
+            <el-button @click="dialogVisible = false">{{ $t('common.action.cancel', '取消') }}</el-button>
+            <el-button type="primary" @click="submitForm" :loading="isSaving">{{ $t('common.action.confirm', '确定') }}</el-button>
+          </div>
+        </div>
       </template>
     </el-dialog>
 
@@ -111,10 +118,10 @@
 import { ref, reactive, onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
-import { Plus, Key } from '@element-plus/icons-vue';
+import { Plus, Key, Connection } from '@element-plus/icons-vue';
 import { useBackendStore } from '@/stores/backendStore';
 import { copyToClipboard } from '@/utils/clipboard';
-import type { BackendConfig, BackendCreate, SshConfigData } from '@/api/types/backendTypes';
+import type { BackendConfig, BackendCreate, SshConfigData, SshTestRequest } from '@/api/types/backendTypes';
 
 const backendStore = useBackendStore();
 const { backendList, isLoading, systemPublicKey } = storeToRefs(backendStore);
@@ -123,6 +130,7 @@ const dialogVisible = ref(false);
 const keyDialogVisible = ref(false);
 const isEdit = ref(false);
 const isSaving = ref(false);
+const isTesting = ref(false); // [新增] 测试连接状态
 const currentEditId = ref<string | null>(null);
 
 const formRef = ref<FormInstance>();
@@ -197,6 +205,39 @@ const handleDelete = async (id: string) => {
   } catch (error) {
     ElMessage.error('删除失败');
   }
+};
+
+// [新增] 测试连接
+const handleTestConnection = async () => {
+  if (!formRef.value) return;
+  // 测试前仅校验表单，确保必填项（如 hostname, username）已填写
+  await formRef.value.validate(async (valid) => {
+    if (valid) {
+      isTesting.value = true;
+      try {
+        const testData: SshTestRequest = {
+          backend_id: isEdit.value ? currentEditId.value : null,
+          configData: {
+            ...form.configData,
+            edit_whitelist: form.configData.edit_whitelist?.length === 0 ? null : form.configData.edit_whitelist,
+            edit_blacklist: form.configData.edit_blacklist?.length === 0 ? null : form.configData.edit_blacklist,
+            ignore_dirs: form.configData.ignore_dirs?.length === 0 ? null : form.configData.ignore_dirs,
+            password: form.configData.password || null
+          }
+        };
+        const res = await backendStore.testConnection(testData);
+        if (res.success) {
+          ElMessage.success(res.message || '连接成功');
+        } else {
+          ElMessage.error(res.message || '连接失败');
+        }
+      } catch (error: any) {
+        ElMessage.error(error.message || '测试连接发生异常');
+      } finally {
+        isTesting.value = false;
+      }
+    }
+  });
 };
 
 const submitForm = async () => {
@@ -276,5 +317,18 @@ const copyPublicKey = async () => {
 .key-textarea {
   font-family: monospace;
   font-size: 12px;
+}
+
+/* [新增] 底部操作按钮布局 */
+.dialog-footer-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.right-actions {
+  display: flex;
+  gap: 12px;
 }
 </style>
