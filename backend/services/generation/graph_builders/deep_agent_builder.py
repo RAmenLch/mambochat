@@ -3,8 +3,6 @@
 from typing import List, Dict, Any
 from langgraph.graph.state import CompiledStateGraph
 from deepagents import create_deep_agent, CompiledSubAgent
-from deepagents.backends.composite import CompositeBackend
-from deepagents.backends.state import StateBackend
 
 from backend.checkpointer import get_checkpointer
 from backend.services.generation.core.llm_io import AgentConfig, RunTimeConfig
@@ -15,15 +13,15 @@ from backend.services.generation.agent.ssh_backend import PureSFTPBackend
 from backend.utils.ssh_utils import get_or_create_system_ssh_key
 from backend.schemas.enums import BackendType
 
+from backend.services.generation.agent.tree_extension import (
+    TreeStateBackend,
+    TreeCompositeBackend,
+    TreeMiddleware
+)
 
 def _create_backend_factory(mounted_backends: List[Dict[str, Any]]):
-    """
-    创建 Backend Factory，供 deepagents 内部调用。
-    使用 CompositeBackend 将不同的远程存储路由到指定的虚拟目录，
-    保留 StateBackend 作为默认的临时状态存储。
-    """
-    def factory(runtime) -> CompositeBackend:
-        default_backend = StateBackend(runtime)
+    def factory(runtime) -> TreeCompositeBackend:
+        default_backend = TreeStateBackend(runtime)
         routes = {}
 
         for mb in mounted_backends:
@@ -51,7 +49,7 @@ def _create_backend_factory(mounted_backends: List[Dict[str, Any]]):
                 route_prefix = f"/{b_name}/"
                 routes[route_prefix] = ssh_backend
 
-        return CompositeBackend(default=default_backend, routes=routes)
+        return TreeCompositeBackend(default=default_backend, routes=routes)
 
     return factory
 
@@ -59,7 +57,6 @@ def _create_backend_factory(mounted_backends: List[Dict[str, Any]]):
 class DeepAgentGraphBuilder(BaseGraphBuilder):
     """
     针对 DeepAgent 架构的图构建器。
-    基于 AgentConfig 树状结构，递归编译子代理图并将其封装挂载到父代理。
     """
 
     def build(self, agent_config: AgentConfig, run_time_config: RunTimeConfig) -> CompiledStateGraph:
@@ -82,6 +79,8 @@ class DeepAgentGraphBuilder(BaseGraphBuilder):
                     )
                 )
 
+        backend_factory = _create_backend_factory(agent_config.mounted_backends or [])
+
         tools = [t for t in agent_config.tools] if agent_config.tools else []
 
         skill_paths: List[str] = []
@@ -91,9 +90,10 @@ class DeepAgentGraphBuilder(BaseGraphBuilder):
 
         active_checkpointer = get_checkpointer()
 
-        middlewares = [ToolMessageOrderingMiddleware()]
-
-        backend_factory = _create_backend_factory(agent_config.mounted_backends or [])
+        middlewares = [
+            ToolMessageOrderingMiddleware(),
+            TreeMiddleware(backend=backend_factory)
+        ]
 
         return create_deep_agent(
             name=agent_config.name,
@@ -107,4 +107,3 @@ class DeepAgentGraphBuilder(BaseGraphBuilder):
             backend=backend_factory,
             interrupt_on=agent_config.hitl_interrupt_on
         )
-

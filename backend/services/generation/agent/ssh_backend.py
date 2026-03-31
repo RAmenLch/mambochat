@@ -1,3 +1,5 @@
+# backend/services/generation/agent/ssh_backend.py
+
 """Pure SFTP Backend for DeepAgents.
 
 Provides remote filesystem access via pure SFTP protocol.
@@ -31,10 +33,12 @@ from deepagents.backends.utils import (
     perform_string_replacement,
 )
 
+from backend.services.generation.agent.tree_extension import TreeBackendProtocol
+
 logger = logging.getLogger(__name__)
 
 
-class PureSFTPBackend(BackendProtocol):
+class PureSFTPBackend(TreeBackendProtocol):
     """Backend that reads and writes files on a remote server using ONLY SFTP.
 
     Note on Async: This class relies on `BackendProtocol`'s default `asyncio.to_thread`
@@ -80,7 +84,6 @@ class PureSFTPBackend(BackendProtocol):
         self.edit_whitelist = edit_whitelist or []
         self.edit_blacklist = edit_blacklist or []
 
-        # Default ignore list to prevent SFTP walk from hanging on massive directories
         if ignore_dirs is None:
             self.ignore_dirs = ['.git', 'node_modules', '__pycache__', '.venv', 'target', 'build', 'dist']
         else:
@@ -124,7 +127,6 @@ class PureSFTPBackend(BackendProtocol):
     def __del__(self) -> None:
         self.close()
 
-    # --- Path & Security Utils ---
     def _resolve_path(self, virtual_path: str) -> str:
         if not virtual_path.startswith("/"):
             virtual_path = "/" + virtual_path
@@ -149,7 +151,6 @@ class PureSFTPBackend(BackendProtocol):
         if self.edit_blacklist and any(fnmatch.fnmatch(filename, p) for p in self.edit_blacklist):
             raise PermissionError(f"Edit denied: File '{filename}' is in the edit blacklist.")
 
-    # --- Pure SFTP Helpers ---
     def _sftp_mkdir_p(self, remote_directory: str) -> None:
         """Pure SFTP implementation of `mkdir -p`."""
         if remote_directory == '/' or not remote_directory:
@@ -162,12 +163,12 @@ class PureSFTPBackend(BackendProtocol):
             try:
                 self._sftp_client.mkdir(remote_directory)
             except IOError:
-                pass  # May have been created by a concurrent process
+                pass
 
-    def _sftp_walk(self, remotedir: str):
-        """Pure SFTP recursive directory walker.
+    def _sftp_walk(self, remotedir: str, current_depth: int = 1, max_depth: int = -1):
+        """Pure SFTP recursive directory walker with depth limit.
 
-        Yields: (physical_path, SFTPAttributes)
+        Yields: (physical_path, SFTPAttributes, is_unexpanded)
         """
         assert self._sftp_client is not None
         try:
@@ -179,13 +180,82 @@ class PureSFTPBackend(BackendProtocol):
             filepath = posixpath.join(remotedir, attr.filename)
             is_dir = stat.S_ISDIR(attr.st_mode) if attr.st_mode else False
 
-            yield filepath, attr
+            is_unexpanded = False
+            if is_dir:
+                if attr.filename in self.ignore_dirs:
+                    is_unexpanded = True
+                elif max_depth != -1 and current_depth >= max_depth:
+                    is_unexpanded = True
 
-            # Skip heavy/unnecessary directories to speed up network traversal
-            if is_dir and attr.filename not in self.ignore_dirs:
-                yield from self._sftp_walk(filepath)
+            yield filepath, attr, is_unexpanded
 
-    # --- Protocol Implementation ---
+            if is_dir and not is_unexpanded:
+                yield from self._sftp_walk(filepath, current_depth + 1, max_depth)
+
+    def tree(self, path: str = "/", depth: int = 3) -> str:
+        """Get a compact directory tree structure for LLM context."""
+        self._connect()
+        try:
+            base_physical = self._resolve_path(path)
+        except ValueError:
+            return f"Error: Invalid path {path}"
+
+        tree_dict = {}
+        for filepath, attr, is_unexpanded in self._sftp_walk(base_physical, current_depth=1, max_depth=depth):
+            is_dir = stat.S_ISDIR(attr.st_mode) if attr.st_mode else False
+            rel_path = filepath[len(base_physical):].lstrip("/")
+            if not rel_path:
+                continue
+
+            parts = rel_path.split("/")
+            current = tree_dict
+            for part in parts[:-1]:
+                if part not in current:
+                    current[part] = {}
+                current = current[part]
+
+            if is_dir:
+                current[parts[-1]] = "__UNEXPANDED__" if is_unexpanded else {}
+            else:
+                current[parts[-1]] = None
+
+        if not tree_dict:
+            return f"No files found in {path}"
+
+        lines = [f"{path}"]
+
+        def _format_tree(node, current_depth):
+            indent = "  " * current_depth
+            sorted_items = sorted(node.items(), key=lambda x: (x[1] is None, x[0]))
+            for k, v in sorted_items:
+                if v is None:
+                    lines.append(f"{indent}{k}")
+                elif v == "__UNEXPANDED__":
+                    lines.append(f"{indent}{k}/ ... (unexpanded)")
+                else:
+                    if not v:
+                        lines.append(f"{indent}{k}/ (empty)")
+                    else:
+                        curr_k = k
+                        curr_v = v
+                        while isinstance(curr_v, dict) and len(curr_v) == 1:
+                            only_key = list(curr_v.keys())[0]
+                            if curr_v[only_key] is None or curr_v[only_key] == "__UNEXPANDED__":
+                                break
+                            curr_k = f"{curr_k}/{only_key}"
+                            curr_v = curr_v[only_key]
+
+                        lines.append(f"{indent}{curr_k}/")
+                        if isinstance(curr_v, dict):
+                            _format_tree(curr_v, current_depth + 1)
+
+        _format_tree(tree_dict, 1)
+
+        result = "\n".join(lines)
+        if len(result) > 16000:
+            return result[:16000] + "\n... (tree truncated due to size)"
+        return result
+
     def ls_info(self, path: str) -> list[FileInfo]:
         self._connect()
         physical_path = self._resolve_path(path)
@@ -297,8 +367,7 @@ class PureSFTPBackend(BackendProtocol):
         effective_pattern = pattern.lstrip("/")
         results: list[FileInfo] = []
 
-        # Local matching using wcmatch against remote SFTP tree
-        for filepath, attr in self._sftp_walk(base_physical):
+        for filepath, attr, _ in self._sftp_walk(base_physical):
             is_dir = stat.S_ISDIR(attr.st_mode) if attr.st_mode else False
             if is_dir:
                 continue
@@ -330,21 +399,18 @@ class PureSFTPBackend(BackendProtocol):
         matches: list[GrepMatch] = []
         assert self._sftp_client is not None
 
-        for filepath, attr in self._sftp_walk(base_physical):
+        for filepath, attr, _ in self._sftp_walk(base_physical):
             if stat.S_ISDIR(attr.st_mode) if attr.st_mode else False:
                 continue
 
-            # 1. Glob filter
             if glob:
                 filename = posixpath.basename(filepath)
                 if not wcglob.globmatch(filename, glob, flags=wcglob.BRACE):
                     continue
 
-            # 2. Size filter (prevent downloading massive files like DBs or binaries)
             if attr.st_size and attr.st_size > self.max_file_size_bytes:
                 continue
 
-            # 3. Read & Search locally
             try:
                 with self._sftp_client.open(filepath, 'r') as f:
                     content = f.read().decode('utf-8')
@@ -357,7 +423,7 @@ class PureSFTPBackend(BackendProtocol):
                                 "text": line
                             })
             except (IOError, UnicodeDecodeError):
-                continue  # Skip unreadable or non-text files
+                continue
 
         return matches
 

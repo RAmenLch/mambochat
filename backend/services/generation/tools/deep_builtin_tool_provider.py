@@ -33,7 +33,8 @@ class DeepAgentBuiltinToolProvider(BaseToolProvider):
         "grep",
         "execute",
         "write_todos",
-        "task"
+        "task",
+        "tree"
     }
 
     def __init__(self):
