@@ -160,7 +160,8 @@ const {
       name: formPayload.name,
       itemType: isFolder ? 'folder' : 'agent',
       parentId: payload.parentId || null,
-      AgentType: isFolder ? undefined : ((formPayload.selectValue as any) || 'ReActAgent')
+      AgentType: isFolder ? undefined : ((formPayload.selectValue as any) || 'ReActAgent'),
+       backendIds: []
     });
 
     return newItem;

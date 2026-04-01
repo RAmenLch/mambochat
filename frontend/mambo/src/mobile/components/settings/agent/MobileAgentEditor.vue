@@ -53,6 +53,7 @@
         </el-card>
 
         <!-- 2. 模型配置 -->
+        <!-- ... 保持不变 ... -->
         <el-card shadow="never" class="config-card">
           <template #header>
             <span class="card-title">{{ $t('agent.modelConfig') }}</span>
@@ -111,7 +112,6 @@
                   </el-tooltip>
                 </template>
                 <div class="parameter-control-wrapper">
-                  <!-- 修复: el-slider 更新事件可能返回 number[]，需断言为 number -->
                   <el-slider
                     v-if="param.type === 'number'"
                     :model-value="form.modelParameters[param.key] as number"
@@ -126,7 +126,6 @@
                     show-input
                     class="parameter-input"
                   />
-                  <!-- 修复: el-input-number 更新事件可能返回 null，需处理 -->
                   <el-input-number
                     v-else-if="param.type === 'integer'"
                     :model-value="form.modelParameters[param.key] as number"
@@ -267,6 +266,53 @@
               </el-form-item>
             </el-col>
           </el-row>
+
+          <!-- [新增] 第三行：Backend 挂载 (仅 DeepAgent 可见) -->
+          <el-row :gutter="16" class="settings-row" v-if="form.AgentType === 'DeepAgent'">
+            <el-col :span="24">
+              <el-form-item :label="$t('agent.mountBackend', '挂载 Backend')">
+                <div class="mount-container" style="height: auto; min-height: 120px;">
+                  <div class="mount-action">
+                    <el-dropdown trigger="click" @command="handleAddBackend" placement="bottom-start">
+                      <el-button type="warning" plain size="small">
+                        <el-icon><Monitor /></el-icon> {{ $t('agent.addBackend', '挂载 Backend') }}
+                      </el-button>
+                      <template #dropdown>
+                        <el-dropdown-menu class="mcp-dropdown-menu">
+                          <el-dropdown-item v-for="b in availableBackends" :key="b.id" :command="b.id">
+                            {{ b.name }} ({{ b.backendType }})
+                          </el-dropdown-item>
+                          <el-dropdown-item v-if="availableBackends.length === 0" disabled>
+                            {{ $t('common.noData', '暂无可用 Backend') }}
+                          </el-dropdown-item>
+                        </el-dropdown-menu>
+                      </template>
+                    </el-dropdown>
+                  </div>
+                  <div v-if="mountedBackendList.length > 0" class="tag-list-wrapper">
+                    <el-tag
+                      v-for="b in mountedBackendList"
+                      :key="b.id"
+                      closable
+                      type="warning"
+                      effect="light"
+                      class="custom-tag"
+                      @close="handleRemoveBackend(b.id)"
+                    >
+                      <div class="tag-inner">
+                        <el-icon class="tag-icon"><Monitor /></el-icon>
+                        <span class="tag-text">{{ b.name }}</span>
+                      </div>
+                    </el-tag>
+                  </div>
+                  <div v-else class="empty-mount">
+                    {{ $t('agent.noBackend', '暂无挂载 Backend') }}
+                  </div>
+                </div>
+              </el-form-item>
+            </el-col>
+          </el-row>
+
         </el-card>
 
       </el-form>
@@ -297,12 +343,13 @@ import { ref, reactive, watch, computed, onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useI18n } from 'vue-i18n';
 import { ElMessage } from 'element-plus';
-import { User, QuestionFilled, Collection, Plus, Connection } from '@element-plus/icons-vue';
+import { User, QuestionFilled, Collection, Plus, Connection, Monitor } from '@element-plus/icons-vue';
 
 import { useAgentStore } from '@/stores/agentStore';
 import { useProviderStore } from '@/stores/providerStore';
 import { useSystemConfigStore } from '@/stores/systemConfigStore';
 import { useMcpStore } from '@/stores/mcpStore';
+import { useBackendStore } from '@/stores/backendStore'; // [新增]
 
 import { uploadAgentAvatar, deleteAgentAvatar, getAgent } from '@/api/agentService';
 import { getResourceDetails } from '@/api/resourceService';
@@ -313,7 +360,6 @@ import ResourceSelectorDialog from '@/mobile/components/chat/dialogs/ResourceSel
 import MobileAgentSelectorDialog from '@/mobile/components/settings/agent/dialogs/MobileAgentSelectorDialog.vue';
 import MountedResourceTags from '@/components/common/MountedResourceTags.vue';
 
-// 定义模型参数允许的严格类型，移除 null 以兼容 Element Plus 组件
 type AgentModelParameterValue = boolean | number | string | undefined;
 
 const { t } = useI18n();
@@ -321,10 +367,12 @@ const agentStore = useAgentStore();
 const providerStore = useProviderStore();
 const systemConfigStore = useSystemConfigStore();
 const mcpStore = useMcpStore();
+const backendStore = useBackendStore(); // [新增]
 
 const { currentAgentId, agentList } = storeToRefs(agentStore);
 const { groupedModels, allModels } = storeToRefs(providerStore);
 const { activeUserMcpServices } = storeToRefs(mcpStore);
+const { backendList } = storeToRefs(backendStore); // [新增]
 
 const isSaving = ref(false);
 const isAvatarLoading = ref(false);
@@ -338,8 +386,22 @@ const mountedSubAgents = ref<Agent[]>([]);
 const form = reactive({
   name: '', description: '', AgentType: 'ReActAgent', systemPrompt: '',
   aiModelId: null as string | null, modelParameters: {} as Record<string, AgentModelParameterValue>,
-  agentAvatarUrl: null as string | null, enabledMcpIds: [] as string[], subAgents: [] as string[]
+  agentAvatarUrl: null as string | null, enabledMcpIds: [] as string[], subAgents: [] as string[],
+  backendIds: [] as string[] // [新增]
 });
+
+// --- Backend 挂载逻辑 [新增] ---
+const availableBackends = computed(() => backendList.value.filter(b => !form.backendIds.includes(b.id)));
+const mountedBackendList = computed(() => form.backendIds.map(id => backendList.value.find(b => b.id === id) || { id, name: 'Unknown Backend', backendType: 'unknown' }));
+
+function handleAddBackend(backendId: string) {
+  if (!form.backendIds.includes(backendId)) form.backendIds.push(backendId);
+}
+
+function handleRemoveBackend(backendId: string) {
+  form.backendIds = form.backendIds.filter(id => id !== backendId);
+}
+// --------------------
 
 const availableMcps = computed(() => activeUserMcpServices.value.filter(mcp => !form.enabledMcpIds.includes(mcp.id)));
 const mountedMcpList = computed(() => form.enabledMcpIds.map(id => activeUserMcpServices.value.find(mcp => mcp.id === id) || { id, name: 'Unknown MCP' }));
@@ -374,7 +436,6 @@ watch(agentData, async (newVal) => {
     form.aiModelId = newVal.aiModelId || null;
 
     const params = newVal.modelParameters ? JSON.parse(JSON.stringify(newVal.modelParameters)) : {};
-    // 修复: 将 null 转换为 undefined，以符合 AgentModelParameterValue 类型定义
     Object.keys(params).forEach(key => {
       if (params[key] === null) {
         params[key] = undefined;
@@ -390,6 +451,7 @@ watch(agentData, async (newVal) => {
     form.agentAvatarUrl = newVal.agentAvatarUrl || null;
     form.enabledMcpIds = newVal.enabledMcpIds ? [...newVal.enabledMcpIds] : [];
     form.subAgents = newVal.subAgents ? [...newVal.subAgents] : [];
+    form.backendIds = newVal.backendIds ? [...newVal.backendIds] : []; // [新增]
 
     if (newVal.resourcePromptList && newVal.resourcePromptList.length > 0) {
       try {
@@ -439,7 +501,6 @@ function getSliderStep(min: number, max: number): number {
 function handleToggleParameter(param: { key: string; definition: { default_value: unknown } }, isEnabled: boolean) {
   const newParams = { ...form.modelParameters };
   if (isEnabled) {
-    // 修复: 确保不赋值 null，使用 undefined 作为后备
     newParams[param.key] = (param.definition.default_value ?? undefined) as AgentModelParameterValue;
   } else {
     delete newParams[param.key];
@@ -518,6 +579,10 @@ async function handleSave() {
         finalModelParameters[key] = form.modelParameters[key];
       }
     }
+
+    // [修复] 无论清空还是切换 AgentType，都显式发送 [] 让后端清空数据
+    const finalBackendIds = form.AgentType === 'DeepAgent' ? [...form.backendIds] : [];
+
     await agentStore.updateAgentSettings(currentAgentId.value, {
       name: form.name,
       description: form.description,
@@ -525,9 +590,10 @@ async function handleSave() {
       systemPrompt: form.systemPrompt,
       aiModelId: form.aiModelId,
       modelParameters: finalModelParameters,
-      resourcePromptList: resourcePromptList.length > 0 ? resourcePromptList : null,
-      enabledMcpIds: form.enabledMcpIds.length > 0 ? form.enabledMcpIds : null,
-      subAgents: form.subAgents.length > 0 ? form.subAgents : null
+      resourcePromptList: resourcePromptList.length > 0 ? [...resourcePromptList] : [],
+      enabledMcpIds: form.enabledMcpIds.length > 0 ? [...form.enabledMcpIds] : [],
+      subAgents: form.subAgents.length > 0 ? [...form.subAgents] : [],
+      backendIds: finalBackendIds // [新增]
     });
     ElMessage.success(t('agent.saveSuccess'));
   } catch {
@@ -540,10 +606,14 @@ async function handleSave() {
 onMounted(() => {
   providerStore.fetchProviders();
   systemConfigStore.fetchSystemConfig();
+  if (backendStore.backendList.length === 0) {
+    backendStore.fetchBackends(); // [新增]
+  }
 });
 </script>
 
 <style scoped>
+/* 原有样式保持不变 */
 .mobile-agent-editor {
   display: flex;
   flex-direction: column;
