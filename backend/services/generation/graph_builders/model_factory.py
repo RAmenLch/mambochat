@@ -37,7 +37,8 @@ class ModelFactory:
                 timeout=model_config.timeout,
                 streaming=stream,
                 stop=None,
-                callbacks=callbacks
+                callbacks=callbacks,
+                max_retries=5
             )
 
         elif worker_type == ProviderWorkerType.GOOGLE.value:
@@ -51,7 +52,8 @@ class ModelFactory:
                 openai_proxy=model_config.proxy_url,
                 timeout=model_config.timeout,
                 streaming=stream,
-                callbacks=callbacks
+                callbacks=callbacks,
+                max_retries=5
             )
 
         elif worker_type == ProviderWorkerType.DEEPSEEK.value:
@@ -63,7 +65,8 @@ class ModelFactory:
                 openai_proxy=model_config.proxy_url,
                 timeout=model_config.timeout,
                 streaming=stream,
-                callbacks=callbacks
+                callbacks=callbacks,
+                max_retries=5
             )
 
         else:
@@ -79,5 +82,6 @@ class ModelFactory:
                     "HTTP-Referer": "https://github.com/RAmenLch/mambochat",
                     "X-Title": "MamboChat",
                 },
-                callbacks=callbacks
+                callbacks=callbacks,
+                max_retries=5
             )
