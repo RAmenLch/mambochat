@@ -53,10 +53,14 @@ async def check_tasks_status(request: TaskStatusRequest):
 async def _start_generation_task(
         background_tasks: BackgroundTasks,
         chat_id: str,
-        assistant_message_id: str
+        assistant_message_id: str,
+        is_retry: bool = False
 ):
     await stream_manager.mark_task_running(assistant_message_id)
-    background_tasks.add_task(generation_service._run_managed_generation_task, chat_id, assistant_message_id)
+    if is_retry:
+        background_tasks.add_task(generation_service._run_retry_generation_task, chat_id, assistant_message_id)
+    else:
+        background_tasks.add_task(generation_service._run_managed_generation_task, chat_id, assistant_message_id)
 
 
 async def _hydrate_and_validate_messages(
@@ -310,6 +314,40 @@ async def prepare_to_regenerate(
 
 
 @router.post(
+    "/messages/{message_id}/retry",
+    response_model=schemas.Message,
+    summary="重试失败的生成任务（从 LangGraph checkpoint 恢复）",
+    response_model_exclude_none=True
+)
+async def retry_failed_generation(
+        message_id: str,
+        background_tasks: BackgroundTasks,
+        db: AsyncSession = Depends(get_db)
+):
+    db_message = await message_crud.get_message(db, message_id=message_id)
+    if not db_message:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    if db_message.role != schemas.MessageRole.ASSISTANT:
+        raise HTTPException(status_code=400, detail="Retry is only applicable to assistant messages.")
+
+    calculated_status = await generation_service._calculate_message_status(db_message)
+    if calculated_status != schemas.MessageStatus.FAILED:
+        raise HTTPException(status_code=400, detail="Retry is only applicable to failed messages.")
+
+    await _start_generation_task(background_tasks, db_message.chatId, message_id, is_retry=True)
+
+    active_msgs = await message_crud.get_messages_by_chat(db, chat_id=db_message.chatId)
+    populated_msg = next((m for m in active_msgs if m.id == message_id), db_message)
+
+    hydrated_messages = await _hydrate_and_validate_messages([populated_msg], db)
+    response_message = hydrated_messages[0]
+    response_message.status = schemas.MessageStatus.GENERATING
+
+    return response_message
+
+
+@router.post(
     "/chats/{chat_id}/generate-title",
     status_code=status.HTTP_202_ACCEPTED,
     summary="自动生成会话标题"
@@ -393,7 +431,7 @@ async def review_tool_call(
         )
 
         if affected_rows == len(sub_ids):
-            await _start_generation_task(background_tasks, db_message.chatId, message_id)
+            await _start_generation_task(background_tasks, db_message.chatId, message_id, is_retry=True)
             is_resuming = True
 
     # 修复: 从活跃路径中重新获取，以装配 sibling 元数据

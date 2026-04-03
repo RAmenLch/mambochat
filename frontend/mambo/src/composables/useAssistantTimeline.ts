@@ -35,7 +35,7 @@ export function useAssistantTimeline(message: Ref<Message>) {
   const timelineSubMessages = computed(() => {
     return message.value.sub_messages.filter(sm => {
       // 排除独立显示的类型
-      if (['Usage', 'ZipHistory', 'Suggest'].includes(sm.type)) {
+      if (['Usage', 'ZipHistory', 'Suggest', 'Error'].includes(sm.type)) {
         return false;
       }
       // 排除已审批的 ReviewTool (审批后后端通常会生成对应的 McpTool，所以隐藏原 ReviewTool 避免重复)
@@ -116,6 +116,10 @@ export function useAssistantTimeline(message: Ref<Message>) {
     message.value.sub_messages.find(sm => sm.type === 'Suggest') || null
   );
 
+  const errorSubMessages = computed(() =>
+    message.value.sub_messages.filter(sm => sm.type === 'Error')
+  );
+
   // 5. 导出气泡状态
 
   /**
@@ -143,6 +147,7 @@ export function useAssistantTimeline(message: Ref<Message>) {
     usageSubMessages,
     zipHistorySubMessage,
     suggestSubMessage,
+    errorSubMessages,
     isReasoningMinimized,
     hasPendingReviews,
   };

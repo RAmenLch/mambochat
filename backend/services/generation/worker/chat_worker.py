@@ -108,22 +108,22 @@ class UniversalGraphWorker(AbstractGenerateWorker):
         graph_builder = GraphBuilderFactory.get_builder(llm_input.agent_config.agent_type)
         agent = graph_builder.build(llm_input.agent_config, llm_input.run_time_config)
 
-        thread_config: RunnableConfig = None
-        if llm_input.agent_config.hitl_interrupt_on or llm_input.agent_config.agent_type == AgentTypeEnum.DEEP:
-            thread_config = {"configurable": {"thread_id": llm_input.run_time_config.chat_id}}
-
-        files_to_inject = {}
-        if llm_input.agent_config.agent_type == AgentTypeEnum.DEEP:
-            files_to_inject = self._collect_vfs_files_recursively(llm_input.agent_config)
-
-        resume_payload = llm_input.agent_config.resume_payload
-        if resume_payload:
-            input_data = Command(resume=resume_payload)
+        thread_config: RunnableConfig = {"configurable": {"thread_id": llm_input.run_time_config.chat_id}}
+        if llm_input.agent_config.recover_from_error:
+            input_data = None
         else:
-            messages = self._convert_messages(llm_input.context.messages)
-            input_data = {"messages": Overwrite(value=messages)}
-            if files_to_inject:
-                input_data["files"] = files_to_inject
+            files_to_inject = {}
+            if llm_input.agent_config.agent_type == AgentTypeEnum.DEEP:
+                files_to_inject = self._collect_vfs_files_recursively(llm_input.agent_config)
+
+            resume_payload = llm_input.agent_config.resume_payload
+            if resume_payload:
+                input_data = Command(resume=resume_payload)
+            else:
+                messages = self._convert_messages(llm_input.context.messages)
+                input_data = {"messages": Overwrite(value=messages)}
+                if files_to_inject:
+                    input_data["files"] = files_to_inject
 
         async for stream1 in agent.astream(
                 input=input_data,

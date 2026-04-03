@@ -97,6 +97,10 @@ class AgentConfig(BaseModel):
         None,
         description="用于从 HITL 中断中恢复的决策载荷"
     )
+    recover_from_error: bool = Field(
+        False,
+        description="是否从错误中恢复（传入 input=None + thread_id 利用 LangGraph checkpoint 继续执行）"
+    )
 
 
 class LLMInput(BaseModel):

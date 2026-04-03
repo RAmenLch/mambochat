@@ -12,6 +12,7 @@ import {
   initiateHistoryCompression as initiateHistoryCompressionAPI,
   submitToolReview as submitToolReviewAPI,
   activateMessageBranch,
+  retryFailedGeneration as retryFailedGenerationAPI,
 } from '@/api/chatService'
 import { subscribeToMessageStream } from '@/services/sseService';
 import { useChatSessionStore } from './chatSessionStore';
@@ -423,6 +424,30 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     }
   }
 
+  /**
+   * 重试失败的生成任务（从错误中恢复）
+   * @param messageId - 失败的 assistant 消息ID
+   */
+  async function retryFailedGeneration(messageId: string) {
+    const chatId = sessionStore.currentChatId;
+    if (!chatId || sessionStore.isGenerating) return;
+
+    const msgIndex = sessionStore.currentChatMessages.findIndex(m => m.id === messageId);
+    if (msgIndex === -1) return;
+
+    try {
+      const updatedMessage = await retryFailedGenerationAPI(messageId);
+      sessionStore.currentChatMessages.splice(msgIndex, 1, updatedMessage);
+
+      if (updatedMessage.status === 'generating') {
+        _subscribeToMessageStream(updatedMessage);
+      }
+    } catch (error) {
+      console.error(`Failed to retry generation for message ${messageId}:`, error);
+      if (chatId) await sessionStore.selectChat(chatId, true);
+    }
+  }
+
   return {
     sendMessage,
     regenerateFrom,
@@ -436,5 +461,6 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     batchUpdateSubMessagesMinimalState,
     submitToolReview,
     activateBranch,
+    retryFailedGeneration,
   }
 });

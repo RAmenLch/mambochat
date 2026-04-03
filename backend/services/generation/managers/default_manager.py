@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import traceback
 from typing import AsyncGenerator, Optional, Dict, List, Set
 
 from backend.services.generation.worker.chat_worker import UniversalGraphWorker
@@ -34,12 +35,13 @@ class DefaultGenerateManager(AbstractGenerateManager):
     使用责任链模式 (Handlers) 处理流式事件，统筹标准对话生成流程。
     """
 
-    def __init__(self, db_session: AsyncSession):
+    def __init__(self, db_session: AsyncSession, recover_from_error: bool = False):
         super().__init__(db_session)
 
         self._final_usage_data: Dict = {}
         self._created_stream_ids: Set[str] = set()
         self._pending_hitl_tool_calls = []
+        self._recover_from_error = recover_from_error
 
         self._handlers = [
             HitlHandler(),
@@ -77,6 +79,8 @@ class DefaultGenerateManager(AbstractGenerateManager):
 
         try:
             llm_input = await director.build()
+            if self._recover_from_error:
+                llm_input.agent_config.recover_from_error = True
             providers = director.get_providers()
             hitl_config = getattr(llm_input.agent_config, 'hitl_interrupt_on', {})
             tool_map = {t.name: t for t in llm_input.agent_config.tools if
@@ -143,27 +147,33 @@ class DefaultGenerateManager(AbstractGenerateManager):
             self, assistant_message_id: str, final_status: schemas_enums.MessageStatus,
             exception: Optional[Exception] = None
     ) -> AsyncGenerator[BaseInstruction, None]:
-        error_content = None
+        error_message = ""
+        error_stack = ""
+
         if exception:
             if isinstance(exception, RuntimeError):
-                error_content = str(exception)
+                error_message = str(exception)
             elif "CancelledError" in str(type(exception)):
-                error_content = "生成被用户取消。"
+                error_message = "生成被用户取消。"
             else:
-                error_content = f"发生未处理的异常: {str(exception)}"
+                error_message = f"发生未处理的异常: {str(exception)}"
+            error_stack = traceback.format_exc()
 
-        last_content_id = None
+        # 1. 闭合所有未完成的子消息，状态改为 failed
         for sub_id in list(self._created_stream_ids):
-            if sub_id.endswith('-R'): yield UpdateSubMessageConfig(sub_message_id=sub_id, config={"is_minimal": True})
-            if sub_id.endswith('-N'): last_content_id = sub_id
-            yield UpdateSubMessageStatus(sub_message_id=sub_id, status=final_status)
+            if sub_id.endswith('-R'):
+                yield UpdateSubMessageConfig(sub_message_id=sub_id, config={"is_minimal": True})
+            yield UpdateSubMessageStatus(sub_message_id=sub_id, status=schemas_enums.MessageStatus.FAILED)
         self._created_stream_ids.clear()
 
-        if error_content:
-            if last_content_id:
-                yield AppendToSubMessage(sub_message_id=last_content_id, content=f"\n\n**错误:** {error_content}")
-            else:
-                yield CreateSubMessage(
-                    sub_message_id=generate_uuid(), type=schemas_enums.SubMessageType.NORMAL.value,
-                    sortOrder=1, status=final_status, initial_content=error_content
-                )
+        # 2. 创建 Error 类型的子消息，包含简短错误信息和完整堆栈（参与上下文）
+        if error_message:
+            from backend.schemas.message import ErrorContent
+            error_content = ErrorContent(message=error_message, stack_trace=error_stack)
+            yield CreateSubMessage(
+                sub_message_id=generate_uuid(),
+                type=schemas_enums.SubMessageType.ERROR.value,
+                sortOrder=98,
+                status=final_status,
+                initial_content=error_content.to_json_string()
+            )

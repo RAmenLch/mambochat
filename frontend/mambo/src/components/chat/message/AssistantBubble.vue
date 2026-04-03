@@ -77,6 +77,44 @@
         </div>
       </div>
 
+      <!-- 错误区域 (Error) -->
+      <div class="bubble-section error-section" v-if="errorSubMessages.length > 0 && !isGenerating">
+        <div
+          v-for="errorSub in errorSubMessages"
+          :key="errorSub.id"
+          class="error-block"
+        >
+          <div class="error-header">
+            <el-icon><Warning /></el-icon>
+            <span class="error-title">{{ $t('chat.message.errorOccurred') }}</span>
+          </div>
+          <div class="error-message">{{ parseErrorMessage(errorSub.content) }}</div>
+          <div class="error-actions">
+            <el-button
+              v-if="errorSub.content && parseErrorStackTrace(errorSub.content)"
+              link
+              size="small"
+              @click="toggleErrorDetail(errorSub.id)"
+            >
+              <el-icon class="detail-icon"><View /></el-icon>
+              {{ expandedErrorId === errorSub.id ? $t('chat.message.hideStack') : $t('chat.message.showStack') }}
+            </el-button>
+            <el-button
+              link
+              size="small"
+              type="primary"
+              @click="handleRetry"
+            >
+              <el-icon><RefreshRight /></el-icon>
+              {{ $t('chat.message.retryFromError') }}
+            </el-button>
+          </div>
+          <div v-if="expandedErrorId === errorSub.id && parseErrorStackTrace(errorSub.content)" class="error-detail">
+            <pre>{{ parseErrorStackTrace(errorSub.content) }}</pre>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 </template>
@@ -84,13 +122,13 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import type { Message, SubMessage } from '@/api/types';
+import type { Message, SubMessage, ErrorContent } from '@/api/types';
 import { useAssistantTimeline, type BubbleSectionGroup } from '@/composables/useAssistantTimeline';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { useChatSessionStore } from '@/stores/chatSessionStore';
 import { useAgentStore } from '@/stores/agentStore';
 import BubbleSectionGroupComponent from './BubbleSectionGroup.vue';
-import { Cpu, Minus, FullScreen, ArrowUpBold, ArrowDownBold, Loading, Warning, Check, Opportunity } from '@element-plus/icons-vue';
+import { Cpu, Minus, FullScreen, ArrowUpBold, ArrowDownBold, Loading, Warning, Check, Opportunity, View, RefreshRight } from '@element-plus/icons-vue';
 
 const BubbleSectionGroup = BubbleSectionGroupComponent;
 
@@ -117,7 +155,8 @@ const {
   reasoningSection,
   normalSection,
   isReasoningMinimized,
-  hasPendingReviews
+  hasPendingReviews,
+  errorSubMessages,
 } = useAssistantTimeline(messageRef);
 
 const isBubbleCollapsed = ref(false);
@@ -145,6 +184,35 @@ function isInactive(group: BubbleSectionGroup): boolean {
   if (cpl === 0) return true;
   if (cpl > 0) return props.currentMessageRank > cpl;
   return false;
+}
+
+// --- Error Section Logic ---
+const expandedErrorId = ref<string | null>(null);
+
+function parseErrorContent(content: string): ErrorContent | null {
+  try {
+    return JSON.parse(content) as ErrorContent;
+  } catch {
+    return null;
+  }
+}
+
+function parseErrorMessage(content: string): string {
+  const parsed = parseErrorContent(content);
+  return parsed?.message || content;
+}
+
+function parseErrorStackTrace(content: string): string {
+  const parsed = parseErrorContent(content);
+  return parsed?.stack_trace || '';
+}
+
+function toggleErrorDetail(errorId: string) {
+  expandedErrorId.value = expandedErrorId.value === errorId ? null : errorId;
+}
+
+function handleRetry() {
+  interactionStore.retryFailedGeneration(props.message.id);
 }
 </script>
 
@@ -287,5 +355,73 @@ function isInactive(group: BubbleSectionGroup): boolean {
 @keyframes bounce {
   0%, 80%, 100% { transform: scale(0); }
   40% { transform: scale(1); }
+}
+
+/* ========== 错误区域 ========== */
+.error-section {
+  border-top: 1px solid var(--el-color-error-light-5);
+  padding-top: 12px;
+}
+
+.error-block {
+  padding: 10px 14px;
+  background-color: var(--el-color-error-light-9);
+  border: 1px solid var(--el-color-error-light-5);
+  border-radius: 8px;
+}
+
+.error-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.error-header .el-icon {
+  color: var(--el-color-error);
+  font-size: 16px;
+}
+
+.error-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-color-error);
+}
+
+.error-message {
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.error-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.error-actions .detail-icon {
+  margin-right: 2px;
+}
+
+.error-detail {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background-color: var(--el-fill-color-darker);
+  border-radius: 6px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.error-detail pre {
+  font-size: 12px;
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  color: var(--el-text-color-regular);
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+  line-height: 1.5;
 }
 </style>

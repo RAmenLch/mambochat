@@ -21,7 +21,7 @@ class ReactGraphBuilder(BaseGraphBuilder):
 
         tools = [t for t in agent_config.tools] if agent_config.tools else []
         middlewares = []
-        active_checkpointer = None
+        active_checkpointer = get_checkpointer()
 
         if agent_config.hitl_interrupt_on:
             middlewares.append(HumanInTheLoopMiddleware(
@@ -29,7 +29,6 @@ class ReactGraphBuilder(BaseGraphBuilder):
                 description_prefix="需要审核的操作"
             ))
             middlewares.append(ToolMessageOrderingMiddleware())
-            active_checkpointer = get_checkpointer()
 
         return create_agent(
             name =agent_config.name,

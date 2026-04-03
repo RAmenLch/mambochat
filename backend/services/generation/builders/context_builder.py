@@ -9,7 +9,7 @@ from typing import List, Dict, Any, Optional, Set, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.schemas import enums as schemas_enums
-from backend.schemas.message import McpToolContent
+from backend.schemas.message import McpToolContent, ErrorContent
 from backend.services.file_service import FileService
 from backend.services.generation.core.llm_io import MessageContext
 
@@ -309,10 +309,15 @@ class MessageContextBuilder:
     async def _convert_sub_message_to_part(self, sub: Any) -> Optional[Dict[str, Any]]:
         part = None
         if sub.type == schemas_enums.SubMessageType.FILE.value:
-            # 只有通过了上述所有过滤条件的子消息，才会触发文件 I/O
             part = await self._process_file_part(sub.content)
         elif sub.type == schemas_enums.SubMessageType.ZIP_HISTORY.value:
             part = None
+        elif sub.type == schemas_enums.SubMessageType.ERROR.value:
+            try:
+                error_obj = ErrorContent.from_json_string(sub.content)
+                part = {"type": "text", "text": error_obj.message}
+            except (ValueError, TypeError):
+                part = {"type": "text", "text": sub.content}
         else:
             part = {"type": "text", "text": sub.content}
 

@@ -185,6 +185,30 @@ class ToolApprovalRequest(BaseModel):
     sub_message_id: str
     decision: ToolDecision
 
+class ErrorContent(BaseModel):
+    """
+    专门用于处理 SubMessageType.ERROR 的 content 字段结构。
+    包含简短错误信息和完整的堆栈跟踪。
+    """
+    message: str = Field(..., description="简短的错误提示信息")
+    stack_trace: str = Field(default="", description="完整的错误堆栈信息")
+
+    def to_json_string(self) -> str:
+        """序列化为存储在 DB content 字段的 JSON 字符串"""
+        return self.model_dump_json(exclude_none=False)
+
+    @classmethod
+    def from_json_string(cls, json_str: str) -> 'ErrorContent':
+        """从 DB content 字符串反序列化"""
+        if not json_str:
+            raise ValueError("Empty content")
+        try:
+            data = json.loads(json_str)
+            return cls(**data)
+        except (json.JSONDecodeError, TypeError) as e:
+            raise ValueError(f"Invalid JSON for ErrorContent: {e}")
+
+
 class ReviewToolContent(BaseModel):
     """
     专门用于处理 SubMessageType.REVIEW_TOOL 的 content 字段结构。

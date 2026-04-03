@@ -18,6 +18,7 @@ export type SubMessageType =
   | 'McpTool'
   | 'Suggest'
   | 'ReviewTool'
+  | 'Error'
 
 export interface SubMessageConfig {
   is_collapsed: boolean
@@ -194,6 +195,11 @@ export interface ToolDecision {
 export interface ReviewToolRequest {
   sub_message_id: string
   decision: ToolDecision
+}
+
+export interface ErrorContent {
+  message: string
+  stack_trace: string
 }
 
 // --- Search Types (Chat) ---

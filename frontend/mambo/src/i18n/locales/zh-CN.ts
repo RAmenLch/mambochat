@@ -373,6 +373,10 @@ export default {
       partition: '分区',
       duplicateUpToHere: '复制会话至此消息',
       viewLogs: '查看日志',
+      errorOccurred: '生成过程中发生错误',
+      showStack: '查看堆栈',
+      hideStack: '收起堆栈',
+      retryFromError: '从错误中恢复',
       mcp: {
         invalidCall: '无效的工具调用',
         unknownTool: '未知工具',

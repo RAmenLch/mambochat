@@ -171,7 +171,7 @@ const currentMessageRank = computed(() => messageRecencyRanks.value.get(props.me
 
 const displayableSubMessages = computed(() =>
   props.message.sub_messages.filter(
-    (sm) => sm.type !== 'Usage' && sm.type !== 'ZipHistory' && sm.type !== 'Suggest',
+    (sm) => sm.type !== 'Usage' && sm.type !== 'ZipHistory' && sm.type !== 'Suggest' && sm.type !== 'Error',
   ),
 )
 

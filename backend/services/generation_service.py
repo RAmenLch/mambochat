@@ -22,6 +22,7 @@ from backend.services.generation.worker.abstract_worker import AbstractGenerateW
 from backend.services.generation.worker.chat_worker import UniversalGraphWorker
 
 from backend.schemas.enums import FileManagementType, MessageStatus, MessageRole, SubMessageType, ProviderWorkerType
+from backend.schemas.message import ErrorContent
 from backend.config.timezone_config import get_configured_now, TZ
 from backend.services.file_service import FileService
 
@@ -228,16 +229,86 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
             final_status = MessageStatus.COMPLETED
         except Exception as e:
             print(f"[Generation Service Error] for message {assistant_message_id}: {e}")
+            import traceback as tb
             final_status = MessageStatus.FAILED
 
             await db.rollback()
 
             try:
+                error_content = ErrorContent(
+                    message=f"生成流程发生异常: {e}",
+                    stack_trace=tb.format_exc()
+                )
                 error_sub_message_create = schemas.SubMessageCreate(
                     id=generate_uuid(),
-                    content=f"生成流程发生异常: {e}",
-                    sortOrder=0,
-                    type=SubMessageType.NORMAL,
+                    content=error_content.to_json_string(),
+                    sortOrder=98,
+                    type=SubMessageType.ERROR,
+                    status=MessageStatus.FAILED
+                )
+                await message_crud.create_sub_message(db, assistant_message_id, error_sub_message_create)
+                await db.commit()
+            except Exception as inner_e:
+                print(f"Failed to even create an error message for {assistant_message_id}: {inner_e}")
+
+        finally:
+            await stream_manager.mark_task_completed(assistant_message_id)
+            await stream_manager.close_stream(assistant_message_id)
+
+
+async def _run_retry_generation_task(chat_id: str, assistant_message_id: str):
+    """
+    后台任务：重试失败的生成任务，使用 LangGraph checkpoint 恢复。
+    通过传入 input=None 和 thread_id 从 checkpoint 恢复图执行。
+    """
+    async with AsyncSessionLocal() as db:
+        final_status = None
+        try:
+            await _ensure_chat_model_configured(db, chat_id)
+
+            # 清理失败的子消息：删除 ERROR 类型和 generating 状态的子消息
+            db_message = await message_crud.get_message(db, message_id=assistant_message_id)
+            if db_message:
+                sub_ids_to_delete = []
+                for sub in db_message.sub_messages:
+                    if sub.type == SubMessageType.ERROR.value or sub.status == MessageStatus.GENERATING.value:
+                        sub_ids_to_delete.append(sub.id)
+                if sub_ids_to_delete:
+                    for sub_id in sub_ids_to_delete:
+                        sub = await db.get(chat_model.SubMessage, sub_id)
+                        if sub:
+                            await db.delete(sub)
+                    await db.commit()
+
+            worker = await _get_worker_for_chat(db, chat_id)
+            manager = DefaultGenerateManager(db_session=db, recover_from_error=True)
+            executor = InstructionDispatcher(db_session=db)
+
+            async for instruction in manager.run(worker, chat_id, assistant_message_id):
+                exec_result = await executor.execute(instruction, chat_id, assistant_message_id)
+                if isinstance(exec_result, MessageStatus):
+                    final_status = exec_result
+
+        except asyncio.CancelledError:
+            print(f"[Retry Generation Service] Task cancelled for message '{assistant_message_id}'.")
+            final_status = MessageStatus.COMPLETED
+        except Exception as e:
+            print(f"[Retry Generation Service Error] for message {assistant_message_id}: {e}")
+            import traceback as tb
+            final_status = MessageStatus.FAILED
+
+            await db.rollback()
+
+            try:
+                error_content = ErrorContent(
+                    message=f"重试生成流程发生异常: {e}",
+                    stack_trace=tb.format_exc()
+                )
+                error_sub_message_create = schemas.SubMessageCreate(
+                    id=generate_uuid(),
+                    content=error_content.to_json_string(),
+                    sortOrder=98,
+                    type=SubMessageType.ERROR,
                     status=MessageStatus.FAILED
                 )
                 await message_crud.create_sub_message(db, assistant_message_id, error_sub_message_create)

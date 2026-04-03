@@ -375,6 +375,10 @@ export default {
       partition: 'Partition',
       duplicateUpToHere: 'Duplicate Up To Here',
       viewLogs: 'View Logs',
+      errorOccurred: 'An error occurred during generation',
+      showStack: 'View Stack Trace',
+      hideStack: 'Hide Stack Trace',
+      retryFromError: 'Recover from Error',
       mcp: {
         invalidCall: 'Invalid tool call',
         unknownTool: 'Unknown tool',

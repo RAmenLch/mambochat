@@ -179,6 +179,14 @@ export const activateMessageBranch = (chatId: string, messageId: string): Promis
 };
 
 /**
+ * 重试失败的生成任务（从 LangGraph checkpoint 恢复）
+ * @param messageId 失败的 assistant 消息ID
+ */
+export const retryFailedGeneration = (messageId: string): Promise<Message> => {
+  return apiClient.post(`/messages/${messageId}/retry`);
+};
+
+/**
  * 批量查询后台任务状态
  */
 export const checkTasksStatus = (taskIds: string[]): Promise<{ running_tasks: string[] }> => {
