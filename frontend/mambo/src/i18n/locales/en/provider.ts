@@ -6,11 +6,11 @@ export default {
     apiHost: 'API Host',
     action: 'Actions',
     currentProvider: 'Current Provider',
-    empty: 'Please select a provider from the table above first',
+    empty: 'No providers',
     deleteConfirm:
       'Are you sure you want to delete provider "{name}"? All its models will also be deleted.',
     deleteSuccess: 'Deleted successfully!',
-    empty: 'No providers',
+    selectFirst: 'Please select a provider from the table above first',
   },
   form: {
     addTitle: 'Add AI Provider',

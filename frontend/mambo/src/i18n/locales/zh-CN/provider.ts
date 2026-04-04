@@ -6,10 +6,10 @@ export default {
     apiHost: 'API Host',
     action: '操作',
     currentProvider: '当前服务商',
-    empty: '请先在上方表格中点击选择一个服务商',
+    empty: '暂无服务商',
     deleteConfirm: '确定删除服务商 "{name}" 吗？其下所有模型也将被删除。',
     deleteSuccess: '删除成功！',
-    empty: '暂无服务商',
+    selectFirst: '请先在上方表格中点击选择一个服务商',
   },
   form: {
     addTitle: '新增 AI 服务商',

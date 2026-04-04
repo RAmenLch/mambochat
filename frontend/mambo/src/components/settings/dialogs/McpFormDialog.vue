@@ -106,6 +106,7 @@ import { ref, reactive, computed, watch } from 'vue';
 import { Plus, Minus, Connection, CircleCheck, CircleClose } from '@element-plus/icons-vue';
 import type { FormInstance, FormRules } from 'element-plus';
 import { useI18n } from 'vue-i18n';
+import type { McpServer, McpCreateRequest, McpTransportType } from '@/api/types';
 import { useMcpStore } from '@/stores/mcpStore';
 
 const { t } = useI18n();
