@@ -2,7 +2,7 @@
 <template>
   <el-drawer
     :model-value="visible"
-    :title="$t('chat.settings.title', '会话设置')"
+    :title="$t('chat.settings.title')"
     direction="rtl"
     size="100%"
     :before-close="handleDrawerClose"
@@ -11,13 +11,13 @@
     <div class="drawer-content">
       <!-- 会话自身的可编辑设置 -->
       <el-form v-if="chatData" :model="form" label-position="top">
-        <el-form-item :label="$t('chat.settings.name', '会话名称')">
+        <el-form-item :label="$t('chat.settings.name')">
           <el-input
             v-model.trim="form.name"
-            :placeholder="$t('chat.settings.namePlaceholder', '请输入会话名称')"
+            :placeholder="$t('chat.settings.namePlaceholder')"
           />
         </el-form-item>
-        <el-form-item :label="$t('chat.settings.bindAgent', '绑定的 Agent')">
+        <el-form-item :label="$t('chat.settings.bindAgent')">
           <el-select v-model="form.agentId" style="width: 100%">
             <el-option
               v-for="agent in agentOptions"
@@ -30,7 +30,7 @@
       </el-form>
 
       <el-divider border-style="dashed">
-        <span class="preview-divider-title">{{ $t('chat.settings.agentInfoPreview', 'Agent 配置预览 (只读)') }}</span>
+        <span class="preview-divider-title">{{ $t('chat.settings.agentInfoPreview') }}</span>
       </el-divider>
 
       <!-- Agent 详细配置预览区 -->
@@ -50,7 +50,7 @@
                 <el-tag size="small" type="info" effect="plain">{{ selectedAgent.AgentType }}</el-tag>
               </div>
               <div class="agent-desc">
-                {{ selectedAgent.description || $t('common.none', '暂无描述') }}
+                {{ selectedAgent.description || $t('common.none') }}
               </div>
             </div>
           </div>
@@ -59,19 +59,19 @@
         <!-- 2. 模型配置 -->
         <div class="preview-section">
           <div class="section-title">
-            <el-icon><Cpu /></el-icon> {{ $t('agent.modelConfig', '模型配置') }}
+            <el-icon><Cpu /></el-icon> {{ $t('agent.modelConfig') }}
           </div>
           <div class="info-grid">
             <div class="info-item">
-              <span class="info-label">{{ $t('agent.bindModel', '绑定模型') }}:</span>
+              <span class="info-label">{{ $t('agent.bindModel') }}:</span>
               <span class="info-value">{{ displayModelName }}</span>
             </div>
             <div class="info-item" v-if="selectedAgent.modelParameters?.max_context_messages !== undefined">
-              <span class="info-label">{{ $t('agent.contextMessages', '上下文消息数') }}:</span>
+              <span class="info-label">{{ $t('agent.contextMessages') }}:</span>
               <span class="info-value">{{ selectedAgent.modelParameters.max_context_messages }}</span>
             </div>
             <div class="info-item" v-if="selectedAgent.modelParameters?.stream !== undefined">
-              <span class="info-label">{{ $t('agent.streamOutput', '流式输出') }}:</span>
+              <span class="info-label">{{ $t('agent.streamOutput') }}:</span>
               <span class="info-value">{{ selectedAgent.modelParameters.stream ? '开启' : '关闭' }}</span>
             </div>
             <div class="info-item" v-if="selectedAgent.modelParameters?.temperature !== undefined">
@@ -84,42 +84,42 @@
         <!-- 3. 系统设定 -->
         <div class="preview-section">
           <div class="section-title">
-            <el-icon><Document /></el-icon> {{ $t('agent.systemPrompt', '系统提示词') }}
+            <el-icon><Document /></el-icon> {{ $t('agent.systemPrompt') }}
           </div>
           <div class="prompt-box">
-            {{ selectedAgent.systemPrompt || $t('common.none', '无') }}
+            {{ selectedAgent.systemPrompt || $t('common.none') }}
           </div>
         </div>
 
         <!-- 4. 扩展能力 -->
         <div class="preview-section ext-section">
           <div class="section-title">
-            <el-icon><MagicStick /></el-icon> {{ $t('agent.settingsAndResources', '设定与能力') }}
+            <el-icon><MagicStick /></el-icon> {{ $t('agent.settingsAndResources') }}
           </div>
 
           <!-- 扩展能力: 挂载资源 -->
           <div class="ext-item">
-            <div class="ext-label">{{ $t('agent.mountedResources', '挂载资源') }}:</div>
+            <div class="ext-label">{{ $t('agent.mountedResources') }}:</div>
             <div class="ext-tags" v-if="previewResources.length > 0">
               <MountedResourceTags :model-value="previewResources" color-by-type readonly />
             </div>
-            <div class="ext-empty" v-else>{{ $t('common.none', '无') }}</div>
+            <div class="ext-empty" v-else>{{ $t('common.none') }}</div>
           </div>
 
           <!-- MCP 工具 -->
           <div class="ext-item">
-            <div class="ext-label">{{ $t('agent.enableMcp', 'MCP 工具') }}:</div>
+            <div class="ext-label">{{ $t('agent.enableMcp') }}:</div>
             <div class="ext-tags" v-if="displayMcpList.length > 0">
               <el-tag v-for="mcp in displayMcpList" :key="mcp.id" size="small" type="info" effect="light">
                 <el-icon><Connection /></el-icon> {{ mcp.name }}
               </el-tag>
             </div>
-            <div class="ext-empty" v-else>{{ $t('common.none', '无') }}</div>
+            <div class="ext-empty" v-else>{{ $t('common.none') }}</div>
           </div>
 
           <!-- 子 Agent -->
           <div class="ext-item">
-            <div class="ext-label">{{ $t('agent.subAgents', '子 Agent') }}:</div>
+            <div class="ext-label">{{ $t('agent.subAgents') }}:</div>
             <div class="ext-tags" v-if="displaySubAgents.length > 0">
               <el-tag
                 v-for="sub in displaySubAgents"
@@ -136,13 +136,13 @@
                 </div>
               </el-tag>
             </div>
-            <div class="ext-empty" v-else>{{ $t('common.none', '无') }}</div>
+            <div class="ext-empty" v-else>{{ $t('common.none') }}</div>
           </div>
         </div>
       </div>
 
       <div v-else class="empty-agent-preview">
-        <el-empty :description="$t('common.rule.selectRequired', '请选择 Agent')" :image-size="60" />
+        <el-empty :description="$t('common.rule.selectRequired')" :image-size="60" />
       </div>
     </div>
 
@@ -211,9 +211,9 @@ const selectedAgent = computed(() => {
 });
 
 const displayModelName = computed(() => {
-  if (!selectedAgent.value?.aiModelId) return t('common.status.unspecified', '未指定');
+  if (!selectedAgent.value?.aiModelId) return t('common.status.unspecified');
   const model = providerStore.allModels.find(m => m.id === selectedAgent.value!.aiModelId);
-  return model ? model.name : t('common.status.unknownModel', '未知模型');
+  return model ? model.name : t('common.status.unknownModel');
 });
 
 const displayMcpList = computed(() => {
@@ -273,11 +273,11 @@ const handleDrawerClose = () => {
 const handleSaveSettings = () => {
   if (!props.chatData) return;
   if (!form.name?.trim()) {
-    ElMessage.warning(t('chat.settings.namePlaceholder', '请输入会话名称'));
+    ElMessage.warning(t('chat.settings.namePlaceholder'));
     return;
   }
   if (!form.agentId) {
-    ElMessage.warning(t('common.rule.selectRequired', '请选择 Agent'));
+    ElMessage.warning(t('common.rule.selectRequired'));
     return;
   }
 

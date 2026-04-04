@@ -33,7 +33,7 @@
     <!-- 裁剪弹窗 -->
     <el-dialog
       v-model="showCropDialog"
-      :title="t('settings.avatar.cropTitle', '处理头像')"
+      :title="t('settings.avatar.cropTitle')"
       width="500px"
       destroy-on-close
       @opened="initCropper"
@@ -48,10 +48,10 @@
             {{ t('common.action.cancel') }}
           </el-button>
           <el-button @click="handleUploadOriginal">
-            {{ t('settings.avatar.uploadOriginal', '上传原图') }}
+            {{ t('settings.avatar.uploadOriginal') }}
           </el-button>
           <el-button type="primary" @click="handleUploadCropped" :loading="isProcessing">
-            {{ t('settings.avatar.cropAndUpload', '裁剪并上传') }}
+            {{ t('settings.avatar.cropAndUpload') }}
           </el-button>
         </div>
       </template>
@@ -170,7 +170,7 @@ const handleUploadCropped = () => {
       emit('upload', croppedFile)
       showCropDialog.value = false
     } else {
-      ElMessage.error(t('settings.avatar.cropFailed', '图片裁剪失败'))
+      ElMessage.error(t('settings.avatar.cropFailed'))
       isProcessing.value = false
     }
   }, mimeType)

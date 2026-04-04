@@ -3,7 +3,7 @@
   <div class="mobile-agent-manager-wrapper">
     <el-tabs v-model="activeTab" class="mobile-agent-tabs">
       <!-- Tab 1: Agent 管理 -->
-      <el-tab-pane :label="t('agent.manager', 'Agent 管理')" name="agent" class="tab-pane-full">
+      <el-tab-pane :label="t('agent.manager')" name="agent" class="tab-pane-full">
         <div class="mobile-agent-manager">
           <!-- 视图 1: Agent 列表 (Tree) -->
           <transition name="slide-left">
@@ -50,7 +50,7 @@
       </el-tab-pane>
 
       <!-- Tab 2: Backend 挂载配置 -->
-      <el-tab-pane :label="t('backend.manager', 'Backend 配置')" name="backend" class="tab-pane-full">
+      <el-tab-pane :label="t('backend.manager')" name="backend" class="tab-pane-full">
         <MobileBackendManagerPanel />
       </el-tab-pane>
     </el-tabs>

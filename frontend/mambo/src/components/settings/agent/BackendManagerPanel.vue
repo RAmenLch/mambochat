@@ -4,33 +4,33 @@
     <!-- 顶部工具栏 -->
     <div class="toolbar">
       <el-button type="primary" @click="handleCreate">
-        <el-icon><Plus /></el-icon> {{ $t('backend.new', '新建 Backend') }}
+        <el-icon><Plus /></el-icon> {{ $t('backend.new') }}
       </el-button>
       <el-button @click="handleShowPublicKey">
-        <el-icon><Key /></el-icon> {{ $t('backend.showPublicKey', '查看系统公钥') }}
+        <el-icon><Key /></el-icon> {{ $t('backend.showPublicKey') }}
       </el-button>
     </div>
 
     <!-- Backend 列表 -->
     <el-table :data="backendList" v-loading="isLoading" border stripe class="backend-table">
-      <el-table-column prop="name" :label="$t('backend.name', '名称')" width="150" />
-      <el-table-column prop="backendType" :label="$t('backend.type', '类型')" width="100">
+      <el-table-column prop="name" :label="$t('backend.name')" width="150" />
+      <el-table-column prop="backendType" :label="$t('backend.type')" width="100">
         <template #default="{ row }">
           <el-tag size="small">{{ row.backendType.toUpperCase() }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column :label="$t('backend.host', '主机地址')" width="200">
+      <el-table-column :label="$t('backend.host')" width="200">
         <template #default="{ row }">
           {{ row.configData.username }}@{{ row.configData.hostname }}:{{ row.configData.port || 22 }}
         </template>
       </el-table-column>
-      <el-table-column prop="description" :label="$t('backend.description', '描述')" show-overflow-tooltip />
-      <el-table-column :label="$t('common.action.operate', '操作')" width="180" fixed="right">
+      <el-table-column prop="description" :label="$t('backend.description')" show-overflow-tooltip />
+      <el-table-column :label="$t('common.action.operate')" width="180" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" @click="handleEdit(row)">{{ $t('common.action.edit', '编辑') }}</el-button>
-          <el-popconfirm :title="$t('common.msg.confirmDelete', '确定要删除吗？')" @confirm="handleDelete(row.id)">
+          <el-button link type="primary" @click="handleEdit(row)">{{ $t('common.action.edit') }}</el-button>
+          <el-popconfirm :title="$t('common.msg.confirmDelete')" @confirm="handleDelete(row.id)">
             <template #reference>
-              <el-button link type="danger">{{ $t('common.action.delete', '删除') }}</el-button>
+              <el-button link type="danger">{{ $t('common.action.delete') }}</el-button>
             </template>
           </el-popconfirm>
         </template>
@@ -40,18 +40,18 @@
     <!-- Backend 表单弹窗 -->
     <el-dialog
       v-model="dialogVisible"
-      :title="isEdit ? $t('backend.edit', '编辑 Backend') : $t('backend.new', '新建 Backend')"
+      :title="isEdit ? $t('backend.edit') : $t('backend.new')"
       width="600px"
       :close-on-click-modal="false"
     >
       <el-form ref="formRef" :model="form" :rules="rules" label-width="120px" v-loading="isSaving">
-        <el-form-item :label="$t('backend.name', '名称')" prop="name">
+        <el-form-item :label="$t('backend.name')" prop="name">
           <el-input v-model="form.name" :disabled="isEdit" placeholder="仅允许字母、数字、下划线 (作为路由路径)" />
         </el-form-item>
-        <el-form-item :label="$t('backend.description', '描述')" prop="description">
+        <el-form-item :label="$t('backend.description')" prop="description">
           <el-input v-model="form.description" type="textarea" :rows="2" />
         </el-form-item>
-        <el-form-item :label="$t('backend.type', '类型')" prop="backendType">
+        <el-form-item :label="$t('backend.type')" prop="backendType">
           <el-select v-model="form.backendType" disabled style="width: 100%">
             <el-option label="SSH" value="ssh" />
           </el-select>
@@ -88,26 +88,26 @@
       <template #footer>
         <div class="dialog-footer-actions">
           <el-button type="info" plain @click="handleTestConnection" :loading="isTesting">
-            <el-icon><Connection /></el-icon> {{ $t('backend.testConnection', '测试连接') }}
+            <el-icon><Connection /></el-icon> {{ $t('backend.testConnection') }}
           </el-button>
           <div class="right-actions">
-            <el-button @click="dialogVisible = false">{{ $t('common.action.cancel', '取消') }}</el-button>
-            <el-button type="primary" @click="submitForm" :loading="isSaving">{{ $t('common.action.confirm', '确定') }}</el-button>
+            <el-button @click="dialogVisible = false">{{ $t('common.action.cancel') }}</el-button>
+            <el-button type="primary" @click="submitForm" :loading="isSaving">{{ $t('common.action.confirm') }}</el-button>
           </div>
         </div>
       </template>
     </el-dialog>
 
     <!-- 公钥展示弹窗 -->
-    <el-dialog v-model="keyDialogVisible" :title="$t('backend.systemPublicKey', '系统 SSH 公钥')" width="500px">
+    <el-dialog v-model="keyDialogVisible" :title="$t('backend.systemPublicKey')" width="500px">
       <div v-loading="!systemPublicKey" class="public-key-container">
         <p class="key-tip">请将以下公钥添加到目标服务器的 <code>~/.ssh/authorized_keys</code> 文件中，以实现免密登录。</p>
         <el-input v-model="systemPublicKey" type="textarea" :rows="6" readonly class="key-textarea" />
       </div>
       <template #footer>
-        <el-button @click="keyDialogVisible = false">{{ $t('common.action.close', '关闭') }}</el-button>
+        <el-button @click="keyDialogVisible = false">{{ $t('common.action.close') }}</el-button>
         <el-button type="primary" @click="copyPublicKey" :disabled="!systemPublicKey">
-          {{ $t('common.action.copy', '复制') }}
+          {{ $t('common.action.copy') }}
         </el-button>
       </template>
     </el-dialog>

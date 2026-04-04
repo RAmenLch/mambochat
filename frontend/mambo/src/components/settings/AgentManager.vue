@@ -3,7 +3,7 @@
   <div class="agent-manager-wrapper">
     <el-tabs v-model="activeTab" class="agent-tabs">
       <!-- Tab 1: Agent 管理 (原有的树 + 编辑器) -->
-      <el-tab-pane :label="$t('agent.manager', 'Agent 管理')" name="agent" class="tab-pane-full">
+      <el-tab-pane :label="$t('agent.manager')" name="agent" class="tab-pane-full">
         <el-container class="agent-manager-container">
           <!-- 左侧：Agent 树 -->
           <AgentTreePanel />
@@ -16,7 +16,7 @@
       </el-tab-pane>
 
       <!-- Tab 2: Backend 挂载配置 -->
-      <el-tab-pane :label="$t('backend.manager', 'Backend 配置')" name="backend" class="tab-pane-full">
+      <el-tab-pane :label="$t('backend.manager')" name="backend" class="tab-pane-full">
         <BackendManagerPanel />
       </el-tab-pane>
     </el-tabs>

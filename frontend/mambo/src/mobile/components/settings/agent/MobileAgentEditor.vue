@@ -184,7 +184,7 @@
                     <MountedResourceTags v-model="mountedResources" color-by-type />
                   </div>
                   <div v-else class="empty-mount">
-                    {{ $t('agent.noResources', '暂无挂载资源') }}
+                    {{ $t('agent.noResources') }}
                   </div>
                 </div>
               </el-form-item>
@@ -198,7 +198,7 @@
                   <div class="mount-action">
                     <el-dropdown trigger="click" @command="handleAddMcp" placement="bottom-start">
                       <el-button type="primary" plain size="small">
-                        <el-icon><Connection /></el-icon> {{ $t('agent.mountMcp', '挂载 MCP 工具') }}
+                        <el-icon><Connection /></el-icon> {{ $t('agent.mountMcp') }}
                       </el-button>
                       <template #dropdown>
                         <el-dropdown-menu class="mcp-dropdown-menu">
@@ -206,7 +206,7 @@
                             {{ mcp.name }}
                           </el-dropdown-item>
                           <el-dropdown-item v-if="availableMcps.length === 0" disabled>
-                            {{ $t('common.noData', '暂无可用工具') }}
+                            {{ $t('common.noData') }}
                           </el-dropdown-item>
                         </el-dropdown-menu>
                       </template>
@@ -229,7 +229,7 @@
                     </el-tag>
                   </div>
                   <div v-else class="empty-mount">
-                    {{ $t('agent.noMcp', '暂无挂载工具') }}
+                    {{ $t('agent.noMcp') }}
                   </div>
                 </div>
               </el-form-item>
@@ -260,7 +260,7 @@
                     </el-tag>
                   </div>
                   <div v-else class="empty-mount">
-                    {{ $t('agent.noSubAgents', '暂无子 Agent') }}
+                    {{ $t('agent.noSubAgents') }}
                   </div>
                 </div>
               </el-form-item>
@@ -270,12 +270,12 @@
           <!-- [新增] 第三行：Backend 挂载 (仅 DeepAgent 可见) -->
           <el-row :gutter="16" class="settings-row" v-if="form.AgentType === 'DeepAgent'">
             <el-col :span="24">
-              <el-form-item :label="$t('agent.mountBackend', '挂载 Backend')">
+              <el-form-item :label="$t('agent.mountBackend')">
                 <div class="mount-container" style="height: auto; min-height: 120px;">
                   <div class="mount-action">
                     <el-dropdown trigger="click" @command="handleAddBackend" placement="bottom-start">
                       <el-button type="warning" plain size="small">
-                        <el-icon><Monitor /></el-icon> {{ $t('agent.addBackend', '挂载 Backend') }}
+                        <el-icon><Monitor /></el-icon> {{ $t('agent.addBackend') }}
                       </el-button>
                       <template #dropdown>
                         <el-dropdown-menu class="mcp-dropdown-menu">
@@ -283,7 +283,7 @@
                             {{ b.name }} ({{ b.backendType }})
                           </el-dropdown-item>
                           <el-dropdown-item v-if="availableBackends.length === 0" disabled>
-                            {{ $t('common.noData', '暂无可用 Backend') }}
+                            {{ $t('common.noData') }}
                           </el-dropdown-item>
                         </el-dropdown-menu>
                       </template>
@@ -306,7 +306,7 @@
                     </el-tag>
                   </div>
                   <div v-else class="empty-mount">
-                    {{ $t('agent.noBackend', '暂无挂载 Backend') }}
+                    {{ $t('agent.noBackend') }}
                   </div>
                 </div>
               </el-form-item>

@@ -2,7 +2,7 @@
 <template>
   <el-dialog
     v-model="internalVisible"
-    :title="mode === 'review_all' ? t('chat.message.batchReview', '批量审核工具') : t('chat.message.toolCall', '工具调用')"
+    :title="mode === 'review_all' ? t('chat.message.mcp.batchReview') : t('chat.message.toolCall')"
     width="600px"
     destroy-on-close
     @close="handleClose"
@@ -23,7 +23,7 @@
           </div>
 
           <div class="tool-arguments">
-            <h4>{{ t('chat.message.arguments', '参数') }}</h4>
+            <h4>{{ t('chat.message.mcp.arguments') }}</h4>
 
             <!-- Read-only view for completed McpTool -->
             <div v-if="msg.type === 'McpTool'">
@@ -33,7 +33,7 @@
                   <span class="arg-val">{{ typeof val === 'object' ? JSON.stringify(val) : val }}</span>
                 </div>
               </div>
-              <div v-else class="no-args">{{ t('chat.message.noArguments', '无参数配置') }}</div>
+              <div v-else class="no-args">{{ t('chat.message.mcp.noArguments') }}</div>
             </div>
 
             <!-- Editable form for ReviewTool -->
@@ -65,35 +65,35 @@
                 </el-form-item>
               </template>
               <div v-if="getCombinedArgKeys(msg).length === 0" class="no-args">
-                {{ t('chat.message.noArguments', '无参数配置') }}
+                {{ t('chat.message.mcp.noArguments') }}
               </div>
             </el-form>
           </div>
 
           <div v-if="msg.type === 'McpTool'" class="tool-result">
-            <h4>{{ t('chat.message.result', '返回结果') }}</h4>
+            <h4>{{ t('chat.message.mcp.result') }}</h4>
             <div class="result-box" :class="{ 'is-error': (getParsedContent(msg) as McpToolContent).is_error }">
-              {{ (getParsedContent(msg) as McpToolContent).result || t('chat.message.noResult', '无返回结果') }}
+              {{ (getParsedContent(msg) as McpToolContent).result || t('chat.message.mcp.noResult') }}
             </div>
           </div>
 
           <div v-if="msg.type === 'ReviewTool'" class="tool-actions-wrapper">
             <div v-if="!getToolDecision(msg)" class="tool-actions">
               <el-button type="danger" plain @click="submitDecision(msg.id, 'reject')">
-                {{ t('chat.message.reject', '拒绝调用') }}
+                {{ t('chat.message.mcp.reject') }}
               </el-button>
               <div class="right-actions">
                 <el-button type="warning" plain @click="submitDecision(msg.id, 'edit')">
-                  {{ t('chat.message.editAndApprove', '修改并同意') }}
+                  {{ t('chat.message.mcp.editAndApprove') }}
                 </el-button>
                 <el-button type="primary" @click="submitDecision(msg.id, 'approve')">
-                  {{ t('chat.message.approve', '同意调用') }}
+                  {{ t('chat.message.mcp.approve') }}
                 </el-button>
               </div>
             </div>
 
             <div v-else class="tool-decision-result">
-              <h4>{{ t('chat.message.reviewResult', '审核结果') }}</h4>
+              <h4>{{ t('chat.message.mcp.reviewResult') }}</h4>
               <el-alert
                 :type="getToolDecision(msg)?.type === 'approve' ? 'success' : (getToolDecision(msg)?.type === 'reject' ? 'error' : 'warning')"
                 :title="getDecisionText(getToolDecision(msg))"
@@ -105,11 +105,11 @@
           </div>
         </div>
         <div v-else class="parse-error">
-          {{ t('chat.message.parseError', '解析失败') }}
+          {{ t('chat.message.mcp.parseError') }}
         </div>
       </el-tab-pane>
     </el-tabs>
-    <el-empty v-else :description="t('chat.message.noToolInfo', '无工具调用信息')" />
+    <el-empty v-else :description="t('chat.message.mcp.noToolInfo')" />
   </el-dialog>
 </template>
 
@@ -359,9 +359,9 @@ function getToolDecision(msg: SubMessage): ToolDecision | null {
 function getDecisionText(decision: ToolDecision | null): string {
   if (!decision) return '';
   switch (decision.type) {
-    case 'approve': return t('chat.message.decisionApprove', '已同意调用');
-    case 'edit': return t('chat.message.decisionEdit', '已修改并同意');
-    case 'reject': return t('chat.message.decisionReject', '已拒绝调用');
+    case 'approve': return t('chat.message.mcp.decisionApprove');
+    case 'edit': return t('chat.message.mcp.decisionEdit');
+    case 'reject': return t('chat.message.mcp.decisionReject');
     default: return '';
   }
 }
@@ -383,13 +383,13 @@ async function submitDecision(subMessageId: string, type: 'approve' | 'edit' | '
   } else if (type === 'reject') {
     try {
       const { value } = await ElMessageBox.prompt(
-        t('chat.message.rejectReasonPrompt', '请输入拒绝理由（可选）：'),
-        t('chat.message.reject', '拒绝调用'),
+        t('chat.message.mcp.rejectReasonPrompt'),
+        t('chat.message.mcp.reject'),
         {
-          confirmButtonText: t('common.action.confirm', '确定'),
-          cancelButtonText: t('common.action.cancel', '取消'),
+          confirmButtonText: t('common.action.confirm'),
+          cancelButtonText: t('common.action.cancel'),
           inputType: 'textarea',
-          inputPlaceholder: t('chat.message.rejectReasonPlaceholder', '若不提供，将使用默认理由...'),
+          inputPlaceholder: t('chat.message.mcp.rejectReasonPlaceholder'),
         }
       );
       // 如果用户输入了理由，则使用用户的输入，否则使用默认文案
@@ -402,13 +402,13 @@ async function submitDecision(subMessageId: string, type: 'approve' | 'edit' | '
 
   try {
     await interactionStore.submitToolReview(liveParentMessage.value.id, subMessageId, decision);
-    ElMessage.success(t('chat.message.reviewSubmitted', '审核已提交'));
+    ElMessage.success(t('chat.message.mcp.reviewSubmitted'));
 
     if (props.mode === 'single') {
       handleClose();
     }
   } catch (error) {
-    ElMessage.error(t('chat.message.reviewFailed', '审核提交失败'));
+    ElMessage.error(t('chat.message.mcp.reviewFailed'));
   }
 }
 </script>

@@ -217,11 +217,11 @@ const displayModelName = computed(() => {
 });
 
 const displayAgentName = computed(() => {
-  if (!props.currentChat?.agentId) return t('common.status.unspecified', '未指定');
+  if (!props.currentChat?.agentId) return t('common.status.unspecified');
   const agent = agentStore.allAgents.find(a => a.id === props.currentChat!.agentId) ||
                 agentStore.agentList.find(a => a.id === props.currentChat!.agentId);
 
-  return agent ? agent.name : t('common.status.unknownModel', '未知 Agent');
+  return agent ? agent.name : t('common.status.unknownModel');
 });
 /**
  * 检查当前会话是否已启用系统联网搜索工具。

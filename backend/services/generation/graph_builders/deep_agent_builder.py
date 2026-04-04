@@ -105,5 +105,5 @@ class DeepAgentGraphBuilder(BaseGraphBuilder):
             subagents=compiled_subagents if compiled_subagents else None,
             checkpointer=active_checkpointer,
             backend=backend_factory,
-            interrupt_on=agent_config.hitl_interrupt_on
+            interrupt_on=agent_config.hitl_interrupt_on,
         )

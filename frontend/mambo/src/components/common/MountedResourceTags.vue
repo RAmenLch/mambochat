@@ -47,8 +47,11 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import type { PropType, Component } from 'vue';
-import { Search, Document, Memo, Tickets, Reading } from '@element-plus/icons-vue'; // [修改] 引入 Reading 替代 MagicStick
+import { Search, Document, Memo, Tickets, Reading } from '@element-plus/icons-vue';
 import type { Resource } from '@/api/types/resourceTypes';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 const props = defineProps({
   modelValue: {
@@ -102,21 +105,21 @@ function getTagIcon(resource: Resource): Component {
 
 function getResourceTypeLabel(resource: Resource): string {
   switch (resource.resourceType) {
-    case 'knowledge_base': return '知识库';
-    case 'system_prompt': return '系统提示词';
-    case 'submessage_template': return '消息模板';
-    case 'skill': return '技能 (Skill)';
-    case 'file': return '文件';
-    default: return resource.resourceType || '资源';
+    case 'knowledge_base': return t('resource.types.knowledge_base');
+    case 'system_prompt': return t('resource.types.system_prompt');
+    case 'submessage_template': return t('resource.types.submessage_template');
+    case 'skill': return t('resource.types.skill');
+    case 'file': return t('resource.types.file');
+    default: return resource.resourceType || t('resource.types.unknown');
   }
 }
 
 function getPreviewText(resource: Resource): string {
   if (resource.resourceType === 'knowledge_base') {
-    return resource.description || '知识库资源（检索增强）';
+    return resource.description || t('resource.selector.kbMountContent');
   }
   if (resource.resourceType === 'skill') {
-    return resource.description || '技能资源（供 Agent 使用）';
+    return resource.description || t('resource.skill.descPlaceholder');
   }
   if (resource.resourceType === 'file') {
     const fileInfo = resource.latest_version?.file_info;
@@ -125,10 +128,10 @@ function getPreviewText(resource: Resource): string {
       const sizeStr = size < 1024 ? `${size} B` : size < 1048576 ? `${(size / 1024).toFixed(1)} KB` : `${(size / 1048576).toFixed(1)} MB`;
       return `${fileInfo.filename} (${sizeStr})`;
     }
-    return '(无文件信息)';
+    return `(${t('common.status.noData')})`;
   }
   const content = resource.latest_version?.content;
-  if (!content) return '(无内容)';
+  if (!content) return `(${t('common.status.noData')})`;
   return content.length > 500 ? content.substring(0, 500) + '...' : content;
 }
 

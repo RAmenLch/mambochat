@@ -16,10 +16,10 @@
         />
       </el-form-item>
 
-      <el-form-item v-if="showChatMode" :label="t('chat.settings.chatMode', '会话模式')" prop="chatMode">
+      <el-form-item v-if="showChatMode" :label="t('chat.settings.chatMode')" prop="chatMode">
         <el-select v-model="form.chatMode" style="width: 100%;">
-          <el-option :label="t('chat.settings.normalMode', '普通模式')" value="normal" />
-          <el-option :label="t('chat.settings.agentMode', 'Agent 模式')" value="agent" />
+          <el-option :label="t('chat.settings.normalMode')" value="normal" />
+          <el-option :label="t('chat.settings.agentMode')" value="agent" />
         </el-select>
       </el-form-item>
 
@@ -208,7 +208,7 @@ const handleConfirm = async () => {
         return;
       }
       if (form.chatMode === 'agent' && props.agentSelectConfig && !form.agentId) {
-        ElMessage.warning(t('common.rule.selectRequired', '请选择 Agent'));
+        ElMessage.warning(t('common.rule.selectRequired'));
         return;
       }
 

@@ -47,7 +47,7 @@
             <ResourceManager />
           </el-tab-pane>
           <!-- 新增 Agent 管理 Tab -->
-          <el-tab-pane label="Agent 管理" name="agentManager">
+          <el-tab-pane :label="t('settings.tabs.agentManager')" name="agentManager">
             <AgentManager />
           </el-tab-pane>
         </el-tabs>

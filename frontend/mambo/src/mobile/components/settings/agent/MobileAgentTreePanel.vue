@@ -136,7 +136,7 @@ const {
         title: t('agent.tree.newAgent'),
         initialName: t('agent.tree.newAgent'),
         selectConfig: {
-          label: t('agent.type', 'Agent 类型'),
+          label: t('agent.type'),
           options: [
             { label: 'ReAct Agent', value: 'ReActAgent' },
             { label: 'Deep Agent', value: 'DeepAgent' }

@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     :model-value="visible"
-    :title="isEditMode ? '编辑 MCP 服务' : '新增 MCP 服务'"
+    :title="isEditMode ? t('settings.mcp.editTitle') : t('settings.mcp.addTitle')"
     width="600px"
     @update:model-value="handleUpdateVisible"
     @closed="handleClosed"
@@ -14,60 +14,60 @@
       label-width="100px"
       label-position="right"
     >
-      <el-form-item label="名称" prop="name">
-        <el-input v-model="formData.name" placeholder="请输入服务名称" />
+      <el-form-item :label="t('settings.mcp.columns.name')" prop="name">
+        <el-input v-model="formData.name" :placeholder="t('settings.mcp.form.namePlaceholder')" />
       </el-form-item>
 
-      <el-form-item label="描述" prop="description">
-        <el-input v-model="formData.description" type="textarea" placeholder="可选描述" />
+      <el-form-item :label="t('settings.mcp.columns.description')" prop="description">
+        <el-input v-model="formData.description" type="textarea" :placeholder="t('settings.mcp.form.descPlaceholder')" />
       </el-form-item>
 
-      <el-form-item label="传输类型" prop="transportType">
+      <el-form-item :label="t('settings.mcp.columns.type')" prop="transportType">
         <el-radio-group v-model="formData.transportType" @change="handleTransportChange">
-          <el-radio-button value="stdio">Stdio (本地进程)</el-radio-button>
-          <el-radio-button value="sse">SSE (远程服务)</el-radio-button>
+          <el-radio-button value="stdio">Stdio</el-radio-button>
+          <el-radio-button value="sse">SSE</el-radio-button>
         </el-radio-group>
       </el-form-item>
 
-      <el-form-item label="启用状态" prop="isEnabled">
+      <el-form-item :label="t('settings.mcp.columns.enableStatus')" prop="isEnabled">
         <el-switch v-model="formData.isEnabled" />
       </el-form-item>
 
       <!-- Stdio 专属字段 -->
       <template v-if="formData.transportType === 'stdio'">
-        <el-divider content-position="left">Stdio 配置</el-divider>
+        <el-divider content-position="left">Stdio</el-divider>
         <el-form-item label="Command" prop="command">
-          <el-input v-model="formData.command" placeholder="例如: python, node, uvx" />
+          <el-input v-model="formData.command" placeholder="python, node, uvx..." />
         </el-form-item>
 
         <el-form-item label="Args">
           <div class="dynamic-list">
             <div v-for="(arg, index) in formData.argsList" :key="index" class="dynamic-row">
-              <el-input v-model="formData.argsList[index]" placeholder="参数" />
+              <el-input v-model="formData.argsList[index]" placeholder="Argument" />
               <el-button type="danger" :icon="Minus" circle size="small" @click="removeArg(index)" />
             </div>
-            <el-button type="primary" link :icon="Plus" @click="addArg">添加参数</el-button>
+            <el-button type="primary" link :icon="Plus" @click="addArg">+</el-button>
           </div>
         </el-form-item>
 
         <el-form-item label="Env">
           <div class="dynamic-list">
             <div v-for="(env, index) in formData.envList" :key="index" class="dynamic-row">
-              <el-input v-model="env.key" placeholder="变量名 (KEY)" style="flex: 1" />
+              <el-input v-model="env.key" placeholder="KEY" style="flex: 1" />
               <span class="separator">=</span>
-              <el-input v-model="env.value" placeholder="变量值 (VALUE)" style="flex: 1" />
+              <el-input v-model="env.value" placeholder="VALUE" style="flex: 1" />
               <el-button type="danger" :icon="Minus" circle size="small" @click="removeEnv(index)" />
             </div>
-            <el-button type="primary" link :icon="Plus" @click="addEnv">添加环境变量</el-button>
+            <el-button type="primary" link :icon="Plus" @click="addEnv">+</el-button>
           </div>
         </el-form-item>
       </template>
 
       <!-- SSE 专属字段 -->
       <template v-if="formData.transportType === 'sse'">
-        <el-divider content-position="left">SSE 配置</el-divider>
+        <el-divider content-position="left">SSE</el-divider>
         <el-form-item label="URL" prop="url">
-          <el-input v-model="formData.url" placeholder="例如: http://localhost:8080/sse" />
+          <el-input v-model="formData.url" placeholder="http://localhost:8080/sse" />
         </el-form-item>
       </template>
     </el-form>
@@ -81,7 +81,7 @@
               :icon="Connection"
               @click="handleTestConnection"
             >
-              测试连接
+              {{ t('settings.mcp.testConnection') }}
             </el-button>
             <div v-if="testFeedback.status !== 'none'" class="test-feedback" :class="testFeedback.status">
               <el-icon v-if="testFeedback.status === 'success'"><CircleCheck /></el-icon>
@@ -91,9 +91,9 @@
           </template>
         </div>
         <div class="footer-right">
-          <el-button @click="handleCancel">取消</el-button>
+          <el-button @click="handleCancel">{{ t('common.action.cancel') }}</el-button>
           <el-button type="primary" @click="handleSubmit" :loading="isSubmitting">
-            确定
+            {{ t('common.action.confirm') }}
           </el-button>
         </div>
       </div>
@@ -105,8 +105,10 @@
 import { ref, reactive, computed, watch } from 'vue';
 import { Plus, Minus, Connection, CircleCheck, CircleClose } from '@element-plus/icons-vue';
 import type { FormInstance, FormRules } from 'element-plus';
-import type { McpServer, McpCreateRequest, McpTransportType } from '@/api/types';
+import { useI18n } from 'vue-i18n';
 import { useMcpStore } from '@/stores/mcpStore';
+
+const { t } = useI18n();
 
 const props = defineProps<{
   visible: boolean;

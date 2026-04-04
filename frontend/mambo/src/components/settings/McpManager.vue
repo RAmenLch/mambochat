@@ -89,9 +89,9 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="工具管理" width="100" align="center">
+      <el-table-column :label="t('settings.mcp.columns.toolManage')" width="100" align="center">
         <template #default="{ row }">
-          <el-button link type="primary" @click="openToolDrawer(row.id)">查看工具</el-button>
+          <el-button link type="primary" @click="openToolDrawer(row.id)">{{ t('settings.mcp.columns.viewTool') }}</el-button>
         </template>
       </el-table-column>
 
@@ -158,27 +158,27 @@
     >
       <template #header>
         <div class="drawer-header">
-          <span class="drawer-title">MCP 工具列表</span>
+          <span class="drawer-title">{{ t('settings.mcp.toolDrawer.title') }}</span>
           <el-button
             type="primary"
             :icon="Refresh"
             :loading="isSyncingTools"
             @click="handleSyncTools"
           >
-            手动同步
+            {{ t('settings.mcp.toolDrawer.sync') }}
           </el-button>
         </div>
       </template>
 
       <el-table :data="currentServerTools" style="width: 100%" v-loading="isToolsLoading">
-        <el-table-column label="工具信息" min-width="180">
+        <el-table-column :label="t('settings.mcp.columns.toolInfo')" min-width="180">
           <template #default="{ row }">
             <div class="tool-info-cell">
               <span>{{ row.name }}</span>
               <el-tooltip placement="top" effect="light">
                 <template #content>
                   <div class="tool-tooltip-content">
-                    <p v-if="row.description"><strong>描述:</strong> {{ row.description }}</p>
+                    <p v-if="row.description"><strong>{{ t('settings.mcp.toolDrawer.description') }}</strong> {{ row.description }}</p>
                     <p><strong>Input Schema:</strong></p>
                     <pre>{{ formatJson(row.input_schema) }}</pre>
                   </div>
@@ -189,15 +189,15 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="在线状态" width="100">
+        <el-table-column :label="t('settings.mcp.columns.onlineStatus')" width="100">
           <template #default="{ row }">
             <el-tag :type="row.status === 'online' ? 'success' : 'info'" size="small">
-              {{ row.status === 'online' ? '正常' : '已失效' }}
+              {{ row.status === 'online' ? t('settings.mcp.columns.online') : t('settings.mcp.columns.offline') }}
             </el-tag>
           </template>
         </el-table-column>
 
-        <el-table-column label="启用状态" width="100">
+        <el-table-column :label="t('settings.mcp.columns.enableStatus')" width="100">
           <template #default="{ row }">
             <el-switch
               :model-value="row.is_enabled"
@@ -206,34 +206,34 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="审核模式" width="140">
+        <el-table-column :label="t('settings.mcp.columns.reviewMode')" width="140">
           <template #default="{ row }">
             <el-select
               :model-value="row.review_mode"
               @change="(val: ToolReviewMode) => handleToolReviewChange(row, val)"
               size="small"
             >
-              <el-option label="不干涉" value="none" />
-              <el-option label="需审核" value="require_review" />
+              <el-option :label="t('settings.mcp.columns.reviewNone')" value="none" />
+              <el-option :label="t('settings.mcp.columns.reviewRequire')" value="require_review" />
             </el-select>
           </template>
         </el-table-column>
 
-        <el-table-column label="最后同步时间" width="160">
+        <el-table-column :label="t('settings.mcp.columns.lastSyncTime')" width="160">
           <template #default="{ row }">
             {{ formatTime(row.last_synced_at) }}
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="80" fixed="right">
+        <el-table-column :label="t('common.action.operate')" width="80" fixed="right">
           <template #default="{ row }">
             <el-popconfirm
-              title="确定要删除该失效工具吗？"
+              :title="t('settings.mcp.toolDrawer.deleteConfirm')"
               @confirm="handleDeleteTool(row)"
             >
               <template #reference>
                 <el-button link type="danger" :disabled="row.status === 'online'">
-                  删除
+                  {{ t('common.action.delete') }}
                 </el-button>
               </template>
             </el-popconfirm>
@@ -342,7 +342,7 @@ const openToolDrawer = async (serverId: string) => {
   try {
     await mcpStore.fetchTools(serverId);
   } catch (error) {
-    ElMessage.error('获取工具列表失败');
+    ElMessage.error(t('settings.mcp.toolDrawer.fetchToolsFailed'));
   } finally {
     isToolsLoading.value = false;
   }
@@ -353,9 +353,9 @@ const handleSyncTools = async () => {
   isSyncingTools.value = true;
   try {
     await mcpStore.syncTools(activeServerId.value);
-    ElMessage.success('同步成功');
+    ElMessage.success(t('settings.mcp.toolDrawer.syncSuccess'));
   } catch (error) {
-    ElMessage.error('同步失败');
+    ElMessage.error(t('settings.mcp.toolDrawer.syncFailed'));
   } finally {
     isSyncingTools.value = false;
   }
@@ -364,27 +364,27 @@ const handleSyncTools = async () => {
 const handleToolSwitchChange = async (row: McpToolResponse, val: boolean) => {
   try {
     await mcpStore.updateToolConfig(row.id, { is_enabled: val });
-    ElMessage.success('更新成功');
+    ElMessage.success(t('settings.mcp.toolDrawer.updateSuccess'));
   } catch (error) {
-    ElMessage.error('更新失败');
+    ElMessage.error(t('settings.mcp.toolDrawer.updateFailed'));
   }
 };
 
 const handleToolReviewChange = async (row: McpToolResponse, val: ToolReviewMode) => {
   try {
     await mcpStore.updateToolConfig(row.id, { review_mode: val });
-    ElMessage.success('更新成功');
+    ElMessage.success(t('settings.mcp.toolDrawer.updateSuccess'));
   } catch (error) {
-    ElMessage.error('更新失败');
+    ElMessage.error(t('settings.mcp.toolDrawer.updateFailed'));
   }
 };
 
 const handleDeleteTool = async (row: McpToolResponse) => {
   try {
     await mcpStore.removeTool(row.id);
-    ElMessage.success('删除成功');
+    ElMessage.success(t('settings.mcp.toolDrawer.deleteSuccess'));
   } catch (error) {
-    ElMessage.error('删除失败');
+    ElMessage.error(t('settings.mcp.toolDrawer.deleteFailed'));
   }
 };
 
@@ -417,7 +417,7 @@ const formatTime = (isoString: string) => {
 };
 
 const formatJson = (obj: Record<string, unknown> | null) => {
-  if (!obj) return '无';
+  if (!obj) return t('settings.mcp.toolDrawer.noSchema');
   try {
     return JSON.stringify(obj, null, 2);
   } catch (e) {
