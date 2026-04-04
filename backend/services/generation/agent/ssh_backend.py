@@ -2,14 +2,17 @@
 
 """Pure SFTP Backend for DeepAgents.
 
-Provides remote filesystem access via pure SFTP protocol.
-Zero shell execution (no python3, grep, or mkdir commands are executed on the remote).
-Highly stable, cross-platform (works on Linux, macOS, Windows OpenSSH), and secure.
+Provides remote filesystem access via SFTP protocol.
+File read/write/edit operations use pure SFTP for safety and cross-platform compatibility.
+Search operations (grep, glob) prefer native remote commands (grep, rg, find) via SSH
+for performance, falling back to pure Python SFTP scanning only when unavailable.
 """
 
 import fnmatch
+import json
 import logging
 import posixpath
+import shlex
 import stat
 from datetime import datetime, timezone
 from pathlib import Path
@@ -93,6 +96,10 @@ class PureSFTPBackend(TreeBackendProtocol):
 
         self._ssh_client: paramiko.SSHClient | None = None
         self._sftp_client: paramiko.SFTPClient | None = None
+        # Cache for remote command availability
+        self._remote_rg_available: bool | None = None
+        self._remote_grep_available: bool | None = None
+        self._remote_find_available: bool | None = None
 
     def _connect(self) -> None:
         """Establish SSH and SFTP connections if not already connected."""
@@ -126,6 +133,35 @@ class PureSFTPBackend(TreeBackendProtocol):
 
     def __del__(self) -> None:
         self.close()
+
+    # ------------------------------------------------------------------
+    # Remote command helpers
+    # ------------------------------------------------------------------
+    def _exec_remote(
+        self,
+        cmd: str,
+        timeout: float = 30,
+    ) -> tuple[int, str, str]:
+        """Execute a command on the remote server via SSH.
+
+        Returns:
+            (exit_code, stdout, stderr)
+        """
+        self._connect()
+        assert self._ssh_client is not None
+        _, stdout, stderr = self._ssh_client.exec_command(cmd, timeout=timeout)
+        exit_code = stdout.channel.recv_exit_status()
+        return exit_code, stdout.read().decode("utf-8", errors="replace"), stderr.read().decode("utf-8", errors="replace")
+
+    def _check_remote_command(self, cmd: str, attr_name: str) -> bool:
+        """Check if a command is available on the remote server (cached)."""
+        cached = getattr(self, attr_name, None)
+        if cached is not None:
+            return cached
+        code, _, _ = self._exec_remote(f"command -v {cmd}", timeout=5)
+        available = code == 0
+        setattr(self, attr_name, available)
+        return available
 
     def _resolve_path(self, virtual_path: str) -> str:
         if not virtual_path.startswith("/"):
@@ -364,6 +400,12 @@ class PureSFTPBackend(TreeBackendProtocol):
         except ValueError:
             return []
 
+        # --- Strategy 1: Remote find (fast) ---
+        results = self._remote_glob(pattern, base_physical, path)
+        if results is not None:
+            return results
+
+        # --- Strategy 2: Pure SFTP walk (fallback) ---
         effective_pattern = pattern.lstrip("/")
         results: list[FileInfo] = []
 
@@ -388,6 +430,65 @@ class PureSFTPBackend(TreeBackendProtocol):
         results.sort(key=lambda x: x.get("path", ""))
         return results
 
+    def _remote_glob(self, pattern: str, base_physical: str, virtual_prefix: str) -> list[FileInfo] | None:
+        """Try to use remote find command for fast glob matching.
+
+        Returns None if the remote command is not available or fails.
+        """
+        if not self._check_remote_command("find", "_remote_find_available"):
+            return None
+
+        try:
+            # Convert glob pattern to find-friendly expression.
+            # For simple patterns like "*.py", use -name directly.
+            # For complex patterns with slashes, use -path with glob.
+            safe_pattern = shlex.quote(pattern.lstrip("/"))
+
+            # Build find command: find <dir> -type f -name/-path <pattern>
+            # Use -iname for case-insensitive match (matching wcmatch default behavior)
+            if "/" not in pattern:
+                find_cmd = f"find {shlex.quote(base_physical)} -type f -iname {safe_pattern} -maxdepth 100 2>/dev/null"
+            else:
+                find_cmd = f"find {shlex.quote(base_physical)} -type f -ipath {shlex.quote('*/' + pattern.lstrip('/'))} -maxdepth 100 2>/dev/null"
+
+            code, stdout, stderr = self._exec_remote(find_cmd, timeout=20)
+            if code != 0 and code != 1:  # 1 = no matches found (normal for find)
+                return None
+
+            if not stdout.strip():
+                return []
+
+            results: list[FileInfo] = []
+            for line in stdout.strip().splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                vpath = self._to_virtual_path(line)
+                try:
+                    # stat to get file size and mtime
+                    assert self._sftp_client is not None
+                    attr = self._sftp_client.stat(line)
+                    results.append({
+                        "path": vpath,
+                        "is_dir": False,
+                        "size": attr.st_size or 0,
+                        "modified_at": datetime.fromtimestamp(attr.st_mtime or 0, timezone.utc).isoformat()
+                    })
+                except IOError:
+                    # File might have been deleted between find and stat
+                    results.append({
+                        "path": vpath,
+                        "is_dir": False,
+                        "size": 0,
+                        "modified_at": ""
+                    })
+
+            results.sort(key=lambda x: x.get("path", ""))
+            return results
+        except Exception as e:
+            logger.debug("Remote glob failed, falling back to SFTP: %s", e)
+            return None
+
     def grep_raw(self, pattern: str, path: str | None = None, glob: str | None = None) -> list[GrepMatch] | str:
         self._connect()
         search_vpath = path or "/"
@@ -396,6 +497,132 @@ class PureSFTPBackend(TreeBackendProtocol):
         except ValueError:
             return []
 
+        # --- Strategy 1: Remote ripgrep (fastest) ---
+        matches = self._remote_ripgrep(pattern, base_physical, glob)
+        if matches is not None:
+            return matches
+
+        # --- Strategy 2: Remote grep (fast) ---
+        matches = self._remote_grep(pattern, base_physical, glob)
+        if matches is not None:
+            return matches
+
+        # --- Strategy 3: Pure SFTP scan (fallback) ---
+        return self._sftp_grep(pattern, base_physical, glob)
+
+    def _remote_ripgrep(self, pattern: str, base_physical: str, glob: str | None) -> list[GrepMatch] | None:
+        """Try to use remote ripgrep for fast search.
+
+        Returns None if ripgrep is not available on the remote server.
+        """
+        if not self._check_remote_command("rg", "_remote_rg_available"):
+            return None
+
+        try:
+            cmd_parts = ["rg", "--json", "-F"]  # -F for literal (fixed-string) search
+            if glob:
+                cmd_parts.extend(["--glob", shlex.quote(glob)])
+            # Respect ignore_dirs
+            for ignore_dir in self.ignore_dirs:
+                cmd_parts.extend(["--glob", f"!{ignore_dir}"])
+            cmd_parts.extend(["--max-filesize", str(self.max_file_size_bytes)])
+            cmd_parts.extend(["--", shlex.quote(pattern), shlex.quote(base_physical)])
+            cmd = " ".join(cmd_parts)
+
+            code, stdout, _ = self._exec_remote(cmd, timeout=30)
+            if code == 2:  # ripgrep returns 2 for errors
+                return None
+            # code 0 or 1 (1 = no matches) are both fine
+
+            if not stdout.strip():
+                return []
+
+            matches: list[GrepMatch] = []
+            for line in stdout.strip().splitlines():
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if data.get("type") != "match":
+                    continue
+                pdata = data.get("data", {})
+                ftext = pdata.get("path", {}).get("text")
+                if not ftext:
+                    continue
+                ln = pdata.get("line_number")
+                lt = pdata.get("lines", {}).get("text", "").rstrip("\n")
+                if ln is None:
+                    continue
+                vpath = self._to_virtual_path(ftext)
+                matches.append({
+                    "path": vpath,
+                    "line": int(ln),
+                    "text": lt
+                })
+
+            return matches
+        except Exception as e:
+            logger.debug("Remote ripgrep failed, falling back: %s", e)
+            return None
+
+    def _remote_grep(self, pattern: str, base_physical: str, glob: str | None) -> list[GrepMatch] | None:
+        """Try to use remote standard grep for fast search.
+
+        Returns None if grep is not available on the remote server.
+        """
+        if not self._check_remote_command("grep", "_remote_grep_available"):
+            return None
+
+        try:
+            # Build grep command
+            cmd_parts = ["grep", "-rnF", "--binary-files=without-match"]
+            if glob:
+                cmd_parts.extend(["--include", shlex.quote(glob)])
+            # Exclude ignore_dirs
+            for ignore_dir in self.ignore_dirs:
+                cmd_parts.extend(["--exclude-dir", shlex.quote(ignore_dir)])
+            cmd_parts.extend(["--", shlex.quote(pattern), shlex.quote(base_physical)])
+            cmd = " ".join(cmd_parts)
+
+            code, stdout, stderr = self._exec_remote(cmd, timeout=30)
+            if code == 2:  # grep returns 2 for errors
+                return None
+            # code 0 (matches found) or 1 (no matches) are both fine
+
+            if not stdout.strip():
+                return []
+
+            matches: list[GrepMatch] = []
+            base_prefix = base_physical.rstrip("/") + "/"
+            for line in stdout.strip().splitlines():
+                # grep output format: filepath:linenum:line_content
+                parts = line.split(":", 2)
+                if len(parts) < 3:
+                    continue
+                filepath, line_num, text = parts[0], parts[1], parts[2]
+                # Convert physical path to virtual path
+                if filepath.startswith(base_prefix):
+                    rel = filepath[len(base_prefix):]
+                    vpath = "/" + rel
+                else:
+                    vpath = self._to_virtual_path(filepath)
+
+                try:
+                    matches.append({
+                        "path": vpath,
+                        "line": int(line_num),
+                        "text": text
+                    })
+                except ValueError:
+                    continue
+
+            return matches
+        except Exception as e:
+            logger.debug("Remote grep failed, falling back: %s", e)
+            return None
+
+    def _sftp_grep(self, pattern: str, base_physical: str, glob: str | None) -> list[GrepMatch]:
+        """Pure SFTP grep: download each file and scan locally (slow fallback)."""
         matches: list[GrepMatch] = []
         assert self._sftp_client is not None
 
