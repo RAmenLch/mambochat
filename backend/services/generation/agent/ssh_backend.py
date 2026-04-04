@@ -575,7 +575,8 @@ class PureSFTPBackend(TreeBackendProtocol):
 
         try:
             # Build grep command
-            cmd_parts = ["grep", "-rnF", "--binary-files=without-match"]
+            # -H: always print filename prefix (even for single file)
+            cmd_parts = ["grep", "-rnFH", "--binary-files=without-match"]
             if glob:
                 cmd_parts.extend(["--include", shlex.quote(glob)])
             # Exclude ignore_dirs
@@ -595,11 +596,14 @@ class PureSFTPBackend(TreeBackendProtocol):
             matches: list[GrepMatch] = []
             base_prefix = base_physical.rstrip("/") + "/"
             for line in stdout.strip().splitlines():
-                # grep output format: filepath:linenum:line_content
+                # grep output format with -H:
+                #   filepath:linenum:line_content
                 parts = line.split(":", 2)
-                if len(parts) < 3:
+                if len(parts) != 3:
                     continue
-                filepath, line_num, text = parts[0], parts[1], parts[2]
+                filepath, line_num_str, text = parts
+                if not line_num_str.isdigit():
+                    continue
                 # Convert physical path to virtual path
                 if filepath.startswith(base_prefix):
                     rel = filepath[len(base_prefix):]
@@ -610,7 +614,7 @@ class PureSFTPBackend(TreeBackendProtocol):
                 try:
                     matches.append({
                         "path": vpath,
-                        "line": int(line_num),
+                        "line": int(line_num_str),
                         "text": text
                     })
                 except ValueError:
@@ -625,6 +629,33 @@ class PureSFTPBackend(TreeBackendProtocol):
         """Pure SFTP grep: download each file and scan locally (slow fallback)."""
         matches: list[GrepMatch] = []
         assert self._sftp_client is not None
+
+        # If base_physical is a file (not a directory), search it directly
+        try:
+            base_attr = self._sftp_client.stat(base_physical)
+            if not (stat.S_ISDIR(base_attr.st_mode) if base_attr.st_mode else False):
+                if glob:
+                    filename = posixpath.basename(base_physical)
+                    if not wcglob.globmatch(filename, glob, flags=wcglob.BRACE):
+                        return matches
+                if base_attr.st_size and base_attr.st_size > self.max_file_size_bytes:
+                    return matches
+                try:
+                    with self._sftp_client.open(base_physical, 'r') as f:
+                        content = f.read().decode('utf-8')
+                        for line_num, line in enumerate(content.splitlines(), 1):
+                            if pattern in line:
+                                vpath = self._to_virtual_path(base_physical)
+                                matches.append({
+                                    "path": vpath,
+                                    "line": line_num,
+                                    "text": line
+                                })
+                except (IOError, UnicodeDecodeError):
+                    pass
+                return matches
+        except IOError:
+            return []
 
         for filepath, attr, _ in self._sftp_walk(base_physical):
             if stat.S_ISDIR(attr.st_mode) if attr.st_mode else False:
