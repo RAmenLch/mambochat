@@ -235,7 +235,7 @@
               </el-form-item>
             </el-col>
 
-            <el-col :span="24">
+            <el-col :span="24" v-if="form.AgentType === 'DeepAgent'">
               <el-form-item :label="$t('agent.subAgents')">
                 <div class="mount-container">
                   <div class="mount-action">
@@ -592,7 +592,7 @@ async function handleSave() {
       modelParameters: finalModelParameters,
       resourcePromptList: resourcePromptList.length > 0 ? [...resourcePromptList] : [],
       enabledMcpIds: form.enabledMcpIds.length > 0 ? [...form.enabledMcpIds] : [],
-      subAgents: form.subAgents.length > 0 ? [...form.subAgents] : [],
+      subAgents: form.AgentType === 'DeepAgent' && form.subAgents.length > 0 ? [...form.subAgents] : [],
       backendIds: finalBackendIds // [新增]
     });
     ElMessage.success(t('agent.saveSuccess'));

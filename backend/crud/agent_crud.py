@@ -7,7 +7,7 @@ from typing import List, Optional
 
 from backend.models import agent_model
 from backend import schemas
-from backend.schemas.enums import MoveAction
+from backend.schemas.enums import MoveAction, AgentTypeEnum
 
 
 async def check_subagent_cycle(db: AsyncSession, target_agent_id: str, new_subagents: List[str]) -> bool:
@@ -122,6 +122,10 @@ async def update_agent(db: AsyncSession, agent_id: str, agent_update: schemas.Ag
         has_cycle = await check_subagent_cycle(db, target_agent_id=agent_id, new_subagents=update_data["subAgents"])
         if has_cycle:
             raise ValueError("Circular dependency detected: An agent cannot have itself as a sub-agent (directly or indirectly).")
+        if len(update_data["subAgents"]) > 0:
+            agent_type = db_agent.AgentType
+            if agent_type != AgentTypeEnum.DEEP.value and agent_type != AgentTypeEnum.DEEP:
+                raise ValueError("ReActAgent does not support sub-agents. Only DeepAgent can mount sub-agents.")
 
     for key, value in update_data.items():
         setattr(db_agent, key, value)

@@ -235,7 +235,7 @@
               </el-form-item>
             </el-col>
 
-            <el-col :span="12">
+            <el-col :span="12" v-if="form.AgentType === 'DeepAgent'">
               <el-form-item :label="$t('agent.subAgents')">
                 <div class="mount-container">
                   <div class="mount-action">
@@ -635,7 +635,7 @@ async function handleSave() {
       // 建议顺手把这里的其他数组也加上展开运算符 [...array] 和 [] 回退，防止遇到同样的 Bug
       resourcePromptList: resourcePromptList.length > 0 ? [...resourcePromptList] : [],
       enabledMcpIds: form.enabledMcpIds.length > 0 ? [...form.enabledMcpIds] : [],
-      subAgents: form.subAgents.length > 0 ? [...form.subAgents] : [],
+      subAgents: form.AgentType === 'DeepAgent' && form.subAgents.length > 0 ? [...form.subAgents] : [],
 
       backendIds: finalBackendIds // 使用修复后的变量
     });
