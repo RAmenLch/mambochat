@@ -14,7 +14,8 @@ from backend.schemas.backend import (
     SSHTestRequest,
     SSHTestResponse,
     PASSWORD_MASK,
-    SSHConfigData
+    SSHConfigData,
+    APIConfigData
 )
 from backend.utils.ssh_utils import get_or_create_system_ssh_key
 from backend.services.generation.agent.ssh_backend import PureSFTPBackend
@@ -24,11 +25,14 @@ router = APIRouter(prefix="/backends", tags=["Backends"])
 
 # --- 辅助函数：密码脱敏 ---
 def _mask_password(db_obj: backend_crud.BackendConfig) -> BackendConfigResponse:
-    """将数据库对象转换为 Response，并脱敏密码"""
+    """将数据库对象转换为 Response，并脱敏密码和 API Key"""
     resp = BackendConfigResponse.model_validate(db_obj)
     if resp.backendType == BackendType.SSH.value and resp.configData:
         if resp.configData.get("password"):
             resp.configData["password"] = PASSWORD_MASK
+    elif resp.backendType == BackendType.API.value and resp.configData:
+        if resp.configData.get("api_key"):
+            resp.configData["api_key"] = PASSWORD_MASK
     return resp
 
 
@@ -110,8 +114,12 @@ async def create_backend(backend_in: BackendConfigCreate, db: AsyncSession = Dep
         raise HTTPException(status_code=400, detail="Backend name already exists")
 
     # 如果前端在创建时传了掩码或空字符串，处理一下
-    if backend_in.configData.get("password") in [PASSWORD_MASK, ""]:
-        backend_in.configData["password"] = None
+    if backend_in.backendType == BackendType.SSH.value:
+        if backend_in.configData.get("password") in [PASSWORD_MASK, ""]:
+            backend_in.configData["password"] = None
+    elif backend_in.backendType == BackendType.API.value:
+        if backend_in.configData.get("api_key") in [PASSWORD_MASK, ""]:
+            backend_in.configData["api_key"] = None
 
     db_obj = await backend_crud.create_backend(db, backend_in)
     return _mask_password(db_obj)
@@ -146,6 +154,13 @@ async def update_backend(backend_id: str, backend_in: BackendConfigUpdate, db: A
     # 处理密码合并
     if backend_in.configData and db_obj.backendType == BackendType.SSH.value:
         backend_in.configData = _merge_password(backend_in.configData, db_obj.configData)
+
+    # 处理 API Key 合并
+    if backend_in.configData and db_obj.backendType == BackendType.API.value:
+        if backend_in.configData.get("api_key") == PASSWORD_MASK:
+            backend_in.configData["api_key"] = db_obj.configData.get("api_key")
+        elif backend_in.configData.get("api_key") == "":
+            backend_in.configData["api_key"] = None
 
     updated_obj = await backend_crud.update_backend(db, backend_id, backend_in)
     return _mask_password(updated_obj)

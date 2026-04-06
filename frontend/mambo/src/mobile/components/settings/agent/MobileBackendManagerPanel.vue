@@ -20,13 +20,32 @@
         <el-card v-for="b in backendList" :key="b.id" class="backend-card" shadow="always">
           <div class="card-header">
             <span class="backend-name">{{ b.name }}</span>
-            <el-tag size="small">{{ b.backendType.toUpperCase() }}</el-tag>
+            <div class="header-right">
+              <el-tag size="small" :type="b.backendType === 'api' ? 'success' : 'info'">
+                {{ b.backendType === 'api' ? 'API' : 'SSH' }}
+              </el-tag>
+              <el-tag
+                v-if="b.backendType === 'api' && clientStatusMap[b.id]"
+                :type="clientStatusMap[b.id]?.connected ? 'success' : 'danger'"
+                size="small"
+              >
+                {{ clientStatusMap[b.id]?.connected ? 'Online' : 'Offline' }}
+              </el-tag>
+            </div>
           </div>
           <div class="card-body">
-            <div class="info-row">
-              <span class="label">主机:</span>
-              <span class="value">{{ b.configData.username }}@{{ b.configData.hostname }}:{{ b.configData.port || 22 }}</span>
-            </div>
+            <template v-if="b.backendType === 'ssh'">
+              <div class="info-row">
+                <span class="label">主机:</span>
+                <span class="value">{{ b.configData.username }}@{{ b.configData.hostname }}:{{ b.configData.port || 22 }}</span>
+              </div>
+            </template>
+            <template v-else-if="b.backendType === 'api'">
+              <div class="info-row">
+                <span class="label">ID:</span>
+                <span class="value api-id">{{ b.id }}</span>
+              </div>
+            </template>
             <div class="info-row" v-if="b.description">
               <span class="label">描述:</span>
               <span class="value">{{ b.description }}</span>
@@ -52,7 +71,7 @@
       :close-on-click-modal="false"
       class="mobile-dialog"
     >
-      <el-form ref="formRef" :model="form" :rules="rules" label-position="top" v-loading="isSaving">
+      <el-form ref="formRef" :model="form" :rules="currentRules" label-position="top" v-loading="isSaving">
         <el-form-item :label="$t('backend.name')" prop="name">
           <el-input v-model="form.name" :disabled="isEdit" placeholder="仅允许字母、数字、下划线" />
         </el-form-item>
@@ -60,42 +79,79 @@
           <el-input v-model="form.description" type="textarea" :rows="2" />
         </el-form-item>
         <el-form-item :label="$t('backend.type')" prop="backendType">
-          <el-select v-model="form.backendType" disabled style="width: 100%">
-            <el-option label="SSH" value="ssh" />
+          <el-select v-model="form.backendType" :disabled="isEdit" style="width: 100%" @change="handleTypeChange">
+            <el-option label="SSH (远程服务器)" value="ssh" />
+            <el-option label="API (客户端连接)" value="api" />
           </el-select>
         </el-form-item>
 
-        <el-divider content-position="left">SSH 配置</el-divider>
+        <!-- SSH 配置 -->
+        <template v-if="form.backendType === 'ssh'">
+          <el-divider content-position="left">SSH 配置</el-divider>
+          <el-form-item label="Hostname" prop="configData.hostname">
+            <el-input v-model="form.configData.hostname" placeholder="192.168.1.100 或 example.com" />
+          </el-form-item>
+          <el-form-item label="Username" prop="configData.username">
+            <el-input v-model="form.configData.username" placeholder="root" />
+          </el-form-item>
+          <el-form-item label="Port" prop="configData.port">
+            <el-input-number v-model="form.configData.port" :min="1" :max="65535" controls-position="right" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="Password" prop="configData.password">
+            <el-input v-model="form.configData.password" type="password" show-password placeholder="不填则使用系统公钥免密登录" />
+          </el-form-item>
+        </template>
 
-        <el-form-item label="Hostname" prop="configData.hostname">
-          <el-input v-model="form.configData.hostname" placeholder="192.168.1.100 或 example.com" />
-        </el-form-item>
-        <el-form-item label="Username" prop="configData.username">
-          <el-input v-model="form.configData.username" placeholder="root" />
-        </el-form-item>
-        <el-form-item label="Port" prop="configData.port">
-          <el-input-number v-model="form.configData.port" :min="1" :max="65535" controls-position="right" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="Password" prop="configData.password">
-          <el-input v-model="form.configData.password" type="password" show-password placeholder="不填则使用系统公钥免密登录" />
-        </el-form-item>
-        <el-form-item label="Root Dir" prop="configData.root_dir">
-          <el-input v-model="form.configData.root_dir" placeholder="默认: /" />
-        </el-form-item>
+        <!-- API 配置 -->
+        <template v-if="form.backendType === 'api'">
+          <el-divider content-position="left">API 客户端配置</el-divider>
+          <el-form-item label="API Key" prop="configData.api_key">
+            <el-input v-model="form.configData.api_key" :type="showApiKey ? 'text' : 'password'" show-password placeholder="客户端连接时使用的密钥" />
+          </el-form-item>
+          <el-form-item label="Edit Whitelist" prop="configData.edit_whitelist">
+            <el-select v-model="form.configData.edit_whitelist" multiple filterable allow-create default-first-option placeholder="例如: *.py" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="Edit Blacklist" prop="configData.edit_blacklist">
+            <el-select v-model="form.configData.edit_blacklist" multiple filterable allow-create default-first-option placeholder="例如: .env" style="width: 100%" />
+          </el-form-item>
+          <div class="api-tip">
+            <el-alert type="info" :closable="false" show-icon>
+              <template #title>
+                创建成功后，将 Backend ID 和 API Key 填入客户端命令：<br/>
+                <code style="word-break: break-all;">python main.py --server-url ws://服务器 --backend-id &lt;ID&gt; --api-key &lt;KEY&gt; --root-dir /你的项目</code>
+              </template>
+            </el-alert>
+          </div>
+        </template>
 
-        <el-form-item label="Edit Whitelist" prop="configData.edit_whitelist">
-          <el-select v-model="form.configData.edit_whitelist" multiple filterable allow-create default-first-option placeholder="例如: *.py" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="Edit Blacklist" prop="configData.edit_blacklist">
-          <el-select v-model="form.configData.edit_blacklist" multiple filterable allow-create default-first-option placeholder="例如: .env" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="Ignore Dirs" prop="configData.ignore_dirs">
-          <el-select v-model="form.configData.ignore_dirs" multiple filterable allow-create default-first-option placeholder="例如: .git" style="width: 100%" />
-        </el-form-item>
+        <!-- 通用配置 (仅 SSH) -->
+        <template v-if="form.backendType === 'ssh'">
+          <el-divider content-position="left">通用配置</el-divider>
+
+          <el-form-item label="Root Dir" prop="configData.root_dir">
+            <el-input v-model="form.configData.root_dir" placeholder="默认: /" />
+          </el-form-item>
+          <el-form-item label="Edit Whitelist" prop="configData.edit_whitelist">
+            <el-select v-model="form.configData.edit_whitelist" multiple filterable allow-create default-first-option placeholder="例如: *.py" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="Edit Blacklist" prop="configData.edit_blacklist">
+            <el-select v-model="form.configData.edit_blacklist" multiple filterable allow-create default-first-option placeholder="例如: .env" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="Ignore Dirs" prop="configData.ignore_dirs">
+            <el-select v-model="form.configData.ignore_dirs" multiple filterable allow-create default-first-option placeholder="例如: .git" style="width: 100%" />
+          </el-form-item>
+        </template>
       </el-form>
       <template #footer>
         <div class="dialog-footer-actions">
-          <el-button type="info" plain size="small" @click="handleTestConnection" :loading="isTesting">
+          <el-button
+            v-if="form.backendType === 'ssh'"
+            type="info"
+            plain
+            size="small"
+            @click="handleTestConnection"
+            :loading="isTesting"
+          >
             <el-icon><Connection /></el-icon> 测试
           </el-button>
           <div class="right-actions">
@@ -123,13 +179,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
 import { Plus, Key, Connection } from '@element-plus/icons-vue';
 import { useBackendStore } from '@/stores/backendStore';
 import { copyToClipboard } from '@/utils/clipboard';
-import type { BackendConfig, BackendCreate, SshConfigData, SshTestRequest } from '@/api/types/backendTypes';
+import { getClientStatus } from '@/api/backendService';
+import type { BackendConfig, BackendCreate, BackendType, SshConfigData, ApiConfigData, SshTestRequest } from '@/api/types/backendTypes';
 
 const backendStore = useBackendStore();
 const { backendList, isLoading, systemPublicKey } = storeToRefs(backendStore);
@@ -139,45 +196,99 @@ const keyDialogVisible = ref(false);
 const isEdit = ref(false);
 const isSaving = ref(false);
 const isTesting = ref(false);
+const showApiKey = ref(false);
 const currentEditId = ref<string | null>(null);
 
 const formRef = ref<FormInstance>();
+const clientStatusMap = ref<Record<string, { connected: boolean }>>({});
+let statusPollTimer: ReturnType<typeof setInterval> | null = null;
 
-const defaultForm = (): BackendCreate => ({
-  name: '',
-  description: '',
-  backendType: 'ssh',
-  configData: {
-    hostname: '',
-    username: 'root',
-    port: 22,
-    password: null,
-    root_dir: '/',
-    edit_whitelist: [],
-    edit_blacklist: [],
-    ignore_dirs: ['.git', 'node_modules', 'build']
-  }
+const sshDefaultConfig = (): SshConfigData => ({
+  hostname: '',
+  username: 'root',
+  port: 22,
+  password: null,
+  root_dir: '/',
+  edit_whitelist: [],
+  edit_blacklist: [],
+  ignore_dirs: ['.git', 'node_modules', 'build']
 });
 
-const form = reactive<BackendCreate>(defaultForm());
+const apiDefaultConfig = (): ApiConfigData => ({
+  api_key: '',
+  edit_whitelist: [],
+  edit_blacklist: [],
+});
 
-const rules = reactive<FormRules>({
+const defaultForm = (type: BackendType = 'ssh'): BackendCreate => ({
+  name: '',
+  description: '',
+  backendType: type,
+  configData: type === 'ssh' ? sshDefaultConfig() : apiDefaultConfig()
+});
+
+const form = reactive<BackendCreate>(defaultForm('ssh'));
+
+const sshRules: FormRules = {
   name: [
     { required: true, message: '请输入名称', trigger: 'blur' },
     { pattern: /^[a-zA-Z0-9_]+$/, message: '仅允许包含字母、数字和下划线', trigger: 'blur' }
   ],
   'configData.hostname': [{ required: true, message: '请输入主机地址', trigger: 'blur' }],
   'configData.username': [{ required: true, message: '请输入用户名', trigger: 'blur' }]
-});
+};
+
+const apiRules: FormRules = {
+  name: [
+    { required: true, message: '请输入名称', trigger: 'blur' },
+    { pattern: /^[a-zA-Z0-9_]+$/, message: '仅允许包含字母、数字和下划线', trigger: 'blur' }
+  ],
+  'configData.api_key': [{ required: true, message: '请输入 API Key', trigger: 'blur' }]
+};
+
+const currentRules = computed(() => form.backendType === 'ssh' ? sshRules : apiRules);
+
+const handleTypeChange = (type: BackendType) => {
+  const newForm = defaultForm(type);
+  newForm.name = form.name;
+  newForm.description = form.description;
+  Object.assign(form, newForm);
+  formRef.value?.clearValidate();
+};
+
+function maskKey(key?: string | null): string {
+  if (!key) return '***';
+  if (key.length <= 8) return '********';
+  return key.slice(0, 4) + '****' + key.slice(-4);
+}
+
+async function fetchClientStatuses() {
+  for (const b of backendList.value) {
+    if (b.backendType === 'api') {
+      try {
+        const status = await getClientStatus(b.id);
+        clientStatusMap.value[b.id] = status;
+      } catch {
+        clientStatusMap.value[b.id] = { connected: false };
+      }
+    }
+  }
+}
 
 onMounted(() => {
   backendStore.fetchBackends();
+  statusPollTimer = setInterval(fetchClientStatuses, 15000);
+});
+
+onUnmounted(() => {
+  if (statusPollTimer) clearInterval(statusPollTimer);
 });
 
 const handleCreate = () => {
   isEdit.value = false;
   currentEditId.value = null;
-  Object.assign(form, defaultForm());
+  showApiKey.value = false;
+  Object.assign(form, defaultForm('ssh'));
   dialogVisible.value = true;
   formRef.value?.clearValidate();
 };
@@ -185,18 +296,18 @@ const handleCreate = () => {
 const handleEdit = (row: BackendConfig) => {
   isEdit.value = true;
   currentEditId.value = row.id;
+  showApiKey.value = false;
 
-  const configData = JSON.parse(JSON.stringify(row.configData)) as SshConfigData;
-
+  const type = row.backendType;
   Object.assign(form, {
     name: row.name,
     description: row.description || '',
-    backendType: row.backendType,
+    backendType: type,
     configData: {
-      ...configData,
-      edit_whitelist: configData.edit_whitelist || [],
-      edit_blacklist: configData.edit_blacklist || [],
-      ignore_dirs: configData.ignore_dirs || []
+      ...(JSON.parse(JSON.stringify(row.configData))),
+      edit_whitelist: (row.configData as any).edit_whitelist || [],
+      edit_blacklist: (row.configData as any).edit_blacklist || [],
+      ignore_dirs: (row.configData as any).ignore_dirs || [],
     }
   });
   dialogVisible.value = true;
@@ -250,10 +361,18 @@ const submitForm = async () => {
       isSaving.value = true;
       try {
         const submitData: BackendCreate = JSON.parse(JSON.stringify(form));
-        if (submitData.configData.edit_whitelist?.length === 0) submitData.configData.edit_whitelist = null;
-        if (submitData.configData.edit_blacklist?.length === 0) submitData.configData.edit_blacklist = null;
-        if (submitData.configData.ignore_dirs?.length === 0) submitData.configData.ignore_dirs = null;
-        if (!submitData.configData.password) submitData.configData.password = null;
+        const cd = submitData.configData as any;
+
+        if (submitData.backendType === 'ssh') {
+          if (cd.edit_whitelist?.length === 0) cd.edit_whitelist = null;
+          if (cd.edit_blacklist?.length === 0) cd.edit_blacklist = null;
+          if (cd.ignore_dirs?.length === 0) cd.ignore_dirs = null;
+          if (!cd.password) cd.password = null;
+        } else {
+          if (cd.edit_whitelist?.length === 0) cd.edit_whitelist = null;
+          if (cd.edit_blacklist?.length === 0) cd.edit_blacklist = null;
+        }
+        if (submitData.backendType === 'api' && !cd.api_key) cd.api_key = null;
 
         if (isEdit.value && currentEditId.value) {
           await backendStore.updateExistingBackend(currentEditId.value, submitData);
@@ -324,6 +443,11 @@ const copyPublicKey = async () => {
   margin-bottom: 12px;
 }
 
+.header-right {
+  display: flex;
+  gap: 6px;
+}
+
 .backend-name {
   font-size: 15px;
   font-weight: 600;
@@ -350,12 +474,21 @@ const copyPublicKey = async () => {
   word-break: break-all;
 }
 
+.api-id {
+  font-family: monospace;
+  font-size: 12px;
+}
+
 .card-footer {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   border-top: 1px solid var(--el-border-color-lighter);
   padding-top: 8px;
+}
+
+.api-tip {
+  margin-bottom: 16px;
 }
 
 .public-key-container {

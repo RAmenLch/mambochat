@@ -1,4 +1,3 @@
-// frontend/mambo/src/api/backendService.ts
 import apiClient from './index';
 import type { BackendConfig, BackendCreate, BackendUpdate, SshPublicKeyResponse, SshTestRequest, SshTestResponse } from './types/backendTypes';
 
@@ -28,4 +27,13 @@ export const getSshPublicKey = (): Promise<SshPublicKeyResponse> => {
 
 export const testSshConnection = (data: SshTestRequest): Promise<SshTestResponse> => {
   return apiClient.post('/backends/ssh/test', data);
+};
+
+export interface ClientStatusResponse {
+  connected: boolean;
+  client_info?: Record<string, any>;
+}
+
+export const getClientStatus = (backendId: string): Promise<ClientStatusResponse> => {
+  return apiClient.get(`/api-client/status/${backendId}`);
 };

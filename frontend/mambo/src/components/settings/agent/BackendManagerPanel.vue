@@ -14,14 +14,32 @@
     <!-- Backend 列表 -->
     <el-table :data="backendList" v-loading="isLoading" border stripe class="backend-table">
       <el-table-column prop="name" :label="$t('backend.name')" width="150" />
-      <el-table-column prop="backendType" :label="$t('backend.type')" width="100">
+      <el-table-column prop="backendType" :label="$t('backend.type')" width="120">
         <template #default="{ row }">
-          <el-tag size="small">{{ row.backendType.toUpperCase() }}</el-tag>
+          <el-tag size="small" :type="row.backendType === 'api' ? 'success' : 'info'">
+            {{ row.backendType === 'api' ? 'API' : 'SSH' }}
+          </el-tag>
         </template>
       </el-table-column>
-      <el-table-column :label="$t('backend.host')" width="200">
+      <el-table-column :label="$t('backend.host')" min-width="220">
         <template #default="{ row }">
-          {{ row.configData.username }}@{{ row.configData.hostname }}:{{ row.configData.port || 22 }}
+          <template v-if="row.backendType === 'ssh'">
+            {{ row.configData.username }}@{{ row.configData.hostname }}:{{ row.configData.port || 22 }}
+          </template>
+          <template v-else-if="row.backendType === 'api'">
+            <div class="api-info">
+              <span class="api-label">ID:</span>
+              <span class="api-id">{{ row.id }}</span>
+              <el-tag
+                v-if="clientStatusMap[row.id]"
+                :type="clientStatusMap[row.id]?.connected ? 'success' : 'danger'"
+                size="small"
+                class="status-tag"
+              >
+                {{ clientStatusMap[row.id]?.connected ? 'Connected' : 'Offline' }}
+              </el-tag>
+            </div>
+          </template>
         </template>
       </el-table-column>
       <el-table-column prop="description" :label="$t('backend.description')" show-overflow-tooltip />
@@ -44,7 +62,7 @@
       width="600px"
       :close-on-click-modal="false"
     >
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="120px" v-loading="isSaving">
+      <el-form ref="formRef" :model="form" :rules="currentRules" label-width="120px" v-loading="isSaving">
         <el-form-item :label="$t('backend.name')" prop="name">
           <el-input v-model="form.name" :disabled="isEdit" placeholder="仅允许字母、数字、下划线 (作为路由路径)" />
         </el-form-item>
@@ -52,42 +70,84 @@
           <el-input v-model="form.description" type="textarea" :rows="2" />
         </el-form-item>
         <el-form-item :label="$t('backend.type')" prop="backendType">
-          <el-select v-model="form.backendType" disabled style="width: 100%">
-            <el-option label="SSH" value="ssh" />
+          <el-select v-model="form.backendType" :disabled="isEdit" style="width: 100%" @change="handleTypeChange">
+            <el-option label="SSH (远程服务器)" value="ssh" />
+            <el-option label="API (客户端连接)" value="api" />
           </el-select>
         </el-form-item>
 
-        <el-divider content-position="left">SSH 配置</el-divider>
+        <!-- SSH 配置 -->
+        <template v-if="form.backendType === 'ssh'">
+          <el-divider content-position="left">SSH 配置</el-divider>
+          <el-form-item label="Hostname" prop="configData.hostname">
+            <el-input v-model="form.configData.hostname" placeholder="192.168.1.100 或 example.com" />
+          </el-form-item>
+          <el-form-item label="Username" prop="configData.username">
+            <el-input v-model="form.configData.username" placeholder="root" />
+          </el-form-item>
+          <el-form-item label="Port" prop="configData.port">
+            <el-input-number v-model="form.configData.port" :min="1" :max="65535" controls-position="right" />
+          </el-form-item>
+          <el-form-item label="Password" prop="configData.password">
+            <el-input v-model="form.configData.password" type="password" show-password placeholder="不填则使用系统公钥免密登录" />
+          </el-form-item>
+        </template>
 
-        <el-form-item label="Hostname" prop="configData.hostname">
-          <el-input v-model="form.configData.hostname" placeholder="192.168.1.100 或 example.com" />
-        </el-form-item>
-        <el-form-item label="Username" prop="configData.username">
-          <el-input v-model="form.configData.username" placeholder="root" />
-        </el-form-item>
-        <el-form-item label="Port" prop="configData.port">
-          <el-input-number v-model="form.configData.port" :min="1" :max="65535" controls-position="right" />
-        </el-form-item>
-        <el-form-item label="Password" prop="configData.password">
-          <el-input v-model="form.configData.password" type="password" show-password placeholder="不填则使用系统公钥免密登录" />
-        </el-form-item>
-        <el-form-item label="Root Dir" prop="configData.root_dir">
-          <el-input v-model="form.configData.root_dir" placeholder="默认: /" />
-        </el-form-item>
+        <!-- API 配置 -->
+        <template v-if="form.backendType === 'api'">
+          <el-divider content-position="left">API 客户端配置</el-divider>
+          <el-form-item label="API Key" prop="configData.api_key">
+            <el-input v-model="form.configData.api_key" :type="showApiKey ? 'text' : 'password'" show-password placeholder="客户端连接时使用的密钥">
+              <template #append>
+                <el-button @click="showApiKey = !showApiKey">
+                  <el-icon><View v-if="!showApiKey" /><Hide v-else /></el-icon>
+                </el-button>
+              </template>
+            </el-input>
+          </el-form-item>
+          <el-form-item label="Edit Whitelist" prop="configData.edit_whitelist">
+            <el-select v-model="form.configData.edit_whitelist" multiple filterable allow-create default-first-option placeholder="例如: *.py (回车添加)" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="Edit Blacklist" prop="configData.edit_blacklist">
+            <el-select v-model="form.configData.edit_blacklist" multiple filterable allow-create default-first-option placeholder="例如: .env (回车添加)" style="width: 100%" />
+          </el-form-item>
+          <div class="api-tip">
+            <el-alert type="info" :closable="false" show-icon>
+              <template #title>
+                创建成功后，将显示的 <b>Backend ID</b> 和 <b>API Key</b> 填入客户端启动命令中：<br/>
+                <code>python main.py --server-url ws://服务器地址 --backend-id &lt;ID&gt; --api-key &lt;KEY&gt; --root-dir /你的项目</code>
+              </template>
+            </el-alert>
+          </div>
+        </template>
 
-        <el-form-item label="Edit Whitelist" prop="configData.edit_whitelist">
-          <el-select v-model="form.configData.edit_whitelist" multiple filterable allow-create default-first-option placeholder="例如: *.py (回车添加)" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="Edit Blacklist" prop="configData.edit_blacklist">
-          <el-select v-model="form.configData.edit_blacklist" multiple filterable allow-create default-first-option placeholder="例如: .env (回车添加)" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="Ignore Dirs" prop="configData.ignore_dirs">
-          <el-select v-model="form.configData.ignore_dirs" multiple filterable allow-create default-first-option placeholder="例如: .git, node_modules (回车添加)" style="width: 100%" />
-        </el-form-item>
+        <!-- 通用配置 (仅 SSH) -->
+        <template v-if="form.backendType === 'ssh'">
+          <el-divider content-position="left">通用配置</el-divider>
+
+          <el-form-item label="Root Dir" prop="configData.root_dir">
+            <el-input v-model="form.configData.root_dir" placeholder="默认: /" />
+          </el-form-item>
+          <el-form-item label="Edit Whitelist" prop="configData.edit_whitelist">
+            <el-select v-model="form.configData.edit_whitelist" multiple filterable allow-create default-first-option placeholder="例如: *.py (回车添加)" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="Edit Blacklist" prop="configData.edit_blacklist">
+            <el-select v-model="form.configData.edit_blacklist" multiple filterable allow-create default-first-option placeholder="例如: .env (回车添加)" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="Ignore Dirs" prop="configData.ignore_dirs">
+            <el-select v-model="form.configData.ignore_dirs" multiple filterable allow-create default-first-option placeholder="例如: .git, node_modules (回车添加)" style="width: 100%" />
+          </el-form-item>
+        </template>
       </el-form>
       <template #footer>
         <div class="dialog-footer-actions">
-          <el-button type="info" plain @click="handleTestConnection" :loading="isTesting">
+          <el-button
+            v-if="form.backendType === 'ssh'"
+            type="info"
+            plain
+            @click="handleTestConnection"
+            :loading="isTesting"
+          >
             <el-icon><Connection /></el-icon> {{ $t('backend.testConnection') }}
           </el-button>
           <div class="right-actions">
@@ -115,13 +175,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
-import { Plus, Key, Connection } from '@element-plus/icons-vue';
+import { Plus, Key, Connection, View, Hide } from '@element-plus/icons-vue';
 import { useBackendStore } from '@/stores/backendStore';
 import { copyToClipboard } from '@/utils/clipboard';
-import type { BackendConfig, BackendCreate, SshConfigData, SshTestRequest } from '@/api/types/backendTypes';
+import { getClientStatus } from '@/api/backendService';
+import type { BackendConfig, BackendCreate, BackendType, SshConfigData, ApiConfigData, SshTestRequest } from '@/api/types/backendTypes';
+import { isSshConfig } from '@/api/types/backendTypes';
 
 const backendStore = useBackendStore();
 const { backendList, isLoading, systemPublicKey } = storeToRefs(backendStore);
@@ -130,48 +192,100 @@ const dialogVisible = ref(false);
 const keyDialogVisible = ref(false);
 const isEdit = ref(false);
 const isSaving = ref(false);
-const isTesting = ref(false); // [新增] 测试连接状态
+const isTesting = ref(false);
+const showApiKey = ref(false);
 const currentEditId = ref<string | null>(null);
 
 const formRef = ref<FormInstance>();
+const clientStatusMap = ref<Record<string, { connected: boolean }>>({});
+let statusPollTimer: ReturnType<typeof setInterval> | null = null;
 
-// 表单初始数据
-const defaultForm = (): BackendCreate => ({
-  name: '',
-  description: '',
-  backendType: 'ssh',
-  configData: {
-    hostname: '',
-    username: 'root',
-    port: 22,
-    password: null,
-    root_dir: '/',
-    edit_whitelist: [],
-    edit_blacklist: [],
-    ignore_dirs: ['.git', 'node_modules', 'build']
-  }
+const sshDefaultConfig = (): SshConfigData => ({
+  hostname: '',
+  username: 'root',
+  port: 22,
+  password: null,
+  root_dir: '/',
+  edit_whitelist: [],
+  edit_blacklist: [],
+  ignore_dirs: ['.git', 'node_modules', 'build']
 });
 
-const form = reactive<BackendCreate>(defaultForm());
+const apiDefaultConfig = (): ApiConfigData => ({
+  api_key: '',
+  edit_whitelist: [],
+  edit_blacklist: [],
+});
 
-// 校验规则
-const rules = reactive<FormRules>({
+const defaultForm = (type: BackendType = 'ssh'): BackendCreate => ({
+  name: '',
+  description: '',
+  backendType: type,
+  configData: type === 'ssh' ? sshDefaultConfig() : apiDefaultConfig()
+});
+
+const form = reactive<BackendCreate>(defaultForm('ssh'));
+
+const sshRules: FormRules = {
   name: [
     { required: true, message: '请输入名称', trigger: 'blur' },
     { pattern: /^[a-zA-Z0-9_]+$/, message: '仅允许包含字母、数字和下划线', trigger: 'blur' }
   ],
   'configData.hostname': [{ required: true, message: '请输入主机地址', trigger: 'blur' }],
   'configData.username': [{ required: true, message: '请输入用户名', trigger: 'blur' }]
-});
+};
+
+const apiRules: FormRules = {
+  name: [
+    { required: true, message: '请输入名称', trigger: 'blur' },
+    { pattern: /^[a-zA-Z0-9_]+$/, message: '仅允许包含字母、数字和下划线', trigger: 'blur' }
+  ],
+  'configData.api_key': [{ required: true, message: '请输入 API Key', trigger: 'blur' }]
+};
+
+const currentRules = computed(() => form.backendType === 'ssh' ? sshRules : apiRules);
+
+const handleTypeChange = (type: BackendType) => {
+  const newForm = defaultForm(type);
+  newForm.name = form.name;
+  newForm.description = form.description;
+  Object.assign(form, newForm);
+  formRef.value?.clearValidate();
+};
+
+function maskKey(key?: string | null): string {
+  if (!key) return '***';
+  if (key.length <= 8) return '********';
+  return key.slice(0, 4) + '****' + key.slice(-4);
+}
+
+async function fetchClientStatuses() {
+  for (const b of backendList.value) {
+    if (b.backendType === 'api') {
+      try {
+        const status = await getClientStatus(b.id);
+        clientStatusMap.value[b.id] = status;
+      } catch {
+        clientStatusMap.value[b.id] = { connected: false };
+      }
+    }
+  }
+}
 
 onMounted(() => {
   backendStore.fetchBackends();
+  statusPollTimer = setInterval(fetchClientStatuses, 15000);
+});
+
+onUnmounted(() => {
+  if (statusPollTimer) clearInterval(statusPollTimer);
 });
 
 const handleCreate = () => {
   isEdit.value = false;
   currentEditId.value = null;
-  Object.assign(form, defaultForm());
+  showApiKey.value = false;
+  Object.assign(form, defaultForm('ssh'));
   dialogVisible.value = true;
   formRef.value?.clearValidate();
 };
@@ -179,19 +293,18 @@ const handleCreate = () => {
 const handleEdit = (row: BackendConfig) => {
   isEdit.value = true;
   currentEditId.value = row.id;
+  showApiKey.value = false;
 
-  // 深拷贝，防止直接修改 store 数据
-  const configData = JSON.parse(JSON.stringify(row.configData)) as SshConfigData;
-
+  const type = row.backendType;
   Object.assign(form, {
     name: row.name,
     description: row.description || '',
-    backendType: row.backendType,
+    backendType: type,
     configData: {
-      ...configData,
-      edit_whitelist: configData.edit_whitelist || [],
-      edit_blacklist: configData.edit_blacklist || [],
-      ignore_dirs: configData.ignore_dirs || []
+      ...(JSON.parse(JSON.stringify(row.configData))),
+      edit_whitelist: (row.configData as any).edit_whitelist || [],
+      edit_blacklist: (row.configData as any).edit_blacklist || [],
+      ignore_dirs: (row.configData as any).ignore_dirs || [],
     }
   });
   dialogVisible.value = true;
@@ -207,10 +320,8 @@ const handleDelete = async (id: string) => {
   }
 };
 
-// [新增] 测试连接
 const handleTestConnection = async () => {
   if (!formRef.value) return;
-  // 测试前仅校验表单，确保必填项（如 hostname, username）已填写
   await formRef.value.validate(async (valid) => {
     if (valid) {
       isTesting.value = true;
@@ -246,12 +357,19 @@ const submitForm = async () => {
     if (valid) {
       isSaving.value = true;
       try {
-        // 数据清洗：将空数组转为 null 以符合后端规范
         const submitData: BackendCreate = JSON.parse(JSON.stringify(form));
-        if (submitData.configData.edit_whitelist?.length === 0) submitData.configData.edit_whitelist = null;
-        if (submitData.configData.edit_blacklist?.length === 0) submitData.configData.edit_blacklist = null;
-        if (submitData.configData.ignore_dirs?.length === 0) submitData.configData.ignore_dirs = null;
-        if (!submitData.configData.password) submitData.configData.password = null;
+        const cd = submitData.configData as any;
+
+        if (submitData.backendType === 'ssh') {
+          if (cd.edit_whitelist?.length === 0) cd.edit_whitelist = null;
+          if (cd.edit_blacklist?.length === 0) cd.edit_blacklist = null;
+          if (cd.ignore_dirs?.length === 0) cd.ignore_dirs = null;
+          if (!cd.password) cd.password = null;
+        } else {
+          if (cd.edit_whitelist?.length === 0) cd.edit_whitelist = null;
+          if (cd.edit_blacklist?.length === 0) cd.edit_blacklist = null;
+        }
+        if (submitData.backendType === 'api' && !cd.api_key) cd.api_key = null;
 
         if (isEdit.value && currentEditId.value) {
           await backendStore.updateExistingBackend(currentEditId.value, submitData);
@@ -304,6 +422,32 @@ const copyPublicKey = async () => {
   flex-grow: 1;
 }
 
+.api-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.api-label {
+  color: var(--el-text-color-secondary);
+  flex-shrink: 0;
+}
+
+.api-id {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+  word-break: break-all;
+}
+
+.status-tag {
+  margin-left: auto;
+}
+
+.api-tip {
+  margin-bottom: 16px;
+}
+
 .public-key-container {
   min-height: 150px;
 }
@@ -319,7 +463,6 @@ const copyPublicKey = async () => {
   font-size: 12px;
 }
 
-/* [新增] 底部操作按钮布局 */
 .dialog-footer-actions {
   display: flex;
   justify-content: space-between;

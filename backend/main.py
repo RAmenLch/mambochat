@@ -33,6 +33,7 @@ from backend.routers import (
     skill_management,
     agent_management,
     backend_management,
+    api_client_router,
     system_log  # <-- 新增：导入系统日志路由
 )
 from backend.services.cleanup_service import cleanup_zombie_files
@@ -170,6 +171,7 @@ app.include_router(agent_management.router, prefix="/api", tags=["Agent Manageme
 app.include_router(system_log.router, prefix="/api/logs", tags=["System Logs"])
 app.include_router(file_management.router)
 app.include_router(backend_management.router,prefix="/api",tags=["Backend Management"])
+app.include_router(api_client_router.router, prefix="/api", tags=["API Client"])
 
 @app.get("/")
 async def root():

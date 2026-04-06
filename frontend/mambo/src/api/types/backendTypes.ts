@@ -1,6 +1,6 @@
 // frontend/mambo/src/api/types/backendTypes.ts
 
-export type BackendType = 'ssh';
+export type BackendType = 'ssh' | 'api';
 
 export interface SshConfigData {
   hostname: string;
@@ -13,12 +13,20 @@ export interface SshConfigData {
   ignore_dirs?: string[] | null;
 }
 
+export interface ApiConfigData {
+  api_key: string;
+  edit_whitelist?: string[] | null;
+  edit_blacklist?: string[] | null;
+}
+
+export type BackendConfigData = SshConfigData | ApiConfigData;
+
 export interface BackendConfig {
   id: string;
   name: string;
   description?: string | null;
   backendType: BackendType;
-  configData: SshConfigData; // 目前仅支持 SSH，未来可扩展为联合类型
+  configData: BackendConfigData;
   createdAt: string;
   updatedAt: string;
 }
@@ -27,7 +35,7 @@ export interface BackendCreate {
   name: string;
   description?: string | null;
   backendType: BackendType;
-  configData: SshConfigData;
+  configData: BackendConfigData;
 }
 
 export interface BackendUpdate extends Partial<BackendCreate> {}
@@ -44,4 +52,12 @@ export interface SshTestRequest {
 export interface SshTestResponse {
   success: boolean;
   message: string;
+}
+
+export function isSshConfig(data: BackendConfigData): data is SshConfigData {
+  return 'hostname' in data;
+}
+
+export function isApiConfig(data: BackendConfigData): data is ApiConfigData {
+  return 'api_key' in data;
 }

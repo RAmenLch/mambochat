@@ -127,6 +127,7 @@ class DeepAgentInitializer(AbstractAgentInitializer):
             backends_db = await backend_crud.get_backends_by_ids(self.db, self.agent.backendIds)
             for b in backends_db:
                 mounted_backends.append({
+                    "id": b.id,
                     "name": b.name,
                     "backendType": b.backendType,
                     "configData": b.configData

@@ -10,6 +10,7 @@ from backend.services.generation.graph_builders.base_builder import BaseGraphBui
 from backend.services.generation.graph_builders.model_factory import ModelFactory
 from backend.services.generation.agent.custom_middleware import ToolMessageOrderingMiddleware
 from backend.services.generation.agent.ssh_backend import PureSFTPBackend
+from backend.services.generation.agent.api_backend import APIBackend
 from backend.utils.ssh_utils import get_or_create_system_ssh_key
 from backend.schemas.enums import BackendType
 
@@ -27,6 +28,7 @@ def _create_backend_factory(mounted_backends: List[Dict[str, Any]]):
         for mb in mounted_backends:
             b_type = mb.get("backendType")
             b_name = mb.get("name")
+            b_id = mb.get("id")
             config = mb.get("configData", {})
 
             if b_type == BackendType.SSH.value:
@@ -48,6 +50,19 @@ def _create_backend_factory(mounted_backends: List[Dict[str, Any]]):
 
                 route_prefix = f"/{b_name}/"
                 routes[route_prefix] = ssh_backend
+
+            elif b_type == BackendType.API.value:
+                # APIBackend communicates via WebSocket through the server.
+                # Create the backend regardless of online status so that the
+                # route exists and returns a clear error when accessed offline.
+                api_backend = APIBackend(
+                    backend_id=b_id,
+                    backend_name=b_name,
+                    edit_whitelist=config.get("edit_whitelist"),
+                    edit_blacklist=config.get("edit_blacklist"),
+                )
+                route_prefix = f"/{b_name}/"
+                routes[route_prefix] = api_backend
 
         return TreeCompositeBackend(default=default_backend, routes=routes)
 

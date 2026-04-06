@@ -87,6 +87,87 @@ class TreeStateBackend(StateBackend, TreeBackendProtocol):
 class TreeCompositeBackend(CompositeBackend, TreeBackendProtocol):
     """CompositeBackend with tree support routing."""
 
+    async def atree(self, path: str = "/", depth: int = 3) -> str:
+        """Async tree method — directly awaits child backends' atree to avoid
+        creating extra event loops (which breaks WebSocket communication on
+        Windows when futures are resolved across loops)."""
+
+        backend, backend_path, route_prefix = _route_for_path(
+            default=self.default,
+            sorted_routes=self.sorted_routes,
+            path=path,
+        )
+
+        # ---------- matched a specific route ----------
+        if route_prefix is not None:
+            try:
+                if hasattr(backend, "atree"):
+                    raw_tree = await backend.atree(backend_path, depth)
+                elif hasattr(backend, "tree"):
+                    import asyncio
+                    raw_tree = await asyncio.to_thread(backend.tree, backend_path, depth)
+                else:
+                    return f"Error: Backend mounted at {route_prefix} does not support tree."
+            except Exception as e:
+                return f"Error: {e}"
+            lines = raw_tree.splitlines()
+            if lines:
+                lines[0] = path
+            return "\n".join(lines)
+
+        # ---------- aggregate root "/" ----------
+        if path == "/":
+            import asyncio
+            lines = [path]
+
+            # default backend
+            if hasattr(self.default, "atree"):
+                default_tree = await self.default.atree("/", depth)
+            elif hasattr(self.default, "tree"):
+                default_tree = await asyncio.to_thread(self.default.tree, "/", depth)
+            else:
+                default_tree = ""
+            default_lines = default_tree.splitlines()
+            if len(default_lines) > 1:
+                lines.extend(default_lines[1:])
+
+            # route backends
+            for r_prefix, b in self.sorted_routes:
+                r_name = r_prefix.strip("/")
+                if depth > 1:
+                    try:
+                        if hasattr(b, "atree"):
+                            b_tree = await b.atree("/", depth - 1)
+                        elif hasattr(b, "tree"):
+                            b_tree = await asyncio.to_thread(b.tree, "/", depth - 1)
+                        else:
+                            lines.append(f"  {r_name}/ ... (unexpanded)")
+                            continue
+                    except Exception as e:
+                        lines.append(f"  {r_name}/ [offline] {e}")
+                        continue
+                    if b_tree.startswith("Error"):
+                        lines.append(f"  {r_name}/ [offline] {b_tree}")
+                        continue
+                    b_lines = b_tree.splitlines()
+                    if len(b_lines) > 1:
+                        lines.append(f"  {r_name}/")
+                        lines.extend([f"  {line}" for line in b_lines[1:]])
+                    else:
+                        lines.append(f"  {r_name}/ (empty)")
+                else:
+                    lines.append(f"  {r_name}/ ... (unexpanded)")
+            return "\n".join(lines)
+
+        # ---------- fall through to default ----------
+        if hasattr(self.default, "atree"):
+            return await self.default.atree(path, depth)
+        elif hasattr(self.default, "tree"):
+            import asyncio
+            return await asyncio.to_thread(self.default.tree, path, depth)
+
+        return "Error: Default backend does not support tree."
+
     def tree(self, path: str = "/", depth: int = 3) -> str:
         backend, backend_path, route_prefix = _route_for_path(
             default=self.default,

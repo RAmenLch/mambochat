@@ -19,6 +19,17 @@ class SSHConfigData(BaseModel):
     edit_blacklist: Optional[List[str]] = Field(None, description="禁止编辑的文件通配符列表")
     ignore_dirs: Optional[List[str]] = Field(None, description="遍历时忽略的目录，如 ['.git', 'node_modules']")
 
+
+class APIConfigData(BaseModel):
+    """API Backend 配置结构 - 客户端主动连接模式
+
+    仅需 api_key。root_dir / ignore_dirs 由客户端启动时通过 --root-dir / --ignore-dirs 参数指定。
+    edit_whitelist 和 edit_blacklist 由服务端控制，用于限制 LLM 可编辑的文件范围。
+    """
+    api_key: str = Field(..., description="API 密钥，客户端连接时需要提供此密钥进行认证")
+    edit_whitelist: Optional[List[str]] = Field(None, description="允许编辑的文件通配符列表")
+    edit_blacklist: Optional[List[str]] = Field(None, description="禁止编辑的文件通配符列表")
+
 class BackendConfigBase(BaseModel):
     name: str = Field(..., description="Backend 挂载路由名称 (仅限字母数字下划线)")
     description: Optional[str] = Field(None, description="描述")
@@ -45,6 +56,13 @@ class BackendConfigBase(BaseModel):
                 SSHConfigData(**temp_v)
             else:
                 SSHConfigData(**v)
+        elif backend_type == BackendType.API.value:
+            if v.get("api_key") == PASSWORD_MASK:
+                temp_v = v.copy()
+                temp_v["api_key"] = "dummy"
+                APIConfigData(**temp_v)
+            else:
+                APIConfigData(**v)
         return v
 
 class BackendConfigCreate(BackendConfigBase):
