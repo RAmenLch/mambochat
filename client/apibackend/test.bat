@@ -1,0 +1,1 @@
+python main.py --server-url ws://localhost:8000  --backend-id 983c5839-9bc1-47a6-9531-fa28ae5ed3fa  --api-key 123456  --root-dir /your/project
