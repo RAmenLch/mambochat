@@ -37,7 +37,7 @@
             <template v-if="b.backendType === 'ssh'">
               <div class="info-row">
                 <span class="label">主机:</span>
-                <span class="value">{{ b.configData.username }}@{{ b.configData.hostname }}:{{ b.configData.port || 22 }}</span>
+                <span class="value">{{ sshConnectionString(b) }}</span>
               </div>
             </template>
             <template v-else-if="b.backendType === 'api'">
@@ -188,6 +188,13 @@ import { copyToClipboard } from '@/utils/clipboard';
 import { getClientStatus } from '@/api/backendService';
 import type { BackendConfig, BackendCreate, BackendType, SshConfigData, ApiConfigData, SshTestRequest } from '@/api/types/backendTypes';
 
+type FormData = {
+  name: string;
+  description: string;
+  backendType: BackendType;
+  configData: SshConfigData & ApiConfigData;
+};
+
 const backendStore = useBackendStore();
 const { backendList, isLoading, systemPublicKey } = storeToRefs(backendStore);
 
@@ -220,14 +227,22 @@ const apiDefaultConfig = (): ApiConfigData => ({
   edit_blacklist: [],
 });
 
-const defaultForm = (type: BackendType = 'ssh'): BackendCreate => ({
+const defaultForm = (type: BackendType = 'ssh'): FormData => ({
   name: '',
   description: '',
   backendType: type,
-  configData: type === 'ssh' ? sshDefaultConfig() : apiDefaultConfig()
+  configData: (type === 'ssh' ? sshDefaultConfig() : apiDefaultConfig()) as SshConfigData & ApiConfigData
 });
 
-const form = reactive<BackendCreate>(defaultForm('ssh'));
+const form = reactive<FormData>(defaultForm('ssh'));
+
+function sshConnectionString(b: BackendConfig): string {
+  if (b.backendType === 'ssh' && 'hostname' in b.configData) {
+    const c = b.configData as SshConfigData;
+    return `${c.username}@${c.hostname}:${c.port || 22}`;
+  }
+  return '';
+}
 
 const sshRules: FormRules = {
   name: [
