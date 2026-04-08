@@ -1,11 +1,39 @@
 # backend/services/generation/core/llm_io.py
 
+from datetime import datetime
 from typing import List, Dict, Any, Optional, Union
 from pydantic import BaseModel, Field, ConfigDict
 from langchain_core.tools import BaseTool
 
 from backend.schemas.enums import AgentTypeEnum
 
+
+# --- 消息结构化 Schema ---
+# 统一 ORM Message/SubMessage 与合成消息的类型，消除 builders 层的鸭子类型
+
+class SubMessageSchema(BaseModel):
+    """子消息的规范类型，兼容 ORM SubMessage 和合成对象。"""
+    model_config = ConfigDict(from_attributes=True)
+
+    type: str
+    content: str
+    config: Optional[str] = None
+    createdAt: Optional[datetime] = None
+    sortOrder: int = 0
+    id: Optional[str] = None
+    status: Optional[str] = None
+
+
+class MessageSchema(BaseModel):
+    """消息的规范类型，兼容 ORM Message 和合成对象。"""
+    model_config = ConfigDict(from_attributes=True)
+
+    role: str
+    sub_messages: List[SubMessageSchema] = Field(default_factory=list)
+    id: Optional[str] = None
+
+
+# --- 生成管道数据结构 ---
 
 class SkillFileConfig(BaseModel):
     """

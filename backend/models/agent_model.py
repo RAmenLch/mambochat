@@ -1,5 +1,7 @@
 # backend/models/agent_model.py
 
+from typing import Dict, Any
+
 from sqlalchemy import Column, String, TEXT, DateTime, ForeignKey, Integer, JSON
 from sqlalchemy.orm import relationship
 
@@ -28,6 +30,11 @@ class Agent(Base):
     AgentType = Column(String(50), nullable=False, default=AgentTypeEnum.REACT.value)
     systemPrompt = Column(TEXT, nullable=True)
     modelParameters = Column(JSON, nullable=True)
+
+    @property
+    def parsed_model_parameters(self) -> Dict[str, Any]:
+        """统一返回 dict，屏蔽 JSON 列与 Chat.TEXT 列的类型差异。"""
+        return self.modelParameters or {}
     agentParameters = Column(JSON, nullable=True)
 
     # 关联配置

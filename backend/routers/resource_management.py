@@ -22,11 +22,11 @@ from backend.services.file_service import FileService
 router = APIRouter(prefix="/resources", tags=["Resource Management"])
 
 
-async def _hydrate_resources(resources: List[schemas.Resource], db: AsyncSession):
+async def _hydrate_resources(resources: list[resource_model.Resource], db: AsyncSession):
     """
     批量填充资源的 file_info 信息。
     针对 ResourceType 为 FILE 或 KB_FILE 的资源。
-    会检查 latest_version 以及 versions 列表（如果存在）。
+    会检查 latest_version 以及 versions 列表。
     """
     if not resources:
         return
@@ -64,11 +64,11 @@ async def _hydrate_resources(resources: List[schemas.Resource], db: AsyncSession
             continue
 
         # 1. 处理最新版本
-        if hasattr(res, 'latest_version') and res.latest_version:
+        if res.latest_version:
             _collect_file_id(res.latest_version)
 
-        # 2. 处理历史版本列表 (仅当属性存在且非空时)
-        if hasattr(res, 'versions') and res.versions:
+        # 2. 处理历史版本列表
+        if res.versions:
             for ver in res.versions:
                 _collect_file_id(ver)
 

@@ -1,7 +1,7 @@
 # backend/services/generation/worker/chat_worker.py
 
 import json
-from typing import AsyncGenerator, Any, List, Dict, Union, Tuple
+from typing import AsyncGenerator, Any, List, Dict, Tuple
 
 from langchain_core.messages import (
     BaseMessage,
@@ -15,7 +15,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command, Overwrite
 from deepagents.backends.utils import create_file_data
 
-from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
+from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker, StreamEvent
 from backend.services.generation.core.llm_io import LLMInput, AgentConfig
 from backend.services.generation.worker.decode import BaseDecode, DecoderRegistry
 from backend.services.generation.graph_builders.factory import GraphBuilderFactory
@@ -24,9 +24,9 @@ from backend.schemas.enums import AgentTypeEnum
 
 class UniversalGraphWorker(AbstractGenerateWorker):
 
-    def resolve_decoder(self, message: Any) -> BaseDecode:
+    def resolve_decoder(self, message: StreamEvent) -> BaseDecode:
         provider = "default"
-        if hasattr(message, "response_metadata") and isinstance(message.response_metadata, dict):
+        if isinstance(message, BaseMessage) and isinstance(message.response_metadata, dict):
             provider = message.response_metadata.get("model_provider", "default")
         return DecoderRegistry.get_decoder(provider)
 
@@ -103,7 +103,7 @@ class UniversalGraphWorker(AbstractGenerateWorker):
     async def generate(
             self,
             llm_input: LLMInput
-    ) -> AsyncGenerator[Tuple[str, Union[ToolMessage, AIMessageChunk, AIMessage, Dict[str, Any]]], None]:
+    ) -> AsyncGenerator[Tuple[str, StreamEvent], None]:
 
         graph_builder = GraphBuilderFactory.get_builder(llm_input.agent_config.agent_type)
         agent = graph_builder.build(llm_input.agent_config, llm_input.run_time_config)
@@ -125,23 +125,29 @@ class UniversalGraphWorker(AbstractGenerateWorker):
                 if files_to_inject:
                     input_data["files"] = files_to_inject
 
-        async for stream1 in agent.astream(
+        async for stream_event in agent.astream(
                 input=input_data,
                 config=thread_config,
                 stream_mode=["messages", "updates"],
                 version="v2"
         ):
-            mode = stream1["type"]
-            event = stream1["data"]
+            if not isinstance(stream_event, dict):
+                continue
+            mode = stream_event.get("type")
+            event = stream_event.get("data")
 
-            if mode == "updates":
+            if mode == "updates" and isinstance(event, dict):
                 if "model" in event:
-                    for message in event["model"]['messages']:
-                        yield mode, message
+                    model_update = event["model"]
+                    if isinstance(model_update, dict) and "messages" in model_update:
+                        for message in model_update["messages"]:
+                            yield mode, message
                 if "tools" in event:
-                    for message in event["tools"]['messages']:
-                        yield mode, message
+                    tools_update = event["tools"]
+                    if isinstance(tools_update, dict) and "messages" in tools_update:
+                        for message in tools_update["messages"]:
+                            yield mode, message
                 if "__interrupt__" in event or "HumanInTheLoopMiddleware.after_model" in event:
                     yield mode, event
-            else:
+            elif mode == "messages" and isinstance(event, (list, tuple)) and len(event) > 0:
                 yield mode, event[0]

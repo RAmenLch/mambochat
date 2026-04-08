@@ -1,11 +1,13 @@
 # backend/models/chat_model.py
 
+import json
 from sqlalchemy import Column, String, TEXT, DateTime, ForeignKey, func, Integer, JSON
 from sqlalchemy.orm import relationship
 from backend.models.base_model import Base, generate_uuid
 from backend.schemas.enums import MessageStatus, SubMessageType
 from backend.config.timezone_config import get_configured_now
 from backend.schemas.enums import ChatMode
+from typing import Dict, Any
 
 
 class Chat(Base):
@@ -22,6 +24,18 @@ class Chat(Base):
 
     systemPrompt = Column(TEXT, nullable=True)
     modelParameters = Column(TEXT, nullable=True)  # Store as JSON string
+
+    @property
+    def parsed_model_parameters(self) -> Dict[str, Any]:
+        """统一返回 dict，屏蔽 TEXT 列与 Agent.JSON 列的类型差异。"""
+        if self.modelParameters is None:
+            return {}
+        if isinstance(self.modelParameters, str):
+            try:
+                return json.loads(self.modelParameters)
+            except (json.JSONDecodeError, TypeError):
+                return {}
+        return self.modelParameters if isinstance(self.modelParameters, dict) else {}
     aiModelId = Column(String(36), ForeignKey("AIModel.id"), nullable=True)
     chatMode = Column(String(20), nullable=False, default=ChatMode.NORMAL.value)
     agentId = Column(String(36), ForeignKey("Agent.id", ondelete="SET NULL"), nullable=True)

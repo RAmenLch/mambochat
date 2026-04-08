@@ -1,5 +1,6 @@
 # backend/crud/resource_crud.py
 
+from sqlalchemy import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload, joinedload
@@ -113,14 +114,8 @@ async def create_resource(db: AsyncSession, resource: schemas.ResourceCreate) ->
         resource.sortOrder = (max_order if max_order is not None else -1) + 1
 
     # 排除非模型字段，以创建 Resource 实例
+    # model_dump() 已将 str, Enum 序列化为字符串，无需额外转换
     resource_data = resource.model_dump(exclude={'initial_content', 'initial_attributes'})
-
-    # 显式处理枚举转字符串，确保兼容性
-    if 'itemType' in resource_data and hasattr(resource_data['itemType'], 'value'):
-        resource_data['itemType'] = resource_data['itemType'].value
-    if 'resourceType' in resource_data and resource_data['resourceType'] and hasattr(resource_data['resourceType'],
-                                                                                     'value'):
-        resource_data['resourceType'] = resource_data['resourceType'].value
 
     db_resource = resource_model.Resource(**resource_data)
     db.add(db_resource)
@@ -328,7 +323,7 @@ async def search_resources_and_versions(
         enable_regex: bool,
         skip: int,
         limit: int
-) -> Tuple[List[Any], int]:
+) -> Tuple[list[Row], int]:
     """
     全局搜索资源名称、描述以及最新版本的内容。
     返回: (结果列表, 总数)

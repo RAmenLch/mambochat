@@ -1,11 +1,11 @@
 # backend/services/generation/builders/initializers/agent_react_initializer.py
 
-import json
 from typing import Tuple, List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_core.tools import BaseTool
 
 from backend.schemas.enums import ToolReviewMode, AgentTypeEnum
+from backend.models.agent_model import Agent
 from backend.crud import mcp_crud
 
 from backend.services.generation.core.llm_io import AgentConfig
@@ -22,7 +22,7 @@ class AgentBasedReActInitializer(AbstractAgentInitializer):
     def __init__(
             self,
             db: AsyncSession,
-            agent: Any,
+            agent: Agent,
             resume_payload: Optional[Dict[str, Any]] = None,
             enable_tools: bool = False,
             enable_resource_merge: bool = False,
@@ -56,12 +56,7 @@ class AgentBasedReActInitializer(AbstractAgentInitializer):
             self.providers.append(KBToolProvider(self.db, knowledge_bases))
 
         if self.enable_tools:
-            params = {}
-            if self.agent and self.agent.modelParameters:
-                try:
-                    params = json.loads(self.agent.modelParameters) if isinstance(self.agent.modelParameters, str) else self.agent.modelParameters
-                except (json.JSONDecodeError, TypeError):
-                    pass
+            params = self.agent.parsed_model_parameters
 
             mcp_ids = self.agent.enabledMcpIds or []
             if mcp_ids:

@@ -5,7 +5,6 @@ import json
 import traceback
 from typing import AsyncGenerator, Optional, Dict, List, Set
 
-from backend.services.generation.worker.chat_worker import UniversalGraphWorker
 from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_core.tools import BaseTool
 
@@ -22,7 +21,8 @@ from backend.services.generation.builders.director import LLMInputDirector
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
 
 from backend.services.generation.managers.base_manager import AbstractGenerateManager
-from backend.services.generation.managers.stream_handlers.base_handler import StreamContext
+from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
+from backend.services.generation.managers.stream_handlers.base_handler import StreamContext, BaseStreamHandler
 from backend.services.generation.managers.stream_handlers.handlers import (
     HitlHandler, TextAndReasoningHandler, RoundClosureHandler,
     ToolExecutionHandler, ImageAndUsageHandler
@@ -43,7 +43,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
         self._pending_hitl_tool_calls = []
         self._recover_from_error = recover_from_error
 
-        self._handlers = [
+        self._handlers: List[BaseStreamHandler] = [
             HitlHandler(),
             TextAndReasoningHandler(),
             RoundClosureHandler(),
@@ -52,12 +52,12 @@ class DefaultGenerateManager(AbstractGenerateManager):
         ]
 
     @staticmethod
-    def _extract_run_uuid(lc_run_id: str) -> Optional[str]:
+    def _extract_run_uuid(lc_run_id: Optional[str]) -> Optional[str]:
         if not lc_run_id: return None
         return lc_run_id[len("lc_run--"):] if lc_run_id.startswith("lc_run--") else lc_run_id
 
     async def _execute_generation(
-            self, worker: UniversalGraphWorker, chat_id: str, assistant_message_id: str
+            self, worker: AbstractGenerateWorker, chat_id: str, assistant_message_id: str
     ) -> AsyncGenerator[BaseInstruction, None]:
 
         director = LLMInputDirector(self.db_session, chat_id=chat_id)
@@ -82,9 +82,9 @@ class DefaultGenerateManager(AbstractGenerateManager):
             if self._recover_from_error:
                 llm_input.agent_config.recover_from_error = True
             providers = director.get_providers()
-            hitl_config = getattr(llm_input.agent_config, 'hitl_interrupt_on', {})
-            tool_map = {t.name: t for t in llm_input.agent_config.tools if
-                        hasattr(t, 'name')} if llm_input.agent_config.tools else {}
+            hitl_config = llm_input.agent_config.hitl_interrupt_on
+            tools = llm_input.agent_config.tools or []
+            tool_map: Dict[str, BaseTool] = {t.name: t for t in tools}
 
         except McpConnectionError as e:
             yield CreateSubMessage(
@@ -103,9 +103,12 @@ class DefaultGenerateManager(AbstractGenerateManager):
 
             decoder = worker.resolve_decoder(event)
 
+            event_id: Optional[str] = None
+            if not isinstance(event, dict):
+                event_id = event.id
             context = StreamContext(
                 decode=decoder, mode=mode, event=event,
-                lc_run_uuid=self._extract_run_uuid(getattr(event, 'id', None)),
+                lc_run_uuid=self._extract_run_uuid(event_id),
                 providers=providers, tool_map=tool_map, hitl_config=hitl_config,
                 created_stream_ids=self._created_stream_ids,
                 pending_hitl_tool_calls=self._pending_hitl_tool_calls,
@@ -153,7 +156,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
         if exception:
             if isinstance(exception, RuntimeError):
                 error_message = str(exception)
-            elif "CancelledError" in str(type(exception)):
+            elif isinstance(exception, asyncio.CancelledError):
                 error_message = "生成被用户取消。"
             else:
                 error_message = f"发生未处理的异常: {str(exception)}"

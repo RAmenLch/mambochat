@@ -1,18 +1,18 @@
 # backend/services/generation/builders/initializers/deep_agent_initializer.py
 
-import json
 import asyncio
 from typing import Tuple, List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_core.tools import BaseTool
 
 from backend.schemas.enums import ToolReviewMode, AgentTypeEnum
+from backend.models.agent_model import Agent
 from backend.crud import mcp_crud, agent_crud, provider_crud, setting_crud, backend_crud
-from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 
 from backend.services.generation.core.llm_io import AgentConfig, ModelConfig
 from backend.services.generation.builders.initializers.base_initializer import AbstractAgentInitializer
 from backend.services.generation.builders.resource_dispatcher import ResourceDispatcher
+from backend.services.generation.builders.param_utils import map_model_parameters
 
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
 from backend.services.generation.tools.mcp_tool_provider import MCPToolProvider
@@ -25,7 +25,7 @@ class DeepAgentInitializer(AbstractAgentInitializer):
     def __init__(
             self,
             db: AsyncSession,
-            agent: Any,
+            agent: Agent,
             resume_payload: Optional[Dict[str, Any]] = None,
             enable_tools: bool = False,
             enable_resource_merge: bool = False,
@@ -40,30 +40,6 @@ class DeepAgentInitializer(AbstractAgentInitializer):
 
         self.providers: List[BaseToolProvider] = []
         self.hitl_interrupt_on: Dict[str, bool] = {}
-
-    def _map_parameters(self, model_params_data: Any) -> Dict[str, Any]:
-        flat_params = {}
-        if model_params_data:
-            flat_params = json.loads(model_params_data) if isinstance(model_params_data, str) else model_params_data
-
-        structured = {}
-        param_def_map = {p.key: p for p in SUPPORTED_LLM_PARAMETERS}
-
-        for key, value in flat_params.items():
-            if key in ["max_context_messages", "stream", "enabled_mcp_ids", "enable_suggest"]:
-                continue
-
-            definition = param_def_map.get(key)
-            if definition:
-                target = structured
-                for part in definition.path[:-1]:
-                    target = target.setdefault(part, {})
-                target[definition.path[-1]] = value
-
-        if 'stream' in flat_params:
-            structured['stream'] = flat_params['stream']
-
-        return structured
 
     async def initialize(self) -> Tuple[AgentConfig, str]:
         extended_prompts: List[str] = []
@@ -88,12 +64,7 @@ class DeepAgentInitializer(AbstractAgentInitializer):
                         file_config.content = ""
 
         if self.enable_tools:
-            params = {}
-            if self.agent and self.agent.modelParameters:
-                try:
-                    params = json.loads(self.agent.modelParameters) if isinstance(self.agent.modelParameters, str) else self.agent.modelParameters
-                except (json.JSONDecodeError, TypeError):
-                    pass
+            params = self.agent.parsed_model_parameters
 
             mcp_ids = self.agent.enabledMcpIds or []
             if mcp_ids:
@@ -179,7 +150,7 @@ class DeepAgentInitializer(AbstractAgentInitializer):
                         if sub_model.provider.use_proxy and is_proxy_enabled:
                             proxy_url = global_proxy_url
 
-                        api_params = self._map_parameters(sub.modelParameters)
+                        api_params = map_model_parameters(sub.parsed_model_parameters)
 
                         sub_config.llm_config = ModelConfig(
                             model_id=sub_model.modelId,

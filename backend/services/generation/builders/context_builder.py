@@ -3,7 +3,6 @@
 import json
 import base64
 from datetime import datetime as dt
-from types import SimpleNamespace
 from typing import List, Dict, Any, Optional, Set, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.schemas import enums as schemas_enums
 from backend.schemas.message import McpToolContent, ErrorContent
 from backend.services.file_service import FileService
-from backend.services.generation.core.llm_io import MessageContext
+from backend.services.generation.core.llm_io import MessageContext, MessageSchema, SubMessageSchema
 
 # 以 application/* 开头但本质是文本的 MIME 类型
 _KNOWN_TEXT_APPLICATION_TYPES = {
@@ -67,7 +66,7 @@ class MessageContextBuilder:
         # 内部缓存，防止同一文件在单次装配中重复读取
         self._file_content_cache: Dict[str, Dict[str, Any]] = {}
 
-    async def build(self, raw_history: List[Any], system_prompt: Optional[str] = None) -> MessageContext:
+    async def build(self, raw_history: List[MessageSchema], system_prompt: Optional[str] = None) -> MessageContext:
         """
         核心装配方法。
         传入原始历史消息列表，输出标准化的 MessageContext。
@@ -96,7 +95,7 @@ class MessageContextBuilder:
 
     # --- 内存级过滤与切片逻辑 ---
 
-    def _apply_zip_history_logic(self, history: List[Any]) -> List[Any]:
+    def _apply_zip_history_logic(self, history: List[MessageSchema]) -> List[MessageSchema]:
         last_enabled_zip_index = -1
         zip_content = None
 
@@ -113,21 +112,21 @@ class MessageContextBuilder:
                 break
 
         if last_enabled_zip_index != -1 and zip_content:
-            user_msg = SimpleNamespace(
+            user_msg = MessageSchema(
                 role=schemas_enums.MessageRole.USER.value,
-                sub_messages=[SimpleNamespace(content="对之前的对话进行了总结摘要。",
+                sub_messages=[SubMessageSchema(content="对之前的对话进行了总结摘要。",
                                               type=schemas_enums.SubMessageType.NORMAL.value, config='{}')]
             )
-            assistant_msg = SimpleNamespace(
+            assistant_msg = MessageSchema(
                 role=schemas_enums.MessageRole.ASSISTANT.value,
                 sub_messages=[
-                    SimpleNamespace(content=zip_content, type=schemas_enums.SubMessageType.NORMAL.value, config='{}')]
+                    SubMessageSchema(content=zip_content, type=schemas_enums.SubMessageType.NORMAL.value, config='{}')]
             )
             return [user_msg, assistant_msg] + history[last_enabled_zip_index + 1:]
 
         return history
 
-    def _apply_slicing(self, history: List[Any]) -> List[Any]:
+    def _apply_slicing(self, history: List[MessageSchema]) -> List[MessageSchema]:
         if not history:
             return []
 
@@ -142,7 +141,7 @@ class MessageContextBuilder:
 
         return history
 
-    def _apply_max_context_limit(self, history: List[Any]) -> List[Any]:
+    def _apply_max_context_limit(self, history: List[MessageSchema]) -> List[MessageSchema]:
         if not history or not self.max_context_messages:
             return history
 
@@ -165,7 +164,7 @@ class MessageContextBuilder:
 
     # --- 消息转换与 I/O 逻辑 ---
 
-    async def _build_payload(self, history: List[Any]) -> List[Dict[str, Any]]:
+    async def _build_payload(self, history: List[MessageSchema]) -> List[Dict[str, Any]]:
         payload: List[Dict[str, Any]] = []
         total_count = len(history)
 
@@ -203,11 +202,11 @@ class MessageContextBuilder:
 
         return self._merge_consecutive_roles(payload)
 
-    async def _convert_assistant_to_rounds(self, msg: Any, recency_rank: int) -> List[Dict[str, Any]]:
+    async def _convert_assistant_to_rounds(self, msg: MessageSchema, recency_rank: int) -> List[Dict[str, Any]]:
         # 按 createdAt 排序，保证时间顺序
         sorted_subs = sorted(
             msg.sub_messages,
-            key=lambda s: (getattr(s, 'createdAt', None) or dt.min, getattr(s, 'sortOrder', 0))
+            key=lambda s: (s.createdAt or dt.min, s.sortOrder)
         )
 
         rounds: List[Dict[str, List]] = []
@@ -263,7 +262,7 @@ class MessageContextBuilder:
 
         return result
 
-    async def _convert_message_to_llm_dict(self, msg: Any, recency_rank: int) -> Optional[Dict[str, Any]]:
+    async def _convert_message_to_llm_dict(self, msg: MessageSchema, recency_rank: int) -> Optional[Dict[str, Any]]:
         content_parts = []
 
         for sub in msg.sub_messages:
@@ -282,8 +281,10 @@ class MessageContextBuilder:
 
         res: Dict[str, Any] = {"role": msg.role}
 
-        if msg.role == "tool" and hasattr(msg, "tool_call_id"):
-            res["tool_call_id"] = msg.tool_call_id
+        if msg.role == "tool":
+            tool_call_id = getattr(msg, 'tool_call_id', None)
+            if tool_call_id:
+                res["tool_call_id"] = tool_call_id
 
         if len(content_parts) == 1 and content_parts[0]["type"] == "text":
             res["content"] = content_parts[0]["text"]
@@ -292,7 +293,7 @@ class MessageContextBuilder:
 
         return res
 
-    def _should_include_sub_message(self, sub: Any, recency_rank: int) -> bool:
+    def _should_include_sub_message(self, sub: SubMessageSchema, recency_rank: int) -> bool:
         if self.type_filter and sub.type not in self.type_filter:
             return False
 
@@ -306,7 +307,7 @@ class MessageContextBuilder:
 
         return True
 
-    async def _convert_sub_message_to_part(self, sub: Any) -> Optional[Dict[str, Any]]:
+    async def _convert_sub_message_to_part(self, sub: SubMessageSchema) -> Optional[Dict[str, Any]]:
         part = None
         if sub.type == schemas_enums.SubMessageType.FILE.value:
             part = await self._process_file_part(sub.content)
@@ -374,4 +375,3 @@ class MessageContextBuilder:
             else:
                 merged.append(msg)
         return merged
-

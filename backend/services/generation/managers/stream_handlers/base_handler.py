@@ -1,12 +1,13 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import AsyncGenerator, List, Dict, Set, Optional, Any
+from typing import AsyncGenerator, List, Dict, Set, Optional
 
 from langchain_core.tools import BaseTool
 
 from backend.services.generation.core.instructions import BaseInstruction
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
 from backend.services.generation.worker.decode import BaseDecode
+from backend.services.generation.worker.abstract_worker import StreamEvent
 
 
 @dataclass
@@ -17,7 +18,7 @@ class StreamContext:
     """
     decode: BaseDecode
     mode: str
-    event: Any
+    event: StreamEvent
     lc_run_uuid: Optional[str]
 
     # 只读配置

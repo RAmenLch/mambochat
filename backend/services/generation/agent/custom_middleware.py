@@ -6,7 +6,6 @@ from langchain.agents.middleware.types import (
     ModelResponse,
 )
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
-from langgraph.config import get_config
 
 
 class ToolMessageOrderingMiddleware(AgentMiddleware):
@@ -24,7 +23,7 @@ class ToolMessageOrderingMiddleware(AgentMiddleware):
             new_messages.append(msg)
             i += 1
 
-            if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+            if isinstance(msg, AIMessage) and msg.tool_calls:
                 tool_call_order = {
                     tc["id"]: idx for idx, tc in enumerate(msg.tool_calls)
                 }
@@ -46,20 +45,15 @@ class ToolMessageOrderingMiddleware(AgentMiddleware):
             request: ModelRequest,
             handler: Callable[[ModelRequest], ModelResponse],
     ) -> ModelResponse:
-        config  = get_config()
-        current_messages = request.messages
-        reordered_messages = self._reorder_tool_messages(current_messages)
+        reordered_messages = self._reorder_tool_messages(request.messages)
 
-        # 1. 更新 State，确保下一次循环历史记录正确
-        if hasattr(request, "state") and request.state:
-            if isinstance(request.state, dict):
-                request.state["messages"] = reordered_messages
+        # 同步更新 state 中的 messages，确保下一次循环历史记录正确
+        # ModelRequest.state 类型为 AgentState[Any]（TypedDict），始终为 dict
+        request.state["messages"] = reordered_messages
 
-        # 2. 【关键修复】创建一个新的 request 对象，覆盖 messages 属性
-        # factory.py 读取的是 request.messages，所以必须在这里修正
+        # 通过 override 创建新的 request，覆盖 messages 属性
         sorted_request = request.override(messages=reordered_messages)
 
-        # 3. 将修正后的 request 传给 handler
         return handler(sorted_request)
 
     async def awrap_model_call(
@@ -67,17 +61,13 @@ class ToolMessageOrderingMiddleware(AgentMiddleware):
             request: ModelRequest,
             handler: Callable[[ModelRequest], ModelResponse],
     ) -> ModelResponse:
-        current_messages = request.messages
-        reordered_messages = self._reorder_tool_messages(current_messages)
+        reordered_messages = self._reorder_tool_messages(request.messages)
 
-        # 1. 更新 State
-        if hasattr(request, "state") and request.state:
-            if isinstance(request.state, dict):
-                request.state["messages"] = reordered_messages
+        # 同步更新 state 中的 messages，确保下一次循环历史记录正确
+        # ModelRequest.state 类型为 AgentState[Any]（TypedDict），始终为 dict
+        request.state["messages"] = reordered_messages
 
-        # 2. 【关键修复】创建一个新的 request 对象，覆盖 messages 属性
-        # factory.py 读取的是 request.messages，所以必须在这里修正
+        # 通过 override 创建新的 request，覆盖 messages 属性
         sorted_request = request.override(messages=reordered_messages)
 
-        # 3. 将修正后的 request 传给 handler
         return await handler(sorted_request)

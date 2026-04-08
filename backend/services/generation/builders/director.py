@@ -9,11 +9,11 @@ from backend.crud import provider_crud
 from backend.schemas import enums as schemas_enums
 from backend.schemas.enums import ChatMode, AgentTypeEnum
 from backend.schemas.message import ReviewToolContent, McpToolContent
-from backend.schemas.provider import AIModel
-from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
+from backend.models.provider_model import AIModel
 
-from backend.services.generation.core.llm_io import LLMInput, ModelConfig, RunTimeConfig
+from backend.services.generation.core.llm_io import LLMInput, ModelConfig, RunTimeConfig, MessageSchema
 from backend.services.generation.builders.material_loader import GenerationMaterialLoader, GenerationMaterials
+from backend.services.generation.builders.param_utils import map_model_parameters
 from backend.services.generation.builders.context_builder import MessageContextBuilder
 from backend.services.generation.builders.initializers.chat_react_initializer import ChatBasedReActInitializer
 from backend.services.generation.builders.initializers.agent_react_initializer import AgentBasedReActInitializer
@@ -40,7 +40,7 @@ class LLMInputDirector:
         self._enable_zip_history: bool = True
         self._global_model_keys: List[str] = []
         self._system_prompt_override: Optional[str] = None
-        self._history_override: Optional[List[Any]] = None
+        self._history_override: Optional[List[MessageSchema]] = None
         self._enable_resource_merge: bool = False
         self._content_limit: Optional[int] = None
         self._flatten_history: bool = False
@@ -94,7 +94,7 @@ class LLMInputDirector:
         self._system_prompt_override = prompt
         return self
 
-    def set_history_override(self, history: List[Any]) -> "LLMInputDirector":
+    def set_history_override(self, history: List[MessageSchema]) -> "LLMInputDirector":
         self._history_override = history
         return self
 
@@ -141,15 +141,18 @@ class LLMInputDirector:
 
         model = await self._resolve_model(materials)
         provider = model.provider
+        if not provider:
+            raise ValueError(f"Model {model.modelId} has no associated provider")
 
         is_agent_mode = not self._force_normal_mode and \
                         (materials.chat.chatMode == ChatMode.AGENT.value and materials.agent is not None)
 
-        active_params = materials.agent.modelParameters if is_agent_mode else materials.chat.modelParameters
+        active_params = (materials.agent.parsed_model_parameters if is_agent_mode
+                         else materials.chat.parsed_model_parameters)
 
         api_params = {}
         if not self._global_model_keys:
-            api_params = self._map_parameters(active_params)
+            api_params = map_model_parameters(active_params)
 
         api_params["_worker_type"] = provider.worker_type
 
@@ -227,14 +230,7 @@ class LLMInputDirector:
 
         max_context_messages = None
         if self._enable_max_context_messages:
-            params = active_params
-            if isinstance(params, str):
-                try:
-                    params = json.loads(params)
-                except json.JSONDecodeError:
-                    params = {}
-            if params and isinstance(params, dict):
-                max_context_messages = params.get("max_context_messages")
+            max_context_messages = active_params.get("max_context_messages")
 
         context_builder = MessageContextBuilder(
             db=self.db,
@@ -296,30 +292,6 @@ class LLMInputDirector:
                 model = materials.chat.ai_model
         return model
 
-    def _map_parameters(self, model_params_data: Any) -> Dict[str, Any]:
-        flat_params = {}
-        if model_params_data:
-            flat_params = json.loads(model_params_data) if isinstance(model_params_data, str) else model_params_data
-
-        structured = {}
-        param_def_map = {p.key: p for p in SUPPORTED_LLM_PARAMETERS}
-
-        for key, value in flat_params.items():
-            if key in ["max_context_messages", "stream", "enabled_mcp_ids", "enable_suggest"]:
-                continue
-
-            definition = param_def_map.get(key)
-            if definition:
-                target = structured
-                for part in definition.path[:-1]:
-                    target = target.setdefault(part, {})
-                target[definition.path[-1]] = value
-
-        if 'stream' in flat_params:
-            structured['stream'] = flat_params['stream']
-
-        return structured
-
     def _model_supports_images(self, model: AIModel) -> bool:
         meta = model.meta_config
         if isinstance(meta, str):
@@ -328,18 +300,13 @@ class LLMInputDirector:
             except json.JSONDecodeError:
                 return False
 
-        if not meta:
+        if not meta or not isinstance(meta, dict):
             return False
 
-        input_modalities = []
-        if isinstance(meta, dict):
-            input_modalities = meta.get('input_modalities')
-        elif hasattr(meta, 'input_modalities'):
-            input_modalities = meta.input_modalities
-
+        input_modalities = meta.get('input_modalities')
         return 'image' in (input_modalities or [])
 
-    def _extract_resume_payload(self, target_msg: Optional[Any]) -> Optional[Dict[str, Any]]:
+    def _extract_resume_payload(self, target_msg: Optional[MessageSchema]) -> Optional[Dict[str, Any]]:
         if not (self._cutoff_message_id and self._enable_tools and target_msg):
             return None
 

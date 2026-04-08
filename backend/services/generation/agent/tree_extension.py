@@ -1,6 +1,7 @@
 # backend/services/generation/agent/tree_extension.py
 
 from abc import abstractmethod
+import asyncio
 from typing import Any, Dict, Annotated
 
 from langchain_core.tools import StructuredTool
@@ -22,6 +23,10 @@ class TreeBackendProtocol(BackendProtocol):
     def tree(self, path: str = "/", depth: int = 3) -> str:
         """Generate a compact directory tree string optimized for LLM context."""
         pass
+
+    async def atree(self, path: str = "/", depth: int = 3) -> str:
+        """Async wrapper that dispatches the synchronous tree method to a thread."""
+        return await asyncio.to_thread(self.tree, path, depth)
 
 
 # ==========================================
@@ -100,16 +105,13 @@ class TreeCompositeBackend(CompositeBackend, TreeBackendProtocol):
 
         # ---------- matched a specific route ----------
         if route_prefix is not None:
-            try:
-                if hasattr(backend, "atree"):
+            if isinstance(backend, TreeBackendProtocol):
+                try:
                     raw_tree = await backend.atree(backend_path, depth)
-                elif hasattr(backend, "tree"):
-                    import asyncio
-                    raw_tree = await asyncio.to_thread(backend.tree, backend_path, depth)
-                else:
-                    return f"Error: Backend mounted at {route_prefix} does not support tree."
-            except Exception as e:
-                return f"Error: {e}"
+                except Exception as e:
+                    return f"Error: {e}"
+            else:
+                return f"Error: Backend mounted at {route_prefix} does not support tree."
             lines = raw_tree.splitlines()
             if lines:
                 lines[0] = path
@@ -117,54 +119,43 @@ class TreeCompositeBackend(CompositeBackend, TreeBackendProtocol):
 
         # ---------- aggregate root "/" ----------
         if path == "/":
-            import asyncio
             lines = [path]
 
             # default backend
-            if hasattr(self.default, "atree"):
+            if isinstance(self.default, TreeBackendProtocol):
                 default_tree = await self.default.atree("/", depth)
-            elif hasattr(self.default, "tree"):
-                default_tree = await asyncio.to_thread(self.default.tree, "/", depth)
-            else:
-                default_tree = ""
-            default_lines = default_tree.splitlines()
-            if len(default_lines) > 1:
-                lines.extend(default_lines[1:])
+                default_lines = default_tree.splitlines()
+                if len(default_lines) > 1:
+                    lines.extend(default_lines[1:])
 
             # route backends
             for r_prefix, b in self.sorted_routes:
                 r_name = r_prefix.strip("/")
                 if depth > 1:
-                    try:
-                        if hasattr(b, "atree"):
+                    if isinstance(b, TreeBackendProtocol):
+                        try:
                             b_tree = await b.atree("/", depth - 1)
-                        elif hasattr(b, "tree"):
-                            b_tree = await asyncio.to_thread(b.tree, "/", depth - 1)
-                        else:
-                            lines.append(f"  {r_name}/ ... (unexpanded)")
+                        except Exception as e:
+                            lines.append(f"  {r_name}/ [offline] {e}")
                             continue
-                    except Exception as e:
-                        lines.append(f"  {r_name}/ [offline] {e}")
-                        continue
-                    if b_tree.startswith("Error"):
-                        lines.append(f"  {r_name}/ [offline] {b_tree}")
-                        continue
-                    b_lines = b_tree.splitlines()
-                    if len(b_lines) > 1:
-                        lines.append(f"  {r_name}/")
-                        lines.extend([f"  {line}" for line in b_lines[1:]])
+                        if b_tree.startswith("Error"):
+                            lines.append(f"  {r_name}/ [offline] {b_tree}")
+                            continue
+                        b_lines = b_tree.splitlines()
+                        if len(b_lines) > 1:
+                            lines.append(f"  {r_name}/")
+                            lines.extend([f"  {line}" for line in b_lines[1:]])
+                        else:
+                            lines.append(f"  {r_name}/ (empty)")
                     else:
-                        lines.append(f"  {r_name}/ (empty)")
+                        lines.append(f"  {r_name}/ ... (unexpanded)")
                 else:
                     lines.append(f"  {r_name}/ ... (unexpanded)")
             return "\n".join(lines)
 
         # ---------- fall through to default ----------
-        if hasattr(self.default, "atree"):
+        if isinstance(self.default, TreeBackendProtocol):
             return await self.default.atree(path, depth)
-        elif hasattr(self.default, "tree"):
-            import asyncio
-            return await asyncio.to_thread(self.default.tree, path, depth)
 
         return "Error: Default backend does not support tree."
 
@@ -176,7 +167,7 @@ class TreeCompositeBackend(CompositeBackend, TreeBackendProtocol):
         )
 
         if route_prefix is not None:
-            if isinstance(backend, TreeBackendProtocol) or hasattr(backend, "tree"):
+            if isinstance(backend, TreeBackendProtocol):
                 raw_tree = backend.tree(backend_path, depth)
                 lines = raw_tree.splitlines()
                 if lines:
@@ -186,14 +177,14 @@ class TreeCompositeBackend(CompositeBackend, TreeBackendProtocol):
 
         if path == "/":
             lines = [path]
-            if isinstance(self.default, TreeBackendProtocol) or hasattr(self.default, "tree"):
+            if isinstance(self.default, TreeBackendProtocol):
                 default_lines = self.default.tree("/", depth).splitlines()
                 if len(default_lines) > 1:
                     lines.extend(default_lines[1:])
 
             for r_prefix, b in self.sorted_routes:
                 r_name = r_prefix.strip("/")
-                if depth > 1 and (isinstance(b, TreeBackendProtocol) or hasattr(b, "tree")):
+                if depth > 1 and isinstance(b, TreeBackendProtocol):
                     b_lines = b.tree("/", depth - 1).splitlines()
                     if len(b_lines) > 1:
                         lines.append(f"  {r_name}/")
@@ -204,7 +195,7 @@ class TreeCompositeBackend(CompositeBackend, TreeBackendProtocol):
                     lines.append(f"  {r_name}/ ... (unexpanded)")
             return "\n".join(lines)
 
-        if isinstance(self.default, TreeBackendProtocol) or hasattr(self.default, "tree"):
+        if isinstance(self.default, TreeBackendProtocol):
             return self.default.tree(path, depth)
 
         return "Error: Default backend does not support tree."
@@ -233,7 +224,7 @@ class TreeMiddleware(AgentMiddleware):
         ) -> str:
             try:
                 backend = self._get_backend(runtime)
-                if hasattr(backend, "tree"):
+                if isinstance(backend, TreeBackendProtocol):
                     return backend.tree(path, depth)
                 return "Error: The current backend configuration does not support the tree operation."
             except Exception as e:
@@ -246,10 +237,8 @@ class TreeMiddleware(AgentMiddleware):
         ) -> str:
             try:
                 backend = self._get_backend(runtime)
-                if hasattr(backend, "atree"):
+                if isinstance(backend, TreeBackendProtocol):
                     return await backend.atree(path, depth)
-                elif hasattr(backend, "tree"):
-                    return backend.tree(path, depth)
                 return "Error: The current backend configuration does not support the tree operation."
             except Exception as e:
                 return f"Error executing tree: {str(e)}"

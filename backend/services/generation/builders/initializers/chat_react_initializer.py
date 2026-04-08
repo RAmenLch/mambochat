@@ -1,19 +1,17 @@
 # backend/services/generation/builders/initializers/chat_react_initializer.py
 
-import json
 from typing import Tuple, List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_core.tools import BaseTool
 
 from backend.schemas.enums import ToolReviewMode, AgentTypeEnum
+from backend.models.chat_model import Chat
 from backend.crud import mcp_crud
 
-# 导入核心层和同级组件
 from backend.services.generation.core.llm_io import AgentConfig
 from backend.services.generation.builders.initializers.base_initializer import AbstractAgentInitializer
 from backend.services.generation.builders.resource_dispatcher import ResourceDispatcher
 
-# 导入工具 Provider
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
 from backend.services.generation.tools.mcp_tool_provider import MCPToolProvider
 from backend.services.generation.tools.suggest_tool_provider import SuggestToolProvider
@@ -29,7 +27,7 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
     def __init__(
             self,
             db: AsyncSession,
-            chat: Any,  # 数据库 Chat 模型实例
+            chat: Chat,
             resume_payload: Optional[Dict[str, Any]] = None,
             enable_tools: bool = False,
             enable_resource_merge: bool = False,
@@ -69,12 +67,7 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
 
         # 2. 外部工具挂载 (MCP & Suggest)
         if self.enable_tools:
-            params = {}
-            if self.chat and self.chat.modelParameters:
-                try:
-                    params = json.loads(self.chat.modelParameters) if isinstance(self.chat.modelParameters, str) else self.chat.modelParameters
-                except (json.JSONDecodeError, TypeError):
-                    pass
+            params = self.chat.parsed_model_parameters
 
             # MCP 服务 (从 Chat 表读取 enabled_mcp_ids)
             mcp_ids = self.chat.enabled_mcp_ids or []
