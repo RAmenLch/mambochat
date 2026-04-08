@@ -31,6 +31,7 @@ export default {
   noSubAgents: '暂无子 Agent',
   noMcp: '暂无挂载工具',
   noBackend: '暂无挂载 Backend',
+  mountedBackend: '已挂载 Backend',
   mountBackend: '挂载 Backend',
   addBackend: '挂载 Backend',
   emptyState: '请在左侧选择或新建一个 Agent',

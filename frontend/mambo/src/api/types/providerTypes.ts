@@ -18,6 +18,7 @@ export interface AIModelBase {
   name: string
   model_type: ModelType
   meta_config?: AIModelMetaConfig | null
+  starred?: boolean
 }
 
 export interface AIModel extends AIModelBase {
@@ -33,6 +34,7 @@ export interface AIModelUpdate {
   name?: string
   model_type?: ModelType
   meta_config?: AIModelMetaConfig | null
+  starred?: boolean
 }
 
 export interface AIProvider {

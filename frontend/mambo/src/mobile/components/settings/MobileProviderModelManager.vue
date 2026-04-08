@@ -79,6 +79,13 @@
             class="delete-model-btn"
             @click.stop="handleDeleteModel(model)"
           ></el-button>
+          <el-icon
+            class="star-icon"
+            :class="{ starred: model.starred }"
+            @click.stop="handleToggleStar(model)"
+          >
+            <Star />
+          </el-icon>
         </div>
         <el-empty v-if="selectedProvider.models.length === 0" :description="t('model.list.empty')" />
       </div>
@@ -114,7 +121,7 @@ import { ref, watch, onMounted, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { storeToRefs } from 'pinia';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Plus, Edit, Delete, ArrowRight, ArrowLeft, Download, MoreFilled } from '@element-plus/icons-vue';
+import { Plus, Edit, Delete, ArrowRight, ArrowLeft, Download, MoreFilled, Star } from '@element-plus/icons-vue';
 import { useProviderStore } from '@/stores/providerStore';
 import type { AIProviderWithModels, AIModel, AIModelBase } from '@/api/types';
 import { useSystemConfigStore } from '@/stores/systemConfigStore'; // 引入
@@ -217,6 +224,10 @@ const handleDeleteModel = async (model: AIModel) => {
   } catch (error) {
     // User cancelled
   }
+};
+
+const handleToggleStar = async (model: AIModel) => {
+  await providerStore.updateModel(model.id, { starred: !model.starred });
 };
 
 const handleFetchModels = async () => {
@@ -383,5 +394,21 @@ const onDialogSubmitted = () => {
 .delete-model-btn {
   margin-left: auto;
   padding: 8px;
+}
+
+.star-icon {
+  cursor: pointer;
+  font-size: 18px;
+  color: var(--el-text-color-disabled);
+  transition: color 0.2s;
+  margin-left: 4px;
+}
+
+.star-icon.starred {
+  color: var(--el-color-warning);
+}
+
+.star-icon:active {
+  color: var(--el-color-warning-light-5);
 }
 </style>

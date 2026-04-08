@@ -17,6 +17,7 @@ export default {
     modality: '模态能力',
     params: '支持参数',
     viewParams: '查看',
+    star: '标星',
     typeChat: '对话模型',
     typeEmbedding: '向量模型',
   },

@@ -17,6 +17,7 @@ export default {
     modality: 'Modalities',
     params: 'Params',
     viewParams: 'View',
+    star: 'Star',
     typeChat: 'Chat',
     typeEmbedding: 'Embedding',
   },

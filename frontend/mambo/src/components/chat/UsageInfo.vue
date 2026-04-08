@@ -59,7 +59,7 @@ const formattedUsageText = computed<string>(() => {
 
   // 1. Prompt Tokens
   if (typeof usage.prompt_tokens === 'number') {
-    mainParts.push(`${t('usage.prompt')}: ${usage.prompt_tokens}`);
+    mainParts.push(`${t('chat.usage.prompt')}: ${usage.prompt_tokens}`);
   }
 
   // 2. Completion Tokens with Details
@@ -69,14 +69,14 @@ const formattedUsageText = computed<string>(() => {
 
     if (details) {
       if (typeof details.reasoning_tokens === 'number' && details.reasoning_tokens > 0) {
-        detailParts.push(`${t('usage.reasoning')}: ${details.reasoning_tokens}`);
+        detailParts.push(`${t('chat.usage.reasoning')}: ${details.reasoning_tokens}`);
       }
       if (typeof details.image_tokens === 'number' && details.image_tokens > 0) {
         detailParts.push(`Image: ${details.image_tokens}`);
       }
     }
 
-    let completionString = `${t('usage.completion')}: ${usage.completion_tokens}`;
+    let completionString = `${t('chat.usage.completion')}: ${usage.completion_tokens}`;
     if (detailParts.length > 0) {
       completionString += ` (${detailParts.join(', ')})`;
     }
@@ -85,7 +85,7 @@ const formattedUsageText = computed<string>(() => {
 
   // 3. Total Tokens
   if (typeof usage.total_tokens === 'number') {
-    mainParts.push(`${t('usage.total')}: ${usage.total_tokens}`);
+    mainParts.push(`${t('chat.usage.total')}: ${usage.total_tokens}`);
   }
 
   return mainParts.join(' | ');

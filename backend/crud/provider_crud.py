@@ -4,7 +4,7 @@ import json  # 导入 json 模块
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload, joinedload
-from sqlalchemy import update
+from sqlalchemy import update, desc
 from typing import List, Optional
 
 from backend.models import provider_model, chat_model
@@ -23,14 +23,18 @@ async def get_provider(db: AsyncSession, provider_id: str) -> Optional[provider_
 
 
 async def get_providers(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[provider_model.AIProvider]:
-    """获取AI服务提供商列表（包含其下的模型）"""
+    """获取AI服务提供商列表（包含其下的模型，模型按标星排序）"""
     result = await db.execute(
         select(provider_model.AIProvider)
         .options(selectinload(provider_model.AIProvider.models))
         .offset(skip)
         .limit(limit)
     )
-    return result.scalars().all()
+    providers = result.scalars().all()
+    # 对每个 provider 的 models 按 starred 降序排序
+    for provider in providers:
+        provider.models.sort(key=lambda m: m.starred, reverse=True)
+    return providers
 
 
 async def create_provider_with_models(db: AsyncSession,
@@ -98,8 +102,12 @@ async def get_model(db: AsyncSession, model_id: str) -> Optional[provider_model.
 
 
 async def get_models_by_provider(db: AsyncSession, provider_id: str) -> List[provider_model.AIModel]:
-    """获取指定提供商下的所有模型"""
-    result = await db.execute(select(provider_model.AIModel).filter(provider_model.AIModel.providerId == provider_id))
+    """获取指定提供商下的所有模型（按标星降序排序）"""
+    result = await db.execute(
+        select(provider_model.AIModel)
+        .filter(provider_model.AIModel.providerId == provider_id)
+        .order_by(desc(provider_model.AIModel.starred))
+    )
     return result.scalars().all()
 
 

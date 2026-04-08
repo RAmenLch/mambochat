@@ -31,6 +31,7 @@ export default {
   noSubAgents: 'No sub agents',
   noMcp: 'No mounted tools',
   noBackend: 'No mounted Backend',
+  mountedBackend: 'Mounted Backend',
   mountBackend: 'Mount Backend',
   addBackend: 'Mount Backend',
   emptyState: 'Please select or create an Agent on the left',

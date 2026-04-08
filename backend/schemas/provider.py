@@ -27,6 +27,7 @@ class AIModelBase(BaseModel):
     name: str
     meta_config: Optional[AIModelMetaConfig] = Field(None, description="模型的元配置信息")
     model_type: ModelType = Field(ModelType.CHAT, description="模型类型: chat 或 embedding")
+    starred: bool = Field(False, description="是否标星")
 
 
 class AIModelCreate(AIModelBase):
@@ -38,6 +39,7 @@ class AIModelUpdate(BaseModel):
     name: Optional[str] = None
     meta_config: Optional[AIModelMetaConfig] = None
     model_type: Optional[ModelType] = None
+    starred: Optional[bool] = None
 
 
 class AIModel(AIModelBase):
