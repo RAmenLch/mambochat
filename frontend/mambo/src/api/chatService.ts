@@ -17,6 +17,7 @@ import type {
   SearchRequest,
   SearchResponse,
   ReviewToolRequest,
+  AskUserAnswerRequest,
   ChatDuplicateRequest,
   ChatArchiveRequest,
 } from './types';
@@ -167,6 +168,15 @@ export const searchChats = (data: SearchRequest): Promise<SearchResponse> => {
  */
 export const submitToolReview = (messageId: string, data: ReviewToolRequest): Promise<Message> => {
   return apiClient.post(`/messages/${messageId}/review-tool`, data);
+};
+
+/**
+ * 提交 ask_user 问题回答
+ * @param messageId 主消息ID
+ * @param data 回答数据
+ */
+export const submitAskUserAnswer = (messageId: string, data: AskUserAnswerRequest): Promise<Message> => {
+  return apiClient.post(`/messages/${messageId}/answer-ask-user`, data);
 };
 
 /**

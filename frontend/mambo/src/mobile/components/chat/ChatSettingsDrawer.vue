@@ -86,6 +86,9 @@
         <el-form-item :label="$t('chat.settings.enableSuggest')">
           <el-switch v-model="chatSettingsForm.modelParameters.enable_suggest" />
         </el-form-item>
+        <el-form-item :label="$t('chat.settings.enableAskUser')">
+          <el-switch v-model="chatSettingsForm.modelParameters.enable_ask_user" />
+        </el-form-item>
 
         <el-form-item v-for="param in dynamicParameters" :key="param.key">
           <template #label>
@@ -270,6 +273,7 @@ watch(
       max_context_messages: params.max_context_messages ?? 0,
       stream: params.stream ?? true,
       enable_suggest: params.enable_suggest ?? false,
+      enable_ask_user: params.enable_ask_user ?? false,
     }
 
     mountedSystemResources.value = []
@@ -342,6 +346,7 @@ function handleSaveSettings() {
     max_context_messages: chatSettingsForm.modelParameters.max_context_messages,
     stream: chatSettingsForm.modelParameters.stream,
     enable_suggest: chatSettingsForm.modelParameters.enable_suggest,
+    enable_ask_user: chatSettingsForm.modelParameters.enable_ask_user,
   }
 
   for (const key in chatSettingsForm.modelParameters) {

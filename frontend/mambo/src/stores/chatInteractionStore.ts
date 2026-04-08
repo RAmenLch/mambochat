@@ -11,6 +11,7 @@ import {
   getChatWithMessages,
   initiateHistoryCompression as initiateHistoryCompressionAPI,
   submitToolReview as submitToolReviewAPI,
+  submitAskUserAnswer as submitAskUserAnswerAPI,
   activateMessageBranch,
   retryFailedGeneration as retryFailedGenerationAPI,
 } from '@/api/chatService'
@@ -24,6 +25,7 @@ import type {
   SubMessageUpdate,
   MessageStatus,
   ReviewToolRequest,
+  AskUserAnswerRequest,
 } from '@/api/types'
 
 /**
@@ -56,7 +58,7 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
         const finalMessage = sessionStore.currentChatMessages.find(m => m.id === assistantMessageId);
         if (finalMessage) {
           const hasPendingReview = finalMessage.sub_messages.some(
-            sm => sm.type === 'ReviewTool' && sm.status === 'pending_review'
+            sm => (sm.type === 'ReviewTool' || sm.type === 'AskUser') && sm.status === 'pending_review'
           );
           if (!hasPendingReview) {
             await batchUpdateSubMessagesMinimalState(assistantMessageId, true);
@@ -360,7 +362,7 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
         }
         else if (updatedMessage.status === 'completed') {
           const hasPendingReview = updatedMessage.sub_messages.some(
-            sm => sm.type === 'ReviewTool' && sm.status === 'pending_review'
+            sm => (sm.type === 'ReviewTool' || sm.type === 'AskUser') && sm.status === 'pending_review'
           );
           if (!hasPendingReview) {
             await batchUpdateSubMessagesMinimalState(messageId, true);
@@ -369,6 +371,44 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
       }
     } catch (error) {
       console.error('Failed to submit tool review:', error)
+      if (sessionStore.currentChatId) {
+        await sessionStore.selectChat(sessionStore.currentChatId, true)
+      }
+      throw error
+    }
+  }
+
+  async function submitAskUserAnswer(
+    messageId: string,
+    subMessageId: string,
+    answers: string[],
+    askStatus: string = 'answered',
+  ) {
+    try {
+      const updatedMessage = await submitAskUserAnswerAPI(messageId, {
+        sub_message_id: subMessageId,
+        answers,
+        ask_status: askStatus,
+      })
+
+      const index = sessionStore.currentChatMessages.findIndex((m) => m.id === messageId)
+      if (index !== -1) {
+        sessionStore.currentChatMessages.splice(index, 1, updatedMessage)
+
+        if (updatedMessage.status === 'generating') {
+          _subscribeToMessageStream(updatedMessage)
+        }
+        else if (updatedMessage.status === 'completed') {
+          const hasPendingReview = updatedMessage.sub_messages.some(
+            sm => (sm.type === 'ReviewTool' || sm.type === 'AskUser') && sm.status === 'pending_review'
+          );
+          if (!hasPendingReview) {
+            await batchUpdateSubMessagesMinimalState(messageId, true);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to submit ask_user answer:', error)
       if (sessionStore.currentChatId) {
         await sessionStore.selectChat(sessionStore.currentChatId, true)
       }
@@ -460,6 +500,7 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     _subscribeToMessageStream,
     batchUpdateSubMessagesMinimalState,
     submitToolReview,
+    submitAskUserAnswer,
     activateBranch,
     retryFailedGeneration,
   }

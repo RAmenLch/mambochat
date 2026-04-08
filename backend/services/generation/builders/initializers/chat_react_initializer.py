@@ -15,6 +15,7 @@ from backend.services.generation.builders.resource_dispatcher import ResourceDis
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
 from backend.services.generation.tools.mcp_tool_provider import MCPToolProvider
 from backend.services.generation.tools.suggest_tool_provider import SuggestToolProvider
+from backend.services.generation.tools.ask_user_tool_provider import AskUserToolProvider
 from backend.services.generation.tools.kb_tool_provider import KBToolProvider
 
 
@@ -84,6 +85,11 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
             enable_suggest = params.get("enable_suggest", False)
             if enable_suggest:
                 self.providers.append(SuggestToolProvider(enable_suggest=True))
+
+            # AskUser 提问工具 (从 Chat 的 modelParameters 中读取)
+            enable_ask_user = params.get("enable_ask_user", False)
+            if enable_ask_user:
+                self.providers.append(AskUserToolProvider(enable_ask_user=True))
 
         # 3. 收集所有工具实例与 Provider 的提示词注入
         all_tools: List[BaseTool] = list(self.external_tools)

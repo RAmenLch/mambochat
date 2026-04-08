@@ -17,12 +17,18 @@ from backend.schemas import SubMessageType, MessageStatus
 from backend.schemas.message import ToolApprovalRequest
 
 from pydantic import BaseModel
+
 class TaskStatusRequest(BaseModel):
     task_ids: List[str]
 
 class TaskStatusResponse(BaseModel):
     running_tasks: List[str]
 
+
+class AskUserAnswerRequest(BaseModel):
+    sub_message_id: str
+    answers: List[str]
+    ask_status: str = "answered"
 
 
 router = APIRouter()
@@ -431,10 +437,79 @@ async def review_tool_call(
         )
 
         if affected_rows == len(sub_ids):
-            await _start_generation_task(background_tasks, db_message.chatId, message_id, is_retry=True)
+            await _start_generation_task(background_tasks, db_message.chatId, message_id)
             is_resuming = True
 
     # 修复: 从活跃路径中重新获取，以装配 sibling 元数据
+    active_msgs = await message_crud.get_messages_by_chat(db, chat_id=db_message.chatId)
+    populated_msg = next((m for m in active_msgs if m.id == message_id), db_message)
+
+    hydrated_messages = await _hydrate_and_validate_messages([populated_msg], db)
+    response_message = hydrated_messages[0]
+
+    if is_resuming:
+        response_message.status = schemas.MessageStatus.GENERATING
+
+    return response_message
+
+
+@router.post(
+    "/messages/{message_id}/answer-ask-user",
+    response_model=schemas.Message,
+    summary="提交 ask_user 问题回答",
+    response_model_exclude_none=True
+)
+async def answer_ask_user(
+        message_id: str,
+        request: AskUserAnswerRequest,
+        background_tasks: BackgroundTasks,
+        db: AsyncSession = Depends(get_db)
+):
+    from backend.schemas.message import AskUserContent
+
+    db_sub = await message_crud.get_sub_message(db, request.sub_message_id)
+    if not db_sub or db_sub.messageId != message_id or db_sub.type != SubMessageType.ASK_USER.value:
+        raise HTTPException(status_code=404, detail="AskUser request not found.")
+
+    ask_content = AskUserContent.from_json_string(db_sub.content)
+    ask_content.answers = request.answers
+    ask_content.ask_status = request.ask_status
+
+    await message_crud.update_sub_message(
+        db,
+        request.sub_message_id,
+        schemas.SubMessageUpdate(content=ask_content.to_json_string())
+    )
+
+    db_message = await message_crud.get_message(db, message_id=message_id)
+    pending_ask_subs = [
+        sub for sub in db_message.sub_messages
+        if sub.type == SubMessageType.ASK_USER.value and sub.status == MessageStatus.PENDING_REVIEW.value
+    ]
+
+    all_answered = True
+    for sub in pending_ask_subs:
+        try:
+            content = AskUserContent.from_json_string(sub.content)
+            if content.answers is None:
+                all_answered = False
+                break
+        except (ValueError, ImportError):
+            all_answered = False
+            break
+
+    is_resuming = False
+
+    if all_answered and pending_ask_subs:
+        sub_ids = [sub.id for sub in pending_ask_subs]
+        affected_rows = await message_crud.batch_update_sub_messages_status_optimistic(
+            db, sub_ids, MessageStatus.PENDING_REVIEW, MessageStatus.COMPLETED
+        )
+
+        if affected_rows == len(sub_ids):
+            await _start_generation_task(background_tasks, db_message.chatId, message_id)
+            is_resuming = True
+
     active_msgs = await message_crud.get_messages_by_chat(db, chat_id=db_message.chatId)
     populated_msg = next((m for m in active_msgs if m.id == message_id), db_message)
 

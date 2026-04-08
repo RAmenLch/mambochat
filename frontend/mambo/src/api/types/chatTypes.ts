@@ -18,6 +18,7 @@ export type SubMessageType =
   | 'McpTool'
   | 'Suggest'
   | 'ReviewTool'
+  | 'AskUser'
   | 'Error'
 
 export interface SubMessageConfig {
@@ -200,6 +201,30 @@ export interface ReviewToolRequest {
 export interface ErrorContent {
   message: string
   stack_trace: string
+}
+
+// --- AskUser Types ---
+
+export interface AskUserQuestion {
+  question: string
+  type: 'text' | 'multiple_choice'
+  choices?: Array<{ value: string }>
+  required?: boolean
+}
+
+export interface AskUserContent {
+  tool_call_id: string
+  questions: AskUserQuestion[]
+  answers?: string[] | null
+  interrupt_index: number
+  batch_id: string
+  ask_status?: 'answered' | 'cancelled' | null
+}
+
+export interface AskUserAnswerRequest {
+  sub_message_id: string
+  answers: string[]
+  ask_status: string
 }
 
 // --- Search Types (Chat) ---

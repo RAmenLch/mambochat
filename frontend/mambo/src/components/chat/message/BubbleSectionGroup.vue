@@ -36,11 +36,12 @@
         v-for="tool in group.toolSubMessages"
         :key="tool.id"
         class="minimized-item"
-        :class="{ 'has-review': tool.type === 'ReviewTool' }"
+        :class="{ 'has-review': tool.type === 'ReviewTool', 'has-ask-user': tool.type === 'AskUser' }"
         @click="$emit('open-tool-dialog', tool.id)"
       >
         <el-icon>
           <Warning v-if="tool.type === 'ReviewTool'" style="color: var(--el-color-warning)" />
+          <QuestionFilled v-else-if="tool.type === 'AskUser'" style="color: var(--el-color-primary)" />
           <Loading v-else-if="tool.status === 'generating'" class="is-loading" />
           <CircleClose v-else-if="isToolError(tool)" style="color: var(--el-color-error)" />
           <CircleCheck v-else style="color: var(--el-color-success)" />
@@ -56,11 +57,11 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import type { Message, SubMessage, McpToolContent, ReviewToolContent } from '@/api/types';
+import type { Message, SubMessage, McpToolContent, ReviewToolContent, AskUserContent } from '@/api/types';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import SubMessageItem from '../SubMessageItem.vue';
 import type { BubbleSectionGroup } from '@/composables/useAssistantTimeline';
-import { Edit, CopyDocument, ArrowUpBold, ArrowDownBold, Warning, Loading, CircleClose, CircleCheck } from '@element-plus/icons-vue';
+import { Edit, CopyDocument, ArrowUpBold, ArrowDownBold, Warning, Loading, CircleClose, CircleCheck, QuestionFilled } from '@element-plus/icons-vue';
 
 const { t } = useI18n();
 
@@ -115,6 +116,9 @@ function getParsedContent(tool: SubMessage): McpToolContent | ReviewToolContent 
 }
 
 function getToolName(tool: SubMessage): string {
+  if (tool.type === 'AskUser') {
+    return t('chat.askUser.toolName');
+  }
   const content = getParsedContent(tool);
   return content?.name || t('chat.message.mcp.unknownTool');
 }
@@ -209,6 +213,14 @@ function isToolError(tool: SubMessage): boolean {
 .minimized-item.has-review:hover {
   border-color: var(--el-color-warning);
   color: var(--el-color-warning-dark-2);
+}
+.minimized-item.has-ask-user {
+  border-color: var(--el-color-primary-light-5);
+  background-color: var(--el-color-primary-light-9);
+}
+.minimized-item.has-ask-user:hover {
+  border-color: var(--el-color-primary);
+  color: var(--el-color-primary);
 }
 
 .minimized-item-title {

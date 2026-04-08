@@ -39,6 +39,7 @@ export default {
     confirmDelete: 'Confirm Delete',
     back: 'Back',
     operate: 'Actions',
+    submit: 'Submit',
   },
   dialog: {
     warning: 'Warning',

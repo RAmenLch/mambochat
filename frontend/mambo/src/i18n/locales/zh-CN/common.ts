@@ -39,6 +39,7 @@ export default {
     confirmDelete: '确定删除',
     back: '返回',
     operate: '操作',
+    submit: '提交',
   },
   dialog: {
     warning: '警告',

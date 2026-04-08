@@ -134,6 +134,13 @@
       :mode="toolDialogMode"
     />
 
+    <AskUserDialog
+      v-model:visible="askUserDialogVisible"
+      :parent-message-id="askUserDialogMessageId"
+      :sub-message-id="askUserDialogSubMessageId"
+      :ask-user-content="askUserDialogContent"
+    />
+
     <LogViewerDialog
       v-model:visible="logDialogVisible"
       :message-id="logDialogMessageId"
@@ -150,7 +157,7 @@ import { storeToRefs } from 'pinia';
 import { ElScrollbar, ElMessage } from 'element-plus';
 import { UploadFilled } from '@element-plus/icons-vue';
 import type { Ref } from 'vue';
-import type { ChatUpdate, SubMessageCreate, AIModel, Resource, Message, SubMessage } from '@/api/types';
+import type { ChatUpdate, SubMessageCreate, AIModel, Resource, Message, SubMessage, AskUserContent } from '@/api/types';
 import { uploadFile } from '@/api/fileService';
 import { duplicateChat } from '@/api/chatService';
 
@@ -173,6 +180,7 @@ import ChatHeader from './ChatHeader.vue';
 import AttachmentPreview from './AttachmentPreview.vue';
 import ChatInputBox from './ChatInputBox.vue';
 import McpToolDialog from './dialogs/McpToolDialog.vue';
+import AskUserDialog from './dialogs/AskUserDialog.vue';
 import LogViewerDialog from './dialogs/LogViewerDialog.vue';
 import ChatNavigator from './ChatNavigator.vue';
 
@@ -276,6 +284,11 @@ const toolDialogMessageId = ref<string | null>(null);
 const toolDialogInitialId = ref<string | undefined>(undefined);
 const toolDialogMode = ref<'review_all' | 'single'>('single');
 
+const askUserDialogVisible = ref(false);
+const askUserDialogMessageId = ref<string | null>(null);
+const askUserDialogSubMessageId = ref<string | null>(null);
+const askUserDialogContent = ref<AskUserContent | null>(null);
+
 const logDialogVisible = ref(false);
 const logDialogMessageId = ref<string | null>(null);
 
@@ -296,16 +309,35 @@ const attachedKnowledgeBases = computed(() => {
 const pendingReviewSubMessages = computed<SubMessage[]>(() => {
   const pendingMsg = currentChatMessages.value.find(msg => msg.status === 'pending_review');
   if (!pendingMsg) return [];
-  return pendingMsg.sub_messages.filter(sm => sm.type === 'ReviewTool' && sm.status === 'pending_review');
+  return pendingMsg.sub_messages.filter(
+    sm => (sm.type === 'ReviewTool' || sm.type === 'AskUser') && sm.status === 'pending_review'
+  );
 });
 
 const isPendingReview = computed(() => pendingReviewSubMessages.value.length > 0);
 
 function handleOpenToolDialog(message: Message, subMessageId: string, mode: 'review_all' | 'single' = 'single') {
+  // 检查是否是 AskUser 类型，打开对应的对话框
+  const sub = message.sub_messages.find(sm => sm.id === subMessageId);
+  if (sub && sub.type === 'AskUser') {
+    handleOpenAskUserDialog(message, sub);
+    return;
+  }
   toolDialogMessageId.value = message.id;
   toolDialogInitialId.value = subMessageId;
   toolDialogMode.value = mode;
   toolDialogVisible.value = true;
+}
+
+function handleOpenAskUserDialog(message: Message, subMessage: SubMessage) {
+  try {
+    askUserDialogContent.value = JSON.parse(subMessage.content) as AskUserContent;
+  } catch {
+    askUserDialogContent.value = null;
+  }
+  askUserDialogMessageId.value = message.id;
+  askUserDialogSubMessageId.value = subMessage.id;
+  askUserDialogVisible.value = true;
 }
 
 function handleViewLogs(messageId: string) {
@@ -318,7 +350,11 @@ function handleOpenReviewFromInput() {
     const pendingSubMsg = pendingReviewSubMessages.value[0];
     const parentMsg = currentChatMessages.value.find(m => m.id === pendingSubMsg.messageId);
     if (parentMsg) {
-      handleOpenToolDialog(parentMsg, pendingSubMsg.id, 'review_all');
+      if (pendingSubMsg.type === 'AskUser') {
+        handleOpenAskUserDialog(parentMsg, pendingSubMsg);
+      } else {
+        handleOpenToolDialog(parentMsg, pendingSubMsg.id, 'review_all');
+      }
     }
   }
 }

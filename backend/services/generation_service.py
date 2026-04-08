@@ -54,6 +54,14 @@ async def _calculate_message_status(message: chat_model.Message) -> schemas.Mess
                             return MessageStatus.PENDING_REVIEW
                     except (ValueError, ImportError):
                         continue
+                elif sm.type == SubMessageType.ASK_USER.value and sm.status == MessageStatus.PENDING_REVIEW.value:
+                    try:
+                        from backend.schemas.message import AskUserContent
+                        content = AskUserContent.from_json_string(sm.content)
+                        if content.answers is None:
+                            return MessageStatus.PENDING_REVIEW
+                    except (ValueError, ImportError):
+                        continue
 
         if MessageStatus.GENERATING.value in sub_statuses:
             return MessageStatus.COMPLETED if cancellation_requested else MessageStatus.GENERATING

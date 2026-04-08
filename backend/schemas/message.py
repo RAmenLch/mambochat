@@ -237,3 +237,31 @@ class ReviewToolContent(BaseModel):
             return cls(**data)
         except (json.JSONDecodeError, TypeError) as e:
             raise ValueError(f"Invalid JSON for ReviewToolContent: {e}")
+
+
+class AskUserContent(BaseModel):
+    """
+    专门用于处理 SubMessageType.ASK_USER 的 content 字段结构。
+    当 AI 调用 ask_user 工具时，中断产生的提问子消息。
+    """
+    tool_call_id: str = Field(..., description="ask_user 工具调用 ID")
+    questions: List[Dict[str, Any]] = Field(..., description="问题列表")
+    answers: Optional[List[str]] = Field(None, description="用户回答，None 表示尚未回答")
+    interrupt_index: int = Field(..., description="中断事件中的序号")
+    batch_id: str = Field(..., description="中断批次号")
+    ask_status: Optional[str] = Field(None, description="回答状态: 'answered' / 'cancelled' / None(待回答)")
+
+    def to_json_string(self) -> str:
+        """序列化为存储在 DB content 字段的 JSON 字符串"""
+        return self.model_dump_json(exclude_none=False)
+
+    @classmethod
+    def from_json_string(cls, json_str: str) -> 'AskUserContent':
+        """从 DB content 字符串反序列化"""
+        if not json_str:
+            raise ValueError("Empty content")
+        try:
+            data = json.loads(json_str)
+            return cls(**data)
+        except (json.JSONDecodeError, TypeError) as e:
+            raise ValueError(f"Invalid JSON for AskUserContent: {e}")

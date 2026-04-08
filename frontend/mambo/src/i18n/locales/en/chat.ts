@@ -94,6 +94,7 @@ export default {
     fileLoadFailed: 'File load failed',
     pendingReview: 'Pending Review',
     toolCallReviewed: 'Tool Call (Reviewed)',
+    pendingAnswer: 'Pending Answer',
     file: 'File',
     partition: 'Partition',
     duplicateUpToHere: 'Duplicate Up To Here',
@@ -158,6 +159,9 @@ export default {
     enableSuggest: 'Generate Suggestions',
     enableSuggestTip:
       'When enabled, AI will provide 3-5 follow-up questions at the end of the reply.',
+    enableAskUser: 'Allow AI to Ask User',
+    enableAskUserTip:
+      'When enabled, AI can ask the user questions to gather necessary information.',
     agent: 'Agent',
     agentInfoPreview: 'Agent Config Preview (Read-only)',
     bindAgent: 'Bound Agent',
@@ -203,5 +207,13 @@ export default {
     noLogs: 'No related logs',
     metaData: 'Run Metadata (MetaData)',
     payload: 'Underlying Payload (Payload)',
+  },
+  askUser: {
+    title: 'Answer Questions',
+    toolName: 'User Question',
+    optional: 'Optional',
+    other: 'Other',
+    otherPlaceholder: 'Enter your custom answer...',
+    answerPlaceholder: 'Enter your answer...',
   },
 }

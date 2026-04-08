@@ -8,7 +8,7 @@ from langchain_core.tools import BaseTool
 from backend.crud import provider_crud
 from backend.schemas import enums as schemas_enums
 from backend.schemas.enums import ChatMode, AgentTypeEnum
-from backend.schemas.message import ReviewToolContent, McpToolContent
+from backend.schemas.message import ReviewToolContent, McpToolContent, AskUserContent
 from backend.models.provider_model import AIModel
 
 from backend.services.generation.core.llm_io import LLMInput, ModelConfig, RunTimeConfig, MessageSchema
@@ -313,6 +313,7 @@ class LLMInputDirector:
         if target_msg.role != schemas_enums.MessageRole.ASSISTANT.value:
             return None
 
+        # 1. 提取 ReviewTool 决策
         decided_reviews = []
         for sub in target_msg.sub_messages:
             if sub.type == schemas_enums.SubMessageType.REVIEW_TOOL.value:
@@ -323,24 +324,55 @@ class LLMInputDirector:
                 except (ValueError, ImportError):
                     pass
 
-        if not decided_reviews:
+        # 2. 提取 AskUser 回答
+        decided_ask_users = []
+        for sub in target_msg.sub_messages:
+            if sub.type == schemas_enums.SubMessageType.ASK_USER.value:
+                try:
+                    content = AskUserContent.from_json_string(sub.content)
+                    if content.answers is not None:
+                        decided_ask_users.append((sub.createdAt, content))
+                except (ValueError, ImportError):
+                    pass
+
+        if not decided_reviews and not decided_ask_users:
             return None
 
-        decided_reviews.sort(key=lambda x: x[0], reverse=True)
-        latest_batch_id = decided_reviews[0][1].batch_id
-
-        latest_batch_decisions = [item[1] for item in decided_reviews if item[1].batch_id == latest_batch_id]
-        latest_batch_decisions.sort(key=lambda x: x.interrupt_index)
-
+        # 3. 构建 ReviewTool 恢复载荷
         resume_decisions = []
-        for item in latest_batch_decisions:
-            decision_dict = {"type": item.decision.type.value}
-            if item.decision.type.value == "edit" and item.decision.edited_action:
-                decision_dict["edited_action"] = item.decision.edited_action.model_dump()
-            if item.decision.type.value == "reject":
-                raw_reason = item.decision.message or ""
-                injected_message = f"{item.tool_call_id} 本批次 调用工具:{item.name}拒绝执行; 拒绝理由 {raw_reason}"
-                decision_dict["message"] = injected_message
-            resume_decisions.append(decision_dict)
+        if decided_reviews:
+            decided_reviews.sort(key=lambda x: x[0], reverse=True)
+            latest_review_batch_id = decided_reviews[0][1].batch_id
+            latest_batch_decisions = [item[1] for item in decided_reviews if item[1].batch_id == latest_review_batch_id]
+            latest_batch_decisions.sort(key=lambda x: x.interrupt_index)
 
-        return {"decisions": resume_decisions}
+            for item in latest_batch_decisions:
+                decision_dict = {"type": item.decision.type.value}
+                if item.decision.type.value == "edit" and item.decision.edited_action:
+                    decision_dict["edited_action"] = item.decision.edited_action.model_dump()
+                if item.decision.type.value == "reject":
+                    raw_reason = item.decision.message or ""
+                    injected_message = f"{item.tool_call_id} 本批次 调用工具:{item.name}拒绝执行; 拒绝理由 {raw_reason}"
+                    decision_dict["message"] = injected_message
+                resume_decisions.append(decision_dict)
+
+        # 4. 构建 AskUser 恢复载荷
+        ask_user_payload = None
+        if decided_ask_users:
+            decided_ask_users.sort(key=lambda x: x[0], reverse=True)
+            latest_ask_user = decided_ask_users[0][1]
+            ask_user_payload = {
+                "status": latest_ask_user.ask_status or "answered",
+                "answers": latest_ask_user.answers,
+            }
+
+        # 5. 组合恢复载荷
+        # 如果同时存在 ReviewTool 和 AskUser，只返回后触发的那个（按时间排序取最新）
+        all_decided = decided_reviews + decided_ask_users
+        all_decided.sort(key=lambda x: x[0], reverse=True)
+        latest_type = all_decided[0][1]
+
+        if isinstance(latest_type, AskUserContent):
+            return ask_user_payload
+        else:
+            return {"decisions": resume_decisions}

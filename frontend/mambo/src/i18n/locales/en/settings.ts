@@ -76,6 +76,8 @@ export default {
     streamTip: 'Enable streaming for new chats. If disabled, AI waits to return full response.',
     defaultEnableSuggest: 'Default Enable Suggestions',
     defaultEnableSuggestTip: 'Enable reply suggestions by default for new chats.',
+    defaultEnableAskUser: 'Default Allow AI to Ask User',
+    defaultEnableAskUserTip: 'Allow AI to ask the user questions by default for new chats.',
     saving: 'Saving settings...',
     saved: 'All changes saved',
     saveError: 'Save failed, check network',

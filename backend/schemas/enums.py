@@ -30,6 +30,7 @@ class SubMessageType(str, Enum):
     MCP_TOOL = "McpTool"
     SUGGEST = "Suggest"
     REVIEW_TOOL = "ReviewTool"
+    ASK_USER = "AskUser"
     ERROR = "Error"
 
 

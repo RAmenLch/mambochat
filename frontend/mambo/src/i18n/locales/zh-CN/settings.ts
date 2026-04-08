@@ -74,6 +74,8 @@ export default {
     streamTip: '新会话默认是否开启流式对话。关闭后, AI将一次性返回完整回复, 可能会增加等待时间。',
     defaultEnableSuggest: '默认启用回复建议',
     defaultEnableSuggestTip: '新会话默认是否启用回复建议功能。',
+    defaultEnableAskUser: '默认允许 AI 提问',
+    defaultEnableAskUserTip: '新会话默认是否允许 AI 向用户提问以获取必要信息。',
     saving: '正在保存设置...',
     saved: '所有更改已保存',
     saveError: '保存失败，请检查网络',

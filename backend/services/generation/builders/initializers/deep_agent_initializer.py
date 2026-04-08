@@ -17,6 +17,7 @@ from backend.services.generation.builders.param_utils import map_model_parameter
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
 from backend.services.generation.tools.mcp_tool_provider import MCPToolProvider
 from backend.services.generation.tools.suggest_tool_provider import SuggestToolProvider
+from backend.services.generation.tools.ask_user_tool_provider import AskUserToolProvider
 from backend.services.generation.tools.deep_builtin_tool_provider import DeepAgentBuiltinToolProvider
 from backend.services.file_service import FileService
 
@@ -79,6 +80,10 @@ class DeepAgentInitializer(AbstractAgentInitializer):
             enable_suggest = params.get("enable_suggest", False)
             if enable_suggest:
                 self.providers.append(SuggestToolProvider(enable_suggest=True))
+
+            enable_ask_user = params.get("enable_ask_user", False)
+            if enable_ask_user:
+                self.providers.append(AskUserToolProvider(enable_ask_user=True))
 
         builtin_provider = DeepAgentBuiltinToolProvider()
         self.providers.append(builtin_provider)

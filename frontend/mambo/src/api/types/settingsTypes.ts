@@ -19,6 +19,7 @@ export interface GlobalSettingsUpdate {
   send_message_shortcut: string | null
   language: string | null
   default_enable_suggest: boolean | null
+  default_enable_ask_user: boolean | null
 }
 
 export interface ProxyTestRequest {

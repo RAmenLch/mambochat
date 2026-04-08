@@ -1,7 +1,7 @@
 // frontend/mambo/src/composables/useAssistantTimeline.ts
 
 import { computed, type Ref } from 'vue';
-import type { Message, SubMessage, ReviewToolContent } from '@/api/types';
+import type { Message, SubMessage, ReviewToolContent, AskUserContent } from '@/api/types';
 
 /** 时间线中的一个分组：一段文本 + 跟随的工具调用 */
 export interface BubbleSectionGroup {
@@ -29,9 +29,22 @@ function isReviewToolDecided(sm: SubMessage): boolean {
   }
 }
 
+/**
+ * 判断一个 AskUser 是否已经被回答
+ */
+function isAskUserAnswered(sm: SubMessage): boolean {
+  if (sm.type !== 'AskUser') return false;
+  try {
+    const content = JSON.parse(sm.content) as AskUserContent;
+    return content.answers !== null && content.answers !== undefined;
+  } catch {
+    return false;
+  }
+}
+
 export function useAssistantTimeline(message: Ref<Message>) {
 
-  // 1. 过滤掉无需在时间线主轴显示的独立组件，以及已审批的 ReviewTool
+  // 1. 过滤掉无需在时间线主轴显示的独立组件，以及已审批的 ReviewTool 和已回答的 AskUser
   const timelineSubMessages = computed(() => {
     return message.value.sub_messages.filter(sm => {
       // 排除独立显示的类型
@@ -40,6 +53,10 @@ export function useAssistantTimeline(message: Ref<Message>) {
       }
       // 排除已审批的 ReviewTool (审批后后端通常会生成对应的 McpTool，所以隐藏原 ReviewTool 避免重复)
       if (sm.type === 'ReviewTool' && isReviewToolDecided(sm)) {
+        return false;
+      }
+      // 排除已回答的 AskUser (回答后后端会生成对应的 McpTool)
+      if (sm.type === 'AskUser' && isAskUserAnswered(sm)) {
         return false;
       }
       return true;
@@ -75,7 +92,7 @@ export function useAssistantTimeline(message: Ref<Message>) {
         currentSection = 'normal';
         currentGroup = { id: sm.id, textSubMessage: sm, toolSubMessages: [] };
       }
-      else if (sm.type === 'McpTool' || sm.type === 'ReviewTool') {
+      else if (sm.type === 'McpTool' || sm.type === 'ReviewTool' || sm.type === 'AskUser') {
         if (!currentGroup) {
           // 边缘情况：如果工具调用先于任何文本出现，创建一个虚拟的文本分组来容纳它
           currentGroup = { id: `${sm.id}_group`, textSubMessage: null, toolSubMessages: [] };

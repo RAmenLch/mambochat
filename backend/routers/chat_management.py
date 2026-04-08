@@ -28,7 +28,7 @@ def _validate_model_parameters(params: Dict[str, Any]):
     Raises HTTPException for any validation failures.
     """
     for key, value in params.items():
-        if key in ["max_context_messages", "stream", "enable_suggest"]:
+        if key in ["max_context_messages", "stream", "enable_suggest", "enable_ask_user"]:
             continue
 
         definition = _param_definition_map.get(key)
@@ -112,6 +112,7 @@ async def create_chat(chat: schemas.ChatCreate, db: AsyncSession = Depends(get_d
                 "max_context_messages": global_settings.default_max_context_messages,
                 "stream": global_settings.default_stream,
                 "enable_suggest": global_settings.default_enable_suggest,
+                "enable_ask_user": global_settings.default_enable_ask_user,
             }
             # Apply default activated parameters from central config
             for param_def in SUPPORTED_LLM_PARAMETERS:

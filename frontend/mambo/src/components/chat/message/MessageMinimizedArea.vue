@@ -15,13 +15,15 @@
         class="minimized-item"
         :class="{
           'is-inactive': isSubMessageInactive(subMessage),
-          'has-review': hasReview(subMessage)
+          'has-review': hasReview(subMessage),
+          'has-ask-user': subMessage.type === 'AskUser'
         }"
         @click="$emit('restore', subMessage.id)"
       >
-        <template v-if="subMessage.type === 'McpTool' || subMessage.type === 'ReviewTool'">
+        <template v-if="subMessage.type === 'McpTool' || subMessage.type === 'ReviewTool' || subMessage.type === 'AskUser'">
           <el-icon>
             <Warning v-if="subMessage.type === 'ReviewTool'" style="color: var(--el-color-warning)" />
+            <QuestionFilled v-else-if="subMessage.type === 'AskUser'" style="color: var(--el-color-primary)" />
             <Loading
               v-else-if="getMinimizedMcpInfo(subMessage).status === 'generating'"
               class="is-loading"
@@ -36,6 +38,8 @@
             {{
               subMessage.type === 'ReviewTool'
               ? $t('chat.message.pendingReview')
+              : subMessage.type === 'AskUser'
+              ? $t('chat.askUser.pendingAnswer')
               : (hasReview(subMessage) ? $t('chat.message.toolCallReviewed') : $t('chat.message.toolCall'))
             }}
           </span>
@@ -52,8 +56,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { SubMessage, McpToolContent, ReviewToolContent } from '@/api/types'
-import { Warning, Loading, CircleCheck, CircleClose, Document } from '@element-plus/icons-vue'
+import type { SubMessage, McpToolContent, ReviewToolContent, AskUserContent } from '@/api/types'
+import { Warning, Loading, CircleCheck, CircleClose, Document, QuestionFilled } from '@element-plus/icons-vue'
 
 const props = defineProps<{
   displayableSubMessages: SubMessage[]
@@ -100,7 +104,7 @@ function hasReview(subMessage: SubMessage): boolean {
 
 const minimizedSubMessages = computed(() => {
   const allSubMessages = props.displayableSubMessages
-  const tools = allSubMessages.filter(sm => sm.type === 'McpTool' || sm.type === 'ReviewTool')
+  const tools = allSubMessages.filter(sm => sm.type === 'McpTool' || sm.type === 'ReviewTool' || sm.type === 'AskUser')
 
   const mcpToolCallIds = new Set(
     tools.filter(sm => sm.type === 'McpTool')
@@ -121,11 +125,18 @@ const minimizedSubMessages = computed(() => {
         return !mcpToolCallIds.has(content.tool_call_id)
       } catch { return true }
     }
+    if (sm.type === 'AskUser') {
+      try {
+        const content = JSON.parse(sm.content) as AskUserContent
+        if (content.answers !== null && content.answers !== undefined) return false
+        return !mcpToolCallIds.has(content.tool_call_id)
+      } catch { return true }
+    }
     return true
   })
 
   const normalMinimized = allSubMessages.filter(sm =>
-    sm.config?.is_minimal === true && sm.type !== 'McpTool' && sm.type !== 'ReviewTool'
+    sm.config?.is_minimal === true && sm.type !== 'McpTool' && sm.type !== 'ReviewTool' && sm.type !== 'AskUser'
   )
 
   return [...normalMinimized, ...deduplicatedTools].sort((a, b) => a.sortOrder - b.sortOrder)
@@ -243,6 +254,14 @@ function getMinimizedTooltipContent(subMessage: SubMessage): string {
 .minimized-item.has-review:hover {
   border-color: var(--el-color-warning-dark-2);
   color: var(--el-color-warning-dark-2);
+}
+.minimized-item.has-ask-user {
+  border-color: var(--el-color-primary-light-5);
+  background-color: var(--el-color-primary-light-9);
+}
+.minimized-item.has-ask-user:hover {
+  border-color: var(--el-color-primary);
+  color: var(--el-color-primary);
 }
 .is-user .minimized-item.has-review {
   border-color: var(--el-color-warning);

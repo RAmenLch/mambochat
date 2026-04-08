@@ -21,6 +21,7 @@ class GlobalSettingsUpdate(BaseModel):
     default_top_p: Optional[float] = Field(None, description="默认Top P")
     default_stream: Optional[bool] = Field(None, description="默认是否开启流式对话")
     default_enable_suggest: Optional[bool] = Field(None, description="默认是否开启回复建议生成")
+    default_enable_ask_user: Optional[bool] = Field(None, description="默认是否允许AI向用户提问")
     # 全局代理配置
     proxy_enabled: Optional[bool] = Field(None, description="是否全局启用代理")
     proxy_url: Optional[str] = Field(None, description="代理服务器的URL, 例如: http://127.0.0.1:7890")

@@ -41,7 +41,7 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
     keys = [
         "default_model_id", "title_generation_model_id", "zip_history_system_prompt",
         "last_selected_provider_id", "default_max_context_messages", "default_temperature",
-        "default_top_p", "default_stream", "default_enable_suggest", "proxy_enabled", "proxy_url",
+        "default_top_p", "default_stream", "default_enable_suggest", "default_enable_ask_user", "proxy_enabled", "proxy_url",
         "user_avatar_file_id", "ai_avatar_file_id",
         "frontend_editor", "kb_default_chunk_size", "kb_default_chunk_overlap", "send_message_shortcut",
         "language"
@@ -79,6 +79,7 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
     top_p = _get_typed_setting(settings_map.get("default_top_p"), 1.0, float)
     stream = _get_typed_setting(settings_map.get("default_stream"), True, bool)
     enable_suggest = _get_typed_setting(settings_map.get("default_enable_suggest"), False, bool)
+    enable_ask_user = _get_typed_setting(settings_map.get("default_enable_ask_user"), False, bool)
     proxy_enabled = _get_typed_setting(settings_map.get("proxy_enabled"), False, bool)
     proxy_url = _get_typed_setting(settings_map.get("proxy_url"), None, str)
 
@@ -98,6 +99,7 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
         default_top_p=top_p,
         default_stream=stream,
         default_enable_suggest=enable_suggest,
+        default_enable_ask_user=enable_ask_user,
         proxy_enabled=proxy_enabled,
         proxy_url=proxy_url,
         user_avatar_url=user_avatar_url,
@@ -160,7 +162,7 @@ async def update_global_settings(
 
     param_keys = [
         "default_max_context_messages", "default_temperature", "default_top_p",
-        "default_stream", "default_enable_suggest", "proxy_enabled", "proxy_url",
+        "default_stream", "default_enable_suggest", "default_enable_ask_user", "proxy_enabled", "proxy_url",
         "zip_history_system_prompt",
         "frontend_editor", "kb_default_chunk_size", "kb_default_chunk_overlap", "send_message_shortcut",
         "language"

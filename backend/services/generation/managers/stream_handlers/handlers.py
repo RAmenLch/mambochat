@@ -4,7 +4,7 @@ from langchain_core.messages import AIMessage
 
 from backend.models.base_model import generate_uuid
 from backend.schemas import enums as schemas_enums
-from backend.schemas.message import ReviewToolContent
+from backend.schemas.message import ReviewToolContent, AskUserContent
 from backend.services.generation.core.instructions import (
     BaseInstruction, CreateSubMessage, AppendToSubMessage,
     UpdateSubMessageConfig, UpdateSubMessageStatus,
@@ -20,36 +20,78 @@ class HitlHandler(BaseStreamHandler):
 
         # 1. 拦截中断请求
         interrupt_data = Decode.get_hitl_interrupt(context.mode, context.event)
-        if interrupt_data and "action_requests" in interrupt_data:
-            current_batch_id = generate_uuid()
-            reviewable_calls = [tc for tc in context.pending_hitl_tool_calls if context.hitl_config.get(tc.get("name"))]
+        if interrupt_data:
+            # --- ask_user 类型中断 ---
+            if interrupt_data.get("type") == "ask_user":
+                questions = interrupt_data.get("questions", [])
+                tool_call_id = interrupt_data.get("tool_call_id", "")
+                current_batch_id = generate_uuid()
 
-            for idx, action_req in enumerate(interrupt_data["action_requests"]):
-                tool_call_id = reviewable_calls[idx].get("id") if idx < len(reviewable_calls) else (action_req.get("id") or generate_uuid())
-                name = action_req.get("name")
-                target_tool = context.tool_map.get(name)
-
-                review_content = ReviewToolContent(
-                    tool_call_id=tool_call_id,
-                    name=name,
-                    arguments=action_req.get("args", {}),
-                    input_schema=target_tool.args if target_tool else None,
-                    description=action_req.get("description"),
-                    interrupt_index=idx,
-                    batch_id=current_batch_id,
-                    decision=None
+                # 创建 McpTool 子消息（记录工具调用信息，参与上下文）
+                pending_call = next(
+                    (tc for tc in context.pending_hitl_tool_calls if tc.get("id") == tool_call_id),
+                    None
                 )
+                if pending_call:
+                    for provider in context.providers:
+                        if provider.matches_tool_name("ask_user"):
+                            async for inst in provider.create_call_instruction(
+                                tool_call_id, "ask_user", pending_call.get("args") or {},
+                                context.tool_map.get("ask_user")
+                            ):
+                                yield inst
+                            break
 
+                # 创建 AskUser 子消息（展示提问 UI）
+                ask_content = AskUserContent(
+                    tool_call_id=tool_call_id,
+                    questions=questions,
+                    answers=None,
+                    interrupt_index=0,
+                    batch_id=current_batch_id,
+                )
                 yield CreateSubMessage(
                     sub_message_id=generate_uuid(),
-                    type=schemas_enums.SubMessageType.REVIEW_TOOL.value,
+                    type=schemas_enums.SubMessageType.ASK_USER.value,
                     sortOrder=2,
                     status=schemas_enums.MessageStatus.PENDING_REVIEW,
-                    initial_content=review_content.to_json_string(),
+                    initial_content=ask_content.to_json_string(),
                     config={"context_participation_length": 0}
                 )
-            yield InterruptGeneration()
-            return
+                yield InterruptGeneration()
+                return
+
+            # --- HITL 审核中断 ---
+            if "action_requests" in interrupt_data:
+                current_batch_id = generate_uuid()
+                reviewable_calls = [tc for tc in context.pending_hitl_tool_calls if context.hitl_config.get(tc.get("name"))]
+
+                for idx, action_req in enumerate(interrupt_data["action_requests"]):
+                    tool_call_id = reviewable_calls[idx].get("id") if idx < len(reviewable_calls) else (action_req.get("id") or generate_uuid())
+                    name = action_req.get("name")
+                    target_tool = context.tool_map.get(name)
+
+                    review_content = ReviewToolContent(
+                        tool_call_id=tool_call_id,
+                        name=name,
+                        arguments=action_req.get("args", {}),
+                        input_schema=target_tool.args if target_tool else None,
+                        description=action_req.get("description"),
+                        interrupt_index=idx,
+                        batch_id=current_batch_id,
+                        decision=None
+                    )
+
+                    yield CreateSubMessage(
+                        sub_message_id=generate_uuid(),
+                        type=schemas_enums.SubMessageType.REVIEW_TOOL.value,
+                        sortOrder=2,
+                        status=schemas_enums.MessageStatus.PENDING_REVIEW,
+                        initial_content=review_content.to_json_string(),
+                        config={"context_participation_length": 0}
+                    )
+                yield InterruptGeneration()
+                return
 
         # 2. 处理恢复数据
         middleware_data = Decode.get_hitl_middleware_data(context.mode, context.event)

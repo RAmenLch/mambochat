@@ -100,6 +100,31 @@
                 <el-switch v-model="form.modelParameters.stream" />
               </el-form-item>
             </el-col>
+            <el-col :span="12">
+              <el-form-item>
+                <template #label>
+                  <span>{{ $t('chat.settings.enableSuggest') }}</span>
+                  <el-tooltip effect="dark" :content="$t('chat.settings.enableSuggestTip')" placement="top">
+                    <el-icon class="label-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-switch v-model="form.modelParameters.enable_suggest" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+
+          <el-row :gutter="40" v-if="form.aiModelId">
+            <el-col :span="12">
+              <el-form-item>
+                <template #label>
+                  <span>{{ $t('chat.settings.enableAskUser') }}</span>
+                  <el-tooltip effect="dark" :content="$t('chat.settings.enableAskUserTip')" placement="top">
+                    <el-icon class="label-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-switch v-model="form.modelParameters.enable_ask_user" />
+              </el-form-item>
+            </el-col>
           </el-row>
 
           <el-row :gutter="40" v-if="form.aiModelId">
@@ -477,6 +502,8 @@ watch(agentData, async (newVal) => {
       ...params,
       max_context_messages: params.max_context_messages ?? 0,
       stream: params.stream ?? true,
+      enable_suggest: params.enable_suggest ?? false,
+      enable_ask_user: params.enable_ask_user ?? false,
     };
 
     form.agentAvatarUrl = newVal.agentAvatarUrl || null;
@@ -518,7 +545,7 @@ watch(() => form.aiModelId, (newModelId) => {
   if (!currentModel) return;
 
   const supportedParams = new Set(currentModel.meta_config?.supported_parameters ?? []);
-  const keysToKeep = new Set(['max_context_messages', 'stream', 'temperature', 'top_p']);
+  const keysToKeep = new Set(['max_context_messages', 'stream', 'enable_suggest', 'enable_ask_user', 'temperature', 'top_p']);
 
   systemConfigStore.llmParameters.forEach(p => {
     if (supportedParams.has(p.key) || p.default_activate) keysToKeep.add(p.key);
@@ -611,6 +638,8 @@ async function handleSave() {
     const finalModelParameters: Record<string, any> = {
       max_context_messages: form.modelParameters.max_context_messages,
       stream: form.modelParameters.stream,
+      enable_suggest: form.modelParameters.enable_suggest,
+      enable_ask_user: form.modelParameters.enable_ask_user,
     };
 
     for (const key in form.modelParameters) {
