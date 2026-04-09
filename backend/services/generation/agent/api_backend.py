@@ -21,10 +21,12 @@ from typing import Any
 
 from deepagents.backends.protocol import (
     EditResult,
+    ExecuteResponse,
     FileDownloadResponse,
     FileInfo,
     FileUploadResponse,
     GrepMatch,
+    SandboxBackendProtocol,
     WriteResult,
 )
 from deepagents.backends.utils import (
@@ -37,7 +39,7 @@ from backend.services.generation.agent.tree_extension import TreeBackendProtocol
 logger = logging.getLogger(__name__)
 
 
-class APIBackend(TreeBackendProtocol):
+class APIBackend(SandboxBackendProtocol, TreeBackendProtocol):
     """Backend that proxies file operations to a WebSocket-connected client.
 
     The client connects to the server's WebSocket endpoint at:
@@ -48,6 +50,8 @@ class APIBackend(TreeBackendProtocol):
 
     The server passes virtual paths directly to the client. The client
     resolves them relative to its own root directory.
+
+    Also supports shell command execution via the client's subprocess.
     """
 
     def __init__(
@@ -63,6 +67,70 @@ class APIBackend(TreeBackendProtocol):
         self.edit_whitelist = edit_whitelist or []
         self.edit_blacklist = edit_blacklist or []
         self.timeout = timeout
+
+    @property
+    def id(self) -> str:
+        """Unique identifier for the sandbox backend instance."""
+        return f"api://{self.backend_name}"
+
+    def execute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+    ) -> ExecuteResponse:
+        """Sync execute — delegates to aexecute via asyncio.
+
+        Since this backend communicates over WebSocket (async), the sync
+        version schedules the async call on the running event loop.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                return pool.submit(asyncio.run, self.aexecute(command, timeout=timeout)).result()
+        except RuntimeError:
+            pass
+
+        try:
+            main_loop = asyncio.get_event_loop()
+        except RuntimeError:
+            main_loop = None
+
+        if main_loop and main_loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(
+                self.aexecute(command, timeout=timeout), main_loop
+            )
+            try:
+                return future.result(timeout=(timeout or 120) + 5)
+            except Exception as e:
+                return ExecuteResponse(output=f"Error executing command: {e}", exit_code=1)
+
+        return asyncio.run(self.aexecute(command, timeout=timeout))
+
+    async def aexecute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+    ) -> ExecuteResponse:
+        """Execute a shell command on the API client's machine via WebSocket."""
+        try:
+            result = await self._call("execute", {
+                "command": command,
+                "timeout": timeout,
+            })
+        except (ConnectionError, TimeoutError) as e:
+            return ExecuteResponse(output=f"Error executing command: {e}", exit_code=1)
+
+        if result.get("error"):
+            return ExecuteResponse(output=result["error"], exit_code=1)
+
+        return ExecuteResponse(
+            output=result.get("output", ""),
+            exit_code=result.get("exit_code"),
+            truncated=result.get("truncated", False),
+        )
 
     def _check_online(self) -> str | None:
         """Check if the API client is currently connected.

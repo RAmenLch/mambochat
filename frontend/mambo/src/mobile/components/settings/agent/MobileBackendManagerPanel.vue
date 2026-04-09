@@ -141,6 +141,20 @@
             <el-select v-model="form.configData.ignore_dirs" multiple filterable allow-create default-first-option placeholder="例如: .git" style="width: 100%" />
           </el-form-item>
         </template>
+
+        <!-- 工具配置 -->
+        <el-divider content-position="left">{{ $t('backend.toolConfig') }}</el-divider>
+        <el-form-item label="Execute (命令执行)">
+          <div class="tools-config-row">
+            <span class="tools-config-label">{{ $t('backend.toolEnabled') }}</span>
+            <el-switch v-model="form.tools_config!.execute.enabled" />
+            <template v-if="form.tools_config!.execute.enabled">
+              <span class="tools-config-label" style="margin-left: 16px;">{{ $t('backend.toolRequireReview') }}</span>
+              <el-switch v-model="form.tools_config!.execute.require_review" />
+            </template>
+          </div>
+          <div class="tools-config-tip">{{ $t('backend.toolExecuteTip') }}</div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <div class="dialog-footer-actions">
@@ -187,6 +201,7 @@ import { useBackendStore } from '@/stores/backendStore';
 import { copyToClipboard } from '@/utils/clipboard';
 import { getClientStatus } from '@/api/backendService';
 import type { BackendConfig, BackendCreate, BackendType, SshConfigData, ApiConfigData, SshTestRequest } from '@/api/types/backendTypes';
+import { defaultToolsConfig } from '@/api/types/backendTypes';
 
 const backendStore = useBackendStore();
 const { backendList, isLoading, systemPublicKey } = storeToRefs(backendStore);
@@ -224,7 +239,8 @@ const defaultForm = (type: BackendType = 'ssh'): BackendCreate => ({
   name: '',
   description: '',
   backendType: type,
-  configData: type === 'ssh' ? sshDefaultConfig() : apiDefaultConfig()
+  configData: type === 'ssh' ? sshDefaultConfig() : apiDefaultConfig(),
+  tools_config: defaultToolsConfig()
 });
 
 const form = reactive<BackendCreate>(defaultForm('ssh'));
@@ -308,7 +324,8 @@ const handleEdit = (row: BackendConfig) => {
       edit_whitelist: (row.configData as any).edit_whitelist || [],
       edit_blacklist: (row.configData as any).edit_blacklist || [],
       ignore_dirs: (row.configData as any).ignore_dirs || [],
-    }
+    },
+    tools_config: row.tools_config ? JSON.parse(JSON.stringify(row.tools_config)) : defaultToolsConfig(),
   });
   dialogVisible.value = true;
   formRef.value?.clearValidate();
@@ -516,5 +533,23 @@ const copyPublicKey = async () => {
 .right-actions {
   display: flex;
   gap: 8px;
+}
+
+.tools-config-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tools-config-label {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+
+.tools-config-tip {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
 }
 </style>

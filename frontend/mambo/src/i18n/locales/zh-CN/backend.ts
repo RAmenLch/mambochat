@@ -9,4 +9,8 @@ export default {
   testConnection: '测试连接',
   type: '类型',
   description: '描述',
+  toolConfig: '工具配置',
+  toolEnabled: '启用',
+  toolRequireReview: '需审核',
+  toolExecuteTip: '启用后 Agent 可在该 Backend 上执行 Shell 命令，建议开启审核以保障安全。',
 }

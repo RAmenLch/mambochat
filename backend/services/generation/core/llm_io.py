@@ -107,6 +107,10 @@ class AgentConfig(BaseModel):
         default=None,
         description="挂载的 Backend 配置列表 (包含类型、路由名称和连接参数)"
     )
+    default_backend_id: Optional[str] = Field(
+        None,
+        description="用户选择的默认 Backend ID，该 backend 将成为 default"
+    )
     tools: Optional[List[BaseTool]] = Field(None, description="挂载给 Agent 的工具列表")
 
     skills: Optional[List[SkillConfig]] = Field(

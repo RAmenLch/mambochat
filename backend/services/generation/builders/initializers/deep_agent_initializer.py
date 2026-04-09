@@ -102,11 +102,15 @@ class DeepAgentInitializer(AbstractAgentInitializer):
         if self.agent.backendIds:
             backends_db = await backend_crud.get_backends_by_ids(self.db, self.agent.backendIds)
             for b in backends_db:
+                config_data = dict(b.configData) if b.configData else {}
+                # Attach tools_config so the factory can check execute.enabled
+                if b.tools_config:
+                    config_data["tools_config"] = b.tools_config
                 mounted_backends.append({
                     "id": b.id,
                     "name": b.name,
                     "backendType": b.backendType,
-                    "configData": b.configData
+                    "configData": config_data,
                 })
 
         sub_configs: List[AgentConfig] = []
@@ -172,6 +176,16 @@ class DeepAgentInitializer(AbstractAgentInitializer):
         additional_system_prompt = "\n\n".join(extended_prompts) if extended_prompts else ""
         final_system_prompt = f"{base_prompt}\n\n{additional_system_prompt}".strip() if additional_system_prompt else base_prompt
 
+        # HITL: check if default backend requires execute review
+        if self.agent.defaultBackendId and self.agent.backendIds:
+            backends_db_for_hitl = await backend_crud.get_backends_by_ids(self.db, self.agent.backendIds)
+            for b in backends_db_for_hitl:
+                if b.id == self.agent.defaultBackendId and b.tools_config:
+                    exec_cfg = b.tools_config.get("execute", {})
+                    if exec_cfg.get("enabled") and exec_cfg.get("require_review"):
+                        self.hitl_interrupt_on["execute"] = True
+                    break
+
         agent_config = AgentConfig(
             name=self.agent.name,
             description=self.agent.description or "",
@@ -182,7 +196,8 @@ class DeepAgentInitializer(AbstractAgentInitializer):
             sub_configs=sub_configs if sub_configs else None,
             hitl_interrupt_on=self.hitl_interrupt_on,
             resume_payload=self.resume_payload,
-            mounted_backends=mounted_backends if mounted_backends else None
+            mounted_backends=mounted_backends if mounted_backends else None,
+            default_backend_id=self.agent.defaultBackendId,
         )
 
         return agent_config, additional_system_prompt

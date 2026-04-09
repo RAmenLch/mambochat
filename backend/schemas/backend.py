@@ -35,6 +35,10 @@ class BackendConfigBase(BaseModel):
     description: Optional[str] = Field(None, description="描述")
     backendType: BackendType = Field(..., description="Backend 类型")
     configData: Dict[str, Any] = Field(..., description="配置数据")
+    tools_config: Optional[Dict[str, Any]] = Field(
+        None,
+        description="工具配置，如 {\"execute\": {\"enabled\": false, \"require_review\": true}}"
+    )
 
     @field_validator('name')
     @classmethod
@@ -72,6 +76,7 @@ class BackendConfigUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     configData: Optional[Dict[str, Any]] = None
+    tools_config: Optional[Dict[str, Any]] = None
 
     @field_validator('name')
     @classmethod

@@ -435,6 +435,45 @@ def handle_download_files(paths: list[str]) -> dict:
     return {"results": results}
 
 
+def handle_execute(command: str, timeout: Optional[int] = None) -> dict:
+    """Execute a shell command on the client's machine."""
+    import subprocess
+
+    try:
+        proc = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        output = proc.stdout
+        if proc.stderr:
+            output = output + proc.stderr if output else proc.stderr
+
+        truncated = len(output) > 100000
+        if truncated:
+            output = output[:100000] + "\n... (output truncated)"
+
+        return {
+            "output": output,
+            "exit_code": proc.returncode,
+            "truncated": truncated,
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "output": f"Command timed out after {timeout} seconds",
+            "exit_code": -1,
+            "truncated": False,
+        }
+    except Exception as e:
+        return {
+            "output": f"Error executing command: {e}",
+            "exit_code": -1,
+            "truncated": False,
+        }
+
+
 # ==========================================
 # Command Dispatcher
 # ==========================================
@@ -472,6 +511,11 @@ async def handle_command(method: str, params: dict) -> dict:
             return handle_upload_files(params.get("files", []))
         elif method == "download_files":
             return handle_download_files(params.get("paths", []))
+        elif method == "execute":
+            return handle_execute(
+                params.get("command", ""),
+                params.get("timeout"),
+            )
         else:
             return {"error": f"Unknown method: {method}"}
     except Exception as e:

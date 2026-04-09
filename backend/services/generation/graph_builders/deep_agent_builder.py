@@ -17,26 +17,39 @@ from backend.schemas.enums import BackendType
 from backend.services.generation.agent.tree_extension import (
     TreeStateBackend,
     TreeCompositeBackend,
-    TreeMiddleware
+    TreeMiddleware,
+    _NonExecutableBackendProxy,
 )
 
-def _create_backend_factory(mounted_backends: List[Dict[str, Any]]):
+def _create_backend_factory(
+    mounted_backends: List[Dict[str, Any]],
+    default_backend_id: str | None = None,
+):
     def factory(runtime) -> TreeCompositeBackend:
-        default_backend = TreeStateBackend(runtime)
-        routes = {}
+        state_backend = TreeStateBackend(runtime)
+        routes: Dict[str, Any] = {}
 
+        if not mounted_backends:
+            # No mounted backends — StateBackend is the sole default.
+            return TreeCompositeBackend(default=state_backend, routes=routes)
+
+        # Create all backend instances, keyed by their id.
+        instances: Dict[str, Any] = {}
         for mb in mounted_backends:
             b_type = mb.get("backendType")
             b_name = mb.get("name")
             b_id = mb.get("id")
             config = mb.get("configData", {})
+            tools_config = config.get("tools_config", {})
+            execute_cfg = tools_config.get("execute", {})
+            execute_enabled = execute_cfg.get("enabled", False)
 
             if b_type == BackendType.SSH.value:
                 priv_key_path = None
                 if not config.get("password"):
                     priv_key_path, _ = get_or_create_system_ssh_key()
 
-                ssh_backend = PureSFTPBackend(
+                backend = PureSFTPBackend(
                     hostname=config.get("hostname"),
                     port=config.get("port", 22),
                     username=config.get("username"),
@@ -48,21 +61,35 @@ def _create_backend_factory(mounted_backends: List[Dict[str, Any]]):
                     ignore_dirs=config.get("ignore_dirs")
                 )
 
-                route_prefix = f"/{b_name}/"
-                routes[route_prefix] = ssh_backend
-
             elif b_type == BackendType.API.value:
-                # APIBackend communicates via WebSocket through the server.
-                # Create the backend regardless of online status so that the
-                # route exists and returns a clear error when accessed offline.
-                api_backend = APIBackend(
+                backend = APIBackend(
                     backend_id=b_id,
                     backend_name=b_name,
                     edit_whitelist=config.get("edit_whitelist"),
                     edit_blacklist=config.get("edit_blacklist"),
                 )
-                route_prefix = f"/{b_name}/"
-                routes[route_prefix] = api_backend
+            else:
+                continue
+
+            # If execute is not enabled, wrap to hide SandboxBackendProtocol identity.
+            if not execute_enabled:
+                backend = _NonExecutableBackendProxy(backend)
+
+            instances[b_id] = (backend, b_name)
+
+        # Determine which backend becomes default.
+        if default_backend_id and default_backend_id in instances:
+            default_backend, _ = instances.pop(default_backend_id)
+            # Mount remaining backends as routes.
+            for b_id, (backend, b_name) in instances.items():
+                routes[f"/{b_name}/"] = backend
+            # Mount StateBackend at /this_chat_tmp/
+            routes["/this_chat_tmp/"] = state_backend
+        else:
+            # No default selected — StateBackend remains default.
+            default_backend = state_backend
+            for b_id, (backend, b_name) in instances.items():
+                routes[f"/{b_name}/"] = backend
 
         return TreeCompositeBackend(default=default_backend, routes=routes)
 
@@ -94,7 +121,10 @@ class DeepAgentGraphBuilder(BaseGraphBuilder):
                     )
                 )
 
-        backend_factory = _create_backend_factory(agent_config.mounted_backends or [])
+        backend_factory = _create_backend_factory(
+            mounted_backends=agent_config.mounted_backends or [],
+            default_backend_id=agent_config.default_backend_id,
+        )
 
         tools = [t for t in agent_config.tools] if agent_config.tools else []
 

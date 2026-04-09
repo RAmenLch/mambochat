@@ -297,7 +297,7 @@
             <el-col :span="24">
               <el-form-item :label="$t('agent.mountBackend')">
                 <div class="mount-container" style="height: auto; min-height: 120px;">
-                  <div class="mount-action">
+                  <div class="mount-action" style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
                     <el-dropdown trigger="click" @command="handleAddBackend" placement="bottom-start">
                       <el-button type="warning" plain size="small">
                         <el-icon><Monitor /></el-icon> {{ $t('agent.addBackend') }}
@@ -313,13 +313,28 @@
                         </el-dropdown-menu>
                       </template>
                     </el-dropdown>
+                    <el-select
+                      v-if="mountedBackendList.length > 0"
+                      v-model="form.defaultBackendId"
+                      clearable
+                      :placeholder="$t('agent.selectDefaultBackend')"
+                      size="small"
+                      style="width: 220px;"
+                    >
+                      <el-option
+                        v-for="b in mountedBackendList"
+                        :key="b.id"
+                        :label="`${b.name} (${b.backendType})`"
+                        :value="b.id"
+                      />
+                    </el-select>
                   </div>
                   <div v-if="mountedBackendList.length > 0" class="tag-list-wrapper">
                     <el-tag
                       v-for="b in mountedBackendList"
                       :key="b.id"
                       closable
-                      type="warning"
+                      :type="b.id === form.defaultBackendId ? 'danger' : 'warning'"
                       effect="light"
                       class="custom-tag"
                       @close="handleRemoveBackend(b.id)"
@@ -327,6 +342,7 @@
                       <div class="tag-inner">
                         <el-icon class="tag-icon"><Monitor /></el-icon>
                         <span class="tag-text">{{ b.name }}</span>
+                        <span v-if="b.id === form.defaultBackendId" class="default-star">★</span>
                       </div>
                     </el-tag>
                   </div>
@@ -417,7 +433,8 @@ const form = reactive({
   agentAvatarUrl: null as string | null,
   enabledMcpIds: [] as string[],
   subAgents: [] as string[],
-  backendIds: [] as string[] // [新增]
+  backendIds: [] as string[], // [新增]
+  defaultBackendId: null as string | null, // [新增] 默认 Backend
 });
 
 // --- Backend 挂载逻辑 [新增] ---
@@ -439,6 +456,9 @@ function handleAddBackend(backendId: string) {
 
 function handleRemoveBackend(backendId: string) {
   form.backendIds = form.backendIds.filter(id => id !== backendId);
+  if (form.defaultBackendId === backendId) {
+    form.defaultBackendId = null;
+  }
 }
 // --------------------
 
@@ -510,6 +530,7 @@ watch(agentData, async (newVal) => {
     form.enabledMcpIds = newVal.enabledMcpIds ? [...newVal.enabledMcpIds] : [];
     form.subAgents = newVal.subAgents ? [...newVal.subAgents] : [];
     form.backendIds = newVal.backendIds ? [...newVal.backendIds] : []; // [新增] 还原 Backend 绑定数据
+    form.defaultBackendId = (newVal as any).defaultBackendId || null; // [新增] 还原默认 Backend
 
     if (newVal.resourcePromptList && newVal.resourcePromptList.length > 0) {
       try {
@@ -666,7 +687,8 @@ async function handleSave() {
       enabledMcpIds: form.enabledMcpIds.length > 0 ? [...form.enabledMcpIds] : [],
       subAgents: form.AgentType === 'DeepAgent' && form.subAgents.length > 0 ? [...form.subAgents] : [],
 
-      backendIds: finalBackendIds // 使用修复后的变量
+      backendIds: finalBackendIds, // 使用修复后的变量
+      defaultBackendId: form.defaultBackendId, // [新增] 默认 Backend
     });
 
     ElMessage.success(t('agent.saveSuccess'));

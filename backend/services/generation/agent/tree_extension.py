@@ -30,10 +30,26 @@ class TreeBackendProtocol(BackendProtocol):
 
 
 # ==========================================
+# 1.5 Execution Control Proxy
+# ==========================================
+class _NonExecutableBackendProxy(BackendProtocol):
+    """Wraps a backend so that isinstance(proxy, SandboxBackendProtocol) is False.
+
+    This causes deepagents' FilesystemMiddleware to automatically hide the
+    execute tool from the LLM (see ``_supports_execution()`` in the library).
+    """
+
+    def __init__(self, backend) -> None:
+        object.__setattr__(self, "_inner", backend)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+# ==========================================
 # 2. Backend Implementations
 # ==========================================
 class TreeStateBackend(StateBackend, TreeBackendProtocol):
-    """StateBackend with tree support."""
 
     def tree(self, path: str = "/", depth: int = 3) -> str:
         files = self.runtime.state.get("files", {})

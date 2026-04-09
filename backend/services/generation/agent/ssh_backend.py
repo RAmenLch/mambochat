@@ -24,10 +24,12 @@ import wcmatch.glob as wcglob
 from deepagents.backends.protocol import (
     BackendProtocol,
     EditResult,
+    ExecuteResponse,
     FileDownloadResponse,
     FileInfo,
     FileUploadResponse,
     GrepMatch,
+    SandboxBackendProtocol,
     WriteResult,
 )
 from deepagents.backends.utils import (
@@ -41,8 +43,10 @@ from backend.services.generation.agent.tree_extension import TreeBackendProtocol
 logger = logging.getLogger(__name__)
 
 
-class PureSFTPBackend(TreeBackendProtocol):
+class PureSFTPBackend(SandboxBackendProtocol, TreeBackendProtocol):
     """Backend that reads and writes files on a remote server using ONLY SFTP.
+
+    Also supports shell command execution via SSH.
 
     Note on Async: This class relies on `BackendProtocol`'s default `asyncio.to_thread`
     wrappers for all `a*` methods (e.g., `aread`, `awrite`). Since `paramiko` is a
@@ -121,6 +125,41 @@ class PureSFTPBackend(TreeBackendProtocol):
             logger.debug("Connecting via SFTP to %s@%s:%s", self.username, self.hostname, self.port)
             self._ssh_client.connect(**connect_kwargs)
             self._sftp_client = self._ssh_client.open_sftp()
+
+    @property
+    def id(self) -> str:
+        """Unique identifier for the sandbox backend instance."""
+        return f"ssh://{self.username}@{self.hostname}:{self.port}"
+
+    def execute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+    ) -> ExecuteResponse:
+        """Execute a shell command on the remote server via SSH.
+
+        Args:
+            command: Full shell command string to execute.
+            timeout: Maximum time in seconds to wait for the command to complete.
+
+        Returns:
+            ExecuteResponse with combined output, exit code, and truncation flag.
+        """
+        self._connect()
+        assert self._ssh_client is not None
+        timeout = timeout or 120
+        _, stdout_ch, stderr_ch = self._ssh_client.exec_command(command, timeout=timeout)
+        exit_code = stdout_ch.channel.recv_exit_status()
+        out = stdout_ch.read().decode("utf-8", errors="replace")
+        err = stderr_ch.read().decode("utf-8", errors="replace")
+        combined = out + err if err else out
+
+        truncated = len(combined) > 100000
+        if truncated:
+            combined = combined[:100000] + "\n... (output truncated)"
+
+        return ExecuteResponse(output=combined, exit_code=exit_code, truncated=truncated)
 
     def close(self) -> None:
         """Close connections."""

@@ -34,6 +34,8 @@ export default {
   mountedBackend: '已挂载 Backend',
   mountBackend: '挂载 Backend',
   addBackend: '挂载 Backend',
+  selectDefaultBackend: '选择默认 Backend (★)',
+  defaultBackendTip: '选为默认后，Agent 可直接在该 Backend 上执行命令（需在 Backend 配置中启用 Execute）',
   emptyState: '请在左侧选择或新建一个 Agent',
   saveSuccess: 'Agent 配置已保存',
   saveFailed: '保存失败',

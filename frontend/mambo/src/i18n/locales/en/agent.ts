@@ -34,6 +34,8 @@ export default {
   mountedBackend: 'Mounted Backend',
   mountBackend: 'Mount Backend',
   addBackend: 'Mount Backend',
+  selectDefaultBackend: 'Select Default Backend (★)',
+  defaultBackendTip: 'When set as default, Agent can execute commands on this Backend (requires Execute enabled in Backend config)',
   emptyState: 'Please select or create an Agent on the left',
   saveSuccess: 'Agent configuration saved',
   saveFailed: 'Save failed',

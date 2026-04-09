@@ -30,6 +30,7 @@ class AgentBase(BaseModel):
     enabledMcpIds: Optional[List[str]] = Field(None, description="启用的 MCP 服务ID列表")
     subAgents: Optional[List[str]] = Field(None, description="子 Agent ID列表")
     backendIds: Optional[List[str]] = Field(default_factory=list, description="挂载的 Backend 配置 ID 列表")
+    defaultBackendId: Optional[str] = Field(None, description="用户选择的默认 Backend ID")
 
 class AgentCreate(AgentBase):
     """用于创建 Agent 的 Schema（继承 Base 保持一致）"""
@@ -53,6 +54,7 @@ class AgentUpdate(BaseModel):
     enabledMcpIds: Optional[List[str]] = None
     subAgents: Optional[List[str]] = None
     backendIds: Optional[List[str]] = None
+    defaultBackendId: Optional[str] = None
 
 class AgentResponse(AgentBase):
     """用于 API 响应的 Agent Schema，包含系统生成的标识和时间戳"""

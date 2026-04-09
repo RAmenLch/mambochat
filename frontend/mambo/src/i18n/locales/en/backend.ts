@@ -9,4 +9,8 @@ export default {
   testConnection: 'Test Connection',
   type: 'Type',
   description: 'Description',
+  toolConfig: 'Tool Configuration',
+  toolEnabled: 'Enabled',
+  toolRequireReview: 'Require Review',
+  toolExecuteTip: 'When enabled, the Agent can execute shell commands on this Backend. Enabling review is recommended for security.',
 }

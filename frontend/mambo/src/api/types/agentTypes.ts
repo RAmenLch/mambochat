@@ -22,6 +22,7 @@ export interface Agent {
   enabledMcpIds: string[] | null;
   subAgents: string[] | null;
   backendIds: string[] | null;
+  defaultBackendId: string | null;
 }
 
 export interface AgentCreate {
@@ -40,6 +41,7 @@ export interface AgentCreate {
   enabledMcpIds?: string[] | null;
   subAgents?: string[] | null;
   backendIds: string[] | null;
+  defaultBackendId?: string | null;
 }
 
 export type AgentUpdate = Partial<AgentCreate>

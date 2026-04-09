@@ -45,6 +45,7 @@ class Agent(Base):
     enabledMcpIds = Column(JSON, nullable=True)
     subAgents = Column(JSON, nullable=True)
     backendIds = Column(JSON, nullable=True)
+    defaultBackendId = Column(String(36), nullable=True)
     # 时间戳
     createdAt = Column(DateTime, nullable=False, default=get_configured_now)
     updatedAt = Column(DateTime, nullable=False, default=get_configured_now, onupdate=get_configured_now)

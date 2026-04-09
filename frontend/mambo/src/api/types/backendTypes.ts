@@ -2,6 +2,19 @@
 
 export type BackendType = 'ssh' | 'api';
 
+export interface ToolPermission {
+  enabled: boolean;
+  require_review: boolean;
+}
+
+export interface ToolsConfig {
+  execute: ToolPermission;
+}
+
+export const defaultToolsConfig = (): ToolsConfig => ({
+  execute: { enabled: false, require_review: true }
+});
+
 export interface SshConfigData {
   hostname: string;
   username: string;
@@ -11,12 +24,19 @@ export interface SshConfigData {
   edit_whitelist?: string[] | null;
   edit_blacklist?: string[] | null;
   ignore_dirs?: string[] | null;
+  api_key?: string;
 }
 
 export interface ApiConfigData {
   api_key: string;
   edit_whitelist?: string[] | null;
   edit_blacklist?: string[] | null;
+  hostname?: string;
+  username?: string;
+  port?: number;
+  password?: string | null;
+  root_dir?: string;
+  ignore_dirs?: string[] | null;
 }
 
 export type BackendConfigData = SshConfigData | ApiConfigData;
@@ -27,6 +47,7 @@ export interface BackendConfig {
   description?: string | null;
   backendType: BackendType;
   configData: BackendConfigData;
+  tools_config?: ToolsConfig | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -36,6 +57,7 @@ export interface BackendCreate {
   description?: string | null;
   backendType: BackendType;
   configData: BackendConfigData;
+  tools_config?: ToolsConfig;
 }
 
 export interface BackendUpdate extends Partial<BackendCreate> {}

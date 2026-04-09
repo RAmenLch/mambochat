@@ -13,6 +13,9 @@ class BackendConfig(Base):
 
     backendType = Column(String(50), nullable=False)
     configData = Column(JSON, nullable=False)
+    tools_config = Column(JSON, nullable=True, default=lambda: {
+        "execute": {"enabled": False, "require_review": True}
+    })
 
     createdAt = Column(DateTime, nullable=False, default=get_configured_now)
     updatedAt = Column(DateTime, nullable=False, default=get_configured_now, onupdate=get_configured_now)
