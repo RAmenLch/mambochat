@@ -17,6 +17,7 @@ import {
 import type {
   McpServer,
   McpCreateRequest,
+  McpUpdateRequest,
   McpTestResponse,
   McpToolResponse,
   McpToolUpdate
