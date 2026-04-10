@@ -210,7 +210,7 @@ class LLMInputDirector:
         if self._cutoff_message_id and materials.target_msg:
             for sub in materials.target_msg.sub_messages:
                 if sub.type == schemas_enums.SubMessageType.MCP_TOOL.value:
-                    if sub.status in [schemas_enums.MessageStatus.GENERATING.value, schemas_enums.MessageStatus.PENDING_REVIEW.value]:
+                    if sub.status in [schemas_enums.MessageStatus.GENERATING.value, schemas_enums.MessageStatus.PENDING_REVIEW.value, schemas_enums.MessageStatus.FAILED.value]:
                         try:
                             content_obj = McpToolContent.from_json_string(sub.content)
                             if content_obj and content_obj.tool_call_id:

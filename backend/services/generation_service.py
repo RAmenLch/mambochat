@@ -274,12 +274,14 @@ async def _run_retry_generation_task(chat_id: str, assistant_message_id: str):
         try:
             await _ensure_chat_model_configured(db, chat_id)
 
-            # 清理失败的子消息：删除 ERROR 类型和 generating 状态的子消息
+            # 清理失败的子消息：删除 ERROR 类型以及 FAILED 的 NORMAL/REASONING，保留 FAILED 的 MCP_TOOL（用于 restore_state）
             db_message = await message_crud.get_message(db, message_id=assistant_message_id)
             if db_message:
                 sub_ids_to_delete = []
                 for sub in db_message.sub_messages:
-                    if sub.type == SubMessageType.ERROR.value or sub.status == MessageStatus.GENERATING.value:
+                    if sub.type == SubMessageType.ERROR.value:
+                        sub_ids_to_delete.append(sub.id)
+                    elif sub.status == MessageStatus.FAILED.value and sub.type in (SubMessageType.NORMAL.value, SubMessageType.REASONING.value):
                         sub_ids_to_delete.append(sub.id)
                 if sub_ids_to_delete:
                     for sub_id in sub_ids_to_delete:

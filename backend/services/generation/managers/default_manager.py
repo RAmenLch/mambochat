@@ -169,6 +169,25 @@ class DefaultGenerateManager(AbstractGenerateManager):
             yield UpdateSubMessageStatus(sub_message_id=sub_id, status=schemas_enums.MessageStatus.FAILED)
         self._created_stream_ids.clear()
 
+        # 1.1 DB 兜底：将所有仍处于 GENERATING 状态的子消息设为 FAILED（覆盖未被 _created_stream_ids 追踪的 MCP_TOOL 子消息）
+        try:
+            from sqlalchemy import update
+            from backend.models.chat_model import SubMessage
+            stmt = (
+                update(SubMessage)
+                .where(SubMessage.messageId == assistant_message_id)
+                .where(SubMessage.status == schemas_enums.MessageStatus.GENERATING.value)
+                .values(status=schemas_enums.MessageStatus.FAILED.value)
+            )
+            await self.db_session.execute(stmt)
+            await self.db_session.commit()
+        except Exception as db_err:
+            print(f"[DefaultGenerateManager] DB fallback cleanup failed: {db_err}")
+            try:
+                await self.db_session.rollback()
+            except Exception:
+                pass
+
         # 2. 创建 Error 类型的子消息，包含简短错误信息和完整堆栈（参与上下文）
         if error_message:
             from backend.schemas.message import ErrorContent
