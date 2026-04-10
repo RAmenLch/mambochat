@@ -8,6 +8,7 @@ import {
   updateMcp as apiUpdateMcp,
   deleteMcp as apiDeleteMcp,
   testMcpServer as apiTestMcpServer,
+  testMcpConfig as apiTestMcpConfig,
   syncMcpTools as apiSyncMcpTools,
   getMcpTools as apiGetMcpTools,
   updateMcpTool as apiUpdateMcpTool,
@@ -16,7 +17,7 @@ import {
 import type {
   McpServer,
   McpCreateRequest,
-  McpUpdateRequest,
+  McpTestResponse,
   McpToolResponse,
   McpToolUpdate
 } from '@/api/types';
@@ -204,6 +205,14 @@ export const useMcpStore = defineStore('mcp', () => {
     }
   }
 
+  /**
+   * 使用传入的配置直接测试 MCP 连接（无需保存，不写数据库）
+   * 适用于新建或编辑时在保存前验证配置是否正确
+   */
+  async function testConnectionWithConfig(data: McpCreateRequest): Promise<McpTestResponse> {
+    return await apiTestMcpConfig(data);
+  }
+
   return {
     availableServices,
     currentServerTools,
@@ -214,6 +223,7 @@ export const useMcpStore = defineStore('mcp', () => {
     updateMcp,
     deleteMcp,
     testConnection,
+    testConnectionWithConfig,
     syncTools,
     fetchTools,
     updateToolConfig,

@@ -35,6 +35,21 @@ class McpConnectionManager:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    @staticmethod
+    async def test_config(config: dict) -> List[BaseTool]:
+        """
+        使用传入的配置直接测试 MCP 连接，不依赖数据库。
+        用于在保存前验证配置是否正确。
+
+        Args:
+            config: MultiServerMCPClient 所需的配置字典，格式与 get_tools_and_check_status 中构建的一致。
+                    需要包含一个 key 作为 server_name，值为 {"transport", "command"?, "args"?, "env"?, "url"?}。
+        """
+        client = MultiServerMCPClient(config)
+        server_name = list(config.keys())[0]
+        tools = await client.get_tools(server_name=server_name)
+        return tools
+
     async def get_tools_and_check_status(self, mcp_ids: List[str]) -> List[BaseTool]:
         """
         加载指定 ID 的 MCP 服务，验证连接并获取工具。

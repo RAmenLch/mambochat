@@ -1,10 +1,11 @@
 # backend/services/generation/tools/mcp_tool_provider.py
 
 import json
+import logging
 from typing import List, Optional, Dict, Any, AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, StructuredTool
 
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
 from backend.services.mcp_connection_manager import McpConnectionManager
@@ -17,6 +18,8 @@ from backend.services.generation.core.instructions import (
 from backend.schemas import enums as schemas_enums
 from backend.schemas.message import McpToolContent
 from backend.models.base_model import generate_uuid
+
+logger = logging.getLogger(__name__)
 
 
 class MCPToolProvider(BaseToolProvider):
@@ -43,6 +46,8 @@ class MCPToolProvider(BaseToolProvider):
     async def get_tools(self) -> List[BaseTool]:
         """
         使用 McpConnectionManager 连接并获取工具。
+        对每个 MCP 工具进行异常安全包装，防止工具执行时的未处理异常
+        (如 ToolException) 冒泡导致整个生成流程崩溃。
         """
         if not self.mcp_ids:
             return []
@@ -50,9 +55,36 @@ class MCPToolProvider(BaseToolProvider):
         # 获取工具并检查状态 (如果服务不可用，此处可能会抛出 McpConnectionError，由上层 Manager 捕获)
         tools = await self.conn_manager.get_tools_and_check_status(self.mcp_ids)
 
+        # 对每个 MCP 工具进行异常安全包装
+        safe_tools = [self._wrap_tool_safe(t) for t in tools]
+
         # 更新名称缓存
-        self._loaded_tool_names = {t.name for t in tools}
-        return tools
+        self._loaded_tool_names = {t.name for t in safe_tools}
+        return safe_tools
+
+    @staticmethod
+    def _wrap_tool_safe(tool: BaseTool) -> BaseTool:
+        """
+        用 StructuredTool 重新包装 MCP 工具，在 coroutine 内捕获所有异常
+        并返回错误文本，而非让异常冒泡导致整个生成流程崩溃。
+        ToolNode 会收到正常结果，LLM 可以看到错误信息并继续推理。
+        """
+        tool_name = tool.name
+        original_coroutine = tool.coroutine
+
+        async def safe_coroutine(*args, **kwargs):
+            try:
+                return await original_coroutine(*args, **kwargs)
+            except Exception as e:
+                logger.warning(f"MCP tool '{tool_name}' execution error: {e}")
+                return f"工具执行失败: {e}"
+
+        return StructuredTool(
+            name=tool_name,
+            description=tool.description,
+            args_schema=tool.args_schema,
+            coroutine=safe_coroutine,
+        )
 
     def get_system_prompt_injection(self) -> Optional[str]:
         # MCP 工具通常不需要额外的全局 System Prompt 注入，

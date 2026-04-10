@@ -54,11 +54,20 @@ export const deleteMcp = (id: string): Promise<void> => {
 };
 
 /**
- * 测试指定 MCP 服务的连接状态
+ * 测试指定 MCP 服务的连接状态（基于已保存的配置）
  * @param id MCP 服务 ID
  */
 export const testMcpServer = (id: string): Promise<McpTestResponse> => {
   return apiClient.post(`/mcp/${id}/test`);
+};
+
+/**
+ * 使用传入的配置直接测试 MCP 连接（无需保存）
+ * 适用于新建或编辑时在保存前验证配置
+ * @param data MCP 配置数据
+ */
+export const testMcpConfig = (data: McpCreateRequest): Promise<McpTestResponse> => {
+  return apiClient.post('/mcp/test-config', data);
 };
 
 /**

@@ -22,6 +22,63 @@ async def list_mcp_servers(db: AsyncSession = Depends(get_db)):
     return await mcp_service.get_all_merged_mcp_configs(db)
 
 
+@router.post("/test-config", summary="测试 MCP 配置（无需保存）")
+async def test_mcp_config(server: McpServerCreate):
+    """
+    使用传入的配置直接测试 MCP 连接，不写入数据库。
+    适用于新建或编辑时在保存前验证配置是否正确。
+    无论成功或失败，HTTP 状态码均为 200，请通过响应体中的 status 字段判断结果。
+    """
+    import uuid
+
+    # 构建 MultiServerMCPClient 所需的配置字典
+    temp_id = f"temp-test-{uuid.uuid4().hex[:8]}"
+
+    if server.transportType.value == "stdio":
+        import os
+        current_env = os.environ.copy()
+        if server.env:
+            current_env.update(server.env)
+        client_config = {
+            temp_id: {
+                "transport": "stdio",
+                "command": server.command,
+                "args": server.args or [],
+                "env": current_env
+            }
+        }
+    else:
+        client_config = {
+            temp_id: {
+                "transport": "sse",
+                "url": server.url
+            }
+        }
+
+    try:
+        tools = await McpConnectionManager.test_config(client_config)
+        return {
+            "status": "healthy",
+            "tools_count": len(tools),
+            "message": f"Successfully connected. Found {len(tools)} tools.",
+            "error": None
+        }
+    except McpConnectionError as e:
+        return {
+            "status": "unhealthy",
+            "tools_count": 0,
+            "message": "Connection failed.",
+            "error": e.error_message
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "tools_count": 0,
+            "message": "Unexpected error occurred.",
+            "error": str(e)
+        }
+
+
 @router.post("/", response_model=McpServerResponse, status_code=status.HTTP_201_CREATED,
              summary="创建新的 MCP 服务器配置")
 async def create_mcp_server(

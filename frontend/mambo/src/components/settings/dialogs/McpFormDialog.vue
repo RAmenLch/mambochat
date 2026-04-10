@@ -75,7 +75,6 @@
     <template #footer>
       <div class="dialog-footer-wrapper">
         <div class="footer-left">
-          <template v-if="isEditMode">
             <el-button
               :loading="isTestingConnection"
               :icon="Connection"
@@ -88,7 +87,6 @@
               <el-icon v-else><CircleClose /></el-icon>
               <span :title="testFeedback.message">{{ testFeedback.shortMessage }}</span>
             </div>
-          </template>
         </div>
         <div class="footer-right">
           <el-button @click="handleCancel">{{ t('common.action.cancel') }}</el-button>
@@ -285,22 +283,50 @@ const handleSubmit = async () => {
 };
 
 const handleTestConnection = async () => {
-  if (!props.initialData?.id) return;
-
   isTestingConnection.value = true;
   testFeedback.status = 'none';
 
   try {
-    await mcpStore.testConnection(props.initialData.id);
-    testFeedback.status = 'success';
-    testFeedback.shortMessage = '连接成功';
-    testFeedback.message = '连接测试通过，服务运行正常。';
+    // 构造当前表单的配置数据用于测试
+    const configData: McpCreateRequest = {
+      name: formData.name,
+      description: formData.description || null,
+      transportType: formData.transportType,
+      isEnabled: formData.isEnabled,
+    };
+
+    if (formData.transportType === 'stdio') {
+      configData.command = formData.command;
+      const validArgs = formData.argsList.filter(a => a.trim() !== '');
+      configData.args = validArgs.length > 0 ? validArgs : null;
+      const validEnv = formData.envList.filter(e => e.key.trim() !== '');
+      if (validEnv.length > 0) {
+        configData.env = validEnv.reduce((acc, cur) => {
+          acc[cur.key] = cur.value;
+          return acc;
+        }, {} as Record<string, string>);
+      } else {
+        configData.env = null;
+      }
+    } else {
+      configData.url = formData.url;
+    }
+
+    const response = await mcpStore.testConnectionWithConfig(configData);
+
+    if (response.status === 'healthy') {
+      testFeedback.status = 'success';
+      testFeedback.shortMessage = `连接成功 (${response.tools_count} 个工具)`;
+      testFeedback.message = '连接测试通过，服务运行正常。';
+    } else {
+      testFeedback.status = 'error';
+      testFeedback.shortMessage = '连接失败';
+      testFeedback.message = response.error || response.message || '连接测试未通过，请检查配置。';
+    }
   } catch (error: any) {
     testFeedback.status = 'error';
     testFeedback.shortMessage = '连接失败';
-    // store 抛出的 Error.message 即为具体错误信息
-    const detail = error.message || '连接测试未通过，请检查配置。';
-    testFeedback.message = detail;
+    testFeedback.message = error.message || '连接测试未通过，请检查配置。';
   } finally {
     isTestingConnection.value = false;
   }
