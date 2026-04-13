@@ -221,7 +221,12 @@ class AskUserToolProvider(BaseToolProvider):
     ) -> AsyncGenerator[BaseInstruction, None]:
         """
         创建 McpTool 类型的子消息，展示 ask_user 工具调用。
+        如果该 tool_call_id 已通过 restore_state 恢复（HITL 中断恢复场景），
+        则跳过重复创建，避免覆盖已有的子消息映射。
         """
+        if tool_call_id in self._tool_sub_msg_map:
+            return
+
         input_schema = tool_def.args if tool_def else None
 
         content_obj = McpToolContent(
