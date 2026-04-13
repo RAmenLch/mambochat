@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from typing import List, Optional, Dict, Any
 
 from backend.crud import chat_crud, setting_crud, provider_crud, resource_crud, agent_crud
@@ -13,6 +14,7 @@ from backend.database import get_db
 from backend.routers.settings import get_global_settings
 from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 from backend.schemas.enums import ResourceItemType, ResourceType
+from backend.checkpointer import adelete_thread
 
 router = APIRouter()
 
@@ -317,9 +319,23 @@ async def update_chat_settings(
 
 @router.delete("/chats/{chat_id}", response_model=schemas.Chat, summary="删除会话或文件夹")
 async def delete_chat(chat_id: str, db: AsyncSession = Depends(get_db)):
+    # 先查询所有后代 ID（包括自身），用于清理 checkpoint
+    descendant_ids = await chat_crud.get_descendant_chat_ids(db, chat_id)
+    # 获取后代中 itemType 为 chat 的 ID 列表
+    result = await db.execute(
+        select(chat_model.Chat.id).where(
+            chat_model.Chat.id.in_(descendant_ids),
+            chat_model.Chat.itemType == "chat"
+        )
+    )
+    chat_ids_to_cleanup = list(result.scalars().all())
+    # 执行删除（ORM cascade 会自动删除子会话和消息）
     db_chat = await chat_crud.delete_chat(db, chat_id=chat_id)
     if db_chat is None:
         raise HTTPException(status_code=404, detail="Item not found")
+    # 清理所有相关会话的 LangGraph checkpoint 数据
+    for cid in chat_ids_to_cleanup:
+        await adelete_thread(cid)
     return db_chat
 
 

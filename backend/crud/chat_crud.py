@@ -108,6 +108,19 @@ async def update_chat(db: AsyncSession, chat_id: str, chat_update: schemas.ChatU
     return db_chat
 
 
+async def get_descendant_chat_ids(db: AsyncSession, chat_id: str) -> List[str]:
+    """
+    递归获取指定节点的所有后代 Chat ID（包括自身）。
+    用于删除前清理 LangGraph checkpoint。
+    """
+    cte = select(chat_model.Chat.id).where(chat_model.Chat.id == chat_id).cte(name="descendants", recursive=True)
+    cte = cte.union_all(
+        select(chat_model.Chat.id).join(cte, chat_model.Chat.parentId == cte.c.id)
+    )
+    result = await db.execute(select(cte.c.id))
+    return list(result.scalars().all())
+
+
 async def delete_chat(db: AsyncSession, chat_id: str) -> Optional[chat_model.Chat]:
     """删除一个聊天会话或文件夹"""
     db_chat = await get_chat(db, chat_id=chat_id)
