@@ -276,22 +276,29 @@ async def prepare_to_generate(
         background_tasks: BackgroundTasks,
         db: AsyncSession = Depends(get_db)
 ):
-    user_message, assistant_placeholder = await generation_service.create_user_message_and_prepare_generation(
-        db=db, chat_id=chat_id, request=request
-    )
-    await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id)
+    if not await stream_manager.try_acquire_generation_lock(chat_id):
+        raise HTTPException(status_code=409, detail="该会话已有正在进行的生成任务，请等待完成后再试。")
 
-    # 修复: 从活跃路径中重新获取，以避免 DetachedInstanceError 并装配 sibling 元数据
-    active_msgs = await message_crud.get_messages_by_chat(db, chat_id=chat_id)
-    populated_user_msg = next((m for m in active_msgs if m.id == user_message.id), user_message)
-    populated_assistant_msg = next((m for m in active_msgs if m.id == assistant_placeholder.id), assistant_placeholder)
+    try:
+        user_message, assistant_placeholder = await generation_service.create_user_message_and_prepare_generation(
+            db=db, chat_id=chat_id, request=request
+        )
+        await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id)
 
-    hydrated_messages = await _hydrate_and_validate_messages([populated_user_msg, populated_assistant_msg], db)
+        # 修复: 从活跃路径中重新获取，以避免 DetachedInstanceError 并装配 sibling 元数据
+        active_msgs = await message_crud.get_messages_by_chat(db, chat_id=chat_id)
+        populated_user_msg = next((m for m in active_msgs if m.id == user_message.id), user_message)
+        populated_assistant_msg = next((m for m in active_msgs if m.id == assistant_placeholder.id), assistant_placeholder)
 
-    return schemas.PrepareGenerateResponse(
-        user_message=hydrated_messages[0],
-        assistant_message=hydrated_messages[1]
-    )
+        hydrated_messages = await _hydrate_and_validate_messages([populated_user_msg, populated_assistant_msg], db)
+
+        return schemas.PrepareGenerateResponse(
+            user_message=hydrated_messages[0],
+            assistant_message=hydrated_messages[1]
+        )
+    except Exception:
+        await stream_manager.release_generation_lock(chat_id)
+        raise
 
 
 @router.post(
@@ -306,17 +313,24 @@ async def prepare_to_regenerate(
         background_tasks: BackgroundTasks,
         db: AsyncSession = Depends(get_db)
 ):
-    assistant_placeholder = await generation_service.prepare_for_regeneration(
-        db=db, chat_id=chat_id, base_message_id=from_message_id
-    )
-    await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id)
+    if not await stream_manager.try_acquire_generation_lock(chat_id):
+        raise HTTPException(status_code=409, detail="该会话已有正在进行的生成任务，请等待完成后再试。")
 
-    # 修复: 从活跃路径中重新获取，以避免 DetachedInstanceError 并装配 sibling 元数据
-    active_msgs = await message_crud.get_messages_by_chat(db, chat_id=chat_id)
-    populated_assistant_msg = next((m for m in active_msgs if m.id == assistant_placeholder.id), assistant_placeholder)
+    try:
+        assistant_placeholder = await generation_service.prepare_for_regeneration(
+            db=db, chat_id=chat_id, base_message_id=from_message_id
+        )
+        await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id)
 
-    hydrated_messages = await _hydrate_and_validate_messages([populated_assistant_msg], db)
-    return hydrated_messages[0]
+        # 修复: 从活跃路径中重新获取，以避免 DetachedInstanceError 并装配 sibling 元数据
+        active_msgs = await message_crud.get_messages_by_chat(db, chat_id=chat_id)
+        populated_assistant_msg = next((m for m in active_msgs if m.id == assistant_placeholder.id), assistant_placeholder)
+
+        hydrated_messages = await _hydrate_and_validate_messages([populated_assistant_msg], db)
+        return hydrated_messages[0]
+    except Exception:
+        await stream_manager.release_generation_lock(chat_id)
+        raise
 
 
 @router.post(
@@ -341,16 +355,23 @@ async def retry_failed_generation(
     if calculated_status != schemas.MessageStatus.FAILED:
         raise HTTPException(status_code=400, detail="Retry is only applicable to failed messages.")
 
-    await _start_generation_task(background_tasks, db_message.chatId, message_id, is_retry=True)
+    if not await stream_manager.try_acquire_generation_lock(db_message.chatId):
+        raise HTTPException(status_code=409, detail="该会话已有正在进行的生成任务，请等待完成后再试。")
 
-    active_msgs = await message_crud.get_messages_by_chat(db, chat_id=db_message.chatId)
-    populated_msg = next((m for m in active_msgs if m.id == message_id), db_message)
+    try:
+        await _start_generation_task(background_tasks, db_message.chatId, message_id, is_retry=True)
 
-    hydrated_messages = await _hydrate_and_validate_messages([populated_msg], db)
-    response_message = hydrated_messages[0]
-    response_message.status = schemas.MessageStatus.GENERATING
+        active_msgs = await message_crud.get_messages_by_chat(db, chat_id=db_message.chatId)
+        populated_msg = next((m for m in active_msgs if m.id == message_id), db_message)
 
-    return response_message
+        hydrated_messages = await _hydrate_and_validate_messages([populated_msg], db)
+        response_message = hydrated_messages[0]
+        response_message.status = schemas.MessageStatus.GENERATING
+
+        return response_message
+    except Exception:
+        await stream_manager.release_generation_lock(db_message.chatId)
+        raise
 
 
 @router.post(

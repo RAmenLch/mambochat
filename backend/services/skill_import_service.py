@@ -17,6 +17,12 @@ from backend.services.file_service import FileService
 from backend.utils.skills_utils import SkillValidator, FileNode, identify_skill_roots
 from backend.models import resource_model
 
+# ZIP 导入安全限制
+MAX_ZIP_FILE_SIZE = 50 * 1024 * 1024          # 50 MB：ZIP 文件本身大小上限
+MAX_TOTAL_UNCOMPRESSED_SIZE = 100 * 1024 * 1024  # 100 MB：解压后总大小上限
+MAX_ZIP_FILE_COUNT = 1000                       # ZIP 内最大文件数量
+MAX_ZIP_SINGLE_FILE_SIZE = 20 * 1024 * 1024     # 20 MB：ZIP 内单个文件大小上限
+
 
 class SkillImportService:
     def __init__(self, db: AsyncSession):
@@ -43,11 +49,10 @@ class SkillImportService:
         with tempfile.TemporaryDirectory() as tmpdir:
             if suffix == '.zip':
                 zip_path = os.path.join(tmpdir, "upload.zip")
+                content = await self._safe_read_upload(file)
                 with open(zip_path, "wb") as buffer:
-                    content = await file.read()
                     buffer.write(content)
-                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                    zip_ref.extractall(tmpdir)
+                self._safe_extract_zip(zip_path, tmpdir)
 
                 # 清理压缩包防止干扰
                 os.remove(zip_path)
@@ -116,12 +121,17 @@ class SkillImportService:
                 raise HTTPException(status_code=400, detail=f"Failed to download repository: {e.response.status_code}")
 
             with tempfile.TemporaryDirectory() as tmpdir:
+                if len(resp.content) > MAX_ZIP_FILE_SIZE:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"下载的 ZIP 文件过大（{len(resp.content) // 1024 // 1024} MB），"
+                               f"上限为 {MAX_ZIP_FILE_SIZE // 1024 // 1024} MB。"
+                    )
                 zip_path = os.path.join(tmpdir, "repo.zip")
                 with open(zip_path, "wb") as buffer:
                     buffer.write(resp.content)
 
-                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                    zip_ref.extractall(tmpdir)
+                self._safe_extract_zip(zip_path, tmpdir)
                 os.remove(zip_path)
 
                 # GitHub zip typically extracts to a folder like repo-branch
@@ -347,3 +357,49 @@ class SkillImportService:
     def _sanitize_name(self, name: str) -> str:
         # Remove or replace invalid characters
         return re.sub(r'[\\/*?:"<>|]', "_", name).strip()
+
+    async def _safe_read_upload(self, file: UploadFile) -> bytes:
+        """安全读取上传文件内容，校验大小上限。"""
+        content = b""
+        while True:
+            chunk = await file.read(1024 * 1024)  # 每次读 1MB
+            if not chunk:
+                break
+            content += chunk
+            if len(content) > MAX_ZIP_FILE_SIZE:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"文件过大（{len(content) // 1024 // 1024} MB），上限为 {MAX_ZIP_FILE_SIZE // 1024 // 1024} MB。"
+                )
+        return content
+
+    def _safe_extract_zip(self, zip_path: str, target_dir: str) -> None:
+        """安全解压 ZIP，防止 ZIP 炸弹攻击。"""
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            infos = zip_ref.infolist()
+
+            # 检查文件数量
+            if len(infos) > MAX_ZIP_FILE_COUNT:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"ZIP 文件包含过多条目（{len(infos)}），上限为 {MAX_ZIP_FILE_COUNT}。"
+                )
+
+            # 检查总解压大小
+            total_uncompressed = sum(info.file_size for info in infos if not info.is_dir())
+            if total_uncompressed > MAX_TOTAL_UNCOMPRESSED_SIZE:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"ZIP 解压后总大小过大（{total_uncompressed // 1024 // 1024} MB），上限为 {MAX_TOTAL_UNCOMPRESSED_SIZE // 1024 // 1024} MB。"
+                )
+
+            # 检查单个文件大小
+            for info in infos:
+                if not info.is_dir() and info.file_size > MAX_ZIP_SINGLE_FILE_SIZE:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"ZIP 内单个文件过大: {info.filename}（{info.file_size // 1024 // 1024} MB），"
+                               f"上限为 {MAX_ZIP_SINGLE_FILE_SIZE // 1024 // 1024} MB。"
+                    )
+
+            zip_ref.extractall(target_dir)

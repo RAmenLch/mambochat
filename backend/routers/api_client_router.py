@@ -14,7 +14,7 @@ import time
 import uuid
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
@@ -140,18 +140,40 @@ async def _handle_client_message(backend_id: str, ws: WebSocket, data: dict):
 
 
 @router.websocket("/ws/{backend_id}")
-async def websocket_endpoint(ws: WebSocket, backend_id: str, api_key: str = Query(...)):
+async def websocket_endpoint(ws: WebSocket, backend_id: str):
     """WebSocket endpoint for API client connections.
 
-    Clients connect to: ws://server/api/api-client/ws/{backend_id}?api_key=xxx
+    Clients connect to: ws://server/api/api-client/ws/{backend_id}
 
-    After connection, clients should send a register_info message:
+    After connection, clients must send an auth message first:
+    {"type": "auth", "api_key": "xxx"}
+
+    Then optionally send a register_info message:
     {"type": "register_info", "info": {"root_dir": "/path", "hostname": "my-pc"}}
     """
-    # Verify API key
+    await ws.accept()
+
+    # Wait for auth message
+    try:
+        auth_msg = await asyncio.wait_for(ws.receive_json(), timeout=10)
+    except asyncio.TimeoutError:
+        await ws.close(code=4003, reason="Authentication timeout")
+        return
+
+    if auth_msg.get("type") != "auth" or not auth_msg.get("api_key"):
+        await ws.close(code=4003, reason="Invalid auth message")
+        return
+
+    api_key = auth_msg["api_key"]
     valid = await _verify_backend_api_key(backend_id, api_key)
     if not valid:
         await ws.close(code=4003, reason="Invalid backend ID or API key")
+        return
+
+    # Auth success
+    try:
+        await ws.send_json({"type": "auth_ok"})
+    except Exception:
         return
 
     # Check if another connection exists for this backend
@@ -161,8 +183,6 @@ async def websocket_endpoint(ws: WebSocket, backend_id: str, api_key: str = Quer
             await existing_ws.close(code=4001, reason="Replaced by new connection")
         except Exception:
             pass
-
-    await ws.accept()
     _connections[backend_id] = ws
     connected_at = time.time()
 

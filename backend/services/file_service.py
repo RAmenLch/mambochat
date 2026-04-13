@@ -43,7 +43,8 @@ class FileService:
             self,
             file: UploadFile,
             management_type: List[str],
-            sub_path: str = "uploads"
+            sub_path: str = "uploads",
+            max_size: Optional[int] = None
     ) -> File:
         sample = await file.read(8192)
         await file.seek(0)
@@ -52,11 +53,19 @@ class FileService:
         if not FileUtils.is_allowed_mime_type(mime_type):
             raise HTTPException(status_code=400, detail=f"不支持的文件类型: {mime_type}。")
 
+        data = await file.read()
+
+        # 二次大小校验：基于实际读取的字节数，而非客户端 Content-Length
+        if max_size is not None and len(data) > max_size:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"文件过大。最大允许 {max_size // 1024 // 1024} MB。"
+            )
+
         file_id = generate_uuid()
-        file_size = file.size
+        file_size = len(data)
 
         if FileUtils.is_small_text_file(file_size, mime_type):
-            data = await file.read()
             try:
                 text_content = FileUtils.decode_to_utf8(data)
             except ValueError as e:
@@ -75,7 +84,7 @@ class FileService:
             return await self._commit_file_record(db_file)
         else:
             try:
-                storage_path = await storage_service.save(file, sub_path=sub_path)
+                storage_path = await storage_service.save_from_bytes(data, file.filename, sub_path)
             except Exception as e:
                 raise HTTPException(status_code=500, detail=f"文件存储失败: {e}")
 

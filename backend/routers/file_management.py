@@ -25,18 +25,13 @@ async def upload_temporary_file(
         file: UploadFile = File(...),
         db: AsyncSession = Depends(get_db)
 ):
-    if file.size > MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"文件过大。最大允许 {MAX_FILE_SIZE // 1024 // 1024} MB。"
-        )
-
     file_service = FileService(db)
 
     db_file = await file_service.save_file(
         file=file,
         management_type=[FileManagementType.TEMPORARY.value],
-        sub_path="chat_attachments"
+        sub_path="chat_attachments",
+        max_size=MAX_FILE_SIZE
     )
 
     return file_service.convert_to_schema(db_file)

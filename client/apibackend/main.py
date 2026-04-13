@@ -528,15 +528,35 @@ async def handle_command(method: str, params: dict) -> dict:
 # ==========================================
 async def run_client():
     """Main client loop: connect to server WebSocket, process commands."""
-    ws_url = (
-        f"{config.server_url}/api/api-client/ws/{config.backend_id}"
-        f"?api_key={config.api_key}"
-    )
+    ws_url = f"{config.server_url}/api/api-client/ws/{config.backend_id}"
 
     while True:
         logger.info("Connecting to %s ...", config.server_url)
         try:
             async with websockets.connect(ws_url) as ws:
+                # Authenticate via first message (not URL query param)
+                await ws.send(json.dumps({
+                    "type": "auth",
+                    "api_key": config.api_key,
+                }))
+
+                # Wait for auth response
+                try:
+                    auth_response_raw = await asyncio.wait_for(ws.recv(), timeout=10)
+                    auth_response = json.loads(auth_response_raw)
+                except asyncio.TimeoutError:
+                    logger.error("Authentication timed out")
+                    return
+                except websockets.ConnectionClosed as e:
+                    if e.code == 4003:
+                        logger.error("Authentication failed! Check your backend_id and api_key.")
+                        return
+                    raise
+
+                if auth_response.get("type") != "auth_ok":
+                    logger.error("Authentication failed: %s", auth_response)
+                    return
+
                 logger.info("Connected successfully!")
 
                 # Send client info
@@ -590,11 +610,7 @@ async def run_client():
                         logger.exception("Error processing message: %s", e)
 
         except websockets.InvalidStatusCode as e:
-            if e.status_code == 4003:
-                logger.error("Authentication failed! Check your backend_id and api_key.")
-                return
-            else:
-                logger.error("Server returned status %s: %s", e.status_code, e)
+            logger.error("Server returned status %s: %s", e.status_code, e)
         except websockets.ConnectionClosed as e:
             logger.warning("Connection closed (code=%s, reason=%s)", e.code, e.reason)
         except Exception as e:

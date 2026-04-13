@@ -14,6 +14,8 @@ class StreamManager:
         self.cancellation_requests: Set[str] = set()
         self.running_tasks: Set[str] = set()
         self.lock = asyncio.Lock()
+        self._chat_generation_locks: Dict[str, asyncio.Lock] = {}
+        self._chat_generation_locks_lock = asyncio.Lock()
 
     async def subscribe(self, message_id: str) -> asyncio.Queue:
         async with self.lock:
@@ -77,6 +79,32 @@ class StreamManager:
         """检查一个生成任务是否正在内存中运行"""
         async with self.lock:
             return message_id in self.running_tasks
+
+    async def try_acquire_generation_lock(self, chat_id: str) -> bool:
+        """
+        尝试获取指定会话的生成锁。
+        返回 True 表示获取成功，False 表示该会话已有生成任务在执行。
+        """
+        async with self._chat_generation_locks_lock:
+            if chat_id in self._chat_generation_locks:
+                if self._chat_generation_locks[chat_id].locked():
+                    return False
+            else:
+                self._chat_generation_locks[chat_id] = asyncio.Lock()
+            lock = self._chat_generation_locks[chat_id]
+            acquired = await lock.acquire()
+            if not acquired:
+                return False
+        print(f"[StreamManager] Generation lock ACQUIRED for chat '{chat_id}'.")
+        return True
+
+    async def release_generation_lock(self, chat_id: str):
+        """释放指定会话的生成锁"""
+        async with self._chat_generation_locks_lock:
+            lock = self._chat_generation_locks.get(chat_id)
+        if lock and lock.locked():
+            lock.release()
+            print(f"[StreamManager] Generation lock RELEASED for chat '{chat_id}'.")
 
 
 stream_manager = StreamManager()

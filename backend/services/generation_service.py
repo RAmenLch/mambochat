@@ -262,6 +262,7 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
         finally:
             await stream_manager.mark_task_completed(assistant_message_id)
             await stream_manager.close_stream(assistant_message_id)
+            await stream_manager.release_generation_lock(chat_id)
 
 
 async def _run_retry_generation_task(chat_id: str, assistant_message_id: str):
@@ -329,6 +330,7 @@ async def _run_retry_generation_task(chat_id: str, assistant_message_id: str):
         finally:
             await stream_manager.mark_task_completed(assistant_message_id)
             await stream_manager.close_stream(assistant_message_id)
+            await stream_manager.release_generation_lock(chat_id)
 
 
 async def run_title_generation_task(chat_id: str):
