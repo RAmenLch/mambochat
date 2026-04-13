@@ -238,6 +238,9 @@ class LLMInputDirector:
             enable_cpl_filter=self._enable_cpl_filter,
             enable_image_with_model=self._enable_image_with_model,
             model_supports_images=self._model_supports_images(model),
+            model_supports_audio=self._model_supports_audio(model),
+            model_supports_video=self._model_supports_video(model),
+            model_supports_file=self._model_supports_file(model),
             enable_zip_history=self._enable_zip_history,
             content_limit=self._content_limit,
             flatten_history=self._flatten_history,
@@ -292,19 +295,43 @@ class LLMInputDirector:
                 model = materials.chat.ai_model
         return model
 
-    def _model_supports_images(self, model: AIModel) -> bool:
+    def _parse_meta_config(self, model: AIModel) -> Optional[dict]:
+        """解析模型的 meta_config 为字典。解析失败返回 None。"""
         meta = model.meta_config
         if isinstance(meta, str):
             try:
                 meta = json.loads(meta)
             except json.JSONDecodeError:
-                return False
-
+                return None
         if not meta or not isinstance(meta, dict):
-            return False
+            return None
+        return meta
 
-        input_modalities = meta.get('input_modalities')
-        return 'image' in (input_modalities or [])
+    def _model_supports_images(self, model: AIModel) -> bool:
+        meta = self._parse_meta_config(model)
+        if not meta:
+            return False
+        return 'image' in (meta.get('input_modalities') or [])
+
+    def _model_supports_audio(self, model: AIModel) -> bool:
+        meta = self._parse_meta_config(model)
+        if not meta:
+            return False
+        return 'audio' in (meta.get('input_modalities') or [])
+
+    def _model_supports_video(self, model: AIModel) -> bool:
+        meta = self._parse_meta_config(model)
+        if not meta:
+            return False
+        return 'video' in (meta.get('input_modalities') or [])
+
+    def _model_supports_file(self, model: AIModel) -> bool:
+        """检测模型是否支持文件输入(PDF等)"""
+        meta = self._parse_meta_config(model)
+        if not meta:
+            return False
+        input_modalities = meta.get('input_modalities') or []
+        return 'file' in input_modalities or 'document' in input_modalities
 
     def _extract_resume_payload(self, target_msg: Optional[MessageSchema]) -> Optional[Dict[str, Any]]:
         if not (self._cutoff_message_id and self._enable_tools and target_msg):

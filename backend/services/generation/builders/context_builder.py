@@ -26,6 +26,12 @@ def _is_text_mime_type(mime_type: str) -> bool:
     return mime_type in _KNOWN_TEXT_APPLICATION_TYPES
 
 
+# 文件大小限制常量 (字节)
+_MAX_AUDIO_SIZE = 25 * 1024 * 1024   # 25MB
+_MAX_VIDEO_SIZE = 50 * 1024 * 1024   # 50MB
+_MAX_FILE_SIZE = 20 * 1024 * 1024    # 20MB (PDF等)
+
+
 class MessageContextBuilder:
     """
     消息上下文装配器。
@@ -40,6 +46,9 @@ class MessageContextBuilder:
             enable_cpl_filter: bool = False,
             enable_image_with_model: bool = False,
             model_supports_images: bool = False,
+            model_supports_audio: bool = False,
+            model_supports_video: bool = False,
+            model_supports_file: bool = False,
             enable_zip_history: bool = True,
             content_limit: Optional[int] = None,
             flatten_history: bool = False,
@@ -55,6 +64,9 @@ class MessageContextBuilder:
         self.enable_cpl_filter = enable_cpl_filter
         self.enable_image_with_model = enable_image_with_model
         self.model_supports_images = model_supports_images
+        self.model_supports_audio = model_supports_audio
+        self.model_supports_video = model_supports_video
+        self.model_supports_file = model_supports_file
         self.enable_zip_history = enable_zip_history
         self.content_limit = content_limit
         self.flatten_history = flatten_history
@@ -339,16 +351,67 @@ class MessageContextBuilder:
             return None
 
         result = None
-        if db_file.mime_type.startswith("image/") \
+        mime = db_file.mime_type
+
+        # --- 图片 (保持现有 OpenAI 格式) ---
+        if mime.startswith("image/") \
                 and self.enable_image_with_model and self.model_supports_images:
             img_bytes = await file_service.get_file_content(file_id)
             b64_data = base64.b64encode(img_bytes).decode('utf-8')
-            result = {"type": "image_url", "image_url": {"url": f"data:{db_file.mime_type};base64,{b64_data}"}}
+            result = {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_data}"}}
 
-        elif _is_text_mime_type(db_file.mime_type):
+        # --- 音频 (LangChain 标准格式) ---
+        elif mime.startswith("audio/") and self.model_supports_audio:
+            audio_bytes = await file_service.get_file_content(file_id)
+            if len(audio_bytes) <= _MAX_AUDIO_SIZE:
+                b64_data = base64.b64encode(audio_bytes).decode('utf-8')
+                result = {"type": "audio", "base64": b64_data, "mime_type": mime}
+            else:
+                size_mb = len(audio_bytes) // (1024 * 1024)
+                result = {"type": "text", "text": f"\n[用户上传了音频文件: {db_file.filename} ({size_mb}MB), 文件过大无法发送给模型]"}
+
+        # --- 视频 (LangChain 标准格式) ---
+        elif mime.startswith("video/") and self.model_supports_video:
+            video_bytes = await file_service.get_file_content(file_id)
+            if len(video_bytes) <= _MAX_VIDEO_SIZE:
+                b64_data = base64.b64encode(video_bytes).decode('utf-8')
+                result = {"type": "video", "base64": b64_data, "mime_type": mime}
+            else:
+                size_mb = len(video_bytes) // (1024 * 1024)
+                result = {"type": "text", "text": f"\n[用户上传了视频文件: {db_file.filename} ({size_mb}MB), 文件过大无法发送给模型]"}
+
+        # --- PDF 等文件 (LangChain 标准格式) ---
+        elif mime == "application/pdf" and self.model_supports_file:
+            pdf_bytes = await file_service.get_file_content(file_id)
+            if len(pdf_bytes) <= _MAX_FILE_SIZE:
+                b64_data = base64.b64encode(pdf_bytes).decode('utf-8')
+                result = {"type": "file", "base64": b64_data, "mime_type": mime}
+            else:
+                size_mb = len(pdf_bytes) // (1024 * 1024)
+                result = {"type": "text", "text": f"\n[用户上传了PDF文件: {db_file.filename} ({size_mb}MB), 文件过大无法发送给模型]"}
+
+        # --- 文本文件 (保持现有逻辑) ---
+        elif _is_text_mime_type(mime):
             text_bytes = await file_service.get_file_content(file_id)
             content = text_bytes.decode('utf-8')
             result = {"type": "text", "text": f"\n--- File: {db_file.filename} ---\n{content}\n--- End of File ---"}
+
+        # --- 不支持的模态 → 文本占位符 ---
+        else:
+            category = ("图片" if mime.startswith("image/") else
+                        "音频" if mime.startswith("audio/") else
+                        "视频" if mime.startswith("video/") else
+                        "PDF文档" if mime == "application/pdf" else "文件")
+            support_hint = ""
+            if mime.startswith("image/") and not self.model_supports_images:
+                support_hint = "，当前模型不支持图片输入"
+            elif mime.startswith("audio/") and not self.model_supports_audio:
+                support_hint = "，当前模型不支持音频输入"
+            elif mime.startswith("video/") and not self.model_supports_video:
+                support_hint = "，当前模型不支持视频输入"
+            elif mime == "application/pdf" and not self.model_supports_file:
+                support_hint = "，当前模型不支持PDF输入"
+            result = {"type": "text", "text": f"\n[用户上传了{category}: {db_file.filename}{support_hint}]"}
 
         if result:
             self._file_content_cache[file_id] = result
