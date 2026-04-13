@@ -64,6 +64,7 @@ export default {
     splitterType: 'Splitter Type',
     simple: 'Simple',
     separator: 'Separator',
+    markdown: 'Markdown',
     chunkSize: 'Chunk Size',
     chunkOverlap: 'Overlap',
     separatorChar: 'Separator Char',

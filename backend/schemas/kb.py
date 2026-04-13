@@ -18,6 +18,7 @@ class KBChunkStatus(str, Enum):
 class KBSplitterType(str, Enum):
     SIMPLE = "simple"
     SEPARATOR = "separator"
+    MARKDOWN = "markdown"
 
 
 class KBTaskAction(str, Enum):

@@ -64,6 +64,7 @@ export default {
     splitterType: '切分方式',
     simple: '简单切分',
     separator: '分隔符切分',
+    markdown: 'Markdown 切分',
     chunkSize: '切片大小',
     chunkOverlap: '重叠大小',
     separatorChar: '分隔符',

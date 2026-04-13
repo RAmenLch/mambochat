@@ -3,10 +3,12 @@
 import asyncio
 import json
 import logging
+import re
 import jieba
 from abc import ABC, abstractmethod
 from typing import List, Tuple, Optional, Set, Dict
 from collections import defaultdict
+from io import BytesIO
 
 from fastapi import HTTPException
 from langchain_openai import OpenAIEmbeddings
@@ -35,16 +37,26 @@ _KNOWN_TEXT_APPLICATION_TYPES = {
     "application/x-ipynb+json",
 }
 
+_DOCUMENT_MIME_TYPES = {
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
 
 def _is_vectorizable_text_type(mime_type: str) -> bool:
     """
     判断 MIME 类型是否为可向量化的文本类型。
     - text/* 前缀通用放行
     - 已知的文本类 application/* 类型放行
+    - 支持的文档类型（PDF、Word）放行
     """
     if mime_type.startswith("text/"):
         return True
-    return mime_type in _KNOWN_TEXT_APPLICATION_TYPES
+    if mime_type in _KNOWN_TEXT_APPLICATION_TYPES:
+        return True
+    if mime_type in _DOCUMENT_MIME_TYPES:
+        return True
+    return False
 
 
 logger = logging.getLogger(__name__)
@@ -130,6 +142,97 @@ class SepTextSplitter(AbstractTextSplitter):
         return final_chunks
 
 
+class MarkdownTextSplitter(AbstractTextSplitter):
+    """
+    基于 Markdown 标题层级的语义切分器。
+    按 Markdown 标题（# ~ ######）将文档分成语义段落，保留标题作为上下文前缀。
+    如果单个段落超过 chunk_size，则回退到 SimpleTextSplitter 进行二次切分。
+    """
+
+    _HEADING_PATTERN = re.compile(r'^(#{1,6})\s+(.+)$', re.MULTILINE)
+
+    def split_text(self, text: str) -> List[str]:
+        if not text:
+            return []
+
+        # 按标题行切分，找到所有标题位置
+        lines = text.split('\n')
+        chunks: List[List[str]] = []
+        current_chunk: List[str] = []
+        current_headings: List[str] = []
+
+        for line in lines:
+            heading_match = re.match(r'^(#{1,6})\s+(.+)$', line)
+            if heading_match:
+                level = len(heading_match.group(1))
+                title = heading_match.group(2).strip()
+
+                # 遇到标题时，将之前的内容保存为一个 chunk
+                if current_chunk:
+                    # 将当前标题层级之前的标题作为上下文前缀
+                    # 保留同级或更高级别的标题
+                    prefix_headings = [h for h in current_headings if len(h[0]) <= level]
+                    prefix_headings.append((heading_match.group(1), title))
+                    header_prefix = '\n'.join(f"{h[0]} {h[1]}" for h in prefix_headings)
+
+                    chunk_text = '\n'.join(current_chunk).strip()
+                    if chunk_text:
+                        chunks.append([chunk_text])
+
+                    current_chunk = []
+                    current_headings = prefix_headings
+                else:
+                    # 空 chunk，只更新标题栈
+                    current_headings = [h for h in current_headings if len(h[0]) <= level]
+                    current_headings.append((heading_match.group(1), title))
+            else:
+                current_chunk.append(line)
+
+        # 保存最后一段
+        if current_chunk:
+            chunk_text = '\n'.join(current_chunk).strip()
+            if chunk_text:
+                chunks.append([chunk_text])
+
+        # 对每个 chunk 添加标题前缀，并检查长度
+        fallback_splitter = SimpleTextSplitter(self.chunk_size, self.chunk_overlap)
+        final_chunks: List[str] = []
+        current_headings_str = ""
+
+        for idx, chunk_lines in enumerate(chunks):
+            # 尝试从 chunk 内容中提取最近的标题行作为前缀
+            heading_prefix = self._extract_heading_context(chunk_lines[0] if chunk_lines else "")
+            if heading_prefix:
+                current_headings_str = heading_prefix
+
+            full_text = chunk_lines[0]
+
+            # 如果需要，添加标题上下文前缀
+            if current_headings_str:
+                full_text = current_headings_str + "\n\n" + full_text
+
+            # 如果单段超过限制，使用 fallback 切分
+            if len(full_text) > self.chunk_size:
+                sub_chunks = fallback_splitter.split_text(full_text)
+                final_chunks.extend(sub_chunks)
+            else:
+                final_chunks.append(full_text)
+
+        return final_chunks
+
+    @staticmethod
+    def _extract_heading_context(text: str) -> str:
+        """从文本开头提取连续的 Markdown 标题行作为上下文"""
+        lines = text.split('\n')
+        heading_lines = []
+        for line in lines:
+            if re.match(r'^#{1,6}\s+', line):
+                heading_lines.append(line)
+            elif line.strip():
+                break
+        return '\n'.join(heading_lines) if heading_lines else ""
+
+
 class SplitterFactory:
     @staticmethod
     def create(config: kb_schemas.KBTextSplitterConfig) -> AbstractTextSplitter:
@@ -138,6 +241,11 @@ class SplitterFactory:
                 chunk_size=config.chunk_size,
                 chunk_overlap=config.chunk_overlap,
                 separator=config.separator
+            )
+        elif config.splitter_type == kb_schemas.KBSplitterType.MARKDOWN:
+            return MarkdownTextSplitter(
+                chunk_size=config.chunk_size,
+                chunk_overlap=config.chunk_overlap
             )
         else:
             return SimpleTextSplitter(
@@ -156,7 +264,25 @@ class AbstractContentExtractor(ABC):
 
 
 class FileExtractor(AbstractContentExtractor):
-    """适用于 FILE 和 KB_FILE 类型，从文件服务读取文件内容"""
+    """适用于 FILE 和 KB_FILE 类型，从文件服务读取文件内容（纯文本文件）"""
+
+    async def _read_file_bytes(self, resource: schemas.ResourceWithVersions, db: AsyncSession) -> bytes:
+        """读取文件原始字节内容"""
+        if not resource.latest_version or not resource.latest_version.content:
+            raise ValueError("Resource content (file_id) is empty.")
+
+        file_id = resource.latest_version.content
+        file_service = FileService(db)
+
+        db_file = await file_service.get_file(file_id)
+        if not db_file:
+            raise ValueError(f"File record not found for ID: {file_id}")
+
+        if not _is_vectorizable_text_type(db_file.mime_type):
+            raise ValueError(
+                f"Unsupported file type for vectorization: {db_file.mime_type}.")
+
+        return await file_service.get_file_content(file_id)
 
     async def extract(self, resource: schemas.ResourceWithVersions, db: AsyncSession) -> str:
         if not resource.latest_version or not resource.latest_version.content:
@@ -183,6 +309,86 @@ class FileExtractor(AbstractContentExtractor):
             raise ValueError(f"Failed to read file content: {e}")
 
 
+class PdfExtractor(AbstractContentExtractor):
+    """从 PDF 文件提取文本（Markdown 格式），使用 PyMuPDF4LLM"""
+
+    async def extract(self, resource: schemas.ResourceWithVersions, db: AsyncSession) -> str:
+        if not resource.latest_version or not resource.latest_version.content:
+            raise ValueError("Resource content (file_id) is empty.")
+
+        file_id = resource.latest_version.content
+        file_service = FileService(db)
+
+        db_file = await file_service.get_file(file_id)
+        if not db_file:
+            raise ValueError(f"File record not found for ID: {file_id}")
+
+        if db_file.mime_type != "application/pdf":
+            raise ValueError(f"PdfExtractor expects PDF file, got: {db_file.mime_type}")
+
+        try:
+            content_bytes = await file_service.get_file_content(file_id)
+            from langchain_pymupdf4llm import PyMuPDF4LLMLoader
+            from tempfile import NamedTemporaryFile
+            import os
+
+            # PyMuPDF4LLMLoader 需要文件路径，写入临时文件
+            with NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                tmp.write(content_bytes)
+                tmp_path = tmp.name
+
+            try:
+                loader = PyMuPDF4LLMLoader(file_path=tmp_path)
+                docs = loader.load()
+                text = "\n\n".join(doc.page_content for doc in docs)
+            finally:
+                os.unlink(tmp_path)
+
+            return text if text.strip() else ""
+        except Exception as e:
+            raise ValueError(f"Failed to extract PDF content: {e}")
+
+
+class DocxExtractor(AbstractContentExtractor):
+    """从 Word (.docx) 文件提取文本，使用 python-docx"""
+
+    async def extract(self, resource: schemas.ResourceWithVersions, db: AsyncSession) -> str:
+        if not resource.latest_version or not resource.latest_version.content:
+            raise ValueError("Resource content (file_id) is empty.")
+
+        file_id = resource.latest_version.content
+        file_service = FileService(db)
+
+        db_file = await file_service.get_file(file_id)
+        if not db_file:
+            raise ValueError(f"File record not found for ID: {file_id}")
+
+        expected_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        if db_file.mime_type != expected_mime:
+            raise ValueError(f"DocxExtractor expects DOCX file, got: {db_file.mime_type}")
+
+        try:
+            content_bytes = await file_service.get_file_content(file_id)
+            import docx
+
+            document = docx.Document(BytesIO(content_bytes))
+            text_parts = []
+            for para in document.paragraphs:
+                if para.text.strip():
+                    text_parts.append(para.text)
+
+            # 也提取表格内容
+            for table in document.tables:
+                for row in table.rows:
+                    row_text = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+                    if row_text:
+                        text_parts.append(" | ".join(row_text))
+
+            return "\n\n".join(text_parts)
+        except Exception as e:
+            raise ValueError(f"Failed to extract DOCX content: {e}")
+
+
 class TextExtractor(AbstractContentExtractor):
     """适用于 SYSTEM_PROMPT 和 SUBMESSAGE_TEMPLATE，直接读取版本内容"""
 
@@ -194,9 +400,14 @@ class TextExtractor(AbstractContentExtractor):
 
 class ExtractorFactory:
     @staticmethod
-    def get_extractor(resource_type: str) -> AbstractContentExtractor:
+    def get_extractor(resource_type: str, mime_type: str = None) -> AbstractContentExtractor:
         if resource_type in [ResourceType.FILE.value, ResourceType.KB_FILE.value]:
-            return FileExtractor()
+            if mime_type == "application/pdf":
+                return PdfExtractor()
+            elif mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+                return DocxExtractor()
+            else:
+                return FileExtractor()
         elif resource_type in [ResourceType.SYSTEM_PROMPT.value, ResourceType.SUBMESSAGE_TEMPLATE.value]:
             return TextExtractor()
         else:
@@ -602,7 +813,16 @@ class KnowledgeBaseService:
                     await self._publish_status(resource_id, KBFileStatus.READING, 0, 0, 0, 0)
 
                     try:
-                        extractor = ExtractorFactory.get_extractor(resource.resourceType)
+                        # 获取文件的 MIME 类型以选择正确的提取器
+                        file_mime_type = None
+                        if resource.resourceType in [ResourceType.FILE.value, ResourceType.KB_FILE.value]:
+                            if resource.latest_version and resource.latest_version.content:
+                                file_svc = FileService(session)
+                                db_file = await file_svc.get_file(resource.latest_version.content)
+                                if db_file:
+                                    file_mime_type = db_file.mime_type
+
+                        extractor = ExtractorFactory.get_extractor(resource.resourceType, mime_type=file_mime_type)
                         text_content = await extractor.extract(resource, session)
                     except Exception as e:
                         logger.error(f"Extraction failed: {e}")

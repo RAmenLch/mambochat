@@ -58,7 +58,7 @@ export interface KBChunkStatus {
   is_stale: boolean
 }
 
-export type SplitterType = 'simple' | 'separator'
+export type SplitterType = 'simple' | 'separator' | 'markdown'
 export type KBTaskAction = 'start' | 'resume' | 'stop'
 
 export interface KBSplitterConfig {
