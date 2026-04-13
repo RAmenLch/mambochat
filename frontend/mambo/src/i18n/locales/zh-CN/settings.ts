@@ -76,6 +76,8 @@ export default {
     defaultEnableSuggestTip: '新会话默认是否启用回复建议功能。',
     defaultEnableAskUser: '默认允许 AI 提问',
     defaultEnableAskUserTip: '新会话默认是否允许 AI 向用户提问以获取必要信息。',
+    defaultMaxRetries: '模型请求最大重试次数',
+    defaultMaxRetriesTip: '模型请求失败时的全局默认最大重试次数，必须 >= 1。',
     saving: '正在保存设置...',
     saved: '所有更改已保存',
     saveError: '保存失败，请检查网络',

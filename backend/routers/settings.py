@@ -41,7 +41,9 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
     keys = [
         "default_model_id", "title_generation_model_id", "zip_history_system_prompt",
         "last_selected_provider_id", "default_max_context_messages", "default_temperature",
-        "default_top_p", "default_stream", "default_enable_suggest", "default_enable_ask_user", "proxy_enabled", "proxy_url",
+        "default_top_p", "default_stream", "default_enable_suggest", "default_enable_ask_user",
+        "default_max_retries",
+        "proxy_enabled", "proxy_url",
         "user_avatar_file_id", "ai_avatar_file_id",
         "frontend_editor", "kb_default_chunk_size", "kb_default_chunk_overlap", "send_message_shortcut",
         "language"
@@ -80,6 +82,7 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
     stream = _get_typed_setting(settings_map.get("default_stream"), True, bool)
     enable_suggest = _get_typed_setting(settings_map.get("default_enable_suggest"), False, bool)
     enable_ask_user = _get_typed_setting(settings_map.get("default_enable_ask_user"), False, bool)
+    max_retries = _get_typed_setting(settings_map.get("default_max_retries"), 1, int)
     proxy_enabled = _get_typed_setting(settings_map.get("proxy_enabled"), False, bool)
     proxy_url = _get_typed_setting(settings_map.get("proxy_url"), None, str)
 
@@ -100,6 +103,7 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
         default_stream=stream,
         default_enable_suggest=enable_suggest,
         default_enable_ask_user=enable_ask_user,
+        default_max_retries=max_retries,
         proxy_enabled=proxy_enabled,
         proxy_url=proxy_url,
         user_avatar_url=user_avatar_url,
@@ -162,7 +166,9 @@ async def update_global_settings(
 
     param_keys = [
         "default_max_context_messages", "default_temperature", "default_top_p",
-        "default_stream", "default_enable_suggest", "default_enable_ask_user", "proxy_enabled", "proxy_url",
+        "default_stream", "default_enable_suggest", "default_enable_ask_user",
+        "default_max_retries",
+        "proxy_enabled", "proxy_url",
         "zip_history_system_prompt",
         "frontend_editor", "kb_default_chunk_size", "kb_default_chunk_overlap", "send_message_shortcut",
         "language"
@@ -170,6 +176,11 @@ async def update_global_settings(
     for key in param_keys:
         if key in update_data:
             value = update_data[key]
+            if key == "default_max_retries" and value is not None and int(value) < 1:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="default_max_retries 必须 >= 1"
+                )
             settings_to_update.append(schemas.GlobalSetting(key=key, value=str(value) if value is not None else None))
 
     for setting in settings_to_update:

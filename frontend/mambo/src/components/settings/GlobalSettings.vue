@@ -281,6 +281,23 @@
           </el-tooltip>
         </el-form-item>
 
+        <el-form-item :label="t('settings.global.defaultMaxRetries')">
+          <el-input-number
+            :model-value="settingsForm.default_max_retries ?? 1"
+            @update:model-value="(val) => (settingsForm.default_max_retries = val as number)"
+            :min="1"
+            :max="20"
+            :step="1"
+          />
+          <el-tooltip
+            effect="dark"
+            :content="t('settings.global.defaultMaxRetriesTip')"
+            placement="top"
+          >
+            <el-icon class="label-icon"><QuestionFilled /></el-icon>
+          </el-tooltip>
+        </el-form-item>
+
         <!-- 状态栏替代了保存按钮 -->
         <div class="status-bar">
           <transition name="fade" mode="out-in">
@@ -348,6 +365,7 @@ const settingsForm = reactive<
   language: 'zh-CN', // 默认值
   default_enable_suggest: false,
   default_enable_ask_user: false,
+  default_max_retries: 1,
 })
 
 // 状态控制
@@ -403,6 +421,7 @@ watch(
       language: newSettings.language || 'zh-CN',
       default_enable_suggest: newSettings.default_enable_suggest ?? false,
       default_enable_ask_user: newSettings.default_enable_ask_user ?? false,
+      default_max_retries: newSettings.default_max_retries ?? 1,
     })
 
     // 在 DOM 更新循环结束后释放锁，确保 watch(settingsForm) 不会被此次赋值触发

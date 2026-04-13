@@ -36,6 +36,7 @@ export const useSettingsStore = defineStore('settings', {
       language: 'zh-CN',
       default_enable_suggest: false,
       default_enable_ask_user: false,
+      default_max_retries: 3,
     },
   }),
 

@@ -65,6 +65,7 @@ class ModelConfig(BaseModel):
         description="模型的生成参数 (如 temperature, top_p, stream 等)"
     )
     timeout: int = Field(60, description="请求超时时间(秒)")
+    max_retries: int = Field(0, description="模型请求最大重试次数, 0表示不配置, 将使用全局默认值")
 
 
 class MessageContext(BaseModel):

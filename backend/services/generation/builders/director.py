@@ -160,12 +160,23 @@ class LLMInputDirector:
         if provider.use_proxy and materials.settings.get("proxy_enabled") == "True":
             proxy_url = materials.settings.get("proxy_url")
 
+        global_max_retries = int(materials.settings.get("default_max_retries", 3))
+        model_max_retries = 0
+        if model.meta_config:
+            try:
+                meta = json.loads(model.meta_config) if isinstance(model.meta_config, str) else model.meta_config
+                model_max_retries = int(meta.get("max_retries", 0))
+            except (json.JSONDecodeError, ValueError, TypeError):
+                pass
+        max_retries = model_max_retries if model_max_retries > 0 else global_max_retries
+
         llm_config = ModelConfig(
             model_id=model.modelId,
             api_host=provider.apiHost,
             api_key=provider.apiKey,
             proxy_url=proxy_url,
-            parameters=api_params
+            parameters=api_params,
+            max_retries=max_retries
         )
 
         resume_payload = self._extract_resume_payload(materials.target_msg)

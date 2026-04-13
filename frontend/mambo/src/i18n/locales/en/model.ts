@@ -38,6 +38,8 @@ export default {
     outputModalities: 'Output Modalities',
     embeddingDimension: 'Embedding Dimension*',
     supportedParams: 'Supported Params',
+    maxRetries: 'Max Retries',
+    useGlobal: 'Use Global',
     updateSuccess: 'Model updated successfully!',
     createSuccess: 'Model added successfully!',
   },

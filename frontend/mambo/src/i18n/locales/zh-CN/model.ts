@@ -38,6 +38,8 @@ export default {
     outputModalities: '输出模态',
     embeddingDimension: '向量维度*',
     supportedParams: '支持的参数',
+    maxRetries: '最大重试次数',
+    useGlobal: '采用全局配置',
     updateSuccess: '更新模型成功！',
     createSuccess: '新增模型成功！',
   },

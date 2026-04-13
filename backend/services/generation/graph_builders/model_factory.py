@@ -16,12 +16,14 @@ class ModelFactory:
     模型工厂。
     负责根据 ModelConfig 动态实例化对应的 LangChain ChatModel。
     """
+    DEFAULT_MAX_RETRIES = 3
 
     @staticmethod
     def create_model(model_config: ModelConfig, run_time_config: RunTimeConfig) -> BaseChatModel:
         params_copy = model_config.parameters.copy()
         worker_type = params_copy.pop("_worker_type", ProviderWorkerType.OPENAI.value)
         stream = params_copy.pop("stream", True)
+        max_retries = model_config.max_retries or self.DEFAULT_MAX_RETRIES
 
         callbacks = [RawPayloadLoggingCallback(run_time_config)]
 
@@ -38,7 +40,7 @@ class ModelFactory:
                 streaming=stream,
                 stop=None,
                 callbacks=callbacks,
-                max_retries=5
+                max_retries=max_retries
             )
 
         elif worker_type == ProviderWorkerType.GOOGLE.value:
@@ -53,7 +55,7 @@ class ModelFactory:
                 timeout=model_config.timeout,
                 streaming=stream,
                 callbacks=callbacks,
-                max_retries=5
+                max_retries=max_retries
             )
 
         elif worker_type == ProviderWorkerType.DEEPSEEK.value:
@@ -66,7 +68,7 @@ class ModelFactory:
                 timeout=model_config.timeout,
                 streaming=stream,
                 callbacks=callbacks,
-                max_retries=5
+                max_retries=max_retries
             )
 
         else:
@@ -83,5 +85,5 @@ class ModelFactory:
                     "X-Title": "MamboChat",
                 },
                 callbacks=callbacks,
-                max_retries=5
+                max_retries=max_retries
             )

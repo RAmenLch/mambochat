@@ -78,6 +78,8 @@ export default {
     defaultEnableSuggestTip: 'Enable reply suggestions by default for new chats.',
     defaultEnableAskUser: 'Default Allow AI to Ask User',
     defaultEnableAskUserTip: 'Allow AI to ask the user questions by default for new chats.',
+    defaultMaxRetries: 'Max Retries',
+    defaultMaxRetriesTip: 'Global default max retry count for model requests. Must be >= 1.',
     saving: 'Saving settings...',
     saved: 'All changes saved',
     saveError: 'Save failed, check network',
