@@ -19,9 +19,11 @@
 
         <el-form-item :label="$t('chat.settings.model')">
           <el-select
+            ref="modelSelectRef"
             v-model="chatSettingsForm.aiModelId"
             :placeholder="$t('chat.settings.modelPlaceholder')"
             style="width: 100%"
+            @visible-change="(visible: boolean) => scrollToTopIfStarred(visible, modelSelectRef)"
           >
             <el-option-group
               v-for="group in filteredGroupedModels"
@@ -172,6 +174,7 @@ import { useChatListStore } from '@/stores/chatListStore'
 import { getResourceDetails } from '@/api/resourceService'
 import type { Chat, ChatUpdate, AIModel, Resource, LLMParameterDefinition } from '@/api/types'
 import ResourceSelectorDialog from './dialogs/ResourceSelectorDialog.vue'
+import { useModelSelectScroll } from '@/composables/useModelSelectScroll'
 
 interface GroupedModels {
   label: string
@@ -212,6 +215,8 @@ const chatSessionStore = useChatSessionStore()
 const chatListStore = useChatListStore()
 
 const promptDialogVisible = ref(false)
+const modelSelectRef = ref()
+const { scrollToTopIfStarred } = useModelSelectScroll()
 const chatSettingsForm = reactive<ChatSettingsForm>({
   name: '',
   aiModelId: null,

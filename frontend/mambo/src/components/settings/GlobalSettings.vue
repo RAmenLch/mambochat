@@ -27,10 +27,12 @@
             </el-tooltip>
           </template>
           <el-select
+            ref="defaultModelSelectRef"
             v-model="settingsForm.default_model_id"
             :placeholder="t('settings.global.defaultModelPlaceholder')"
             style="width: 100%"
             clearable
+            @visible-change="(visible: boolean) => scrollToTopIfStarred(visible, defaultModelSelectRef)"
           >
             <el-option-group v-for="group in groupedModels" :key="group.label" :label="group.label">
               <el-option
@@ -55,10 +57,12 @@
             </el-tooltip>
           </template>
           <el-select
+            ref="titleModelSelectRef"
             v-model="settingsForm.title_generation_model_id"
             :placeholder="t('settings.global.titleModelPlaceholder')"
             style="width: 100%"
             clearable
+            @visible-change="(visible: boolean) => scrollToTopIfStarred(visible, titleModelSelectRef)"
           >
             <el-option-group v-for="group in groupedModels" :key="group.label" :label="group.label">
               <el-option
@@ -330,6 +334,7 @@ import { ElMessage } from 'element-plus'
 import { QuestionFilled, User, Cpu, Loading, Check, Warning } from '@element-plus/icons-vue'
 import type { GlobalSettingsUpdate } from '@/api/types'
 import AvatarUploader from './AvatarUploader.vue'
+import { useModelSelectScroll } from '@/composables/useModelSelectScroll'
 
 type AvatarType = 'user' | 'ai'
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
@@ -376,6 +381,10 @@ const isAvatarLoading = reactive({
   user: false,
   ai: false,
 })
+
+const defaultModelSelectRef = ref()
+const titleModelSelectRef = ref()
+const { scrollToTopIfStarred } = useModelSelectScroll()
 
 // 同步锁：防止 Store -> Form -> Watch -> API -> Store 的死循环
 const isSyncingFromStore = ref(false)

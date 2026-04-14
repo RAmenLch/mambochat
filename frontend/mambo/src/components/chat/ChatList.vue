@@ -112,6 +112,7 @@
       :select-config="dialogProps.selectConfig"
       :show-chat-mode="dialogProps.showChatMode"
       :agent-select-config="dialogProps.agentSelectConfig"
+      :select-starred-ids="modelStarredIds"
       @confirm="onDialogConfirm"
     />
 
@@ -209,6 +210,14 @@ const modelOptions = computed((): SelectConfigOption[] => {
         }))
     }))
     .filter(group => group.options.length > 0);
+});
+
+const modelStarredIds = computed(() => {
+  return new Set(
+    providerStore.allModels
+      .filter(m => m.starred && m.model_type === 'chat')
+      .map(m => m.id)
+  );
 });
 
 const agentOptions = computed((): SelectConfigOption[] => {

@@ -62,7 +62,9 @@
           <el-row :gutter="40">
             <el-col :span="12">
               <el-form-item :label="$t('agent.bindModel')">
-                <el-select v-model="form.aiModelId" :placeholder="$t('agent.modelPlaceholder')" style="width: 100%" clearable>
+                <el-select ref="modelSelectRef" v-model="form.aiModelId" :placeholder="$t('agent.modelPlaceholder')" style="width: 100%" clearable
+                  @visible-change="(visible: boolean) => scrollToTopIfStarred(visible, modelSelectRef)"
+                >
                   <el-option-group v-for="group in filteredGroupedModels" :key="group.label" :label="group.label">
                     <el-option v-for="item in group.options" :key="item.id" :label="item.name" :value="item.id" />
                   </el-option-group>
@@ -400,6 +402,7 @@ import AvatarUploader from '../AvatarUploader.vue';
 import ResourceSelectorDialog from '@/components/common/dialogs/ResourceSelectorDialog.vue';
 import AgentSelectorDialog from './dialogs/AgentSelectorDialog.vue';
 import MountedResourceTags from '@/components/common/MountedResourceTags.vue';
+import { useModelSelectScroll } from '@/composables/useModelSelectScroll';
 
 const { t } = useI18n();
 const agentStore = useAgentStore();
@@ -417,6 +420,8 @@ const isSaving = ref(false);
 const isAvatarLoading = ref(false);
 const resourceSelectorVisible = ref(false);
 const agentSelectorVisible = ref(false);
+const modelSelectRef = ref();
+const { scrollToTopIfStarred } = useModelSelectScroll();
 
 const agentData = computed(() => agentList.value.find(a => a.id === currentAgentId.value));
 

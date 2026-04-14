@@ -29,9 +29,11 @@
         prop="selectValue"
       >
         <el-select
+          ref="modelSelectRef"
           v-model="form.selectValue"
           :placeholder="t('common.placeholder.select', { label: selectConfig.label })"
           style="width: 100%;"
+          @visible-change="(visible: boolean) => scrollToTopIfStarred(visible, modelSelectRef)"
         >
           <template v-for="(item, index) in selectConfig.options" :key="index">
             <el-option-group v-if="'options' in item" :label="item.label">
@@ -116,6 +118,7 @@ const props = defineProps<{
   selectConfig?: SelectConfig;
   showChatMode?: boolean;
   agentSelectConfig?: SelectConfig;
+  selectStarredIds?: Set<string>;
 }>();
 
 const emit = defineEmits<{
@@ -127,6 +130,22 @@ const { t } = useI18n();
 const internalVisible = ref(false);
 const formRef = ref<FormInstance>();
 const nameInputRef = ref<HTMLInputElement>();
+const modelSelectRef = ref();
+
+function scrollToTopIfStarred(visible: boolean, selectRef: any) {
+  if (!visible || !selectRef || !props.selectStarredIds) return;
+  const value = selectRef.modelValue as string | null;
+  if (!value || !props.selectStarredIds.has(value)) return;
+
+  setTimeout(() => {
+    try {
+      const popperContentRef = selectRef.tooltipRef?.popperRef?.contentRef;
+      if (!popperContentRef) return;
+      const wrapEl = popperContentRef.querySelector('.el-select-dropdown__wrap');
+      if (wrapEl) wrapEl.scrollTop = 0;
+    } catch { /* ignore */ }
+  }, 0);
+}
 
 const form = reactive({
   name: '',

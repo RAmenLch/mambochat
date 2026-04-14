@@ -14,7 +14,13 @@
           <el-input v-model.trim="chatSettingsForm.name" :placeholder="$t('chat.settings.namePlaceholder')" />
         </el-form-item>
         <el-form-item :label="$t('chat.settings.model')">
-          <el-select v-model="chatSettingsForm.aiModelId" :placeholder="$t('chat.settings.modelPlaceholder')" style="width: 100%">
+          <el-select
+            ref="modelSelectRef"
+            v-model="chatSettingsForm.aiModelId"
+            :placeholder="$t('chat.settings.modelPlaceholder')"
+            style="width: 100%"
+            @visible-change="(visible: boolean) => scrollToTopIfStarred(visible, modelSelectRef)"
+          >
             <el-option-group v-for="group in filteredGroupedModels" :key="group.label" :label="group.label">
               <el-option v-for="item in group.options" :key="item.id" :label="item.name" :value="item.id" />
             </el-option-group>
@@ -149,6 +155,7 @@
 
 <script setup lang="ts">
 import { reactive, watch, ref, computed } from 'vue';
+import { useModelSelectScroll } from '@/composables/useModelSelectScroll';
 import { useI18n } from 'vue-i18n';
 import { ElMessage } from 'element-plus';
 import { QuestionFilled } from '@element-plus/icons-vue';
@@ -161,6 +168,8 @@ import ResourceSelectorDialog from '../common/dialogs/ResourceSelectorDialog.vue
 import MountedResourceTags from '@/components/common/MountedResourceTags.vue';
 import { useChatListStore } from '@/stores/chatListStore';
 const chatListStore = useChatListStore();
+const { scrollToTopIfStarred } = useModelSelectScroll();
+const modelSelectRef = ref();
 
 interface GroupedModels {
   label: string;
