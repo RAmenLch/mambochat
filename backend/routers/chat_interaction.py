@@ -231,8 +231,15 @@ async def update_sub_message(
 
 
 @router.post("/messages/{message_id}/stop", status_code=status.HTTP_202_ACCEPTED, summary="请求停止AI生成")
-async def stop_generation(message_id: str):
+async def stop_generation(message_id: str, db: AsyncSession = Depends(get_db)):
     await stream_manager.request_cancellation(message_id)
+    await stream_manager.mark_task_completed(message_id)
+
+    # 立即释放该会话的生成锁，使前端停止后可以立刻重新生成。
+    db_message = await message_crud.get_message(db, message_id=message_id)
+    if db_message:
+        await stream_manager.release_generation_lock(db_message.chatId)
+
     return {"message": "Cancellation requested."}
 
 

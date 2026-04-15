@@ -242,20 +242,22 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
    * @param messageId - 正在生成的消息ID。
    */
   async function cancelGeneration(messageId: string) {
-    sessionStore.activeSubscriptions.get(messageId)?.abort();
-    sessionStore.activeSubscriptions.delete(messageId);
+    // 不在此处 abort SSE 连接，而是通知后端停止后，
+    // 等待后端完成清理（写入 Error 子消息等）并通过 close_stream 自然关闭 SSE，
+    // 这样 onClose 回调会正常触发 finalize → getChatWithMessages 获取最终状态。
+    try {
+      await stopGenerationAPI(messageId);
+    } catch (error) {
+      console.error(`Failed to process stop request for ${messageId}:`, error);
+    }
 
+    // 乐观更新：UI 立即停止生成状态
     const msg = sessionStore.currentChatMessages.find(m => m.id === messageId);
     if (msg && msg.status === 'generating') {
       msg.status = 'completed';
       msg.sub_messages.forEach(sm => {
         if (sm.status === 'generating') sm.status = 'completed';
       });
-    }
-     try {
-      await stopGenerationAPI(messageId);
-    } catch (error) {
-      console.error(`Failed to process stop request for ${messageId}:`, error);
     }
   }
 

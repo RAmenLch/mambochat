@@ -1,8 +1,57 @@
 # backend/services/stream_manager_service.py
 
 import asyncio
+import contextlib
 from collections import defaultdict
-from typing import Dict, List, Set
+from typing import AsyncIterator, TypeVar
+
+T = TypeVar("T")
+
+
+async def cancellable_aiter(aiter: AsyncIterator[T], cancel_event: asyncio.Event) -> AsyncIterator[T]:
+    """
+    包装一个异步迭代器，使其在 cancel_event 被触发时立即停止。
+
+    用法::
+
+        cancel_event = await stream_manager.get_cancel_event(message_id)
+        async for item in cancellable_aiter(some_async_generator(), cancel_event):
+            process(item)
+
+    取消时会关闭底层生成器并抛出 asyncio.CancelledError，
+    由调用方的 try/except 处理后续清理逻辑。
+    """
+    ait = aiter.__aiter__()
+    try:
+        while True:
+            next_coro = asyncio.ensure_future(ait.__anext__())
+            cancel_coro = asyncio.ensure_future(cancel_event.wait())
+
+            done, pending = await asyncio.wait(
+                {next_coro, cancel_coro},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            for p in pending:
+                p.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await p
+
+            if cancel_coro in done:
+                next_coro.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await next_coro
+                raise asyncio.CancelledError("Generation cancelled.")
+
+            exc = next_coro.exception()
+            if exc:
+                if isinstance(exc, StopAsyncIteration):
+                    return
+                raise exc
+            yield next_coro.result()
+    finally:
+        await ait.aclose()
+
 
 class StreamManager:
     """
@@ -10,12 +59,47 @@ class StreamManager:
     """
 
     def __init__(self):
-        self.active_streams: Dict[str, List[asyncio.Queue]] = defaultdict(list)
-        self.cancellation_requests: Set[str] = set()
-        self.running_tasks: Set[str] = set()
+        self.active_streams: dict[str, list[asyncio.Queue]] = defaultdict(list)
+        self._cancel_events: dict[str, asyncio.Event] = {}
+        self.running_tasks: set[str] = set()
         self.lock = asyncio.Lock()
-        self._chat_generation_locks: Dict[str, asyncio.Lock] = {}
+        self._chat_generation_locks: dict[str, asyncio.Lock] = {}
         self._chat_generation_locks_lock = asyncio.Lock()
+
+    # ── 取消信号管理 ──────────────────────────────────────
+
+    async def get_cancel_event(self, message_id: str) -> asyncio.Event:
+        """获取或创建指定消息的取消事件。"""
+        async with self.lock:
+            event = self._cancel_events.get(message_id)
+            if event is None:
+                event = asyncio.Event()
+                self._cancel_events[message_id] = event
+            return event
+
+    async def request_cancellation(self, message_id: str):
+        """请求取消指定消息的生成任务。"""
+        async with self.lock:
+            print(f"[StreamManager] Cancellation requested for message '{message_id}'.")
+            event = self._cancel_events.get(message_id)
+            if event:
+                event.set()
+            else:
+                event = asyncio.Event()
+                event.set()
+                self._cancel_events[message_id] = event
+
+    async def is_cancellation_requested(self, message_id: str) -> bool:
+        """检查是否已请求取消。"""
+        async with self.lock:
+            event = self._cancel_events.get(message_id)
+            return event is not None and event.is_set()
+
+    def _discard_cancel_event(self, message_id: str):
+        """内部方法：清理取消事件（仅在持有 self.lock 时调用）。"""
+        self._cancel_events.pop(message_id, None)
+
+    # ── 流订阅管理 ──────────────────────────────────────
 
     async def subscribe(self, message_id: str) -> asyncio.Queue:
         async with self.lock:
@@ -36,7 +120,7 @@ class StreamManager:
                 except ValueError:
                     pass
 
-    async def publish(self, message_id: str, chunk: any):
+    async def publish(self, message_id: str, chunk):
         async with self.lock:
             if message_id in self.active_streams:
                 subscribers = self.active_streams[message_id]
@@ -48,37 +132,29 @@ class StreamManager:
                 subscribers = self.active_streams.pop(message_id, [])
                 print(f"[StreamManager] Closing stream '{message_id}' for {len(subscribers)} subscribers.")
                 await asyncio.gather(*(queue.put(None) for queue in subscribers))
-            self.cancellation_requests.discard(message_id)
+            self._discard_cancel_event(message_id)
 
     async def is_stream_active(self, message_id: str) -> bool:
         async with self.lock:
             return message_id in self.active_streams and len(self.active_streams[message_id]) > 0
 
-    async def request_cancellation(self, message_id: str):
-        async with self.lock:
-            print(f"[StreamManager] Cancellation requested for message '{message_id}'.")
-            self.cancellation_requests.add(message_id)
-
-    async def is_cancellation_requested(self, message_id: str) -> bool:
-        async with self.lock:
-            return message_id in self.cancellation_requests
+    # ── 任务状态管理 ──────────────────────────────────────
 
     async def mark_task_running(self, message_id: str):
-        """标记一个生成任务已启动"""
         async with self.lock:
             self.running_tasks.add(message_id)
             print(f"[StreamManager] Task marked as RUNNING for message '{message_id}'.")
 
     async def mark_task_completed(self, message_id: str):
-        """标记一个生成任务已结束"""
         async with self.lock:
             self.running_tasks.discard(message_id)
             print(f"[StreamManager] Task marked as COMPLETED for message '{message_id}'.")
 
     async def is_task_running(self, message_id: str) -> bool:
-        """检查一个生成任务是否正在内存中运行"""
         async with self.lock:
             return message_id in self.running_tasks
+
+    # ── 生成锁管理 ──────────────────────────────────────
 
     async def try_acquire_generation_lock(self, chat_id: str) -> bool:
         """
@@ -99,7 +175,6 @@ class StreamManager:
         return True
 
     async def release_generation_lock(self, chat_id: str):
-        """释放指定会话的生成锁"""
         async with self._chat_generation_locks_lock:
             lock = self._chat_generation_locks.get(chat_id)
         if lock and lock.locked():

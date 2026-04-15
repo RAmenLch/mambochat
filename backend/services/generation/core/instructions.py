@@ -90,6 +90,16 @@ class SaveAndPersistFile(BaseInstruction):
     management_type: str = FileManagementType.SUB_MESSAGE.value
 
 
+class FailSubMessagesByMessage(BaseInstruction):
+    """
+    指令：将指定消息下所有仍处于 GENERATING 状态的子消息批量标记为 FAILED。
+    统一的失败闭合指令，替代 Manager 中逐个 yield UpdateSubMessageStatus 的做法。
+    Executor 层应同时处理 reasoning 子消息的 is_minimal 折叠配置。
+    """
+    message_id: str = Field(..., description="目标父消息UUID")
+    status: MessageStatus = MessageStatus.FAILED
+
+
 class UpdateZipHistorySubMessage(BaseInstruction):
     """
     指令：创建或更新一个 ZipHistory 类型的子消息。

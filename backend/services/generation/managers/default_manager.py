@@ -10,12 +10,12 @@ from langchain_core.tools import BaseTool
 
 from backend.models.base_model import generate_uuid
 from backend.schemas import enums as schemas_enums
-from backend.services.stream_manager_service import stream_manager
+from backend.services.stream_manager_service import stream_manager, cancellable_aiter
 from backend.services.mcp_connection_manager import McpConnectionError
 
 from backend.services.generation.core.instructions import (
     BaseInstruction, CreateSubMessage, AppendToSubMessage,
-    UpdateSubMessageStatus, UpdateSubMessageConfig, SetFinalStatus, InterruptGeneration
+    SetFinalStatus, InterruptGeneration, FailSubMessagesByMessage, UpdateSubMessageConfig, UpdateSubMessageStatus
 )
 from backend.services.generation.builders.director import LLMInputDirector
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
@@ -96,35 +96,36 @@ class DefaultGenerateManager(AbstractGenerateManager):
             return
 
         should_interrupt = False
+        cancel_event = await stream_manager.get_cancel_event(assistant_message_id)
 
-        async for mode, event in worker.generate(llm_input):
-            if await stream_manager.is_cancellation_requested(assistant_message_id):
-                raise asyncio.CancelledError("Generation cancelled.")
+        try:
+            async for mode, event in cancellable_aiter(worker.generate(llm_input), cancel_event):
+                decoder = worker.resolve_decoder(event)
 
-            decoder = worker.resolve_decoder(event)
+                event_id: Optional[str] = None
+                if not isinstance(event, dict):
+                    event_id = event.id
+                context = StreamContext(
+                    decode=decoder, mode=mode, event=event,
+                    lc_run_uuid=self._extract_run_uuid(event_id),
+                    providers=providers, tool_map=tool_map, hitl_config=hitl_config,
+                    created_stream_ids=self._created_stream_ids,
+                    pending_hitl_tool_calls=self._pending_hitl_tool_calls,
+                    final_usage_data=self._final_usage_data
+                )
 
-            event_id: Optional[str] = None
-            if not isinstance(event, dict):
-                event_id = event.id
-            context = StreamContext(
-                decode=decoder, mode=mode, event=event,
-                lc_run_uuid=self._extract_run_uuid(event_id),
-                providers=providers, tool_map=tool_map, hitl_config=hitl_config,
-                created_stream_ids=self._created_stream_ids,
-                pending_hitl_tool_calls=self._pending_hitl_tool_calls,
-                final_usage_data=self._final_usage_data
-            )
+                for handler in self._handlers:
+                    async for instruction in handler.handle(context):
+                        if isinstance(instruction, InterruptGeneration):
+                            context.should_interrupt = True
+                            continue
+                        yield instruction
 
-            for handler in self._handlers:
-                async for instruction in handler.handle(context):
-                    if isinstance(instruction, InterruptGeneration):
-                        context.should_interrupt = True
-                        continue
-                    yield instruction
-
-            if context.should_interrupt:
-                should_interrupt = True
-                break
+                if context.should_interrupt:
+                    should_interrupt = True
+                    break
+        except asyncio.CancelledError:
+            raise
 
         async for instruction in self._finalize_generation(is_interrupted=should_interrupt):
             yield instruction
@@ -162,33 +163,10 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 error_message = f"发生未处理的异常: {str(exception)}"
             error_stack = traceback.format_exc()
 
-        # 1. 闭合所有未完成的子消息，状态改为 failed
-        for sub_id in list(self._created_stream_ids):
-            if sub_id.endswith('-R'):
-                yield UpdateSubMessageConfig(sub_message_id=sub_id, config={"is_minimal": True})
-            yield UpdateSubMessageStatus(sub_message_id=sub_id, status=schemas_enums.MessageStatus.FAILED)
-        self._created_stream_ids.clear()
+        # 统一将所有 GENERATING 状态的子消息批量标记为 FAILED（含 reasoning 折叠处理）
+        yield FailSubMessagesByMessage(message_id=assistant_message_id)
 
-        # 1.1 DB 兜底：将所有仍处于 GENERATING 状态的子消息设为 FAILED（覆盖未被 _created_stream_ids 追踪的 MCP_TOOL 子消息）
-        try:
-            from sqlalchemy import update
-            from backend.models.chat_model import SubMessage
-            stmt = (
-                update(SubMessage)
-                .where(SubMessage.messageId == assistant_message_id)
-                .where(SubMessage.status == schemas_enums.MessageStatus.GENERATING.value)
-                .values(status=schemas_enums.MessageStatus.FAILED.value)
-            )
-            await self.db_session.execute(stmt)
-            await self.db_session.commit()
-        except Exception as db_err:
-            print(f"[DefaultGenerateManager] DB fallback cleanup failed: {db_err}")
-            try:
-                await self.db_session.rollback()
-            except Exception:
-                pass
-
-        # 2. 创建 Error 类型的子消息，包含简短错误信息和完整堆栈（参与上下文）
+        # 创建 Error 类型的子消息，包含简短错误信息和完整堆栈（参与上下文）
         if error_message:
             from backend.schemas.message import ErrorContent
             error_content = ErrorContent(message=error_message, stack_trace=error_stack)

@@ -7,7 +7,8 @@ from backend import schemas
 from backend.services.generation.core.instructions import (
     BaseInstruction, CreateSubMessage, AppendToSubMessage, UpdateSubMessageContent,
     UpdateSubMessageStatus, UpdateSubMessageConfig, SetFinalStatus,
-    UpdateChatName, SaveAndPersistFile, UpdateZipHistorySubMessage, NotifyUser
+    UpdateChatName, SaveAndPersistFile, UpdateZipHistorySubMessage, NotifyUser,
+    FailSubMessagesByMessage
 )
 from backend.services.generation.executor import handlers
 
@@ -56,6 +57,7 @@ class InstructionDispatcher:
         self.register(UpdateChatName, handlers.handle_update_chat_name)
         self.register(UpdateZipHistorySubMessage, handlers.handle_update_zip_history)
         self.register(NotifyUser, handlers.handle_notify_user)
+        self.register(FailSubMessagesByMessage, handlers.handle_fail_sub_messages_by_message)
         self.register(SetFinalStatus, handlers.handle_set_final_status)
 
     async def execute(

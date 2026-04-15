@@ -16,7 +16,8 @@ export type StreamedChunk =
   | { type: 'create'; sub_message: SubMessage }
   | { type: 'append'; sub_message_id: string; content: string }
   | { type: 'status_update'; sub_message_id: string; status: MessageStatus }
-  | { type: 'content_update'; sub_message_id: string; content: string };
+  | { type: 'content_update'; sub_message_id: string; content: string }
+  | { type: 'batch_status_update'; message_id: string; status: MessageStatus };
 
 /**
  * SSE 订阅服务的参数配置。

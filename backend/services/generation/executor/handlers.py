@@ -15,7 +15,8 @@ from backend.routers.notifications import GLOBAL_NOTIFICATIONS_STREAM_ID
 from backend.services.generation.core.instructions import (
     CreateSubMessage, AppendToSubMessage, UpdateSubMessageContent,
     UpdateSubMessageStatus, UpdateSubMessageConfig, SetFinalStatus,
-    UpdateChatName, SaveAndPersistFile, UpdateZipHistorySubMessage, NotifyUser
+    UpdateChatName, SaveAndPersistFile, UpdateZipHistorySubMessage, NotifyUser,
+    FailSubMessagesByMessage
 )
 
 
@@ -200,6 +201,51 @@ async def handle_notify_user(
         "message": instruction.message
     }
     await stream_manager.publish(GLOBAL_NOTIFICATIONS_STREAM_ID, notification_payload)
+
+
+async def handle_fail_sub_messages_by_message(
+    instruction: FailSubMessagesByMessage, chat_id: str, assistant_message_id: str, db: AsyncSession
+) -> None:
+    """
+    将指定消息下所有 GENERATING 状态的子消息批量标记为 FAILED，
+    并对 Reasoning 类型子消息设置 is_minimal=True。
+    通过 SSE 推送每条子消息的状态更新。
+    """
+    from sqlalchemy import update as sa_update
+    from backend.models.chat_model import SubMessage as SubMessageModel
+
+    target_status = instruction.status
+
+    # 1. 查询所有 GENERATING 的子消息
+    stmt = (
+        sa_update(SubMessageModel)
+        .where(SubMessageModel.messageId == instruction.message_id)
+        .where(SubMessageModel.status == schemas.enums.MessageStatus.GENERATING.value)
+        .values(status=target_status.value)
+    )
+    result = await db.execute(stmt)
+    await db.commit()
+
+    # 2. 查询受影响的 Reasoning 类型子消息，设置 is_minimal=True
+    stmt_reasoning = (
+        sa_update(SubMessageModel)
+        .where(SubMessageModel.messageId == instruction.message_id)
+        .where(SubMessageModel.type == schemas.enums.SubMessageType.REASONING.value)
+        .where(SubMessageModel.status == target_status.value)
+        .values(config=json.dumps({"is_minimal": True, "context_participation_length": 0}))
+    )
+    await db.execute(stmt_reasoning)
+    await db.commit()
+
+    # 3. 推送 SSE 通知（汇总一条消息，前端据此刷新子消息状态）
+    await stream_manager.publish(
+        instruction.message_id,
+        {
+            "type": "batch_status_update",
+            "message_id": instruction.message_id,
+            "status": target_status.value
+        }
+    )
 
 
 async def handle_set_final_status(

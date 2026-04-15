@@ -437,6 +437,13 @@ export const useChatSessionStore = defineStore('chatSession', () => {
         }
         break;
       }
+      case 'batch_status_update': {
+        // 批量更新该消息下所有 generating 状态的子消息
+        msgToUpdate.sub_messages.forEach(sm => {
+          if (sm.status === 'generating') sm.status = data.status;
+        });
+        break;
+      }
     }
   }
 
