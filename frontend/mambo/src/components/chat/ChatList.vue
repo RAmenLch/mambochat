@@ -11,6 +11,7 @@
         folder-item-type="folder"
         persistence-key="mambo_chat_folder_expanded_state"
         :enable-multi-select="true"
+        :custom-allow-drop="customAllowDrop"
         class="chat-tree"
         @node-click="handleNodeClick"
         @node-contextmenu="onNodeContextMenu"
@@ -21,6 +22,17 @@
         <template #header>
           <div class="chat-list-header">
             <h4>{{ $t('chat.sidebar.title') }}</h4>
+            <el-tooltip
+              :content="isManualSort ? $t('chat.sidebar.sortByTime') : $t('chat.sidebar.sortManual')"
+              placement="top"
+            >
+              <el-button
+                link
+                :icon="Sort"
+                class="sort-toggle-btn"
+                @click="toggleSortMode"
+              />
+            </el-tooltip>
           </div>
         </template>
 
@@ -147,8 +159,10 @@ import { onMounted, computed, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRouter, useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, EditPen, CopyDocument, Search, FolderChecked } from '@element-plus/icons-vue';
+import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, EditPen, CopyDocument, Search, FolderChecked, Sort } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
+import type { AllowDropType } from 'element-plus/es/components/tree/src/tree.type';
+import type Node from 'element-plus/es/components/tree/src/model/node';
 
 import type { Chat, ChatCreate, ChatUpdate, BaseTreeItem } from '@/api/types';
 import { useChatListStore } from '@/stores/chatListStore';
@@ -158,6 +172,7 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { useAgentStore } from '@/stores/agentStore';
 
 import { buildChatTree } from '@/utils/treeHelper';
+import type { ChatSortMode } from '@/utils/treeHelper';
 import { useTreeController, type DialogPayload, type DialogConfirmPayload } from '@/composables/useTreeController';
 
 import ExplorerTree from '@/components/common/ExplorerTree.vue';
@@ -196,7 +211,28 @@ const { providers } = storeToRefs(providerStore);
 const { globalSettings } = storeToRefs(settingsStore);
 const { agentList } = storeToRefs(agentStore);
 
-const treeData = computed(() => buildChatTree(chatList.value, loadedFolderIds.value) as unknown as BaseTreeItem[]);
+// 排序模式
+const SORT_MODE_KEY = 'mambo_chat_sort_mode';
+const chatSortMode = ref<ChatSortMode>(
+  (localStorage.getItem(SORT_MODE_KEY) as ChatSortMode) || 'manual'
+);
+
+const isManualSort = computed(() => chatSortMode.value === 'manual');
+
+const customAllowDrop = (_draggingNode: Node, dropNode: Node, dropType: AllowDropType): boolean => {
+  if (isManualSort.value) return true;
+  // 时间排序模式：禁止根目录节点的 before/after 拖拽，允许拖入文件夹(inner)和文件夹内部的排序
+  const isRootLevel = !(dropNode.data as BaseTreeItem).parentId;
+  if (!isRootLevel) return true; // 文件夹内部不受限
+  return dropType === 'inner';   // 根目录只允许放入文件夹
+};
+
+function toggleSortMode() {
+  chatSortMode.value = chatSortMode.value === 'manual' ? 'folder-top-time' : 'manual';
+  localStorage.setItem(SORT_MODE_KEY, chatSortMode.value);
+}
+
+const treeData = computed(() => buildChatTree(chatList.value, loadedFolderIds.value, chatSortMode.value) as unknown as BaseTreeItem[]);
 
 const modelOptions = computed((): SelectConfigOption[] => {
   return providerStore.groupedModels
@@ -547,6 +583,9 @@ async function handleSearchResultSelect(data: { chatId: string; subMessageId: st
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .chat-list-header h4 {
@@ -554,6 +593,16 @@ async function handleSearchResultSelect(data: { chatId: string; subMessageId: st
   font-size: 16px;
   font-weight: 600;
   color: var(--el-text-color-primary);
+}
+
+.sort-toggle-btn {
+  color: var(--el-text-color-secondary);
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.sort-toggle-btn:hover {
+  color: var(--el-color-primary);
 }
 
 .el-divider {

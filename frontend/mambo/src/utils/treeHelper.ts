@@ -9,6 +9,8 @@ interface TreeItem {
   parentId: string | null;
   sortOrder: number;
   itemType: string;
+  createdAt?: string;
+  lastOpenedAt?: string | null;
 }
 
 /**
@@ -16,13 +18,16 @@ interface TreeItem {
  */
 export type TreeNode<T> = T & { children?: TreeNode<T>[] };
 
+export type ChatSortMode = 'manual' | 'folder-top-time';
+
 /**
  * 将扁平列表构建成树。
  * 策略：始终确保文件夹拥有子节点（真实节点或隐藏的 Stub 节点），以强行维持 UI 的一致性。
  */
 export function buildChatTree<T extends TreeItem>(
   flatList: readonly T[],
-  loadedIds?: Set<string>
+  loadedIds?: Set<string>,
+  sortMode: ChatSortMode = 'manual'
 ): TreeNode<T>[] {
   // 深拷贝防止由于对象引用导致的副作用
   const list: TreeNode<T>[] = JSON.parse(JSON.stringify(flatList));
@@ -41,19 +46,15 @@ export function buildChatTree<T extends TreeItem>(
   });
 
   // 2. 注入占位符 (Stub)
-  // 解决问题 1: 只要是文件夹，如果当前没有子节点，就注入 Stub。
-  // 这样做有两个好处：
-  // a) 未加载时：显示箭头，点击触发加载。
-  // b) 已加载但为空时：依然显示箭头（指向下），表示这是一个容器，符合“保留三角符号”的需求。
   list.forEach(item => {
     if (item.itemType === 'folder') {
       if (!item.children || item.children.length === 0) {
         const stubNode = {
           id: `stub_${item.id}`,
-          name: '', // 名字为空，配合 CSS 隐藏
+          name: '',
           parentId: item.id,
           sortOrder: 0,
-          itemType: 'stub', // 特殊类型，ElementTree 中会识别并隐藏
+          itemType: 'stub',
           children: []
         } as unknown as TreeNode<T>;
 
@@ -63,16 +64,30 @@ export function buildChatTree<T extends TreeItem>(
   });
 
   // 排序
-  const sortNodes = (nodes: TreeNode<T>[]) => {
-    nodes.sort((a, b) => a.sortOrder - b.sortOrder);
+  const sortNodes = (nodes: TreeNode<T>[], isRoot: boolean = false) => {
+    if (sortMode === 'folder-top-time' && isRoot) {
+      // 文件夹置顶（按 sortOrder），根目录会话按时间降序（最新在上）
+      const folders = nodes.filter(n => n.itemType === 'folder');
+      const chats = nodes.filter(n => n.itemType !== 'folder' && n.itemType !== 'stub');
+      folders.sort((a, b) => a.sortOrder - b.sortOrder);
+      chats.sort((a, b) => {
+        const timeA = a.createdAt || '';
+        const timeB = b.createdAt || '';
+        return timeB.localeCompare(timeA);
+      });
+      nodes.length = 0;
+      nodes.push(...folders, ...chats);
+    } else {
+      nodes.sort((a, b) => a.sortOrder - b.sortOrder);
+    }
     nodes.forEach(node => {
       if (node.children) {
-        sortNodes(node.children);
+        sortNodes(node.children, false);
       }
     });
   };
 
-  sortNodes(tree);
+  sortNodes(tree, true);
 
   return tree;
 }

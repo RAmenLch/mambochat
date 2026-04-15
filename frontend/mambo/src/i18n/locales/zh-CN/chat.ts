@@ -15,6 +15,8 @@ export default {
     archiveTitle: '归档到新文件夹',
     folderName: '文件夹名称',
     newArchiveFolder: '新建归档文件夹',
+    sortByTime: '按时间排序（文件夹置顶）',
+    sortManual: '手动排序',
   },
   move: {
     title: '移动到文件夹',

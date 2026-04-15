@@ -22,7 +22,7 @@
         :current-node-key="currentId || undefined"
         highlight-current
         :expand-on-click-node="false"
-        draggable
+        :draggable="draggable"
         :allow-drop="allowDrop"
         :indent="5"
         @node-click="handleNodeClick"
@@ -100,6 +100,7 @@ interface Props {
   loadingFolderIds?: Set<string>
   customAllowDrop?: (draggingNode: Node, dropNode: Node, dropType: AllowDropType) => boolean
   enableMultiSelect?: boolean // 新增：是否开启多选模式
+  draggable?: boolean // 是否允许拖拽排序
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -110,7 +111,8 @@ const props = withDefaults(defineProps<Props>(), {
   persistenceKey: undefined,
   loadingFolderIds: () => new Set(),
   customAllowDrop: undefined,
-  enableMultiSelect: false, // 默认关闭，保护其他组件
+  enableMultiSelect: false,
+  draggable: true,
 })
 
 const emit = defineEmits<{

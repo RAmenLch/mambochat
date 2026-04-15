@@ -15,6 +15,8 @@ export default {
     archiveTitle: 'Archive to New Folder',
     folderName: 'Folder Name',
     newArchiveFolder: 'New Archive Folder',
+    sortByTime: 'Sort by time (folders on top)',
+    sortManual: 'Manual sort',
   },
   move: {
     title: 'Move to Folder',
