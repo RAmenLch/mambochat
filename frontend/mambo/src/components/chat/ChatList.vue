@@ -219,12 +219,15 @@ const chatSortMode = ref<ChatSortMode>(
 
 const isManualSort = computed(() => chatSortMode.value === 'manual');
 
-const customAllowDrop = (_draggingNode: Node, dropNode: Node, dropType: AllowDropType): boolean => {
+const customAllowDrop = (draggingNode: Node, dropNode: Node, dropType: AllowDropType): boolean => {
   if (isManualSort.value) return true;
-  // 时间排序模式：禁止根目录节点的 before/after 拖拽，允许拖入文件夹(inner)和文件夹内部的排序
-  const isRootLevel = !(dropNode.data as BaseTreeItem).parentId;
-  if (!isRootLevel) return true; // 文件夹内部不受限
-  return dropType === 'inner';   // 根目录只允许放入文件夹
+  // 时间排序模式：禁止根目录节点之间的 before/after 手动排序
+  // 但允许从子目录跨到根目录的移动（包括 before/after）
+  const isDropRoot = !(dropNode.data as BaseTreeItem).parentId;
+  if (!isDropRoot) return true; // 文件夹内部不受限
+  const isDragFromSub = !!(draggingNode.data as BaseTreeItem).parentId;
+  if (isDragFromSub) return true; // 从子目录移到根目录，允许任意位置
+  return dropType === 'inner';   // 根目录同级节点只允许拖入文件夹
 };
 
 function toggleSortMode() {

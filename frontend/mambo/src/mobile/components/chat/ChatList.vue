@@ -205,10 +205,12 @@ const chatSortMode = ref<ChatSortMode>(
 
 const isManualSort = computed(() => chatSortMode.value === 'manual');
 
-const customAllowDrop = (_draggingNode: Node, dropNode: Node, dropType: AllowDropType): boolean => {
+const customAllowDrop = (draggingNode: Node, dropNode: Node, dropType: AllowDropType): boolean => {
   if (isManualSort.value) return true;
-  const isRootLevel = !(dropNode.data as BaseTreeItem).parentId;
-  if (!isRootLevel) return true;
+  const isDropRoot = !(dropNode.data as BaseTreeItem).parentId;
+  if (!isDropRoot) return true;
+  const isDragFromSub = !!(draggingNode.data as BaseTreeItem).parentId;
+  if (isDragFromSub) return true;
   return dropType === 'inner';
 };
 

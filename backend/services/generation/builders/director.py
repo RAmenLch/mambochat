@@ -258,7 +258,8 @@ class LLMInputDirector:
             append_prompt=self._append_prompt,
             max_context_messages=max_context_messages,
             slice_range=self._slice_range,
-            head_tail=self._head_tail
+            head_tail=self._head_tail,
+            language=materials.settings.get("language")
         )
 
         message_context = await context_builder.build(

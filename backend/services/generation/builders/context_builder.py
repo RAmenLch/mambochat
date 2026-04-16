@@ -55,7 +55,8 @@ class MessageContextBuilder:
             append_prompt: Optional[str] = None,
             max_context_messages: Optional[int] = None,
             slice_range: Optional[slice] = None,
-            head_tail: Optional[Tuple[int, int]] = None
+            head_tail: Optional[Tuple[int, int]] = None,
+            language: Optional[str] = None
     ):
         self.db = db
 
@@ -74,6 +75,7 @@ class MessageContextBuilder:
         self.max_context_messages = max_context_messages
         self.slice_range = slice_range
         self.head_tail = head_tail
+        self.language = language
 
         # 内部缓存，防止同一文件在单次装配中重复读取
         self._file_content_cache: Dict[str, Dict[str, Any]] = {}
@@ -124,9 +126,10 @@ class MessageContextBuilder:
                 break
 
         if last_enabled_zip_index != -1 and zip_content:
+            zip_summary_prompt = "对之前的对话进行了总结摘要。" if self.language == "zh-CN" else "A summary of the previous conversation has been generated."
             user_msg = MessageSchema(
                 role=schemas_enums.MessageRole.USER.value,
-                sub_messages=[SubMessageSchema(content="对之前的对话进行了总结摘要。",
+                sub_messages=[SubMessageSchema(content=zip_summary_prompt,
                                               type=schemas_enums.SubMessageType.NORMAL.value, config='{}')]
             )
             assistant_msg = MessageSchema(
