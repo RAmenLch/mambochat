@@ -65,8 +65,9 @@
     </div>
 
     <div class="actions">
-      <!-- MCP 工具选择器 -->
+      <!-- MCP 工具选择器 (Agent 模式下无效，Agent 使用自身配置) -->
       <el-popover
+        v-if="currentChat?.chatMode !== 'agent'"
         placement="top"
         :width="260"
         trigger="click"
@@ -120,6 +121,7 @@
       </el-popover>
 
       <el-button
+        v-if="currentChat?.chatMode !== 'agent'"
         :icon="Search"
         :type="isWebSearchEnabled ? 'primary' : ''"
         circle

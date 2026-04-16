@@ -1,7 +1,7 @@
 # backend/crud/mcp_crud.py
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, or_
 from typing import List, Optional
 
 from backend.models.mcp_model import McpServer, McpTool
@@ -98,6 +98,9 @@ async def get_tools_by_server_ids(db: AsyncSession, server_ids: List[str]) -> Li
         return []
 
     result = await db.execute(
-        select(McpTool).filter(McpTool.server_id.in_(server_ids))
+        select(McpTool).filter(
+            McpTool.server_id.in_(server_ids),
+            or_(McpTool.is_enabled == True, McpTool.is_enabled.is_(None))
+        )
     )
     return list(result.scalars().all())

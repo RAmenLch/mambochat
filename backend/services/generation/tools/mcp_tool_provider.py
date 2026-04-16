@@ -55,6 +55,19 @@ class MCPToolProvider(BaseToolProvider):
         # 获取工具并检查状态 (如果服务不可用，此处可能会抛出 McpConnectionError，由上层 Manager 捕获)
         tools = await self.conn_manager.get_tools_and_check_status(self.mcp_ids)
 
+        # 过滤掉数据库中 is_enabled=False 的工具
+        from sqlalchemy import select
+        from backend.models.mcp_model import McpTool
+        result = await self.db_session.execute(
+            select(McpTool).filter(
+                McpTool.server_id.in_(self.mcp_ids),
+                McpTool.is_enabled == False
+            )
+        )
+        disabled_tool_names = {t.name for t in result.scalars().all()}
+        if disabled_tool_names:
+            tools = [t for t in tools if t.name not in disabled_tool_names]
+
         # 对每个 MCP 工具进行异常安全包装
         safe_tools = [self._wrap_tool_safe(t) for t in tools]
 

@@ -18,9 +18,9 @@ from backend.utils.skills_utils import SkillValidator, FileNode, identify_skill_
 from backend.models import resource_model
 
 # ZIP 导入安全限制
-MAX_ZIP_FILE_SIZE = 50 * 1024 * 1024          # 50 MB：ZIP 文件本身大小上限
-MAX_TOTAL_UNCOMPRESSED_SIZE = 100 * 1024 * 1024  # 100 MB：解压后总大小上限
-MAX_ZIP_FILE_COUNT = 1000                       # ZIP 内最大文件数量
+MAX_ZIP_FILE_SIZE = 100 * 1024 * 1024          # 100 MB：ZIP 文件本身大小上限
+MAX_TOTAL_UNCOMPRESSED_SIZE = 500 * 1024 * 1024  # 500 MB：解压后总大小上限
+MAX_ZIP_FILE_COUNT = 100000                       # ZIP 内最大文件数量
 MAX_ZIP_SINGLE_FILE_SIZE = 20 * 1024 * 1024     # 20 MB：ZIP 内单个文件大小上限
 
 

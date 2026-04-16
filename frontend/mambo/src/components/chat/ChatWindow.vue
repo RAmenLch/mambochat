@@ -121,7 +121,7 @@
 
     <ResourceSelectorDialog
       v-model:visible="resourceSelectorVisible"
-      context="chat-toolbar"
+      :context="currentChat?.chatMode === 'agent' ? 'agent-toolbar' : 'chat-toolbar'"
       @mount-resources="handleMountResources"
       @append-resources="handleAppendResources"
       @mount-knowledge-base="handleMountKnowledgeBase"
