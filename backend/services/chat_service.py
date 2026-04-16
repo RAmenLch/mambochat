@@ -6,7 +6,7 @@ from typing import Optional, List, Dict
 import json
 import re
 
-from backend.crud import chat_crud, message_crud
+from backend.crud import chat_crud, message_crud, setting_crud
 from backend import schemas
 from backend.models import chat_model
 from backend.schemas.enums import MessageStatus, MoveAction
@@ -26,6 +26,10 @@ async def duplicate_chat_with_messages(
     if not original_chat or original_chat.itemType != 'chat':
         return None
 
+    lang_setting = await setting_crud.get_setting(db, "language")
+    language = lang_setting.value if lang_setting else "zh-CN"
+    copy_suffix = "副本" if language == "zh-CN" else "Copy"
+
     max_sort_order_result = await db.execute(
         select(func.max(chat_model.Chat.sortOrder))
         .filter(chat_model.Chat.parentId == original_chat.parentId)
@@ -39,7 +43,7 @@ async def duplicate_chat_with_messages(
         params = None
 
     new_chat_data = schemas.ChatCreate(
-        name=f"{original_chat.name} (副本)",
+        name=f"{original_chat.name} ({copy_suffix})",
         systemPrompt=original_chat.systemPrompt,
         modelParameters=params,
         aiModelId=original_chat.aiModelId,
