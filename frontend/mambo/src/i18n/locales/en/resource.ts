@@ -137,6 +137,7 @@ export default {
     namePlaceholder: 'e.g. CodeAssistant',
     descPlaceholder: 'Describe what this skill does...',
     descRequired: 'Skill description is required',
+    nameRequired: 'Skill name is required (English letters, numbers, underscores and hyphens only)',
     clickUpload: 'Click to Upload',
     selectFolder: 'Select Folder',
     importFromRepo: 'Import from Public Repository',

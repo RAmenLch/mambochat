@@ -37,6 +37,7 @@ export default {
     inputModalities: '输入模态',
     outputModalities: '输出模态',
     embeddingDimension: '向量维度*',
+    embeddingDimensionPlaceholder: '选择或输入维度，例如: 1536',
     supportedParams: '支持的参数',
     maxRetries: '最大重试次数',
     useGlobal: '采用全局配置',

@@ -30,6 +30,7 @@
               <el-input
                 v-model="manualForm.name"
                 :placeholder="t('resource.skill.namePlaceholder')"
+                @input="manualForm.name = manualForm.name.replace(/[^ -~]/g, '')"
               />
             </el-form-item>
             <el-form-item :label="t('resource.skill.descLabel')" prop="description">
@@ -223,7 +224,10 @@ const pendingFiles = ref<File[]>([])
 
 // --- Validation Rules ---
 const manualRules = {
-  name: [{ required: true, message: t('resource.skill.nameRequired'), trigger: 'blur' }],
+  name: [
+    { required: true, message: t('resource.skill.nameRequired'), trigger: 'blur' },
+    { pattern: /^[A-Za-z0-9_-]+$/, message: t('resource.skill.nameRequired'), trigger: 'blur' },
+  ],
   description: [{ required: true, message: t('resource.skill.descRequired'), trigger: 'blur' }],
 }
 

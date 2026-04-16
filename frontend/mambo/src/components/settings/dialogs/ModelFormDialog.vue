@@ -82,13 +82,16 @@
       <!-- Embedding 模型专用配置 -->
       <template v-if="isEmbeddingModel">
         <el-form-item :label="t('model.form.embeddingDimension')">
-          <el-input-number
+          <el-select
             v-model="modelForm.meta_config.embedding_dimension"
-            :min="1"
-            :controls="false"
-            placeholder="e.g. 1536"
+            filterable
+            allow-create
+            default-first-option
+            :placeholder="t('model.form.embeddingDimensionPlaceholder')"
             style="width: 100%"
-          />
+          >
+            <el-option v-for="dim in embeddingDimensionOptions" :key="dim" :label="String(dim)" :value="dim" />
+          </el-select>
         </el-form-item>
       </template>
 
@@ -142,6 +145,8 @@ import {
   inputModalitiesOptions,
   outputModalitiesOptions,
 } from '@/constants/metaConfigOptions';
+
+const embeddingDimensionOptions = [384, 768, 1024, 1536, 2560, 3072, 4096];
 
 interface ModelFormData {
   name: string;

@@ -37,6 +37,7 @@ export default {
     inputModalities: 'Input Modalities',
     outputModalities: 'Output Modalities',
     embeddingDimension: 'Embedding Dimension*',
+    embeddingDimensionPlaceholder: 'Select or input dimension, e.g. 1536',
     supportedParams: 'Supported Params',
     maxRetries: 'Max Retries',
     useGlobal: 'Use Global',
