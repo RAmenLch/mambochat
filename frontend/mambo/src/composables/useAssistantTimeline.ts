@@ -92,6 +92,12 @@ export function useAssistantTimeline(message: Ref<Message>) {
         currentSection = 'normal';
         currentGroup = { id: sm.id, textSubMessage: sm, toolSubMessages: [] };
       }
+      else if (sm.type === 'File') {
+        // File 类型(如生成的图片)作为独立文本节点渲染，SubMessageItem 会根据 type === 'File' 展示文件卡片或图片
+        pushCurrentGroup();
+        currentSection = 'normal';
+        currentGroup = { id: sm.id, textSubMessage: sm, toolSubMessages: [] };
+      }
       else if (sm.type === 'McpTool' || sm.type === 'ReviewTool' || sm.type === 'AskUser') {
         if (!currentGroup) {
           // 边缘情况：如果工具调用先于任何文本出现，创建一个虚拟的文本分组来容纳它
