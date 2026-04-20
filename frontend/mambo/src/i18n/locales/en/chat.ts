@@ -135,6 +135,7 @@ export default {
   },
   codeBlock: {
     lines: '{count} lines',
+    rendering: 'Rendering...',
   },
   usage: {
     prompt: 'Prompt',

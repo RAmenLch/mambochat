@@ -135,6 +135,7 @@ export default {
   },
   codeBlock: {
     lines: '{count} 行',
+    rendering: '渲染中...',
   },
   usage: {
     prompt: 'Prompt',

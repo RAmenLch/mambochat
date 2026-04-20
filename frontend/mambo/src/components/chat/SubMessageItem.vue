@@ -189,7 +189,7 @@
               :alt="block.alt"
               class="rendered-image"
             />
-            <div v-else v-html="block.content"></div>
+            <div v-else class="markdown-content" v-html="block.content"></div>
           </div>
 
           <div
@@ -770,6 +770,12 @@ function scrollToTop() {
 .is-user .content-block :deep(b) {
   color: var(--el-color-primary-dark-2);
 }
+
+.content-block :deep(svg) {
+  max-width: 100%;
+  height: auto;
+}
+
 .typing-indicator {
   display: flex;
   align-items: center;

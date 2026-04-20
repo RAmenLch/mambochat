@@ -31,6 +31,7 @@
     "lodash-es": "^4.17.21",
     "markdown-it": "^14.1.0",
     "markdown-it-link-attributes": "^4.0.1",
+    "mermaid": "^11.14.0",
     "monaco-editor": "^0.55.1",
     "pinia": "^3.0.3",
     "vite-plugin-static-copy": "^3.2.0",

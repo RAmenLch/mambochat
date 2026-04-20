@@ -30,7 +30,7 @@
     *   支持 MCP 工具调用审核模式（Human-in-the-Loop），可在工具执行前人工确认。
 *   **🤖 智能 Agent**
     *   **对话型 Agent (ReAct)**：基于工具调用进行推理，可挂载知识库、MCP 工具和 Skill 技能包。
-    *   **代码型 Agent (Deep)**：基于 [deepagents](https://github.com/langchain-ai/deepagents) 项目，具备文件读写、命令执行等能力，可用于代码开发与远程服务器运维。
+    *   **复杂型 Agent (Deep)**：基于 [deepagents](https://github.com/langchain-ai/deepagents) 项目，具备文件读写、命令执行、嵌套子agent调用等能力，可用于复杂任务执行与远程服务器运维。
     *   支持 Agent 挂载资源、MCP 工具、Skill 技能包，并可与远程 Backend 协同工作。
 *   **🔧 远程 Backend**
     *   **SSH Backend**：通过 SSH/SFTP 连接远程 Linux 服务器，让 Agent 直接操作远程文件和执行命令。
@@ -45,9 +45,9 @@
     *   **编辑器模式**：支持 Monaco Editor 代码编辑器模式。
     *   **消息分支**：支持消息编辑与重新生成，每次编辑保留历史分支，对话不再丢失。
     *   **会话复制**：支持将会话复制（可截断到指定消息），方便基于已有对话进行新探索。
-    *   **压缩对话**：支持压缩历史对话以节省 Token。✨ **主推特色功能**
+    *   **压缩对话**：支持压缩历史对话以节省 Token。
 *   **🛠️ 资源与提示词管理**
-    *   统一管理 System Prompts、消息模板、Skill 技能包。✨ **主推特色功能**
+    *   统一管理 System Prompts、消息模板、Skill 技能包。
     *   支持资源的版本控制与回滚。
 *   **⚙️ 全局个性化**
     *   自定义用户与 AI 头像。
@@ -144,7 +144,7 @@
 欢迎任何形式的贡献！如果您有好的想法、发现了 Bug，或者希望添加新功能，请随时提交 Pull Request 或创建 Issue。
 
 ## 👨‍💻 开发计划
-- [x] 抽象关键功能，支持插件能力
-- [x] 强化 Agent 能力（ReAct + Deep）
+- [ ] 抽象关键功能，支持插件能力
+- [ ] 强化 Agent 能力 
 - [ ] 构建角色扮演插件
 - [ ] 持续修复和优化
