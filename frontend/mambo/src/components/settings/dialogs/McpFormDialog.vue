@@ -36,26 +36,26 @@
       <!-- Stdio 专属字段 -->
       <template v-if="formData.transportType === 'stdio'">
         <el-divider content-position="left">Stdio</el-divider>
-        <el-form-item label="Command" prop="command">
-          <el-input v-model="formData.command" placeholder="python, node, uvx..." />
+        <el-form-item :label="t('settings.mcp.form.commandLabel')" prop="command">
+          <el-input v-model="formData.command" :placeholder="t('settings.mcp.form.commandPlaceholder')" />
         </el-form-item>
 
-        <el-form-item label="Args">
+        <el-form-item :label="t('settings.mcp.form.argsLabel')">
           <div class="dynamic-list">
             <div v-for="(arg, index) in formData.argsList" :key="index" class="dynamic-row">
-              <el-input v-model="formData.argsList[index]" placeholder="Argument" />
+              <el-input v-model="formData.argsList[index]" :placeholder="t('settings.mcp.form.argPlaceholder')" />
               <el-button type="danger" :icon="Minus" circle size="small" @click="removeArg(index)" />
             </div>
             <el-button type="primary" link :icon="Plus" @click="addArg">+</el-button>
           </div>
         </el-form-item>
 
-        <el-form-item label="Env">
+        <el-form-item :label="t('settings.mcp.form.envLabel')">
           <div class="dynamic-list">
             <div v-for="(env, index) in formData.envList" :key="index" class="dynamic-row">
-              <el-input v-model="env.key" placeholder="KEY" style="flex: 1" />
+              <el-input v-model="env.key" :placeholder="t('settings.mcp.form.envKeyPlaceholder')" style="flex: 1" />
               <span class="separator">=</span>
-              <el-input v-model="env.value" placeholder="VALUE" style="flex: 1" />
+              <el-input v-model="env.value" :placeholder="t('settings.mcp.form.envValuePlaceholder')" style="flex: 1" />
               <el-button type="danger" :icon="Minus" circle size="small" @click="removeEnv(index)" />
             </div>
             <el-button type="primary" link :icon="Plus" @click="addEnv">+</el-button>
@@ -66,8 +66,8 @@
       <!-- SSE 专属字段 -->
       <template v-if="formData.transportType === 'sse'">
         <el-divider content-position="left">SSE</el-divider>
-        <el-form-item label="URL" prop="url">
-          <el-input v-model="formData.url" placeholder="http://localhost:8080/sse" />
+        <el-form-item :label="t('settings.mcp.form.urlLabel')" prop="url">
+          <el-input v-model="formData.url" :placeholder="t('settings.mcp.form.urlPlaceholder')" />
         </el-form-item>
       </template>
     </el-form>
@@ -160,18 +160,18 @@ const isEditMode = computed(() => !!props.initialData);
 
 const rules = computed<FormRules>(() => {
   const commonRules = {
-    name: [{ required: true, message: '请输入服务名称', trigger: 'blur' }],
+    name: [{ required: true, message: () => t('settings.mcp.form.nameRequired'), trigger: 'blur' }],
   };
 
   if (formData.transportType === 'stdio') {
     return {
       ...commonRules,
-      command: [{ required: true, message: '请输入执行命令', trigger: 'blur' }],
+      command: [{ required: true, message: () => t('settings.mcp.form.commandRequired'), trigger: 'blur' }],
     };
   } else {
     return {
       ...commonRules,
-      url: [{ required: true, message: '请输入 SSE URL', trigger: 'blur' }],
+      url: [{ required: true, message: () => t('settings.mcp.form.urlRequired'), trigger: 'blur' }],
     };
   }
 });
@@ -316,17 +316,17 @@ const handleTestConnection = async () => {
 
     if (response.status === 'healthy') {
       testFeedback.status = 'success';
-      testFeedback.shortMessage = `连接成功 (${response.tools_count} 个工具)`;
-      testFeedback.message = '连接测试通过，服务运行正常。';
+      testFeedback.shortMessage = t('settings.mcp.connectSuccess', { count: response.tools_count });
+      testFeedback.message = t('settings.mcp.connectSuccessDetail');
     } else {
       testFeedback.status = 'error';
-      testFeedback.shortMessage = '连接失败';
-      testFeedback.message = response.error || response.message || '连接测试未通过，请检查配置。';
+      testFeedback.shortMessage = t('settings.mcp.connectFailed');
+      testFeedback.message = response.error || response.message || t('settings.mcp.connectFailedDetail');
     }
   } catch (error: any) {
     testFeedback.status = 'error';
-    testFeedback.shortMessage = '连接失败';
-    testFeedback.message = error.message || '连接测试未通过，请检查配置。';
+    testFeedback.shortMessage = t('settings.mcp.connectFailed');
+    testFeedback.message = error.message || t('settings.mcp.connectFailedDetail');
   } finally {
     isTestingConnection.value = false;
   }

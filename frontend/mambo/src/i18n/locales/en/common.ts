@@ -12,6 +12,9 @@ export default {
     unspecified: 'Unspecified',
     unknownModel: 'Unknown Model',
     unknown: 'Unknown',
+    unknownMcp: 'Unknown MCP',
+    unknownBackend: 'Unknown Backend',
+    unknownAgent: 'Unknown Agent',
   },
   time: {
     today: 'Today',

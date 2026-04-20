@@ -12,6 +12,9 @@ export default {
     unspecified: '未指定',
     unknownModel: '未知模型',
     unknown: '未知',
+    unknownMcp: '未知 MCP',
+    unknownBackend: '未知 Backend',
+    unknownAgent: '未知 Agent',
   },
   time: {
     today: '今天',

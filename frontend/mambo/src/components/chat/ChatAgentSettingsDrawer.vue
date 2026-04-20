@@ -71,7 +71,7 @@
               </div>
               <div class="info-item" v-if="selectedAgent.modelParameters?.stream !== undefined">
                 <span class="info-label">{{ $t('agent.streamOutput') }}:</span>
-                <span class="info-value">{{ selectedAgent.modelParameters.stream ? '开启' : '关闭' }}</span>
+                <span class="info-value">{{ selectedAgent.modelParameters.stream ? t('common.status.enabled') : t('common.status.disabled') }}</span>
               </div>
               <div class="info-item" v-if="selectedAgent.modelParameters?.temperature !== undefined">
                 <span class="info-label">Temperature:</span>
@@ -222,7 +222,7 @@ const displayMcpList = computed(() => {
   const mcpIds = selectedAgent.value?.enabledMcpIds || [];
   return mcpIds.map(id => {
     const mcp = mcpStore.activeUserMcpServices.find(m => m.id === id);
-    return mcp ? { id, name: mcp.name } : { id, name: 'Unknown MCP' };
+    return mcp ? { id, name: mcp.name } : { id, name: t('common.status.unknownMcp') };
   });
 });
 
@@ -230,7 +230,7 @@ const displayBackendList = computed(() => {
   const bIds = selectedAgent.value?.backendIds || [];
   return bIds.map(id => {
     const b = backendStore.backendList.find(x => x.id === id);
-    return b ? { id, name: b.name } : { id, name: 'Unknown Backend' };
+    return b ? { id, name: b.name } : { id, name: t('common.status.unknownBackend') };
   });
 });
 
@@ -238,7 +238,7 @@ const displaySubAgents = computed(() => {
   const subIds = selectedAgent.value?.subAgents || [];
   return subIds.map(id => {
     const agent = agentStore.allAgents.find(a => a.id === id);
-    return agent ? { id, name: agent.name, avatar: agent.agentAvatarUrl } : { id, name: 'Unknown Agent', avatar: null };
+    return agent ? { id, name: agent.name, avatar: agent.agentAvatarUrl } : { id, name: t('common.status.unknownAgent'), avatar: null };
   });
 });
 
