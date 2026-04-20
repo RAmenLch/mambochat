@@ -116,7 +116,7 @@ if !BACKEND_READY! equ 0 (
 echo.
 echo   Starting Frontend (Port !FRONTEND_PORT!)...
 pushd "%FRONTEND_DIR%"
-start "MamboChat-Frontend" cmd /k "title MamboChat-Frontend [Port !FRONTEND_PORT!] && call "%NPM_CMD%" run preview -- --port !FRONTEND_PORT! --host 127.0.0.1 --strictPort"
+start "MamboChat-Frontend" cmd /k "set BACKEND_PORT=!BACKEND_PORT! && title MamboChat-Frontend [Port !FRONTEND_PORT!] && call "%NPM_CMD%" run preview -- --port !FRONTEND_PORT! --host 127.0.0.1 --strictPort"
 popd
 
 timeout /t 3 /nobreak >nul
