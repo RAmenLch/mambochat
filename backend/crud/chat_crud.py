@@ -78,7 +78,6 @@ async def create_chat(db: AsyncSession, chat: schemas.ChatCreate) -> chat_model.
         # 如果文件夹为空(None)，则从 0 开始；否则在最大值基础上 +1
         chat.sortOrder = (max_order if max_order is not None else -1) + 1
 
-    # [原有逻辑]
     chat_data = chat.model_dump()
     if chat_data.get("modelParameters") is not None:
         chat_data["modelParameters"] = json.dumps(chat_data["modelParameters"])
@@ -107,6 +106,19 @@ async def update_chat(db: AsyncSession, chat_id: str, chat_update: schemas.ChatU
     await db.commit()
     await db.refresh(db_chat)
     return db_chat
+
+
+async def get_descendant_chat_ids(db: AsyncSession, chat_id: str) -> List[str]:
+    """
+    递归获取指定节点的所有后代 Chat ID（包括自身）。
+    用于删除前清理 LangGraph checkpoint。
+    """
+    cte = select(chat_model.Chat.id).where(chat_model.Chat.id == chat_id).cte(name="descendants", recursive=True)
+    cte = cte.union_all(
+        select(chat_model.Chat.id).join(cte, chat_model.Chat.parentId == cte.c.id)
+    )
+    result = await db.execute(select(cte.c.id))
+    return list(result.scalars().all())
 
 
 async def delete_chat(db: AsyncSession, chat_id: str) -> Optional[chat_model.Chat]:

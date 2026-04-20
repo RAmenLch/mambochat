@@ -20,9 +20,6 @@ RUN uv pip install --system --no-cache -r /app/backend/pyproject.toml -i ${PYPI_
 COPY MCP_SERVER/ddgs/pyproject.toml /app/MCP_SERVER/ddgs/pyproject.toml
 RUN uv pip install --system --no-cache -r /app/MCP_SERVER/ddgs/pyproject.toml -i ${PYPI_INDEX_URL}
 
-# 2.3 安装 knowledge_base 依赖
-COPY MCP_SERVER/knowledge_base/pyproject.toml /app/MCP_SERVER/knowledge_base/pyproject.toml
-RUN uv pip install --system --no-cache -r /app/MCP_SERVER/knowledge_base/pyproject.toml -i ${PYPI_INDEX_URL}
 
 
 # 3. 复制源代码

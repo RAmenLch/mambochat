@@ -82,15 +82,35 @@
       <!-- Embedding 模型专用配置 -->
       <template v-if="isEmbeddingModel">
         <el-form-item :label="t('model.form.embeddingDimension')">
-          <el-input-number
+          <el-select
             v-model="modelForm.meta_config.embedding_dimension"
-            :min="1"
-            :controls="false"
-            placeholder="e.g. 1536"
+            filterable
+            allow-create
+            default-first-option
+            :placeholder="t('model.form.embeddingDimensionPlaceholder')"
             style="width: 100%"
-          />
+          >
+            <el-option v-for="dim in embeddingDimensionOptions" :key="dim" :label="String(dim)" :value="dim" />
+          </el-select>
         </el-form-item>
       </template>
+
+      <!-- 通用配置 -->
+      <el-form-item :label="t('model.form.maxRetries')">
+        <div class="slider-row">
+          <el-slider
+            :model-value="modelForm.meta_config.max_retries ?? 0"
+            @update:model-value="modelForm.meta_config!.max_retries = Number($event)"
+            :min="0"
+            :max="20"
+            :step="1"
+            :show-tooltip="false"
+            style="flex: 1; margin-right: 12px;"
+          />
+          <span v-if="(modelForm.meta_config.max_retries ?? 0) === 0" class="slider-tag">{{ t('model.form.useGlobal') }}</span>
+          <span v-else class="slider-tag slider-tag--value">{{ modelForm.meta_config.max_retries }}</span>
+        </div>
+      </el-form-item>
 
       <!-- 通用配置 -->
       <el-form-item :label="t('model.form.supportedParams')">
@@ -126,6 +146,8 @@ import {
   outputModalitiesOptions,
 } from '@/constants/metaConfigOptions';
 
+const embeddingDimensionOptions = [384, 768, 1024, 1536, 2560, 3072, 4096];
+
 interface ModelFormData {
   name: string;
   modelId: string;
@@ -158,6 +180,7 @@ const getInitialMetaConfig = (): AIModelMetaConfig => ({
   input_modalities: [],
   output_modalities: [],
   supported_parameters: [],
+  max_retries: 0,
 });
 
 const modelForm = reactive<ModelFormData>({
@@ -211,6 +234,7 @@ function getSanitizedMetaConfig(): AIModelMetaConfig {
     const baseConfig: AIModelMetaConfig = {
       context_length: config.context_length || null,
       supported_parameters: config.supported_parameters || [],
+      max_retries: config.max_retries || 0,
     };
 
     if (isChatModel.value) {
@@ -272,4 +296,23 @@ async function submitForm() {
 </script>
 
 <style scoped>
+.slider-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+.slider-tag {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.slider-tag--value {
+  font-weight: 600;
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
 </style>

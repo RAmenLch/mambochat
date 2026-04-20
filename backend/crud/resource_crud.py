@@ -1,5 +1,6 @@
 # backend/crud/resource_crud.py
 
+from sqlalchemy import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload, joinedload
@@ -76,6 +77,20 @@ async def get_resources_by_parent_ids(db: AsyncSession, parent_ids: List[str]) -
     return result.scalars().all()
 
 
+async def get_child_names_by_parent_id(db: AsyncSession, parent_id: Optional[str]) -> List[str]:
+    """
+    获取指定父节点下所有直接子资源的名称列表，用于冲突检测。
+    """
+    stmt = select(resource_model.Resource.name)
+    if parent_id is None:
+        stmt = stmt.filter(resource_model.Resource.parentId.is_(None))
+    else:
+        stmt = stmt.filter(resource_model.Resource.parentId == parent_id)
+
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
+
 async def get_resource_with_versions(db: AsyncSession, resource_id: str) -> Optional[resource_model.Resource]:
     """通过ID获取单个资源及其所有版本列表。"""
     result = await db.execute(
@@ -99,18 +114,8 @@ async def create_resource(db: AsyncSession, resource: schemas.ResourceCreate) ->
         resource.sortOrder = (max_order if max_order is not None else -1) + 1
 
     # 排除非模型字段，以创建 Resource 实例
-    # 注意：resource.itemType 是枚举，SQLAlchemy 模型中定义为 String，但通常驱动会自动处理或我们需要取 .value
-    # Pydantic model_dump 会根据配置导出枚举值或枚举对象，这里直接传入给 Model 构造函数
-    # SQLAlchemy Model 接收枚举对象时，如果列是 String，通常会自动转换为 value，或者我们需要在 dump 时处理
-    # 这里假设 Pydantic 配置或 SQLAlchemy 能够处理 Enum -> String 的转换
+    # model_dump() 已将 str, Enum 序列化为字符串，无需额外转换
     resource_data = resource.model_dump(exclude={'initial_content', 'initial_attributes'})
-
-    # 显式处理枚举转字符串，确保兼容性
-    if 'itemType' in resource_data and hasattr(resource_data['itemType'], 'value'):
-        resource_data['itemType'] = resource_data['itemType'].value
-    if 'resourceType' in resource_data and resource_data['resourceType'] and hasattr(resource_data['resourceType'],
-                                                                                     'value'):
-        resource_data['resourceType'] = resource_data['resourceType'].value
 
     db_resource = resource_model.Resource(**resource_data)
     db.add(db_resource)
@@ -172,6 +177,7 @@ async def create_resource_version(db: AsyncSession, resource_id: str, version_cr
     db_resource = await get_resource(db, resource_id=resource_id)
 
     # 使用枚举值进行判断
+    # 注意: 并非Folder类型不可创建version,而是普通的Folder不创建version,如KB在其自有的服务会创建version
     if not db_resource or db_resource.itemType != ResourceItemType.RESOURCE.value:
         return None
 
@@ -252,7 +258,7 @@ async def batch_update_resources_order(db: AsyncSession, updates: List[schemas.R
 
 async def move_resources(db: AsyncSession, move_request: schemas.ResourceMoveRequest) -> bool:
     """
-    移动资源或文件夹到指定位置（Inside, Before, After）。
+    移动资源或文件夹到指定位置。
     处理目标位置的排序挤占逻辑。
     """
     if not move_request.item_ids:
@@ -317,7 +323,7 @@ async def search_resources_and_versions(
         enable_regex: bool,
         skip: int,
         limit: int
-) -> Tuple[List[Any], int]:
+) -> Tuple[list[Row], int]:
     """
     全局搜索资源名称、描述以及最新版本的内容。
     返回: (结果列表, 总数)
@@ -371,7 +377,7 @@ async def search_resources_and_versions(
     if target_resource_ids_query is not None:
         q_content = q_content.where(resource_model.Resource.id.in_(target_resource_ids_query))
 
-    # 4. 构建 Resource 元数据 (Name, Description) 搜索查询
+    # 4. 构建 Resource 元数据 搜索查询
     name_match = match_op(resource_model.Resource.name)
     desc_match = match_op(resource_model.Resource.description)
 
@@ -397,10 +403,10 @@ async def search_resources_and_versions(
     if target_resource_ids_query is not None:
         q_meta = q_meta.where(resource_model.Resource.id.in_(target_resource_ids_query))
 
-    # 5. 合并查询 (Union All)
+    # 5. 合并查询
     union_query = union_all(q_content, q_meta).subquery()
 
-    # 6. 获取总数 (Count)
+    # 6. 获取总数
     count_stmt = select(func.count()).select_from(union_query)
     count_result = await db.execute(count_stmt)
     total_count = count_result.scalar() or 0
@@ -446,13 +452,51 @@ async def get_batch_resource_ancestors(db: AsyncSession, resource_ids: List[str]
         return []
 
     # 3. 查询完整的 ORM 对象
-    # === 修改开始 ===
-    # 添加 .options(joinedload(resource_model.Resource.latest_version))
     resources_result = await db.execute(
         select(resource_model.Resource)
         .options(joinedload(resource_model.Resource.latest_version))
         .where(resource_model.Resource.id.in_(ancestor_ids))
     )
-    # === 修改结束 ===
 
     return resources_result.scalars().all()
+
+
+async def get_skill_descendants_with_versions(db: AsyncSession, skill_ids: List[str]) -> List[resource_model.Resource]:
+    """
+    根据 SKILL 根节点 ID 列表，递归获取其下所有的子孙节点（包含文件夹和文件）。
+    自动预加载 latest_version 关系数据，以便后续提取底层物理文件 ID。
+    """
+    if not skill_ids:
+        return []
+
+    # 1. 递归 CTE: 查询所有子孙节点的 ID
+    # 基础查询：选出指定的 SKILL 根节点
+    cte = select(
+        resource_model.Resource.id,
+        resource_model.Resource.parentId
+    ).where(resource_model.Resource.id.in_(skill_ids)).cte(name="skill_descendants", recursive=True)
+
+    # 递归部分：查找 parentId 等于当前节点 id 的子节点
+    cte = cte.union_all(
+        select(
+            resource_model.Resource.id,
+            resource_model.Resource.parentId
+        ).join(cte, resource_model.Resource.parentId == cte.c.id)
+    )
+
+    # 获取所有涉及的节点 ID
+    stmt = select(cte.c.id)
+    result = await db.execute(stmt)
+    descendant_ids = result.scalars().all()
+
+    if not descendant_ids:
+        return []
+
+    # 2. 查询完整的 ORM 对象并预加载 latest_version
+    resources_result = await db.execute(
+        select(resource_model.Resource)
+        .options(joinedload(resource_model.Resource.latest_version))
+        .where(resource_model.Resource.id.in_(descendant_ids))
+    )
+
+    return list(resources_result.scalars().all())

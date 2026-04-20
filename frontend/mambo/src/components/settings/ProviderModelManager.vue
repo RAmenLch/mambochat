@@ -54,6 +54,17 @@
         {{ t('provider.list.currentProvider') }}: <strong>{{ selectedProvider.name }}</strong>
       </p>
       <el-table :data="selectedProvider.models" border style="width: 100%">
+        <el-table-column :label="t('model.table.star')" width="50" align="center">
+          <template #default="{ row }">
+            <el-icon
+              class="star-icon"
+              :class="{ starred: row.starred }"
+              @click="handleToggleStar(row)"
+            >
+              <Star />
+            </el-icon>
+          </template>
+        </el-table-column>
         <el-table-column prop="modelId" :label="t('model.table.id')" width="220" />
         <el-table-column prop="name" :label="t('model.table.name')" width="200" />
         <el-table-column prop="model_type" :label="t('model.table.type')" width="50" align="center">
@@ -161,7 +172,7 @@ import { storeToRefs } from 'pinia';
 import { ElMessage, ElMessageBox, type ElTable } from 'element-plus';
 import {
   Plus, Document, Picture, Headset, VideoCamera, Folder, ArrowRight, Download,
-  ChatDotRound, Connection
+  ChatDotRound, Connection, Star
 } from '@element-plus/icons-vue';
 import type { AIProviderWithModels, AIModel, AIModelBase, AIModelCreate, ProviderWorkerType } from '@/api/types';
 
@@ -278,6 +289,10 @@ const handleDeleteModel = async (model: AIModel) => {
     ElMessage.success(t('model.list.deleteSuccess'));
 };
 
+const handleToggleStar = async (model: AIModel) => {
+  await providerStore.updateModel(model.id, { starred: !model.starred });
+};
+
 // Dialog Event Handlers
 const onDialogSubmitted = () => {
   providerStore.fetchProviders();
@@ -346,4 +361,7 @@ const onConfirmAddFetchedModels = (selectedIds: string[]) => {
 .arrow-icon { color: var(--el-text-color-secondary); }
 .parameter-list { display: flex; flex-wrap: wrap; gap: 4px; }
 .separator { margin: 0 4px; color: var(--el-text-color-secondary); }
+.star-icon { cursor: pointer; font-size: 18px; color: var(--el-text-color-disabled); transition: color 0.2s; }
+.star-icon.starred { color: var(--el-color-warning); }
+.star-icon:hover { color: var(--el-color-warning-light-5); }
 </style>

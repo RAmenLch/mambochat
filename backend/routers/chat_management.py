@@ -1,17 +1,20 @@
 # backend/routers/chat_management.py
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from typing import List, Optional, Dict, Any
 
-from backend.crud import chat_crud, setting_crud, provider_crud, resource_crud
+from backend.crud import chat_crud, setting_crud, provider_crud, resource_crud, agent_crud
 from backend.services import chat_service
+from backend.services.resource_service import validate_mounted_resources
 from backend import schemas
 from backend.models import chat_model
 from backend.database import get_db
 from backend.routers.settings import get_global_settings
 from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 from backend.schemas.enums import ResourceItemType, ResourceType
+from backend.checkpointer import adelete_thread
 
 router = APIRouter()
 
@@ -27,8 +30,7 @@ def _validate_model_parameters(params: Dict[str, Any]):
     Raises HTTPException for any validation failures.
     """
     for key, value in params.items():
-        # These parameters are managed by the system but not defined in the central config
-        if key in ["max_context_messages", "stream", "enabled_mcp_ids","enable_suggest"]:
+        if key in ["max_context_messages", "stream", "enable_suggest", "enable_ask_user"]:
             continue
 
         definition = _param_definition_map.get(key)
@@ -91,6 +93,11 @@ async def create_chat(chat: schemas.ChatCreate, db: AsyncSession = Depends(get_d
     - All provided model parameters are validated against the system configuration.
     """
     if chat.itemType == 'chat':
+        if chat.agentId:
+            db_agent = await agent_crud.get_agent(db, agent_id=chat.agentId)
+            if not db_agent:
+                raise HTTPException(status_code=404, detail=f"Agent ID {chat.agentId} not found")
+
         if not chat.aiModelId:
             default_model_setting = await setting_crud.get_setting(db, key="default_model_id")
             if default_model_setting and default_model_setting.value:
@@ -107,6 +114,7 @@ async def create_chat(chat: schemas.ChatCreate, db: AsyncSession = Depends(get_d
                 "max_context_messages": global_settings.default_max_context_messages,
                 "stream": global_settings.default_stream,
                 "enable_suggest": global_settings.default_enable_suggest,
+                "enable_ask_user": global_settings.default_enable_ask_user,
             }
             # Apply default activated parameters from central config
             for param_def in SUPPORTED_LLM_PARAMETERS:
@@ -123,6 +131,10 @@ async def create_chat(chat: schemas.ChatCreate, db: AsyncSession = Depends(get_d
         else:
             # Validate user-provided parameters
             _validate_model_parameters(chat.modelParameters)
+
+        # 验证资源挂载列表
+        if chat.resource_prompt_list is not None:
+            await validate_mounted_resources(db, chat.resource_prompt_list)
 
     return await chat_crud.create_chat(db=db, chat=chat)
 
@@ -285,35 +297,17 @@ async def update_chat_settings(
         if not db_model:
             raise HTTPException(status_code=404, detail=f"AI model ID {chat_update.aiModelId} not found")
 
+    if chat_update.agentId:
+        db_agent = await agent_crud.get_agent(db, agent_id=chat_update.agentId)
+        if not db_agent:
+            raise HTTPException(status_code=404, detail=f"Agent ID {chat_update.agentId} not found")
+
     if chat_update.modelParameters is not None:
         _validate_model_parameters(chat_update.modelParameters)
 
     # 验证资源挂载列表
     if chat_update.resource_prompt_list is not None:
-        if len(chat_update.resource_prompt_list) > 0:
-            # 批量获取资源对象
-            resources = await resource_crud.get_resources_by_ids(db, chat_update.resource_prompt_list)
-            resources_map = {res.id: res for res in resources}
-
-            # 遍历ID进行严格验证
-            for rid in chat_update.resource_prompt_list:
-                res = resources_map.get(rid)
-                if not res:
-                    raise HTTPException(status_code=400, detail=f"Resource ID {rid} not found.")
-
-                # 检查是否为文件夹
-                if res.itemType != ResourceItemType.RESOURCE.value:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Item {rid} is a folder, cannot be mounted as a resource prompt."
-                    )
-
-                # 检查资源类型
-                if res.resourceType not in [ResourceType.SYSTEM_PROMPT.value, ResourceType.SUBMESSAGE_TEMPLATE.value]:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Resource {rid} type is not supported for mounting. Only SYSTEM_PROMPT and SUBMESSAGE_TEMPLATE are allowed."
-                    )
+        await validate_mounted_resources(db, chat_update.resource_prompt_list)
 
     updated_chat = await chat_crud.update_chat(db, chat_id=chat_id, chat_update=chat_update)
 
@@ -325,23 +319,62 @@ async def update_chat_settings(
 
 @router.delete("/chats/{chat_id}", response_model=schemas.Chat, summary="删除会话或文件夹")
 async def delete_chat(chat_id: str, db: AsyncSession = Depends(get_db)):
+    # 先查询所有后代 ID（包括自身），用于清理 checkpoint
+    descendant_ids = await chat_crud.get_descendant_chat_ids(db, chat_id)
+    # 获取后代中 itemType 为 chat 的 ID 列表
+    result = await db.execute(
+        select(chat_model.Chat.id).where(
+            chat_model.Chat.id.in_(descendant_ids),
+            chat_model.Chat.itemType == "chat"
+        )
+    )
+    chat_ids_to_cleanup = list(result.scalars().all())
+    # 执行删除（ORM cascade 会自动删除子会话和消息）
     db_chat = await chat_crud.delete_chat(db, chat_id=chat_id)
     if db_chat is None:
         raise HTTPException(status_code=404, detail="Item not found")
+    # 清理所有相关会话的 LangGraph checkpoint 数据
+    for cid in chat_ids_to_cleanup:
+        await adelete_thread(cid)
     return db_chat
 
 
 @router.post(
-    "/chats/{chat_id}/duplicate",
-    response_model=schemas.Chat,
-    status_code=status.HTTP_201_CREATED,
-    summary="复制会话"
+    "/{chat_id}/duplicate",
+    response_model=schemas.Chat,  # 响应模型根据你实际情况(Chat或ChatWithMessages)决定
+    summary="复制指定会话"
 )
-async def duplicate_chat_endpoint(chat_id: str, db: AsyncSession = Depends(get_db)):
+async def duplicate_chat_endpoint(
+    chat_id: str,
+    payload: schemas.ChatDuplicateRequest = Body(default_factory=schemas.ChatDuplicateRequest),
+    db: AsyncSession = Depends(get_db)
+):
     """
-    Creates a new session with the same configuration and message history as the given session ID.
+    复制会话。如果不传参数，则全量复制；如果传入 up_to_message_id，则触发截断复制。
     """
-    new_chat = await chat_service.duplicate_chat_with_messages(db, chat_id=chat_id)
+    new_chat = await chat_service.duplicate_chat_with_messages(
+        db,
+        chat_id=chat_id,
+        up_to_message_id=payload.up_to_message_id
+    )
     if not new_chat:
-        raise HTTPException(status_code=404, detail="Source chat not found or is a folder")
+        raise HTTPException(status_code=404, detail="Original chat not found or cannot be duplicated.")
     return new_chat
+
+
+@router.post(
+    "/archive",
+    response_model=schemas.Chat,
+    summary="新建文件夹并批量归档会话"
+)
+async def archive_chats_endpoint(
+    request: schemas.ChatArchiveRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    接收一个名称和一组项目ID，创建一个新文件夹并将这些项目全部归档到入其中。
+    """
+    new_folder = await chat_service.archive_chats_to_new_folder(db, request=request)
+    if not new_folder:
+        raise HTTPException(status_code=400, detail="Failed to archive chats. Ensure requested items exist.")
+    return new_folder

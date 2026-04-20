@@ -277,7 +277,7 @@ async function handleTestConnection() {
     if(isAxiosError(error)){
       ElMessage.error(error?.response?.data?.detail || t('provider.form.testFailed'));
     } else {
-      ElMessage.error(t('api.error.unknown', '未知错误')); // Fallback if key missing
+      ElMessage.error(t('common.error.unknown')); // Fallback if key missing
     }
   } finally {
     isTestingConnection.value = false;

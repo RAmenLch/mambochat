@@ -1,27 +1,20 @@
 from abc import ABC, abstractmethod
-from typing import AsyncGenerator, Any
+from typing import AsyncGenerator, Any, Dict, Tuple, Union
 
-from backend.services.generation.llm_io import LLMInput
+from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
+
+from backend.services.generation.core.llm_io import LLMInput
 from backend.services.generation.worker.decode import BaseDecode
+
+StreamEvent = Union[ToolMessage, AIMessageChunk, AIMessage, Dict[str, Any]]
 
 
 class AbstractGenerateWorker(ABC):
-
-    @staticmethod
-    def get_decode() -> type[BaseDecode]:
-        return BaseDecode
+    @abstractmethod
+    def resolve_decoder(self, message: StreamEvent) -> BaseDecode:
+        pass
 
     @abstractmethod
-    async def generate(self, llm_input: LLMInput) -> AsyncGenerator[Any, None]:
-        """
-        启动 Agent 并流式返回执行过程中的事件。
-
-        Args:
-            llm_input: 包含模型配置、历史消息、工具定义等上下文的输入对象。
-
-        Yields:
-            Any: LangChain/LangGraph 的流式事件 (chunks, updates, etc.)。
-                 具体类型取决于 Worker 内部使用的 stream_mode。
-        """
+    async def generate(self, llm_input: LLMInput) -> AsyncGenerator[Tuple[str, StreamEvent], None]:
         if False:
             yield

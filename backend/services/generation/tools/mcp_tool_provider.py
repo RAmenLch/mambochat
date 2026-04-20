@@ -1,12 +1,15 @@
+# backend/services/generation/tools/mcp_tool_provider.py
+
 import json
+import logging
 from typing import List, Optional, Dict, Any, AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, StructuredTool
 
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
 from backend.services.mcp_connection_manager import McpConnectionManager
-from backend.services.generation.instructions import (
+from backend.services.generation.core.instructions import (
     BaseInstruction,
     CreateSubMessage,
     UpdateSubMessageContent,
@@ -16,6 +19,8 @@ from backend.schemas import enums as schemas_enums
 from backend.schemas.message import McpToolContent
 from backend.models.base_model import generate_uuid
 
+logger = logging.getLogger(__name__)
+
 
 class MCPToolProvider(BaseToolProvider):
     """
@@ -23,9 +28,9 @@ class MCPToolProvider(BaseToolProvider):
     负责管理通过 MCP 协议连接的外部工具，并处理其 UI 交互逻辑。
     """
 
-    def __init__(self, db_session: AsyncSession, mcp_config: Dict[str, Any]):
+    def __init__(self, db_session: AsyncSession, mcp_ids: List[str]):
         self.db_session = db_session
-        self.mcp_config = mcp_config
+        self.mcp_ids = mcp_ids
         self.conn_manager = McpConnectionManager(db_session)
 
         # 缓存已加载的工具名称，用于快速匹配
@@ -41,16 +46,58 @@ class MCPToolProvider(BaseToolProvider):
     async def get_tools(self) -> List[BaseTool]:
         """
         使用 McpConnectionManager 连接并获取工具。
+        对每个 MCP 工具进行异常安全包装，防止工具执行时的未处理异常
+        (如 ToolException) 冒泡导致整个生成流程崩溃。
         """
-        if not self.mcp_config:
+        if not self.mcp_ids:
             return []
 
         # 获取工具并检查状态 (如果服务不可用，此处可能会抛出 McpConnectionError，由上层 Manager 捕获)
-        tools = await self.conn_manager.get_tools_and_check_status(self.mcp_config)
+        tools = await self.conn_manager.get_tools_and_check_status(self.mcp_ids)
+
+        # 过滤掉数据库中 is_enabled=False 的工具
+        from sqlalchemy import select
+        from backend.models.mcp_model import McpTool
+        result = await self.db_session.execute(
+            select(McpTool).filter(
+                McpTool.server_id.in_(self.mcp_ids),
+                McpTool.is_enabled == False
+            )
+        )
+        disabled_tool_names = {t.name for t in result.scalars().all()}
+        if disabled_tool_names:
+            tools = [t for t in tools if t.name not in disabled_tool_names]
+
+        # 对每个 MCP 工具进行异常安全包装
+        safe_tools = [self._wrap_tool_safe(t) for t in tools]
 
         # 更新名称缓存
-        self._loaded_tool_names = {t.name for t in tools}
-        return tools
+        self._loaded_tool_names = {t.name for t in safe_tools}
+        return safe_tools
+
+    @staticmethod
+    def _wrap_tool_safe(tool: BaseTool) -> BaseTool:
+        """
+        用 StructuredTool 重新包装 MCP 工具，在 coroutine 内捕获所有异常
+        并返回错误文本，而非让异常冒泡导致整个生成流程崩溃。
+        ToolNode 会收到正常结果，LLM 可以看到错误信息并继续推理。
+        """
+        tool_name = tool.name
+        original_coroutine = tool.coroutine
+
+        async def safe_coroutine(*args, **kwargs):
+            try:
+                return await original_coroutine(*args, **kwargs)
+            except Exception as e:
+                logger.warning(f"MCP tool '{tool_name}' execution error: {e}")
+                return f"工具执行失败: {e}"
+
+        return StructuredTool(
+            name=tool_name,
+            description=tool.description,
+            args_schema=tool.args_schema,
+            coroutine=safe_coroutine,
+        )
 
     def get_system_prompt_injection(self) -> Optional[str]:
         # MCP 工具通常不需要额外的全局 System Prompt 注入，
@@ -64,16 +111,18 @@ class MCPToolProvider(BaseToolProvider):
             self,
             tool_call_id: str,
             name: str,
-            arguments: Dict[str, Any]
+            arguments: Dict[str, Any],
+            tool_def: Optional[BaseTool] = None
     ) -> AsyncGenerator[BaseInstruction, None]:
-        # 1. 序列化参数
-        args_str = json.dumps(arguments, ensure_ascii=False)
+        # 1. 提取工具定义中的 JSON Schema
+        input_schema = tool_def.args if tool_def else None
 
-        # 2. 构建 McpToolContent 对象
+        # 2. 构建包含 Schema 的 McpToolContent 对象
         tool_content = McpToolContent(
             tool_call_id=tool_call_id,
             name=name,
-            arguments=args_str
+            arguments=arguments,
+            input_schema=input_schema  # 注入 Schema
         )
 
         # 3. 缓存状态，建立 ID 映射
@@ -115,3 +164,8 @@ class MCPToolProvider(BaseToolProvider):
                 sub_message_id=sub_id,
                 status=schemas_enums.MessageStatus.COMPLETED
             )
+
+    def restore_state(self, tool_call_id: str, sub_message_id: str, tool_content: Any) -> None:
+        self._tool_sub_msg_map[tool_call_id] = sub_message_id
+        if isinstance(tool_content, McpToolContent):
+            self._tool_info_cache[tool_call_id] = tool_content

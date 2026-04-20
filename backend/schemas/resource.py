@@ -144,3 +144,41 @@ class ResourceSearchResultItem(BaseModel):
 class ResourceSearchResponse(BaseModel):
     total: int
     items: List[ResourceSearchResultItem]
+
+
+class SkillValidationResult(BaseModel):
+    """Skill 规范校验结果"""
+    is_valid: bool = Field(..., description="是否完全符合规范")
+    errors: List[str] = Field(default_factory=list, description="导致校验失败的错误信息列表")
+    warnings: List[str] = Field(default_factory=list, description="不影响有效性但建议修复的警告信息列表")
+
+
+class SkillCreate(BaseModel):
+    """创建 SKILL 时的请求体"""
+    name: str = Field(..., min_length=1, max_length=64, description="Skill 名称 (需符合规范)")
+    description: str = Field(..., min_length=1, max_length=1024, description="Skill 描述")
+    parentId: Optional[str] = Field(None, description="父文件夹ID")
+
+
+# --- Skill Import Schemas ---
+
+class GithubImportRequest(BaseModel):
+    """GitHub 仓库导入请求"""
+    repo_url: str = Field(..., description="GitHub 仓库地址")
+    parent_id: Optional[str] = Field(None, description="目标父文件夹ID")
+
+
+class SkillImportResultItem(BaseModel):
+    """单个 Skill 导入结果"""
+    name: str = Field(..., description="Skill 名称")
+    status: str = Field(..., description="导入状态: success 或 failed")
+    resource_id: Optional[str] = Field(None, description="成功时返回的资源ID")
+    error: Optional[str] = Field(None, description="失败原因")
+
+
+class SkillImportResponse(BaseModel):
+    """批量导入 Skill 的响应结果"""
+    total_detected: int = Field(..., description="识别出的 Skill 总数")
+    success_count: int = Field(..., description="成功导入数量")
+    failed_count: int = Field(..., description="失败数量")
+    details: List[SkillImportResultItem] = Field(default_factory=list, description="详细结果列表")

@@ -15,16 +15,20 @@ from .provider import (
 from .chat import (
     ChatBase, ChatCreate, Chat, ChatUpdate, ChatWithMessages,
     ChatReorderItem, GenerateRequest,UpdateMessageResponse,PrepareGenerateResponse,
-    SearchRequest,SearchResultItem,SearchResponse,MoveAction,ChatMoveRequest
+    SearchRequest,SearchResultItem,SearchResponse,MoveAction,ChatMoveRequest,
+    ChatArchiveRequest,ChatDuplicateRequest
 )
 from .setting import GlobalSetting, GlobalSettingsUpdate
 
-from .file import File,FileBase
+from .file import File,FileBase,FileUpdate,FileContentResponse
 
 from .resource import (Resource, ResourceVersion,
                        ResourceVersionBase,ResourceBase,
                        ResourceCreate,ResourceUpdate,
                        ResourceVersionCreate,ResourceWithVersions,
                        ResourceVersionUpdate,ResourceReorderItem,MoveAction,ResourceMoveRequest,ResourceSimple,
-                       ResourceSearchRequest,ResourceSearchResultItem,ResourceSearchResponse
+                       ResourceSearchRequest,ResourceSearchResultItem,ResourceSearchResponse,
+                       SkillCreate,SkillValidationResult,SkillImportResponse,SkillImportResultItem,GithubImportRequest
                        )
+
+from .agent import (AgentBase,AgentCreate,AgentUpdate,AgentResponse,AgentMoveRequest)

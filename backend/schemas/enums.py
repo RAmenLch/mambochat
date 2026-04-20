@@ -2,6 +2,11 @@
 from enum import Enum
 
 
+class ChatMode(str, Enum):
+    """定义会话的模式"""
+    NORMAL = "normal"
+    AGENT = "agent"
+
 class MessageRole(str, Enum):
     USER = "user"
     ASSISTANT = "assistant"
@@ -12,6 +17,7 @@ class MessageStatus(str, Enum):
     GENERATING = "generating"
     COMPLETED = "completed"
     FAILED = "failed"
+    PENDING_REVIEW = "pending_review"
 
 
 class SubMessageType(str, Enum):
@@ -23,6 +29,9 @@ class SubMessageType(str, Enum):
     ZIP_HISTORY = "ZipHistory"
     MCP_TOOL = "McpTool"
     SUGGEST = "Suggest"
+    REVIEW_TOOL = "ReviewTool"
+    ASK_USER = "AskUser"
+    ERROR = "Error"
 
 
 class FileManagementType(str, Enum):
@@ -32,7 +41,7 @@ class FileManagementType(str, Enum):
     GLOBAL_SETTING = "global_setting"  # 被全局设置（如头像）引用的文件
     KB_DOCUMENT = "kb_document"      # 旧版知识库文件（保留用于兼容）
     RESOURCE = "resource"            # 通用资源文件，统一管理所有上传到资源中心的文件
-
+    AGENT_AVATAR = "agent_avatar"
 
 class MoveAction(str, Enum):
     """定义节点移动的操作类型"""
@@ -70,7 +79,7 @@ class ResourceType(str, Enum):
     SUBMESSAGE_TEMPLATE = "submessage_template"
     KB_FILE = "kb_file"  # 旧版知识库文件类型（保留用于兼容）
     FILE = "file"        # 通用文件资源类型，支持向量化
-
+    SKILL = "skill"
 
 class KBFileStatus(str, Enum):
     """定义知识库文件的整体处理状态"""
@@ -88,3 +97,34 @@ class McpTransportType(str, Enum):
     """定义 MCP 服务器的传输类型"""
     STDIO = "stdio"
     SSE = "sse"
+
+class ToolReviewMode(str, Enum):
+    NONE = "none"
+    REQUIRE_REVIEW = "require_review"
+
+
+class ToolStatus(str, Enum):
+    ONLINE = "online"
+    OFFLINE = "offline"
+
+class ToolDecisionType(str, Enum):
+    """工具调用审核的决策类型"""
+    APPROVE = "approve"
+    EDIT = "edit"
+    REJECT = "reject"
+
+class AgentItemType(str, Enum):
+    """定义 Agent 树状目录结构中的节点类型"""
+    AGENT = "agent"
+    FOLDER = "folder"
+
+
+class AgentTypeEnum(str, Enum):
+    """定义 Agent 初始化的类型标识符"""
+    REACT = "ReActAgent"
+    DEEP = "DeepAgent"
+
+class BackendType(str, Enum):
+    """定义 Backend 的类型"""
+    SSH = "ssh"
+    API = "api"

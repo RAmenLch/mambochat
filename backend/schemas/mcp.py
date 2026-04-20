@@ -1,9 +1,10 @@
 # backend/schemas/mcp.py
 
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from datetime import datetime
-from backend.schemas.enums import McpTransportType
+
+from backend.schemas.enums import McpTransportType,ToolReviewMode,ToolStatus
 
 class McpServerBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
@@ -37,8 +38,10 @@ class McpServerBase(BaseModel):
             return v.strip()
         return v
 
+
 class McpServerCreate(McpServerBase):
     pass
+
 
 class McpServerUpdate(BaseModel):
     name: Optional[str] = None
@@ -49,6 +52,7 @@ class McpServerUpdate(BaseModel):
     env: Optional[Dict[str, str]] = None
     url: Optional[str] = None
     isEnabled: Optional[bool] = None
+
 
 class McpServerResponse(McpServerBase):
     id: str
@@ -61,3 +65,26 @@ class McpServerResponse(McpServerBase):
 
     class Config:
         from_attributes = True
+
+
+
+
+
+class McpToolResponse(BaseModel):
+    id: str
+    server_id: str
+    name: str
+    description: Optional[str] = None
+    input_schema: Optional[Dict[str, Any]] = None
+    is_enabled: bool
+    review_mode: ToolReviewMode
+    status: ToolStatus
+    last_synced_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class McpToolUpdate(BaseModel):
+    is_enabled: Optional[bool] = None
+    review_mode: Optional[ToolReviewMode] = None

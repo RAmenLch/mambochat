@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     :model-value="visible"
-    :title="isEditMode ? '编辑 MCP 服务' : '新增 MCP 服务'"
+    :title="isEditMode ? t('settings.mcp.editTitle') : t('settings.mcp.addTitle')"
     width="600px"
     @update:model-value="handleUpdateVisible"
     @closed="handleClosed"
@@ -14,60 +14,60 @@
       label-width="100px"
       label-position="right"
     >
-      <el-form-item label="名称" prop="name">
-        <el-input v-model="formData.name" placeholder="请输入服务名称" />
+      <el-form-item :label="t('settings.mcp.columns.name')" prop="name">
+        <el-input v-model="formData.name" :placeholder="t('settings.mcp.form.namePlaceholder')" />
       </el-form-item>
 
-      <el-form-item label="描述" prop="description">
-        <el-input v-model="formData.description" type="textarea" placeholder="可选描述" />
+      <el-form-item :label="t('settings.mcp.columns.description')" prop="description">
+        <el-input v-model="formData.description" type="textarea" :placeholder="t('settings.mcp.form.descPlaceholder')" />
       </el-form-item>
 
-      <el-form-item label="传输类型" prop="transportType">
+      <el-form-item :label="t('settings.mcp.columns.type')" prop="transportType">
         <el-radio-group v-model="formData.transportType" @change="handleTransportChange">
-          <el-radio-button value="stdio">Stdio (本地进程)</el-radio-button>
-          <el-radio-button value="sse">SSE (远程服务)</el-radio-button>
+          <el-radio-button value="stdio">Stdio</el-radio-button>
+          <el-radio-button value="sse">SSE</el-radio-button>
         </el-radio-group>
       </el-form-item>
 
-      <el-form-item label="启用状态" prop="isEnabled">
+      <el-form-item :label="t('settings.mcp.columns.enableStatus')" prop="isEnabled">
         <el-switch v-model="formData.isEnabled" />
       </el-form-item>
 
       <!-- Stdio 专属字段 -->
       <template v-if="formData.transportType === 'stdio'">
-        <el-divider content-position="left">Stdio 配置</el-divider>
-        <el-form-item label="Command" prop="command">
-          <el-input v-model="formData.command" placeholder="例如: python, node, uvx" />
+        <el-divider content-position="left">Stdio</el-divider>
+        <el-form-item :label="t('settings.mcp.form.commandLabel')" prop="command">
+          <el-input v-model="formData.command" :placeholder="t('settings.mcp.form.commandPlaceholder')" />
         </el-form-item>
 
-        <el-form-item label="Args">
+        <el-form-item :label="t('settings.mcp.form.argsLabel')">
           <div class="dynamic-list">
             <div v-for="(arg, index) in formData.argsList" :key="index" class="dynamic-row">
-              <el-input v-model="formData.argsList[index]" placeholder="参数" />
+              <el-input v-model="formData.argsList[index]" :placeholder="t('settings.mcp.form.argPlaceholder')" />
               <el-button type="danger" :icon="Minus" circle size="small" @click="removeArg(index)" />
             </div>
-            <el-button type="primary" link :icon="Plus" @click="addArg">添加参数</el-button>
+            <el-button type="primary" link :icon="Plus" @click="addArg">+</el-button>
           </div>
         </el-form-item>
 
-        <el-form-item label="Env">
+        <el-form-item :label="t('settings.mcp.form.envLabel')">
           <div class="dynamic-list">
             <div v-for="(env, index) in formData.envList" :key="index" class="dynamic-row">
-              <el-input v-model="env.key" placeholder="变量名 (KEY)" style="flex: 1" />
+              <el-input v-model="env.key" :placeholder="t('settings.mcp.form.envKeyPlaceholder')" style="flex: 1" />
               <span class="separator">=</span>
-              <el-input v-model="env.value" placeholder="变量值 (VALUE)" style="flex: 1" />
+              <el-input v-model="env.value" :placeholder="t('settings.mcp.form.envValuePlaceholder')" style="flex: 1" />
               <el-button type="danger" :icon="Minus" circle size="small" @click="removeEnv(index)" />
             </div>
-            <el-button type="primary" link :icon="Plus" @click="addEnv">添加环境变量</el-button>
+            <el-button type="primary" link :icon="Plus" @click="addEnv">+</el-button>
           </div>
         </el-form-item>
       </template>
 
       <!-- SSE 专属字段 -->
       <template v-if="formData.transportType === 'sse'">
-        <el-divider content-position="left">SSE 配置</el-divider>
-        <el-form-item label="URL" prop="url">
-          <el-input v-model="formData.url" placeholder="例如: http://localhost:8080/sse" />
+        <el-divider content-position="left">SSE</el-divider>
+        <el-form-item :label="t('settings.mcp.form.urlLabel')" prop="url">
+          <el-input v-model="formData.url" :placeholder="t('settings.mcp.form.urlPlaceholder')" />
         </el-form-item>
       </template>
     </el-form>
@@ -75,25 +75,23 @@
     <template #footer>
       <div class="dialog-footer-wrapper">
         <div class="footer-left">
-          <template v-if="isEditMode">
             <el-button
               :loading="isTestingConnection"
               :icon="Connection"
               @click="handleTestConnection"
             >
-              测试连接
+              {{ t('settings.mcp.testConnection') }}
             </el-button>
             <div v-if="testFeedback.status !== 'none'" class="test-feedback" :class="testFeedback.status">
               <el-icon v-if="testFeedback.status === 'success'"><CircleCheck /></el-icon>
               <el-icon v-else><CircleClose /></el-icon>
               <span :title="testFeedback.message">{{ testFeedback.shortMessage }}</span>
             </div>
-          </template>
         </div>
         <div class="footer-right">
-          <el-button @click="handleCancel">取消</el-button>
+          <el-button @click="handleCancel">{{ t('common.action.cancel') }}</el-button>
           <el-button type="primary" @click="handleSubmit" :loading="isSubmitting">
-            确定
+            {{ t('common.action.confirm') }}
           </el-button>
         </div>
       </div>
@@ -105,8 +103,11 @@
 import { ref, reactive, computed, watch } from 'vue';
 import { Plus, Minus, Connection, CircleCheck, CircleClose } from '@element-plus/icons-vue';
 import type { FormInstance, FormRules } from 'element-plus';
+import { useI18n } from 'vue-i18n';
 import type { McpServer, McpCreateRequest, McpTransportType } from '@/api/types';
 import { useMcpStore } from '@/stores/mcpStore';
+
+const { t } = useI18n();
 
 const props = defineProps<{
   visible: boolean;
@@ -159,18 +160,18 @@ const isEditMode = computed(() => !!props.initialData);
 
 const rules = computed<FormRules>(() => {
   const commonRules = {
-    name: [{ required: true, message: '请输入服务名称', trigger: 'blur' }],
+    name: [{ required: true, message: () => t('settings.mcp.form.nameRequired'), trigger: 'blur' }],
   };
 
   if (formData.transportType === 'stdio') {
     return {
       ...commonRules,
-      command: [{ required: true, message: '请输入执行命令', trigger: 'blur' }],
+      command: [{ required: true, message: () => t('settings.mcp.form.commandRequired'), trigger: 'blur' }],
     };
   } else {
     return {
       ...commonRules,
-      url: [{ required: true, message: '请输入 SSE URL', trigger: 'blur' }],
+      url: [{ required: true, message: () => t('settings.mcp.form.urlRequired'), trigger: 'blur' }],
     };
   }
 });
@@ -282,22 +283,50 @@ const handleSubmit = async () => {
 };
 
 const handleTestConnection = async () => {
-  if (!props.initialData?.id) return;
-
   isTestingConnection.value = true;
   testFeedback.status = 'none';
 
   try {
-    await mcpStore.testConnection(props.initialData.id);
-    testFeedback.status = 'success';
-    testFeedback.shortMessage = '连接成功';
-    testFeedback.message = '连接测试通过，服务运行正常。';
+    // 构造当前表单的配置数据用于测试
+    const configData: McpCreateRequest = {
+      name: formData.name,
+      description: formData.description || null,
+      transportType: formData.transportType,
+      isEnabled: formData.isEnabled,
+    };
+
+    if (formData.transportType === 'stdio') {
+      configData.command = formData.command;
+      const validArgs = formData.argsList.filter(a => a.trim() !== '');
+      configData.args = validArgs.length > 0 ? validArgs : null;
+      const validEnv = formData.envList.filter(e => e.key.trim() !== '');
+      if (validEnv.length > 0) {
+        configData.env = validEnv.reduce((acc, cur) => {
+          acc[cur.key] = cur.value;
+          return acc;
+        }, {} as Record<string, string>);
+      } else {
+        configData.env = null;
+      }
+    } else {
+      configData.url = formData.url;
+    }
+
+    const response = await mcpStore.testConnectionWithConfig(configData);
+
+    if (response.status === 'healthy') {
+      testFeedback.status = 'success';
+      testFeedback.shortMessage = t('settings.mcp.connectSuccess', { count: response.tools_count });
+      testFeedback.message = t('settings.mcp.connectSuccessDetail');
+    } else {
+      testFeedback.status = 'error';
+      testFeedback.shortMessage = t('settings.mcp.connectFailed');
+      testFeedback.message = response.error || response.message || t('settings.mcp.connectFailedDetail');
+    }
   } catch (error: any) {
     testFeedback.status = 'error';
-    testFeedback.shortMessage = '连接失败';
-    // store 抛出的 Error.message 即为具体错误信息
-    const detail = error.message || '连接测试未通过，请检查配置。';
-    testFeedback.message = detail;
+    testFeedback.shortMessage = t('settings.mcp.connectFailed');
+    testFeedback.message = error.message || t('settings.mcp.connectFailedDetail');
   } finally {
     isTestingConnection.value = false;
   }

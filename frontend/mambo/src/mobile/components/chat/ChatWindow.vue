@@ -1,12 +1,11 @@
 <!-- frontend/mambo/src/mobile/components/chat/ChatWindow.vue -->
 <template>
-  <!-- 修改点：动态绑定 style，使用 fixed 定位强制适应可视区域 -->
   <div class="mobile-chat-window" :style="containerStyle">
     <!-- Header -->
     <ChatHeader
       :current-chat="currentChat"
       @toggle-drawer="$emit('toggle-drawer')"
-      @open-settings="settingsDrawerVisible = true"
+      @open-settings="handleOpenSettings"
     />
 
     <!-- Messages Area -->
@@ -20,6 +19,8 @@
             :message="message"
             :is-last-message="index === currentChatMessages.length - 1"
             @suggestion-click="handleSuggestionClick"
+            @switch-branch="handleSwitchBranch"
+            @open-tool-dialog="handleOpenToolDialog"
           />
         </div>
       </el-scrollbar>
@@ -60,7 +61,7 @@
         @open-resource-selector="resourceSelectorVisible = true"
         @toggle-mcp-tool="handleToggleMcpTool"
         @jump-to-message="handleJumpToMessage"
-        @open-settings="settingsDrawerVisible = true"
+        @open-settings="handleOpenSettings"
       />
 
       <!-- Input Box -->
@@ -83,10 +84,17 @@
       @save="handleSaveSettings"
     />
 
+    <!-- Agent Settings Drawer -->
+    <MobileChatAgentSettingsDrawer
+      v-model:visible="agentSettingsDrawerVisible"
+      :chat-data="currentChat"
+      @save="handleSaveAgentSettings"
+    />
+
     <!-- Resource Selector Dialog -->
     <ResourceSelectorDialog
       v-model:visible="resourceSelectorVisible"
-      source="toolbar"
+      :context="currentChat?.chatMode === 'agent' ? 'agent-toolbar' : 'chat-toolbar'"
       @mount-resources="handleMountResources"
       @append-resources="handleAppendResources"
       @mount-knowledge-base="handleMountKnowledgeBase"
@@ -115,17 +123,18 @@ import ChatToolbar from '@/mobile/components/chat/ChatToolbar.vue'
 import AttachmentPreview from '@/mobile/components/chat/AttachmentPreview.vue'
 import ChatInputBox from '@/mobile/components/chat/ChatInputBox.vue'
 import ChatSettingsDrawer from './ChatSettingsDrawer.vue'
+import MobileChatAgentSettingsDrawer from './MobileChatAgentSettingsDrawer.vue'
 import ResourceSelectorDialog from './dialogs/ResourceSelectorDialog.vue'
 
 import { useChatListStore } from '@/stores/chatListStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useProviderStore } from '@/stores/providerStore'
-import { useResourceStore } from '@/stores/resourceStore'
+import { useAgentStore } from '@/stores/agentStore'
 import { useChatInput } from '@/composables/useChatInput'
 import { useTokenEstimator } from '@/composables/useTokenEstimator'
-import { uploadFile } from '@/api/chatService'
-import type { AIModel, ChatUpdate, Resource, SubMessageCreate } from '@/api/types'
+import { uploadFile } from '@/api/fileService'
+import type { AIModel, ChatUpdate, Resource, SubMessageCreate, Message } from '@/api/types'
 
 interface GroupedModels {
   label: string
@@ -141,14 +150,12 @@ const chatListStore = useChatListStore()
 const chatSessionStore = useChatSessionStore()
 const chatInteractionStore = useChatInteractionStore()
 const providerStore = useProviderStore()
-const resourceStore = useResourceStore()
+const agentStore = useAgentStore()
 
-const { currentChat, currentChatMessages, isGenerating, currentChatId, contextForTokenEstimation } =
+const { currentChat, currentChatMessages, isGenerating, currentChatId, contextForTokenEstimation, systemPromptResources } =
   storeToRefs(chatSessionStore)
 const { groupedModels } = storeToRefs(providerStore) as { groupedModels: Ref<GroupedModels[]> }
-const { resources: allResources } = storeToRefs(resourceStore)
 
-// --- State from Composables ---
 const {
   singlePartDraft,
   uploadedFiles,
@@ -162,22 +169,20 @@ const {
   appendContentToDraft,
 } = useChatInput(currentChatId)
 
-// --- Local State ---
 const scrollbarRef = ref<InstanceType<typeof ElScrollbar>>()
 const chatInputBoxRef = ref()
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const settingsDrawerVisible = ref(false)
+const agentSettingsDrawerVisible = ref(false)
 const resourceSelectorVisible = ref(false)
 const userHasScrolledUp = ref(false)
 
-// --- 新增：可视区域布局状态 ---
 const layoutStyle = reactive({
   top: '0px',
   height: '100%',
   width: '100%',
 })
 
-// 计算属性用于模板绑定
 const containerStyle = computed<CSSProperties>(() => ({
   position: 'fixed',
   top: layoutStyle.top,
@@ -185,34 +190,30 @@ const containerStyle = computed<CSSProperties>(() => ({
   width: layoutStyle.width,
 }))
 
-// --- 新增：核心布局修复逻辑 ---
 const updateLayout = () => {
-  // 优先使用 visualViewport
   if (window.visualViewport) {
     const vv = window.visualViewport
-    // 计算 top：由于页面可能滚动，我们需要计算可视区域在布局视口中的位置
-    // 并将容器固定在当前可视区域的位置
     const top = vv.offsetTop
     const height = vv.height
 
     layoutStyle.top = `${top}px`
     layoutStyle.height = `${height}px`
 
-    // 键盘弹起引起的视口变化时，确保输入框可见
-    // 这里我们利用 nextTick 确保 DOM 更新后滚动
     nextTick(() => {
       const wrap = scrollbarRef.value?.wrapRef
       if (wrap) wrap.scrollTop = wrap.scrollHeight
     })
   } else {
-    // 降级处理：如果浏览器不支持 visualViewport (极少见)，回退到 100dvh
     layoutStyle.top = '0px'
     layoutStyle.height = '100dvh'
   }
 }
 
-// --- Computed ---
 const isSendButtonDisabled = computed(() => isGenerating.value || !isReadyToSend.value)
+
+const attachedKnowledgeBases = computed(() => {
+  return systemPromptResources.value.filter(r => r.resourceType === 'knowledge_base')
+})
 
 const hasAttachments = computed(
   () =>
@@ -221,7 +222,6 @@ const hasAttachments = computed(
     attachedKnowledgeBases.value.length > 0,
 )
 
-// --- Token Estimation ---
 const pendingMessageTextForTokenEstimation = computed(() => {
   const parts: string[] = []
   if (singlePartDraft.value) {
@@ -240,46 +240,17 @@ const { estimatedTokens } = useTokenEstimator(
   pendingMessageTextForTokenEstimation,
 )
 
-// --- Knowledge Base Logic ---
-const activeKnowledgeBaseId = computed(() => {
-  const params = currentChat.value?.modelParameters
-  if (!params?.enabled_mcp_ids) return null
-  if (!Array.isArray(params.enabled_mcp_ids) && typeof params.enabled_mcp_ids === 'object') {
-    const kbConfig = params.enabled_mcp_ids['system-knowledge-base']
-    return kbConfig?.['MAMBOCHAT_RESOURCE_ID'] || null
-  }
-  return null
-})
-
-const attachedKnowledgeBases = computed(() => {
-  const id = activeKnowledgeBaseId.value
-  if (!id) return []
-  const resource = allResources.value.find((r) => r.id === id)
-  if (resource) return [resource]
-  return []
-})
-
-watch(
-  activeKnowledgeBaseId,
-  (newId) => {
-    if (newId) {
-      const exists = allResources.value.some((r) => r.id === newId)
-      if (!exists) resourceStore.fetchResourceDetails(newId)
-    }
-  },
-  { immediate: true },
-)
-
-// --- Lifecycle Hooks ---
 onMounted(() => {
-  updateLayout() // 初始化布局
+  updateLayout()
   if (window.visualViewport) {
-    // 监听视口变化 (键盘弹起/落下, 滚动等)
     window.visualViewport.addEventListener('resize', updateLayout)
     window.visualViewport.addEventListener('scroll', updateLayout)
   }
-  // 备用监听：某些浏览器在全屏切换时可能触发 window resize
   window.addEventListener('resize', updateLayout)
+
+  if (agentStore.allAgents.length === 0) {
+    agentStore.fetchAllAgents()
+  }
 })
 
 onUnmounted(() => {
@@ -289,8 +260,6 @@ onUnmounted(() => {
   }
   window.removeEventListener('resize', updateLayout)
 })
-
-// --- Methods ---
 
 const handleSendMessage = async () => {
   if (isSendButtonDisabled.value) return
@@ -336,7 +305,16 @@ const handleSuggestionClick = (text: string) => {
   })
 }
 
-// --- File Upload ---
+const handleSwitchBranch = async (targetId: string) => {
+  if (typeof chatInteractionStore.activateBranch === 'function') {
+    await chatInteractionStore.activateBranch(targetId)
+  }
+}
+
+const handleOpenToolDialog = (message: Message, subMessageId: string, mode: 'review_all' | 'single') => {
+  // Mobile tool review dialog integration point
+}
+
 function handleTriggerFileUpload() {
   fileInputRef.value?.click()
 }
@@ -361,22 +339,6 @@ async function handleFileUploads(files: FileList) {
   }
 }
 
-// --- Resource & KB Mounting ---
-function normalizeMcpIds(currentIds: any): Record<string, any> {
-  if (!currentIds) return {}
-  if (Array.isArray(currentIds)) {
-    return currentIds.reduce(
-      (acc, id) => {
-        acc[id] = {}
-        return acc
-      },
-      {} as Record<string, any>,
-    )
-  }
-  if (typeof currentIds === 'object') return { ...currentIds }
-  return {}
-}
-
 async function handleMountResources(resources: Resource[]) {
   for (const resource of resources) {
     if (resource.resourceType === 'submessage_template') {
@@ -396,49 +358,49 @@ async function handleAppendResources(resources: Resource[]) {
   }
 }
 
-async function handleMountKnowledgeBase(resource: Resource) {
+async function handleMountKnowledgeBase(resources: Resource[]) {
   if (!currentChat.value) return
-  const currentParams = currentChat.value.modelParameters || {}
-  const mcpIds = normalizeMcpIds(currentParams.enabled_mcp_ids)
-  mcpIds['system-knowledge-base'] = { MAMBOCHAT_RESOURCE_ID: resource.id }
+  const currentList = currentChat.value.resource_prompt_list || []
+  const newIds = resources.map(r => r.id).filter(id => !currentList.includes(id))
 
-  const updatedSettings: ChatUpdate = {
-    modelParameters: { ...currentParams, enabled_mcp_ids: mcpIds },
+  if (newIds.length > 0) {
+    const updatedList = [...currentList, ...newIds]
+    await chatListStore.updateChatSettings(currentChat.value.id, {
+      resource_prompt_list: updatedList
+    })
+    ElMessage.success(`已启用知识库: ${resources.map(r => r.name).join(', ')}`)
   }
-  await chatListStore.updateChatSettings(currentChat.value.id, updatedSettings)
-  ElMessage.success(`已启用知识库: ${resource.name}`)
 }
 
-async function handleRemoveKnowledgeBase() {
+async function handleRemoveKnowledgeBase(resourceId: string) {
   if (!currentChat.value) return
-  const currentParams = currentChat.value.modelParameters || {}
-  const mcpIds = normalizeMcpIds(currentParams.enabled_mcp_ids)
-  if (mcpIds['system-knowledge-base']) {
-    delete mcpIds['system-knowledge-base']
-    const updatedSettings: ChatUpdate = {
-      modelParameters: { ...currentParams, enabled_mcp_ids: mcpIds },
-    }
-    await chatListStore.updateChatSettings(currentChat.value.id, updatedSettings)
-    ElMessage.success('已停用知识库检索')
-  }
+  const currentList = currentChat.value.resource_prompt_list || []
+  const updatedList = currentList.filter(id => id !== resourceId)
+
+  await chatListStore.updateChatSettings(currentChat.value.id, {
+    resource_prompt_list: updatedList.length > 0 ? updatedList : null
+  })
+  ElMessage.success('已停用知识库')
 }
 
 async function handleToggleMcpTool(mcpId: string) {
   if (!currentChat.value) return
-  const currentParams = currentChat.value.modelParameters || {}
-  const mcpIds = normalizeMcpIds(currentParams.enabled_mcp_ids)
-  if (mcpIds[mcpId]) {
-    delete mcpIds[mcpId]
-  } else {
-    mcpIds[mcpId] = {}
-  }
-  const updatedSettings: ChatUpdate = {
-    modelParameters: { ...currentParams, enabled_mcp_ids: mcpIds },
-  }
-  await chatListStore.updateChatSettings(currentChat.value.id, updatedSettings)
+  const currentIds = currentChat.value.enabled_mcp_ids || []
+  const newIds = currentIds.includes(mcpId)
+    ? currentIds.filter(id => id !== mcpId)
+    : [...currentIds, mcpId]
+
+  await chatListStore.updateChatSettings(currentChat.value.id, { enabled_mcp_ids: newIds })
 }
 
-// --- Settings ---
+function handleOpenSettings() {
+  if (currentChat.value?.chatMode === 'agent') {
+    agentSettingsDrawerVisible.value = true
+  } else {
+    settingsDrawerVisible.value = true
+  }
+}
+
 async function handleSaveSettings(settings: ChatUpdate) {
   if (!currentChat.value) return
   await chatListStore.updateChatSettings(currentChat.value.id, settings)
@@ -446,7 +408,13 @@ async function handleSaveSettings(settings: ChatUpdate) {
   ElMessage.success(t('chat.settings.saveSuccess'))
 }
 
-// --- Scroll & Jump ---
+async function handleSaveAgentSettings(settings: ChatUpdate) {
+  if (!currentChat.value) return
+  await chatListStore.updateChatSettings(currentChat.value.id, settings)
+  agentSettingsDrawerVisible.value = false
+  ElMessage.success(t('chat.settings.saveSuccess'))
+}
+
 const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
   const el = scrollbarRef.value?.wrapRef
   if (!el) return
@@ -483,17 +451,14 @@ watch(
 </script>
 
 <style scoped>
-/* 移除 height: 100dvh，改为由 JS 动态控制 */
 .mobile-chat-window {
-  /* position: fixed;  <- 由 JS 动态注入，这里为了性能可以预设，但会被 style 覆盖 */
   left: 0;
   right: 0;
-  bottom: 0; /* 兜底 */
+  bottom: 0;
   display: flex;
   flex-direction: column;
   background-color: var(--color-background);
   overflow: hidden;
-  /* 移除 transition，因为在全屏键盘弹起瞬间，transition 会导致动画不同步，感觉卡顿 */
 }
 
 .mobile-messages {
@@ -524,22 +489,19 @@ watch(
   flex-direction: column;
   border-top: 1px solid var(--color-border);
   background: var(--color-background);
-  /* Safe area for iOS */
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-/* Padding for content inside input area to avoid overlap with notches */
 .mobile-input-area > * {
   padding-left: 10px;
   padding-right: 10px;
 }
 
 .mobile-input-area > .mobile-toolbar {
-  padding-left: 5px; /* Less padding for toolbar icons */
+  padding-left: 5px;
   padding-right: 5px;
 }
 
-/* Jump highlight animation */
 :deep(.jump-highlight) {
   animation: jump-pulse 0.5s ease-in-out 3;
   background-color: var(--el-color-primary-light-9);

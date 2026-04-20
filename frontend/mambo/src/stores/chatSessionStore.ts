@@ -13,7 +13,7 @@ export const LAST_ACTIVE_CHAT_KEY = 'mambo_last_active_chat_id';
 
 /**
  * 管理当前激活会话的数据状态。
- * 这个 Store 扮演着当前会话的响应式“数据库”角色，
+ * 这个 Store 扮演着当前会话的响应式"数据库"角色，
  * 它只负责存储和管理数据，不直接处理复杂的业务交互逻辑。
  */
 export const useChatSessionStore = defineStore('chatSession', () => {
@@ -50,7 +50,23 @@ export const useChatSessionStore = defineStore('chatSession', () => {
   );
 
   /**
-   * 计算每条消息的“新旧程度排名”。
+   * 获取当前处于待审核状态的子消息列表。
+   */
+  const pendingReviewSubMessages = computed((): SubMessage[] => {
+    return currentChatMessages.value.flatMap(msg =>
+      msg.status === 'pending_review'
+        ? msg.sub_messages.filter(sm => (sm.type === 'ReviewTool' || sm.type === 'AskUser') && sm.status === 'pending_review')
+        : []
+    );
+  });
+
+  /**
+   * 判断当前是否处于等待审核状态。
+   */
+  const isPendingReview = computed((): boolean => pendingReviewSubMessages.value.length > 0);
+
+  /**
+   * 计算每条消息的"新旧程度排名"。
    * 用于 Context Participation Length (CPL) 的 UI 展示判断。
    *
    * 规则：
@@ -98,9 +114,10 @@ export const useChatSessionStore = defineStore('chatSession', () => {
     const systemPrompt = chat.systemPrompt || '';
 
     // 提取挂载资源的内容
-    const systemResourceContent = systemPromptResources.value
-      .map(r => r.latest_version?.content || '')
-      .join('\n');
+  const systemResourceContent = systemPromptResources.value
+    .filter(r => r.resourceType !== 'knowledge_base')
+    .map(r => r.latest_version?.content || '')
+    .join('\n');
 
     let anchorIndex = -1;
     let anchorContent = '';
@@ -141,8 +158,13 @@ export const useChatSessionStore = defineStore('chatSession', () => {
 
       return msg.sub_messages
         .filter(sm => {
-          // 始终从历史记录中排除非文本内容和特殊类型
-          if (sm.type !== 'Normal' && sm.type !== 'File') { // 假设File类型是文本文件
+          // 允许参与 token 估算的类型
+          if (sm.type === 'Normal' || sm.type === 'File') {
+            // 走 CPL 规则
+          } else if (sm.type === 'McpTool') {
+            // 工具调用/结果：始终参与（与后端 context_builder 行为一致）
+            return true;
+          } else {
             return false;
           }
 
@@ -153,7 +175,7 @@ export const useChatSessionStore = defineStore('chatSession', () => {
             return false;
           }
 
-          // 规则2: cpl 是正整数, 检查当前 message 是否在指定的“新”范围内
+          // 规则2: cpl 是正整数, 检查当前 message 是否在指定的"新"范围内
           if (typeof cpl === 'number' && cpl > 0) {
             return messageRecencyRank <= cpl;
           }
@@ -161,7 +183,37 @@ export const useChatSessionStore = defineStore('chatSession', () => {
           // 规则3: cpl 未定义或为其他值, 按默认逻辑(参与上下文)处理
           return true;
         })
-        .map(sm => sm.content);
+        .map(sm => {
+          if (sm.type === 'McpTool') {
+            // 提取后端实际发送给 LLM 的工具相关文本：
+            //   assistant 消息: tool_call_id, function.name, function.arguments
+            //   tool 消息: tool_call_id, content(result)
+            // 注意：input_schema 不发送给 LLM，不参与估算
+            try {
+              const toolContent = JSON.parse(sm.content);
+              const parts: string[] = [];
+              // 模拟 assistant(tool_calls) 部分
+              parts.push(JSON.stringify({
+                id: toolContent.tool_call_id,
+                type: 'function',
+                function: {
+                  name: toolContent.name,
+                  arguments: typeof toolContent.arguments === 'string'
+                    ? toolContent.arguments
+                    : JSON.stringify(toolContent.arguments),
+                },
+              }));
+              // 模拟 tool(result) 部分
+              if (toolContent.result != null) {
+                parts.push(toolContent.result);
+              }
+              return parts.join('\n');
+            } catch {
+              return sm.content;
+            }
+          }
+          return sm.content;
+        });
     }).join('\n');
 
 
@@ -420,6 +472,13 @@ export const useChatSessionStore = defineStore('chatSession', () => {
         }
         break;
       }
+      case 'batch_status_update': {
+        // 批量更新该消息下所有 generating 状态的子消息
+        msgToUpdate.sub_messages.forEach(sm => {
+          if (sm.status === 'generating') sm.status = data.status;
+        });
+        break;
+      }
     }
   }
 
@@ -434,9 +493,11 @@ export const useChatSessionStore = defineStore('chatSession', () => {
     // Getters
     currentChat,
     isGenerating,
+    pendingReviewSubMessages,
+    isPendingReview,
     messageRecencyRanks,
     contextForTokenEstimation,
-
+    systemPromptResources,
     // Actions
     selectChat,
     clearSession,

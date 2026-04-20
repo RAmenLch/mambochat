@@ -33,6 +33,7 @@
               <el-radio-group v-model="taskConfig.splitter_type" class="w-full">
                 <el-radio-button label="simple">{{ $t('kb.task.simple') }}</el-radio-button>
                 <el-radio-button label="separator">{{ $t('kb.task.separator') }}</el-radio-button>
+                <el-radio-button label="markdown">{{ $t('kb.task.markdown') }}</el-radio-button>
               </el-radio-group>
             </el-form-item>
 

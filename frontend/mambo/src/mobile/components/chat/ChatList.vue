@@ -4,6 +4,12 @@
     <div class="list-header">
       <span>{{ $t('chat.sidebar.title') }}</span>
       <div class="header-actions">
+        <el-tooltip
+          :content="isManualSort ? $t('chat.sidebar.sortByTime') : $t('chat.sidebar.sortManual')"
+          placement="bottom"
+        >
+          <el-button link :icon="Sort" @click="toggleSortMode" class="icon-btn" />
+        </el-tooltip>
         <el-button link :icon="FolderAdd" @click="handleNewFolder(null)" class="icon-btn" />
         <el-button link :icon="Plus" @click="handleNewChat(null)" class="icon-btn" />
       </div>
@@ -17,6 +23,7 @@
         :is-loading="isChatListLoading"
         :loading-folder-ids="loadingFolders"
         folder-item-type="folder"
+        :custom-allow-drop="customAllowDrop"
         class="chat-tree"
         @node-click="handleNodeClick"
         @node-expand="handleNodeExpand"
@@ -161,7 +168,10 @@ import {
   Search,
   Expand,
   Fold,
+  Sort,
 } from '@element-plus/icons-vue'
+import type { AllowDropType } from 'element-plus/es/components/tree/src/tree.type'
+import type Node from 'element-plus/es/components/tree/src/model/node'
 import ExplorerTree from '@/components/common/ExplorerTree.vue'
 import EntityFormDialog from '@/components/common/EntityFormDialog.vue'
 import MoveTargetDialog from './dialogs/MoveTargetDialog.vue'
@@ -169,6 +179,7 @@ import SearchDialog from './dialogs/SearchDialog.vue'
 import { useChatListStore } from '@/stores/chatListStore'
 import { useChatSessionStore, LAST_ACTIVE_CHAT_KEY } from '@/stores/chatSessionStore' // [新增] 引入 LAST_ACTIVE_CHAT_KEY
 import { buildChatTree } from '@/utils/treeHelper'
+import type { ChatSortMode } from '@/utils/treeHelper'
 import type { BaseTreeItem, ChatNode, MoveRequest } from '@/api/types'
 import { ElMessageBox, ElMessage } from 'element-plus'
 
@@ -186,8 +197,30 @@ const treeRef = ref<InstanceType<typeof ExplorerTree>>()
 const { chatList, isChatListLoading, loadingFolders, loadedFolderIds } = storeToRefs(chatListStore)
 const { currentChatId } = storeToRefs(chatSessionStore)
 
+// 排序模式
+const SORT_MODE_KEY = 'mambo_chat_sort_mode';
+const chatSortMode = ref<ChatSortMode>(
+  (localStorage.getItem(SORT_MODE_KEY) as ChatSortMode) || 'manual'
+);
+
+const isManualSort = computed(() => chatSortMode.value === 'manual');
+
+const customAllowDrop = (draggingNode: Node, dropNode: Node, dropType: AllowDropType): boolean => {
+  if (isManualSort.value) return true;
+  const isDropRoot = !(dropNode.data as BaseTreeItem).parentId;
+  if (!isDropRoot) return true;
+  const isDragFromSub = !!(draggingNode.data as BaseTreeItem).parentId;
+  if (isDragFromSub) return true;
+  return dropType === 'inner';
+};
+
+function toggleSortMode() {
+  chatSortMode.value = chatSortMode.value === 'manual' ? 'folder-top-time' : 'manual';
+  localStorage.setItem(SORT_MODE_KEY, chatSortMode.value);
+}
+
 const treeData = computed(
-  () => buildChatTree(chatList.value, loadedFolderIds.value) as unknown as BaseTreeItem[],
+  () => buildChatTree(chatList.value, loadedFolderIds.value, chatSortMode.value) as unknown as BaseTreeItem[],
 )
 
 const folderTreeData = computed(

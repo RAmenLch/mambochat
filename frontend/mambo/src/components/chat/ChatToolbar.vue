@@ -3,8 +3,16 @@
   <div class="chat-toolbar">
     <div class="toolbar-left">
       <div class="model-display">
-        <el-icon><Cpu /></el-icon>
-        <span>{{ t('chat.toolbar.currentModel') }}: <strong>{{ displayModelName }}</strong></span>
+        <!-- [新增] Agent 模式显示 -->
+        <template v-if="currentChat?.chatMode === 'agent'">
+          <el-icon><User /></el-icon>
+          <span>Agent: <strong>{{ displayAgentName }}</strong></span>
+        </template>
+        <!-- 普通模式显示 -->
+        <template v-else>
+          <el-icon><Cpu /></el-icon>
+          <span>{{ t('chat.toolbar.currentModel') }}: <strong>{{ displayModelName }}</strong></span>
+        </template>
       </div>
       <div class="zip-history-list-trigger" v-if="zipHistoryItems.length > 0">
         <el-popover
@@ -57,8 +65,9 @@
     </div>
 
     <div class="actions">
-      <!-- MCP 工具选择器 -->
+      <!-- MCP 工具选择器 (Agent 模式下无效，Agent 使用自身配置) -->
       <el-popover
+        v-if="currentChat?.chatMode !== 'agent'"
         placement="top"
         :width="260"
         trigger="click"
@@ -112,6 +121,7 @@
       </el-popover>
 
       <el-button
+        v-if="currentChat?.chatMode !== 'agent'"
         :icon="Search"
         :type="isWebSearchEnabled ? 'primary' : ''"
         circle
@@ -147,17 +157,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive } from 'vue';
+import { computed, reactive,onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useI18n } from 'vue-i18n';
 import { useProviderStore } from '@/stores/providerStore';
 import { useMcpStore } from '@/stores/mcpStore';
+import { useAgentStore } from '@/stores/agentStore'; // [新增]
 import type { Chat, Message, McpHealthStatus } from '@/api/types';
 import type { PropType } from 'vue';
 import { ElMessage } from 'element-plus';
 import {
   Cpu, Setting, Files, Tickets, Upload, Collection,
-  QuestionFilled, Search, Suitcase, Refresh
+  QuestionFilled, Search, Suitcase, Refresh, User // [新增 User]
 } from '@element-plus/icons-vue';
 
 const props = defineProps({
@@ -188,7 +199,12 @@ defineEmits([
 const { t } = useI18n();
 const providerStore = useProviderStore();
 const mcpStore = useMcpStore();
-
+const agentStore = useAgentStore(); // [新增]
+onMounted(() => {
+  if (agentStore.allAgents.length === 0 && !agentStore.isAllAgentsLoading) {
+    agentStore.fetchAllAgents();
+  }
+});
 const { activeUserMcpServices } = storeToRefs(mcpStore);
 
 // 本地状态：正在测试连接的 MCP ID 集合
@@ -202,35 +218,30 @@ const displayModelName = computed(() => {
   return model ? model.name : t('common.status.unknownModel');
 });
 
+const displayAgentName = computed(() => {
+  if (!props.currentChat?.agentId) return t('common.status.unspecified');
+  const agent = agentStore.allAgents.find(a => a.id === props.currentChat!.agentId) ||
+                agentStore.agentList.find(a => a.id === props.currentChat!.agentId);
+
+  return agent ? agent.name : t('common.status.unknownModel');
+});
 /**
  * 检查当前会话是否已启用系统联网搜索工具。
  * 目标 ID: system-ddgs-search
  */
 const isWebSearchEnabled = computed((): boolean => {
-  const mcpIds = props.currentChat?.modelParameters?.enabled_mcp_ids;
+  const mcpIds = props.currentChat?.enabled_mcp_ids;
   if (!mcpIds) return false;
-
-  if (Array.isArray(mcpIds)) {
-    return mcpIds.includes('system-ddgs-search');
-  } else if (typeof mcpIds === 'object') {
-    return Object.prototype.hasOwnProperty.call(mcpIds, 'system-ddgs-search');
-  }
-  return false;
+  return mcpIds.includes('system-ddgs-search');
 });
 
 /**
  * 检查指定 MCP 工具是否在当前会话中启用。
  */
 const isMcpToolEnabled = (mcpId: string): boolean => {
-  const mcpIds = props.currentChat?.modelParameters?.enabled_mcp_ids;
+  const mcpIds = props.currentChat?.enabled_mcp_ids;
   if (!mcpIds) return false;
-
-  if (Array.isArray(mcpIds)) {
-    return mcpIds.includes(mcpId);
-  } else if (typeof mcpIds === 'object') {
-    return Object.prototype.hasOwnProperty.call(mcpIds, mcpId);
-  }
-  return false;
+  return mcpIds.includes(mcpId);
 };
 
 /**

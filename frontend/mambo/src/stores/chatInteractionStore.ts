@@ -10,11 +10,23 @@ import {
   stopGeneration as stopGenerationAPI,
   getChatWithMessages,
   initiateHistoryCompression as initiateHistoryCompressionAPI,
-} from '@/api/chatService';
+  submitToolReview as submitToolReviewAPI,
+  submitAskUserAnswer as submitAskUserAnswerAPI,
+  activateMessageBranch,
+  retryFailedGeneration as retryFailedGenerationAPI,
+} from '@/api/chatService'
 import { subscribeToMessageStream } from '@/services/sseService';
 import { useChatSessionStore } from './chatSessionStore';
 import { useChatListStore } from './chatListStore';
-import type { Message, SubMessage, SubMessageCreate, SubMessageUpdate, MessageStatus } from '@/api/types';
+import type {
+  Message,
+  SubMessage,
+  SubMessageCreate,
+  SubMessageUpdate,
+  MessageStatus,
+  ReviewToolRequest,
+  AskUserAnswerRequest,
+} from '@/api/types'
 
 /**
  * 处理所有与当前会话的交互动作。
@@ -40,11 +52,18 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     const finalize = async () => {
       sessionStore.activeSubscriptions.delete(assistantMessageId);
       try {
-        // 流结束后，从服务器获取最终权威状态
         const chatWithMessages = await getChatWithMessages(chatId);
         sessionStore.currentChatMessages = chatWithMessages.messages.sort((a, b) => a.sortOrder - b.sortOrder);
 
-        // 检查是否需要触发自动标题生成
+        const finalMessage = sessionStore.currentChatMessages.find(m => m.id === assistantMessageId);
+        if (finalMessage) {
+          const hasPendingReview = finalMessage.sub_messages.some(
+            sm => (sm.type === 'ReviewTool' || sm.type === 'AskUser') && sm.status === 'pending_review'
+          );
+          if (!hasPendingReview) {
+            await batchUpdateSubMessagesMinimalState(assistantMessageId, true);
+          }
+        }
         if (
           sessionStore.currentChat &&
             (
@@ -77,6 +96,7 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     sessionStore.activeSubscriptions.set(assistantMessageId, controller);
   }
 
+
   /**
    * 发送新消息。
    * @param sub_messages - 用户创建的子消息数组。
@@ -99,7 +119,6 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
       }
     } catch (error) {
       console.error('Failed to prepare generation:', error);
-      // If the API call fails, refresh the chat to ensure a consistent state.
       if (sessionStore.currentChatId) await sessionStore.selectChat(sessionStore.currentChatId, true);
     }
   }
@@ -117,7 +136,7 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     const baseMessage = sessionStore.currentChatMessages[baseMessageIndex];
 
     const sliceIndex = baseMessage.role === 'assistant' ? baseMessageIndex : baseMessageIndex + 1;
-    sessionStore._spliceMessages(sliceIndex); // 乐观地移除后续消息
+    sessionStore._spliceMessages(sliceIndex);
 
     try {
       const assistantPlaceholder = await prepareRegenerate(chatId, messageId);
@@ -139,31 +158,24 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     const chatId = sessionStore.currentChatId;
     if (!chatId) return;
 
-    // 如果是重新生成，则检查是否已有其他任务在运行
     if (payload.resend && sessionStore.isGenerating) return;
 
     try {
-      // 调用更新后的API, 它会返回更新后的用户消息和可能的助手消息占位符
       const response = await updateMessageAndRegenerate(payload.messageId, {
         sub_messages: payload.sub_messages,
         resend: payload.resend,
       });
       const { user_message, assistant_message } = response;
 
-      // 使用API返回的权威数据更新前端状态
-      const messageIndex = sessionStore.currentChatMessages.findIndex(m => m.id === user_message.id);
+      const messageIndex = sessionStore.currentChatMessages.findIndex(m => m.id === payload.messageId);
       if (messageIndex !== -1) {
-        // 直接替换整个消息对象，确保所有字段（包括sub_messages）都是最新的
         sessionStore.currentChatMessages.splice(messageIndex, 1, user_message);
       } else {
-        // 如果找不到，作为后备方案，刷新整个会话
         await sessionStore.selectChat(chatId, true);
         return;
       }
 
-      // 如果有助手消息占位符 (即 resend: true)
       if (assistant_message) {
-        // 从用户消息之后移除所有旧消息, 并插入新的助手消息占位符
         sessionStore._spliceMessages(messageIndex + 1, [assistant_message]);
         if (assistant_message.status === 'generating') {
           _subscribeToMessageStream(assistant_message);
@@ -171,7 +183,6 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
       }
     } catch (error) {
       console.error('Failed to update and/or resend message:', error);
-      // 发生任何错误时，都强制刷新会话以保证数据一致性
       if (chatId) await sessionStore.selectChat(chatId, true);
     }
   }
@@ -182,11 +193,9 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
    * @param payload - 包含子消息ID和要更新的数据。
    */
   async function updateSubMessage(payload: { subMessageId: string, data: SubMessageUpdate }) {
-    // 乐观更新UI
     for (const msg of sessionStore.currentChatMessages) {
       const subMsg = msg.sub_messages.find(sm => sm.id === payload.subMessageId);
       if (subMsg) {
-        // 合并config对象而不是直接替换
         if (payload.data.config) {
           subMsg.config = { ...subMsg.config, ...payload.data.config };
         }
@@ -213,14 +222,17 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
    * @param messageId - 要删除的消息ID。
    */
   async function deleteMessage(messageId: string) {
-    const backup = sessionStore._removeMessage(messageId); // 乐观更新UI
+    const backup = sessionStore._removeMessage(messageId);
     if (!backup) return;
 
     try {
       await deleteMessageAPI(messageId);
+      if (sessionStore.currentChatId) {
+        await sessionStore.selectChat(sessionStore.currentChatId, true);
+      }
     } catch (error) {
       console.error('Failed to delete message:', error);
-      sessionStore.currentChatMessages.push(backup); // 回滚
+      sessionStore.currentChatMessages.push(backup);
       sessionStore.currentChatMessages.sort((a,b) => a.sortOrder - b.sortOrder);
     }
   }
@@ -230,22 +242,22 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
    * @param messageId - 正在生成的消息ID。
    */
   async function cancelGeneration(messageId: string) {
-    sessionStore.activeSubscriptions.get(messageId)?.abort();
-    sessionStore.activeSubscriptions.delete(messageId);
+    // 不在此处 abort SSE 连接，而是通知后端停止后，
+    // 等待后端完成清理（写入 Error 子消息等）并通过 close_stream 自然关闭 SSE，
+    // 这样 onClose 回调会正常触发 finalize → getChatWithMessages 获取最终状态。
+    try {
+      await stopGenerationAPI(messageId);
+    } catch (error) {
+      console.error(`Failed to process stop request for ${messageId}:`, error);
+    }
 
-    // 乐观更新UI状态
+    // 乐观更新：UI 立即停止生成状态
     const msg = sessionStore.currentChatMessages.find(m => m.id === messageId);
     if (msg && msg.status === 'generating') {
       msg.status = 'completed';
       msg.sub_messages.forEach(sm => {
         if (sm.status === 'generating') sm.status = 'completed';
       });
-    }
-     try {
-      await stopGenerationAPI(messageId);
-      // 停止后，强制刷新以获取最终一致状态
-    } catch (error) {
-      console.error(`Failed to process stop request for ${messageId}:`, error);
     }
   }
 
@@ -262,21 +274,18 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     let tempId: string | null = null;
 
     if (existingZip) {
-      // 1. 如果已存在，备份并乐观更新状态为 generating
-      // 使用 JSON.parse/stringify 进行深拷贝备份
       backupZip = JSON.parse(JSON.stringify(existingZip));
 
       const updatedZip = { ...existingZip, status: 'generating' as MessageStatus };
       sessionStore._addOrUpdateSubMessage(messageId, updatedZip);
     } else {
-      // 2. 如果不存在，创建临时占位符
       tempId = `temp_zip_${Date.now()}`;
       const optimisticSubMessage: SubMessage = {
         id: tempId,
         content: '',
         createdAt: new Date().toISOString(),
         messageId: messageId,
-        sortOrder: 999, // 临时赋予一个较大的排序值
+        sortOrder: 999,
         type: 'ZipHistory',
         config: {
           is_collapsed: false,
@@ -292,12 +301,9 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     } catch (error) {
       console.error(`Failed to initiate history compression for message ${messageId}:`, error);
 
-      // 回滚逻辑
       if (existingZip && backupZip) {
-        // 恢复原有的子消息状态
         sessionStore._addOrUpdateSubMessage(messageId, backupZip);
       } else if (tempId) {
-        // 移除临时创建的消息
         const currentParent = sessionStore.currentChatMessages.find(m => m.id === messageId);
         if (currentParent) {
           const index = currentParent.sub_messages.findIndex(sm => sm.id === tempId);
@@ -315,7 +321,6 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
    * @param data - 要更新的数据。
    */
   async function updateZipHistorySubMessage(subMessageId: string, data: SubMessageUpdate) {
-    // 乐观更新UI
     for (const msg of sessionStore.currentChatMessages) {
       const subMsg = msg.sub_messages.find(sm => sm.id === subMessageId);
       if (subMsg) {
@@ -323,7 +328,6 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
           subMsg.content = data.content;
         }
         if (data.config) {
-          // 合并config对象，而不是直接替换
           subMsg.config = { ...subMsg.config, ...data.config };
         }
         break;
@@ -334,10 +338,155 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
       await updateSubMessageAPI(subMessageId, data);
     } catch (error) {
       console.error(`Failed to update zip history sub-message ${subMessageId}:`, error);
-      // 发生错误时，强制刷新整个会话以确保数据一致性
       if (sessionStore.currentChatId) {
         await sessionStore.selectChat(sessionStore.currentChatId, true);
       }
+    }
+  }
+
+  async function submitToolReview(
+    messageId: string,
+    subMessageId: string,
+    decision: ReviewToolRequest['decision'],
+  ) {
+    try {
+      const updatedMessage = await submitToolReviewAPI(messageId, {
+        sub_message_id: subMessageId,
+        decision,
+      })
+
+      const index = sessionStore.currentChatMessages.findIndex((m) => m.id === messageId)
+      if (index !== -1) {
+        sessionStore.currentChatMessages.splice(index, 1, updatedMessage)
+
+        if (updatedMessage.status === 'generating') {
+          _subscribeToMessageStream(updatedMessage)
+        }
+        else if (updatedMessage.status === 'completed') {
+          const hasPendingReview = updatedMessage.sub_messages.some(
+            sm => (sm.type === 'ReviewTool' || sm.type === 'AskUser') && sm.status === 'pending_review'
+          );
+          if (!hasPendingReview) {
+            await batchUpdateSubMessagesMinimalState(messageId, true);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to submit tool review:', error)
+      if (sessionStore.currentChatId) {
+        await sessionStore.selectChat(sessionStore.currentChatId, true)
+      }
+      throw error
+    }
+  }
+
+  async function submitAskUserAnswer(
+    messageId: string,
+    subMessageId: string,
+    answers: string[],
+    askStatus: string = 'answered',
+  ) {
+    try {
+      const updatedMessage = await submitAskUserAnswerAPI(messageId, {
+        sub_message_id: subMessageId,
+        answers,
+        ask_status: askStatus,
+      })
+
+      const index = sessionStore.currentChatMessages.findIndex((m) => m.id === messageId)
+      if (index !== -1) {
+        sessionStore.currentChatMessages.splice(index, 1, updatedMessage)
+
+        if (updatedMessage.status === 'generating') {
+          _subscribeToMessageStream(updatedMessage)
+        }
+        else if (updatedMessage.status === 'completed') {
+          const hasPendingReview = updatedMessage.sub_messages.some(
+            sm => (sm.type === 'ReviewTool' || sm.type === 'AskUser') && sm.status === 'pending_review'
+          );
+          if (!hasPendingReview) {
+            await batchUpdateSubMessagesMinimalState(messageId, true);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to submit ask_user answer:', error)
+      if (sessionStore.currentChatId) {
+        await sessionStore.selectChat(sessionStore.currentChatId, true)
+      }
+      throw error
+    }
+  }
+
+  async function batchUpdateSubMessagesMinimalState(messageId: string, isMinimal: boolean) {
+    const message = sessionStore.currentChatMessages.find(m => m.id === messageId);
+    if (!message) return;
+
+    const reasoningSubMessages = message.sub_messages.filter(sm => sm.type === 'Reasoning');
+    if (reasoningSubMessages.length === 0) return;
+
+    let hasChanges = false;
+
+    reasoningSubMessages.forEach(sm => {
+      if (sm.config.is_minimal !== isMinimal) {
+        sm.config = { ...sm.config, is_minimal: isMinimal };
+        hasChanges = true;
+      }
+    });
+
+    if (!hasChanges) return;
+
+    try {
+      const updatePromises = reasoningSubMessages.map(sm =>
+        updateSubMessageAPI(sm.id, { config: { ...sm.config, is_minimal: isMinimal } })
+      );
+      await Promise.all(updatePromises);
+    } catch (error) {
+      console.error(`Failed to batch update minimal state for message ${messageId}:`, error);
+      if (sessionStore.currentChatId) {
+        await sessionStore.selectChat(sessionStore.currentChatId, true);
+      }
+    }
+  }
+
+  /**
+   * 激活指定消息分支
+   * @param messageId - 目标消息ID
+   */
+  async function activateBranch(messageId: string) {
+    const chatId = sessionStore.currentChatId;
+    if (!chatId || sessionStore.isGenerating) return;
+
+    try {
+      const messages = await activateMessageBranch(chatId, messageId);
+      sessionStore.currentChatMessages = messages.sort((a, b) => a.sortOrder - b.sortOrder);
+    } catch (error) {
+      console.error(`Failed to activate branch for message ${messageId}:`, error);
+      if (chatId) await sessionStore.selectChat(chatId, true);
+    }
+  }
+
+  /**
+   * 重试失败的生成任务（从错误中恢复）
+   * @param messageId - 失败的 assistant 消息ID
+   */
+  async function retryFailedGeneration(messageId: string) {
+    const chatId = sessionStore.currentChatId;
+    if (!chatId || sessionStore.isGenerating) return;
+
+    const msgIndex = sessionStore.currentChatMessages.findIndex(m => m.id === messageId);
+    if (msgIndex === -1) return;
+
+    try {
+      const updatedMessage = await retryFailedGenerationAPI(messageId);
+      sessionStore.currentChatMessages.splice(msgIndex, 1, updatedMessage);
+
+      if (updatedMessage.status === 'generating') {
+        _subscribeToMessageStream(updatedMessage);
+      }
+    } catch (error) {
+      console.error(`Failed to retry generation for message ${messageId}:`, error);
+      if (chatId) await sessionStore.selectChat(chatId, true);
     }
   }
 
@@ -350,6 +499,11 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     cancelGeneration,
     initiateHistoryCompression,
     updateZipHistorySubMessage,
-    _subscribeToMessageStream
-  };
+    _subscribeToMessageStream,
+    batchUpdateSubMessagesMinimalState,
+    submitToolReview,
+    submitAskUserAnswer,
+    activateBranch,
+    retryFailedGeneration,
+  }
 });

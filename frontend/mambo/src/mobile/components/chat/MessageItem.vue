@@ -1,115 +1,177 @@
 <!-- frontend/mambo/src/mobile/components/chat/MessageItem.vue -->
 <template>
-  <div :id="id" class="mobile-message-item" :class="roleClass">
-    <!-- 头像 -->
-    <div class="message-avatar">
-      <el-avatar :size="32" :src="avatarUrl || ''">
-        <el-icon v-if="message.role === 'user'"><User /></el-icon>
-        <el-icon v-else><Cpu /></el-icon>
-      </el-avatar>
-    </div>
+  <!-- 点击空白区域关闭菜单 -->
+  <div :id="id" class="mobile-message-item" :class="roleClass" @click="clearActions">
 
-    <!-- 消息体 -->
-    <!-- 点击切换菜单 -->
-    <div class="message-body" @click="toggleActions">
-      <!-- 最小化子消息区域 -->
-      <div v-if="minimizedSubMessages.length > 0" class="minimized-bar">
-        <el-tag
-          v-for="sub in minimizedSubMessages"
-          :key="sub.id"
-          size="small"
-          type="info"
-          :class="{ 'is-inactive': isSubMessageInactive(sub) }"
-          @click.stop="restoreSubMessage(sub.id)"
-        >
-          <el-icon><Document /></el-icon>
-        </el-tag>
+    <!-- 用户消息 -->
+    <template v-if="message.role === 'user'">
+      <!-- 头像 -->
+      <div class="message-avatar">
+        <el-avatar :size="32" :src="avatarUrl || ''">
+          <el-icon><User /></el-icon>
+        </el-avatar>
       </div>
 
-      <!-- 子消息列表 -->
-      <div class="sub-messages-container">
-        <div
-          v-if="message.status === 'generating' && normalSubMessages.length === 0"
-          class="initial-loading"
-        >
-          <div class="typing-indicator"><span></span><span></span><span></span></div>
+      <!-- 消息体 -->
+      <div class="message-body">
+        <!-- 最小化子消息区域 -->
+        <div v-if="minimizedSubMessages.length > 0" class="minimized-bar">
+          <el-tag
+            v-for="sub in minimizedSubMessages"
+            :key="sub.id"
+            size="small"
+            type="info"
+            :class="{ 'is-inactive': isSubMessageInactive(sub) }"
+            @click.stop="restoreSubMessage(sub.id)"
+          >
+            <el-icon><Document /></el-icon>
+          </el-tag>
         </div>
 
-        <template v-for="(subMessage, index) in normalSubMessages" :key="subMessage.id">
-          <SubMessageItem
-            :id="`sub-msg-${subMessage.id}`"
-            :sub-message="subMessage"
-            :parent-message="message"
-            :index="index + 1"
-            :show-header="normalSubMessages.length > 1 || subMessage.type !== 'Normal'"
-            :is-inactive="isSubMessageInactive(subMessage)"
-            @edit="(payload) => handleEditRequest(subMessage, payload)"
-            @copy="handleCopySingle(subMessage)"
+        <!-- 子消息列表 -->
+        <div class="sub-messages-container">
+          <div
+            v-if="message.status === 'generating' && normalSubMessages.length === 0"
+            class="initial-loading"
+          >
+            <div class="typing-indicator"><span></span><span></span><span></span></div>
+          </div>
+
+          <template v-for="(subMessage, index) in normalSubMessages" :key="subMessage.id">
+            <!-- 针对单个用户子消息的包裹层，绑定点击事件 -->
+            <div class="user-sub-message-wrapper" @click.stop="toggleActions(subMessage.id)">
+              <SubMessageItem
+                :id="`sub-msg-${subMessage.id}`"
+                :sub-message="subMessage"
+                :parent-message="message"
+                :index="index + 1"
+                :show-header="normalSubMessages.length > 1 || subMessage.type !== 'Normal'"
+                :is-inactive="isSubMessageInactive(subMessage)"
+                @edit="(payload) => handleEditRequest(subMessage, payload)"
+                @copy="handleCopySingle(subMessage)"
+              />
+
+              <!-- 用户消息的内联浮动菜单 -->
+              <transition name="fade-slide">
+                <div v-if="activeSubMessageId === subMessage.id && message.status !== 'generating'" class="floating-actions inline-actions is-user-side" @click.stop>
+                  <el-icon class="action-btn" @click="handleEditSpecific(subMessage.id)"><Edit /></el-icon>
+                  <el-icon class="action-btn" @click="handleCopySpecific(subMessage.id)"><CopyDocument /></el-icon>
+                  <el-icon class="action-btn" @click="handleRegenerate"><RefreshRight /></el-icon>
+                  <el-dropdown trigger="click" @command="handleCommand">
+                    <el-icon class="action-btn"><MoreFilled /></el-icon>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item command="delete" class="text-danger">
+                          <el-icon><Delete /></el-icon>{{ $t('common.action.delete') }}
+                        </el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
+                </div>
+              </transition>
+            </div>
+          </template>
+        </div>
+      </div>
+    </template>
+
+    <!-- AI 消息 -->
+    <template v-else-if="message.role === 'assistant'">
+      <div class="assistant-message-container">
+        <MobileAssistantBubble
+          :message="message"
+          :is-generating="message.status === 'generating'"
+          :current-message-rank="currentMessageRank"
+          @edit="handleEditRequest"
+          @copy="handleCopySingle"
+          @open-tool-dialog="(toolId) => $emit('open-tool-dialog', message, toolId, 'single')"
+          @toggle-actions="toggleActions"
+        >
+          <template #avatar>
+            <div class="message-avatar">
+              <el-avatar :size="32" :src="avatarUrl || ''">
+                <el-icon><Cpu /></el-icon>
+              </el-avatar>
+            </div>
+          </template>
+
+          <!-- 接收 AI 子消息的插槽，渲染对应的内联菜单 -->
+          <template #actions="{ subMessageId }">
+            <transition name="fade-slide">
+              <div v-if="activeSubMessageId === subMessageId && message.status !== 'generating'" class="floating-actions inline-actions" @click.stop>
+                <!-- 分支切换 -->
+                <div v-if="hasSiblings" class="branch-switcher">
+                  <el-icon class="action-btn" :class="{'is-disabled': !canGoPrev}" @click="handlePrev"><ArrowLeft /></el-icon>
+                  <span class="branch-text">{{ currentIndex }} / {{ totalSiblings }}</span>
+                  <el-icon class="action-btn" :class="{'is-disabled': !canGoNext}" @click="handleNext"><ArrowRight /></el-icon>
+                  <el-divider direction="vertical" />
+                </div>
+
+                <!-- Token 消耗 -->
+                <el-icon v-if="usageSubMessage" class="action-btn" @click="handleShowUsage"><Coin /></el-icon>
+
+                <el-icon class="action-btn" @click="handleEditSpecific(subMessageId)"><Edit /></el-icon>
+                <el-icon class="action-btn" @click="handleCopySpecific(subMessageId)"><CopyDocument /></el-icon>
+                <el-icon class="action-btn" @click="handleRegenerate"><RefreshRight /></el-icon>
+                <el-icon class="action-btn" @click="handleCompressHistory"><Clock /></el-icon>
+
+                <el-dropdown trigger="click" @command="handleCommand">
+                  <el-icon class="action-btn"><MoreFilled /></el-icon>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="delete" class="text-danger">
+                        <el-icon><Delete /></el-icon>{{ $t('common.action.delete') }}
+                      </el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </div>
+            </transition>
+          </template>
+        </MobileAssistantBubble>
+
+        <!-- Zip History -->
+        <div v-if="zipHistorySubMessage" class="zip-history-section">
+          <div class="zip-history-bookmark" :class="zipBookmarkClass" @click.stop="handleZipBookmarkClick">
+            <el-icon :class="{ 'is-loading': zipStatus === 'generating' }">
+              <component :is="zipBookmarkIcon" />
+            </el-icon>
+            <span>{{ zipBookmarkText }}</span>
+          </div>
+          <ZipHistoryCard
+            v-if="isZipCardVisible && zipStatus !== 'generating'"
+            :sub-message="zipHistorySubMessage"
+            class="zip-history-card"
           />
-        </template>
-      </div>
-
-      <!-- Zip History Bookmark and Card -->
-      <div v-if="zipHistorySubMessage" class="zip-history-section">
-        <div class="zip-history-bookmark" :class="zipBookmarkClass" @click.stop="handleZipBookmarkClick">
-          <el-icon :class="{ 'is-loading': zipStatus === 'generating' }">
-            <component :is="zipBookmarkIcon" />
-          </el-icon>
-          <span>{{ zipBookmarkText }}</span>
         </div>
-        <ZipHistoryCard
-          v-if="isZipCardVisible && zipStatus !== 'generating'"
-          :sub-message="zipHistorySubMessage"
-          class="zip-history-card"
-        />
-      </div>
 
-      <!-- 建议区域 (独立于操作菜单，始终占据空间但可换行) -->
-      <div class="suggestion-area" v-if="message.status !== 'generating' && isLastMessage && suggestionList.length > 0">
-        <el-tag
-          v-for="(suggestion, idx) in suggestionList"
-          :key="idx"
-          class="suggestion-item"
-          type="info"
-          effect="plain"
-          round
-          size="small"
-          @click.stop="$emit('suggestion-click', suggestion)"
-        >
-          {{ suggestion }}
-        </el-tag>
-      </div>
-
-      <!-- 浮动操作菜单 (绝对定位，不占空间) -->
-      <transition name="fade-slide">
-        <div v-if="showActions && message.status !== 'generating'" class="floating-actions" :class="{'is-user-side': message.role === 'user'}" @click.stop>
-          <el-icon class="action-btn" @click="handleEditFirst" v-if="normalSubMessages.length > 0"><Edit /></el-icon>
-          <el-icon class="action-btn" @click="handleCopyAll"><CopyDocument /></el-icon>
-          <el-icon class="action-btn" @click="handleRegenerate"><RefreshRight /></el-icon>
-          <el-icon v-if="message.role === 'assistant'" class="action-btn" @click="handleCompressHistory"><Clock /></el-icon>
-          <el-dropdown trigger="click" @command="handleCommand">
-            <el-icon class="action-btn"><MoreFilled /></el-icon>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="delete" class="text-danger">
-                  <el-icon><Delete /></el-icon>{{ $t('common.action.delete') }}
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+        <!-- 建议区域 -->
+        <div class="suggestion-area" v-if="message.status !== 'generating' && isLastMessage && suggestionList.length > 0">
+          <el-tag
+            v-for="(suggestion, idx) in suggestionList"
+            :key="idx"
+            class="suggestion-item"
+            type="info"
+            effect="plain"
+            round
+            size="small"
+            @click.stop="$emit('suggestion-click', suggestion)"
+          >
+            {{ suggestion }}
+          </el-tag>
         </div>
-      </transition>
-    </div>
+      </div>
+    </template>
+
+    <!-- 编辑弹窗 -->
+    <MobileMessageEditDialog
+      v-model:visible="editDialogVisible"
+      :initial-content="originalEditingContent"
+      :is-user-message="message.role === 'user'"
+      @save="handleSaveEdit"
+      @save-and-resend="handleSaveAndResend"
+    />
   </div>
-
-  <!-- 编辑弹窗 -->
-  <MobileMessageEditDialog
-    v-model:visible="editDialogVisible"
-    :initial-content="originalEditingContent"
-    :is-user-message="message.role === 'user'"
-    @save="handleSaveEdit"
-    @save-and-resend="handleSaveAndResend"
-  />
 </template>
 
 <script setup lang="ts">
@@ -120,12 +182,14 @@ import type { Message, SubMessage, SubMessageCreate, MessageStatus } from '@/api
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { useAgentStore } from '@/stores/agentStore'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  User, Cpu, Document, MoreFilled, CopyDocument, RefreshRight, Delete, Edit, Clock, Loading, CircleCheck,
+  User, Cpu, Document, MoreFilled, CopyDocument, RefreshRight, Delete, Edit, Clock, Loading, CircleCheck, ArrowLeft, ArrowRight, Coin
 } from '@element-plus/icons-vue'
 import SubMessageItem from './SubMessageItem.vue'
 import ZipHistoryCard from './ZipHistoryCard.vue'
+import MobileAssistantBubble from './message/MobileAssistantBubble.vue'
 import MobileMessageEditDialog from '@/mobile/components/chat/dialogs/MobileMessageEditDialog.vue'
 import { copyToClipboard } from '@/utils/clipboard'
 import { type ParsedBlock } from '@/utils/markdownParser'
@@ -138,40 +202,42 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'suggestion-click', text: string): void
+  (e: 'switch-branch', targetId: string): void
+  (e: 'open-tool-dialog', message: Message, subMessageId: string, mode: 'review_all' | 'single'): void
 }>()
 
 const { t } = useI18n()
 const interactionStore = useChatInteractionStore()
 const sessionStore = useChatSessionStore()
 const settingsStore = useSettingsStore()
+const agentStore = useAgentStore()
+
 const { globalSettings } = storeToRefs(settingsStore)
 const { messageRecencyRanks } = storeToRefs(sessionStore)
 
 // --- Interaction State ---
-const showActions = ref(false)
+const activeSubMessageId = ref<string | null>(null)
 
-const toggleActions = () => {
-  if (props.message.status !== 'generating') {
-    showActions.value = !showActions.value
+const toggleActions = (id?: string) => {
+  if (props.message.status === 'generating') return
+  if (!id) return
+  if (activeSubMessageId.value === id) {
+    activeSubMessageId.value = null
+  } else {
+    activeSubMessageId.value = id
   }
 }
 
-/**
- * 计算当前消息的新旧程度排名。
- * 0: 正在生成。
- * 1: 最新的一条已完成消息。
- * N: 第N条已完成消息。
- */
+const clearActions = () => {
+  activeSubMessageId.value = null
+}
+
 const currentMessageRank = computed(() => {
   return messageRecencyRanks.value.get(props.message.id) ?? 999
 })
 
-/**
- * 判断子消息是否处于“虚状态”（不参与上下文）。
- */
 function isSubMessageInactive(subMessage: SubMessage): boolean {
   if (props.message.status === 'generating') return false
-
   const cpl = subMessage.config?.context_participation_length
   if (cpl === undefined || cpl === null) return false
   if (cpl === 0) return true
@@ -179,6 +245,25 @@ function isSubMessageInactive(subMessage: SubMessage): boolean {
     return currentMessageRank.value > cpl
   }
   return false
+}
+
+// --- Multi-Branch Logic ---
+const hasSiblings = computed(() => props.message.sibling_ids && props.message.sibling_ids.length > 1)
+const currentIndex = computed(() => props.message.sibling_index + 1)
+const totalSiblings = computed(() => props.message.sibling_ids ? props.message.sibling_ids.length : 0)
+const canGoPrev = computed(() => props.message.sibling_index > 0 && props.message.status !== 'generating')
+const canGoNext = computed(() => props.message.sibling_ids && props.message.sibling_index < props.message.sibling_ids.length - 1 && props.message.status !== 'generating')
+
+function handlePrev() {
+  if (canGoPrev.value && props.message.sibling_ids) {
+    emit('switch-branch', props.message.sibling_ids[props.message.sibling_index - 1])
+  }
+}
+
+function handleNext() {
+  if (canGoNext.value && props.message.sibling_ids) {
+    emit('switch-branch', props.message.sibling_ids[props.message.sibling_index + 1])
+  }
 }
 
 // --- Data Logic ---
@@ -251,10 +336,43 @@ const roleClass = computed(() => ({
 }))
 
 const avatarUrl = computed(() => {
-  return props.message.role === 'user'
-    ? globalSettings.value.user_avatar_url
-    : globalSettings.value.ai_avatar_url
+  if (props.message.role === 'user') {
+    return globalSettings.value.user_avatar_url
+  }
+
+  if (props.message.role === 'assistant') {
+    const currentChat = sessionStore.currentChat
+    if (currentChat?.chatMode === 'agent' && currentChat.agentId) {
+      const agent = agentStore.allAgents.find(a => a.id === currentChat.agentId)
+      if (agent && agent.agentAvatarUrl) {
+        return agent.agentAvatarUrl
+      }
+    }
+    return globalSettings.value.ai_avatar_url
+  }
+
+  return null
 })
+
+// --- Usage Info Logic ---
+const usageSubMessage = computed(() => {
+  const usageMessages = props.message.sub_messages.filter((sm) => sm.type === 'Usage')
+  if (usageMessages.length === 0) return undefined
+  return usageMessages.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+})
+
+function handleShowUsage() {
+  if (!usageSubMessage.value) return
+  try {
+    const usage = JSON.parse(usageSubMessage.value.content)
+    const prompt = usage.prompt_tokens ?? 0
+    const completion = usage.completion_tokens ?? 0
+    const total = usage.total_tokens ?? (prompt + completion)
+    ElMessage.info(`Tokens - Prompt: ${prompt}, Completion: ${completion}, Total: ${total}`)
+  } catch {
+    ElMessage.info(usageSubMessage.value.content)
+  }
+}
 
 // --- Edit Logic ---
 const editDialogVisible = ref(false)
@@ -292,10 +410,17 @@ function handleEditRequest(
   editDialogVisible.value = true
 }
 
-function handleEditFirst() {
-  if (normalSubMessages.value.length > 0) {
-    handleEditRequest(normalSubMessages.value[0], { content: normalSubMessages.value[0].content })
+// 精准编辑特定的 SubMessage
+function handleEditSpecific(id: string) {
+  const targetSub = props.message.sub_messages.find((sm) => sm.id === id)
+  if (targetSub) {
+    handleEditRequest(targetSub, { content: targetSub.content })
+  } else if (normalSubMessages.value.length > 0) {
+    // Fallback: 如果点的是纯工具组，降级编辑第一个普通消息
+    const firstNormal = normalSubMessages.value[0]
+    handleEditRequest(firstNormal, { content: firstNormal.content })
   }
+  activeSubMessageId.value = null
 }
 
 function getUpdatedFullContent(newPartialContent: string): string {
@@ -365,16 +490,18 @@ async function handleCopySingle(subMessage: SubMessage) {
   } catch {}
 }
 
-async function handleCopyAll() {
-  const text = normalSubMessages.value.map((sm) => sm.content).join('\n---\n')
-  try {
-    await copyToClipboard(text)
-    ElMessage.success(t('chat.message.codeCopied'))
-  } catch {}
+// 精准复制特定的 SubMessage
+async function handleCopySpecific(id: string) {
+  const targetSub = props.message.sub_messages.find((sm) => sm.id === id)
+  if (targetSub) {
+    await handleCopySingle(targetSub)
+  }
+  activeSubMessageId.value = null
 }
 
 function handleRegenerate() {
   interactionStore.regenerateFrom(props.message.id)
+  activeSubMessageId.value = null
 }
 
 async function handleCommand(command: string) {
@@ -386,6 +513,7 @@ async function handleCommand(command: string) {
       await interactionStore.deleteMessage(props.message.id)
     } catch {}
   }
+  activeSubMessageId.value = null
 }
 </script>
 
@@ -393,8 +521,12 @@ async function handleCommand(command: string) {
 .mobile-message-item {
   display: flex;
   gap: 8px;
-  margin-bottom: 24px; /* 保留底部间距，给浮动菜单留出空间 */
+  margin-bottom: 24px;
   width: 100%;
+}
+
+.mobile-message-item.is-user {
+  flex-direction: row-reverse;
 }
 
 .message-avatar {
@@ -407,8 +539,18 @@ async function handleCommand(command: string) {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  cursor: pointer; /* 暗示可点击 */
-  position: relative; /* 关键：为绝对定位的菜单提供参考点 */
+}
+
+.user-sub-message-wrapper {
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+}
+
+.assistant-message-container {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .minimized-bar {
@@ -418,7 +560,6 @@ async function handleCommand(command: string) {
   flex-wrap: wrap;
 }
 
-/* 虚状态样式 - 最小化模式 */
 .minimized-bar .el-tag.is-inactive {
   opacity: 1;
   border-style: dashed;
@@ -500,7 +641,7 @@ async function handleCommand(command: string) {
   margin-top: 8px;
 }
 
-/* Suggestion Area - 独立区域，允许换行 */
+/* Suggestion Area */
 .suggestion-area {
   display: flex;
   flex-wrap: wrap;
@@ -509,31 +650,43 @@ async function handleCommand(command: string) {
 }
 
 .suggestion-item {
-  margin: 0; /* 重置 margin */
+  margin: 0;
 }
 
-/* Floating Actions - 核心修改 */
-.floating-actions {
-  position: absolute;
-  bottom: -30px; /* 向下偏移，进入 margin-bottom 的空间 */
-  right: 0;
-  z-index: 10;
-
-  display: flex;
+/* Floating Actions - Inline Mode */
+.floating-actions.inline-actions {
+  position: relative;
+  display: inline-flex;
   align-items: center;
   gap: 12px;
-
   background-color: var(--color-background);
   border: 1px solid var(--el-border-color-light);
   border-radius: 6px;
   padding: 4px 10px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  z-index: 10;
+  margin-top: 4px;
 }
 
-/* 用户消息的菜单靠左对齐 */
-.floating-actions.is-user-side {
-  right: auto;
-  left: 0;
+/* AI 消息的操作菜单靠右对齐 (由于放在 group-actions-container 已经靠右，这里保持默认) */
+
+/* 用户消息的操作菜单靠左对齐 */
+.floating-actions.inline-actions.is-user-side {
+  align-self: flex-end; /* 因为 user 消息整体是 row-reverse，这里用 flex-end 靠左 */
+}
+
+.branch-switcher {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.branch-text {
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+  margin: 0 2px;
 }
 
 .action-btn {
@@ -547,7 +700,11 @@ async function handleCommand(command: string) {
   color: var(--el-color-primary);
 }
 
-/* 过渡动画 */
+.action-btn.is-disabled {
+  color: var(--el-text-color-disabled);
+  cursor: not-allowed;
+}
+
 .fade-slide-enter-active,
 .fade-slide-leave-active {
   transition: opacity 0.2s, transform 0.2s;
@@ -556,12 +713,7 @@ async function handleCommand(command: string) {
 .fade-slide-enter-from,
 .fade-slide-leave-to {
   opacity: 0;
-  transform: translateY(-10px); /* 从上方滑入 */
-}
-
-/* User Message Specifics */
-.mobile-message-item.is-user {
-  flex-direction: row-reverse;
+  transform: translateY(-5px); /* 改为稍微向下偏移滑入，更符合内联展开的视觉 */
 }
 
 .text-danger {

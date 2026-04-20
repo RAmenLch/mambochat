@@ -11,10 +11,11 @@ import {
   moveChat,
   duplicateChat as duplicateChatAPI,
   generateChatTitle as generateChatTitleAPI,
-  getChatLineage
+  getChatLineage,
+  archiveChats as archiveChatsAPI, checkTasksStatus, getChatWithMessages
 } from '@/api/chatService';
 import { subscribeToGlobalNotifications } from '@/services/notificationService';
-import type { Chat, ChatCreate, ChatUpdate, MoveRequest, GlobalNotification } from '@/api/types';
+import type { Chat, ChatCreate, ChatUpdate, MoveRequest, GlobalNotification, ChatArchiveRequest } from '@/api/types';
 import { useChatSessionStore } from './chatSessionStore';
 import { useTreeStoreActions } from '@/composables/useTreeStoreActions';
 
@@ -136,25 +137,100 @@ export const useChatListStore = defineStore('chatList', () => {
   }
 
   /**
+   * 批量归档项目到新文件夹
+   */
+  async function archiveItems(request: ChatArchiveRequest) {
+    try {
+      const newFolder = await archiveChatsAPI(request);
+      const parentIdToRefresh = request.parent_id || 'root';
+      loadedFolderIds.value.delete(parentIdToRefresh);
+      await fetchChatChildren(parentIdToRefresh);
+
+      // [修复] 主动拉取新文件夹的内容，确保数据在前端是最新的，而不是盲目标记为已加载
+      await fetchChatChildren(newFolder.id);
+
+      return newFolder;
+    } catch (error) {
+      console.error('Failed to archive items:', error);
+      throw error;
+    }
+  }
+
+  /**
    * 初始化并监听来自服务器的全局通知（SSE）。
    * 用于实时更新会话标题、接收历史压缩结果以及处理异步任务错误。
    */
   function initializeNotificationListener() {
     subscribeToGlobalNotifications({
-      onNotification: (notification: GlobalNotification) => {
-        if (notification.type === 'chat_update') {
+      onNotification: async (notification: GlobalNotification) => {
+
+        if (notification.type === 'connected') {
+          const sessionStore = useChatSessionStore();
+          const tasksToCheck: string[] = [];
+
+          if (refreshingTitleChatId.value) {
+            tasksToCheck.push(`title-gen-${refreshingTitleChatId.value}`);
+          }
+
+          const pendingZipMessages = sessionStore.currentChatMessages.filter(msg =>
+            msg.sub_messages.some(sm => sm.type === 'ZipHistory' && sm.status === 'generating')
+          );
+          pendingZipMessages.forEach(msg => {
+            tasksToCheck.push(`zip-history-gen-${msg.id}`);
+          });
+
+          if (tasksToCheck.length === 0) return;
+
+          try {
+            const { running_tasks } = await checkTasksStatus(tasksToCheck);
+
+            if (refreshingTitleChatId.value) {
+              const titleTaskId = `title-gen-${refreshingTitleChatId.value}`;
+              if (!running_tasks.includes(titleTaskId)) {
+                const targetChatId = refreshingTitleChatId.value;
+                getChatWithMessages(targetChatId).then(chatData => {
+                  const chatInList = chatList.value.find(c => c.id === targetChatId);
+                  if (chatInList && chatData.name) {
+                    chatInList.name = chatData.name;
+                  }
+                }).finally(() => {
+                  if (refreshingTitleChatId.value === targetChatId) {
+                    refreshingTitleChatId.value = null;
+                  }
+                });
+              }
+            }
+
+            if (pendingZipMessages.length > 0 && sessionStore.currentChatId) {
+              let needRefresh = false;
+              pendingZipMessages.forEach(msg => {
+                const zipTaskId = `zip-history-gen-${msg.id}`;
+                if (!running_tasks.includes(zipTaskId)) {
+                  needRefresh = true;
+                }
+              });
+
+              if (needRefresh) {
+                const chatData = await getChatWithMessages(sessionStore.currentChatId);
+                sessionStore.currentChatMessages = chatData.messages.sort((a, b) => a.sortOrder - b.sortOrder);
+              }
+            }
+
+          } catch (error) {
+            console.error('Failed to check tasks status during reconnection:', error);
+          }
+        }
+        else if (notification.type === 'chat_update') {
           const { id, name } = notification.payload;
           const chatInList = chatList.value.find(c => c.id === id);
           if (chatInList) {
             chatInList.name = name;
           }
-          // 无论是否在列表中找到，都清除加载状态
           if (refreshingTitleChatId.value === id) {
             refreshingTitleChatId.value = null;
           }
         } else if (notification.type === 'zip_history_update') {
           const sessionStore = useChatSessionStore();
-          // 仅当通知与当前活动会话相关时，才更新会话状态
           if (sessionStore.currentChatId === notification.payload.chat_id) {
             sessionStore._addOrUpdateSubMessage(
               notification.payload.message_id,
@@ -162,15 +238,10 @@ export const useChatListStore = defineStore('chatList', () => {
             );
           }
         } else if (notification.type === 'notification' && notification.category === 'title_generation_error') {
-          // 处理标题生成任务异常
           const errorChatId = notification.context.chat_id;
-
-          // 如果当前正在刷新的正是这个出错的会话，停止 Loading 状态
           if (refreshingTitleChatId.value === errorChatId) {
             refreshingTitleChatId.value = null;
           }
-
-          // 弹出错误提示，展示后端返回的具体错误信息
           ElMessage.error(notification.message);
         }
       },
@@ -179,6 +250,7 @@ export const useChatListStore = defineStore('chatList', () => {
       }
     });
   }
+
 
   return {
     // State
@@ -197,6 +269,7 @@ export const useChatListStore = defineStore('chatList', () => {
     moveChatItem,
     duplicateChat,
     resolvePath,
+    archiveItems,
 
     // Store-specific Actions
     refreshChatTitle,

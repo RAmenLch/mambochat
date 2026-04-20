@@ -1,5 +1,7 @@
 # backend/models/resource_model.py
 
+from typing import Any, ClassVar
+
 from sqlalchemy import Column, String, TEXT, DateTime, ForeignKey, func, Integer, JSON
 from sqlalchemy.orm import relationship
 from backend.models.base_model import Base, generate_uuid
@@ -78,3 +80,6 @@ class ResourceVersion(Base):
         back_populates="versions",
         foreign_keys=[resourceId]
     )
+
+    # 非持久化属性，在 API 响应填充时动态赋值（不对应数据库列）
+    file_info: ClassVar[Any] = None

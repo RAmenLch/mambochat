@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Optional, List, Union, Dict, Any
 import json
 
-from backend.schemas.enums import MessageRole, MessageStatus, SubMessageType
+from backend.schemas.enums import MessageRole, MessageStatus, SubMessageType, ToolDecisionType
 from backend.schemas.file import File as FileSchema  # 导入文件模型以供类型提示
 
 
@@ -17,7 +17,7 @@ class McpToolContent(BaseModel):
     name: str
     # arguments 可能是 JSON 字符串（来自 LLM 原始输出）或已解析的字典
     arguments: Union[str, Dict[str, Any]]
-
+    input_schema: Optional[Dict[str, Any]] = None
     # 执行结果，None 表示尚未执行
     result: Optional[str] = None
     is_error: bool = False
@@ -137,6 +137,7 @@ class MessageBase(BaseModel):
 
 class MessageCreate(MessageBase):
     sub_messages: List[SubMessageCreate]
+    parentId: Optional[str] = Field(None, description="父消息ID，如果不传则自动挂载到当前活跃路径的叶子节点")
 
 
 class MessageUpdate(BaseModel):
@@ -151,6 +152,13 @@ class Message(MessageBase):
     createdAt: datetime
     chatId: str
     sortOrder: int
+
+    # 新增树状结构与分支路由相关字段
+    parentId: Optional[str] = Field(None, description="父消息ID")
+    lastActiveAt: datetime = Field(..., description="最后活跃时间")
+    sibling_ids: List[str] = Field(default_factory=list, description="同级分支的消息ID列表(按创建时间排序)")
+    sibling_index: int = Field(0, description="当前消息在同级分支中的索引(从0开始)")
+
     sub_messages: List[SubMessage] = Field(default_factory=list)
     status: Optional[MessageStatus] = Field(None,
                                             description="消息的动态计算状态，例如 'generating', 'completed', 'failed'。仅在API响应时填充。")
@@ -158,3 +166,102 @@ class Message(MessageBase):
     class Config:
         from_attributes = True
 
+
+class EditedAction(BaseModel):
+    """编辑后的工具调用动作"""
+    name: str = Field(..., description="被编辑的工具名称")
+    args: Dict[str, Any] = Field(..., description="编辑后的工具参数")
+
+
+class ToolDecision(BaseModel):
+    """工具调用的用户决策结果"""
+    type: ToolDecisionType
+    edited_action: Optional[EditedAction] = Field(None, description="编辑后的工具调用参数（仅在 type=edit 时有效）")
+    message: Optional[str] = Field(None, description="拒绝原因或其他附加信息")
+
+
+# 接收前端审核决策的请求模型
+class ToolApprovalRequest(BaseModel):
+    sub_message_id: str
+    decision: ToolDecision
+
+class ErrorContent(BaseModel):
+    """
+    专门用于处理 SubMessageType.ERROR 的 content 字段结构。
+    包含简短错误信息和完整的堆栈跟踪。
+    """
+    message: str = Field(..., description="简短的错误提示信息")
+    stack_trace: str = Field(default="", description="完整的错误堆栈信息")
+
+    def to_json_string(self) -> str:
+        """序列化为存储在 DB content 字段的 JSON 字符串"""
+        return self.model_dump_json(exclude_none=False)
+
+    @classmethod
+    def from_json_string(cls, json_str: str) -> 'ErrorContent':
+        """从 DB content 字符串反序列化"""
+        if not json_str:
+            raise ValueError("Empty content")
+        try:
+            data = json.loads(json_str)
+            return cls(**data)
+        except (json.JSONDecodeError, TypeError) as e:
+            raise ValueError(f"Invalid JSON for ErrorContent: {e}")
+
+
+class ReviewToolContent(BaseModel):
+    """
+    专门用于处理 SubMessageType.REVIEW_TOOL 的 content 字段结构。
+    强制要求强类型，拒绝 Union，确保全链路结构化。
+    """
+    tool_call_id: str
+    name: str
+    arguments: Dict[str, Any] = Field(..., description="必须是已解析的字典，若上游为JSON字符串需在Decode层完成解析")
+    description: Optional[str] = Field(None, description="审核描述说明")
+    interrupt_index: int = Field(..., description="中断事件中的序号，用于严格保证多工具并发时的决策数组顺序")
+    batch_id: str = Field(..., description="中断批次号")
+    decision: Optional[ToolDecision] = Field(None, description="用户的决策结果，None 表示尚未做出决策")
+    input_schema: Optional[Dict[str, Any]] = None
+
+    def to_json_string(self) -> str:
+        """序列化为存储在 DB content 字段的 JSON 字符串"""
+        return self.model_dump_json(exclude_none=False)
+
+    @classmethod
+    def from_json_string(cls, json_str: str) -> 'ReviewToolContent':
+        """从 DB content 字符串反序列化"""
+        if not json_str:
+            raise ValueError("Empty content")
+        try:
+            data = json.loads(json_str)
+            return cls(**data)
+        except (json.JSONDecodeError, TypeError) as e:
+            raise ValueError(f"Invalid JSON for ReviewToolContent: {e}")
+
+
+class AskUserContent(BaseModel):
+    """
+    专门用于处理 SubMessageType.ASK_USER 的 content 字段结构。
+    当 AI 调用 ask_user 工具时，中断产生的提问子消息。
+    """
+    tool_call_id: str = Field(..., description="ask_user 工具调用 ID")
+    questions: List[Dict[str, Any]] = Field(..., description="问题列表")
+    answers: Optional[List[str]] = Field(None, description="用户回答，None 表示尚未回答")
+    interrupt_index: int = Field(..., description="中断事件中的序号")
+    batch_id: str = Field(..., description="中断批次号")
+    ask_status: Optional[str] = Field(None, description="回答状态: 'answered' / 'cancelled' / None(待回答)")
+
+    def to_json_string(self) -> str:
+        """序列化为存储在 DB content 字段的 JSON 字符串"""
+        return self.model_dump_json(exclude_none=False)
+
+    @classmethod
+    def from_json_string(cls, json_str: str) -> 'AskUserContent':
+        """从 DB content 字符串反序列化"""
+        if not json_str:
+            raise ValueError("Empty content")
+        try:
+            data = json.loads(json_str)
+            return cls(**data)
+        except (json.JSONDecodeError, TypeError) as e:
+            raise ValueError(f"Invalid JSON for AskUserContent: {e}")

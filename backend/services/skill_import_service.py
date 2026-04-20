@@ -1,0 +1,405 @@
+# backend/services/skill_import_service.py
+
+import os
+import re
+import zipfile
+import tempfile
+import yaml
+import httpx
+from typing import List, Optional, Dict
+from fastapi import HTTPException, UploadFile
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend import schemas
+from backend.schemas.enums import ResourceItemType, ResourceType, FileManagementType
+from backend.crud import resource_crud, setting_crud
+from backend.services.file_service import FileService
+from backend.utils.skills_utils import SkillValidator, FileNode, identify_skill_roots
+from backend.models import resource_model
+
+# ZIP 导入安全限制
+MAX_ZIP_FILE_SIZE = 100 * 1024 * 1024          # 100 MB：ZIP 文件本身大小上限
+MAX_TOTAL_UNCOMPRESSED_SIZE = 500 * 1024 * 1024  # 500 MB：解压后总大小上限
+MAX_ZIP_FILE_COUNT = 100000                       # ZIP 内最大文件数量
+MAX_ZIP_SINGLE_FILE_SIZE = 20 * 1024 * 1024     # 20 MB：ZIP 内单个文件大小上限
+
+
+class SkillImportService:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+        self.file_service = FileService(db)
+
+    def _extract_name_from_md(self, content: bytes) -> Optional[str]:
+        """尝试从 SKILL.md 内容中提前解析出 name 字段"""
+        try:
+            text = content.decode('utf-8')
+            match = re.match(r"^---\s*\n(.*?)\n---", text, re.DOTALL)
+            if match:
+                data = yaml.safe_load(match.group(1))
+                return data.get("name")
+        except Exception:
+            pass
+        return None
+
+    async def import_from_file(self, file: UploadFile, parent_id: Optional[str]) -> schemas.SkillImportResponse:
+        """
+        处理文件/ZIP上传导入逻辑。
+        """
+        suffix = os.path.splitext(file.filename)[1].lower()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            if suffix == '.zip':
+                zip_path = os.path.join(tmpdir, "upload.zip")
+                content = await self._safe_read_upload(file)
+                with open(zip_path, "wb") as buffer:
+                    buffer.write(content)
+                self._safe_extract_zip(zip_path, tmpdir)
+
+                # 清理压缩包防止干扰
+                os.remove(zip_path)
+
+                # 直接处理 tmpdir，内部相对路径会自动生成正确的目录结构
+                return await self._process_directory(tmpdir, parent_id)
+
+            elif file.filename == "SKILL.md":
+                content = await file.read()
+
+                # 提前解析 name，以此作为目录名，避免 skill_root 校验报错
+                frontmatter_name = self._extract_name_from_md(content)
+                if not frontmatter_name:
+                    frontmatter_name = "unnamed_skill"
+
+                safe_name = self._sanitize_name(frontmatter_name)
+                skill_dir = os.path.join(tmpdir, safe_name)
+                os.makedirs(skill_dir)
+
+                skill_md_path = os.path.join(skill_dir, "SKILL.md")
+                with open(skill_md_path, "wb") as buffer:
+                    buffer.write(content)
+
+                return await self._process_directory(tmpdir, parent_id)
+
+            else:
+                raise HTTPException(status_code=400,
+                                    detail="Invalid file type. Please upload a ZIP file or a single SKILL.md file.")
+
+    async def import_from_github(self, repo_url: str, parent_id: Optional[str]) -> schemas.SkillImportResponse:
+        """
+        处理 GitHub 仓库导入逻辑。
+        """
+        proxy_url = None
+        proxy_setting = await setting_crud.get_setting(self.db, "proxy_enabled")
+        if proxy_setting and proxy_setting.value == "True":
+            url_setting = await setting_crud.get_setting(self.db, "proxy_url")
+            proxy_url = url_setting.value if url_setting else None
+
+        # Parse URL
+        match = re.search(r"github\.com/([^/]+)/([^/]+)", repo_url)
+        if not match:
+            raise HTTPException(status_code=400, detail="Invalid GitHub URL format.")
+
+        owner, repo = match.group(1), match.group(2)
+        if repo.endswith(".git"):
+            repo = repo[:-4]
+
+        async with httpx.AsyncClient(proxy=proxy_url, timeout=30.0) as client:
+            # Get default branch
+            api_url = f"https://api.github.com/repos/{owner}/{repo}"
+            try:
+                resp = await client.get(api_url)
+                resp.raise_for_status()
+                repo_data = resp.json()
+                default_branch = repo_data.get("default_branch", "main")
+            except httpx.HTTPStatusError as e:
+                raise HTTPException(status_code=400, detail=f"Failed to fetch repo info: {e.response.status_code}")
+
+            # Download ZIP
+            zip_url = f"https://github.com/{owner}/{repo}/archive/refs/heads/{default_branch}.zip"
+            try:
+                resp = await client.get(zip_url, follow_redirects=True)
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                raise HTTPException(status_code=400, detail=f"Failed to download repository: {e.response.status_code}")
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                if len(resp.content) > MAX_ZIP_FILE_SIZE:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"下载的 ZIP 文件过大（{len(resp.content) // 1024 // 1024} MB），"
+                               f"上限为 {MAX_ZIP_FILE_SIZE // 1024 // 1024} MB。"
+                    )
+                zip_path = os.path.join(tmpdir, "repo.zip")
+                with open(zip_path, "wb") as buffer:
+                    buffer.write(resp.content)
+
+                self._safe_extract_zip(zip_path, tmpdir)
+                os.remove(zip_path)
+
+                # GitHub zip typically extracts to a folder like repo-branch
+                extracted_items = os.listdir(tmpdir)
+                extracted_dir = None
+                for item in extracted_items:
+                    if os.path.isdir(os.path.join(tmpdir, item)):
+                        extracted_dir = os.path.join(tmpdir, item)
+                        break
+
+                if not extracted_dir:
+                    raise HTTPException(status_code=500, detail="Failed to locate extracted directory.")
+
+                # 将解压出来的顶层目录重命名为 owner_repo
+                # 这样相对路径机制就会自动帮我们建立一个 owner_repo 的父目录
+                root_name = f"{owner}_{repo}"
+                safe_root_name = self._sanitize_name(root_name)
+                new_dir = os.path.join(tmpdir, safe_root_name)
+                os.rename(extracted_dir, new_dir)
+
+                return await self._process_directory(tmpdir, parent_id)
+
+    async def _process_directory(self, disk_root: str, parent_id: Optional[str]) -> schemas.SkillImportResponse:
+        """
+        核心处理逻辑：识别、校验、创建资源。
+        （去除了强制创建 Root Folder 的逻辑，完全依赖相对路径生成结构）
+        """
+        # 1. Identify Skill Roots
+        skill_dirs = identify_skill_roots(disk_root)
+
+        details = []
+        success_count = 0
+        failed_count = 0
+
+        if not skill_dirs:
+            return schemas.SkillImportResponse(
+                total_detected=0,
+                success_count=0,
+                failed_count=0,
+                details=[schemas.SkillImportResultItem(name="N/A", status="failed", error="No valid SKILL.md found.")]
+            )
+
+        # 3. Process each Skill
+        for skill_abs_path in skill_dirs:
+            skill_name = os.path.basename(skill_abs_path)
+            relative_path = os.path.relpath(skill_abs_path, disk_root)
+
+            # Validate Skill
+            validation_result = await self._validate_skill_on_disk(skill_abs_path)
+
+            if not validation_result.is_valid:
+                failed_count += 1
+                details.append(schemas.SkillImportResultItem(
+                    name=skill_name,
+                    status="failed",
+                    error="; ".join(validation_result.errors)
+                ))
+                continue
+
+            # Extract name from SKILL.md frontmatter to ensure consistency
+            frontmatter_name = await self._get_skill_name(skill_abs_path)
+            if not frontmatter_name:
+                failed_count += 1
+                details.append(schemas.SkillImportResultItem(
+                    name=skill_name,
+                    status="failed",
+                    error="Could not parse name from SKILL.md"
+                ))
+                continue
+
+            try:
+                # Create intermediate folders and Skill folder
+                skill_resource = await self._create_skill_resources(relative_path, parent_id, frontmatter_name)
+
+                # Create files inside Skill
+                await self._create_files_recursive(skill_abs_path, skill_resource.id)
+
+                success_count += 1
+                details.append(schemas.SkillImportResultItem(
+                    name=frontmatter_name,
+                    status="success",
+                    resource_id=skill_resource.id
+                ))
+            except Exception as e:
+                failed_count += 1
+                details.append(schemas.SkillImportResultItem(
+                    name=frontmatter_name,
+                    status="failed",
+                    error=str(e)
+                ))
+
+        return schemas.SkillImportResponse(
+            total_detected=len(skill_dirs),
+            success_count=success_count,
+            failed_count=failed_count,
+            details=details
+        )
+
+    async def _validate_skill_on_disk(self, skill_dir: str) -> schemas.SkillValidationResult:
+        """构建文件树并校验"""
+        validator = SkillValidator()
+        root_node = await self._build_file_node_from_disk(skill_dir)
+        if not root_node:
+            return schemas.SkillValidationResult(is_valid=False, errors=["Failed to build file tree"], warnings=[])
+        return validator.validate_tree(root_node)
+
+    async def _build_file_node_from_disk(self, path: str) -> Optional[FileNode]:
+        """递归构建内存文件树"""
+        if not os.path.exists(path):
+            return None
+
+        name = os.path.basename(path)
+        if os.path.isfile(path):
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+            return FileNode(type="file", name=name, content=content)
+        else:
+            children = []
+            for item in os.listdir(path):
+                child_path = os.path.join(path, item)
+                child_node = await self._build_file_node_from_disk(child_path)
+                if child_node:
+                    children.append(child_node)
+            return FileNode(type="dir", name=name, children=children)
+
+    async def _get_skill_name(self, skill_dir: str) -> Optional[str]:
+        md_path = os.path.join(skill_dir, "SKILL.md")
+        if not os.path.exists(md_path):
+            return None
+        with open(md_path, "r", encoding="utf-8") as f:
+            content = f.read()
+            match = re.match(r"^---\s*\n(.*?)\n---", content, re.DOTALL)
+            if match:
+                try:
+                    data = yaml.safe_load(match.group(1))
+                    return data.get("name")
+                except:
+                    return None
+        return None
+
+    async def _create_skill_resources(self, relative_path: str, root_parent_id: Optional[str],
+                                      skill_name: str) -> resource_model.Resource:
+        """
+        根据相对路径创建中间文件夹，最后创建 Skill 文件夹。
+        """
+        parts = relative_path.split(os.sep)
+        current_parent_id = root_parent_id
+
+        # Create intermediate folders
+        if len(parts) > 1:
+            for folder_name in parts[:-1]:
+                safe_name = self._sanitize_name(folder_name)
+
+                # 修复：如果 parentId 是 None，传递 "root" 给查询函数以获取根目录资源
+                query_parent_id = current_parent_id if current_parent_id else "root"
+                children = await resource_crud.get_resources_by_parent_ids(self.db, [query_parent_id])
+
+                existing = next((c for c in children if c.name == safe_name), None)
+
+                if existing:
+                    current_parent_id = existing.id
+                else:
+                    folder_schema = schemas.ResourceCreate(
+                        name=safe_name,
+                        itemType=ResourceItemType.FOLDER,
+                        parentId=current_parent_id
+                    )
+                    new_folder = await resource_crud.create_resource(self.db, folder_schema)
+                    current_parent_id = new_folder.id
+
+        # Create Skill Folder
+        safe_skill_name = self._sanitize_name(skill_name)
+
+        # Check conflict
+        existing_names = await resource_crud.get_child_names_by_parent_id(self.db, current_parent_id)
+        if safe_skill_name in existing_names:
+            raise ValueError(f"Skill name conflict: '{safe_skill_name}' already exists in the destination.")
+
+        skill_schema = schemas.ResourceCreate(
+            name=safe_skill_name,
+            itemType=ResourceItemType.FOLDER,
+            resourceType=ResourceType.SKILL,
+            parentId=current_parent_id
+        )
+        return await resource_crud.create_resource(self.db, skill_schema)
+
+    async def _create_files_recursive(self, disk_path: str, resource_parent_id: str):
+        """递归创建文件资源"""
+        for item in os.listdir(disk_path):
+            item_path = os.path.join(disk_path, item)
+            if os.path.isfile(item_path):
+                with open(item_path, "rb") as f:
+                    content_bytes = f.read()
+
+                db_file = await self.file_service.save_file_from_bytes(
+                    data=content_bytes,
+                    filename=item,
+                    mime_type="text/markdown" if item.endswith(".md") else "application/octet-stream",
+                    management_type=[FileManagementType.RESOURCE.value],
+                    sub_path="skills"
+                )
+
+                file_res_schema = schemas.ResourceCreate(
+                    name=item,
+                    itemType=ResourceItemType.RESOURCE,
+                    resourceType=ResourceType.FILE,
+                    parentId=resource_parent_id,
+                    initial_content=db_file.id,
+                    initial_attributes={}
+                )
+                await resource_crud.create_resource(self.db, file_res_schema)
+
+            elif os.path.isdir(item_path):
+                # Create sub-folder
+                folder_schema = schemas.ResourceCreate(
+                    name=item,
+                    itemType=ResourceItemType.FOLDER,
+                    parentId=resource_parent_id
+                )
+                sub_folder = await resource_crud.create_resource(self.db, folder_schema)
+                await self._create_files_recursive(item_path, sub_folder.id)
+
+    def _sanitize_name(self, name: str) -> str:
+        # Remove or replace invalid characters
+        return re.sub(r'[\\/*?:"<>|]', "_", name).strip()
+
+    async def _safe_read_upload(self, file: UploadFile) -> bytes:
+        """安全读取上传文件内容，校验大小上限。"""
+        content = b""
+        while True:
+            chunk = await file.read(1024 * 1024)  # 每次读 1MB
+            if not chunk:
+                break
+            content += chunk
+            if len(content) > MAX_ZIP_FILE_SIZE:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"文件过大（{len(content) // 1024 // 1024} MB），上限为 {MAX_ZIP_FILE_SIZE // 1024 // 1024} MB。"
+                )
+        return content
+
+    def _safe_extract_zip(self, zip_path: str, target_dir: str) -> None:
+        """安全解压 ZIP，防止 ZIP 炸弹攻击。"""
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            infos = zip_ref.infolist()
+
+            # 检查文件数量
+            if len(infos) > MAX_ZIP_FILE_COUNT:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"ZIP 文件包含过多条目（{len(infos)}），上限为 {MAX_ZIP_FILE_COUNT}。"
+                )
+
+            # 检查总解压大小
+            total_uncompressed = sum(info.file_size for info in infos if not info.is_dir())
+            if total_uncompressed > MAX_TOTAL_UNCOMPRESSED_SIZE:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"ZIP 解压后总大小过大（{total_uncompressed // 1024 // 1024} MB），上限为 {MAX_TOTAL_UNCOMPRESSED_SIZE // 1024 // 1024} MB。"
+                )
+
+            # 检查单个文件大小
+            for info in infos:
+                if not info.is_dir() and info.file_size > MAX_ZIP_SINGLE_FILE_SIZE:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"ZIP 内单个文件过大: {info.filename}（{info.file_size // 1024 // 1024} MB），"
+                               f"上限为 {MAX_ZIP_SINGLE_FILE_SIZE // 1024 // 1024} MB。"
+                    )
+
+            zip_ref.extractall(target_dir)

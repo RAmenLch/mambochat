@@ -43,10 +43,14 @@ export const useProviderStore = defineStore('providers', {
       return state.providers.flatMap(p => p.models);
     },
     groupedModels: (state) => {
-      return state.providers.map(p => ({
-        label: p.name,
-        options: p.models
-      }));
+      const allStarred = state.providers.flatMap(p => p.models.filter(m => m.starred));
+      if (allStarred.length === 0) {
+        return state.providers.map(p => ({ label: p.name, options: p.models }));
+      }
+      return [
+        { label: '⭐ 标星', options: allStarred },
+        ...state.providers.map(p => ({ label: p.name, options: p.models }))
+      ];
     }
   },
 

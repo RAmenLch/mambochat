@@ -19,9 +19,11 @@
 
         <el-form-item :label="$t('chat.settings.model')">
           <el-select
+            ref="modelSelectRef"
             v-model="chatSettingsForm.aiModelId"
             :placeholder="$t('chat.settings.modelPlaceholder')"
             style="width: 100%"
+            @visible-change="(visible: boolean) => scrollToTopIfStarred(visible, modelSelectRef)"
           >
             <el-option-group
               v-for="group in filteredGroupedModels"
@@ -53,7 +55,6 @@
             :rows="6"
             :placeholder="$t('chat.settings.systemPromptPlaceholder')"
           />
-          <!-- 挂载资源预览区（仅展示，不支持拖拽） -->
           <div v-if="mountedSystemResources.length > 0" class="mounted-resources-wrapper">
             <el-space wrap>
               <el-tag
@@ -87,8 +88,10 @@
         <el-form-item :label="$t('chat.settings.enableSuggest')">
           <el-switch v-model="chatSettingsForm.modelParameters.enable_suggest" />
         </el-form-item>
+        <el-form-item :label="$t('chat.settings.enableAskUser')">
+          <el-switch v-model="chatSettingsForm.modelParameters.enable_ask_user" />
+        </el-form-item>
 
-        <!-- 动态参数列表 -->
         <el-form-item v-for="param in dynamicParameters" :key="param.key">
           <template #label>
             <div class="param-label-row">
@@ -152,11 +155,11 @@
     </template>
   </el-drawer>
 
-  <!-- 引用移动端的资源选择器 -->
   <ResourceSelectorDialog
     v-model:visible="promptDialogVisible"
-    source="settings"
+    context="chat-settings"
     @mount-resources="handleMountResources"
+    @mount-knowledge-base="handleMountKnowledgeBase"
   />
 </template>
 
@@ -166,9 +169,12 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { useSystemConfigStore } from '@/stores/systemConfigStore'
 import { useProviderStore } from '@/stores/providerStore'
+import { useChatSessionStore } from '@/stores/chatSessionStore'
+import { useChatListStore } from '@/stores/chatListStore'
 import { getResourceDetails } from '@/api/resourceService'
 import type { Chat, ChatUpdate, AIModel, Resource, LLMParameterDefinition } from '@/api/types'
 import ResourceSelectorDialog from './dialogs/ResourceSelectorDialog.vue'
+import { useModelSelectScroll } from '@/composables/useModelSelectScroll'
 
 interface GroupedModels {
   label: string
@@ -205,8 +211,12 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const systemConfigStore = useSystemConfigStore()
 const providerStore = useProviderStore()
+const chatSessionStore = useChatSessionStore()
+const chatListStore = useChatListStore()
 
 const promptDialogVisible = ref(false)
+const modelSelectRef = ref()
+const { scrollToTopIfStarred } = useModelSelectScroll()
 const chatSettingsForm = reactive<ChatSettingsForm>({
   name: '',
   aiModelId: null,
@@ -262,21 +272,22 @@ watch(
     chatSettingsForm.aiModelId = newVal.aiModelId
     chatSettingsForm.systemPrompt = newVal.systemPrompt
 
-    // Copy params
     const params = newVal.modelParameters || {}
     chatSettingsForm.modelParameters = {
       ...JSON.parse(JSON.stringify(params)),
       max_context_messages: params.max_context_messages ?? 0,
       stream: params.stream ?? true,
       enable_suggest: params.enable_suggest ?? false,
+      enable_ask_user: params.enable_ask_user ?? false,
     }
 
     mountedSystemResources.value = []
     if (newVal.resource_prompt_list && newVal.resource_prompt_list.length > 0) {
       try {
         const promises = newVal.resource_prompt_list.map((id) => getResourceDetails(id))
-        mountedSystemResources.value = (await Promise.all(promises)).filter(
-          (r) => !!r,
+        const results = await Promise.all(promises)
+        mountedSystemResources.value = results.filter(
+          (r) => r && (r.resourceType === 'system_prompt' || r.resourceType === 'submessage_template')
         ) as Resource[]
       } catch (e) {
         console.error(e)
@@ -315,6 +326,20 @@ function handleRemoveMountedResource(resourceId: string) {
   mountedSystemResources.value = mountedSystemResources.value.filter((r) => r.id !== resourceId)
 }
 
+async function handleMountKnowledgeBase(resources: Resource[]) {
+  if (!props.chatData) return
+  const currentList = props.chatData.resource_prompt_list || []
+  const newIds = resources.map(r => r.id).filter(id => !currentList.includes(id))
+
+  if (newIds.length > 0) {
+    const updatedList = [...currentList, ...newIds]
+    await chatListStore.updateChatSettings(props.chatData.id, {
+      resource_prompt_list: updatedList
+    })
+    ElMessage.success(`已启用知识库: ${resources.map(r => r.name).join(', ')}`)
+  }
+}
+
 function handleSaveSettings() {
   if (!props.chatData) return
   if (!chatSettingsForm.name?.trim()) {
@@ -326,6 +351,7 @@ function handleSaveSettings() {
     max_context_messages: chatSettingsForm.modelParameters.max_context_messages,
     stream: chatSettingsForm.modelParameters.stream,
     enable_suggest: chatSettingsForm.modelParameters.enable_suggest,
+    enable_ask_user: chatSettingsForm.modelParameters.enable_ask_user,
   }
 
   for (const key in chatSettingsForm.modelParameters) {
@@ -335,7 +361,12 @@ function handleSaveSettings() {
     }
   }
 
-  const resourcePromptList = mountedSystemResources.value.map((r) => r.id)
+  const drawerResourceIds = mountedSystemResources.value.map((r) => r.id)
+  const currentKbIds = chatSessionStore.systemPromptResources
+    .filter(r => r.resourceType === 'knowledge_base')
+    .map(r => r.id)
+
+  const resourcePromptList = [...drawerResourceIds, ...currentKbIds]
 
   emit('save', {
     name: chatSettingsForm.name,
@@ -367,7 +398,7 @@ function handleSaveSettings() {
   justify-content: space-between;
   align-items: center;
   width: 100%;
-  gap: 12px; /* 1. 修复：增加文本与开关的间距 */
+  gap: 12px;
 }
 
 .param-label-text {
@@ -391,14 +422,11 @@ function handleSaveSettings() {
   border-radius: 4px;
 }
 
-/* 2 & 3. 修复：控件容器样式 */
 .mobile-param-control {
-  width: 100%; /* 确保容器占满宽度，解决下拉框过短问题 */
+  width: 100%;
   margin-top: 8px;
 }
 
-/* 2. 修复：滑块样式调整 */
-/* 强制将滑块内部的输入框宽度缩小，防止挤压滑动条 */
 .mobile-param-control :deep(.el-slider .el-input-number) {
   width: 80px;
 }
@@ -407,7 +435,6 @@ function handleSaveSettings() {
   margin-right: 12px;
 }
 
-/* 确保整数输入框不受影响（如果需要全宽） */
 .mobile-param-control > .el-input-number {
   width: 100%;
 }

@@ -8,7 +8,6 @@
     </div>
 
     <template v-else>
-      <!-- 仅在非折叠模式下显示 Header，折叠模式下 Header 显示在 ChatList 中 -->
       <ChatHeader
         v-if="!isSidebarCollapsed"
         :current-chat="currentChat"
@@ -18,18 +17,30 @@
         @refresh-title="handleRefreshTitle"
       />
 
-      <el-scrollbar ref="scrollbarRef" class="message-list-scrollbar" v-loading="isChatHistoryLoading" @scroll="handleScroll">
-        <div class="message-list-wrapper">
-          <MessageItem
-            v-for="(message, index) in currentChatMessages"
-            :key="message.id"
-            :id="'msg-' + message.id"
-            :message="message"
-            :is-last-message="index === currentChatMessages.length - 1"
-            @suggestion-click="handleSuggestionClick"
-          />
-        </div>
-      </el-scrollbar>
+      <div class="scroll-area-wrapper">
+        <el-scrollbar ref="scrollbarRef" class="message-list-scrollbar" v-loading="isChatHistoryLoading" @scroll="handleScroll">
+          <div class="message-list-wrapper">
+            <MessageItem
+              v-for="(message, index) in currentChatMessages"
+              :key="message.id"
+              :id="'msg-' + message.id"
+              :message="message"
+              :is-last-message="index === currentChatMessages.length - 1"
+              @suggestion-click="handleSuggestionClick"
+              @open-tool-dialog="handleOpenToolDialog"
+              @view-logs="handleViewLogs"
+              @duplicate-upto="handleDuplicateUpTo"
+              @switch-branch="(targetId) => handleSwitchBranch(message.id, targetId)"
+            />
+          </div>
+        </el-scrollbar>
+
+        <ChatNavigator
+          :messages="currentChatMessages"
+          :active-message-id="currentVisibleMessageId"
+          @jump="handleJumpToMessage"
+        />
+      </div>
 
       <div
         class="input-container-wrapper"
@@ -38,7 +49,6 @@
         @dragover.prevent.stop="handleContainerDragOver"
         @drop.prevent.stop="handleContainerDrop"
       >
-        <!-- 拖拽文件时的覆盖层 -->
         <div
           v-if="isDraggingOver"
           class="drag-over-overlay"
@@ -56,7 +66,7 @@
           :current-chat="currentChat"
           :messages="currentChatMessages"
           :estimated-tokens="estimatedTokens"
-          @open-settings="settingsDrawerVisible = true"
+          @open-settings="handleOpenSettings"
           @toggle-multi-part-mode="toggleMultiPartMode"
           @trigger-file-upload="handleTriggerFileUpload"
           @open-resource-selector="resourceSelectorVisible = true"
@@ -81,12 +91,14 @@
           :is-multi-part-mode="isMultiPartMode"
           :is-generating="isGenerating"
           :is-send-button-disabled="isSendButtonDisabled"
+          :is-pending-review="isPendingReview"
           v-model:singlePartDraft="singlePartDraft"
           v-model:multiPartDraft="multiPartDraft"
           :active-partition-index="activePartitionIndex"
           @update:active-partition-index="index => activePartitionIndex = index"
           @send="handleSendMessage"
           @stop-generation="handleStopGeneration"
+          @open-review="handleOpenReviewFromInput"
           @undo="undo"
           @redo="redo"
           @files-pasted="handleFileUploads"
@@ -101,12 +113,38 @@
       @save="handleSaveSettings"
     />
 
+    <ChatAgentSettingsDrawer
+      v-model:visible="agentSettingsDrawerVisible"
+      :chat-data="currentChat"
+      @save="handleSaveAgentSettings"
+    />
+
     <ResourceSelectorDialog
       v-model:visible="resourceSelectorVisible"
-      source="toolbar"
+      :context="currentChat?.chatMode === 'agent' ? 'agent-toolbar' : 'chat-toolbar'"
       @mount-resources="handleMountResources"
       @append-resources="handleAppendResources"
       @mount-knowledge-base="handleMountKnowledgeBase"
+    />
+
+    <McpToolDialog
+      v-model:visible="toolDialogVisible"
+      :parent-message-id="toolDialogMessageId"
+      :initial-sub-message-id="toolDialogInitialId"
+      :mode="toolDialogMode"
+    />
+
+    <AskUserDialog
+      v-model:visible="askUserDialogVisible"
+      :parent-message-id="askUserDialogMessageId"
+      :sub-message-id="askUserDialogSubMessageId"
+      :ask-user-content="askUserDialogContent"
+    />
+
+    <LogViewerDialog
+      v-model:visible="logDialogVisible"
+      :message-id="logDialogMessageId"
+      :chat-id="currentChatId"
     />
   </div>
 </template>
@@ -114,32 +152,37 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { useRouter } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { ElScrollbar, ElMessage } from 'element-plus';
 import { UploadFilled } from '@element-plus/icons-vue';
 import type { Ref } from 'vue';
-import type { ChatUpdate, SubMessageCreate, AIModel, Resource } from '@/api/types';
-import { uploadFile } from '@/api/chatService';
+import type { ChatUpdate, SubMessageCreate, AIModel, Resource, Message, SubMessage, AskUserContent } from '@/api/types';
+import { uploadFile } from '@/api/fileService';
+import { duplicateChat } from '@/api/chatService';
 
-// --- Stores & Composables ---
 import { useChatListStore } from '@/stores/chatListStore';
 import { useChatSessionStore } from '@/stores/chatSessionStore';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { useProviderStore } from '@/stores/providerStore';
 import { useSystemConfigStore } from '@/stores/systemConfigStore';
-import { useResourceStore } from '@/stores/resourceStore';
+import { useAgentStore } from '@/stores/agentStore';
 import { useChatInput } from '@/composables/useChatInput';
 import { useResizablePanels } from '@/composables/useResizablePanels';
 import { useTokenEstimator } from '@/composables/useTokenEstimator';
 
-// --- Components ---
 import MessageItem from './MessageItem.vue';
 import ChatToolbar from './ChatToolbar.vue';
 import ChatSettingsDrawer from './ChatSettingsDrawer.vue';
-import ResourceSelectorDialog from './dialogs/ResourceSelectorDialog.vue';
+import ChatAgentSettingsDrawer from './ChatAgentSettingsDrawer.vue';
+import ResourceSelectorDialog from '../common/dialogs/ResourceSelectorDialog.vue';
 import ChatHeader from './ChatHeader.vue';
 import AttachmentPreview from './AttachmentPreview.vue';
 import ChatInputBox from './ChatInputBox.vue';
+import McpToolDialog from './dialogs/McpToolDialog.vue';
+import AskUserDialog from './dialogs/AskUserDialog.vue';
+import LogViewerDialog from './dialogs/LogViewerDialog.vue';
+import ChatNavigator from './ChatNavigator.vue';
 
 interface GroupedModels { label: string; options: AIModel[]; }
 
@@ -148,22 +191,28 @@ const props = defineProps<{
 }>();
 
 const { t } = useI18n();
+const router = useRouter();
 
-// --- Store Instances ---
 const chatListStore = useChatListStore();
 const chatSessionStore = useChatSessionStore();
 const chatInteractionStore = useChatInteractionStore();
 const providerStore = useProviderStore();
 const systemConfigStore = useSystemConfigStore();
-const resourceStore = useResourceStore();
+const agentStore = useAgentStore();
 
-// --- State from Stores ---
 const { refreshingTitleChatId } = storeToRefs(chatListStore);
-const { currentChat, currentChatId, currentChatMessages, isChatHistoryLoading, isGenerating, contextForTokenEstimation, searchTargetSubMessageId } = storeToRefs(chatSessionStore);
+const {
+  currentChat,
+  currentChatId,
+  currentChatMessages,
+  isChatHistoryLoading,
+  isGenerating,
+  contextForTokenEstimation,
+  searchTargetSubMessageId,
+  systemPromptResources
+} = storeToRefs(chatSessionStore);
 const { groupedModels } = storeToRefs(providerStore) as { groupedModels: Ref<GroupedModels[]>};
-const { resources: allResources } = storeToRefs(resourceStore);
 
-// --- State from Composables ---
 const {
   isMultiPartMode,
   singlePartDraft,
@@ -184,13 +233,11 @@ const {
   appendContentToDraft,
 } = useChatInput(currentChatId);
 
-// --- Resizable Input Area Logic ---
 const inputAreaHeight = ref(150);
-const isInputAreaCollapsed = ref(false); // 用于配合 useResizablePanels，但在输入框上下调整场景下不涉及折叠逻辑
+const isInputAreaCollapsed = ref(false);
 const MIN_INPUT_HEIGHT = 100;
 const MAX_INPUT_HEIGHT = 600;
 
-// useResizablePanels 需要 isCollapsed 参数，即使在此场景下不使用
 const { startResize: startResizeInputArea } = useResizablePanels(inputAreaHeight, isInputAreaCollapsed, {
   min: MIN_INPUT_HEIGHT,
   max: MAX_INPUT_HEIGHT,
@@ -200,11 +247,9 @@ const { startResize: startResizeInputArea } = useResizablePanels(inputAreaHeight
 
 const pendingMessageTextForTokenEstimation = computed(() => {
   const parts: string[] = [];
-
   if (currentUserInputText.value) {
     parts.push(currentUserInputText.value);
   }
-
   attachedSubmessageResources.value.forEach(resource => {
     if (resource.resourceType === 'submessage_template' && resource.latest_version) {
       const cpl = resource.latest_version.attributes?.context_participation_length;
@@ -215,116 +260,107 @@ const pendingMessageTextForTokenEstimation = computed(() => {
       }
     }
   });
-
   return parts.join('\n');
 });
 
 const { estimatedTokens } = useTokenEstimator(contextForTokenEstimation, pendingMessageTextForTokenEstimation);
 
-// --- Local Component State ---
 const scrollbarRef = ref<InstanceType<typeof ElScrollbar>>();
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const chatInputBoxRef = ref<InstanceType<typeof ChatInputBox>>();
 const attachmentPreviewRef = ref<InstanceType<typeof AttachmentPreview> | null>(null);
 const settingsDrawerVisible = ref(false);
+const agentSettingsDrawerVisible = ref(false);
 const resourceSelectorVisible = ref(false);
 const userHasScrolledUp = ref(false);
 const previousPreviewHeight = ref(0);
 const isDraggingOver = ref(false);
+const isSwitchingBranch = ref(false);
 
-// --- Lifecycle Hooks ---
+const currentVisibleMessageId = ref<string | null>(null);
+
+const toolDialogVisible = ref(false);
+const toolDialogMessageId = ref<string | null>(null);
+const toolDialogInitialId = ref<string | undefined>(undefined);
+const toolDialogMode = ref<'review_all' | 'single'>('single');
+
+const askUserDialogVisible = ref(false);
+const askUserDialogMessageId = ref<string | null>(null);
+const askUserDialogSubMessageId = ref<string | null>(null);
+const askUserDialogContent = ref<AskUserContent | null>(null);
+
+const logDialogVisible = ref(false);
+const logDialogMessageId = ref<string | null>(null);
+
 onMounted(() => {
   systemConfigStore.fetchSystemConfig();
+  if (agentStore.allAgents.length === 0) {
+    agentStore.fetchAllAgents();
+  }
 });
 
-// --- Computed Properties ---
 const isTitleRefreshing = computed(() => refreshingTitleChatId.value === currentChat.value?.id);
 const isSendButtonDisabled = computed(() => isGenerating.value || !isReadyToSend.value);
 
-/**
- * 提取当前启用的知识库ID
- * 逻辑：解析 modelParameters.enabled_mcp_ids['system-knowledge-base']['MAMBOCHAT_RESOURCE_ID']
- */
-const activeKnowledgeBaseId = computed(() => {
-  const params = currentChat.value?.modelParameters;
-  if (!params?.enabled_mcp_ids) return null;
-
-  // 仅支持新的字典结构
-  if (!Array.isArray(params.enabled_mcp_ids) && typeof params.enabled_mcp_ids === 'object') {
-    const kbConfig = params.enabled_mcp_ids['system-knowledge-base'];
-    return kbConfig?.['MAMBOCHAT_RESOURCE_ID'] || null;
-  }
-  return null;
-});
-
-/**
- * 获取当前挂载的知识库资源对象列表 (用于 AttachmentPreview)
- */
 const attachedKnowledgeBases = computed(() => {
-  const id = activeKnowledgeBaseId.value;
-  if (!id) return [];
-
-  const resource = allResources.value.find(r => r.id === id);
-  if (resource) {
-    return [resource];
-  }
-
-  // 如果 Store 中没有找到（可能未加载详情），返回一个占位对象
-  // 注意：这里使用类型断言构造一个最小化的 Resource 对象
-  return [{
-    id,
-    name: '加载中...',
-    description: '正在获取知识库详情',
-    itemType: 'resource',
-    resourceType: 'knowledge_base',
-    parentId: null,
-    sortOrder: 0,
-    createdAt: '',
-    updatedAt: '',
-    latest_version: null,
-    kb_id: null,
-    kb_config: null
-  } as Resource];
+  return systemPromptResources.value.filter(r => r.resourceType === 'knowledge_base');
 });
 
-// --- Watchers for Knowledge Base ---
-watch(activeKnowledgeBaseId, (newId) => {
-  if (newId) {
-    // 如果有ID但本地没有详情，尝试获取
-    const exists = allResources.value.some(r => r.id === newId);
-    if (!exists) {
-      resourceStore.fetchResourceDetails(newId);
-    }
-  }
-}, { immediate: true });
+const pendingReviewSubMessages = computed<SubMessage[]>(() => {
+  const pendingMsg = currentChatMessages.value.find(msg => msg.status === 'pending_review');
+  if (!pendingMsg) return [];
+  return pendingMsg.sub_messages.filter(
+    sm => (sm.type === 'ReviewTool' || sm.type === 'AskUser') && sm.status === 'pending_review'
+  );
+});
 
-// --- Methods ---
+const isPendingReview = computed(() => pendingReviewSubMessages.value.length > 0);
 
-/**
- * 辅助函数：将 enabled_mcp_ids 统一标准化为字典格式
- * 兼容旧的数组格式，转换为 Key-Value 结构 (Value 为空对象)
- */
-function normalizeMcpIds(currentIds: any): Record<string, any> {
-  if (!currentIds) return {};
-  if (Array.isArray(currentIds)) {
-    return currentIds.reduce((acc, id) => {
-      acc[id] = {};
-      return acc;
-    }, {} as Record<string, any>);
+function handleOpenToolDialog(message: Message, subMessageId: string, mode: 'review_all' | 'single' = 'single') {
+  // 检查是否是 AskUser 类型，打开对应的对话框
+  const sub = message.sub_messages.find(sm => sm.id === subMessageId);
+  if (sub && sub.type === 'AskUser') {
+    handleOpenAskUserDialog(message, sub);
+    return;
   }
-  if (typeof currentIds === 'object') {
-    return { ...currentIds };
-  }
-  return {};
+  toolDialogMessageId.value = message.id;
+  toolDialogInitialId.value = subMessageId;
+  toolDialogMode.value = mode;
+  toolDialogVisible.value = true;
 }
 
-/**
- * 处理资源挂载操作 (Toolbar 场景)
- * 支持: submessage_template, file
- */
+function handleOpenAskUserDialog(message: Message, subMessage: SubMessage) {
+  try {
+    askUserDialogContent.value = JSON.parse(subMessage.content) as AskUserContent;
+  } catch {
+    askUserDialogContent.value = null;
+  }
+  askUserDialogMessageId.value = message.id;
+  askUserDialogSubMessageId.value = subMessage.id;
+  askUserDialogVisible.value = true;
+}
+
+function handleViewLogs(messageId: string) {
+  logDialogMessageId.value = messageId;
+  logDialogVisible.value = true;
+}
+
+function handleOpenReviewFromInput() {
+  if (pendingReviewSubMessages.value.length > 0) {
+    const pendingSubMsg = pendingReviewSubMessages.value[0];
+    const parentMsg = currentChatMessages.value.find(m => m.id === pendingSubMsg.messageId);
+    if (parentMsg) {
+      if (pendingSubMsg.type === 'AskUser') {
+        handleOpenAskUserDialog(parentMsg, pendingSubMsg);
+      } else {
+        handleOpenToolDialog(parentMsg, pendingSubMsg.id, 'review_all');
+      }
+    }
+  }
+}
+
 async function handleMountResources(resources: Resource[]) {
   let hasFileAdded = false;
-
   for (const resource of resources) {
     if (resource.resourceType === 'submessage_template') {
       addAttachedResource(resource);
@@ -334,20 +370,15 @@ async function handleMountResources(resources: Resource[]) {
         addUploadedFile(fileInfo);
         hasFileAdded = true;
       } else {
-        ElMessage.warning(`资源 "${resource.name}" 文件信息为空，已跳过`);
+        ElMessage.warning(t('chat.attachment.resourceFileEmpty', { name: resource.name }));
       }
     }
   }
-
   if (hasFileAdded) {
-    ElMessage.success('已从资源库添加文件');
+    ElMessage.success(t('chat.attachment.resourceFileAdded'));
   }
 }
 
-/**
- * 处理资源追加操作 (Toolbar 场景)
- * 支持: system_prompt, submessage_template, knowledge_base_chunk
- */
 async function handleAppendResources(resources: Resource[]) {
   const contentsToAppend = resources
     .map(res => res.latest_version?.content)
@@ -360,75 +391,43 @@ async function handleAppendResources(resources: Resource[]) {
   }
 }
 
-/**
- * 处理知识库挂载操作
- * 将知识库ID写入 enabled_mcp_ids 的 system-knowledge-base 配置中
- */
-async function handleMountKnowledgeBase(resource: Resource) {
+async function handleMountKnowledgeBase(resources: Resource[]) {
   if (!currentChat.value) return;
-
-  const currentParams = currentChat.value.modelParameters || {};
-  const mcpIds = normalizeMcpIds(currentParams.enabled_mcp_ids);
-
-  // 设置知识库配置
-  mcpIds['system-knowledge-base'] = {
-    MAMBOCHAT_RESOURCE_ID: resource.id
-  };
-
-  const updatedSettings: ChatUpdate = {
-    modelParameters: {
-      ...currentParams,
-      enabled_mcp_ids: mcpIds,
-    },
-  };
-
-  await chatListStore.updateChatSettings(currentChat.value.id, updatedSettings);
-  ElMessage.success(`已启用知识库: ${resource.name}`);
-}
-
-/**
- * 处理知识库移除操作
- */
-async function handleRemoveKnowledgeBase(resourceId: string) {
-  if (!currentChat.value) return;
-
-  const currentParams = currentChat.value.modelParameters || {};
-  const mcpIds = normalizeMcpIds(currentParams.enabled_mcp_ids);
-
-  // 移除配置
-  if (mcpIds['system-knowledge-base']) {
-    delete mcpIds['system-knowledge-base'];
-
-    const updatedSettings: ChatUpdate = {
-      modelParameters: {
-        ...currentParams,
-        enabled_mcp_ids: mcpIds,
-      },
-    };
-
-    await chatListStore.updateChatSettings(currentChat.value.id, updatedSettings);
-    ElMessage.success('已停用知识库检索');
+  const currentList = currentChat.value.resource_prompt_list || [];
+  const newIds = resources.map(r => r.id).filter(id => !currentList.includes(id));
+  if (newIds.length > 0) {
+    const updatedList = [...currentList, ...newIds];
+    await chatListStore.updateChatSettings(currentChat.value.id, {
+      resource_prompt_list: updatedList
+    });
+    ElMessage.success(t('chat.attachment.kbEnabled', { names: resources.map(r => r.name).join(', ') }));
   }
 }
 
-// --- File Upload Logic ---
+async function handleRemoveKnowledgeBase(resourceId: string) {
+  if (!currentChat.value) return;
+  const currentList = currentChat.value.resource_prompt_list || [];
+  const updatedList = currentList.filter(id => id !== resourceId);
+  await chatListStore.updateChatSettings(currentChat.value.id, {
+    resource_prompt_list: updatedList.length > 0 ? updatedList : null
+  });
+  ElMessage.success(t('chat.attachment.kbDisabled'));
+}
 
 async function handleFileUploads(files: FileList) {
   if (!files || files.length === 0) return;
-
   for (const file of Array.from(files)) {
     try {
       const fileInfo = await uploadFile(file);
       addUploadedFile(fileInfo);
     } catch (error) {
       console.error(`Failed to upload file ${file.name}:`, error);
-      ElMessage.error(`文件 ${file.name} 上传失败`);
+      ElMessage.error(t('chat.attachment.fileUploadFailed', { name: file.name }));
     }
   }
 }
 
 function handleContainerDragEnter(event: DragEvent) {
-  // 仅当拖拽内容包含文件时才显示上传遮罩，避免与内部 Tag 拖拽冲突
   if (event.dataTransfer && event.dataTransfer.types.includes('Files')) {
     isDraggingOver.value = true;
   }
@@ -455,15 +454,12 @@ function handleTriggerFileUpload() {
 async function onFileSelected(event: Event) {
   const target = event.target as HTMLInputElement;
   if (!target.files) return;
-
   await handleFileUploads(target.files);
   target.value = '';
 }
 
-// --- Send & Stop Logic ---
 async function handleSendMessage() {
   if (isSendButtonDisabled.value) return;
-
   const textParts = isMultiPartMode.value
     ? multiPartDraft.value.map(p => p.content)
     : [singlePartDraft.value];
@@ -500,83 +496,96 @@ function handleStopGeneration() {
   if (genMsg) chatInteractionStore.cancelGeneration(genMsg.id);
 }
 
-// --- Title Actions ---
 function handleRefreshTitle() {
   if (currentChat.value) {
     chatListStore.refreshChatTitle(currentChat.value.id);
   }
 }
 
-// --- Settings & Tools ---
 async function handleSaveSettings(settings: ChatUpdate) {
   if (!currentChat.value) return;
-  await chatListStore.updateChatSettings(currentChat.value.id, settings);
+  const finalSettings = { ...settings };
+  if (settings.resource_prompt_list !== undefined) {
+    const kbIds = attachedKnowledgeBases.value.map(r => r.id);
+    const promptIds = settings.resource_prompt_list || [];
+    finalSettings.resource_prompt_list = [...new Set([...promptIds, ...kbIds])];
+  }
+  await chatListStore.updateChatSettings(currentChat.value.id, finalSettings);
   settingsDrawerVisible.value = false;
   ElMessage.success(t('chat.settings.saveSuccess'));
 }
 
-/**
- * 处理联网搜索工具的启用/停用切换。
- * 目标 ID: system-ddgs-search
- */
+async function handleSaveAgentSettings(settings: ChatUpdate) {
+  if (!currentChat.value) return;
+  await chatListStore.updateChatSettings(currentChat.value.id, settings);
+  agentSettingsDrawerVisible.value = false;
+  ElMessage.success(t('chat.settings.saveSuccess'));
+}
+
+function handleOpenSettings() {
+  if (currentChat.value?.chatMode === 'agent') {
+    agentSettingsDrawerVisible.value = true;
+  } else {
+    settingsDrawerVisible.value = true;
+  }
+}
+
 async function handleToggleWebSearch() {
   if (!currentChat.value) return;
-
   const SEARCH_TOOL_ID = 'system-ddgs-search';
-  const currentParams = currentChat.value.modelParameters || {};
-  const mcpIds = normalizeMcpIds(currentParams.enabled_mcp_ids);
-
-  if (mcpIds[SEARCH_TOOL_ID]) {
-    delete mcpIds[SEARCH_TOOL_ID];
-  } else {
-    mcpIds[SEARCH_TOOL_ID] = {};
-  }
-
-  const updatedSettings: ChatUpdate = {
-    modelParameters: {
-      ...currentParams,
-      enabled_mcp_ids: mcpIds,
-    },
-  };
-
-  await chatListStore.updateChatSettings(currentChat.value.id, updatedSettings);
-  ElMessage.success(`联网搜索已${mcpIds[SEARCH_TOOL_ID] ? '启用' : '禁用'}`);
+  const currentIds = currentChat.value.enabled_mcp_ids || [];
+  const newIds = currentIds.includes(SEARCH_TOOL_ID)
+    ? currentIds.filter(id => id !== SEARCH_TOOL_ID)
+    : [...currentIds, SEARCH_TOOL_ID];
+  await chatListStore.updateChatSettings(currentChat.value.id, { enabled_mcp_ids: newIds });
+  ElMessage.success(newIds.includes(SEARCH_TOOL_ID) ? t('chat.toolbar.webSearchEnabled') : t('chat.toolbar.webSearchDisabled'));
 }
 
-/**
- * 处理通用 MCP 工具的启用/停用切换。
- */
 async function handleToggleMcpTool(mcpId: string) {
   if (!currentChat.value) return;
-
-  const currentParams = currentChat.value.modelParameters || {};
-  const mcpIds = normalizeMcpIds(currentParams.enabled_mcp_ids);
-
-  if (mcpIds[mcpId]) {
-    delete mcpIds[mcpId];
-  } else {
-    mcpIds[mcpId] = {};
-  }
-
-  const updatedSettings: ChatUpdate = {
-    modelParameters: {
-      ...currentParams,
-      enabled_mcp_ids: mcpIds,
-    },
-  };
-
-  await chatListStore.updateChatSettings(currentChat.value.id, updatedSettings);
+  const currentIds = currentChat.value.enabled_mcp_ids || [];
+  const newIds = currentIds.includes(mcpId)
+    ? currentIds.filter(id => id !== mcpId)
+    : [...currentIds, mcpId];
+  await chatListStore.updateChatSettings(currentChat.value.id, { enabled_mcp_ids: newIds });
 }
 
-
-// --- Scroll & Navigation ---
 const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
   const el = scrollbarRef.value?.wrapRef;
   if (!el) return;
+
   userHasScrolledUp.value = el.scrollHeight - el.clientHeight - scrollTop > 20;
+
+  const containerRect = el.getBoundingClientRect();
+  const detectY = containerRect.top + containerRect.height * 0.3;
+
+  let activeUserId: string | null = null;
+
+  const userMsgs = currentChatMessages.value.filter(m => m.role === 'user');
+
+  for (let i = userMsgs.length - 1; i >= 0; i--) {
+    const msg = userMsgs[i];
+    const dom = document.getElementById(`msg-${msg.id}`);
+    if (dom) {
+      const rect = dom.getBoundingClientRect();
+      if (rect.top <= detectY) {
+        activeUserId = msg.id;
+        break;
+      }
+    }
+  }
+
+  if (!activeUserId && userMsgs.length > 0) {
+    activeUserId = userMsgs[0].id;
+  }
+
+  if (activeUserId) {
+    currentVisibleMessageId.value = activeUserId;
+  }
 };
 
 const scrollToBottom = (force = false) => {
+  if (isSwitchingBranch.value) return;
   if (!force && userHasScrolledUp.value && isGenerating.value) return;
   nextTick(() => {
     const scrollbar = scrollbarRef.value;
@@ -597,36 +606,27 @@ function handleJumpToMessage(messageId: string) {
 }
 
 function handleJumpToSubMessage(subMessageId: string) {
-  // 找到包含该subMessage的message
   const message = currentChatMessages.value.find(msg =>
     msg.sub_messages.some(sm => sm.id === subMessageId)
   );
 
   if (message) {
-    // 1. 先尝试跳转到父消息位置，让滚动条大致到位
     handleJumpToMessage(message.id);
 
-    // 2. 使用双重 nextTick 确保子组件（如 SubMessageItem）已完全展开并渲染
     nextTick(() => {
       nextTick(() => {
         const subMessageElement = document.getElementById(`sub-msg-${subMessageId}`);
         const scrollbarWrap = scrollbarRef.value?.wrapRef;
 
         if (subMessageElement && scrollbarWrap) {
-          // 获取subMessage相对于滚动容器的实际位置
           const elementRect = subMessageElement.getBoundingClientRect();
           const containerRect = scrollbarWrap.getBoundingClientRect();
-
-          // 计算相对位移
           const relativeTop = elementRect.top - containerRect.top;
           const currentScrollTop = scrollbarWrap.scrollTop;
-
-          // 目标位置 = 当前滚动位置 + 相对位移 - 顶部留白(20px)
           const offset = currentScrollTop + relativeTop - 20;
 
           scrollbarRef.value!.setScrollTop(offset);
 
-          // 高亮显示该subMessage
           subMessageElement.classList.add('search-highlight-target');
           setTimeout(() => {
             subMessageElement.classList.remove('search-highlight-target');
@@ -650,11 +650,63 @@ function handleSuggestionClick(text: string) {
   });
 }
 
-// --- Watchers ---
+async function handleDuplicateUpTo(messageId: string) {
+  if (!currentChatId.value) return;
+  try {
+    const newChat = await duplicateChat(currentChatId.value, { up_to_message_id: messageId });
+    ElMessage.success(t('common.msg.duplicateSuccess'));
+
+    const exists = chatListStore.chatList.some(c => c.id === newChat.id);
+    if (!exists) {
+      chatListStore.chatList.push(newChat);
+    }
+    await chatSessionStore.selectChat(newChat.id)
+  } catch (error) {
+    console.error('Failed to duplicate chat up to message:', error);
+    ElMessage.error(t('common.error.operationFailed'));
+  }
+}
+
+async function handleSwitchBranch(currentMessageId: string, targetMessageId: string) {
+  if (isGenerating.value) return;
+
+  isSwitchingBranch.value = true;
+  const scrollbarWrap = scrollbarRef.value?.wrapRef;
+  let relativeTop = 0;
+
+  if (scrollbarWrap) {
+    const currentElement = document.getElementById(`msg-${currentMessageId}`);
+    if (currentElement) {
+      const elementRect = currentElement.getBoundingClientRect();
+      const containerRect = scrollbarWrap.getBoundingClientRect();
+      relativeTop = elementRect.top - containerRect.top;
+    }
+  }
+
+  try {
+    await chatInteractionStore.activateBranch(targetMessageId);
+
+    await nextTick();
+    await new Promise(resolve => requestAnimationFrame(resolve));
+
+    if (scrollbarWrap) {
+      const targetElement = document.getElementById(`msg-${targetMessageId}`);
+      if (targetElement) {
+        const targetRect = targetElement.getBoundingClientRect();
+        const containerRect = scrollbarWrap.getBoundingClientRect();
+        const currentRelativeTop = targetRect.top - containerRect.top;
+
+        const diff = currentRelativeTop - relativeTop;
+        scrollbarWrap.scrollTop += diff;
+      }
+    }
+  } finally {
+    isSwitchingBranch.value = false;
+  }
+}
 
 watch([uploadedFiles, attachedSubmessageResources, attachedKnowledgeBases], async () => {
   await nextTick();
-
   const previewEl = (attachmentPreviewRef.value?.$el as HTMLDivElement);
   const currentPreviewHeight = previewEl?.offsetHeight ?? 0;
   const heightDifference = currentPreviewHeight - previousPreviewHeight.value;
@@ -663,7 +715,6 @@ watch([uploadedFiles, attachedSubmessageResources, attachedKnowledgeBases], asyn
     const newTotalHeight = inputAreaHeight.value + heightDifference;
     inputAreaHeight.value = Math.max(MIN_INPUT_HEIGHT, Math.min(newTotalHeight, MAX_INPUT_HEIGHT));
   }
-
   previousPreviewHeight.value = currentPreviewHeight;
 }, { deep: true });
 
@@ -680,21 +731,19 @@ watch(currentChatId, (newId) => {
   if (newId) {
     userHasScrolledUp.value = false;
     previousPreviewHeight.value = 0;
+    currentVisibleMessageId.value = null;
 
     const stopWatch = watch(isChatHistoryLoading, (loading) => {
       if (!loading) {
         if (searchTargetSubMessageId.value) {
-          // 场景 A: 有搜索目标，执行精准跳转，不滚动到底部
           handleJumpToSubMessage(searchTargetSubMessageId.value);
-          chatSessionStore.setSearchTarget(null); // 跳转后清除目标
+          chatSessionStore.setSearchTarget(null);
         } else {
-          // 场景 B: 普通切换，滚动到底部
           scrollToBottom(true);
         }
         nextTick(() => {
             chatInputBoxRef.value?.focus();
         });
-
         stopWatch();
       }
     }, { immediate: true });
@@ -705,7 +754,15 @@ watch(currentChatId, (newId) => {
 <style scoped>
 .chat-window-container { height: 100%; display: flex; flex-direction: column; background-color: var(--color-background); overflow: hidden; }
 .welcome-view { display: flex; justify-content: center; align-items: center; height: 100%; }
-.message-list-scrollbar { flex-grow: 1; }
+
+.scroll-area-wrapper {
+  position: relative;
+  flex-grow: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.message-list-scrollbar { width: 100%; height: 100%; }
 .message-list-wrapper { padding: 20px; }
 .input-container-wrapper { flex-shrink: 0; position: relative; display: flex; flex-direction: column; border-top: 1px solid var(--color-border); }
 .resize-handle { position: absolute; top: -3px; left: 0; width: 100%; height: 6px; cursor: ns-resize; z-index: 10; }
@@ -737,7 +794,6 @@ watch(currentChatId, (newId) => {
   font-weight: bold;
 }
 
-/* 搜索高亮目标样式 */
 :deep(.search-highlight-target) {
   animation: highlight-pulse 0.5s ease-in-out 3;
   background-color: var(--el-color-warning-light-9);
@@ -756,19 +812,16 @@ watch(currentChatId, (newId) => {
   }
 }
 
-/* 覆盖 Element Plus 滚动条样式 */
 .message-list-scrollbar :deep(.el-scrollbar__bar.is-vertical) {
-  width: 14px; /* 增加感应区域宽度 */
+  width: 14px;
 }
 
-/* 默认视觉状态：细条、靠右 */
 .message-list-scrollbar :deep(.el-scrollbar__bar.is-vertical .el-scrollbar__thumb) {
   width: 6px;
   margin-left: auto;
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* 交互状态（悬停或拖动）：变宽 */
 .message-list-scrollbar :deep(.el-scrollbar__bar.is-vertical:hover .el-scrollbar__thumb),
 .message-list-scrollbar :deep(.el-scrollbar__bar.is-vertical:active .el-scrollbar__thumb) {
   width: 14px;

@@ -11,6 +11,7 @@ export interface AIModelMetaConfig {
   input_modalities?: string[] | null
   output_modalities?: string[] | null
   supported_parameters?: string[] | null
+  max_retries?: number | null
 }
 
 export interface AIModelBase {
@@ -18,6 +19,7 @@ export interface AIModelBase {
   name: string
   model_type: ModelType
   meta_config?: AIModelMetaConfig | null
+  starred?: boolean
 }
 
 export interface AIModel extends AIModelBase {
@@ -33,6 +35,7 @@ export interface AIModelUpdate {
   name?: string
   model_type?: ModelType
   meta_config?: AIModelMetaConfig | null
+  starred?: boolean
 }
 
 export interface AIProvider {

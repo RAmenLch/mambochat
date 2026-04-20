@@ -10,7 +10,24 @@ export type ResourceType =
   | 'knowledge_base_chunk'
   | 'kb_file'
   | 'file'
+  | 'skill'
   | string
+
+export interface SkillCreate {
+  name: string
+  description: string
+  parentId?: string | null
+}
+
+//  SKILL 验证结果
+export interface SkillValidationResult {
+  is_valid: boolean
+  errors: string[]
+  warnings: string[]
+}
+
+
+
 
 // --- Knowledge Base Types ---
 
@@ -41,7 +58,7 @@ export interface KBChunkStatus {
   is_stale: boolean
 }
 
-export type SplitterType = 'simple' | 'separator'
+export type SplitterType = 'simple' | 'separator' | 'markdown'
 export type KBTaskAction = 'start' | 'resume' | 'stop'
 
 export interface KBSplitterConfig {
@@ -218,4 +235,18 @@ export interface ResourceSearchResultItem {
 export interface ResourceSearchResponse {
   total: number
   items: ResourceSearchResultItem[]
+}
+
+export interface SkillImportResultItem {
+  name: string
+  status: 'success' | 'failed'
+  resource_id: string | null
+  error: string | null
+}
+
+export interface SkillImportResponse {
+  total_detected: number
+  success_count: number
+  failed_count: number
+  details: SkillImportResultItem[]
 }

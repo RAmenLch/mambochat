@@ -80,6 +80,23 @@
           />
         </el-form-item>
       </template>
+
+      <!-- 通用配置: max_retries -->
+      <el-form-item :label="t('model.form.maxRetries')">
+        <div class="slider-row">
+          <el-slider
+            :model-value="form.meta_config.max_retries ?? 0"
+            @update:model-value="form.meta_config!.max_retries = Number($event)"
+            :min="0"
+            :max="20"
+            :step="1"
+            :show-tooltip="false"
+            style="flex: 1; margin-right: 12px;"
+          />
+          <span v-if="(form.meta_config.max_retries ?? 0) === 0" class="slider-tag">{{ t('model.form.useGlobal') }}</span>
+          <span v-else class="slider-tag slider-tag--value">{{ form.meta_config.max_retries }}</span>
+        </div>
+      </el-form-item>
     </el-form>
 
     <template #footer>
@@ -133,7 +150,8 @@ const defaultMeta = (): AIModelMetaConfig => ({
   tokenizer: null,
   input_modalities: [],
   output_modalities: [],
-  supported_parameters: []
+  supported_parameters: [],
+  max_retries: 0,
 });
 
 // 表单数据
@@ -232,5 +250,24 @@ const submitForm = async () => {
 <style scoped>
 .mobile-form {
   padding: 0 10px;
+}
+.slider-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+.slider-tag {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.slider-tag--value {
+  font-weight: 600;
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
 }
 </style>

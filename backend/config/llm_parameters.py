@@ -49,10 +49,50 @@ SUPPORTED_LLM_PARAMETERS: List[LLMParameter] = [
         key="max_tokens",
         label="Max Tokens",
         path=["max_tokens"],
-        description="单次请求中，模型生成的最大token数量。这会影响回复的长度。",
+        description="单次请求中，模型生成的最大token数量。这会影响回复的长度。部分新模型推荐使用 max_completion_tokens 替代此参数。",
         type="integer",
         limit={"min": 1},
         default_value=4096,
+        default_activate=False
+    ),
+    LLMParameter(
+        key="max_completion_tokens",
+        label="Max Completion Tokens",
+        path=["max_completion_tokens"],
+        description="指定模型生成的最大完成token数（含推理token）。这是 max_tokens 的新版替代参数，部分新模型（如 GPT-4.1 系列）推荐使用此参数。",
+        type="integer",
+        limit={"min": 1},
+        default_value=4096,
+        default_activate=False
+    ),
+    LLMParameter(
+        key="frequency_penalty",
+        label="Frequency Penalty",
+        path=["frequency_penalty"],
+        description="降低模型重复使用已在文本中出现过的词的概率。值越高，越倾向于使用新词汇，减少重复。范围 -2.0 到 2.0。",
+        type="number",
+        limit={"min": -2.0, "max": 2.0},
+        default_value=0,
+        default_activate=False
+    ),
+    LLMParameter(
+        key="presence_penalty",
+        label="Presence Penalty",
+        path=["presence_penalty"],
+        description="增加模型谈论新话题的倾向。值越高，越倾向于引入新概念，增加话题多样性。范围 -2.0 到 2.0。",
+        type="number",
+        limit={"min": -2.0, "max": 2.0},
+        default_value=0,
+        default_activate=False
+    ),
+    LLMParameter(
+        key="repetition_penalty",
+        label="Repetition Penalty",
+        path=["repetition_penalty"],
+        description="对已生成的token施加惩罚因子。值大于1时，降低重复生成相同token的概率；值等于1时无惩罚。常用于开源模型（如 Llama、Qwen）。",
+        type="number",
+        limit={"min": 1.0, "max": 2.0},
+        default_value=1.0,
         default_activate=False
     ),
     LLMParameter(
@@ -76,10 +116,30 @@ SUPPORTED_LLM_PARAMETERS: List[LLMParameter] = [
         default_activate=False
     ),
     LLMParameter(
+        key="min_p",
+        label="Min P",
+        path=["min_p"],
+        description="设置token概率的最小阈值。只有概率不小于最可能token概率的P倍的token才会被考虑。值越低，采样范围越广。范围 0.0 到 1.0。",
+        type="number",
+        limit={"min": 0.0, "max": 1.0},
+        default_value=0.1,
+        default_activate=False
+    ),
+    LLMParameter(
+        key="stop",
+        label="Stop Sequences",
+        path=["stop"],
+        description="当模型生成指定的停止序列时停止输出。可以传入最多4个字符串，以逗号分隔输入。",
+        type="string",
+        limit=None,
+        default_value=None,
+        default_activate=False
+    ),
+    LLMParameter(
         key="openrouter::image_config.aspect_ratio",
         label="Image Aspect Ratio (OpenRouter)",
         path=["image_config", "aspect_ratio"],
-        description="（示例）用于图像生成模型，控制生成图像的宽高比。",
+        description="用于图像生成模型，控制生成图像的宽高比。",
         type="string",
         limit=["1:1","2:3","3:2","3:4","4:3","4:5","5:4","16:9","9:16","21:9"],
         default_value="1:1",
@@ -89,7 +149,7 @@ SUPPORTED_LLM_PARAMETERS: List[LLMParameter] = [
         key="gemini::includeThoughts",
         label="includeThoughts(Gemini)",
         path=["include_thoughts"],
-        description="用于是否输出思考总结",
+        description="是否在响应中输出 Gemini 模型的思考过程。",
         type="boolean",
         limit=[True,False],
         default_value=True,
@@ -97,9 +157,9 @@ SUPPORTED_LLM_PARAMETERS: List[LLMParameter] = [
     ),
     LLMParameter(
         key="gemini::reasoning_effort",
-        label="reasoning_effort(Gemini)",
+        label="Reasoning Effort (Gemini)",
         path=["reasoning_effort"],
-        description="（示例）用于控制思考思考预算",
+        description="控制 Gemini 模型的推理努力级别。值越高，推理越深入但响应越慢。",
         type="string",
         limit=["minimal","low","medium","high"],
         default_value="medium",
@@ -107,19 +167,29 @@ SUPPORTED_LLM_PARAMETERS: List[LLMParameter] = [
     ),
     LLMParameter(
         key="reasoning",
-        label="reasoning.effort(Openrouter)",
+        label="Reasoning Effort (OpenRouter)",
         path=["reasoning","effort"],
-        description="（示例）用于控制思考思考预算",
+        description="通过 OpenRouter 的嵌套结构控制推理努力级别。映射为 {reasoning: {effort: value}}。值越高，推理越深入但响应越慢。",
         type="string",
         limit=["minimal","low","medium","high"],
         default_value="medium",
         default_activate=False
     ),
     LLMParameter(
+        key="include_reasoning",
+        label="Include Reasoning",
+        path=["include_reasoning"],
+        description="当模型支持推理模式时，是否在响应中返回推理过程（thinking/reasoning 内容）。",
+        type="boolean",
+        limit=[True, False],
+        default_value=True,
+        default_activate=False
+    ),
+    LLMParameter(
         key="anthropic::thinking.type",
-        label="thinking.type(Anthropic)",
+        label="Thinking Type (Anthropic)",
         path=["thinking", "type"],
-        description="用于是否启动思考,启用后须启用thinking.budget_tokens",
+        description="是否启用 Anthropic 扩展思考模式。启用后须同时设置 thinking.budget_tokens。",
         type="string",
         limit=["enabled","disabled"],
         default_value="enabled",
@@ -127,12 +197,22 @@ SUPPORTED_LLM_PARAMETERS: List[LLMParameter] = [
     ),
     LLMParameter(
         key="anthropic::thinking.budget_tokens",
-        label="thinking.budget_tokens(Openrouter)",
+        label="Thinking Budget Tokens (Anthropic)",
         path=["thinking", "budget_tokens"],
-        description="用于控制思考思考预算,须启用thinking.type(Anthropic)",
+        description="Anthropic 扩展思考模式的最大 token 预算。须同时启用 thinking.type(Anthropic)。",
         type="integer",
         limit={"min": 1000,"max":32000},
         default_value=2048,
+        default_activate=False
+    ),
+    LLMParameter(
+        key="anthropic::verbosity",
+        label="Verbosity (Anthropic)",
+        path=["verbosity"],
+        description="控制 Anthropic 模型输出的详细程度。",
+        type="string",
+        limit=["concise", "default", "verbose"],
+        default_value="default",
         default_activate=False
     ),
 

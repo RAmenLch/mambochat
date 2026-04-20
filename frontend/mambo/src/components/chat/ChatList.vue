@@ -1,11 +1,6 @@
 <!-- frontend/mambo/src/components/chat/ChatList.vue -->
 <template>
   <div class="chat-list-container">
-    <!--
-      显示逻辑升级：
-      显示树形列表的条件：必须处于非折叠状态，且当前宽度大于视觉阈值。
-      否则，显示竖向 Header（提前进入视觉折叠态）。
-    -->
     <template v-if="showTree">
       <ExplorerTree
         ref="treeRef"
@@ -15,17 +10,29 @@
         :loading-folder-ids="loadingFolders"
         folder-item-type="folder"
         persistence-key="mambo_chat_folder_expanded_state"
+        :enable-multi-select="true"
+        :custom-allow-drop="customAllowDrop"
         class="chat-tree"
         @node-click="handleNodeClick"
-        @node-contextmenu="handleNodeContextMenu"
-        @root-contextmenu="openRootContextMenu"
+        @node-contextmenu="onNodeContextMenu"
+        @root-contextmenu="onRootContextMenu"
         @move="handleMove"
         @node-expand="handleNodeExpand"
       >
         <template #header>
-          <!-- 添加 no-wrap 样式防止在临界宽度时换行 -->
           <div class="chat-list-header">
             <h4>{{ $t('chat.sidebar.title') }}</h4>
+            <el-tooltip
+              :content="isManualSort ? $t('chat.sidebar.sortByTime') : $t('chat.sidebar.sortManual')"
+              placement="top"
+            >
+              <el-button
+                link
+                :icon="Sort"
+                class="sort-toggle-btn"
+                @click="toggleSortMode"
+              />
+            </el-tooltip>
           </div>
         </template>
 
@@ -46,41 +53,50 @@
         <span :style="contextMenuPosition" />
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item
-              v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'"
-              command="newChat"
-            >
-              <el-icon><Plus /></el-icon>{{ $t('chat.sidebar.newChat') }}
-            </el-dropdown-item>
-            <el-dropdown-item
-              v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'"
-              command="newFolder"
-            >
-              <el-icon><FolderAdd /></el-icon>{{ $t('chat.sidebar.newFolder') }}
-            </el-dropdown-item>
-
-            <template v-if="contextMenuItem">
-              <el-dropdown-item command="rename" :divided="contextMenuItem.itemType === 'folder'"
-                ><el-icon><EditPen /></el-icon>{{ $t('chat.sidebar.rename') }}</el-dropdown-item
-              >
-              <el-dropdown-item v-if="contextMenuItem.itemType === 'chat'" command="duplicate"
-                ><el-icon><CopyDocument /></el-icon
-                >{{ $t('chat.sidebar.duplicate') }}</el-dropdown-item
-              >
-              <el-dropdown-item command="delete" class="delete-item"
-                ><el-icon><Delete /></el-icon>{{ $t('chat.sidebar.delete') }}</el-dropdown-item
-              >
+            <!-- 多选模式下的菜单 -->
+            <template v-if="selectedNodeCount > 1">
+              <el-dropdown-item command="archive">
+                <el-icon><FolderChecked /></el-icon>{{ $t('chat.sidebar.archive') }}
+              </el-dropdown-item>
             </template>
 
-            <el-dropdown-item command="search" :divided="true"
-              ><el-icon><Search /></el-icon>{{ $t('chat.sidebar.search') }}</el-dropdown-item
-            >
+            <!-- 单选或未选中模式下的菜单 -->
+            <template v-else>
+              <el-dropdown-item
+                v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'"
+                command="newChat"
+              >
+                <el-icon><Plus /></el-icon>{{ $t('chat.sidebar.newChat') }}
+              </el-dropdown-item>
+              <el-dropdown-item
+                v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'"
+                command="newFolder"
+              >
+                <el-icon><FolderAdd /></el-icon>{{ $t('chat.sidebar.newFolder') }}
+              </el-dropdown-item>
+
+              <template v-if="contextMenuItem">
+                <el-dropdown-item command="rename" :divided="contextMenuItem.itemType === 'folder'"
+                  ><el-icon><EditPen /></el-icon>{{ $t('chat.sidebar.rename') }}</el-dropdown-item
+                >
+                <el-dropdown-item v-if="contextMenuItem.itemType === 'chat'" command="duplicate"
+                  ><el-icon><CopyDocument /></el-icon
+                  >{{ $t('chat.sidebar.duplicate') }}</el-dropdown-item
+                >
+                <el-dropdown-item command="delete" class="delete-item"
+                  ><el-icon><Delete /></el-icon>{{ $t('chat.sidebar.delete') }}</el-dropdown-item
+                >
+              </template>
+
+              <el-dropdown-item command="search" :divided="true"
+                ><el-icon><Search /></el-icon>{{ $t('chat.sidebar.search') }}</el-dropdown-item
+              >
+            </template>
           </el-dropdown-menu>
         </template>
       </el-dropdown>
     </template>
 
-    <!-- 显示竖向 ChatHeader 的条件：已折叠 或 正在拖拽且宽度过窄 -->
     <ChatHeader
       v-else
       mode="vertical"
@@ -94,7 +110,6 @@
 
     <el-divider />
 
-    <!-- 底部按钮：在 tree 显示时靠右，在 header 显示时居中 -->
     <div class="footer" :class="{ collapsed: !showTree }">
       <el-tooltip v-if="!showTree" :content="$t('settings.tabs.globalSettings')" placement="right">
         <el-button :icon="Setting" circle @click="goToSettings" />
@@ -107,6 +122,9 @@
       :title="dialogProps.title"
       :initial-name="dialogProps.initialName"
       :select-config="dialogProps.selectConfig"
+      :show-chat-mode="dialogProps.showChatMode"
+      :agent-select-config="dialogProps.agentSelectConfig"
+      :select-starred-ids="modelStarredIds"
       @confirm="onDialogConfirm"
     />
 
@@ -117,6 +135,22 @@
       :root-path="searchRootPath"
       @select-result="handleSearchResultSelect"
     />
+
+    <el-dialog
+      v-model="archiveDialogVisible"
+      :title="$t('chat.sidebar.archiveTitle')"
+      width="400px"
+    >
+      <el-form @submit.prevent>
+        <el-form-item :label="$t('chat.sidebar.folderName')">
+          <el-input v-model="archiveFolderName" @keyup.enter="confirmArchive" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="archiveDialogVisible = false">{{ $t('common.action.cancel') }}</el-button>
+        <el-button type="primary" @click="confirmArchive" :loading="isArchiving">{{ $t('common.action.confirm') }}</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -125,26 +159,30 @@ import { onMounted, computed, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRouter, useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, EditPen, CopyDocument, Search } from '@element-plus/icons-vue';
+import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, EditPen, CopyDocument, Search, FolderChecked, Sort } from '@element-plus/icons-vue';
+import { ElMessage } from 'element-plus';
+import type { AllowDropType } from 'element-plus/es/components/tree/src/tree.type';
+import type Node from 'element-plus/es/components/tree/src/model/node';
 
 import type { Chat, ChatCreate, ChatUpdate, BaseTreeItem } from '@/api/types';
 import { useChatListStore } from '@/stores/chatListStore';
 import { useChatSessionStore, LAST_ACTIVE_CHAT_KEY } from '@/stores/chatSessionStore';
 import { useProviderStore } from '@/stores/providerStore';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { useAgentStore } from '@/stores/agentStore';
 
 import { buildChatTree } from '@/utils/treeHelper';
+import type { ChatSortMode } from '@/utils/treeHelper';
 import { useTreeController, type DialogPayload, type DialogConfirmPayload } from '@/composables/useTreeController';
 
 import ExplorerTree from '@/components/common/ExplorerTree.vue';
-import EntityFormDialog, { type SelectConfigOption } from '@/components/common/EntityFormDialog.vue';
+import EntityFormDialog, { type SelectConfigOption, type ConfirmPayload } from '@/components/common/EntityFormDialog.vue';
 import SearchDialog from '@/components/chat/dialogs/SearchDialog.vue';
 import ChatHeader from '@/components/chat/ChatHeader.vue';
 
-// -- Props & Emits --
 const props = defineProps<{
   isCollapsed: boolean;
-  width: number; // 接收实时宽度
+  width: number;
 }>();
 
 const emit = defineEmits<{
@@ -153,18 +191,17 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 
-// -- Visual Threshold Logic --
 const VISUAL_COLLAPSE_THRESHOLD = 150;
 
 const showTree = computed(() => {
   return !props.isCollapsed && props.width >= VISUAL_COLLAPSE_THRESHOLD;
 });
 
-// -- Store Instances & State --
 const chatListStore = useChatListStore();
 const chatSessionStore = useChatSessionStore();
 const providerStore = useProviderStore();
 const settingsStore = useSettingsStore();
+const agentStore = useAgentStore();
 const router = useRouter();
 const route = useRoute();
 
@@ -172,27 +209,67 @@ const { chatList, isChatListLoading, loadingFolders, loadedFolderIds, refreshing
 const { currentChatId, currentChat } = storeToRefs(chatSessionStore);
 const { providers } = storeToRefs(providerStore);
 const { globalSettings } = storeToRefs(settingsStore);
+const { agentList } = storeToRefs(agentStore);
 
-// -- Data Transformation --
-const treeData = computed(() => buildChatTree(chatList.value, loadedFolderIds.value) as unknown as BaseTreeItem[]);
+// 排序模式
+const SORT_MODE_KEY = 'mambo_chat_sort_mode';
+const chatSortMode = ref<ChatSortMode>(
+  (localStorage.getItem(SORT_MODE_KEY) as ChatSortMode) || 'manual'
+);
+
+const isManualSort = computed(() => chatSortMode.value === 'manual');
+
+const customAllowDrop = (draggingNode: Node, dropNode: Node, dropType: AllowDropType): boolean => {
+  if (isManualSort.value) return true;
+  // 时间排序模式：禁止根目录节点之间的 before/after 手动排序
+  // 但允许从子目录跨到根目录的移动（包括 before/after）
+  const isDropRoot = !(dropNode.data as BaseTreeItem).parentId;
+  if (!isDropRoot) return true; // 文件夹内部不受限
+  const isDragFromSub = !!(draggingNode.data as BaseTreeItem).parentId;
+  if (isDragFromSub) return true; // 从子目录移到根目录，允许任意位置
+  return dropType === 'inner';   // 根目录同级节点只允许拖入文件夹
+};
+
+function toggleSortMode() {
+  chatSortMode.value = chatSortMode.value === 'manual' ? 'folder-top-time' : 'manual';
+  localStorage.setItem(SORT_MODE_KEY, chatSortMode.value);
+}
+
+const treeData = computed(() => buildChatTree(chatList.value, loadedFolderIds.value, chatSortMode.value) as unknown as BaseTreeItem[]);
 
 const modelOptions = computed((): SelectConfigOption[] => {
-  return providers.value
-    .map(p => ({
-      label: p.name,
-      options: p.models
+  return providerStore.groupedModels
+    .map(group => ({
+      label: group.label,
+      options: group.options
         .filter(m => m.model_type === 'chat')
         .map(m => ({
           label: m.name,
           value: m.id
         }))
     }))
-    .filter(p => p.options.length > 0);
+    .filter(group => group.options.length > 0);
+});
+
+const modelStarredIds = computed(() => {
+  return new Set(
+    providerStore.allModels
+      .filter(m => m.starred && m.model_type === 'chat')
+      .map(m => m.id)
+  );
+});
+
+const agentOptions = computed((): SelectConfigOption[] => {
+  return agentStore.allAgents
+    .filter(a => a.itemType === 'agent')
+    .map(a => ({
+      label: a.name,
+      value: a.id
+    }));
 });
 
 const isTitleRefreshing = computed(() => refreshingTitleChatId.value === currentChat.value?.id);
 
-// -- Tree Controller Logic --
 const {
   treeRef,
   contextMenuRef,
@@ -227,11 +304,16 @@ const {
         return {
           title: t('chat.sidebar.newChat'),
           initialName: t('chat.sidebar.initChatName'),
+          showChatMode: true,
           selectConfig: {
             label: t('chat.settings.model'),
             options: modelOptions.value,
             initialValue: globalSettings.value.default_model_id || undefined,
           },
+          agentSelectConfig: {
+            label: t('chat.settings.agent'),
+            options: agentOptions.value,
+          }
         };
       case 'newFolder':
         return {
@@ -244,8 +326,10 @@ const {
   },
   handleDialogConfirm: async (
     dialogPayload: DialogPayload<Chat>,
-    formPayload: DialogConfirmPayload
+    rawFormPayload: DialogConfirmPayload
   ): Promise<Chat | null> => {
+    const formPayload = rawFormPayload as unknown as ConfirmPayload;
+
     if (dialogPayload.type === 'rename' && dialogPayload.targetItem) {
       await chatListStore.updateChatSettings(dialogPayload.targetItem.id, { name: formPayload.name });
       return null;
@@ -256,7 +340,9 @@ const {
     if (dialogPayload.type === 'newChat') {
       newItem = await chatListStore.createNewItem({
         name: formPayload.name,
-        aiModelId: formPayload.selectValue,
+        aiModelId: formPayload.chatMode === 'normal' ? formPayload.selectValue : null,
+        chatMode: formPayload.chatMode,
+        agentId: formPayload.chatMode === 'agent' ? formPayload.agentId : null,
         itemType: 'chat',
         parentId: dialogPayload.parentId || null,
       });
@@ -274,11 +360,25 @@ const {
   },
 });
 
-// -- Lifecycle --
+// 记录当前选中的节点数量，用于判断是否展示多选右键菜单
+const selectedNodeCount = ref(0);
+
+const onNodeContextMenu = (event: MouseEvent, data: BaseTreeItem, node: any) => {
+  selectedNodeCount.value = treeRef.value?.selectedIds?.size || 0;
+  handleNodeContextMenu(event, data, node);
+};
+
+const onRootContextMenu = (event: MouseEvent) => {
+  // 在空白处右键时清除选中状态，确保弹出全局菜单
+  treeRef.value?.clearSelection();
+  selectedNodeCount.value = 0;
+  openRootContextMenu(event);
+};
+
 onMounted(async () => {
   await providerStore.fetchProviders();
+  await agentStore.fetchAllAgents();
   await chatListStore.initializeList();
-
   await router.isReady();
 
   let targetChatId = route.params.id as string;
@@ -328,7 +428,6 @@ watch(
   }
 );
 
-// -- Component-Specific Actions --
 const handleNodeClick = (data: BaseTreeItem) => {
   if (data.itemType === 'chat') {
     handleSelectChat(data.id);
@@ -346,8 +445,6 @@ const handleSelectChat = async (chatId: string) => {
 
 const goToSettings = () => router.push('/settings');
 
-// -- Vertical Header Actions --
-
 function handleSaveTitle(newTitle: string) {
   if (currentChat.value) {
     chatListStore.updateChatSettings(currentChat.value.id, { name: newTitle });
@@ -360,7 +457,6 @@ function handleRefreshTitle() {
   }
 }
 
-// -- Search Dialog --
 const searchDialogVisible = ref(false);
 const searchRootId = ref<string | null>(null);
 const searchRootName = ref<string | null>(null);
@@ -380,6 +476,10 @@ function getItemPath(itemId: string): string {
 
   return path.join(' / ');
 }
+
+const archiveDialogVisible = ref(false);
+const archiveFolderName = ref('');
+const isArchiving = ref(false);
 
 async function handleMenuCommand(command: string) {
   if (command === 'search') {
@@ -403,7 +503,51 @@ async function handleMenuCommand(command: string) {
     return;
   }
 
-  await originalHandleMenuCommand(command);
+  if (command === 'archive') {
+    archiveFolderName.value = t('chat.sidebar.newArchiveFolder');
+    archiveDialogVisible.value = true;
+    return;
+  }
+
+  const result = await originalHandleMenuCommand(command);
+
+  if (result && result.itemType === 'chat') {
+    await handleSelectChat(result.id);
+  }
+}
+
+async function confirmArchive() {
+  if (!archiveFolderName.value.trim()) {
+    ElMessage.warning(t('common.rule.nameRequired'));
+    return;
+  }
+
+  const selectedIds = treeRef.value?.selectedIds;
+  if (!selectedIds || selectedIds.size === 0) return;
+
+  const itemIds = Array.from(selectedIds);
+  const parentId = chatList.value.find(c => c.id === itemIds[0])?.parentId || null;
+
+  isArchiving.value = true;
+  try {
+    const newFolder = await chatListStore.archiveItems({
+      item_ids: itemIds,
+      new_folder_name: archiveFolderName.value.trim(),
+      parent_id: parentId
+    });
+    ElMessage.success(t('common.msg.operationSuccess'));
+    archiveDialogVisible.value = false;
+    treeRef.value?.clearSelection();
+
+    if (newFolder) {
+      await treeRef.value?.scrollToKey(newFolder.id);
+      await treeRef.value?.expandNode(newFolder.id);
+    }
+  } catch (error) {
+    ElMessage.error(t('common.error.operationFailed'));
+  } finally {
+    isArchiving.value = false;
+  }
 }
 
 async function handleSearchResultSelect(data: { chatId: string; subMessageId: string | null }) {
@@ -442,6 +586,9 @@ async function handleSearchResultSelect(data: { chatId: string; subMessageId: st
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .chat-list-header h4 {
@@ -449,6 +596,16 @@ async function handleSearchResultSelect(data: { chatId: string; subMessageId: st
   font-size: 16px;
   font-weight: 600;
   color: var(--el-text-color-primary);
+}
+
+.sort-toggle-btn {
+  color: var(--el-text-color-secondary);
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.sort-toggle-btn:hover {
+  color: var(--el-color-primary);
 }
 
 .el-divider {

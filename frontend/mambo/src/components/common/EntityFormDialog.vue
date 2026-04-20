@@ -1,3 +1,4 @@
+<!-- frontend/mambo/src/components/common/EntityFormDialog.vue -->
 <template>
   <el-dialog
     v-model="internalVisible"
@@ -15,21 +16,27 @@
         />
       </el-form-item>
 
+      <el-form-item v-if="showChatMode" :label="t('chat.settings.chatMode')" prop="chatMode">
+        <el-select v-model="form.chatMode" style="width: 100%;">
+          <el-option :label="t('chat.settings.normalMode')" value="normal" />
+          <el-option :label="t('chat.settings.agentMode')" value="agent" />
+        </el-select>
+      </el-form-item>
+
       <el-form-item
-        v-if="selectConfig"
+        v-if="selectConfig && form.chatMode === 'normal'"
         :label="selectConfig.label"
         prop="selectValue"
       >
         <el-select
+          ref="modelSelectRef"
           v-model="form.selectValue"
           :placeholder="t('common.placeholder.select', { label: selectConfig.label })"
           style="width: 100%;"
+          @visible-change="(visible: boolean) => scrollToTopIfStarred(visible, modelSelectRef)"
         >
           <template v-for="(item, index) in selectConfig.options" :key="index">
-            <el-option-group
-              v-if="'options' in item"
-              :label="item.label"
-            >
+            <el-option-group v-if="'options' in item" :label="item.label">
               <el-option
                 v-for="opt in (item as SelectGroupItem).options"
                 :key="opt.value"
@@ -37,13 +44,31 @@
                 :value="opt.value"
               />
             </el-option-group>
-
             <el-option
               v-else
               :label="(item as SelectOptionItem).label"
               :value="(item as SelectOptionItem).value"
             />
           </template>
+        </el-select>
+      </el-form-item>
+
+      <el-form-item
+        v-if="agentSelectConfig && form.chatMode === 'agent'"
+        :label="agentSelectConfig.label"
+        prop="agentId"
+      >
+        <el-select
+          v-model="form.agentId"
+          :placeholder="t('common.placeholder.select', { label: agentSelectConfig.label })"
+          style="width: 100%;"
+        >
+          <el-option
+            v-for="opt in agentSelectConfig.options"
+            :key="(opt as SelectOptionItem).value"
+            :label="(opt as SelectOptionItem).label"
+            :value="(opt as SelectOptionItem).value"
+          />
         </el-select>
       </el-form-item>
     </el-form>
@@ -59,8 +84,6 @@
 import { ref, reactive, watch, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { type FormInstance, type FormRules, ElMessage } from 'element-plus';
-
-// --- Types ---
 
 export interface SelectOptionItem {
   label: string;
@@ -80,12 +103,12 @@ interface SelectConfig {
   initialValue?: string;
 }
 
-interface ConfirmPayload {
+export interface ConfirmPayload {
   name: string;
   selectValue?: string;
+  chatMode?: 'normal' | 'agent';
+  agentId?: string;
 }
-
-// --- Props & Emits ---
 
 const props = defineProps<{
   visible: boolean;
@@ -93,6 +116,9 @@ const props = defineProps<{
   nameLabel?: string;
   initialName?: string;
   selectConfig?: SelectConfig;
+  showChatMode?: boolean;
+  agentSelectConfig?: SelectConfig;
+  selectStarredIds?: Set<string>;
 }>();
 
 const emit = defineEmits<{
@@ -100,33 +126,42 @@ const emit = defineEmits<{
   (e: 'confirm', payload: ConfirmPayload): void;
 }>();
 
-// --- State ---
-
 const { t } = useI18n();
 const internalVisible = ref(false);
 const formRef = ref<FormInstance>();
 const nameInputRef = ref<HTMLInputElement>();
+const modelSelectRef = ref();
+
+function scrollToTopIfStarred(visible: boolean, selectRef: any) {
+  if (!visible || !selectRef || !props.selectStarredIds) return;
+  const value = selectRef.modelValue as string | null;
+  if (!value || !props.selectStarredIds.has(value)) return;
+
+  setTimeout(() => {
+    try {
+      const popperContentRef = selectRef.tooltipRef?.popperRef?.contentRef;
+      if (!popperContentRef) return;
+      const wrapEl = popperContentRef.querySelector('.el-select-dropdown__wrap');
+      if (wrapEl) wrapEl.scrollTop = 0;
+    } catch { /* ignore */ }
+  }, 0);
+}
 
 const form = reactive({
   name: '',
   selectValue: '',
+  chatMode: 'normal' as 'normal' | 'agent',
+  agentId: '',
 });
 
 const rules = reactive<FormRules>({
   name: [{ required: true, message: t('common.rule.nameRequired'), trigger: 'blur' }],
-  selectValue: [{ required: true, message: t('common.rule.selectRequired'), trigger: 'change' }],
 });
 
-// --- Methods ---
-
-/**
- * 初始化表单数据
- */
 const initFormData = () => {
-  // 1. 设置名称
   form.name = props.initialName || '';
+  form.chatMode = 'normal';
 
-  // 2. 处理下拉选择框初始值
   if (props.selectConfig) {
     if (props.selectConfig.initialValue) {
       form.selectValue = props.selectConfig.initialValue;
@@ -136,7 +171,7 @@ const initFormData = () => {
         if ('options' in firstItem && firstItem.options.length > 0) {
           form.selectValue = firstItem.options[0].value;
         } else if ('value' in firstItem) {
-          form.selectValue = firstItem.value;
+          form.selectValue = (firstItem as SelectOptionItem).value;
         } else {
           form.selectValue = '';
         }
@@ -148,30 +183,35 @@ const initFormData = () => {
     form.selectValue = '';
   }
 
-  // 3. 清除校验并聚焦
-  // 使用 nextTick 确保 DOM 已更新
+  if (props.agentSelectConfig) {
+    if (props.agentSelectConfig.initialValue) {
+      form.agentId = props.agentSelectConfig.initialValue;
+    } else if (props.agentSelectConfig.options.length > 0) {
+      const first = props.agentSelectConfig.options[0];
+      if ('value' in first) form.agentId = (first as SelectOptionItem).value;
+    } else {
+      form.agentId = '';
+    }
+  } else {
+    form.agentId = '';
+  }
+
   nextTick(() => {
     formRef.value?.clearValidate();
     nameInputRef.value?.focus();
   });
 };
 
-// --- Watchers ---
-
 watch(() => props.visible, (val) => {
   internalVisible.value = val;
-  // 当 visible 变为 true 时，立即初始化表单数据
-  // 配合 immediate: true，即使组件挂载时 visible 已经是 true，也会执行初始化
   if (val) {
     initFormData();
   }
-}, { immediate: true }); // [重要] 必须保留 immediate: true
+}, { immediate: true });
 
 watch(internalVisible, (val) => {
   emit('update:visible', val);
 });
-
-// --- Handlers ---
 
 const handleClose = () => {
   internalVisible.value = false;
@@ -182,12 +222,25 @@ const handleConfirm = async () => {
 
   await formRef.value.validate((valid) => {
     if (valid) {
+      if (form.chatMode === 'normal' && props.selectConfig && !form.selectValue) {
+        ElMessage.warning(t('common.rule.selectRequired'));
+        return;
+      }
+      if (form.chatMode === 'agent' && props.agentSelectConfig && !form.agentId) {
+        ElMessage.warning(t('common.rule.selectRequired'));
+        return;
+      }
+
       const payload: ConfirmPayload = {
         name: form.name.trim(),
+        chatMode: form.chatMode,
       };
 
-      if (props.selectConfig) {
+      if (form.chatMode === 'normal' && props.selectConfig) {
         payload.selectValue = form.selectValue;
+      }
+      if (form.chatMode === 'agent' && props.agentSelectConfig) {
+        payload.agentId = form.agentId;
       }
 
       emit('confirm', payload);

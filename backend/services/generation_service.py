@@ -5,26 +5,27 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import AsyncGenerator, Tuple, List, Optional
+from typing import AsyncGenerator, Tuple, List, Optional, Type
 
+from backend.services.generation.executor.dispatcher import InstructionDispatcher
 from backend.services.stream_manager_service import stream_manager
-from backend.crud import chat_crud, message_crud, file_crud, resource_crud, setting_crud, provider_crud
+from backend.crud import chat_crud, message_crud, resource_crud, setting_crud, provider_crud
 from backend import schemas
 from backend.models import chat_model
 from backend.database import AsyncSessionLocal
-from backend.services.generation.instruction_executor import InstructionExecutor
 from backend.models.base_model import generate_uuid
-from backend.services.generation.default_manager import DefaultGenerateManager
-from backend.services.generation.title_manager import TitleGenerateManager
-from backend.services.generation.zip_history_manager import ZipHistoryGenerateManager
-from backend.services.generation.worker.openai_worker import OpenAiWorker
-from backend.services.generation.worker.google_worker import GoogleWorker
-from backend.services.generation.worker.deepseek_worker import DeepSeekWorker
-from backend.schemas.enums import FileManagementType, MessageStatus, MessageRole, SubMessageType, ProviderWorkerType
-from backend.config.timezone_config import get_configured_now, TZ
-from backend.services.generation.worker.anthropic_worker import AnthropicWorker
+from backend.services.generation.managers.default_manager import DefaultGenerateManager
+from backend.services.generation.managers.title_manager import TitleGenerateManager
+from backend.services.generation.managers.zip_history_manager import ZipHistoryGenerateManager
 
-# 定义生成任务启动的超时阈值
+from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
+from backend.services.generation.worker.chat_worker import UniversalGraphWorker
+
+from backend.schemas.enums import FileManagementType, MessageStatus, MessageRole, SubMessageType, ProviderWorkerType
+from backend.schemas.message import ErrorContent
+from backend.config.timezone_config import get_configured_now, TZ
+from backend.services.file_service import FileService
+
 GENERATION_START_TIMEOUT = timedelta(minutes=10)
 
 
@@ -35,37 +36,53 @@ async def _calculate_message_status(message: chat_model.Message) -> schemas.Mess
     if message.role != MessageRole.ASSISTANT:
         return MessageStatus.COMPLETED
 
-    # 检查内存中是否存在针对此消息的取消请求
     cancellation_requested = await stream_manager.is_cancellation_requested(message.id)
 
-    # 1. 基于子消息状态判断
+    if await stream_manager.is_task_running(message.id):
+        return MessageStatus.COMPLETED if cancellation_requested else MessageStatus.GENERATING
+
     if message.sub_messages:
         sub_statuses = {sm.status for sm in message.sub_messages}
+
+        if MessageStatus.PENDING_REVIEW.value in sub_statuses:
+            for sm in message.sub_messages:
+                if sm.type == SubMessageType.REVIEW_TOOL.value and sm.status == MessageStatus.PENDING_REVIEW.value:
+                    try:
+                        from backend.schemas.message import ReviewToolContent
+                        content = ReviewToolContent.from_json_string(sm.content)
+                        if content.decision is None:
+                            return MessageStatus.PENDING_REVIEW
+                    except (ValueError, ImportError):
+                        continue
+                elif sm.type == SubMessageType.ASK_USER.value and sm.status == MessageStatus.PENDING_REVIEW.value:
+                    try:
+                        from backend.schemas.message import AskUserContent
+                        content = AskUserContent.from_json_string(sm.content)
+                        if content.answers is None:
+                            return MessageStatus.PENDING_REVIEW
+                    except (ValueError, ImportError):
+                        continue
+
         if MessageStatus.GENERATING.value in sub_statuses:
-            # 如果仍在生成但已请求取消，则乐观地返回最终状态
             return MessageStatus.COMPLETED if cancellation_requested else MessageStatus.GENERATING
         if MessageStatus.FAILED.value in sub_statuses:
             return MessageStatus.FAILED
-        return MessageStatus.COMPLETED
 
-    # 2. 无子消息时的判断
-    # 检查是否有活跃的流，有则说明正在生成
     if await stream_manager.is_stream_active(message.id):
         return MessageStatus.COMPLETED if cancellation_requested else MessageStatus.GENERATING
 
-    # 无活跃流，检查是否超时（后台任务可能启动失败）
-    created_at = message.createdAt
-    if created_at.tzinfo is None:
-        # 如果数据库返回的是不带时区的时间，我们假设它处于配置的时区
-        # 使用 pytz 的 localize 方法正确处理时区（包括可能的夏令时等）
-        created_at = TZ.localize(created_at)
+    if not message.sub_messages:
+        created_at = message.createdAt
+        if created_at.tzinfo is None:
+            created_at = TZ.localize(created_at)
 
-    time_since_creation = get_configured_now() - created_at
-    if time_since_creation > GENERATION_START_TIMEOUT:
-        return MessageStatus.FAILED
+        time_since_creation = get_configured_now() - created_at
+        if time_since_creation > GENERATION_START_TIMEOUT:
+            return MessageStatus.FAILED
 
-    # 未超时，但无子消息和活跃流，可能处于任务启动的短暂间隙
-    return MessageStatus.COMPLETED if cancellation_requested else MessageStatus.GENERATING
+        return MessageStatus.COMPLETED if cancellation_requested else MessageStatus.GENERATING
+
+    return MessageStatus.COMPLETED
 
 
 async def prepare_for_regeneration(
@@ -74,7 +91,7 @@ async def prepare_for_regeneration(
         base_message_id: str,
 ) -> chat_model.Message:
     """
-    准备重新生成：删除指定消息之后的所有消息，并创建一个新的AI消息占位符。
+    准备重新生成：在指定的层级创建一个新的AI消息占位符分支。
     """
     db_chat = await chat_crud.get_chat(db, chat_id=chat_id)
     if not db_chat:
@@ -86,12 +103,15 @@ async def prepare_for_regeneration(
     if not ref_message or ref_message.chatId != chat_id:
         raise HTTPException(status_code=404, detail="Reference message not found in the specified chat.")
 
-    include_self = (ref_message.role == MessageRole.ASSISTANT)
-    await message_crud.delete_messages_after(db, chat_id=chat_id, message_id=base_message_id, include_self=include_self)
+    if ref_message.role == MessageRole.ASSISTANT:
+        target_parent_id = ref_message.parentId
+    else:
+        target_parent_id = ref_message.id
 
     assistant_message_create = schemas.MessageCreate(
         role=MessageRole.ASSISTANT,
-        sub_messages=[]
+        sub_messages=[],
+        parentId=target_parent_id
     )
     assistant_placeholder = await message_crud.create_message(db, message=assistant_message_create, chat_id=chat_id)
     return assistant_placeholder
@@ -116,28 +136,25 @@ async def create_user_message_and_prepare_generation(
 
                 template_sub_message = schemas.SubMessageCreate(
                     content=latest_version.content or "",
-                    sortOrder=-1,  # 临时值，稍后重新排序
+                    sortOrder=-1,
                     type=SubMessageType.NORMAL,
                     config=schemas.SubMessageConfig(**config_data),
                     status=MessageStatus.COMPLETED
                 )
                 injected_sub_messages.append(template_sub_message)
 
-    # 组合注入的模板和用户输入的内容，并重新排序
     all_sub_messages = injected_sub_messages + request.sub_messages
     for i, sub_msg in enumerate(all_sub_messages):
         sub_msg.sortOrder = i
 
-    # 在创建消息前，处理用户原始提交的文件类型子消息
+    file_service = FileService(db)
     for sub_message in request.sub_messages:
         if sub_message.type == 'File':
             file_id = sub_message.content
-            # 智能更新文件管理类型：如果是临时类型则移除临时标记并加入新类型，否则合并类型
-            await file_crud.update_file_management_type(
-                db,
+            await file_service.update_management_type(
                 file_id=file_id,
                 new_type=FileManagementType.SUB_MESSAGE.value,
-                merge=True  # 使用智能合并模式
+                merge=True
             )
 
     user_message_create = schemas.MessageCreate(
@@ -165,25 +182,11 @@ async def _ensure_chat_model_configured(db: AsyncSession, chat_id: str) -> None:
             await db.refresh(db_chat)
 
 
-# --- Worker Factory Logic ---
-
-def _create_worker_instance(worker_type: str):
-    """Worker 工厂方法"""
-    if worker_type == ProviderWorkerType.GOOGLE:
-        return GoogleWorker()
-    elif worker_type == ProviderWorkerType.DEEPSEEK:
-        return DeepSeekWorker()
-    elif worker_type == ProviderWorkerType.ANTHROPIC:
-        return AnthropicWorker()
-    else:
-        return OpenAiWorker()
+def _create_worker_instance(worker_type: str) -> AbstractGenerateWorker:
+    return UniversalGraphWorker()
 
 
-async def _get_worker_for_chat(db: AsyncSession, chat_id: str):
-    """
-    根据会话配置的服务商类型，返回对应的 Worker 实例。
-    用于主对话流程。
-    """
+async def _get_worker_for_chat(db: AsyncSession, chat_id: str) -> AbstractGenerateWorker:
     db_chat = await chat_crud.get_chat(db, chat_id=chat_id)
     worker_type = ProviderWorkerType.OPENAI
     if db_chat and db_chat.ai_model and db_chat.ai_model.provider:
@@ -192,14 +195,9 @@ async def _get_worker_for_chat(db: AsyncSession, chat_id: str):
     return _create_worker_instance(worker_type)
 
 
-async def _get_worker_from_settings(db: AsyncSession, setting_keys: List[str]):
-    """
-    根据全局设置列表（按优先级）查找模型，并返回对应的 Worker 实例。
-    用于标题生成等使用全局模型配置的任务。
-    """
+async def _get_worker_from_settings(db: AsyncSession, setting_keys: List[str]) -> AbstractGenerateWorker:
     target_model_id = None
 
-    # 1. 遍历 Key 列表，找到第一个配置了有效值的设置项
     for key in setting_keys:
         setting = await setting_crud.get_setting(db, key)
         if setting and setting.value:
@@ -208,7 +206,6 @@ async def _get_worker_from_settings(db: AsyncSession, setting_keys: List[str]):
 
     worker_type = ProviderWorkerType.OPENAI
 
-    # 2. 如果找到了模型ID，查询其 Provider 的 worker_type
     if target_model_id:
         model = await provider_crud.get_model(db, target_model_id)
         if model and model.provider:
@@ -217,66 +214,138 @@ async def _get_worker_from_settings(db: AsyncSession, setting_keys: List[str]):
     return _create_worker_instance(worker_type)
 
 
-# --- Background Tasks ---
-
 async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
     """
-    后台任务：协调整个生成过程。它实例化 Executor、Worker 和 Manager，
-    通过指令流驱动生成。
+    后台任务：协调整个生成过程。
     """
     async with AsyncSessionLocal() as db:
+        final_status = None
         try:
-            # 在实例化 Manager 之前，确保 Chat 数据是就绪的 (AI Model ID 已配置)
             await _ensure_chat_model_configured(db, chat_id)
 
-            # 1. 实例化核心组件 (使用 Chat 绑定的模型)
             worker = await _get_worker_for_chat(db, chat_id)
             manager = DefaultGenerateManager(db_session=db)
-            executor = InstructionExecutor(db_session=db)
+            executor = InstructionDispatcher(db_session=db)
 
-            # 2. 执行生成循环：Manager 产出指令 -> Executor 执行指令
             async for instruction in manager.run(worker, chat_id, assistant_message_id):
-                await executor.execute(
-                    instruction=instruction,
-                    chat_id=chat_id,
-                    assistant_message_id=assistant_message_id
-                )
+                exec_result = await executor.execute(instruction, chat_id, assistant_message_id)
+                if isinstance(exec_result, MessageStatus):
+                    final_status = exec_result
 
         except asyncio.CancelledError:
             print(f"[Generation Service] Task cancelled for message '{assistant_message_id}'.")
-            # Manager 内部已处理了取消并生成了清理指令，此处只需记录
+            final_status = MessageStatus.COMPLETED
         except Exception as e:
             print(f"[Generation Service Error] for message {assistant_message_id}: {e}")
-            # Manager 内部已处理大部分异常。如果异常抛出到这里，说明 Manager 初始化失败或严重崩溃。
+            import traceback as tb
+            final_status = MessageStatus.FAILED
+
+            await db.rollback()
+
             try:
+                error_content = ErrorContent(
+                    message=f"生成流程发生异常: {e}",
+                    stack_trace=tb.format_exc()
+                )
                 error_sub_message_create = schemas.SubMessageCreate(
                     id=generate_uuid(),
-                    content=f"生成流程启动失败: {e}",
-                    sortOrder=0,
-                    type=SubMessageType.NORMAL,
+                    content=error_content.to_json_string(),
+                    sortOrder=98,
+                    type=SubMessageType.ERROR,
                     status=MessageStatus.FAILED
                 )
                 await message_crud.create_sub_message(db, assistant_message_id, error_sub_message_create)
+                await db.commit()
             except Exception as inner_e:
                 print(f"Failed to even create an error message for {assistant_message_id}: {inner_e}")
 
         finally:
+            await stream_manager.mark_task_completed(assistant_message_id)
             await stream_manager.close_stream(assistant_message_id)
+            await stream_manager.release_generation_lock(chat_id)
+
+
+async def _run_retry_generation_task(chat_id: str, assistant_message_id: str):
+    """
+    后台任务：重试失败的生成任务，使用 LangGraph checkpoint 恢复。
+    通过传入 input=None 和 thread_id 从 checkpoint 恢复图执行。
+    """
+    async with AsyncSessionLocal() as db:
+        final_status = None
+        try:
+            await _ensure_chat_model_configured(db, chat_id)
+
+            # 清理失败的子消息：删除 ERROR 类型以及 FAILED 的 NORMAL/REASONING，保留 FAILED 的 MCP_TOOL（用于 restore_state）
+            db_message = await message_crud.get_message(db, message_id=assistant_message_id)
+            if db_message:
+                sub_ids_to_delete = []
+                for sub in db_message.sub_messages:
+                    if sub.type == SubMessageType.ERROR.value:
+                        sub_ids_to_delete.append(sub.id)
+                    elif sub.status == MessageStatus.FAILED.value and sub.type in (SubMessageType.NORMAL.value, SubMessageType.REASONING.value):
+                        sub_ids_to_delete.append(sub.id)
+                if sub_ids_to_delete:
+                    for sub_id in sub_ids_to_delete:
+                        sub = await db.get(chat_model.SubMessage, sub_id)
+                        if sub:
+                            await db.delete(sub)
+                    await db.commit()
+
+            worker = await _get_worker_for_chat(db, chat_id)
+            manager = DefaultGenerateManager(db_session=db, recover_from_error=True)
+            executor = InstructionDispatcher(db_session=db)
+
+            async for instruction in manager.run(worker, chat_id, assistant_message_id):
+                exec_result = await executor.execute(instruction, chat_id, assistant_message_id)
+                if isinstance(exec_result, MessageStatus):
+                    final_status = exec_result
+
+        except asyncio.CancelledError:
+            print(f"[Retry Generation Service] Task cancelled for message '{assistant_message_id}'.")
+            final_status = MessageStatus.COMPLETED
+        except Exception as e:
+            print(f"[Retry Generation Service Error] for message {assistant_message_id}: {e}")
+            import traceback as tb
+            final_status = MessageStatus.FAILED
+
+            await db.rollback()
+
+            try:
+                error_content = ErrorContent(
+                    message=f"重试生成流程发生异常: {e}",
+                    stack_trace=tb.format_exc()
+                )
+                error_sub_message_create = schemas.SubMessageCreate(
+                    id=generate_uuid(),
+                    content=error_content.to_json_string(),
+                    sortOrder=98,
+                    type=SubMessageType.ERROR,
+                    status=MessageStatus.FAILED
+                )
+                await message_crud.create_sub_message(db, assistant_message_id, error_sub_message_create)
+                await db.commit()
+            except Exception as inner_e:
+                print(f"Failed to even create an error message for {assistant_message_id}: {inner_e}")
+
+        finally:
+            await stream_manager.mark_task_completed(assistant_message_id)
+            await stream_manager.close_stream(assistant_message_id)
+            await stream_manager.release_generation_lock(chat_id)
 
 
 async def run_title_generation_task(chat_id: str):
     """
     后台任务：为指定的会话生成并更新标题。
-    使用全局配置的 'title_generation_model_id' 或 'default_model_id'。
     """
     task_id = f"title-gen-{chat_id}"
+    await stream_manager.mark_task_running(task_id)
+
     async with AsyncSessionLocal() as db:
         try:
-            # 1. 根据全局配置获取 Worker
             worker = await _get_worker_from_settings(db, ["title_generation_model_id", "default_model_id"])
 
             manager = TitleGenerateManager(db_session=db)
-            executor = InstructionExecutor(db_session=db)
+            executor = InstructionDispatcher(db_session=db)
 
             async for instruction in manager.run(worker, chat_id, task_id):
                 await executor.execute(
@@ -288,7 +357,7 @@ async def run_title_generation_task(chat_id: str):
         except Exception as e:
             print(f"[Title Generation Service Error] for chat {chat_id}: {e}")
         finally:
-            # 清理可能存在的取消请求状态
+            await stream_manager.mark_task_completed(task_id)
             await stream_manager.close_stream(task_id)
 
 
@@ -297,14 +366,14 @@ async def run_zip_history_generation_task(chat_id: str, target_message_id: str):
     后台任务：为指定消息之前的对话历史生成压缩摘要。
     """
     task_id = f"zip-history-gen-{target_message_id}"
+    await stream_manager.mark_task_running(task_id)
+
     async with AsyncSessionLocal() as db:
         try:
-            # 实例化核心组件 (此处暂时跟随 Chat 模型，如有独立配置需求可改为 _get_worker_from_settings)
             worker = await _get_worker_for_chat(db, chat_id)
             manager = ZipHistoryGenerateManager(db_session=db)
-            executor = InstructionExecutor(db_session=db)
+            executor = InstructionDispatcher(db_session=db)
 
-            # 状态检查与初始化
             target_message = await message_crud.get_message(db, target_message_id)
             if target_message:
                 for sub in target_message.sub_messages:
@@ -323,7 +392,6 @@ async def run_zip_history_generation_task(chat_id: str, target_message_id: str):
                             pass
                         break
 
-            # 在 ZipHistoryManager 中，assistant_message_id 被用作 target_message_id
             async for instruction in manager.run(worker, chat_id, target_message_id):
                 await executor.execute(
                     instruction=instruction,
@@ -334,7 +402,7 @@ async def run_zip_history_generation_task(chat_id: str, target_message_id: str):
         except Exception as e:
             print(f"[Zip History Generation Service Error] for message {target_message_id}: {e}")
         finally:
-            # 此类任务不直接面向客户端流，但清理取消状态以防万一
+            await stream_manager.mark_task_completed(task_id)
             await stream_manager.close_stream(task_id)
 
 
@@ -349,10 +417,8 @@ async def subscribe_to_stream(
     if not message:
         return
 
-    # 计算初始的聚合状态
     calculated_status = await _calculate_message_status(message)
 
-    # 准备并发送初始的替换事件，包含子消息和聚合状态
     sub_messages_data = [schemas.SubMessage.model_validate(sm).model_dump(mode='json') for sm in message.sub_messages]
     initial_event_data = {
         "type": "replace",
@@ -361,16 +427,14 @@ async def subscribe_to_stream(
     }
     yield f"data: {json.dumps(initial_event_data)}\n\n"
 
-    # 如果生成任务已经明确结束（完成或失败），则无需继续订阅
     if calculated_status in [MessageStatus.COMPLETED, MessageStatus.FAILED]:
         return
 
-    # 订阅实时事件流
     queue = await stream_manager.subscribe(assistant_message_id)
     try:
         while True:
             chunk_data = await queue.get()
-            if chunk_data is None:  # 流结束的信号
+            if chunk_data is None:
                 break
             yield f"data: {json.dumps(chunk_data)}\n\n"
             queue.task_done()

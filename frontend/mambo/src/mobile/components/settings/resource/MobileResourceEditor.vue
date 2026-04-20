@@ -1,34 +1,7 @@
-<!-- frontend/mambo/src/mobile/components/settings/resource/MobileResourceEditor.vue -->
 <template>
   <div class="mobile-resource-editor">
 
-    <!-- 0. 顶部操作栏 (固定在最上方) -->
-    <!-- 仅在编辑器模式下显示，KB配置页面有自己的保存按钮 -->
-    <div
-      class="top-actions-bar"
-      v-if="viewMode === 'editor' && resource.itemType === 'resource' && resource.resourceType !== 'file'"
-    >
-      <div class="action-left">
-        <el-button link size="small" @click="resetForm">
-          {{ $t('resource.editor.reset') }}
-        </el-button>
-      </div>
-      <div class="action-right">
-        <el-button size="small" type="success" plain @click="openNewVersionDialog">
-          {{ $t('resource.editor.saveAsNew') }}
-        </el-button>
-        <el-button
-          size="small"
-          type="primary"
-          @click="handleSaveChanges"
-          :disabled="!isFormDirty"
-        >
-          {{ $t('common.action.save') }}
-        </el-button>
-      </div>
-    </div>
-
-    <!-- 1. 版本栏 (提取到外层，方便在KB配置和编辑器之间切换) -->
+    <!-- 1. 版本栏 -->
     <MobileResourceVersionBar
       v-if="resource.itemType === 'resource'"
       :versions="resource.versions || []"
@@ -67,45 +40,94 @@
             <!-- 编辑器核心区域 -->
             <div class="editor-wrapper">
               <!-- Case A: 文件资源 -->
-              <div v-if="resource.resourceType === 'file'" class="file-section">
-                <div v-if="currentFileInfo" class="file-preview-card">
-                  <div class="preview-area">
-                     <el-image
-                      v-if="isImage"
-                      :src="fileDownloadUrl"
-                      fit="contain"
-                      class="preview-image"
-                      :preview-src-list="[fileDownloadUrl]"
-                     />
-                     <el-icon v-else :size="60" class="file-icon"><Document /></el-icon>
-                  </div>
-                  <div class="file-info">
-                    <span class="filename">{{ currentFileInfo.filename }}</span>
-                    <div class="meta">
-                      <el-tag size="small" type="info">{{ currentFileInfo.mime_type }}</el-tag>
-                      <span class="size">{{ formatFileSize(currentFileInfo.size) }}</span>
+              <div v-if="resource.resourceType === 'file'" class="file-section" :class="{ 'is-editable-layout': isEditableFile }">
+
+                <!-- Sub-case A1: Editable File -->
+                <div v-if="isEditableFile" class="editable-file-mobile-layout">
+                  <div class="file-info-compact">
+                    <div class="file-preview-icon compact">
+                      <el-icon :size="32"><Document /></el-icon>
+                      <div class="editable-badge">
+                        <el-icon><EditPen /></el-icon>
+                      </div>
                     </div>
-                    <a :href="fileDownloadUrl" target="_blank" class="download-link">
-                      <el-button type="primary" size="small" :icon="Download">
-                        {{ $t('resource.editor.downloadFile') }}
-                      </el-button>
-                    </a>
+                    <div class="file-meta-content">
+                      <span class="file-name">{{ currentFileInfo?.filename }}</span>
+                      <div class="file-details">
+                        <el-tag size="small" type="info" class="mime-tag">{{ currentFileInfo?.mime_type }}</el-tag>
+                        <span class="file-size">{{ formatFileSize(currentFileInfo?.size || 0) }}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="file-editor-wrapper">
+                    <ResourceUniversalEditor
+                      v-model="editableFileContent"
+                      language="plaintext"
+                      :monaco-options="editorOptions"
+                    />
+                  </div>
+
+                  <!-- 按钮放在输入框下面 -->
+                  <div class="editor-actions">
+                    <el-button size="default" @click="resetForm">
+                      {{ $t('resource.editor.reset') }}
+                    </el-button>
+                    <el-button size="default" type="success" plain @click="openNewVersionDialog">
+                      {{ $t('resource.editor.saveAsNew') }}
+                    </el-button>
+                    <el-button
+                      size="default"
+                      type="primary"
+                      @click="handleSaveChanges"
+                      :disabled="!isFormDirty"
+                    >
+                      {{ $t('common.action.save') }}
+                    </el-button>
                   </div>
                 </div>
 
-                <div class="upload-area">
-                  <el-upload
-                    action="#"
-                    :auto-upload="false"
-                    :show-file-list="false"
-                    :on-change="handleFileChange"
-                    :disabled="isUploading"
-                  >
-                    <el-button type="primary" :loading="isUploading">
-                      {{ currentFileInfo ? $t('resource.editor.uploadNew') : $t('resource.editor.uploadFile') }}
-                    </el-button>
-                  </el-upload>
-                </div>
+                <!-- Sub-case A2: Non-editable File -->
+                <template v-else>
+                  <div v-if="currentFileInfo" class="file-preview-card">
+                    <div class="preview-area">
+                       <el-image
+                        v-if="isImage"
+                        :src="fileDownloadUrl"
+                        fit="contain"
+                        class="preview-image"
+                        :preview-src-list="[fileDownloadUrl]"
+                       />
+                       <el-icon v-else :size="60" class="file-icon"><Document /></el-icon>
+                    </div>
+                    <div class="file-info">
+                      <span class="filename">{{ currentFileInfo.filename }}</span>
+                      <div class="meta">
+                        <el-tag size="small" type="info">{{ currentFileInfo.mime_type }}</el-tag>
+                        <span class="size">{{ formatFileSize(currentFileInfo.size) }}</span>
+                      </div>
+                      <a :href="fileDownloadUrl" target="_blank" class="download-link">
+                        <el-button type="primary" size="small" :icon="Download">
+                          {{ $t('resource.editor.downloadFile') }}
+                        </el-button>
+                      </a>
+                    </div>
+                  </div>
+
+                  <div class="upload-area">
+                    <el-upload
+                      action="#"
+                      :auto-upload="false"
+                      :show-file-list="false"
+                      :on-change="handleFileChange"
+                      :disabled="isUploading"
+                    >
+                      <el-button type="primary" :loading="isUploading">
+                        {{ currentFileInfo ? $t('resource.editor.uploadNew') : $t('resource.editor.uploadFile') }}
+                      </el-button>
+                    </el-upload>
+                  </div>
+                </template>
               </div>
 
               <!-- Case B: 文本/Prompt 资源 -->
@@ -117,6 +139,23 @@
                     :monaco-options="editorOptions"
                   />
                 </div>
+                <!-- 按钮放在编辑器下面 -->
+                <div class="editor-actions">
+                  <el-button size="default" @click="resetForm">
+                    {{ $t('resource.editor.reset') }}
+                  </el-button>
+                  <el-button size="default" type="success" plain @click="openNewVersionDialog">
+                    {{ $t('resource.editor.saveAsNew') }}
+                  </el-button>
+                  <el-button
+                    size="default"
+                    type="primary"
+                    @click="handleSaveChanges"
+                    :disabled="!isFormDirty"
+                  >
+                    {{ $t('common.action.save') }}
+                  </el-button>
+                </div>
               </template>
             </div>
           </div>
@@ -125,7 +164,6 @@
           <div v-show="activeTab === 'settings'" class="tab-pane-settings">
             <el-scrollbar>
               <div class="settings-form">
-                <!-- 基础信息 -->
                 <div class="form-section">
                   <div class="section-title">{{ $t('resource.meta.title') }}</div>
                   <el-form label-position="top" size="default">
@@ -138,7 +176,6 @@
                   </el-form>
                 </div>
 
-                <!-- 版本信息 -->
                 <div class="form-section">
                   <div class="section-title">{{ $t('resource.meta.versionTitle') }}</div>
                   <el-form label-position="top" size="default">
@@ -151,7 +188,6 @@
                   </el-form>
                 </div>
 
-                <!-- 模板配置 -->
                 <template v-if="resource.resourceType === 'submessage_template'">
                   <div class="form-section">
                     <div class="section-title">{{ $t('resource.meta.configTitle') }}</div>
@@ -179,7 +215,6 @@
 
     </div>
 
-    <!-- New Version Dialog -->
     <el-dialog v-model="newVersionDialog.visible" :title="$t('resource.dialog.saveAsNewTitle')" width="90%">
       <el-form :model="newVersionDialog.form" label-position="top" ref="newVersionFormRef">
         <el-form-item
@@ -204,7 +239,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type UploadFile } from 'element-plus'
-import { Document, Download } from '@element-plus/icons-vue'
+import { Document, Download, EditPen } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 import type { editor } from 'monaco-editor'
 
@@ -213,7 +248,6 @@ import { uploadResourceFile } from '@/api/kbService'
 import type { ResourceWithVersions, ResourceVersion, ResourceVersionCreate } from '@/api/types'
 import ResourceUniversalEditor from '@/components/common/ResourceUniversalEditor.vue'
 import MobileResourceVersionBar from './MobileResourceVersionBar.vue'
-// 引入移动端知识库文件详情组件
 import MobileKnowledgeBaseFileDetail from './MobileKnowledgeBaseFileDetail.vue'
 
 const { t } = useI18n()
@@ -237,14 +271,15 @@ const DEFAULT_SUBMESSAGE_ATTRIBUTES: SubMessageTemplateAttributes = {
   is_minimal: false,
 }
 
-// --- State ---
 const activeTab = ref<'editor' | 'settings'>('editor')
 const formRef = ref<FormInstance>()
 const newVersionFormRef = ref<FormInstance>()
 const loadedVersionInEditor = ref<ResourceVersion | null>(null)
-// 修复：定义 viewMode 状态，用于切换编辑器和知识库配置视图
 const viewMode = ref<'editor' | 'kb_config'>('editor')
 const isUploading = ref(false)
+
+const editableFileContent = ref('')
+const isFileContentLoading = ref(false)
 
 const form = reactive({
   name: '',
@@ -263,7 +298,6 @@ const newVersionDialog = reactive({
   },
 })
 
-// --- Computed ---
 const currentVersion = computed(() => {
   return loadedVersionInEditor.value ?? props.resource.latest_version
 })
@@ -275,6 +309,10 @@ const currentFileInfo = computed(() => {
 const isImage = computed(() => {
   const mime = currentFileInfo.value?.mime_type
   return mime ? mime.startsWith('image/') : false
+})
+
+const isEditableFile = computed(() => {
+  return currentFileInfo.value?.editable ?? false
 })
 
 const fileDownloadUrl = computed(() => {
@@ -290,6 +328,11 @@ const isFormDirty = computed(() => {
     form.name !== original.name || form.description !== (original.description || '')
 
   if (original.itemType === 'resource' && originalVersion) {
+    if (original.resourceType === 'file' && isEditableFile.value) {
+      const isContentDirty = editableFileContent.value !== (originalVersion.content || '')
+      return isMetaDirty || isContentDirty
+    }
+
     if (original.resourceType === 'file') return isMetaDirty
 
     const isVersionMetaDirty =
@@ -327,21 +370,45 @@ const editorOptions = computed<editor.IStandaloneEditorConstructionOptions>(() =
   automaticLayout: true
 }))
 
-// --- Watchers ---
 watch(
   () => props.resource,
-  (newSelection) => {
+  (newSelection, oldSelection) => {
     if (newSelection) {
-      resetForm()
-      activeTab.value = 'editor'
-      // 修复：根据 prop 初始化 viewMode
-      viewMode.value = props.initialViewMode === 'kb_config' ? 'kb_config' : 'editor'
+      if (newSelection.id !== oldSelection?.id) {
+        resetForm()
+        activeTab.value = 'editor'
+        viewMode.value = props.initialViewMode === 'kb_config' ? 'kb_config' : 'editor'
+      } else {
+        if (newSelection.kb_id !== oldSelection?.kb_id) {
+          viewMode.value = 'editor'
+        }
+        if (!loadedVersionInEditor.value) {
+          resetForm()
+        }
+      }
+
+      if (isEditableFile.value && currentVersion.value) {
+        loadFileContent()
+      }
+    } else {
+      form.name = ''
+      form.description = ''
+      form.content = ''
+      form.attributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES }
+      form.versionName = ''
+      form.versionCommitMessage = ''
+      editableFileContent.value = ''
     }
   },
   { immediate: true }
 )
 
-// --- Methods ---
+watch(currentVersion, (newVersion) => {
+  if (newVersion && isEditableFile.value) {
+    loadFileContent()
+  }
+})
+
 function formatFileSize(bytes: number): string {
   if (bytes === 0) return '0 B'
   const k = 1024
@@ -350,9 +417,23 @@ function formatFileSize(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
-// 修复：添加切换到知识库配置视图的方法
 function toggleKbView() {
   viewMode.value = 'kb_config'
+}
+
+async function loadFileContent() {
+  if (!props.resource || !currentVersion.value) return
+
+  isFileContentLoading.value = true
+  try {
+    await resourceStore.fetchFileContent(props.resource.id, currentVersion.value.id)
+    editableFileContent.value = currentVersion.value.content || ''
+  } catch (error) {
+    console.error('Failed to load file content:', error)
+    ElMessage.error(t('resource.editor.loadContentError'))
+  } finally {
+    isFileContentLoading.value = false
+  }
 }
 
 function resetForm() {
@@ -374,6 +455,12 @@ function resetForm() {
       form.attributes = { ...DEFAULT_SUBMESSAGE_ATTRIBUTES }
     }
     loadedVersionInEditor.value = null
+
+    if (isEditableFile.value && versionToLoad) {
+       editableFileContent.value = versionToLoad.content || ''
+    } else {
+       editableFileContent.value = ''
+    }
   }
 }
 
@@ -388,22 +475,33 @@ async function handleSaveChanges() {
     })
   }
 
-  if (resource.itemType === 'resource' && resource.resourceType !== 'file') {
-    const targetVersionId = loadedVersionInEditor.value?.id ?? resource.latest_version?.id
+  if (resource.itemType === 'resource') {
+    if (resource.resourceType === 'file' && isEditableFile.value && currentVersion.value) {
+       if (editableFileContent.value !== currentVersion.value.content) {
+         await resourceStore.saveFileContent(
+           resource.id,
+           currentVersion.value.id,
+           editableFileContent.value
+         )
+       }
+    }
+    else if (resource.resourceType !== 'file') {
+      const targetVersionId = loadedVersionInEditor.value?.id ?? resource.latest_version?.id
 
-    if (targetVersionId) {
-      const payload = {
-        name: form.versionName,
-        commitMessage: form.versionCommitMessage,
-        content: form.content,
-        attributes: form.attributes,
-      }
-      await resourceStore.updateResourceVersionItem(resource.id, targetVersionId, payload)
+      if (targetVersionId) {
+        const payload = {
+          name: form.versionName,
+          commitMessage: form.versionCommitMessage,
+          content: form.content,
+          attributes: form.attributes,
+        }
+        await resourceStore.updateResourceVersionItem(resource.id, targetVersionId, payload)
 
-      if (loadedVersionInEditor.value) {
-        const updatedVersion = resource.versions.find((v) => v.id === targetVersionId)
-        if (updatedVersion) {
-          loadedVersionInEditor.value = { ...updatedVersion, ...payload }
+        if (loadedVersionInEditor.value) {
+          const updatedVersion = resource.versions.find((v) => v.id === targetVersionId)
+          if (updatedVersion) {
+            loadedVersionInEditor.value = { ...updatedVersion, ...payload }
+          }
         }
       }
     }
@@ -443,7 +541,11 @@ function loadVersionIntoEditor(version: ResourceVersion) {
   }
   loadedVersionInEditor.value = version
   activeTab.value = 'editor'
-  // 修复：点击版本时，如果当前在 KB 配置页，应切回编辑器页
+
+  if (version.file_info?.editable) {
+    loadFileContent()
+  }
+
   if (viewMode.value === 'kb_config') {
     viewMode.value = 'editor'
   }
@@ -473,14 +575,30 @@ async function handleConfirmNewVersion() {
   if (!newVersionFormRef.value || !props.resource) return
   await newVersionFormRef.value.validate(async (valid) => {
     if (valid) {
-      const versionData: ResourceVersionCreate = {
-        ...newVersionDialog.form,
-        content: form.content,
-        attributes: form.attributes,
+      if (isEditableFile.value && currentFileInfo.value) {
+        try {
+          const blob = new Blob([editableFileContent.value], { type: currentFileInfo.value.mime_type })
+          const file = new File([blob], currentFileInfo.value.filename, { type: currentFileInfo.value.mime_type })
+
+          await uploadResourceFile(file, undefined, props.resource.id)
+          ElMessage.success(t('resource.editor.uploadSuccess'))
+          newVersionDialog.visible = false
+          await resourceStore.fetchResourceDetails(props.resource.id)
+        } catch (error) {
+          console.error(error)
+          ElMessage.error(t('resource.editor.uploadError'))
+        }
       }
-      await resourceStore.createNewVersion(props.resource!.id, versionData)
-      newVersionDialog.visible = false
-      ElMessage.success(t('resource.editor.uploadSuccess'))
+      else {
+        const versionData: ResourceVersionCreate = {
+          ...newVersionDialog.form,
+          content: form.content,
+          attributes: form.attributes,
+        }
+        await resourceStore.createNewVersion(props.resource!.id, versionData)
+        newVersionDialog.visible = false
+        ElMessage.success(t('resource.editor.uploadSuccess'))
+      }
     }
   })
 }
@@ -495,29 +613,12 @@ async function handleConfirmNewVersion() {
   bottom: 0;
   display: flex;
   flex-direction: column;
+  height: 100dvh;
+  height: 100%;
   background-color: var(--color-background);
   overflow: hidden;
 }
 
-/* 0. 顶部操作栏 */
-.top-actions-bar {
-  flex-shrink: 0;
-  padding: 10px 16px;
-  background-color: #fff;
-  border-bottom: 1px solid var(--color-border);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  z-index: 20;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
-}
-
-.action-right {
-  display: flex;
-  gap: 8px;
-}
-
-/* 2. 中间内容区 */
 .main-content-area {
   flex: 1;
   position: relative;
@@ -525,9 +626,9 @@ async function handleConfirmNewVersion() {
   display: flex;
   flex-direction: column;
   background-color: var(--color-background-soft);
+  min-height: 0;
 }
 
-/* KB Config View Container */
 .kb-view-container {
   flex: 1;
   overflow: hidden;
@@ -536,18 +637,17 @@ async function handleConfirmNewVersion() {
   background-color: var(--color-background);
 }
 
-/* Tab Content Wrapper */
 .tab-content-wrapper {
   flex: 1;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
-/* 1. 顶部切换器 */
 .top-switcher {
   flex-shrink: 0;
-  padding: 12px 16px;
+  padding: 2px 16px;
   display: flex;
   justify-content: center;
   background-color: var(--color-background-soft);
@@ -579,34 +679,36 @@ async function handleConfirmNewVersion() {
   border: none;
 }
 
-/* Tab A: 编辑器视图 */
 .tab-pane-editor {
   flex: 1;
   display: flex;
   flex-direction: column;
-  height: 100%;
   overflow: hidden;
+  min-height: 0;
 }
 
 .editor-wrapper {
   flex: 1;
   position: relative;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .monaco-container {
-  position: absolute;
-  top: 10px;
-  left: 12px;
-  right: 12px;
-  bottom: 12px;
+  position: relative;
+  flex-shrink: 0;
+  margin: 10px 12px 8px 12px;
+  height: 250px !important;
   background-color: #fff;
   border: 1px solid var(--el-border-color);
   border-radius: 8px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
-/* Tab B: 设置视图 */
 .tab-pane-settings {
   flex: 1;
   height: 100%;
@@ -636,14 +738,166 @@ async function handleConfirmNewVersion() {
   border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
-/* File Section */
 .file-section {
   padding: 16px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+.file-section.is-editable-layout {
+  padding: 8px 12px 8px 12px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+.editable-file-mobile-layout {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  height: auto !important;
+}
+
+.file-info-compact {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 6px;
+  background-color: #fff;
+  border-radius: 8px;
+  border: 1px solid var(--el-border-color-lighter);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  flex-shrink: 0;
+}
+
+.file-preview-icon.compact {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: var(--color-background-soft);
+  border-radius: 8px;
+}
+
+.editable-badge {
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  background-color: var(--el-color-success);
+  color: white;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border: 2px solid white;
+  font-size: 12px;
+}
+
+.file-meta-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.file-name {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-details {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mime-tag {
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-size {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.file-editor-wrapper {
+  position: relative;
+  background-color: #fff;
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 420px !important;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.file-editor-wrapper :deep(.simple-textarea) {
+  height: 100% !important;
+  display: flex;
+  flex-direction: column;
+}
+
+.file-editor-wrapper :deep(.el-textarea__inner) {
+  height: 100% !important;
+  max-height: 100% !important;
+  overflow: auto !important;
+  resize: none;
+  padding: 8px 12px !important;
+}
+
+.file-editor-wrapper :deep(.monaco-editor-container) {
+  height: 100% !important;
+  overflow: hidden;
+}
+
+.monaco-container :deep(.monaco-editor-container) {
+  height: 100% !important;
+  overflow: hidden;
+}
+
+.monaco-container :deep(.simple-textarea) {
+  height: 100% !important;
+  display: flex;
+  flex-direction: column;
+}
+
+.monaco-container :deep(.el-textarea__inner) {
+  height: 100% !important;
+  max-height: 100% !important;
+  overflow: auto !important;
+  resize: none;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 0 0 0;
+  flex-shrink: 0;
 }
 
 .file-preview-card {

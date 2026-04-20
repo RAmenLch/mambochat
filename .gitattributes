@@ -8,3 +8,7 @@
 
 # 强制指定 Shell 脚本在检出时使用 LF 换行符 (如果你的项目有 Linux 脚本)
 *.sh text eol=lf
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class

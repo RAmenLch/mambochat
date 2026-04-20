@@ -5,7 +5,7 @@ from typing import Optional, List, Dict
 import json
 
 from backend.schemas.message import Message, SubMessageCreate
-from backend.schemas.enums import MoveAction
+from backend.schemas.enums import MoveAction, ChatMode
 
 
 # --- Chat Schemas ---
@@ -20,8 +20,12 @@ class ChatBase(BaseModel):
     parentId: Optional[str] = Field(None, description="父文件夹的ID")
     sortOrder: int = Field(0, description="排序权重")
 
-    # 新增：资源挂载ID列表
+    # 资源挂载ID列表
     resource_prompt_list: Optional[List[str]] = Field(None, description="挂载的资源ID列表")
+
+    enabled_mcp_ids: Optional[List[str]] = Field(default_factory=list, description="启用的外部 MCP 服务 ID 列表")
+    chatMode: ChatMode = Field(ChatMode.NORMAL, description="聊天模式: 'normal' 或 'agent'")
+    agentId: Optional[str] = Field(None, description="绑定的 Agent ID（当 chatMode 为 'agent' 时有效）")
 
     @field_validator("modelParameters", mode="before")
     @classmethod
@@ -32,7 +36,6 @@ class ChatBase(BaseModel):
             except json.JSONDecodeError:
                 return None
         return v
-
 
 class ChatCreate(ChatBase):
     pass
@@ -56,9 +59,12 @@ class ChatUpdate(BaseModel):
     parentId: Optional[str] = None
     sortOrder: Optional[int] = None
 
-    # 新增：资源挂载ID列表
+    # 资源挂载ID列表
     resource_prompt_list: Optional[List[str]] = None
-
+    # 启用的外部 MCP 服务 ID 列表
+    enabled_mcp_ids: Optional[List[str]] = None
+    chatMode: Optional[ChatMode] = None
+    agentId: Optional[str] = None
 
 # noinspection PyDataclass
 class ChatWithMessages(Chat):
@@ -121,3 +127,13 @@ class SearchResultItem(BaseModel):
 class SearchResponse(BaseModel):
     total: int
     items: List[SearchResultItem]
+
+class ChatDuplicateRequest(BaseModel):
+    """复制会话请求的验证模型"""
+    up_to_message_id: Optional[str] = Field(None, description="截断复制：仅复制到此消息ID（含）为止，后续消息将被丢弃")
+
+class ChatArchiveRequest(BaseModel):
+    """批量归档会话到新文件夹的验证模型"""
+    item_ids: List[str] = Field(..., description="要打包移动的会话或文件夹ID列表")
+    new_folder_name: str = Field(..., description="新建归档文件夹的名称", min_length=1, max_length=100)
+    parent_id: Optional[str] = Field(None, description="新建归档文件夹的父级位置ID，'root'或不传代表放置在根目录")

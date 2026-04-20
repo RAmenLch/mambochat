@@ -1,0 +1,220 @@
+# backend/crud/agent_crud.py
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from sqlalchemy import func, update, or_
+from typing import List, Optional
+
+from backend.models import agent_model
+from backend import schemas
+from backend.schemas.enums import MoveAction, AgentTypeEnum
+
+
+async def check_subagent_cycle(db: AsyncSession, target_agent_id: str, new_subagents: List[str]) -> bool:
+    """检查更新 subAgents 是否会引起循环依赖"""
+    if not new_subagents:
+        return False
+
+    queue = list(new_subagents)
+    visited = set()
+
+    while queue:
+        current_id = queue.pop(0)
+
+        if current_id == target_agent_id:
+            return True
+
+        if current_id in visited:
+            continue
+
+        visited.add(current_id)
+
+        stmt = select(agent_model.Agent.subAgents).where(agent_model.Agent.id == current_id)
+        result = await db.execute(stmt)
+        current_subagents = result.scalar()
+
+        if current_subagents and isinstance(current_subagents, list):
+            queue.extend(current_subagents)
+
+    return False
+
+
+async def get_agent(db: AsyncSession, agent_id: str) -> Optional[agent_model.Agent]:
+    """通过ID获取单个 Agent（或文件夹）"""
+    result = await db.execute(
+        select(agent_model.Agent).filter(agent_model.Agent.id == agent_id)
+    )
+    return result.scalars().first()
+
+
+async def get_agents(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[agent_model.Agent]:
+    """获取 Agent 和文件夹列表（按排序权重升序）"""
+    result = await db.execute(
+        select(agent_model.Agent)
+        .order_by(agent_model.Agent.sortOrder.asc())
+        .offset(skip)
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+async def get_agents_by_parent_ids(db: AsyncSession, parent_ids: List[str]) -> List[agent_model.Agent]:
+    """
+    根据父节点ID列表批量获取子节点。
+    如果列表中包含 "root"，则同时获取根目录下的项目。
+    """
+    if not parent_ids:
+        return []
+
+    conditions = []
+    valid_uuids = [pid for pid in parent_ids if pid != "root"]
+
+    if valid_uuids:
+        conditions.append(agent_model.Agent.parentId.in_(valid_uuids))
+
+    if "root" in parent_ids:
+        conditions.append(agent_model.Agent.parentId.is_(None))
+
+    if not conditions:
+        return []
+
+    result = await db.execute(
+        select(agent_model.Agent)
+        .filter(or_(*conditions))
+        .order_by(agent_model.Agent.sortOrder.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def create_agent(db: AsyncSession, agent: schemas.AgentCreate) -> agent_model.Agent:
+    """创建一个新的 Agent 或文件夹"""
+
+    # 如果未传 sortOrder，则计算追加到末尾的顺序值
+    if "sortOrder" not in agent.model_fields_set:
+        stmt = select(func.max(agent_model.Agent.sortOrder)).filter(
+            agent_model.Agent.parentId == agent.parentId
+        )
+        result = await db.execute(stmt)
+        max_order = result.scalar()
+        # 如果文件夹为空(None)，则从 0 开始；否则在最大值基础上 +1
+        agent.sortOrder = (max_order if max_order is not None else -1) + 1
+
+    # agent_model 中的复杂字段已定义为 JSON，SQLAlchemy 会自动处理序列化
+    agent_data = agent.model_dump()
+
+    db_agent = agent_model.Agent(**agent_data)
+    db.add(db_agent)
+    await db.commit()
+    await db.refresh(db_agent)
+    return db_agent
+
+
+async def update_agent(db: AsyncSession, agent_id: str, agent_update: schemas.AgentUpdate) -> Optional[
+    agent_model.Agent]:
+    """更新 Agent 或文件夹的配置信息"""
+    db_agent = await get_agent(db, agent_id=agent_id)
+    if not db_agent:
+        return None
+
+    update_data = agent_update.model_dump(exclude_unset=True)
+
+    if "subAgents" in update_data and update_data["subAgents"] is not None:
+        has_cycle = await check_subagent_cycle(db, target_agent_id=agent_id, new_subagents=update_data["subAgents"])
+        if has_cycle:
+            raise ValueError("Circular dependency detected: An agent cannot have itself as a sub-agent (directly or indirectly).")
+        if len(update_data["subAgents"]) > 0:
+            agent_type = db_agent.AgentType
+            if agent_type != AgentTypeEnum.DEEP.value and agent_type != AgentTypeEnum.DEEP:
+                raise ValueError("ReActAgent does not support sub-agents. Only DeepAgent can mount sub-agents.")
+
+    for key, value in update_data.items():
+        setattr(db_agent, key, value)
+
+    await db.commit()
+    await db.refresh(db_agent)
+    return db_agent
+
+
+async def delete_agent(db: AsyncSession, agent_id: str) -> Optional[agent_model.Agent]:
+    """删除一个 Agent 或文件夹"""
+    db_agent = await get_agent(db, agent_id=agent_id)
+    if db_agent:
+        await db.delete(db_agent)
+        await db.commit()
+    return db_agent
+
+
+async def move_agents(db: AsyncSession, move_request: schemas.AgentMoveRequest) -> bool:
+    """
+    移动 Agent 或文件夹到指定位置（Inside, Before, After）。
+    处理目标位置的排序挤占逻辑。
+    """
+    if not move_request.item_ids:
+        return True
+
+    target_parent_id = None
+    target_sort_order = 0
+
+    # 1. 计算目标父节点和起始排序值
+    if move_request.action == MoveAction.INSIDE:
+        # 移入文件夹内部，作为最后一个子节点
+        if move_request.reference_id != "root":
+            target_parent_id = move_request.reference_id
+
+        # 获取目标文件夹内当前最大的 sortOrder
+        stmt = select(func.max(agent_model.Agent.sortOrder)).filter(agent_model.Agent.parentId == target_parent_id)
+        result = await db.execute(stmt)
+        max_order = result.scalar()
+        target_sort_order = (max_order if max_order is not None else -1) + 1
+
+    else:
+        # Before 或 After，需要参考节点
+        if move_request.reference_id == "root":
+            return False
+
+        ref_agent = await db.get(agent_model.Agent, move_request.reference_id)
+        if not ref_agent:
+            return False
+
+        target_parent_id = ref_agent.parentId
+        base_order = ref_agent.sortOrder
+
+        if move_request.action == MoveAction.BEFORE:
+            target_sort_order = base_order
+        else:  # AFTER
+            target_sort_order = base_order + 1
+
+        # 2. 挤占位移：将插入点之后的同级节点 sortOrder 向后推
+        shift_stmt = (
+            update(agent_model.Agent)
+            .where(agent_model.Agent.parentId == target_parent_id)
+            .where(agent_model.Agent.sortOrder >= target_sort_order)
+            .values(sortOrder=agent_model.Agent.sortOrder + len(move_request.item_ids))
+        )
+        await db.execute(shift_stmt)
+
+    # 3. 更新被移动的节点
+    # 保持 item_ids 原有的相对顺序
+    for index, item_id in enumerate(move_request.item_ids):
+        stmt = (
+            update(agent_model.Agent)
+            .where(agent_model.Agent.id == item_id)
+            .values(
+                parentId=target_parent_id,
+                sortOrder=target_sort_order + index
+            )
+        )
+        await db.execute(stmt)
+
+    await db.commit()
+    return True
+
+
+async def get_agents_by_ids(db: AsyncSession, agent_ids: List[str]) -> List[agent_model.Agent]:
+    """通过ID列表批量获取 Agent"""
+    if not agent_ids:
+        return []
+    result = await db.execute(
+        select(agent_model.Agent).filter(agent_model.Agent.id.in_(agent_ids))
+    )
+    return list(result.scalars().all())

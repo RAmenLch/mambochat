@@ -3,6 +3,9 @@
 export type McpTransportType = 'stdio' | 'sse';
 export type McpHealthStatus = 'healthy' | 'unhealthy' | null;
 
+export type ToolReviewMode = 'none' | 'require_review';
+export type ToolStatus = 'online' | 'offline';
+
 export interface McpServer {
   id: string;
   name: string;
@@ -60,4 +63,21 @@ export interface McpTestResponse {
   tools_count: number;
   message: string;
   error: string | null;
+}
+
+export interface McpToolResponse {
+  id: string;
+  server_id: string;
+  name: string;
+  description: string | null;
+  input_schema: Record<string, unknown> | null;
+  is_enabled: boolean;
+  review_mode: ToolReviewMode;
+  status: ToolStatus;
+  last_synced_at: string;
+}
+
+export interface McpToolUpdate {
+  is_enabled?: boolean;
+  review_mode?: ToolReviewMode;
 }

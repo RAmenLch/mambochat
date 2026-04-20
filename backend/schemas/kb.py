@@ -18,6 +18,7 @@ class KBChunkStatus(str, Enum):
 class KBSplitterType(str, Enum):
     SIMPLE = "simple"
     SEPARATOR = "separator"
+    MARKDOWN = "markdown"
 
 
 class KBTaskAction(str, Enum):
@@ -30,7 +31,7 @@ class KBTaskAction(str, Enum):
 
 class KBTextSplitterConfig(BaseModel):
     splitter_type: KBSplitterType = Field(KBSplitterType.SIMPLE, description="切分器类型")
-    chunk_size: int = Field(500, ge=50, le=5000, description="切片大小 (字符数)")
+    chunk_size: int = Field(500, ge=50, le=100000, description="切片大小 (字符数)")
     chunk_overlap: int = Field(50, ge=0, description="切片重叠大小 (字符数)")
     separator: Optional[str] = Field(None, description="分隔符，仅当 splitter_type 为 separator 时有效，例如 '\\n\\n'")
 

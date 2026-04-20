@@ -36,7 +36,14 @@
             @select-file="handleSelectFile"
           />
 
-          <!-- Case 2: Standard Resource Editor -->
+          <!-- Case 2: Skill Overview -->
+          <MobileSkillOverview
+            v-else-if="activeResourceDetails.resourceType === 'skill'"
+            :resource="activeResourceDetails"
+            @edit-file="handleSelectFile"
+          />
+
+          <!-- Case 3: Standard Resource Editor -->
           <MobileResourceEditor
             v-else
             :resource="activeResourceDetails"
@@ -70,6 +77,7 @@ import { useResourceStore } from '@/stores/resourceStore'
 import MobileResourceTreePanel from './resource/MobileResourceTreePanel.vue'
 import MobileResourceEditor from './resource/MobileResourceEditor.vue'
 import MobileKnowledgeBaseConfig from './resource/MobileKnowledgeBaseConfig.vue'
+import MobileSkillOverview from './resource/MobileSkillOverview.vue'
 import type { Resource, ResourceWithVersions, BaseTreeItem } from '@/api/types'
 
 const { t } = useI18n()
@@ -101,8 +109,8 @@ async function handleNodeClick(data: BaseTreeItem) {
   selectedResourceId.value = data.id
   initialViewMode.value = 'editor'
   const resource = data as unknown as Resource
-  const isKnowledgeBase = resource.resourceType === 'knowledge_base'
-  if (data.itemType === 'resource' || isKnowledgeBase) {
+  const isSpecialFolder = resource.resourceType === 'knowledge_base' || resource.resourceType === 'skill'
+  if (data.itemType === 'resource' || isSpecialFolder) {
     await resourceStore.fetchResourceDetails(data.id)
   }
   viewMode.value = 'detail'
@@ -111,8 +119,8 @@ async function handleNodeClick(data: BaseTreeItem) {
 async function handleItemCreated(newItem: Resource) {
   selectedResourceId.value = newItem.id
   initialViewMode.value = 'editor'
-  const isKnowledgeBase = newItem.resourceType === 'knowledge_base'
-  if (newItem.itemType === 'resource' || isKnowledgeBase) {
+  const isSpecialFolder = newItem.resourceType === 'knowledge_base' || newItem.resourceType === 'skill'
+  if (newItem.itemType === 'resource' || isSpecialFolder) {
     await resourceStore.fetchResourceDetails(newItem.id)
   }
   viewMode.value = 'detail'
@@ -129,9 +137,9 @@ function handleBackToList() {
   viewMode.value = 'list'
 }
 
-async function handleSelectFile(file: Resource) {
+async function handleSelectFile(file: Resource, viewMode: 'editor' | 'kb_config' = 'kb_config') {
   selectedResourceId.value = file.id
-  initialViewMode.value = 'kb_config'
+  initialViewMode.value = viewMode
   await resourceStore.fetchResourceDetails(file.id)
 }
 </script>

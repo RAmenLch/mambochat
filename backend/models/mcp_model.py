@@ -29,3 +29,18 @@ class McpServer(Base):
     last_status = Column(String(50), nullable=True)  # 例如: "healthy", "unhealthy"
     last_test_at = Column(DateTime, nullable=True)   # 上次测试/执行时间
     last_error = Column(Text, nullable=True)         # 详细报错堆栈信息
+
+
+class McpTool(Base):
+    __tablename__ = "McpTool"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    server_id = Column(String(36), index=True, nullable=False)
+    name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+    input_schema = Column(JSON, nullable=True)
+
+    is_enabled = Column(Boolean, default=True)
+    review_mode = Column(String(20), default="none")
+    status = Column(String(20), default="online")
+    last_synced_at = Column(DateTime, nullable=True)

@@ -1,6 +1,6 @@
 # ![mambo](img/logo_hajimi.svg) MamboChat
 
-![Version](https://img.shields.io/badge/version-1.1.3-blue)
+![Version](https://img.shields.io/badge/version-1.2.0-blue)
 ![License](https://img.shields.io/badge/license-GPLv3-green)
 ![Vue](https://img.shields.io/badge/frontend-Vue3%20%2B%20ElementPlus-42b883)
 ![FastAPI](https://img.shields.io/badge/backend-FastAPI%20%2B%20Python3.11-009688)
@@ -18,26 +18,42 @@
     *   Support for multiple providers including OpenAI, Google, DeepSeek, etc. See [Verification Records](./CheckRecord_EN.md) for model compatibility.
     *   Custom API Host and proxy configuration.
     *   Unified management for chat and embedding models.
+    *   Model favorites and grouping.
 *   **📚 Local Knowledge Base (RAG)**
-    *   Upload documents in Markdown, TXT, and other formats.
-    *   Built-in file chunking, vector embedding, and semantic search.
-    *   Dynamically mount knowledge bases during conversations.
+    *   Upload documents in Markdown, TXT, PDF, Word, and other formats.
+    *   Built-in file chunking, vector embedding, and semantic search (BM25 + vector retrieval + RRF).
+    *   Dynamically mount knowledge bases during conversations. Multiple knowledge bases can be mounted simultaneously.
 *   **🔌 MCP (Model Context Protocol) Support**
     *   Native implementation of MCP to extend AI capabilities.
     *   Supports custom MCP servers (Stdio/SSE connections).
+    *   Supports MCP tool review mode (Human-in-the-Loop), allowing manual confirmation before tool execution.
+*   **🤖 Intelligent Agents**
+    *   **Conversational Agent (ReAct)**: Reasoning through tool calls, with support for knowledge bases, MCP tools, and Skill packs.
+    *   **Advanced Agent (Deep)**: Based on the [deepagents](https://github.com/langchain-ai/deepagents) project, capable of reading/writing files, executing commands, nested sub-agent invocation, and performing remote server operations.
+    *   Agents can be equipped with resources, MCP tools, Skill packs, and can collaborate with remote Backends.
+*   **🔧 Remote Backend**
+    *   **SSH Backend**: Connect to remote Linux servers via SSH/SFTP, enabling the Agent to directly operate remote files and execute commands.
+    *   **API Client**: Run a client locally that connects to the server via WebSocket — no public IP required to expose your local files to the Agent.
+*   **📦 Skill Packs**
+    *   Create and import Skills to extend Agent capabilities.
+    *   Import from local files, ZIP archives, or GitHub repositories.
 *   **💬 Robust Conversation Experience**
-    *   Stream responses with Markdown and code highlighting.
+    *   Stream responses with Markdown and code highlighting, supporting mermaid and svg code block image rendering.
     *   **Multimodal Support**: Image/file upload and parsing. Support for image generation models.
-    *   **Session Management**: Folder categorization, drag-and-drop sorting, and search.
+    *   **Session Management**: Folder categorization, drag-and-drop sorting, search, and batch archiving.
     *   **Editor Mode**: Integrated Monaco Editor.
-    *   **Message Editing**: Edit messages and regenerate responses.
-    *   **Context Compression**: Compresses conversation history to save tokens. ✨ **Featured Highlight**
+    *   **Message Branching**: Edit and regenerate messages while preserving the full edit history — conversations are never lost.
+    *   **Conversation Copying**: Duplicate conversations (with optional truncation) to explore new directions from existing dialogues.
+    *   **Context Compression**: Compresses conversation history to save tokens.
 *   **🛠️ Resource & Prompt Management**
-    *   Unified management for System Prompts and Message Templates. ✨ **Featured Highlight**
+    *   Unified management for System Prompts, Message Templates, and Skill packs.
     *   Version control and rollback for resources.
 *   **⚙️ Global Personalization**
     *   Custom avatars for users and AI.
     *   Global proxy configuration.
+*   **📱 Multi-Device Support**
+    *   Full mobile interface with automatic adaptation for desktop and mobile browsers.
+    *   Chinese and English language switching.
 
 ## 🚀 Quick Start (Docker)
 
@@ -57,7 +73,7 @@ Use the provided `docker-compose.yml` to launch the service instantly.
 
 2.  **Start Services**
     ```bash
-    docker-compose up -d
+    docker compose up -d --build
     ```
 
 3.  **Access the Application**
@@ -78,13 +94,17 @@ Use the provided `docker-compose.yml` to launch the service instantly.
     ```bash
     PS C:\mambochat> .\build_and_start.bat
     ```
-    **If you downloaded a release package such as `mambochat-v113-winx64.zip`, double-click or run this file instead:**
+    **If you downloaded a release package such as `mambochat-v120-winx64.zip`, double-click or run this file instead:**
     ```bash
     PS C:\mambochat> .\start.bat
     ```    
 > `build_and_start.bat` checks for and downloads dependencies before launching, while `start.bat` launches directly.
 > Note: This script has not been tested across different environments. If you encounter any issues, please feel free to open an Issue.
 
+
+## 💻 Local Development Guide
+
+If you need to do secondary development, you can start the frontend and backend services separately.
 
 ### Backend
 
@@ -125,7 +145,7 @@ Use the provided `docker-compose.yml` to launch the service instantly.
 Contributions are welcome! Whether you have ideas, found a bug, or want to add a feature, feel free to submit a Pull Request or create an Issue.
 
 ## 👨‍💻 Roadmap
-1. Abstract key functionalities to support a plugin system.
-2. Enhance Agent capabilities.
-3. **Original Vision**: Build a plugin specifically for role-playing scenarios.
-4. Bug fixes and feature reinforcement.
+- [ ] Abstract key functionalities to support plugin capabilities
+- [ ] Enhance Agent capabilities
+- [ ] Build a role-playing plugin
+- [ ] Ongoing bug fixes and optimizations.

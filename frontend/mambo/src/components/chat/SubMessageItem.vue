@@ -8,9 +8,9 @@
       'is-user': parentMessage.role === 'user',
       'is-file': subMessage.type === 'File',
       'is-inactive': isInactive,
+      'is-inline': isInline
     }"
   >
-    <!-- 文件类型消息的专属渲染 -->
     <div v-if="subMessage.type === 'File' && subMessage.file_info" class="file-display-container">
       <el-image
         v-if="subMessage.file_info.mime_type.startsWith('image/')"
@@ -41,16 +41,23 @@
           </div>
           <div class="file-card-size">{{ formattedFileSize }}</div>
         </div>
+
+        <el-button
+          v-if="subMessage.file_info.editable"
+          :icon="Edit"
+          circle
+          class="file-card-action"
+          @click="handleFileEdit"
+        />
+
         <a :href="subMessage.file_info.url" download class="file-card-download">
           <el-button :icon="Download" circle />
         </a>
       </div>
     </div>
 
-    <!-- MCP 工具调用类型 或 其他带头部的类型 -->
     <template v-else>
       <div v-if="showHeader || subMessage.type === 'McpTool'" class="sub-message-header">
-        <!-- MCP Tool Collapsed Header View -->
         <div v-if="subMessage.type === 'McpTool' && isCollapsed" class="mcp-collapsed-summary">
           <div class="mcp-tool-status-icon">
             <el-icon v-if="isGenerating" class="is-loading"><Loading /></el-icon>
@@ -61,11 +68,9 @@
           </div>
           <span class="mcp-collapsed-text" :title="mcpSummaryText">{{ mcpSummaryText }}</span>
         </div>
-        <!-- Default Header View -->
         <span v-else class="partition-title">{{ partitionTitle }}</span>
 
         <div class="actions">
-          <!-- 编辑和复制按钮不适用于 McpTool -->
           <template v-if="subMessage.type !== 'McpTool'">
             <el-tooltip :content="t('common.action.edit')" placement="top" :show-after="500">
               <el-button
@@ -88,7 +93,13 @@
               />
             </el-tooltip>
           </template>
-          <el-tooltip :content="t('chat.message.minimize')" placement="top" :show-after="500">
+
+          <el-tooltip
+            v-if="!(parentMessage.role === 'assistant' && subMessage.type === 'Normal')"
+            :content="t('chat.message.minimize')"
+            placement="top"
+            :show-after="500"
+          >
             <el-button
               :icon="Minus"
               circle
@@ -98,6 +109,7 @@
               :disabled="isGenerating || isMinimizeDisabled"
             />
           </el-tooltip>
+
           <el-tooltip
             :content="isCollapsed ? t('chat.message.expand') : t('chat.message.collapse')"
             placement="top"
@@ -115,7 +127,6 @@
         </div>
       </div>
 
-      <!-- MCP 工具调用内容 -->
       <div
         v-if="subMessage.type === 'McpTool' && !isCollapsed"
         class="message-content mcp-tool-content"
@@ -151,7 +162,6 @@
         </div>
       </div>
 
-      <!-- 普通文本内容 -->
       <div
         v-else-if="subMessage.type !== 'McpTool'"
         class="message-content"
@@ -179,7 +189,7 @@
               :alt="block.alt"
               class="rendered-image"
             />
-            <div v-else v-html="block.content"></div>
+            <div v-else class="markdown-content" v-html="block.content"></div>
           </div>
 
           <div
@@ -199,7 +209,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { SubMessage, Message, SubMessageConfig, McpToolContent } from '@/api/types'
+import type { SubMessage, Message, SubMessageConfig, McpToolContent, FileResponse } from '@/api/types'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { ElMessage } from 'element-plus'
 import {
@@ -232,6 +242,7 @@ const props = withDefaults(
     index?: number
     isMinimizeDisabled?: boolean
     isInactive?: boolean
+    isInline?: boolean
   }>(),
   {
     id: '',
@@ -239,6 +250,7 @@ const props = withDefaults(
     index: 1,
     isMinimizeDisabled: false,
     isInactive: false,
+    isInline: false,
   },
 )
 
@@ -248,6 +260,7 @@ const emit = defineEmits<{
     payload: { content: string; range?: ParsedBlock['range']; language?: string; markup?: string },
   ): void
   (e: 'copy'): void
+  (e: 'edit-file', file: FileResponse): void
 }>()
 
 const interactionStore = useChatInteractionStore()
@@ -276,7 +289,6 @@ onBeforeUnmount(() => {
   }
 })
 
-// --- Computed properties for McpTool type ---
 const mcpContent = computed((): McpToolContent | null => {
   if (props.subMessage.type !== 'McpTool') return null
   try {
@@ -311,7 +323,6 @@ const mcpSummaryText = computed((): string => {
   return t('chat.message.mcp.searched', { tool: toolName, query })
 })
 
-// --- Computed properties for File type ---
 const fileIcon = computed(() => {
   if (props.subMessage.type === 'File' && props.subMessage.file_info) {
     return getIconForMimeType(props.subMessage.file_info.mime_type)
@@ -328,7 +339,6 @@ const formattedFileSize = computed(() => {
   return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`
 })
 
-// --- Computed properties for Normal type ---
 const contentBlocks = computed(() => {
   if (props.subMessage.type !== 'File' && props.subMessage.type !== 'McpTool') {
     return parseMarkdown(props.subMessage.content)
@@ -378,6 +388,12 @@ function handleCodeBlockEdit(payload: {
   })
 }
 
+function handleFileEdit() {
+  if (props.subMessage.file_info) {
+    emit('edit-file', props.subMessage.file_info)
+  }
+}
+
 function toggleCollapse() {
   const newCollapsedState = !isCollapsed.value
   isCollapsed.value = newCollapsedState
@@ -423,11 +439,19 @@ function scrollToTop() {
   max-width: 100%;
   border: 1px solid var(--el-border-color-light);
   border-radius: 6px;
-  background-color: var(--color-background-soft);
+  background-color: var(--el-bg-color);           /* ← 改为白色 */
   overflow: hidden;
-  --sub-message-bg: var(--color-background-soft);
+  --sub-message-bg: var(--el-bg-color);            /* ← 同步 */
   position: relative;
   transition: all 0.3s ease;
+}
+
+/* 仅用于内联文本的无边框模式 */
+.sub-message-item.is-inline {
+  border: none;
+  background-color: transparent;
+  box-shadow: none;
+  --sub-message-bg: transparent;
 }
 
 .sub-message-item.is-inactive {
@@ -441,9 +465,6 @@ function scrollToTop() {
 .sub-message-item.is-inactive:hover {
   border-style: solid;
   border-color: var(--el-text-color-placeholder);
-}
-.sub-message-item.is-inactive .message-content {
-  /* color: var(--el-text-color-regular); */
 }
 
 .is-user .sub-message-item {
@@ -528,6 +549,10 @@ function scrollToTop() {
 .file-card-size {
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+.file-card-action {
+  flex-shrink: 0;
+  margin-right: 8px;
 }
 .file-card-download {
   flex-shrink: 0;
@@ -628,7 +653,7 @@ function scrollToTop() {
   position: relative;
   word-break: break-word;
   line-height: 1.7;
-  color: var(--color-text);
+  color: var(--el-text-color-primary);
   min-height: 20px;
   transition: max-height 0.25s ease-out;
   max-height: none;
@@ -636,6 +661,9 @@ function scrollToTop() {
 }
 .message-content:not(.mcp-tool-content) {
   padding: 10px 15px;
+}
+.sub-message-item.is-inline .message-content {
+  padding: 0;
 }
 .is-user .message-content {
   color: var(--el-color-primary-dark-2);
@@ -742,6 +770,12 @@ function scrollToTop() {
 .is-user .content-block :deep(b) {
   color: var(--el-color-primary-dark-2);
 }
+
+.content-block :deep(svg) {
+  max-width: 100%;
+  height: auto;
+}
+
 .typing-indicator {
   display: flex;
   align-items: center;

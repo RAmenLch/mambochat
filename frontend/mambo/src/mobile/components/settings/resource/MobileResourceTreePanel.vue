@@ -18,6 +18,9 @@
               <el-dropdown-item command="newKB">
                 <el-icon><Collection /></el-icon>{{ t('resource.tree.newKB') }}
               </el-dropdown-item>
+              <el-dropdown-item command="newSkill">
+                <el-icon><Reading /></el-icon>{{ t('resource.tree.newSkill') }}
+              </el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -39,7 +42,8 @@
       >
         <template #item-icon="{ data: itemData }">
           <el-icon>
-            <Collection v-if="itemData.resourceType === 'knowledge_base'" />
+            <Reading v-if="itemData.resourceType === 'skill'" />
+            <Collection v-else-if="itemData.resourceType === 'knowledge_base'" />
             <Folder v-else-if="itemData.itemType === 'folder'" />
             <Memo v-else-if="itemData.resourceType === 'submessage_template'" />
             <Cpu v-else-if="itemData.resourceType === 'system_prompt'" />
@@ -48,8 +52,24 @@
         </template>
 
         <template #item-suffix="{ data: itemData }">
-          <div class="node-actions" @click.stop="openContextMenu(itemData)">
-            <el-icon><MoreFilled /></el-icon>
+          <div class="node-suffix-wrapper" @click.stop>
+             <el-tooltip
+              v-if="itemData.resourceType === 'skill' && skillValidationStatus.has(itemData.id)"
+              :content="skillValidationStatus.get(itemData.id)?.is_valid ? t('resource.skill.valid') : t('resource.skill.invalid')"
+              placement="top"
+            >
+              <el-icon
+                :color="skillValidationStatus.get(itemData.id)?.is_valid ? '#67C23A' : '#F56C6C'"
+                :size="12"
+                class="validation-icon"
+              >
+                <CircleCheckFilled v-if="skillValidationStatus.get(itemData.id)?.is_valid" />
+                <CircleCloseFilled v-else />
+              </el-icon>
+            </el-tooltip>
+            <div class="node-actions" @click="openContextMenu(itemData)">
+              <el-icon><MoreFilled /></el-icon>
+            </div>
           </div>
         </template>
       </ExplorerTree>
@@ -66,8 +86,7 @@
       size="auto"
       class="context-menu-drawer"
     >
-      <!-- Drawer content unchanged ... -->
-       <div class="context-menu-list" v-if="selectedItem">
+      <div class="context-menu-list" v-if="selectedItem">
         <div class="menu-header">
           <span class="menu-title">{{ selectedItem.name }}</span>
         </div>
@@ -84,6 +103,10 @@
           <div class="menu-item" @click="handleContextAction('newKB')">
             <el-icon><Collection /></el-icon>
             <span>{{ t('resource.tree.newKB') }}</span>
+          </div>
+          <div class="menu-item" @click="handleContextAction('newSkill')">
+            <el-icon><Reading /></el-icon>
+            <span>{{ t('resource.tree.newSkill') }}</span>
           </div>
           <el-divider />
         </template>
@@ -113,7 +136,7 @@
 
     <!-- Dialogs -->
     <EntityFormDialog
-      v-if="dialogState.type !== 'newKB'"
+      v-if="dialogState.type !== 'newKB' && dialogState.type !== 'newSkill'"
       v-model:visible="dialogVisible"
       :title="dialogProps.title"
       :initial-name="dialogProps.initialName"
@@ -122,13 +145,20 @@
     />
 
     <KnowledgeBaseFormDialog
-      v-else
+      v-else-if="dialogState.type === 'newKB'"
       v-model:visible="dialogVisible"
       :embedding-model-options="embeddingModelOptions"
       @confirm="handleKBConfirm"
     />
 
-    <!-- 3. Move Dialog -->
+    <SkillFormDialog
+      v-else-if="dialogState.type === 'newSkill'"
+      v-model:visible="dialogVisible"
+      :parent-id="dialogState.parentId"
+      @confirm="handleSkillConfirm"
+      @import-success="handleSkillImportSuccess"
+    />
+
     <MoveTargetDialog
       v-model:visible="moveDialogVisible"
       :item-to-move="selectedItem"
@@ -144,7 +174,7 @@ import { ref, computed, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import {
-  Folder, Document, DocumentAdd, FolderAdd, EditPen, Delete, Memo, Collection, Cpu, Plus, MoreFilled, Rank
+  Folder, Document, DocumentAdd, FolderAdd, EditPen, Delete, Memo, Collection, Cpu, Plus, MoreFilled, Rank, Reading, CircleCheckFilled, CircleCloseFilled
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
@@ -154,16 +184,15 @@ import { createKnowledgeBase } from '@/api/kbService'
 import ExplorerTree from '@/components/common/ExplorerTree.vue'
 import EntityFormDialog from '@/components/common/EntityFormDialog.vue'
 import KnowledgeBaseFormDialog, { type ModelGroup } from '@/components/settings/dialogs/KnowledgeBaseFormDialog.vue'
+import SkillFormDialog from '@/components/settings/dialogs/SkillFormDialog.vue'
 import MoveTargetDialog from '@/mobile/components/chat/dialogs/MoveTargetDialog.vue'
 
-// 修复 1: 引入 ChatNode 类型以进行类型断言
 import type {
-  Resource, ResourceWithVersions, ResourceCreate, ResourceType, BaseTreeItem, MoveRequest, ChatNode
+  Resource, ResourceWithVersions, ResourceCreate, ResourceType, BaseTreeItem, MoveRequest, ChatNode, SkillImportResponse
 } from '@/api/types'
 
 const { t } = useI18n()
 
-// --- Props & Emits ---
 defineProps<{
   data: Resource[]
   currentId: string | null
@@ -176,22 +205,18 @@ const emit = defineEmits<{
   (e: 'item-deleted', id: string): void
 }>()
 
-// --- Stores ---
 const resourceStore = useResourceStore()
 const providerStore = useProviderStore()
 
-// 修复 2: 将 loadingFolderIds 改为 loadingFolders，与 Store 导出保持一致
-const { resources, loadingFolders, loadedFolderIds, resourceTree } = storeToRefs(resourceStore)
+const { resources, loadingFolders, loadedFolderIds, resourceTree, skillValidationStatus } = storeToRefs(resourceStore)
 
-// --- State ---
 const treeRef = ref<InstanceType<typeof ExplorerTree>>()
 const contextMenuVisible = ref(false)
 const selectedItem = ref<Resource | null>(null)
 
-// Dialog State
 const dialogVisible = ref(false)
 const dialogState = ref<{
-  type: 'rename' | 'newResource' | 'newFolder' | 'newKB' | null
+  type: 'rename' | 'newResource' | 'newFolder' | 'newKB' | 'newSkill' | null
   targetItem: Resource | null
   parentId: string | null
 }>({
@@ -209,10 +234,8 @@ const dialogProps = ref<{
   initialName: ''
 })
 
-// Move Dialog State
 const moveDialogVisible = ref(false)
 
-// --- Computed ---
 const creatableResourceTypes = computed(() => [
   { value: 'system_prompt' as ResourceType, label: t('resource.types.system_prompt') },
   { value: 'submessage_template' as ResourceType, label: t('resource.types.submessage_template') },
@@ -230,17 +253,13 @@ const embeddingModelOptions = computed<ModelGroup[]>(() => {
   return Object.values(groups)
 })
 
-// 修复 3: 类型断言以匹配 MoveTargetDialog 的 props (ChatNode[])
 const folderTreeData = computed(() => {
   return resourceTree.value as unknown as ChatNode[]
 })
 
-// --- Lifecycle ---
 onMounted(() => {
   providerStore.fetchProviders()
 })
-
-// --- Interaction Handlers ---
 
 function handleNodeClick(data: BaseTreeItem) {
   emit('node-click', data)
@@ -292,6 +311,10 @@ function handleContextAction(action: string, parentIdOverride: string | null = n
     dialogState.value = { type: 'newKB', targetItem: null, parentId }
     dialogProps.value = { title: '', initialName: '' }
     dialogVisible.value = true
+  } else if (action === 'newSkill') {
+    dialogState.value = { type: 'newSkill', targetItem: null, parentId }
+    dialogProps.value = { title: '', initialName: '' }
+    dialogVisible.value = true
   } else if (action === 'rename' && item) {
     dialogState.value = { type: 'rename', targetItem: item, parentId: null }
     dialogProps.value = {
@@ -318,8 +341,6 @@ async function handleDelete(item: Resource) {
     ElMessage.success(t('common.msg.deleteSuccess'))
   } catch {}
 }
-
-// --- Dialog Confirm Handlers ---
 
 const DEFAULT_SUBMESSAGE_ATTRIBUTES = {
   context_participation_length: 1,
@@ -387,6 +408,46 @@ async function handleKBConfirm(payload: { name: string; embeddingModelId: string
   }
 }
 
+async function handleSkillConfirm(payload: { name: string; description: string }) {
+  const state = dialogState.value
+  if (!state) return
+
+  try {
+    const newItem = await resourceStore.addSkillItem({
+      name: payload.name,
+      description: payload.description,
+      parentId: state.parentId,
+    })
+    if (newItem) {
+      emit('item-created', newItem)
+      resourceStore.checkSkillValidation(newItem.id)
+    }
+    dialogVisible.value = false
+  } catch (error) {
+    console.error(error)
+    ElMessage.error(t('common.msg.createFailed'))
+  }
+}
+
+async function handleSkillImportSuccess(result: SkillImportResponse) {
+  dialogVisible.value = false
+  const state = dialogState.value
+  if (!state) return
+
+  const parentId = state.parentId
+  if (parentId && parentId !== 'root') {
+    resourceStore.loadedFolderIds.delete(parentId)
+    await resourceStore.fetchResourceChildren(parentId)
+  } else {
+    await resourceStore.initializeList()
+  }
+
+  const firstSuccess = result.details.find((d) => d.status === 'success')
+  if (firstSuccess && firstSuccess.resource_id) {
+    emit('item-created', { id: firstSuccess.resource_id } as Resource)
+  }
+}
+
 async function handleMoveConfirm(targetId: string) {
   if (!selectedItem.value) return
 
@@ -412,7 +473,6 @@ async function handleMoveConfirm(targetId: string) {
 </script>
 
 <style scoped>
-/* 样式保持不变 */
 .mobile-resource-tree-panel {
   height: 100%;
   display: flex;
@@ -445,6 +505,15 @@ async function handleMoveConfirm(targetId: string) {
   flex: 1;
   overflow-y: auto;
   padding-bottom: 50px;
+}
+
+.node-suffix-wrapper {
+  display: flex;
+  align-items: center;
+}
+
+.validation-icon {
+  margin-right: 4px;
 }
 
 .node-actions {

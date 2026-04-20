@@ -1,32 +1,43 @@
 // frontend/mambo/src/api/types/chatTypes.ts
 
-import type { FileResponse } from './common';
+import type { FileResponse } from './common'
 
 export type MessageRole = 'user' | 'assistant' | 'system'
 export type ChatItemType = 'chat' | 'folder'
-export type MessageStatus = 'generating' | 'completed' | 'failed'
+export type MessageStatus = 'generating' | 'completed' | 'failed' | 'pending_review'
+export type ChatMode = 'normal' | 'agent'
 
 // --- SubMessage Types ---
 
-export type SubMessageType = 'Normal' | 'Reasoning' | 'File' | 'Usage' | 'ZipHistory' | 'McpTool' | 'Suggest'
+export type SubMessageType =
+  | 'Normal'
+  | 'Reasoning'
+  | 'File'
+  | 'Usage'
+  | 'ZipHistory'
+  | 'McpTool'
+  | 'Suggest'
+  | 'ReviewTool'
+  | 'AskUser'
+  | 'Error'
 
 export interface SubMessageConfig {
   is_collapsed: boolean
   is_minimal?: boolean
   context_participation_length?: number
-  zip_enable?: boolean | null // 压缩历史是否启用
+  zip_enable?: boolean | null
 }
 
 export interface SubMessage {
   id: string
   content: string
-  createdAt: string // ISO 8601 date string
+  createdAt: string
   messageId: string
   sortOrder: number
   type: SubMessageType
   config: SubMessageConfig
   status: MessageStatus
-  file_info?: FileResponse // 用于承载文件类型消息的完整文件元数据
+  file_info?: FileResponse
 }
 
 export interface SubMessageCreate {
@@ -47,12 +58,16 @@ export interface SubMessageUpdate {
 
 export interface Message {
   id: string
-  createdAt: string // ISO 8601 date string
+  createdAt: string
   role: MessageRole
   chatId: string
   sortOrder: number
   sub_messages: SubMessage[]
   status: MessageStatus
+  parentId: string | null
+  lastActiveAt: string
+  sibling_ids: string[]
+  sibling_index: number
 }
 
 export interface MessageUpdate {
@@ -88,8 +103,11 @@ export interface Chat {
   parentId: string | null
   sortOrder: number
   lastOpenedAt: string | null
-  isLoaded?: boolean // 标记该节点的子节点是否已加载
-  resource_prompt_list?: string[] | null // 挂载的资源 ID 列表
+  isLoaded?: boolean
+  resource_prompt_list?: string[] | null
+  enabled_mcp_ids?: string[] | null
+  chatMode?: ChatMode
+  agentId?: string | null
 }
 
 export type ChatNode = Chat & { children?: ChatNode[] }
@@ -102,6 +120,9 @@ export interface ChatCreate {
   itemType?: ChatItemType
   parentId?: string | null
   sortOrder?: number
+  enabled_mcp_ids?: string[] | null
+  chatMode?: ChatMode
+  agentId?: string | null
 }
 
 export interface ChatUpdate {
@@ -112,6 +133,9 @@ export interface ChatUpdate {
   parentId?: string | null
   sortOrder?: number
   resource_prompt_list?: string[] | null
+  enabled_mcp_ids?: string[] | null
+  chatMode?: ChatMode
+  agentId?: string | null
 }
 
 export interface ChatWithMessages extends Chat {
@@ -122,6 +146,16 @@ export interface ChatReorderItem {
   id: string
   parentId: string | null
   sortOrder: number
+}
+
+
+// --- Schema Property Type ---
+export interface SchemaProperty {
+  type: string;
+  title?: string;
+  description?: string;
+  default?: unknown;
+  [key: string]: unknown;
 }
 
 // --- Mcp Types ---
@@ -138,7 +172,59 @@ export interface McpToolContent {
   name: string
   arguments: string
   result: string | null
-  is_error: boolean
+  is_error: boolean,
+  input_schema?: Record<string, SchemaProperty>
+}
+
+export interface ReviewToolContent {
+  tool_call_id: string
+  name: string
+  arguments: Record<string, unknown>
+  description: string | null
+  interrupt_index: number
+  batch_id: string
+  decision: ToolDecision | null
+  input_schema?: Record<string, SchemaProperty>
+}
+
+export interface ToolDecision {
+  type: 'approve' | 'edit' | 'reject'
+  edited_action?: { name: string; args: Record<string, unknown> } | null
+  message?: string | null
+}
+
+export interface ReviewToolRequest {
+  sub_message_id: string
+  decision: ToolDecision
+}
+
+export interface ErrorContent {
+  message: string
+  stack_trace: string
+}
+
+// --- AskUser Types ---
+
+export interface AskUserQuestion {
+  question: string
+  type: 'text' | 'multiple_choice'
+  choices?: Array<{ value: string }>
+  required?: boolean
+}
+
+export interface AskUserContent {
+  tool_call_id: string
+  questions: AskUserQuestion[]
+  answers?: string[] | null
+  interrupt_index: number
+  batch_id: string
+  ask_status?: 'answered' | 'cancelled' | null
+}
+
+export interface AskUserAnswerRequest {
+  sub_message_id: string
+  answers: string[]
+  ask_status: string
 }
 
 // --- Search Types (Chat) ---

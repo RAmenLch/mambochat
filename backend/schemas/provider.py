@@ -18,6 +18,7 @@ class AIModelMetaConfig(BaseModel):
     supported_parameters: Optional[List[str]] = None
     embedding_dimension: Optional[int] = Field(None, description="Embeddings 模型的输出向量维度")
     max_context_length: Optional[int] = Field(None, description="Embeddings 模型的最大上下文Token限制")
+    max_retries: Optional[int] = Field(0, description="模型请求最大重试次数, 0表示不配置, 使用全局默认值")
 
 
 # --- AIModel Schemas ---
@@ -27,6 +28,7 @@ class AIModelBase(BaseModel):
     name: str
     meta_config: Optional[AIModelMetaConfig] = Field(None, description="模型的元配置信息")
     model_type: ModelType = Field(ModelType.CHAT, description="模型类型: chat 或 embedding")
+    starred: bool = Field(False, description="是否标星")
 
 
 class AIModelCreate(AIModelBase):
@@ -38,6 +40,7 @@ class AIModelUpdate(BaseModel):
     name: Optional[str] = None
     meta_config: Optional[AIModelMetaConfig] = None
     model_type: Optional[ModelType] = None
+    starred: Optional[bool] = None
 
 
 class AIModel(AIModelBase):

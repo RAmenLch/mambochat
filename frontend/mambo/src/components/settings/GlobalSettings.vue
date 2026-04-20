@@ -27,10 +27,12 @@
             </el-tooltip>
           </template>
           <el-select
+            ref="defaultModelSelectRef"
             v-model="settingsForm.default_model_id"
             :placeholder="t('settings.global.defaultModelPlaceholder')"
             style="width: 100%"
             clearable
+            @visible-change="(visible: boolean) => scrollToTopIfStarred(visible, defaultModelSelectRef)"
           >
             <el-option-group v-for="group in groupedModels" :key="group.label" :label="group.label">
               <el-option
@@ -55,10 +57,12 @@
             </el-tooltip>
           </template>
           <el-select
+            ref="titleModelSelectRef"
             v-model="settingsForm.title_generation_model_id"
             :placeholder="t('settings.global.titleModelPlaceholder')"
             style="width: 100%"
             clearable
+            @visible-change="(visible: boolean) => scrollToTopIfStarred(visible, titleModelSelectRef)"
           >
             <el-option-group v-for="group in groupedModels" :key="group.label" :label="group.label">
               <el-option
@@ -267,6 +271,37 @@
           </el-tooltip>
         </el-form-item>
 
+        <el-form-item :label="t('settings.global.defaultEnableAskUser')">
+          <el-switch
+            :model-value="settingsForm.default_enable_ask_user ?? false"
+            @update:model-value="(val) => (settingsForm.default_enable_ask_user = val as boolean)"
+          />
+          <el-tooltip
+            effect="dark"
+            :content="t('settings.global.defaultEnableAskUserTip')"
+            placement="top"
+          >
+            <el-icon class="label-icon"><QuestionFilled /></el-icon>
+          </el-tooltip>
+        </el-form-item>
+
+        <el-form-item :label="t('settings.global.defaultMaxRetries')">
+          <el-input-number
+            :model-value="settingsForm.default_max_retries ?? 1"
+            @update:model-value="(val) => (settingsForm.default_max_retries = val as number)"
+            :min="1"
+            :max="20"
+            :step="1"
+          />
+          <el-tooltip
+            effect="dark"
+            :content="t('settings.global.defaultMaxRetriesTip')"
+            placement="top"
+          >
+            <el-icon class="label-icon"><QuestionFilled /></el-icon>
+          </el-tooltip>
+        </el-form-item>
+
         <!-- 状态栏替代了保存按钮 -->
         <div class="status-bar">
           <transition name="fade" mode="out-in">
@@ -299,6 +334,7 @@ import { ElMessage } from 'element-plus'
 import { QuestionFilled, User, Cpu, Loading, Check, Warning } from '@element-plus/icons-vue'
 import type { GlobalSettingsUpdate } from '@/api/types'
 import AvatarUploader from './AvatarUploader.vue'
+import { useModelSelectScroll } from '@/composables/useModelSelectScroll'
 
 type AvatarType = 'user' | 'ai'
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
@@ -333,6 +369,8 @@ const settingsForm = reactive<
   send_message_shortcut: 'enter',
   language: 'zh-CN', // 默认值
   default_enable_suggest: false,
+  default_enable_ask_user: false,
+  default_max_retries: 1,
 })
 
 // 状态控制
@@ -343,6 +381,10 @@ const isAvatarLoading = reactive({
   user: false,
   ai: false,
 })
+
+const defaultModelSelectRef = ref()
+const titleModelSelectRef = ref()
+const { scrollToTopIfStarred } = useModelSelectScroll()
 
 // 同步锁：防止 Store -> Form -> Watch -> API -> Store 的死循环
 const isSyncingFromStore = ref(false)
@@ -387,6 +429,8 @@ watch(
       send_message_shortcut: newSettings.send_message_shortcut,
       language: newSettings.language || 'zh-CN',
       default_enable_suggest: newSettings.default_enable_suggest ?? false,
+      default_enable_ask_user: newSettings.default_enable_ask_user ?? false,
+      default_max_retries: newSettings.default_max_retries ?? 1,
     })
 
     // 在 DOM 更新循环结束后释放锁，确保 watch(settingsForm) 不会被此次赋值触发

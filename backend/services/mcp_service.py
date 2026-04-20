@@ -70,3 +70,36 @@ async def get_all_merged_mcp_configs(db: AsyncSession) -> List[McpServerResponse
         response_list.append(McpServerResponse.model_validate(server))
 
     return response_list
+
+
+async def sync_server_tools(db: AsyncSession, server_id: str) -> List[Any]:
+    """
+    同步指定 MCP 服务器的工具列表到数据库。
+    """
+    # 局部导入以避免与 mcp_connection_manager 产生循环依赖
+    from backend.services.mcp_connection_manager import McpConnectionManager
+    from backend.crud import mcp_tool_crud
+    from backend.schemas.mcp import McpToolResponse
+
+    config = await load_mcp_config_by_id(db, server_id)
+    if not config:
+        raise ValueError(f"MCP Server {server_id} not found.")
+
+    if not config.isEnabled:
+        raise ValueError(f"MCP Server {server_id} is disabled.")
+
+    manager = McpConnectionManager(db)
+    tools = await manager.get_tools_and_check_status([server_id])
+
+    latest_tools = []
+    for tool in tools:
+        latest_tools.append({
+            "name": tool.name,
+            "description": tool.description,
+            "input_schema": tool.args
+        })
+
+    await mcp_tool_crud.sync_tools_for_server(db, server_id, latest_tools)
+
+    db_tools = await mcp_tool_crud.get_tools_by_server_id(db, server_id)
+    return [McpToolResponse.model_validate(t) for t in db_tools]

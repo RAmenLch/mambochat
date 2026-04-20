@@ -12,12 +12,15 @@ import {
   createResourceVersion,
   setActiveVersion,
   getResourceDetails,
+  createSkill,
+  validateSkill,
 } from '@/api/resourceService';
 import {
   uploadResourceFile,
   updateKBFileConfig as apiUpdateKBFileConfig,
   runKBFileTask as apiRunKBFileTask,
 } from '@/api/kbService';
+import { getFileContent, updateFileContent } from '@/api/fileService';
 import { buildChatTree } from '@/utils/treeHelper';
 import { useTreeStoreActions } from '@/composables/useTreeStoreActions';
 import type {
@@ -31,6 +34,8 @@ import type {
   ResourceVersionUpdate,
   KBSplitterConfig,
   KBRunTaskRequest,
+  SkillCreate,
+  SkillValidationResult,
 } from '@/api/types';
 
 /**
@@ -40,6 +45,7 @@ import type {
 export const useResourceStore = defineStore('resource', () => {
   // --- State ---
   const resources = ref<ResourceWithVersions[]>([]);
+  const skillValidationStatus = ref<Map<string, SkillValidationResult>>(new Map());
 
   // --- Actions (Composable) ---
 
@@ -68,7 +74,6 @@ export const useResourceStore = defineStore('resource', () => {
         await moveResource(req);
       },
     },
-    // onDeleteItem is not needed here as there are no store-level side effects.
   });
 
   // --- Getters ---
@@ -231,6 +236,57 @@ export const useResourceStore = defineStore('resource', () => {
     }
   }
 
+  /**
+   * 获取可编辑文件的文本内容。
+   * 仅当文件 editable 为 true 时调用。
+   */
+  async function fetchFileContent(resourceId: string, versionId: string) {
+    const resource = resources.value.find(r => r.id === resourceId);
+    if (!resource) return;
+
+    const version = resource.versions?.find(v => v.id === versionId) || resource.latest_version;
+    if (!version || !version.file_info) return;
+
+    try {
+      const response = await getFileContent(version.file_info.id);
+      version.content = response.content;
+
+      if (resource.latest_version?.id === versionId) {
+        resource.latest_version.content = response.content;
+      }
+    } catch (error) {
+      console.error(`Failed to fetch file content for version ${versionId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * 保存可编辑文件的文本内容。
+   * 直接更新文件实体，不创建新版本。
+   */
+  async function saveFileContent(resourceId: string, versionId: string, content: string) {
+    const resource = resources.value.find(r => r.id === resourceId);
+    if (!resource) return;
+
+    const version = resource.versions?.find(v => v.id === versionId) || resource.latest_version;
+    if (!version || !version.file_info) return;
+
+    try {
+      const updatedFileInfo = await updateFileContent(version.file_info.id, content);
+
+      version.file_info = updatedFileInfo;
+      version.content = content;
+
+      if (resource.latest_version?.id === versionId) {
+        resource.latest_version.file_info = updatedFileInfo;
+        resource.latest_version.content = content;
+      }
+    } catch (error) {
+      console.error(`Failed to save file content for version ${versionId}:`, error);
+      throw error;
+    }
+  }
+
   // --- Knowledge Base Specific Actions ---
 
   /**
@@ -287,12 +343,53 @@ export const useResourceStore = defineStore('resource', () => {
     // 注意：任务启动后的状态更新通常由 SSE 订阅或轮询处理，此处不直接修改本地状态
   }
 
+  // --- Skill Specific Actions ---
+
+  /**
+   * 创建新的 SKILL 资源。
+   * 后端会自动创建对应的文件夹和 SKILL.md 文件。
+   */
+  async function addSkillItem(data: SkillCreate) {
+    try {
+      const newSkill = await createSkill(data);
+      const newItemWithVersions: ResourceWithVersions = {
+        ...newSkill,
+        versions: newSkill.latest_version ? [newSkill.latest_version] : [],
+      };
+      resources.value.push(newItemWithVersions);
+
+      if (newSkill.itemType === 'folder') {
+        loadedFolderIds.value.add(newSkill.id);
+      }
+
+      return newSkill;
+    } catch (error) {
+      console.error('Store: Create skill failed', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 验证 SKILL 是否符合规范并更新本地缓存状态。
+   */
+  async function checkSkillValidation(resourceId: string) {
+    try {
+      const result = await validateSkill(resourceId);
+      skillValidationStatus.value.set(resourceId, result);
+      return result;
+    } catch (error) {
+      console.error(`Failed to validate skill ${resourceId}:`, error);
+      throw error;
+    }
+  }
+
   return {
     // State
     resources,
     isResourcesLoading,
     loadedFolderIds,
     loadingFolders,
+    skillValidationStatus,
     // Getters
     resourceTree,
     // Actions from Composable
@@ -309,9 +406,14 @@ export const useResourceStore = defineStore('resource', () => {
     createNewVersion,
     setActiveResourceVersion,
     fetchResourceDetails,
+    fetchFileContent,
+    saveFileContent,
     // KB Specific Actions
     uploadKBFile,
     updateKBFileConfig,
     runKBFileTask,
+    // Skill Specific Actions
+    addSkillItem,
+    checkSkillValidation,
   };
 });

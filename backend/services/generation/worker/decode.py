@@ -1,39 +1,70 @@
-from langchain_core.messages import AIMessageChunk,AIMessage, ToolMessage
+# backend/services/generation/worker/decode.py
 
-class BaseDecode:
-    @staticmethod
-    def get_text_content(mode,message):
+from abc import ABC, abstractmethod
+from typing import Any, Dict, Optional, Union
+
+from langchain_core.messages import AIMessageChunk, AIMessage, BaseMessage, ToolMessage
+
+
+class BaseDecode(ABC):
+    @abstractmethod
+    def get_text_content(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[str]:
         pass
 
-    @staticmethod
-    def get_reasoning_content(mode,message):
+    @abstractmethod
+    def get_reasoning_content(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[str]:
         pass
 
-    @staticmethod
-    def get_toolcall_content(mode,message:AIMessageChunk| AIMessage):
-        if mode == "updates" and isinstance(message,AIMessage):
-            return message.tool_calls # 示例 [{'name': 'ddgs_search', 'args': {'query': '今日广州天气', 'max_results': 5}, 'id': '019bcccc33c40a0867a2879848bddca0', 'type': 'tool_call'}]
-        else:
+    @abstractmethod
+    def get_toolcall_content(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[list]:
+        pass
+
+    @abstractmethod
+    def get_toolcall_result(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        pass
+
+    @abstractmethod
+    def get_usage(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        pass
+
+    @abstractmethod
+    def get_hitl_interrupt(self, mode: str, event: Union[BaseMessage, Dict[str, Any]]) -> Optional[Any]:
+        pass
+
+    @abstractmethod
+    def get_hitl_middleware_data(self, mode: str, event: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        pass
+
+    @abstractmethod
+    def get_image_url(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        pass
+
+
+class DefaultLangChainDecode(BaseDecode):
+    def get_text_content(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[str]:
+        return None
+
+    def get_reasoning_content(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[str]:
+        return None
+
+    def get_image_url(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        return None
+
+    def get_toolcall_content(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[list]:
+        if mode == "updates" and isinstance(message, AIMessage):
+            return message.tool_calls or None
+        return None
+
+    def get_toolcall_result(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if mode == "updates" and isinstance(message, ToolMessage):
+            return {"id": message.tool_call_id, "text": str(message.text)}
+        return None
+
+    def get_usage(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not isinstance(message, AIMessage):
             return None
 
-    @staticmethod
-    def get_toolcall_result(mode,message:ToolMessage):
-        if mode == "updates" and isinstance(message,ToolMessage):
-            return {"id": message.tool_call_id, "text": message.text} # text 工具调用mcp方法返回的json
-        else:
-            return None
-
-
-
-    @staticmethod
-    def get_usage(mode,message:AIMessage):
-        if isinstance(message,ToolMessage):
-            return None
-
-        if (mode == "messages"
-                # and message.response_metadata.get("finish_reason","").lower() == "stop"
-                and message.usage_metadata
-        ):
+        if mode == "messages" and message.usage_metadata:
             usage = {}
             if "input_tokens" in message.usage_metadata:
                 usage["prompt_tokens"] = message.usage_metadata.get("input_tokens")
@@ -43,108 +74,128 @@ class BaseDecode:
                 usage["total_tokens"] = message.usage_metadata.get("total_tokens")
             if "output_token_details" in message.usage_metadata:
                 usage["completion_tokens_details"] = {}
-                usage["completion_tokens_details"]["reasoning_tokens"] \
-                        = message.usage_metadata.get("output_token_details").get("reasoning")
+                usage["completion_tokens_details"]["reasoning_tokens"] = \
+                    message.usage_metadata.get("output_token_details").get("reasoning")
             return usage
-        else:
-            return None
+        return None
 
+    def get_hitl_interrupt(self, mode: str, event: Union[BaseMessage, Dict[str, Any]]) -> Optional[Any]:
+        if mode == "updates" and isinstance(event, dict) and "__interrupt__" in event:
+            return event["__interrupt__"][0].value
+        return None
 
-class OpenAiDecode(BaseDecode):
-    @staticmethod
-    def get_text_content(mode,message:AIMessageChunk| AIMessage):
-        if mode == "updates":
-            return None
-        if mode == "messages" and isinstance(message,AIMessage):
-            return message.content
-        else:
-            return None
-
-    @staticmethod
-    def get_reasoning_content(mode,message:AIMessageChunk| AIMessage):
-        if mode == "updates":
-            return None
-        if mode == "messages" and isinstance(message,AIMessage):
-            return message.additional_kwargs.get("reasoning") or message.additional_kwargs.get("reasoning_content")
-        else:
-            return None
-
-    @staticmethod
-    def get_image_url(mode,message:AIMessageChunk| AIMessage):
-        if mode == "updates" and isinstance(message,AIMessage):
-            if "images" in message.additional_kwargs:
-                for image in message.additional_kwargs["images"]:
-                    return image # {"image_url":{"url":"data:image..."}}
-                else:
-                    return None
-            else:
+    def get_hitl_middleware_data(self, mode: str, event: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if mode == "updates" and isinstance(event, dict) and "HumanInTheLoopMiddleware.after_model" in event:
+            data = event["HumanInTheLoopMiddleware.after_model"]
+            if not data:
                 return None
-        else:
-            return None
 
+            messages = data.get("messages", [])
+            rejected_results = []
+            rejected_ids = set()
 
-class AnthropicDecode(BaseDecode):
-    @staticmethod
-    def get_text_content(mode,message:AIMessageChunk| AIMessage):
-        if mode == "updates":
-            return None
-        if mode == "messages" and isinstance(message,AIMessage):
-            for sub_message in message.content_blocks:
-                if sub_message.get("type","") == "text":
-                    return sub_message.get("text","")
-            else:
-                return None
-        else:
-            return None
+            for msg in messages:
+                if isinstance(msg, ToolMessage):
+                    rejected_ids.add(msg.tool_call_id)
+                    rejected_results.append({
+                        "id": msg.tool_call_id,
+                        "name": msg.name or "",
+                        "content": msg.content
+                    })
 
-    @staticmethod
-    def get_reasoning_content(mode,message:AIMessageChunk| AIMessage):
-        if mode == "updates":
-            return None
-        if mode == "messages" and isinstance(message,AIMessage):
-            for sub_message in message.content_blocks:
-                if sub_message.get("type","") == "reasoning":
-                    return sub_message.get("reasoning","")
-            else:
-                return None
-        else:
-            return None
+            approved_calls = []
+            for msg in messages:
+                if isinstance(msg, AIMessage) and msg.tool_calls:
+                    for call in msg.tool_calls:
+                        if call.get("id") not in rejected_ids:
+                            approved_calls.append(call)
 
-    @staticmethod
-    def get_image_url(mode,message:AIMessageChunk| AIMessage):
+            return {"approved_calls": approved_calls, "rejected_results": rejected_results}
         return None
 
 
-
-class GoogleDecode(BaseDecode):
-    @staticmethod
-    def get_text_content(mode,message:AIMessageChunk| AIMessage):
-        if mode == "updates":
-            return None
-        if mode == "messages" and isinstance(message,AIMessage):
-            return "\n".join([subm.get("text","") for subm in message.content_blocks if subm.get("type","") == 'text'])
-        else:
-            return None
-
-    @staticmethod
-    def get_reasoning_content(mode,message):
+class OpenAiDecode(DefaultLangChainDecode):
+    def get_text_content(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[str]:
         if mode == "updates":
             return None
         if mode == "messages" and isinstance(message, AIMessage):
-            return message.additional_kwargs.get("reasoning") or message.additional_kwargs.get("reasoning_content") \
-                   or "".join([sub.get("reasoning","") for sub in message.content_blocks if sub.get("type","") == "reasoning"])
-        else:
-            return None
+            return message.content
+        return None
 
-    @staticmethod
-    def get_image_url(mode,message:AIMessageChunk| AIMessage):
-        if mode == "updates" and isinstance(message,AIMessage):
+    def get_reasoning_content(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[str]:
+        if mode == "updates":
+            return None
+        if mode == "messages" and isinstance(message, AIMessage):
+            return message.additional_kwargs.get("reasoning") or message.additional_kwargs.get("reasoning_content")
+        return None
+
+    def get_image_url(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if mode == "updates" and isinstance(message, AIMessage):
             if "images" in message.additional_kwargs:
                 for image in message.additional_kwargs["images"]:
-                    return image # {"image_url":{"url":"data:image..."}}
-                else:
-                    return None
-            else:
-                return None
-        else:
+                    return image
+        return None
+
+
+class AnthropicDecode(DefaultLangChainDecode):
+    def get_text_content(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[str]:
+        if mode == "updates":
             return None
+        if mode == "messages" and isinstance(message, AIMessage):
+            for sub_message in message.content_blocks:
+                if sub_message.get("type", "") == "text":
+                    return sub_message.get("text", "")
+        return None
+
+    def get_reasoning_content(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[str]:
+        if mode == "updates":
+            return None
+        if mode == "messages" and isinstance(message, AIMessage):
+            for sub_message in message.content_blocks:
+                if sub_message.get("type", "") == "reasoning":
+                    return sub_message.get("reasoning", "")
+        return None
+
+    def get_image_url(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        return None
+
+
+class GoogleDecode(DefaultLangChainDecode):
+    def get_text_content(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[str]:
+        if mode == "updates":
+            return None
+        if mode == "messages" and isinstance(message, AIMessage):
+            return "\n".join([subm.get("text", "") for subm in message.content_blocks if subm.get("type", "") == 'text'])
+        return None
+
+    def get_reasoning_content(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[str]:
+        if mode == "updates":
+            return None
+        if mode == "messages" and isinstance(message, AIMessage):
+            reasoning = message.additional_kwargs.get("reasoning") or message.additional_kwargs.get("reasoning_content")
+            if reasoning:
+                return reasoning
+            return "".join([sub.get("reasoning", "") for sub in message.content_blocks if sub.get("type", "") == "reasoning"])
+        return None
+
+    def get_image_url(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if mode == "updates" and isinstance(message, AIMessage):
+            if "images" in message.additional_kwargs:
+                for image in message.additional_kwargs["images"]:
+                    return image
+        return None
+
+
+class DecoderRegistry:
+    _decoders: Dict[str, BaseDecode] = {
+        "openai": OpenAiDecode(),
+        "anthropic": AnthropicDecode(),
+        "google_genai": GoogleDecode(),
+        "deepseek": OpenAiDecode(),
+        "default": DefaultLangChainDecode()
+    }
+
+    @classmethod
+    def get_decoder(cls, model_provider: str) -> BaseDecode:
+        provider_key = (model_provider or "").lower()
+        return cls._decoders.get(provider_key, cls._decoders["default"])

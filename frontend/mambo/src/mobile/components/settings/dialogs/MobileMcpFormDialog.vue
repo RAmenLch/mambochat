@@ -76,10 +76,24 @@
 
     <template #footer>
       <div class="dialog-footer">
-        <el-button @click="handleCancel">{{ t('common.action.cancel') }}</el-button>
-        <el-button type="primary" @click="handleSubmit" :loading="isSubmitting">
-          {{ t('common.action.confirm') }}
-        </el-button>
+        <div class="footer-left">
+          <el-button
+            :loading="isTestingConnection"
+            size="small"
+            @click="handleTestConnection"
+          >
+            {{ t('settings.mcp.testConnection') }}
+          </el-button>
+          <div v-if="testFeedback.status !== 'none'" class="test-feedback" :class="testFeedback.status">
+            <span :title="testFeedback.message">{{ testFeedback.shortMessage }}</span>
+          </div>
+        </div>
+        <div class="footer-right">
+          <el-button @click="handleCancel">{{ t('common.action.cancel') }}</el-button>
+          <el-button type="primary" @click="handleSubmit" :loading="isSubmitting">
+            {{ t('common.action.confirm') }}
+          </el-button>
+        </div>
       </div>
     </template>
   </el-dialog>
@@ -91,6 +105,7 @@ import { Plus, Minus } from '@element-plus/icons-vue';
 import type { FormInstance, FormRules } from 'element-plus';
 import type { McpServer, McpCreateRequest, McpTransportType } from '@/api/types';
 import { useI18n } from 'vue-i18n';
+import { useMcpStore } from '@/stores/mcpStore';
 
 const { t } = useI18n();
 
@@ -106,6 +121,15 @@ const emit = defineEmits<{
 }>();
 
 const formRef = ref<FormInstance>();
+const mcpStore = useMcpStore();
+
+// 测试连接状态
+const isTestingConnection = ref(false);
+const testFeedback = reactive({
+  status: 'none' as 'none' | 'success' | 'error',
+  shortMessage: '',
+  message: ''
+});
 
 interface LocalFormData {
   name: string;
@@ -187,7 +211,61 @@ const removeEnv = (index: number) => formData.envList.splice(index, 1);
 
 const handleUpdateVisible = (val: boolean) => emit('update:visible', val);
 const handleCancel = () => emit('update:visible', false);
-const handleClosed = () => formRef.value?.resetFields();
+const handleClosed = () => {
+  formRef.value?.resetFields();
+  testFeedback.status = 'none';
+  testFeedback.shortMessage = '';
+  testFeedback.message = '';
+};
+
+const handleTestConnection = async () => {
+  isTestingConnection.value = true;
+  testFeedback.status = 'none';
+
+  try {
+    const configData: McpCreateRequest = {
+      name: formData.name,
+      description: formData.description || null,
+      transportType: formData.transportType,
+      isEnabled: formData.isEnabled,
+    };
+
+    if (formData.transportType === 'stdio') {
+      configData.command = formData.command;
+      const validArgs = formData.argsList.filter(a => a.trim() !== '');
+      configData.args = validArgs.length > 0 ? validArgs : null;
+      const validEnv = formData.envList.filter(e => e.key.trim() !== '');
+      if (validEnv.length > 0) {
+        configData.env = validEnv.reduce((acc, cur) => {
+          acc[cur.key] = cur.value;
+          return acc;
+        }, {} as Record<string, string>);
+      } else {
+        configData.env = null;
+      }
+    } else {
+      configData.url = formData.url;
+    }
+
+    const response = await mcpStore.testConnectionWithConfig(configData);
+
+    if (response.status === 'healthy') {
+      testFeedback.status = 'success';
+      testFeedback.shortMessage = `OK (${response.tools_count})`;
+      testFeedback.message = '连接测试通过，服务运行正常。';
+    } else {
+      testFeedback.status = 'error';
+      testFeedback.shortMessage = 'Failed';
+      testFeedback.message = response.error || response.message || '连接测试未通过，请检查配置。';
+    }
+  } catch (error: any) {
+    testFeedback.status = 'error';
+    testFeedback.shortMessage = 'Failed';
+    testFeedback.message = error.message || '连接测试未通过，请检查配置。';
+  } finally {
+    isTestingConnection.value = false;
+  }
+};
 
 const handleSubmit = async () => {
   if (!formRef.value) return;
@@ -284,8 +362,40 @@ const handleSubmit = async () => {
 
 .dialog-footer {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
   gap: 10px;
   padding: 10px 0 0;
+}
+
+.footer-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.footer-right {
+  display: flex;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.test-feedback {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.test-feedback.success {
+  color: var(--el-color-success);
+}
+
+.test-feedback.error {
+  color: var(--el-color-danger);
 }
 </style>

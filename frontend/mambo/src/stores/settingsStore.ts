@@ -35,6 +35,8 @@ export const useSettingsStore = defineStore('settings', {
       send_message_shortcut: 'enter',
       language: 'zh-CN',
       default_enable_suggest: false,
+      default_enable_ask_user: false,
+      default_max_retries: 3,
     },
   }),
 

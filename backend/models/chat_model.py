@@ -1,10 +1,13 @@
 # backend/models/chat_model.py
 
+import json
 from sqlalchemy import Column, String, TEXT, DateTime, ForeignKey, func, Integer, JSON
 from sqlalchemy.orm import relationship
 from backend.models.base_model import Base, generate_uuid
-from backend.schemas.enums import MessageStatus,SubMessageType
+from backend.schemas.enums import MessageStatus, SubMessageType
 from backend.config.timezone_config import get_configured_now
+from backend.schemas.enums import ChatMode
+from typing import Dict, Any
 
 
 class Chat(Base):
@@ -21,10 +24,29 @@ class Chat(Base):
 
     systemPrompt = Column(TEXT, nullable=True)
     modelParameters = Column(TEXT, nullable=True)  # Store as JSON string
-    aiModelId = Column(String(36), ForeignKey("AIModel.id"), nullable=True)
 
-    # 新增：资源挂载列表，存储资源ID的JSON数组
+    @property
+    def parsed_model_parameters(self) -> Dict[str, Any]:
+        """统一返回 dict，屏蔽 TEXT 列与 Agent.JSON 列的类型差异。"""
+        if self.modelParameters is None:
+            return {}
+        if isinstance(self.modelParameters, str):
+            try:
+                return json.loads(self.modelParameters)
+            except (json.JSONDecodeError, TypeError):
+                return {}
+        return self.modelParameters if isinstance(self.modelParameters, dict) else {}
+    aiModelId = Column(String(36), ForeignKey("AIModel.id"), nullable=True)
+    chatMode = Column(String(20), nullable=False, default=ChatMode.NORMAL.value)
+    agentId = Column(String(36), ForeignKey("Agent.id", ondelete="SET NULL"), nullable=True)
+
+    # 关系: 反向引用到 Agent
+    agent = relationship("Agent")
+    # 资源挂载列表，存储资源ID的JSON数组
     resource_prompt_list = Column(JSON, nullable=True)
+
+    # 启用的 MCP 服务 ID 列表，存储字符串数组
+    enabled_mcp_ids = Column(JSON, nullable=True, default=list)
 
     # 关系: 反向引用到 AIModel
     ai_model = relationship("AIModel", back_populates="chats")
@@ -43,13 +65,21 @@ class Message(Base):
     createdAt = Column(DateTime, nullable=False, default=get_configured_now)
     role = Column(String(20), nullable=False)  # 'user', 'assistant', 'system'
     chatId = Column(String(36), ForeignKey("Chat.id"), nullable=False)
-    sortOrder = Column(Integer, nullable=False)
+
+    # 树状结构与路由字段
+    parentId = Column(String(36), ForeignKey("Message.id"), nullable=True)
+    lastActiveAt = Column(DateTime, nullable=False, default=get_configured_now)
+    sortOrder = Column(Integer, nullable=False) # 现在的语义变更为：记录节点在树中的深度层级
 
     # 关系: 反向引用到 Chat
     chat = relationship("Chat", back_populates="messages")
     # 关系: 一个 Message 包含多个 SubMessage
     sub_messages = relationship("SubMessage", back_populates="message", cascade="all, delete-orphan",
                                 order_by="SubMessage.sortOrder")
+
+    # 关系: 自引用，用于构建消息分支树
+    children = relationship("Message", back_populates="parent")
+    parent = relationship("Message", remote_side=[id], back_populates="children")
 
 
 class SubMessage(Base):
@@ -66,4 +96,3 @@ class SubMessage(Base):
 
     # 关系: 反向引用到 Message
     message = relationship("Message", back_populates="sub_messages")
-

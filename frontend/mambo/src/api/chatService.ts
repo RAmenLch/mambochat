@@ -13,12 +13,17 @@ import type {
   SubMessageUpdate,
   GenerateRequest,
   PrepareGenerateResponse,
-  FileResponse, UpdateMessageResponse,
-  SearchRequest, SearchResponse
+  UpdateMessageResponse,
+  SearchRequest,
+  SearchResponse,
+  ReviewToolRequest,
+  AskUserAnswerRequest,
+  ChatDuplicateRequest,
+  ChatArchiveRequest,
 } from './types';
 
 /**
- * [新增] 懒加载获取会话/文件夹子节点
+ * 懒加载获取会话/文件夹子节点
  * @param parentIds 父节点ID列表，传 "root" 获取根目录
  */
 export const getChatChildren = (parentIds: string[]): Promise<Chat[]> => {
@@ -28,14 +33,14 @@ export const getChatChildren = (parentIds: string[]): Promise<Chat[]> => {
 };
 
 /**
- * [新增] 移动会话/文件夹节点
+ * 移动会话/文件夹节点
  */
 export const moveChat = (data: MoveRequest): Promise<void> => {
   return apiClient.post('/chats/move', data);
 };
 
 /**
- * [新增] 获取会话链路 (用于深层链接回溯)
+ * 获取会话链路 (用于深层链接回溯)
  */
 export const getChatLineage = (chatId: string): Promise<Chat[]> => {
   return apiClient.get(`/chats/${chatId}/lineage`);
@@ -70,10 +75,17 @@ export const deleteChat = (itemId: string): Promise<Chat> => {
 };
 
 /**
- * 复制会话
+ * 复制会话 (支持截断复制)
  */
-export const duplicateChat = (chatId: string): Promise<Chat> => {
-  return apiClient.post(`/chats/${chatId}/duplicate`)
+export const duplicateChat = (chatId: string, payload?: ChatDuplicateRequest): Promise<Chat> => {
+  return apiClient.post(`/${chatId}/duplicate`, payload || {});
+};
+
+/**
+ * 批量归档会话到新文件夹
+ */
+export const archiveChats = (data: ChatArchiveRequest): Promise<Chat> => {
+  return apiClient.post('/archive', data);
 };
 
 
@@ -100,24 +112,6 @@ export const updateSubMessage = (subMessageId: string, data: SubMessageUpdate): 
  */
 export const deleteMessage = (messageId: string): Promise<Message> => {
   return apiClient.delete(`/messages/${messageId}`)
-};
-
-/**
- * 上传单个文件到服务器。
- * @param file 用户选择的 File 对象。
- * @returns 返回已上传文件的元数据。
- */
-export const uploadFile = (file: File): Promise<FileResponse> => {
-  const formData = new FormData();
-  formData.append('file', file);
-
-  // 解决方案：在此处为本次请求单独覆盖 Content-Type
-  // 这会覆盖 apiClient 实例的全局默认 'application/json' 设置
-  return apiClient.post('/files/upload', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
-  });
 };
 
 /**
@@ -165,4 +159,46 @@ export const generateChatTitle = (chatId: string): Promise<{ message: string }> 
  */
 export const searchChats = (data: SearchRequest): Promise<SearchResponse> => {
   return apiClient.post('/chats/search', data);
+};
+
+/**
+ * 提交工具调用审核决策
+ * @param messageId 主消息ID
+ * @param data 审核决策数据
+ */
+export const submitToolReview = (messageId: string, data: ReviewToolRequest): Promise<Message> => {
+  return apiClient.post(`/messages/${messageId}/review-tool`, data);
+};
+
+/**
+ * 提交 ask_user 问题回答
+ * @param messageId 主消息ID
+ * @param data 回答数据
+ */
+export const submitAskUserAnswer = (messageId: string, data: AskUserAnswerRequest): Promise<Message> => {
+  return apiClient.post(`/messages/${messageId}/answer-ask-user`, data);
+};
+
+/**
+ * 激活指定消息分支
+ * @param chatId 会话ID
+ * @param messageId 目标消息ID
+ */
+export const activateMessageBranch = (chatId: string, messageId: string): Promise<Message[]> => {
+  return apiClient.put(`/chats/${chatId}/messages/${messageId}/activate`);
+};
+
+/**
+ * 重试失败的生成任务（从 LangGraph checkpoint 恢复）
+ * @param messageId 失败的 assistant 消息ID
+ */
+export const retryFailedGeneration = (messageId: string): Promise<Message> => {
+  return apiClient.post(`/messages/${messageId}/retry`);
+};
+
+/**
+ * 批量查询后台任务状态
+ */
+export const checkTasksStatus = (taskIds: string[]): Promise<{ running_tasks: string[] }> => {
+  return apiClient.post('/tasks/status', { task_ids: taskIds });
 };

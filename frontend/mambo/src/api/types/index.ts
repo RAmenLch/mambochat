@@ -6,3 +6,5 @@ export * from './resourceTypes';
 export * from './providerTypes';
 export * from './settingsTypes';
 export * from './mcpTypes';
+export * from './agentTypes.ts'
+export * from './backendTypes.ts'
