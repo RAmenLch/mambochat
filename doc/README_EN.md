@@ -29,7 +29,7 @@
     *   Supports MCP tool review mode (Human-in-the-Loop), allowing manual confirmation before tool execution.
 *   **🤖 Intelligent Agents**
     *   **Conversational Agent (ReAct)**: Reasoning through tool calls, with support for knowledge bases, MCP tools, and Skill packs.
-    *   **Code Agent (Deep)**: Based on the [deepagents](https://github.com/langchain-ai/deepagents) project, capable of reading/writing files, executing commands, and performing remote server operations.
+    *   **Advanced Agent (Deep)**: Based on the [deepagents](https://github.com/langchain-ai/deepagents) project, capable of reading/writing files, executing commands, nested sub-agent invocation, and performing remote server operations.
     *   Agents can be equipped with resources, MCP tools, Skill packs, and can collaborate with remote Backends.
 *   **🔧 Remote Backend**
     *   **SSH Backend**: Connect to remote Linux servers via SSH/SFTP, enabling the Agent to directly operate remote files and execute commands.
@@ -38,15 +38,15 @@
     *   Create and import Skills to extend Agent capabilities.
     *   Import from local files, ZIP archives, or GitHub repositories.
 *   **💬 Robust Conversation Experience**
-    *   Stream responses with Markdown and code highlighting.
+    *   Stream responses with Markdown and code highlighting, supporting mermaid and svg code block image rendering.
     *   **Multimodal Support**: Image/file upload and parsing. Support for image generation models.
     *   **Session Management**: Folder categorization, drag-and-drop sorting, search, and batch archiving.
     *   **Editor Mode**: Integrated Monaco Editor.
     *   **Message Branching**: Edit and regenerate messages while preserving the full edit history — conversations are never lost.
     *   **Conversation Copying**: Duplicate conversations (with optional truncation) to explore new directions from existing dialogues.
-    *   **Context Compression**: Compresses conversation history to save tokens. ✨ **Featured Highlight**
+    *   **Context Compression**: Compresses conversation history to save tokens.
 *   **🛠️ Resource & Prompt Management**
-    *   Unified management for System Prompts, Message Templates, and Skill packs. ✨ **Featured Highlight**
+    *   Unified management for System Prompts, Message Templates, and Skill packs.
     *   Version control and rollback for resources.
 *   **⚙️ Global Personalization**
     *   Custom avatars for users and AI.
@@ -73,7 +73,7 @@ Use the provided `docker-compose.yml` to launch the service instantly.
 
 2.  **Start Services**
     ```bash
-    docker-compose up -d
+    docker compose up -d --build
     ```
 
 3.  **Access the Application**
@@ -101,6 +101,10 @@ Use the provided `docker-compose.yml` to launch the service instantly.
 > `build_and_start.bat` checks for and downloads dependencies before launching, while `start.bat` launches directly.
 > Note: This script has not been tested across different environments. If you encounter any issues, please feel free to open an Issue.
 
+
+## 💻 Local Development Guide
+
+If you need to do secondary development, you can start the frontend and backend services separately.
 
 ### Backend
 
@@ -141,7 +145,7 @@ Use the provided `docker-compose.yml` to launch the service instantly.
 Contributions are welcome! Whether you have ideas, found a bug, or want to add a feature, feel free to submit a Pull Request or create an Issue.
 
 ## 👨‍💻 Roadmap
-- [x] Abstract key functionalities to support a plugin system.
-- [x] Enhance Agent capabilities (ReAct + Deep).
-- [ ] Build a plugin for role-playing scenarios.
+- [ ] Abstract key functionalities to support plugin capabilities
+- [ ] Enhance Agent capabilities
+- [ ] Build a role-playing plugin
 - [ ] Ongoing bug fixes and optimizations.
