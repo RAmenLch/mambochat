@@ -39,50 +39,58 @@ set "TZ=Asia/Shanghai"
 if not exist "%ROOT_DIR%uploads" mkdir "%ROOT_DIR%uploads"
 if not exist "%ROOT_DIR%DB" mkdir "%ROOT_DIR%DB"
 
-:: Default ports
+:: --- Detect available ports ---
+:: Use TcpListener bind test: tries to actually bind the port at OS level.
+:: If any process (HTTP, WSL, any type) is using the port, the OS will refuse.
+:: This is more reliable than netstat or HTTP probing.
+
+echo.
+echo   Detecting available ports...
 set "BACKEND_PORT=8000"
-set "FRONTEND_PORT=24911"
 
-:: Detect free backend port (8000 - 8010)
-echo   Detecting available backend port...
 :check_backend_port
-netstat -aon | findstr ":%BACKEND_PORT% " | findstr "LISTENING" >nul 2>&1
+if !BACKEND_PORT! gtr 8010 goto :backend_no_port
+powershell -NoProfile -Command "try { $l = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, !BACKEND_PORT!); $l.Start(); $l.Stop(); exit 0 } catch { exit 1 }" >nul 2>&1
 if !errorlevel! equ 0 (
-    if !BACKEND_PORT! geq 8010 (
-        echo   [Error] Cannot find free port for backend in range 8000-8010!
-        echo   Please close applications using these ports and try again.
-        pause
-        exit /b 1
-    )
-    echo   Port !BACKEND_PORT! is in use, trying next...
-    set /a "BACKEND_PORT+=1"
-    goto :check_backend_port
-)
-echo   [OK] Backend port: !BACKEND_PORT!
-
-:: Detect free frontend port (24911 - 24920)
-echo   Detecting available frontend port...
-:check_frontend_port
-netstat -aon | findstr ":%FRONTEND_PORT% " | findstr "LISTENING" >nul 2>&1
-if !errorlevel! equ 0 (
-    if !FRONTEND_PORT! geq 24921 (
-        echo   [Error] Cannot find free port for frontend in range 24911-24920!
-        echo   Please close applications using these ports and try again.
-        pause
-        exit /b 1
-    )
-    echo   Port !FRONTEND_PORT! is in use, trying next...
-    set /a "FRONTEND_PORT+=1"
+    echo   [OK] Backend port: !BACKEND_PORT!
     goto :check_frontend_port
 )
-echo   [OK] Frontend port: !FRONTEND_PORT!
+echo   Port !BACKEND_PORT! is in use, trying next...
+set /a "BACKEND_PORT+=1"
+goto :check_backend_port
 
-:: Start Backend
+:backend_no_port
+echo   [Error] Cannot find free port for backend in range 8000-8010!
+echo   Please close applications using these ports and try again.
+pause
+exit /b 1
+
+:check_frontend_port
+set "FRONTEND_PORT=24911"
+:check_fe_port_loop
+if !FRONTEND_PORT! gtr 24920 goto :frontend_no_port
+powershell -NoProfile -Command "try { $l = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, !FRONTEND_PORT!); $l.Start(); $l.Stop(); exit 0 } catch { exit 1 }" >nul 2>&1
+if !errorlevel! equ 0 (
+    echo   [OK] Frontend port: !FRONTEND_PORT!
+    goto :ports_done
+)
+echo   Port !FRONTEND_PORT! is in use, trying next...
+set /a "FRONTEND_PORT+=1"
+goto :check_fe_port_loop
+
+:frontend_no_port
+echo   [Error] Cannot find free port for frontend in range 24911-24920!
+echo   Please close applications using these ports and try again.
+pause
+exit /b 1
+
+:ports_done
+
+:: --- Start Backend ---
 echo.
 echo   Starting Backend (Port !BACKEND_PORT!)...
 start "MamboChat-Backend" cmd /k "title MamboChat-Backend [Port !BACKEND_PORT!] && "%PYTHON_EXE%" -m uvicorn backend.main:app --host 127.0.0.1 --port !BACKEND_PORT! --app-dir "%ROOT_DIR%""
 
-:: Wait for backend to be ready (up to 30s)
 echo   Waiting for backend...
 set "BACKEND_READY=0"
 for /l %%i in (1,1,30) do (
@@ -104,7 +112,8 @@ if !BACKEND_READY! equ 0 (
     exit /b 1
 )
 
-:: Start Frontend (--strictPort ensures the detected port is used exactly)
+:: --- Start Frontend ---
+echo.
 echo   Starting Frontend (Port !FRONTEND_PORT!)...
 pushd "%FRONTEND_DIR%"
 start "MamboChat-Frontend" cmd /k "title MamboChat-Frontend [Port !FRONTEND_PORT!] && call "%NPM_CMD%" run preview -- --port !FRONTEND_PORT! --host 127.0.0.1 --strictPort"
