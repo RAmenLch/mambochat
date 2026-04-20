@@ -13,7 +13,7 @@ export default {
   about: {
     title: 'MamboChat',
     subtitle: 'MamboChat',
-    desc: 'A simple yet powerful AI Web platform merging multi-provider model aggregation, local RAG, and MCP protocol extension.',
+    desc: 'A simple yet powerful AI Web platform merging multi-provider model aggregation, local RAG, Agent, and MCP protocol extension.',
     github: 'GitHub Repository',
     contact: 'Contact Author',
     copyright: '© {year} MamboChat. All rights reserved.',

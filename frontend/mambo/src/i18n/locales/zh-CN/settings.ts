@@ -13,7 +13,7 @@ export default {
   about: {
     title: 'MamboChat',
     subtitle: '曼波茶',
-    desc: '一款简约强大的 AI Web 平台，融合了多服务商模型聚合、本地知识库 RAG 与 MCP 协议扩展。',
+    desc: '一款简约强大的 AI Web 平台，融合了多服务商模型聚合、本地知识库 RAG 、智能体(Agent) 与 MCP 协议扩展。',
     github: 'GitHub 仓库',
     contact: '联系作者',
     copyright: '© {year} MamboChat. All rights reserved.',
