@@ -141,14 +141,12 @@ LLMs naturally focus on the beginning and end of context, while the middle tends
 
 Create a Message Template resource, then mount it above the input box in any chat session to activate it.
 
-<!-- TODO: 需要英文截图 → 参考中文图片：img/挂载消息模板.png -->
 ![Mounting_a_Message_Template](img_en/Mounting_a_Message_Template.png)
 
 (3) **Flexible Usage**
 
 Switch mounted templates dynamically during a conversation. For example, only mount a coding-related template when code output is needed, and unmount it when planning architecture.
 
-<!-- TODO: 需要英文截图 → 参考中文图片：img/切换挂载的消息模板.png -->
 ![Switching_mounted_Message_Templates](img_en/Switching_mounted_Message_Templates.png)
 
 ### Skill Packs
@@ -159,9 +157,8 @@ Skills are packages used to extend [Agent](#7-agent-configuration--usage) capabi
 
 Create a new Skill-type resource in the Resource Center, and write a Markdown configuration file defining the skill's behavior following the [specification](https://agentskills.io/what-are-skills).
 
-<!-- TODO: 需要英文截图 → 参考中文图片：img/创建新Skill.png -->
 ![Creating_a_new_Skill](img_en/Creating_a_new_Skill.png)
-<!-- TODO: 需要英文截图 → 参考中文图片：img/SKILL预览页面.png -->
+
 ![Skill_preview_page](img_en/Skill_preview_page.png)
 
 (2) **Import Skill**
@@ -192,23 +189,19 @@ Once created, attach the Skill in the DeepAgent settings to let the Agent use it
 
 Before using the Knowledge Base for the first time, configure an Embedding vector model in global settings. For higher dimension support, modify `SUP_DIM` in `kb_service.py` and restart the service.
 
-<!-- TODO: 需要英文截图 → 参考中文图片：img/向量模型配置.png -->
 ![Vector_model_configuration](img_en/Vector_model_configuration.png)
 
 (2) **Create Knowledge Base & Upload Documents**
 
 After creating a Knowledge Base, upload documents in Markdown, TXT, PDF, Word, or other supported formats.
 
-<!-- TODO: 需要英文截图 → 参考中文图片：img/创建知识库.png -->
 ![Creating_a_Knowledge_Base](img_en/Creating_a_Knowledge_Base.png)
-<!-- TODO: 需要英文截图 → 参考中文图片：img/上传文档.png -->
 ![Uploading_documents](img_en/Uploading_documents.png)
 
 (3) **Configure Chunking Strategy & Start Embedding**
 
 Configure document chunking strategy (chunk size, overlap length, etc.), start the vectorization embedding task, and wait for completion.
 
-<!-- TODO: 需要英文截图 → 参考中文图片：img/切分策略配置与嵌入进度.png -->
 ![Chunking_strategy_config_and_embedding_progress](img_en/Chunking_strategy_config_and_embedding_progress.png)
 
 (4) **Verify Retrieval Results**
@@ -216,17 +209,14 @@ Configure document chunking strategy (chunk size, overlap length, etc.), start t
 Use the retrieval test function to verify chunking quality. The system uses BM25 + Vector Search + RRF (Reciprocal Rank Fusion) hybrid retrieval, balancing keyword matching and semantic similarity.
 Go to the chat session page -> Select from Resources -> KB Search.
 
-<!-- TODO: 需要英文截图 → 参考中文图片：img/检索测试结果.png -->
 ![Retrieval_test_results](img_en/Retrieval_test_results.png)
 
 (5) **AI Auto-Retrieval** (Recommended)
 
 No need to manually search — simply mount the Knowledge Base to your chat session. The AI assistant will automatically call the Knowledge Base when needed and generate answers. Multiple Knowledge Bases can be mounted simultaneously.
 
-<!-- TODO: 需要英文截图 → 参考中文图片：img/在会话中挂载知识库.png -->
 ![Mounting_Knowledge_Base_in_a_chat](img_en/Mounting_Knowledge_Base_in_a_chat.png)
 
-<!-- TODO: 需要英文截图 → 参考中文图片：img/AI自动检索知识库并回答的效果.png -->
 ![AI_auto-retrieving_from_Knowledge_Base_and_responding](img_en/AI_auto-retrieving_from_Knowledge_Base_and_responding.png)
 
 ---
@@ -240,7 +230,7 @@ MCP (Model Context Protocol) is a standardized protocol that allows AI models to
 (1) **Enter MCP Management Page**
 
 In the system settings page, click the "Add" button in the "MCP Management" section.
-<!-- TODO: 需要英文截图 → 参考中文图片：img/新增mcp.png -->
+
 ![Add_MCP_server](img_en/Add_MCP_server.png)
 
 (2) **Select Transport Type & Fill in Configuration**
@@ -260,7 +250,7 @@ MCP supports two transport types:
 After filling in the configuration, click the "Test Connection" button to verify. Upon success, the number of tools provided by the server will be displayed.
 
 ### Manage MCP Servers
-<!-- TODO: 需要英文截图 → 参考中文图片：img/管理mcp服务器.png -->
+
 ![Manage_MCP_servers](img_en/Manage_MCP_servers.png)
 
 The MCP server list displays all configured server information, including:
@@ -274,7 +264,7 @@ The MCP server list displays all configured server information, including:
 > Some system built-in MCP servers are marked as "System" type and cannot be edited or deleted.
 
 ### Manage Tools
-<!-- TODO: 需要英文截图 → 参考中文图片：img/管理工具.png -->
+
 ![Manage_tools](img_en/Manage_tools.png)
 
 Each MCP server can expose multiple tools. Click "View Tools" to open the tool management drawer:
@@ -294,7 +284,7 @@ After creating an MCP server and ensuring its health status is normal, mount the
 
 ### Using in Chat
 In a chat session under Normal Mode, click the "View Tools" button to select and use tools.
-<!-- TODO: 需要英文截图 → 参考中文图片：img/在Chat中使用工具.png -->
+
 ![Using_tools_in_Chat](img_en/Using_tools_in_Chat.png)
 
 ---
@@ -312,31 +302,31 @@ Agent is a core capability introduced in MamboChat v1.2.0, providing two types o
 
 (1) Go to "Agent Management" in the settings page, and click "New Agent".
 
-<!-- TODO: 需要英文截图 → 参考中文图片：img/新建Agent入口.png -->
+
 ![New_Agent_entry_point](img_en/New_Agent_entry_point.png)
 
 (2) Select Agent type:
    - **ReAct Agent**: Configure system prompts, choose available tools (MCP, Knowledge Base, ask_user, etc.)
    - **Deep Agent**: Configure remote Backend connection info, choosing SSH or API Client mode to connect to the target environment
 
-<!-- TODO: 需要英文截图 → 参考中文图片：img/Agent类型选择与基础配置.png -->
+
 ![Agent_type_selection_and_basic_configuration](img_en/Agent_type_selection_and_basic_configuration.png)
 
 (3) Configure resources for the Agent: mount Knowledge Bases, Skill Packs, MCP servers, and other extensions.
 
-<!-- TODO: 需要英文截图 → 参考中文图片：img/Agent挂载资源.png -->
+
 ![Agent_resource_mounting_panel](img_en/Agent_resource_mounting_panel.png)
 
 ### Use an Agent
 
 Associate an Agent directly when creating a new chat. Once enabled, all conversations in that session will be driven by the Agent, automatically calling tools to complete complex tasks.
-<!-- TODO: 需要英文截图 → 参考中文图片：img/在会话中启用Agent.png -->
+
 ![Enabling_Agent_in_a_chat](img_en/Enabling_Agent_in_a_chat.png)
 
-<!-- TODO: 需要英文截图 → 参考中文图片：img/Agent执行任务时的工具调用过程展示.png -->
+
 ![Tool_calling_process_during_Agent_execution](img_en/Tool_calling_process_during_Agent_execution.png)
 
-<!-- TODO: 需要英文截图 → 参考中文图片：img/Agent执行任务过程中调用subAgent.png -->
+
 ![Agent_calling_subAgent](img_en/Agent_calling_subAgent.png)
 
 ---
@@ -349,7 +339,6 @@ Remote Backends allow Deep Agents to access external environments (such as Linux
 
 (1) In the settings page under "Backend Management", create a new SSH-type Backend. Fill in connection details: host address, port, username, and authentication method (password or key).
 
-<!-- TODO: 需要英文截图 → 参考中文图片：img/SSH连接信息填写.png -->
 ![SSH_connection_details_form](img_en/SSH_connection_details_form.png)
 
 (3) After testing the connection successfully, associate this Backend with a Deep Agent. The Agent will then remotely read/write files, execute commands, and browse directory structures via SFTP/SSH.
@@ -372,17 +361,17 @@ cd client/apibackend
 pip install -r requirements.txt
 python main.py --server-url ws://<your-server>:24911 --backend-id <backend-id> --api-key <key> --root-dir <directory-to-expose>
 ```
-<!-- TODO: 需要英文截图 → 参考中文图片：img/运行APIClient.png -->
+
 ![Running_APIClient](img_en/Running_APIClient.png)
 
 (3) Once the client connects successfully, the Deep Agent can operate your local file system just like a remote server.
-<!-- TODO: 需要英文截图 → 参考中文图片：img/APIClient运行状态与连接成功提示.png -->
+
 ![API_Client_running_status_and_connection_success](img_en/API_Client_running_status_and_connection_success.png)
 
 
 ## 9. Conversation Interruption — Human Intervention
 - **Human-in-the-Loop (HITL)**: A review request pops up before tool execution, allowing the user to approve or reject before proceeding.
-<!-- TODO: 需要英文截图 → 参考中文图片：img/工具审核配置.png -->
+
 ![Tool_review_configuration](img_en/Tool_review_configuration.png)
 <!-- TODO: 需要英文截图 → 参考中文图片：img/HITL工具审核弹窗.png -->
 ![HITL_tool_review_popup](img_en/HITL_tool_review_popup.png)
