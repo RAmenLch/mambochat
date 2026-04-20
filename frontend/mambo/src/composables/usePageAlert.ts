@@ -11,6 +11,7 @@ export function usePageAlert() {
   const originalTitle = ref(document.title)
   const alertInterval = ref<number | null>(null)
   const isAlerting = ref(false)
+  const hasSentReviewNotification = ref(false)
 
   const originalFavicon = ref<string>('')
   let faviconCanvas: HTMLCanvasElement | null = null
@@ -81,6 +82,7 @@ export function usePageAlert() {
 
   const startAlert = (type: 'completed' | 'review') => {
     if (isAlerting.value) return
+    if (type === 'review' && hasSentReviewNotification.value) return
     isAlerting.value = true
 
     if (!document.title.startsWith('【')) {
@@ -92,6 +94,7 @@ export function usePageAlert() {
     const notificationBody = type === 'review' ? t('common.alert.reviewBody') : t('common.alert.completedBody')
 
     sendSystemNotification(titlePrefix.replace(/【|】/g, ''), notificationBody)
+    if (type === 'review') hasSentReviewNotification.value = true
 
     let toggle = false
     alertInterval.value = window.setInterval(() => {
@@ -135,6 +138,9 @@ export function usePageAlert() {
   watch(isPendingReview, (newVal) => {
     if (document.hidden && newVal === true) {
       startAlert('review')
+    }
+    if (newVal === false) {
+      hasSentReviewNotification.value = false
     }
   })
 

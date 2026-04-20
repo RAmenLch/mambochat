@@ -55,7 +55,7 @@ export const useChatSessionStore = defineStore('chatSession', () => {
   const pendingReviewSubMessages = computed((): SubMessage[] => {
     return currentChatMessages.value.flatMap(msg =>
       msg.status === 'pending_review'
-        ? msg.sub_messages.filter(sm => sm.type === 'ReviewTool' && sm.status === 'pending_review')
+        ? msg.sub_messages.filter(sm => (sm.type === 'ReviewTool' || sm.type === 'AskUser') && sm.status === 'pending_review')
         : []
     );
   });
