@@ -24,6 +24,13 @@ export interface ElectronAPI {
     status: () => Promise<{ running: boolean; port?: number; pid?: number; error?: string }>
     onStatusChange: (callback: (status: any) => void) => () => void
   }
+  // Frontend
+  frontend: {
+    start: () => Promise<{ success: boolean; port?: number; error?: string }>
+    stop: () => Promise<{ success: boolean }>
+    restart: () => Promise<{ success: boolean; port?: number; error?: string }>
+    status: () => Promise<{ running: boolean; host?: string; port?: number }>
+  }
   // App
   app: {
     getVersion: () => Promise<string>
@@ -32,6 +39,7 @@ export interface ElectronAPI {
   }
   // Network
   testConnection: (url: string) => Promise<{ ok: boolean; status?: number; error?: string }>
+  getNetworkAddresses: () => Promise<string[]>
   // Window
   win: {
     minimize: () => Promise<void>
@@ -67,6 +75,13 @@ const electronAPI: ElectronAPI = {
     },
   },
 
+  frontend: {
+    start: () => ipcRenderer.invoke('frontend:start'),
+    stop: () => ipcRenderer.invoke('frontend:stop'),
+    restart: () => ipcRenderer.invoke('frontend:restart'),
+    status: () => ipcRenderer.invoke('frontend:status'),
+  },
+
   app: {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     getPlatform: () => ipcRenderer.invoke('app:getPlatform'),
@@ -74,6 +89,8 @@ const electronAPI: ElectronAPI = {
   },
 
   testConnection: (url) => ipcRenderer.invoke('test-remote-connection', url),
+
+  getNetworkAddresses: () => ipcRenderer.invoke('get-network-addresses'),
 
   win: {
     minimize: () => ipcRenderer.invoke('win:minimize'),

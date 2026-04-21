@@ -137,6 +137,9 @@
         document.addEventListener('DOMContentLoaded', function() {
           var tb = document.getElementById('electron-titlebar');
           tb.style.display = 'flex';
+          document.getElementById('titlebar-reload').addEventListener('click', function() {
+            window.location.reload();
+          });
           document.getElementById('titlebar-settings').addEventListener('click', function() {
             window.electronAPI.app.openDesktopSettings();
           });
@@ -165,6 +168,11 @@
       <span class="titlebar-title">MamboChat</span>
       <div class="titlebar-spacer"></div>
       <div class="titlebar-actions">
+        <button class="titlebar-btn" id="titlebar-reload" title="Reload">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.5 2v6h-6"/><path d="M2.5 22v-6h6"/><path d="M2.5 11.5a10 10 0 0 1 18.8-4.3"/><path d="M21.5 12.5a10 10 0 0 1-18.8 4.3"/>
+          </svg>
+        </button>
         <button class="titlebar-btn" id="titlebar-settings" title="Settings">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72 1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>

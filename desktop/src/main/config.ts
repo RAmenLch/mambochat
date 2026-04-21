@@ -24,6 +24,8 @@ export interface LocalModeConfig {
   portStart: number
   /** Port range end for auto-detection */
   portEnd: number
+  /** Whether to allow external network access to the backend */
+  allowExternalAccess: boolean
 }
 
 export interface RemoteModeConfig {
@@ -51,6 +53,7 @@ const DEFAULT_CONFIG: AppConfig = {
     host: '127.0.0.1',
     portStart: 8000,
     portEnd: 8010,
+    allowExternalAccess: false,
   },
   remote: {
     url: 'http://127.0.0.1:8000',
@@ -151,6 +154,7 @@ export class AppConfigManager {
         host: partial.local?.host ?? DEFAULT_CONFIG.local.host,
         portStart: partial.local?.portStart ?? DEFAULT_CONFIG.local.portStart,
         portEnd: partial.local?.portEnd ?? DEFAULT_CONFIG.local.portEnd,
+        allowExternalAccess: partial.local?.allowExternalAccess ?? DEFAULT_CONFIG.local.allowExternalAccess,
       },
       remote: {
         url: partial.remote?.url ?? DEFAULT_CONFIG.remote.url,

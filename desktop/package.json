@@ -5,10 +5,10 @@
   "description": "MamboChat Desktop Application",
   "main": "dist/main/index.js",
   "scripts": {
-    "dev": "concurrently -k -n frontend,electron \"npm run dev:frontend\" \"npm run dev:electron\"",
+    "dev": "electron-vite build && electron .",
     "dev:frontend": "cd ../frontend/mambo && npm run dev",
-    "dev:electron": "wait-on http://localhost:5173 && electron-vite build && electron .",
-    "dev:electron:watch": "wait-on http://localhost:5173 && electron-vite build && concurrently -k -n rebuild,app \"electron-vite build --watch\" \"electron .\"",
+    "dev:electron": "electron-vite build && electron .",
+    "dev:electron:watch": "electron-vite build && concurrently -k -n rebuild,app \"electron-vite build\" \"electron .\"",
     "build": "npm run build:frontend && electron-vite build",
     "build:frontend": "cd ../frontend/mambo && npm run build",
     "pack": "npm run build && electron-builder --dir",

@@ -6,11 +6,11 @@
  * This page does NOT depend on the Vue app or the backend being available.
  */
 
-import { BrowserWindow, ipcMain, app } from 'electron'
-import { join, isAbsolute } from 'path'
+import { BrowserWindow, ipcMain } from 'electron'
+import { join } from 'path'
 import http from 'http'
+import os from 'os'
 import { AppConfigManager } from './config'
-import { BackendProcessManager } from './backend'
 import type { AppConfig } from './config'
 
 let settingsWindow: BrowserWindow | null = null
@@ -28,41 +28,62 @@ function getSettingsHtml(): string {
 <title>MamboChat Desktop Settings</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
     background: #f5f7fa;
     color: #303133;
     line-height: 1.6;
+    display: flex;
+    flex-direction: column;
   }
-  .header {
+  .titlebar {
+    height: 36px;
+    display: flex;
+    align-items: center;
     background: #fff;
-    padding: 16px 24px;
     border-bottom: 1px solid #e4e7ed;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+    padding-left: 12px;
+    -webkit-app-region: drag;
+    user-select: none;
+    flex-shrink: 0;
   }
-  .header h1 {
-    font-size: 18px;
-    font-weight: 600;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .header h1 .dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: #409eff;
-    display: inline-block;
-  }
-  .header .subtitle {
+  .titlebar-title {
     font-size: 12px;
-    color: #909399;
+    font-weight: 600;
+    color: #303133;
+    letter-spacing: -0.3px;
   }
+  .titlebar-spacer { flex: 1; }
+  .titlebar-actions {
+    -webkit-app-region: no-drag;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-right: 6px;
+  }
+  .tb-btn {
+    width: 30px; height: 30px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #606266;
+    font-size: 15px;
+    transition: all 0.15s;
+  }
+  .tb-btn:hover { background: rgba(0,0,0,0.06); color: #303133; }
+  .tb-btn-close:hover { background: #e81123 !important; color: #fff !important; }
   .body {
     max-width: 680px;
     margin: 24px auto;
     padding: 0 20px;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
   }
   .card {
     background: #fff;
@@ -225,14 +246,91 @@ function getSettingsHtml(): string {
     text-align: center;
     padding: 12px;
   }
+  .switch-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #303133;
+    cursor: pointer;
+  }
+  .switch {
+    position: relative;
+    display: inline-block;
+    width: 36px;
+    height: 20px;
+    flex-shrink: 0;
+  }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch-slider {
+    position: absolute;
+    inset: 0;
+    background: #c0c4cc;
+    border-radius: 10px;
+    transition: all 0.3s;
+    cursor: pointer;
+  }
+  .switch-slider::before {
+    content: '';
+    position: absolute;
+    height: 16px;
+    width: 16px;
+    left: 2px;
+    bottom: 2px;
+    background: #fff;
+    border-radius: 50%;
+    transition: all 0.3s;
+  }
+  .switch input:checked + .switch-slider { background: #409eff; }
+  .switch input:checked + .switch-slider::before { transform: translateX(16px); }
+  .network-info {
+    margin-top: 12px;
+    padding: 12px;
+    background: #f4f4f5;
+    border-radius: 6px;
+    border: 1px solid #e9e9eb;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  }
+  .network-info-title {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    color: #606266;
+    margin-bottom: 8px;
+  }
+  .network-url-line {
+    font-size: 12px;
+    color: #909399;
+    padding: 2px 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .network-url-line .prefix { color: #67c23a; }
+  .network-url-line .url { color: #409eff; }
 </style>
 </head>
 <body>
 
-<div class="header">
-  <div>
-    <h1><span class="dot"></span>MamboChat Settings</h1>
-    <div class="subtitle">Desktop connection configuration</div>
+<!-- Custom title bar -->
+<div class="titlebar">
+  <span class="titlebar-title">MamboChat Settings</span>
+  <div class="titlebar-spacer"></div>
+  <div class="titlebar-actions">
+    <button class="tb-btn" id="tbMinimize" title="Minimize">
+      <svg width="10" height="1" viewBox="0 0 10 1"><rect width="10" height="1" fill="currentColor"/></svg>
+    </button>
+    <button class="tb-btn" id="tbMaximize" title="Maximize">
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2">
+        <rect x="0.6" y="0.6" width="8.8" height="8.8" rx="1"/>
+      </svg>
+    </button>
+    <button class="tb-btn tb-btn-close" id="tbClose" title="Close">
+      <svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+        <line x1="0.5" y1="0.5" x2="9.5" y2="9.5"/><line x1="9.5" y1="0.5" x2="0.5" y2="9.5"/>
+      </svg>
+    </button>
   </div>
 </div>
 
@@ -254,6 +352,10 @@ function getSettingsHtml(): string {
         <div class="label">Remote</div>
         <div class="desc">Connect to remote server</div>
       </div>
+    </div>
+    <div class="btn-row" style="margin-top: 16px;">
+      <button class="btn btn-success" id="btnTest" onclick="testConnection()">Test Connection</button>
+      <button class="btn btn-primary" id="btnSave" onclick="saveConfig()">Save & Apply</button>
     </div>
   </div>
 
@@ -280,6 +382,22 @@ function getSettingsHtml(): string {
         <label class="form-label">Python Path</label>
         <input type="text" id="pythonPath" value="runtime/.venv/Scripts/python.exe">
         <div class="form-hint">Path to the Python executable. Relative paths are resolved from the app resources directory.</div>
+      </div>
+
+      <!-- External Access -->
+      <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #ebeef5;">
+        <label class="switch-label">
+          <span class="switch">
+            <input type="checkbox" id="allowExternal" onchange="toggleExternalAccess()">
+            <span class="switch-slider"></span>
+          </span>
+          <span>Allow external network access</span>
+        </label>
+        <div class="form-hint" style="margin-top: 4px; margin-bottom: 0;">Bind the frontend dev server to 0.0.0.0 so other devices on the same network can access it via browser.</div>
+        <div id="networkInfo" class="network-info" style="display:none;">
+          <div class="network-info-title">Network Access URLs</div>
+          <div id="networkUrls"></div>
+        </div>
       </div>
 
       <!-- Backend Status -->
@@ -316,13 +434,6 @@ function getSettingsHtml(): string {
     </div>
   </div>
 
-  <!-- Actions -->
-  <div class="card">
-    <div class="btn-row">
-      <button class="btn btn-success" id="btnTest" onclick="testConnection()">Test Connection</button>
-      <button class="btn btn-primary" id="btnSave" onclick="saveConfig()">Save & Apply</button>
-    </div>
-  </div>
 
   <div class="config-path" id="configPath"></div>
 </div>
@@ -333,6 +444,11 @@ function getSettingsHtml(): string {
 const api = window.electronAPI;
 let currentConfig = null;
 let statusCleanup = null;
+
+// --- Title bar buttons ---
+document.getElementById('tbMinimize').addEventListener('click', () => api.win.minimize());
+document.getElementById('tbMaximize').addEventListener('click', () => api.win.toggleMaximize());
+document.getElementById('tbClose').addEventListener('click', () => api.win.close());
 
 // --- Toast ---
 function showToast(msg, type = 'info', duration = 3000) {
@@ -364,6 +480,7 @@ function gatherConfig() {
       host: document.getElementById('localHost').value,
       portStart: parseInt(document.getElementById('portStart').value, 10) || 8000,
       portEnd: parseInt(document.getElementById('portEnd').value, 10) || 8010,
+      allowExternalAccess: document.getElementById('allowExternal').checked,
     },
     remote: {
       url: document.getElementById('remoteUrl').value.replace(/\\/+$/, ''),
@@ -378,7 +495,9 @@ function applyConfigToUI(config) {
   document.getElementById('portStart').value = config.local.portStart;
   document.getElementById('portEnd').value = config.local.portEnd;
   document.getElementById('pythonPath').value = config.local.pythonPath;
+  document.getElementById('allowExternal').checked = !!config.local.allowExternalAccess;
   document.getElementById('remoteUrl').value = config.remote.url;
+  updateNetworkVisibility();
 }
 
 async function saveConfig() {
@@ -387,31 +506,32 @@ async function saveConfig() {
   btn.disabled = true;
   btn.classList.add('btn-loading');
   try {
-    const prevMode = currentConfig.mode;
+    const prevConfig = currentConfig;
+    const prevMode = prevConfig.mode;
     await api.config.update(config);
     currentConfig = config;
 
     // Apply mode change: start/stop backend as needed
     if (config.mode === 'local') {
-      const status = await api.backend.status();
-      if (!status.running) {
-        const result = await api.backend.start();
-        if (result.success) {
-          showToast('Config saved, backend started on port ' + result.port, 'success');
-        } else {
-          showToast('Config saved, but backend failed: ' + (result.error || 'Unknown'), 'error');
+      const externalChanged = config.local.allowExternalAccess !== prevConfig.local.allowExternalAccess;
+      const backendChanged = prevMode !== 'local' ||
+        config.local.host !== prevConfig.local.host ||
+        config.local.portStart !== prevConfig.local.portStart ||
+        config.local.portEnd !== prevConfig.local.portEnd ||
+        config.local.pythonPath !== prevConfig.local.pythonPath;
+
+      if (externalChanged || backendChanged) {
+        // Restart frontend dev server if external access setting changed
+        if (externalChanged) {
+          try { await api.frontend.restart(); } catch (e) { console.error('Frontend restart failed:', e); }
         }
-      } else {
-        // Restart if local settings changed
-        const needsRestart = prevMode !== 'local' ||
-          config.local.host !== currentConfig.local.host ||
-          config.local.portStart !== currentConfig.local.portStart;
-        if (needsRestart) {
+        // Restart backend if backend settings changed or switching from remote
+        if (backendChanged) {
           await api.backend.restart();
-          showToast('Config saved, backend restarted', 'success');
-        } else {
-          showToast('Config saved', 'success');
         }
+        showToast('Config saved and applied', 'success');
+      } else {
+        showToast('Config saved', 'success');
       }
     } else {
       // Remote mode: stop local backend if running
@@ -486,7 +606,14 @@ async function restartBackend() {
 
 // --- Status ---
 function refreshStatus() {
-  api.backend.status().then(status => updateStatusUI(status)).catch(() => {});
+  api.backend.status().then(status => {
+    updateStatusUI(status);
+    if (document.getElementById('allowExternal').checked && status.running) {
+      updateNetworkInfo();
+    }
+  }).catch(e => {
+    console.error('[Settings] Failed to get backend status:', e);
+  });
 }
 
 function updateStatusUI(status) {
@@ -514,6 +641,39 @@ function updateStatusUI(status) {
     btnStop.style.display = 'none';
     btnRestart.style.display = 'none';
   }
+}
+
+// --- External Access ---
+function toggleExternalAccess() {
+  updateNetworkVisibility();
+}
+
+function updateNetworkVisibility() {
+  const checked = document.getElementById('allowExternal').checked;
+  const el = document.getElementById('networkInfo');
+  if (checked) {
+    el.style.display = 'block';
+    updateNetworkInfo();
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+async function updateNetworkInfo() {
+  const status = await api.frontend.status();
+  if (!status.running || !status.port) return;
+  let addresses;
+  try {
+    addresses = await api.getNetworkAddresses();
+  } catch { return; }
+
+  const container = document.getElementById('networkUrls');
+  const port = status.port;
+  let html = '<div class="network-url-line"><span class="prefix">➜  Local:   </span><span class="url">http://localhost:' + port + '/</span></div>';
+  for (const addr of addresses) {
+    html += '<div class="network-url-line"><span class="prefix">➜  Network: </span><span class="url">http://' + addr + ':' + port + '/</span></div>';
+  }
+  container.innerHTML = html;
 }
 
 // --- Test Connection ---
@@ -592,7 +752,8 @@ export function openDesktopSettings(): void {
     minWidth: 440,
     minHeight: 500,
     resizable: true,
-    title: 'MamboChat Settings',
+    frame: false,
+    titleBarStyle: 'hidden',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -603,7 +764,6 @@ export function openDesktopSettings(): void {
 
   settingsWindow.setMenu(null)
   settingsWindow.loadURL(getSettingsHtml())
-  settingsWindow.webContents.openDevTools()
 
   settingsWindow.on('closed', () => {
     settingsWindow = null
@@ -636,6 +796,20 @@ export function setupDesktopSettingsIpc(
     return configManager.getConfigPath()
   })
 
+  ipcMain.handle('get-network-addresses', () => {
+    const interfaces = os.networkInterfaces()
+    const addresses: string[] = []
+    for (const name of Object.keys(interfaces)) {
+      for (const iface of interfaces[name]!) {
+        // Skip internal (loopback) and non-IPv4 addresses
+        if (!iface.internal && iface.family === 'IPv4') {
+          addresses.push(iface.address)
+        }
+      }
+    }
+    return addresses
+  })
+
   ipcMain.handle('config:apply', (_event, newConfig: AppConfig) => {
     configManager.save(newConfig)
 
@@ -651,10 +825,12 @@ export function setupDesktopSettingsIpc(
   ipcMain.handle('test-remote-connection', (_event, url: string) => {
     return new Promise<{ ok: boolean; status?: number; error?: string }>((resolve) => {
       const cleanUrl = url.replace(/\/+$/, '')
-      const req = http.get(cleanUrl + '/api/mcp', { timeout: 15000 }, (res) => {
-        res.resume() // drain response body
+      // Test connectivity by requesting the root; any HTTP response (including 3xx/4xx)
+      // proves the server is reachable. Only network errors / timeouts mean failure.
+      const req = http.get(cleanUrl + '/', { timeout: 15000 }, (res) => {
+        res.resume()
         res.on('end', () => {
-          resolve({ ok: res.statusCode === 200, status: res.statusCode })
+          resolve({ ok: true, status: res.statusCode })
         })
       })
       req.on('timeout', () => {

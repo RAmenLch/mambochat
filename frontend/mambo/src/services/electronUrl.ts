@@ -36,3 +36,18 @@ export function resolveApiUrl(path: string): string {
 
   return `${currentBaseUrl}${path}`
 }
+
+/**
+ * Resolve a file URL (e.g., avatar, image download path) for use in <img src> etc.
+ *
+ * In browser mode, returns the path as-is (Vite proxy handles it).
+ * In Electron mode, prepends the backend base URL so the browser loads from the correct port.
+ *
+ * @param url - File URL, e.g. "/api/files/download/avatars/xxx.png"
+ * @returns Resolved URL
+ */
+export function resolveFileUrl(url: string | null | undefined): string | undefined {
+  if (!url) return undefined
+  if (!url.startsWith('/')) return url
+  return resolveApiUrl(url)
+}

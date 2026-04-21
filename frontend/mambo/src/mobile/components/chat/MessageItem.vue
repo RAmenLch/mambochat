@@ -193,6 +193,7 @@ import MobileAssistantBubble from './message/MobileAssistantBubble.vue'
 import MobileMessageEditDialog from '@/mobile/components/chat/dialogs/MobileMessageEditDialog.vue'
 import { copyToClipboard } from '@/utils/clipboard'
 import { type ParsedBlock } from '@/utils/markdownParser'
+import { resolveFileUrl } from '@/services/electronUrl'
 
 const props = defineProps<{
   id?: string
@@ -337,7 +338,7 @@ const roleClass = computed(() => ({
 
 const avatarUrl = computed(() => {
   if (props.message.role === 'user') {
-    return globalSettings.value.user_avatar_url
+    return resolveFileUrl(globalSettings.value.user_avatar_url)
   }
 
   if (props.message.role === 'assistant') {
@@ -345,10 +346,10 @@ const avatarUrl = computed(() => {
     if (currentChat?.chatMode === 'agent' && currentChat.agentId) {
       const agent = agentStore.allAgents.find(a => a.id === currentChat.agentId)
       if (agent && agent.agentAvatarUrl) {
-        return agent.agentAvatarUrl
+        return resolveFileUrl(agent.agentAvatarUrl)
       }
     }
-    return globalSettings.value.ai_avatar_url
+    return resolveFileUrl(globalSettings.value.ai_avatar_url)
   }
 
   return null

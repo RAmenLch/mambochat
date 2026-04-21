@@ -10,6 +10,7 @@ import { join } from 'path'
 import type { AppConfig } from './config'
 import { AppConfigManager } from './config'
 import { BackendProcessManager } from './backend'
+import { FrontendDevServerManager } from './frontendDevServer'
 import { openDesktopSettings, setupDesktopSettingsIpc } from './desktopSettings'
 
 // Remove the default Electron application menu
@@ -48,6 +49,16 @@ async function bootstrap(): Promise<void> {
   // Register IPC handlers BEFORE creating window,
   // so renderer can invoke them immediately after load
   setupIpcHandlers(configManager)
+
+  // In dev mode, start frontend dev server (managed by Electron)
+  if (!app.isPackaged) {
+    const frontendHost = config.local.allowExternalAccess ? '0.0.0.0' : '127.0.0.1'
+    try {
+      await FrontendDevServerManager.getInstance().start(frontendHost)
+    } catch (error) {
+      console.error('Failed to start frontend dev server:', error)
+    }
+  }
 
   // Create main window
   mainWindow = await createMainWindow()
@@ -88,7 +99,6 @@ async function createMainWindow(): Promise<BrowserWindow> {
   // Show window once the DOM is ready (avoids white flash)
   mainWindow.webContents.once('did-finish-load', () => {
     mainWindow!.show()
-    mainWindow!.webContents.openDevTools()
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -188,6 +198,45 @@ function setupIpcHandlers(configManager: AppConfigManager): void {
   ipcMain.handle('app:getVersion', () => app.getVersion())
   ipcMain.handle('app:getPlatform', () => process.platform)
 
+  // Frontend dev server control
+  ipcMain.handle('frontend:start', async () => {
+    if (app.isPackaged) return { success: false, error: 'Not available in production' }
+    const config = configManager.load()
+    const host = config.local.allowExternalAccess ? '0.0.0.0' : '127.0.0.1'
+    try {
+      const port = await FrontendDevServerManager.getInstance().start(host)
+      return { success: true, port }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('frontend:stop', async () => {
+    FrontendDevServerManager.getInstance().stop()
+    return { success: true }
+  })
+
+  ipcMain.handle('frontend:restart', async () => {
+    if (app.isPackaged) return { success: false, error: 'Not available in production' }
+    const config = configManager.load()
+    const host = config.local.allowExternalAccess ? '0.0.0.0' : '127.0.0.1'
+    try {
+      await FrontendDevServerManager.getInstance().restart(host)
+      // Reload main window to reconnect to the restarted dev server
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        const frontendDevUrl = process.env['FRONTEND_DEV_URL'] || 'http://localhost:5173'
+        await mainWindow.loadURL(frontendDevUrl)
+      }
+      return { success: true, port: 5173 }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('frontend:status', () => {
+    return FrontendDevServerManager.getInstance().getStatus()
+  })
+
   // Window controls
   ipcMain.handle('win:minimize', () => {
     const win = BrowserWindow.getFocusedWindow()
@@ -225,6 +274,7 @@ app.whenReady().then(bootstrap)
 
 app.on('window-all-closed', () => {
   BackendProcessManager.getInstance().stop()
+  FrontendDevServerManager.getInstance().stop()
   globalShortcut.unregisterAll()
   if (process.platform !== 'darwin') {
     app.quit()
@@ -239,5 +289,6 @@ app.on('activate', async () => {
 
 app.on('before-quit', () => {
   BackendProcessManager.getInstance().stop()
+  FrontendDevServerManager.getInstance().stop()
   globalShortcut.unregisterAll()
 })

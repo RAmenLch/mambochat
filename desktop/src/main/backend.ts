@@ -54,13 +54,16 @@ export class BackendProcessManager {
       return this.currentPort
     }
 
-    const { pythonPath, host, portStart, portEnd } = config.local
+    const { pythonPath, portStart, portEnd } = config.local
 
     // 1. Resolve Python executable path
     const exePath = this.resolvePythonPath(pythonPath)
 
+    // Backend always binds to 127.0.0.1 — external access is controlled via the frontend dev server
+    const bindHost = '127.0.0.1'
+
     // 2. Detect an available port
-    const port = await this.detectAvailablePort(host, portStart, portEnd)
+    const port = await this.detectAvailablePort(bindHost, portStart, portEnd)
 
     // 3. Determine working directory (project root)
     const appDir = this.resolveAppDirectory()
@@ -75,7 +78,7 @@ export class BackendProcessManager {
 
     this.process = spawn(
       exePath,
-      ['-m', 'uvicorn', 'backend.main:app', '--host', host, '--port', String(port)],
+      ['-m', 'uvicorn', 'backend.main:app', '--host', bindHost, '--port', String(port)],
       {
         cwd: appDir,
         env: { ...process.env, ...env },
@@ -108,7 +111,7 @@ export class BackendProcessManager {
     })
 
     // 6. Wait for backend to become ready
-    await this.waitForReady(host, port, 30_000)
+    await this.waitForReady(bindHost === '0.0.0.0' ? '127.0.0.1' : bindHost, port, 30_000)
 
     this.currentPort = port
     console.log(`[Backend] Ready on port ${port}`)

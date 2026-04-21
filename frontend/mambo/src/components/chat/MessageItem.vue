@@ -127,6 +127,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { User, Cpu, Loading, CircleCheck, Clock } from '@element-plus/icons-vue'
 import { copyToClipboard } from '@/utils/clipboard'
 import { getFileContent, updateFileContent } from '@/api/fileService'
+import { resolveFileUrl } from '@/services/electronUrl'
 
 import MessageEditDialog from './dialogs/MessageEditDialog.vue'
 import ZipHistoryCard from './ZipHistoryCard.vue'
@@ -236,17 +237,17 @@ const roleClass = computed(() => ({
 
 const avatarUrl = computed(() => {
   if (props.message.role === 'user') {
-    return globalSettings.value.user_avatar_url
+    return resolveFileUrl(globalSettings.value.user_avatar_url)
   }
   if (props.message.role === 'assistant') {
     const currentChat = sessionStore.currentChat
     if (currentChat?.chatMode === 'agent' && currentChat.agentId) {
       const agent = agentStore.allAgents.find(a => a.id === currentChat.agentId)
       if (agent && agent.agentAvatarUrl) {
-        return agent.agentAvatarUrl
+        return resolveFileUrl(agent.agentAvatarUrl)
       }
     }
-    return globalSettings.value.ai_avatar_url
+    return resolveFileUrl(globalSettings.value.ai_avatar_url)
   }
   return null
 })

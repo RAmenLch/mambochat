@@ -99,6 +99,15 @@ function updateApiBaseUrl(config: any): void {
       setApiBaseUrl(`${url}/api`)
       setBackendBaseUrl(url)
     }
+  } else if (config.mode === 'local') {
+    // When switching to local mode, query backend status to get the actual port
+    window.electronAPI!.backend.status().then((status) => {
+      if (status.running && status.port) {
+        const baseUrl = `http://127.0.0.1:${status.port}`
+        setApiBaseUrl(`${baseUrl}/api`)
+        setBackendBaseUrl(baseUrl)
+      }
+    }).catch(() => {})
   }
 }
 
