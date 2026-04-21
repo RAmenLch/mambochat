@@ -2,6 +2,7 @@
 
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import apiClient from './index'
+import { resolveApiUrl } from '@/services/electronUrl'
 import type {
   Resource,
   KnowledgeBaseCreate,
@@ -112,7 +113,7 @@ export const subscribeToKBFileProgress = (
 ): AbortController => {
   const { resourceId, onMessage, onError, onClose } = params
   const controller = new AbortController()
-  const url = `/api/resources/kb/${resourceId}/progress`
+  const url = resolveApiUrl(`/api/resources/kb/${resourceId}/progress`)
 
   fetchEventSource(url, {
     method: 'GET',

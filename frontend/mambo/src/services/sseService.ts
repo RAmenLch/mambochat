@@ -2,6 +2,7 @@
 
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import type { SubMessage, MessageStatus } from '@/api/types';
+import { resolveApiUrl } from './electronUrl';
 
 /**
  * 定义了从 SSE 流接收到的各类事件数据块的类型结构。
@@ -46,7 +47,7 @@ export function subscribeToMessageStream(params: SseSubscriptionParams): AbortCo
   const { chatId, assistantMessageId, onMessage, onClose, onError } = params;
 
   const controller = new AbortController();
-  const url = `/api/chats/${chatId}/stream-response/${assistantMessageId}`;
+  const url = resolveApiUrl(`/api/chats/${chatId}/stream-response/${assistantMessageId}`);
 
   fetchEventSource(url, {
     method: 'GET',

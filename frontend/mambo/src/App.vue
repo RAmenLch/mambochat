@@ -90,4 +90,22 @@ body,
   padding: 0;
   overflow: hidden; /* 防止出现不必要的滚动条 */
 }
+
+/* Electron mode: body is flex column, title bar + app fill viewport */
+html.electron-mode body {
+  display: flex;
+  flex-direction: column;
+  height: 100vh !important;
+  overflow: hidden;
+}
+
+html.electron-mode #electron-titlebar {
+  display: flex !important;
+}
+
+html.electron-mode #app {
+  flex: 1;
+  height: auto !important;
+  min-height: 0;
+}
 </style>

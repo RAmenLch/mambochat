@@ -2,6 +2,7 @@
 
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import type { GlobalNotification } from '@/api/types';
+import { resolveApiUrl } from './electronUrl';
 
 /**
  * 全局通知订阅服务的参数配置。
@@ -24,7 +25,7 @@ export function subscribeToGlobalNotifications(params: GlobalSseSubscriptionPara
   const { onNotification, onError } = params;
 
   const controller = new AbortController();
-  const url = `/api/notifications/subscribe`;
+  const url = resolveApiUrl('/api/notifications/subscribe');
 
   fetchEventSource(url, {
     method: 'GET',

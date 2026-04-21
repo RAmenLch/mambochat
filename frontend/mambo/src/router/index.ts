@@ -1,7 +1,12 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory, createWebHistory } from 'vue-router'
+
+// Use hash history in Electron (file:// protocol) for proper SPA routing
+// window.electronAPI is injected by preload before any renderer module executes
+const isElectron = !!window.electronAPI
+const history = isElectron ? createWebHashHistory() : createWebHistory(import.meta.env.BASE_URL)
 
 const router = createRouter({
-  history: createWebHistory(import.meta.env.BASE_URL),
+  history,
   routes: [
     {
       // 1. 根路径重定向
@@ -31,6 +36,13 @@ const router = createRouter({
       path: '/settings',
       name: 'settings',
       component: () => import('@/views/SettingsView.vue')
+    },
+    {
+      // 4. 桌面端连接配置路由 (仅 Electron 环境使用)
+      path: '/connection',
+      name: 'connection',
+      component: () => import('@/views/SettingsView.vue'),
+      props: { defaultTab: 'connection' }
     }
   ]
 })

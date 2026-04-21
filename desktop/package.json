@@ -1,0 +1,94 @@
+{
+  "name": "mambochat-desktop",
+  "version": "1.2.0",
+  "private": true,
+  "description": "MamboChat Desktop Application",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "dev": "concurrently -k -n frontend,electron \"npm run dev:frontend\" \"npm run dev:electron\"",
+    "dev:frontend": "cd ../frontend/mambo && npm run dev",
+    "dev:electron": "wait-on http://localhost:5173 && electron-vite build && electron .",
+    "dev:electron:watch": "wait-on http://localhost:5173 && electron-vite build && concurrently -k -n rebuild,app \"electron-vite build --watch\" \"electron .\"",
+    "build": "npm run build:frontend && electron-vite build",
+    "build:frontend": "cd ../frontend/mambo && npm run build",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:portable": "npm run build && electron-builder --win portable"
+  },
+  "dependencies": {
+    "electron-updater": "^6.6.2"
+  },
+  "devDependencies": {
+    "@electron-toolkit/tsconfig": "^1.0.1",
+    "@electron-toolkit/utils": "^4.0.0",
+    "@types/node": "^22.16.5",
+    "concurrently": "^9.1.2",
+    "electron": "^35.2.1",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^3.1.0",
+    "typescript": "~5.8.0",
+    "vite": "^6.3.5",
+    "wait-on": "^8.0.3"
+  },
+  "build": {
+    "appId": "com.mambochat.desktop",
+    "productName": "MamboChat",
+    "copyright": "Copyright © 2025 MamboChat",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "!node_modules"
+    ],
+    "extraResources": [
+      {
+        "from": "../frontend/mambo/dist",
+        "to": "frontend/dist",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../runtime",
+        "to": "runtime",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../backend",
+        "to": "backend",
+        "filter": ["**/*", "!__pycache__/**", "!*.pyc", "!*.egg-info/**"]
+      },
+      {
+        "from": "../MCP_SERVER",
+        "to": "MCP_SERVER",
+        "filter": ["**/*", "!__pycache__/**", "!*.pyc", "!*.egg-info/**"]
+      }
+    ],
+    "win": {
+      "icon": "resources/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "installerIcon": "resources/icon.ico",
+      "uninstallerIcon": "resources/icon.ico",
+      "installerHeaderIcon": "resources/icon.ico"
+    },
+    "portable": {
+      "artifactName": "MamboChat-${version}-Portable.${ext}"
+    }
+  }
+}
