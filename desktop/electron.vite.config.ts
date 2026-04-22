@@ -3,7 +3,7 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    plugins: [externalizeDepsPlugin({ exclude: ['electron-log'] })],
     build: {
       outDir: 'dist/main',
       rollupOptions: {
@@ -20,7 +20,7 @@ export default defineConfig({
   },
 
   preload: {
-    plugins: [externalizeDepsPlugin()],
+    plugins: [externalizeDepsPlugin({ exclude: ['electron-log'] })],
     build: {
       outDir: 'dist/preload',
       rollupOptions: {

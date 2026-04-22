@@ -8,11 +8,12 @@
  * - Graceful shutdown
  */
 
-import { spawn, ChildProcess } from 'child_process'
+import { spawn, ChildProcess, execSync } from 'child_process'
 import { createServer, createConnection } from 'net'
-import { app } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { join, isAbsolute } from 'path'
 import type { AppConfig } from './config'
+import log from './log'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,6 +34,10 @@ export class BackendProcessManager {
   private static instance: BackendProcessManager | null = null
   private process: ChildProcess | null = null
   private currentPort: number | null = null
+  private stopping = false
+
+  /** Callback invoked when the backend process exits unexpectedly (not via stop()). */
+  onUnexpectedExit: (() => void) | null = null
 
   private constructor() {}
 
@@ -72,9 +77,9 @@ export class BackendProcessManager {
     const env = this.buildEnvironment(appDir)
 
     // 5. Spawn the backend process
-    console.log(`[Backend] Starting on port ${port}...`)
-    console.log(`[Backend] Python: ${exePath}`)
-    console.log(`[Backend] WorkDir: ${appDir}`)
+    log.info(`[Backend] Starting on port ${port}...`)
+    log.info(`[Backend] Python: ${exePath}`)
+    log.info(`[Backend] WorkDir: ${appDir}`)
 
     this.process = spawn(
       exePath,
@@ -90,55 +95,104 @@ export class BackendProcessManager {
     // Pipe stdout/stderr for debugging
     this.process.stdout?.on('data', (data: Buffer) => {
       const msg = data.toString().trim()
-      if (msg) console.log(`[Backend:OUT] ${msg}`)
+      if (msg) log.info(`[Backend:OUT] ${msg}`)
     })
 
     this.process.stderr?.on('data', (data: Buffer) => {
       const msg = data.toString().trim()
-      if (msg) console.warn(`[Backend:ERR] ${msg}`)
+      if (msg) log.warn(`[Backend:ERR] ${msg}`)
     })
 
     this.process.on('error', (err) => {
-      console.error('[Backend] Process error:', err.message)
+      log.error('[Backend] Process error:', err.message)
       this.process = null
       this.currentPort = null
     })
 
     this.process.on('exit', (code, signal) => {
-      console.log(`[Backend] Process exited (code=${code}, signal=${signal})`)
+      log.info(`[Backend] Process exited (code=${code}, signal=${signal})`)
+      const pid = this.process?.pid
       this.process = null
       this.currentPort = null
+
+      // If we didn't initiate the stop, notify all windows and trigger callback
+      if (!this.stopping) {
+        log.warn('[Backend] Unexpected exit — notifying renderer windows')
+        const status = { running: false, mode: 'local' as const }
+        BrowserWindow.getAllWindows().forEach(win => {
+          if (!win.isDestroyed()) {
+            win.webContents.send('backend:status', status)
+          }
+        })
+        this.onUnexpectedExit?.()
+      }
     })
 
     // 6. Wait for backend to become ready
     await this.waitForReady(bindHost === '0.0.0.0' ? '127.0.0.1' : bindHost, port, 30_000)
 
     this.currentPort = port
-    console.log(`[Backend] Ready on port ${port}`)
+    log.info(`[Backend] Ready on port ${port}`)
     return port
   }
 
   /**
    * Stop the backend process gracefully.
+   * Returns a promise that resolves when the process has fully exited.
    */
-  stop(): void {
-    if (this.process) {
-      console.log(`[Backend] Stopping (PID: ${this.process.pid})...`)
+  async stop(timeoutMs = 5000): Promise<void> {
+    if (!this.process) return
+
+    const pid = this.process.pid
+    log.info(`[Backend] Stopping (PID: ${pid})...`)
+    this.stopping = true
+
+    // Wrap exit in a promise
+    const exitPromise = new Promise<void>((resolve) => {
+      const proc = this.process
+      if (!proc || proc.killed) {
+        resolve()
+        return
+      }
+      const onExit = () => {
+        proc.off('exit', onExit)
+        resolve()
+      }
+      proc.on('exit', onExit)
+    })
+
+    // Try SIGTERM first
+    try {
       this.process.kill('SIGTERM')
-
-      // Force kill after timeout
-      const pid = this.process.pid
-      setTimeout(() => {
-        try {
-          process.kill(pid!, 'SIGKILL')
-        } catch {
-          // Process already dead
-        }
-      }, 5000)
-
-      this.process = null
-      this.currentPort = null
+    } catch {
+      // Already dead
     }
+
+    // On Windows, use taskkill to ensure the entire process tree is killed
+    if (process.platform === 'win32' && pid) {
+      try {
+        execSync(`taskkill /T /F /PID ${pid}`, { stdio: 'ignore' })
+      } catch {
+        // Process may have already exited
+      }
+    }
+
+    // Wait for the exit event, but enforce a timeout
+    const timeoutPromise = new Promise<void>(resolve => setTimeout(resolve, timeoutMs))
+    await Promise.race([exitPromise, timeoutPromise])
+
+    // Force kill if still alive (Linux/macOS fallback)
+    if (this.process && !this.process.killed && pid) {
+      try {
+        process.kill(pid, 'SIGKILL')
+      } catch {
+        // Already dead
+      }
+    }
+
+    this.process = null
+    this.currentPort = null
+    this.stopping = false
   }
 
   /**

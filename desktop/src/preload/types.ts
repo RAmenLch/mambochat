@@ -18,6 +18,10 @@ export interface ElectronAPI {
     status: () => Promise<BackendStatus>
     onStatusChange: (callback: (status: BackendStatus) => void) => () => void
   }
+  gateway: {
+    status: () => Promise<GatewayStatus>
+    restart: (host: string, port: number) => Promise<{ success: boolean; port?: number; error?: string }>
+  }
   app: {
     getVersion: () => Promise<string>
     getPlatform: () => Promise<string>
@@ -44,6 +48,13 @@ export interface BackendStartResult {
   success: boolean
   port?: number
   error?: string
+}
+
+export interface GatewayStatus {
+  running: boolean
+  port?: number
+  host?: string
+  mode?: string
 }
 
 declare global {

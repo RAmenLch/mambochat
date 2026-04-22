@@ -12,6 +12,8 @@ import http from 'http'
 import os from 'os'
 import { AppConfigManager } from './config'
 import type { AppConfig } from './config'
+import { getDesktopLocale, translate, translations } from './i18n'
+import log from './log'
 
 let settingsWindow: BrowserWindow | null = null
 
@@ -20,12 +22,13 @@ let settingsWindow: BrowserWindow | null = null
 // ---------------------------------------------------------------------------
 
 function getSettingsHtml(): string {
+  const locale = getDesktopLocale()
   return `data:text/html;charset=utf-8,${encodeURIComponent(`<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="${locale}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MamboChat Desktop Settings</title>
+<title>${translate(locale, 'settings.title')}</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; }
@@ -309,13 +312,48 @@ function getSettingsHtml(): string {
   }
   .network-url-line .prefix { color: #67c23a; }
   .network-url-line .url { color: #409eff; }
+  .current-mode-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: #ecf5ff;
+    color: #409eff;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 16px;
+    border: 1px solid #d9ecff;
+    transition: all 0.3s;
+  }
+  .current-mode-badge.remote {
+    background: #fdf6ec;
+    color: #e6a23c;
+    border-color: #faecd8;
+  }
+  .current-mode-badge .mode-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #409eff;
+    flex-shrink: 0;
+  }
+  .current-mode-badge.remote .mode-dot {
+    background: #e6a23c;
+  }
+  .current-mode-badge .mode-label {
+    color: #606266;
+  }
+  .current-mode-badge .mode-value {
+    font-weight: 600;
+  }
 </style>
 </head>
 <body>
 
 <!-- Custom title bar -->
 <div class="titlebar">
-  <span class="titlebar-title">MamboChat Settings</span>
+  <span class="titlebar-title">${translate(locale, 'settings.title')}</span>
   <div class="titlebar-spacer"></div>
   <div class="titlebar-actions">
     <button class="tb-btn" id="tbMinimize" title="Minimize">
@@ -335,27 +373,34 @@ function getSettingsHtml(): string {
 </div>
 
 <div class="body">
+  <!-- Current Mode Badge -->
+  <div class="current-mode-badge" id="activeModeBadge">
+    <span class="mode-dot"></span>
+    <span class="mode-label">${translate(locale, 'mode.current')}:</span>
+    <span class="mode-value" id="activeModeValue">${translate(locale, 'mode.current.local')}</span>
+  </div>
+
   <!-- Mode Selection -->
   <div class="card">
     <div class="card-title">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-      Connection Mode
+      ${translate(locale, 'mode.title')}
     </div>
     <div class="radio-group">
       <div class="radio-card active" id="modeLocal" onclick="selectMode('local')">
         <div class="icon">🖥️</div>
-        <div class="label">Local</div>
-        <div class="desc">Run backend locally</div>
+        <div class="label">${translate(locale, 'mode.local')}</div>
+        <div class="desc">${translate(locale, 'mode.local.desc')}</div>
       </div>
       <div class="radio-card" id="modeRemote" onclick="selectMode('remote')">
         <div class="icon">🌐</div>
-        <div class="label">Remote</div>
-        <div class="desc">Connect to remote server</div>
+        <div class="label">${translate(locale, 'mode.remote')}</div>
+        <div class="desc">${translate(locale, 'mode.remote.desc')}</div>
       </div>
     </div>
     <div class="btn-row" style="margin-top: 16px;">
-      <button class="btn btn-success" id="btnTest" onclick="testConnection()">Test Connection</button>
-      <button class="btn btn-primary" id="btnSave" onclick="saveConfig()">Save & Apply</button>
+      <button class="btn btn-success" id="btnTest" onclick="testConnection()">${translate(locale, 'mode.test')}</button>
+      <button class="btn btn-primary" id="btnSave" onclick="saveConfig()">${translate(locale, 'mode.save')}</button>
     </div>
   </div>
 
@@ -364,14 +409,14 @@ function getSettingsHtml(): string {
     <div class="card">
       <div class="card-title">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-        Local Backend
+        ${translate(locale, 'local.title')}
       </div>
       <div class="form-group">
-        <label class="form-label">Host</label>
+        <label class="form-label">${translate(locale, 'local.host')}</label>
         <input type="text" id="localHost" value="127.0.0.1">
       </div>
       <div class="form-group">
-        <label class="form-label">Port Range</label>
+        <label class="form-label">${translate(locale, 'local.portRange')}</label>
         <div class="port-range">
           <input type="number" id="portStart" value="8000" min="1024" max="65535">
           <span class="sep">—</span>
@@ -379,9 +424,9 @@ function getSettingsHtml(): string {
         </div>
       </div>
       <div class="form-group">
-        <label class="form-label">Python Path</label>
+        <label class="form-label">${translate(locale, 'local.pythonPath')}</label>
         <input type="text" id="pythonPath" value="runtime/.venv/Scripts/python.exe">
-        <div class="form-hint">Path to the Python executable. Relative paths are resolved from the app resources directory.</div>
+        <div class="form-hint">${translate(locale, 'local.pythonPath.hint')}</div>
       </div>
 
       <!-- External Access -->
@@ -391,11 +436,16 @@ function getSettingsHtml(): string {
             <input type="checkbox" id="allowExternal" onchange="toggleExternalAccess()">
             <span class="switch-slider"></span>
           </span>
-          <span>Allow external network access</span>
+          <span>${translate(locale, 'local.externalAccess')}</span>
         </label>
-        <div class="form-hint" style="margin-top: 4px; margin-bottom: 0;">Bind the frontend dev server to 0.0.0.0 so other devices on the same network can access it via browser.</div>
+        <div class="form-hint" style="margin-top: 4px; margin-bottom: 0;">${translate(locale, 'local.externalAccess.hint')}</div>
+        <div class="form-group" style="margin-top: 12px;">
+          <label class="form-label">${translate(locale, 'local.gatewayPort')}</label>
+          <input type="number" id="gatewayPort" value="5173" min="1024" max="65535" style="width: 120px;">
+          <div class="form-hint">${translate(locale, 'local.gatewayPort.hint')}</div>
+        </div>
         <div id="networkInfo" class="network-info" style="display:none;">
-          <div class="network-info-title">Network Access URLs</div>
+          <div class="network-info-title">${translate(locale, 'local.networkUrls')}</div>
           <div id="networkUrls"></div>
         </div>
       </div>
@@ -404,16 +454,16 @@ function getSettingsHtml(): string {
       <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #ebeef5;">
         <div class="status-bar stopped" id="statusBar">
           <span class="dot"></span>
-          <span id="statusText">Checking...</span>
+          <span id="statusText">${translate(locale, 'backend.checking')}</span>
         </div>
         <div class="status-detail" id="statusDetail" style="display:none;">
-          <span>Port: <strong id="detailPort">-</strong></span>
-          <span>PID: <strong id="detailPid">-</strong></span>
+          <span>${translate(locale, 'status.port')}: <strong id="detailPort">-</strong></span>
+          <span>${translate(locale, 'status.pid')}: <strong id="detailPid">-</strong></span>
         </div>
         <div class="btn-row">
-          <button class="btn btn-primary" id="btnStart" onclick="startBackend()">▶ Start</button>
-          <button class="btn btn-danger" id="btnStop" onclick="stopBackend()" style="display:none;">■ Stop</button>
-          <button class="btn btn-default" id="btnRestart" onclick="restartBackend()" style="display:none;">↻ Restart</button>
+          <button class="btn btn-primary" id="btnStart" onclick="startBackend()">&#9654; ${translate(locale, 'backend.start')}</button>
+          <button class="btn btn-danger" id="btnStop" onclick="stopBackend()" style="display:none;">&#9632; ${translate(locale, 'backend.stop')}</button>
+          <button class="btn btn-default" id="btnRestart" onclick="restartBackend()" style="display:none;">&#8635; ${translate(locale, 'backend.restart')}</button>
         </div>
       </div>
     </div>
@@ -424,12 +474,12 @@ function getSettingsHtml(): string {
     <div class="card">
       <div class="card-title">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-        Remote Server
+        ${translate(locale, 'remote.title')}
       </div>
       <div class="form-group">
-        <label class="form-label">Server URL</label>
+        <label class="form-label">${translate(locale, 'remote.serverUrl')}</label>
         <input type="text" id="remoteUrl" value="http://127.0.0.1:8000" placeholder="http://your-server:port">
-        <div class="form-hint">The base URL of the remote MamboChat backend server.</div>
+        <div class="form-hint">${translate(locale, 'remote.serverUrl.hint')}</div>
       </div>
     </div>
   </div>
@@ -441,11 +491,32 @@ function getSettingsHtml(): string {
 <div class="toast" id="toast"></div>
 
 <script>
-const api = window.electronAPI;
+const T = ${JSON.stringify(translations[locale])};
 let currentConfig = null;
+let activeMode = 'local';
 let statusCleanup = null;
 
+function t(key, params) {
+  let text = T[key] || key;
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      text = text.replace('{' + k + '}', v);
+    }
+  }
+  return text;
+}
+
+// --- Active mode badge ---
+function updateActiveModeBadge(mode) {
+  activeMode = mode;
+  const badge = document.getElementById('activeModeBadge');
+  const value = document.getElementById('activeModeValue');
+  badge.classList.toggle('remote', mode === 'remote');
+  value.textContent = mode === 'local' ? t('mode.current.local') : t('mode.current.remote');
+}
+
 // --- Title bar buttons ---
+const api = window.electronAPI;
 document.getElementById('tbMinimize').addEventListener('click', () => api.win.minimize());
 document.getElementById('tbMaximize').addEventListener('click', () => api.win.toggleMaximize());
 document.getElementById('tbClose').addEventListener('click', () => api.win.close());
@@ -481,6 +552,7 @@ function gatherConfig() {
       portStart: parseInt(document.getElementById('portStart').value, 10) || 8000,
       portEnd: parseInt(document.getElementById('portEnd').value, 10) || 8010,
       allowExternalAccess: document.getElementById('allowExternal').checked,
+      gatewayPort: parseInt(document.getElementById('gatewayPort').value, 10) || 5173,
     },
     remote: {
       url: document.getElementById('remoteUrl').value.replace(/\\/+$/, ''),
@@ -490,12 +562,14 @@ function gatherConfig() {
 
 function applyConfigToUI(config) {
   currentConfig = config;
+  updateActiveModeBadge(config.mode);
   selectMode(config.mode);
   document.getElementById('localHost').value = config.local.host;
   document.getElementById('portStart').value = config.local.portStart;
   document.getElementById('portEnd').value = config.local.portEnd;
   document.getElementById('pythonPath').value = config.local.pythonPath;
   document.getElementById('allowExternal').checked = !!config.local.allowExternalAccess;
+  document.getElementById('gatewayPort').value = config.local.gatewayPort || 5173;
   document.getElementById('remoteUrl').value = config.remote.url;
   updateNetworkVisibility();
 }
@@ -514,39 +588,54 @@ async function saveConfig() {
     // Apply mode change: start/stop backend as needed
     if (config.mode === 'local') {
       const externalChanged = config.local.allowExternalAccess !== prevConfig.local.allowExternalAccess;
+      const gatewayPortChanged = config.local.gatewayPort !== (prevConfig.local.gatewayPort || 5173);
       const backendChanged = prevMode !== 'local' ||
         config.local.host !== prevConfig.local.host ||
         config.local.portStart !== prevConfig.local.portStart ||
         config.local.portEnd !== prevConfig.local.portEnd ||
         config.local.pythonPath !== prevConfig.local.pythonPath;
 
-      if (externalChanged || backendChanged) {
-        // Restart frontend dev server if external access setting changed
-        if (externalChanged) {
-          try { await api.frontend.restart(); } catch (e) { console.error('Frontend restart failed:', e); }
-        }
-        // Restart backend if backend settings changed or switching from remote
-        if (backendChanged) {
-          await api.backend.restart();
-        }
-        showToast('Config saved and applied', 'success');
+      // Restart gateway if external access or gateway port changed
+      if (externalChanged || gatewayPortChanged) {
+        const host = config.local.allowExternalAccess ? '0.0.0.0' : '127.0.0.1';
+        try {
+          const result = await api.gateway.restart(host, config.local.gatewayPort || 5173);
+          if (!result.success) {
+            showToast(t('toast.gatewayRestartFailed') + ': ' + (result.error || 'Unknown'), 'error');
+          }
+        } catch (e) { log.error('Gateway restart failed:', e); }
+      }
+
+      // Restart backend if backend settings changed or switching from remote
+      if (backendChanged) {
+        await api.backend.restart();
+      }
+
+      if (externalChanged || gatewayPortChanged || backendChanged) {
+        showToast(t('toast.savedAndApplied'), 'success');
       } else {
-        showToast('Config saved', 'success');
+        showToast(t('toast.saved'), 'success');
       }
     } else {
-      // Remote mode: stop local backend if running
-      const status = await api.backend.status();
-      if (status.running) {
+      // Remote mode: stop local backend if running, set gateway to localhost
+      const backendStatus = await api.backend.status();
+      if (backendStatus.running) {
         await api.backend.stop();
       }
-      showToast('Config saved, remote mode active', 'success');
+      // Switch gateway to localhost-only and proxy to remote
+      const gatewayPort = config.local.gatewayPort || 5173;
+      try {
+        await api.gateway.restart('127.0.0.1', gatewayPort);
+      } catch (e) { log.error('Gateway restart failed:', e); }
+      showToast(t('toast.remoteActive'), 'success');
     }
 
     // Notify main process to update main window
     await api.config.apply(config);
+    updateActiveModeBadge(config.mode);
     refreshStatus();
   } catch (e) {
-    showToast('Save failed: ' + String(e), 'error');
+    showToast(t('toast.saveFailed') + ': ' + String(e), 'error');
   } finally {
     btn.disabled = false;
     btn.classList.remove('btn-loading');
@@ -560,13 +649,13 @@ async function startBackend() {
   try {
     const result = await api.backend.start();
     if (result.success) {
-      showToast('Backend started on port ' + result.port, 'success');
+      showToast(t('toast.backendStarted', {port: result.port}), 'success');
     } else {
-      showToast('Failed: ' + (result.error || 'Unknown'), 'error');
+      showToast(t('toast.testFailed') + ': ' + (result.error || 'Unknown'), 'error');
     }
     refreshStatus();
   } catch (e) {
-    showToast('Error: ' + String(e), 'error');
+    showToast(t('toast.testFailed') + ': ' + String(e), 'error');
   } finally {
     btn.disabled = false;
   }
@@ -577,10 +666,10 @@ async function stopBackend() {
   btn.disabled = true;
   try {
     await api.backend.stop();
-    showToast('Backend stopped', 'info');
+    showToast(t('toast.backendStopped'), 'info');
     refreshStatus();
   } catch (e) {
-    showToast('Error: ' + String(e), 'error');
+    showToast(t('toast.testFailed') + ': ' + String(e), 'error');
   } finally {
     btn.disabled = false;
   }
@@ -592,13 +681,13 @@ async function restartBackend() {
   try {
     const result = await api.backend.restart();
     if (result.success) {
-      showToast('Backend restarted on port ' + result.port, 'success');
+      showToast(t('toast.backendRestarted', {port: result.port}), 'success');
     } else {
-      showToast('Failed: ' + (result.error || 'Unknown'), 'error');
+      showToast(t('toast.testFailed') + ': ' + (result.error || 'Unknown'), 'error');
     }
     refreshStatus();
   } catch (e) {
-    showToast('Error: ' + String(e), 'error');
+    showToast(t('toast.testFailed') + ': ' + String(e), 'error');
   } finally {
     btn.disabled = false;
   }
@@ -612,7 +701,7 @@ function refreshStatus() {
       updateNetworkInfo();
     }
   }).catch(e => {
-    console.error('[Settings] Failed to get backend status:', e);
+    log.error('[Settings] Failed to get backend status:', e);
   });
 }
 
@@ -627,7 +716,7 @@ function updateStatusUI(status) {
   bar.className = 'status-bar ' + (status.running ? 'running' : (status.error ? 'error' : 'stopped'));
 
   if (status.running) {
-    text.textContent = 'Backend Running';
+    text.textContent = t('backend.running');
     detail.style.display = 'flex';
     document.getElementById('detailPort').textContent = status.port || '-';
     document.getElementById('detailPid').textContent = status.pid || '-';
@@ -635,7 +724,7 @@ function updateStatusUI(status) {
     btnStop.style.display = '';
     btnRestart.style.display = '';
   } else {
-    text.textContent = status.error || 'Backend Stopped';
+    text.textContent = status.error || t('backend.stopped');
     detail.style.display = 'none';
     btnStart.style.display = '';
     btnStop.style.display = 'none';
@@ -660,7 +749,7 @@ function updateNetworkVisibility() {
 }
 
 async function updateNetworkInfo() {
-  const status = await api.frontend.status();
+  const status = await api.gateway.status();
   if (!status.running || !status.port) return;
   let addresses;
   try {
@@ -669,9 +758,9 @@ async function updateNetworkInfo() {
 
   const container = document.getElementById('networkUrls');
   const port = status.port;
-  let html = '<div class="network-url-line"><span class="prefix">➜  Local:   </span><span class="url">http://localhost:' + port + '/</span></div>';
+  let html = '<div class="network-url-line"><span class="prefix">➜  ' + t('network.local') + ':   </span><span class="url">http://localhost:' + port + '/</span></div>';
   for (const addr of addresses) {
-    html += '<div class="network-url-line"><span class="prefix">➜  Network: </span><span class="url">http://' + addr + ':' + port + '/</span></div>';
+    html += '<div class="network-url-line"><span class="prefix">➜  ' + t('network.network') + ': </span><span class="url">http://' + addr + ':' + port + '/</span></div>';
   }
   container.innerHTML = html;
 }
@@ -686,21 +775,21 @@ async function testConnection() {
       const url = document.getElementById('remoteUrl').value.replace(/\\/+$/, '');
       const result = await api.testConnection(url);
       if (result.ok) {
-        showToast(url + ' Connection successful!', 'success');
+        showToast(url + ' ' + t('toast.testSuccess'), 'success');
       } else {
-        showToast(url + ' Connection failed: ' + (result.error || 'HTTP ' + result.status), 'error');
+        showToast(url + ' ' + t('toast.testFailed') + ': ' + (result.error || 'HTTP ' + result.status), 'error');
       }
     } else {
       const status = await api.backend.status();
       if (status.running) {
-        showToast('Backend is running on port ' + status.port, 'success');
+        showToast(t('toast.testBackendRunning', {port: status.port}), 'success');
       } else {
-        showToast('Backend is not running', 'error');
+        showToast(t('toast.testBackendNotRunning'), 'error');
       }
     }
   } catch (e) {
-    console.error('Connection test error:', e);
-    showToast('Connection test failed: ' + (e && e.message ? e.message : String(e)), 'error');
+    log.error('Connection test error:', e);
+    showToast(t('toast.connectionTestFailed') + ': ' + (e && e.message ? e.message : String(e)), 'error');
   } finally {
     btn.disabled = false;
     btn.classList.remove('btn-loading');
@@ -715,14 +804,14 @@ async function init() {
 
     // Get config path
     const path = await api.config.getPath();
-    document.getElementById('configPath').textContent = 'Config: ' + path;
+    document.getElementById('configPath').textContent = t('config.path') + ': ' + path;
 
     // Subscribe to backend status changes
     statusCleanup = api.backend.onStatusChange(status => updateStatusUI(status));
 
     refreshStatus();
   } catch (e) {
-    showToast('Failed to load config: ' + String(e), 'error');
+    showToast(t('toast.loadFailed') + ': ' + String(e), 'error');
   }
 }
 

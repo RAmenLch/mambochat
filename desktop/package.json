@@ -17,6 +17,7 @@
     "dist:portable": "npm run build && electron-builder --win portable"
   },
   "dependencies": {
+    "electron-log": "^5.4.3",
     "electron-updater": "^6.6.2"
   },
   "devDependencies": {
@@ -46,22 +47,36 @@
       {
         "from": "../frontend/mambo/dist",
         "to": "frontend/dist",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "../runtime",
         "to": "runtime",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "../backend",
         "to": "backend",
-        "filter": ["**/*", "!__pycache__/**", "!*.pyc", "!*.egg-info/**"]
+        "filter": [
+          "**/*",
+          "!__pycache__/**",
+          "!*.pyc",
+          "!*.egg-info/**"
+        ]
       },
       {
         "from": "../MCP_SERVER",
         "to": "MCP_SERVER",
-        "filter": ["**/*", "!__pycache__/**", "!*.pyc", "!*.egg-info/**"]
+        "filter": [
+          "**/*",
+          "!__pycache__/**",
+          "!*.pyc",
+          "!*.egg-info/**"
+        ]
       }
     ],
     "win": {
@@ -69,11 +84,15 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "requestedExecutionLevel": "asInvoker"

@@ -1,27 +1,76 @@
 /**
  * MamboChat Desktop - Electron Main Process
  *
- * Manages the application lifecycle, backend process,
- * and renderer window.
+ * Manages the application lifecycle, embedded gateway server,
+ * backend process, and renderer window.
  */
 
-import { app, BrowserWindow, ipcMain, dialog, shell, Menu, globalShortcut, session } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell, Menu, globalShortcut, Tray, nativeImage } from 'electron'
 import { join } from 'path'
 import type { AppConfig } from './config'
 import { AppConfigManager } from './config'
 import { BackendProcessManager } from './backend'
-import { FrontendDevServerManager } from './frontendDevServer'
+import { GatewayServer } from './gateway'
 import { openDesktopSettings, setupDesktopSettingsIpc } from './desktopSettings'
+import { getDesktopLocale, translate } from './i18n'
+import log, { getLogPath } from './log'
 
 // Remove the default Electron application menu
 Menu.setApplicationMenu(null)
 
 let mainWindow: BrowserWindow | null = null
+let tray: Tray | null = null
+let isQuitting = false
 
 // --- Single instance lock ---
 const gotTheLock = app.requestSingleInstanceLock()
 if (!gotTheLock) {
   app.quit()
+}
+
+// ---------------------------------------------------------------------------
+// Icon & Tray helpers
+// ---------------------------------------------------------------------------
+
+function resolveIconPath(): string {
+  if (app.isPackaged) {
+    return join(process.resourcesPath, 'frontend', 'dist', 'logo.ico')
+  }
+  return join(app.getAppPath(), '..', 'frontend', 'mambo', 'public', 'logo.ico')
+}
+
+function createSystemTray(iconPath: string): void {
+  const icon = nativeImage.createFromPath(iconPath)
+  tray = new Tray(icon.resize({ width: 16, height: 16 }))
+  const locale = getDesktopLocale()
+  tray.setToolTip('MamboChat')
+  tray.setContextMenu(Menu.buildFromTemplate([
+    {
+      label: translate(locale, 'tray.show'),
+      click: () => {
+        if (mainWindow) {
+          if (mainWindow.isMinimized()) mainWindow.restore()
+          mainWindow.show()
+          mainWindow.focus()
+        }
+      },
+    },
+    { type: 'separator' },
+    {
+      label: translate(locale, 'tray.quit'),
+      click: () => {
+        isQuitting = true
+        app.quit()
+      },
+    },
+  ]))
+  tray.on('double-click', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -31,37 +80,46 @@ if (!gotTheLock) {
 async function bootstrap(): Promise<void> {
   const configManager = AppConfigManager.getInstance()
   const config = configManager.load()
+  const gateway = GatewayServer.getInstance()
 
-  // Force Connection: close on all non-SSE HTTP requests to prevent connection pool
-  // exhaustion with Docker port forwarding (ERR_CONNECTION_RESET on Windows).
-  // SSE streams (EventSource) must be excluded — they require persistent connections.
-  session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
-    const url = details.url
-    // Exclude SSE/stream endpoints — they need persistent connections
-    if (url.includes('/stream-response') || url.includes('/notifications/subscribe')) {
-      callback({ requestHeaders: details.requestHeaders })
-      return
-    }
-    details.requestHeaders['Connection'] = 'close'
-    callback({ requestHeaders: details.requestHeaders })
-  })
+  // NOTE: Connection: close for Docker port forwarding is handled inside
+  // the gateway's proxyRequest() — NOT here. Modifying request headers
+  // via onBeforeSendHeaders causes "Parse Error" because Chromium
+  // assembles the raw HTTP/1.1 request with its own Connection semantics.
 
   // Register IPC handlers BEFORE creating window,
   // so renderer can invoke them immediately after load
   setupIpcHandlers(configManager)
 
-  // In dev mode, start frontend dev server (managed by Electron)
-  if (!app.isPackaged) {
-    const frontendHost = config.local.allowExternalAccess ? '0.0.0.0' : '127.0.0.1'
-    try {
-      await FrontendDevServerManager.getInstance().start(frontendHost)
-    } catch (error) {
-      console.error('Failed to start frontend dev server:', error)
-    }
+  // Start the gateway server
+  const gatewayHost = config.mode === 'local' && config.local.allowExternalAccess
+    ? '0.0.0.0'
+    : '127.0.0.1'
+  const gatewayPort = config.local.gatewayPort || 5173
+
+  try {
+    const actualGatewayPort = await gateway.start(gatewayHost, gatewayPort)
+    log.info(`[Main] Gateway started on port ${actualGatewayPort}`)
+  } catch (error) {
+    log.error('[Main] Failed to start gateway:', error)
+  }
+
+  // Configure gateway proxy target based on mode
+  if (config.mode === 'remote') {
+    gateway.setMode('remote')
+    gateway.setBackendTarget(config.remote.url)
+  } else {
+    gateway.setMode('local')
+    // Backend target will be set once backend starts
   }
 
   // Create main window
   mainWindow = await createMainWindow()
+
+  // Set window icon and create system tray
+  const iconPath = resolveIconPath()
+  mainWindow.setIcon(nativeImage.createFromPath(iconPath))
+  createSystemTray(iconPath)
 
   // Register global shortcut to open desktop settings (Ctrl+,)
   globalShortcut.register('CommandOrControl+,', () => {
@@ -70,7 +128,12 @@ async function bootstrap(): Promise<void> {
 
   // Start local backend if configured (non-blocking for window display)
   if (config.mode === 'local') {
-    startLocalBackground(config)
+    startLocalBackend(config)
+  }
+
+  // When the backend crashes unexpectedly, open the settings window so the user can see what happened
+  BackendProcessManager.getInstance().onUnexpectedExit = () => {
+    openDesktopSettings()
   }
 }
 
@@ -106,15 +169,30 @@ async function createMainWindow(): Promise<BrowserWindow> {
     return { action: 'deny' }
   })
 
-  // Load the Vue frontend app
-  if (!app.isPackaged) {
-    const frontendDevUrl = process.env['FRONTEND_DEV_URL'] || 'http://localhost:5173'
-    console.log(`[Main] Loading frontend dev server: ${frontendDevUrl}`)
-    await mainWindow.loadURL(frontendDevUrl)
+  // Minimize to system tray on close instead of quitting
+  mainWindow.on('close', (e) => {
+    if (!isQuitting) {
+      e.preventDefault()
+      mainWindow?.hide()
+    }
+  })
+
+  // Load the frontend through the gateway server
+  const gatewayUrl = GatewayServer.getInstance().getUrl()
+  if (gatewayUrl) {
+    log.info(`[Main] Loading frontend via gateway: ${gatewayUrl}`)
+    await mainWindow.loadURL(gatewayUrl)
   } else {
-    const frontendDist = join(process.resourcesPath, 'frontend', 'dist', 'index.html')
-    console.log(`[Main] Loading frontend dist: ${frontendDist}`)
-    await mainWindow.loadFile(frontendDist)
+    // Fallback: load from disk if gateway failed to start
+    log.warn('[Main] Gateway not available, loading from disk')
+    if (app.isPackaged) {
+      const frontendDist = join(process.resourcesPath, 'frontend', 'dist', 'index.html')
+      await mainWindow.loadFile(frontendDist)
+    } else {
+      // Dev fallback: try Vite dev server
+      const frontendDevUrl = process.env['FRONTEND_DEV_URL'] || 'http://localhost:5173'
+      await mainWindow.loadURL(frontendDevUrl)
+    }
   }
 
   return mainWindow
@@ -124,10 +202,14 @@ async function createMainWindow(): Promise<BrowserWindow> {
 // Backend management
 // ---------------------------------------------------------------------------
 
-function startLocalBackground(config: AppConfig): void {
+function startLocalBackend(config: AppConfig): void {
   const manager = BackendProcessManager.getInstance()
+  const gateway = GatewayServer.getInstance()
 
   manager.start(config).then((port) => {
+    // Set gateway proxy target to local backend
+    gateway.setBackendTarget(`http://127.0.0.1:${port}`)
+
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('backend:status', {
         running: true,
@@ -136,7 +218,7 @@ function startLocalBackground(config: AppConfig): void {
       })
     }
   }).catch((error) => {
-    console.error('Failed to start local backend:', error)
+    log.error('Failed to start local backend:', error)
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('backend:status', {
         running: false,
@@ -165,6 +247,8 @@ function setupIpcHandlers(configManager: AppConfigManager): void {
     }
     try {
       const port = await BackendProcessManager.getInstance().start(config)
+      // Update gateway proxy target
+      GatewayServer.getInstance().setBackendTarget(`http://127.0.0.1:${port}`)
       return { success: true, port }
     } catch (error) {
       return { success: false, error: String(error) }
@@ -172,7 +256,7 @@ function setupIpcHandlers(configManager: AppConfigManager): void {
   })
 
   ipcMain.handle('backend:stop', async () => {
-    BackendProcessManager.getInstance().stop()
+    await BackendProcessManager.getInstance().stop()
     return { success: true }
   })
 
@@ -183,8 +267,10 @@ function setupIpcHandlers(configManager: AppConfigManager): void {
     }
     const manager = BackendProcessManager.getInstance()
     try {
-      manager.stop()
+      await manager.stop()
       const port = await manager.start(config)
+      // Update gateway proxy target
+      GatewayServer.getInstance().setBackendTarget(`http://127.0.0.1:${port}`)
       return { success: true, port }
     } catch (error) {
       return { success: false, error: String(error) }
@@ -197,44 +283,44 @@ function setupIpcHandlers(configManager: AppConfigManager): void {
 
   ipcMain.handle('app:getVersion', () => app.getVersion())
   ipcMain.handle('app:getPlatform', () => process.platform)
+  ipcMain.handle('app:getLogPath', () => getLogPath())
 
-  // Frontend dev server control
-  ipcMain.handle('frontend:start', async () => {
-    if (app.isPackaged) return { success: false, error: 'Not available in production' }
-    const config = configManager.load()
-    const host = config.local.allowExternalAccess ? '0.0.0.0' : '127.0.0.1'
-    try {
-      const port = await FrontendDevServerManager.getInstance().start(host)
-      return { success: true, port }
-    } catch (error) {
-      return { success: false, error: String(error) }
-    }
+  // Gateway control
+  ipcMain.handle('gateway:status', () => {
+    return GatewayServer.getInstance().getStatus()
   })
 
-  ipcMain.handle('frontend:stop', async () => {
-    FrontendDevServerManager.getInstance().stop()
-    return { success: true }
-  })
-
-  ipcMain.handle('frontend:restart', async () => {
-    if (app.isPackaged) return { success: false, error: 'Not available in production' }
+  ipcMain.handle('gateway:restart', async (_event, host: string, port: number) => {
+    const gateway = GatewayServer.getInstance()
     const config = configManager.load()
-    const host = config.local.allowExternalAccess ? '0.0.0.0' : '127.0.0.1'
     try {
-      await FrontendDevServerManager.getInstance().restart(host)
-      // Reload main window to reconnect to the restarted dev server
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        const frontendDevUrl = process.env['FRONTEND_DEV_URL'] || 'http://localhost:5173'
-        await mainWindow.loadURL(frontendDevUrl)
+      await gateway.stop()
+      const actualPort = await gateway.start(host, port)
+
+      // Re-configure proxy target based on current mode
+      if (config.mode === 'remote') {
+        gateway.setMode('remote')
+        gateway.setBackendTarget(config.remote.url)
+      } else {
+        gateway.setMode('local')
+        const backendPort = BackendProcessManager.getInstance().getPort()
+        if (backendPort) {
+          gateway.setBackendTarget(`http://127.0.0.1:${backendPort}`)
+        }
       }
-      return { success: true, port: 5173 }
+
+      // Reload main window to connect to new gateway
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        const url = gateway.getUrl()
+        if (url) {
+          await mainWindow.loadURL(url)
+        }
+      }
+
+      return { success: true, port: actualPort }
     } catch (error) {
       return { success: false, error: String(error) }
     }
-  })
-
-  ipcMain.handle('frontend:status', () => {
-    return FrontendDevServerManager.getInstance().getStatus()
   })
 
   // Window controls
@@ -273,22 +359,25 @@ function setupIpcHandlers(configManager: AppConfigManager): void {
 app.whenReady().then(bootstrap)
 
 app.on('window-all-closed', () => {
-  BackendProcessManager.getInstance().stop()
-  FrontendDevServerManager.getInstance().stop()
-  globalShortcut.unregisterAll()
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
+  // Keep running in system tray — don't quit
 })
 
 app.on('activate', async () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  } else {
     mainWindow = await createMainWindow()
+    const iconPath = resolveIconPath()
+    mainWindow.setIcon(nativeImage.createFromPath(iconPath))
+    createSystemTray(iconPath)
   }
 })
 
 app.on('before-quit', () => {
+  isQuitting = true
   BackendProcessManager.getInstance().stop()
-  FrontendDevServerManager.getInstance().stop()
+  GatewayServer.getInstance().stop()
   globalShortcut.unregisterAll()
 })

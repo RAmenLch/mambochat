@@ -8,6 +8,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
 import { app } from 'electron'
+import log from './log'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,8 +25,10 @@ export interface LocalModeConfig {
   portStart: number
   /** Port range end for auto-detection */
   portEnd: number
-  /** Whether to allow external network access to the backend */
+  /** Whether to allow external network access */
   allowExternalAccess: boolean
+  /** Port for the embedded gateway server */
+  gatewayPort: number
 }
 
 export interface RemoteModeConfig {
@@ -54,6 +57,7 @@ const DEFAULT_CONFIG: AppConfig = {
     portStart: 8000,
     portEnd: 8010,
     allowExternalAccess: false,
+    gatewayPort: 5173,
   },
   remote: {
     url: 'http://127.0.0.1:8000',
@@ -100,7 +104,7 @@ export class AppConfigManager {
       const parsed = JSON.parse(raw) as Partial<AppConfig>
       return this.mergeWithDefaults(parsed)
     } catch {
-      console.warn('Failed to parse config file, using defaults')
+      log.warn('Failed to parse config file, using defaults')
       return { ...DEFAULT_CONFIG }
     }
   }
@@ -116,7 +120,7 @@ export class AppConfigManager {
       }
       writeFileSync(this.configPath, JSON.stringify(config, null, 2), 'utf-8')
     } catch (error) {
-      console.error('Failed to save config:', error)
+      log.error('Failed to save config:', error)
       throw error
     }
   }
@@ -144,7 +148,7 @@ export class AppConfigManager {
     let pythonPath = partial.local?.pythonPath ?? DEFAULT_CONFIG.local.pythonPath
     if (pythonPath === 'runtime/python/python.exe') {
       pythonPath = DEFAULT_CONFIG.local.pythonPath
-      console.log('[Config] Migrated pythonPath: runtime/python/python.exe -> runtime/.venv/Scripts/python.exe')
+      log.info('[Config] Migrated pythonPath: runtime/python/python.exe -> runtime/.venv/Scripts/python.exe')
     }
 
     return {
@@ -155,6 +159,7 @@ export class AppConfigManager {
         portStart: partial.local?.portStart ?? DEFAULT_CONFIG.local.portStart,
         portEnd: partial.local?.portEnd ?? DEFAULT_CONFIG.local.portEnd,
         allowExternalAccess: partial.local?.allowExternalAccess ?? DEFAULT_CONFIG.local.allowExternalAccess,
+        gatewayPort: partial.local?.gatewayPort ?? DEFAULT_CONFIG.local.gatewayPort,
       },
       remote: {
         url: partial.remote?.url ?? DEFAULT_CONFIG.remote.url,

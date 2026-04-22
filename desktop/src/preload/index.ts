@@ -24,12 +24,10 @@ export interface ElectronAPI {
     status: () => Promise<{ running: boolean; port?: number; pid?: number; error?: string }>
     onStatusChange: (callback: (status: any) => void) => () => void
   }
-  // Frontend
-  frontend: {
-    start: () => Promise<{ success: boolean; port?: number; error?: string }>
-    stop: () => Promise<{ success: boolean }>
-    restart: () => Promise<{ success: boolean; port?: number; error?: string }>
-    status: () => Promise<{ running: boolean; host?: string; port?: number }>
+  // Gateway
+  gateway: {
+    status: () => Promise<{ running: boolean; port?: number; host?: string; mode?: string }>
+    restart: (host: string, port: number) => Promise<{ success: boolean; port?: number; error?: string }>
   }
   // App
   app: {
@@ -75,11 +73,9 @@ const electronAPI: ElectronAPI = {
     },
   },
 
-  frontend: {
-    start: () => ipcRenderer.invoke('frontend:start'),
-    stop: () => ipcRenderer.invoke('frontend:stop'),
-    restart: () => ipcRenderer.invoke('frontend:restart'),
-    status: () => ipcRenderer.invoke('frontend:status'),
+  gateway: {
+    status: () => ipcRenderer.invoke('gateway:status'),
+    restart: (host, port) => ipcRenderer.invoke('gateway:restart', host, port),
   },
 
   app: {
