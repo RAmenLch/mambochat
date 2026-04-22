@@ -19,6 +19,8 @@ services:
     expose:
       # 只在 Docker 内部网络暴露 8000 端口，不直接映射到宿主机
       - "8000"
+    ports:
+      - "24910:8000"
     restart: unless-stopped
 
   # 2. 前端 Nginx 服务
