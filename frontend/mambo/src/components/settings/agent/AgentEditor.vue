@@ -169,7 +169,7 @@
                   />
                   <el-switch
                     :model-value="param.isEnabled"
-                    @change="val => handleToggleParameter(param, val as boolean)"
+                    @change="(val: string | number | boolean) => handleToggleParameter(param, val as boolean)"
                     class="parameter-switch"
                   />
                 </div>

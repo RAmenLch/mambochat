@@ -95,7 +95,7 @@
           v-model:singlePartDraft="singlePartDraft"
           v-model:multiPartDraft="multiPartDraft"
           :active-partition-index="activePartitionIndex"
-          @update:active-partition-index="index => activePartitionIndex = index"
+          @update:active-partition-index="(index: number) => activePartitionIndex = index"
           @send="handleSendMessage"
           @stop-generation="handleStopGeneration"
           @open-review="handleOpenReviewFromInput"

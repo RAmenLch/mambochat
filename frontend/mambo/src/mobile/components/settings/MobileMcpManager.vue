@@ -28,7 +28,7 @@
           <el-switch
             :model-value="item.isEnabled"
             size="small"
-            @change="(val) => handleToggleEnabled(item, val as boolean)"
+            @change="(val: string | number | boolean) => handleToggleEnabled(item, val as boolean)"
           />
         </div>
 

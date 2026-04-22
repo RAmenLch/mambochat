@@ -162,7 +162,13 @@ import { useI18n } from 'vue-i18n';
 import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, EditPen, CopyDocument, Search, FolderChecked, Sort } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import type { AllowDropType } from 'element-plus/es/components/tree/src/tree.type';
-import type Node from 'element-plus/es/components/tree/src/model/node';
+/** Element Plus Tree 内部节点结构（避免依赖内部路径） */
+interface ElTreeNode {
+  data: Record<string, any>;
+  parent: ElTreeNode | null;
+  level: number;
+  childNodes: ElTreeNode[];
+}
 
 import type { Chat, ChatCreate, ChatUpdate, BaseTreeItem } from '@/api/types';
 import { useChatListStore } from '@/stores/chatListStore';
@@ -219,7 +225,7 @@ const chatSortMode = ref<ChatSortMode>(
 
 const isManualSort = computed(() => chatSortMode.value === 'manual');
 
-const customAllowDrop = (draggingNode: Node, dropNode: Node, dropType: AllowDropType): boolean => {
+const customAllowDrop = (draggingNode: any, dropNode: any, dropType: AllowDropType): boolean => {
   if (isManualSort.value) return true;
   // 时间排序模式：禁止根目录节点之间的 before/after 手动排序
   // 但允许从子目录跨到根目录的移动（包括 before/after）

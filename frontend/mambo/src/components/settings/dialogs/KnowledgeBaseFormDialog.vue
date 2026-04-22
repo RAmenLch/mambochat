@@ -4,7 +4,7 @@
     :model-value="visible"
     :title="$t('kb.form.createTitle')"
     width="500px"
-    @update:model-value="val => emit('update:visible', val)"
+    @update:model-value="(val: boolean) => emit('update:visible', val)"
     @close="handleClose"
   >
     <el-form ref="formRef" :model="form" :rules="rules" label-position="top">

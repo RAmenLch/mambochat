@@ -98,7 +98,7 @@
               <span class="param-label-text">{{ param.label }}</span>
               <el-switch
                 :model-value="param.isEnabled"
-                @change="(isEnabled) => handleToggleParameter(param, isEnabled as boolean)"
+                @change="(isEnabled: string | number | boolean) => handleToggleParameter(param, isEnabled as boolean)"
                 size="small"
               />
             </div>

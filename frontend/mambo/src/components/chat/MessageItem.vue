@@ -100,7 +100,7 @@
         @compress-history="handleCompressHistory"
         @delete="handleDelete"
         @view-logs="$emit('view-logs', message.id)"
-        @switch-branch="(targetId) => $emit('switch-branch', targetId)"
+        @switch-branch="(targetId: string) => $emit('switch-branch', targetId)"
       />
     </div>
   </div>

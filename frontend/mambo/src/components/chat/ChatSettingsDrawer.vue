@@ -128,7 +128,7 @@
             <!-- 启用开关 -->
             <el-switch
               :model-value="param.isEnabled"
-              @change="isEnabled => handleToggleParameter(param, isEnabled as boolean)"
+              @change="(isEnabled: string | number | boolean) => handleToggleParameter(param, isEnabled as boolean)"
               class="parameter-switch"
             />
           </div>

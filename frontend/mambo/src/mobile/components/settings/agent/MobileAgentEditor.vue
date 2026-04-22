@@ -117,7 +117,7 @@
                   <el-slider
                     v-if="param.type === 'number'"
                     :model-value="form.modelParameters[param.key] as number"
-                    @update:model-value="val => form.modelParameters[param.key] = val as number"
+                    @update:model-value="(val: number | number[]) => form.modelParameters[param.key] = (Array.isArray(val) ? val[0] : val)"
                     :min="!Array.isArray(param.limit) ? param.limit?.min ?? 0 : 0"
                     :max="!Array.isArray(param.limit) ? param.limit?.max ?? 1 : 1"
                     :step="getSliderStep(
@@ -131,7 +131,7 @@
                   <el-input-number
                     v-else-if="param.type === 'integer'"
                     :model-value="form.modelParameters[param.key] as number"
-                    @update:model-value="val => form.modelParameters[param.key] = val ?? undefined"
+                    @update:model-value="(val: number | undefined) => form.modelParameters[param.key] = val ?? undefined"
                     :min="!Array.isArray(param.limit) ? param.limit?.min : undefined"
                     :max="!Array.isArray(param.limit) ? param.limit?.max : undefined"
                     :disabled="!param.isEnabled"
@@ -146,7 +146,7 @@
                   />
                   <el-switch
                     :model-value="param.isEnabled"
-                    @change="val => handleToggleParameter(param, val as boolean)"
+                    @change="(val: string | number | boolean) => handleToggleParameter(param, val as boolean)"
                     class="parameter-switch"
                   />
                 </div>
