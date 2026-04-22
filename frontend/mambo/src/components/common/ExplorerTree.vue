@@ -211,7 +211,7 @@ const handleNodeClick = (data: BaseTreeItem, node: any, treeNode: unknown, event
   emit('node-click', data)
 }
 
-const handleNodeContextMenu = (event: MouseEvent, data: BaseTreeItem, node: any) => {
+const handleNodeContextMenu = (event: Event, data: BaseTreeItem, node: any) => {
   if (props.enableMultiSelect) {
     if (!selectedIds.value.has(data.id)) {
       selectedIds.value.clear();
@@ -220,7 +220,7 @@ const handleNodeContextMenu = (event: MouseEvent, data: BaseTreeItem, node: any)
       currentMultiSelectParentId.value = data.parentId;
     }
   }
-  emit('node-contextmenu', event, data, node)
+  emit('node-contextmenu', event as MouseEvent, data, node)
 }
 
 const handleRootContextMenu = (event: MouseEvent) => {
