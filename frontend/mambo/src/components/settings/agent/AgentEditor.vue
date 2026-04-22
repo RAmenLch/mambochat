@@ -21,7 +21,7 @@
             <div class="avatar-section">
               <AvatarUploader
                 :title="$t('agent.avatar')"
-                :avatar-url="resolveFileUrl(form.agentAvatarUrl)"
+                :avatar-url="resolveFileUrl(form.agentAvatarUrl) ?? null"
                 :icon="User"
                 :is-loading="isAvatarLoading"
                 @upload="handleUploadAvatar"
