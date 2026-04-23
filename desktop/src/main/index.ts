@@ -12,8 +12,9 @@ import { AppConfigManager } from './config'
 import { BackendProcessManager } from './backend'
 import { GatewayServer } from './gateway'
 import { openDesktopSettings, setupDesktopSettingsIpc } from './desktopSettings'
-import { getDesktopLocale, translate } from './i18n'
+import {DesktopLocale, getDesktopLocale, translate} from './i18n'
 import log, { getLogPath } from './log'
+import { setupDataDirectories } from './paths'
 
 // Remove the default Electron application menu
 Menu.setApplicationMenu(null)
@@ -28,6 +29,16 @@ if (!gotTheLock) {
   app.quit()
 }
 
+// When a second instance is launched (e.g. double-clicking the shortcut),
+// show the existing window instead of starting a new instance.
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  }
+})
+
 // ---------------------------------------------------------------------------
 // Icon & Tray helpers
 // ---------------------------------------------------------------------------
@@ -39,10 +50,9 @@ function resolveIconPath(): string {
   return join(app.getAppPath(), '..', 'frontend', 'mambo', 'public', 'logo.ico')
 }
 
-function createSystemTray(iconPath: string): void {
+function createSystemTray(iconPath: string, locale: DesktopLocale): void {
   const icon = nativeImage.createFromPath(iconPath)
   tray = new Tray(icon.resize({ width: 16, height: 16 }))
-  const locale = getDesktopLocale()
   tray.setToolTip('MamboChat')
   tray.setContextMenu(Menu.buildFromTemplate([
     {
@@ -78,9 +88,14 @@ function createSystemTray(iconPath: string): void {
 // ---------------------------------------------------------------------------
 
 async function bootstrap(): Promise<void> {
+  const locale = getDesktopLocale()
   const configManager = AppConfigManager.getInstance()
   const config = configManager.load()
   const gateway = GatewayServer.getInstance()
+
+  // Set up persistent data directories (junctions) before anything else.
+  // This ensures DB/uploads survive uninstalls. No-op in dev mode.
+  setupDataDirectories()
 
   // NOTE: Connection: close for Docker port forwarding is handled inside
   // the gateway's proxyRequest() — NOT here. Modifying request headers
@@ -89,7 +104,7 @@ async function bootstrap(): Promise<void> {
 
   // Register IPC handlers BEFORE creating window,
   // so renderer can invoke them immediately after load
-  setupIpcHandlers(configManager)
+  setupIpcHandlers(configManager, locale)
 
   // Start the gateway server
   const gatewayHost = config.mode === 'local' && config.local.allowExternalAccess
@@ -119,7 +134,7 @@ async function bootstrap(): Promise<void> {
   // Set window icon and create system tray
   const iconPath = resolveIconPath()
   mainWindow.setIcon(nativeImage.createFromPath(iconPath))
-  createSystemTray(iconPath)
+  createSystemTray(iconPath, locale)
 
   // Register global shortcut to open desktop settings (Ctrl+,)
   globalShortcut.register('CommandOrControl+,', () => {
@@ -206,26 +221,14 @@ function startLocalBackend(config: AppConfig): void {
   const manager = BackendProcessManager.getInstance()
   const gateway = GatewayServer.getInstance()
 
+  // Tell the gateway that backend is starting so it can return 503 instead of 502
+  gateway.setBackendStarting()
+
   manager.start(config).then((port) => {
     // Set gateway proxy target to local backend
     gateway.setBackendTarget(`http://127.0.0.1:${port}`)
-
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('backend:status', {
-        running: true,
-        port,
-        mode: 'local',
-      })
-    }
   }).catch((error) => {
     log.error('Failed to start local backend:', error)
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('backend:status', {
-        running: false,
-        error: String(error),
-        mode: 'local',
-      })
-    }
   })
 }
 
@@ -233,7 +236,7 @@ function startLocalBackend(config: AppConfig): void {
 // IPC Handlers
 // ---------------------------------------------------------------------------
 
-function setupIpcHandlers(configManager: AppConfigManager): void {
+function setupIpcHandlers(configManager: AppConfigManager, locale: DesktopLocale): void {
   ipcMain.handle('config:get', () => configManager.load())
   ipcMain.handle('config:update', (_event, newConfig: AppConfig) => {
     configManager.save(newConfig)
@@ -243,7 +246,7 @@ function setupIpcHandlers(configManager: AppConfigManager): void {
   ipcMain.handle('backend:start', async () => {
     const config = configManager.load()
     if (config.mode !== 'local') {
-      return { success: false, error: 'Backend control is only available in local mode' }
+      return { success: false, error: translate(locale, 'error.backendControlLocalOnly') }
     }
     try {
       const port = await BackendProcessManager.getInstance().start(config)
@@ -263,7 +266,7 @@ function setupIpcHandlers(configManager: AppConfigManager): void {
   ipcMain.handle('backend:restart', async () => {
     const config = configManager.load()
     if (config.mode !== 'local') {
-      return { success: false, error: 'Backend control is only available in local mode' }
+      return { success: false, error: translate(locale, 'error.backendControlLocalOnly') }
     }
     const manager = BackendProcessManager.getInstance()
     try {
@@ -371,13 +374,13 @@ app.on('activate', async () => {
     mainWindow = await createMainWindow()
     const iconPath = resolveIconPath()
     mainWindow.setIcon(nativeImage.createFromPath(iconPath))
-    createSystemTray(iconPath)
+    createSystemTray(iconPath, getDesktopLocale())
   }
 })
 
-app.on('before-quit', () => {
+app.on('before-quit', async () => {
   isQuitting = true
-  BackendProcessManager.getInstance().stop()
+  await BackendProcessManager.getInstance().stop()
   GatewayServer.getInstance().stop()
   globalShortcut.unregisterAll()
 })

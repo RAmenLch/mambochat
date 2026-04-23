@@ -1,6 +1,6 @@
 {
   "name": "mambochat-desktop",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "description": "MamboChat Desktop Application",
   "main": "dist/main/index.js",
@@ -33,6 +33,7 @@
     "wait-on": "^8.0.3"
   },
   "build": {
+    "compression": "maximum",
     "appId": "com.mambochat.desktop",
     "productName": "MamboChat",
     "copyright": "Copyright © 2025 MamboChat",
@@ -51,33 +52,33 @@
           "**/*"
         ]
       },
-      {
-        "from": "../runtime",
-        "to": "runtime",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "../backend",
-        "to": "backend",
-        "filter": [
-          "**/*",
-          "!__pycache__/**",
-          "!*.pyc",
-          "!*.egg-info/**"
-        ]
-      },
-      {
-        "from": "../MCP_SERVER",
-        "to": "MCP_SERVER",
-        "filter": [
-          "**/*",
-          "!__pycache__/**",
-          "!*.pyc",
-          "!*.egg-info/**"
-        ]
-      }
+       {
+         "from": "../runtime",
+         "to": "runtime",
+         "filter": [
+           "**/*"
+         ]
+       },
+       {
+         "from": "../backend",
+         "to": "backend",
+         "filter": [
+           "**/*",
+           "!__pycache__/**",
+           "!*.pyc",
+           "!*.egg-info/**"
+         ]
+       },
+       {
+         "from": "../MCP_SERVER",
+         "to": "MCP_SERVER",
+         "filter": [
+           "**/*",
+           "!__pycache__/**",
+           "!*.pyc",
+           "!*.egg-info/**"
+         ]
+       }
     ],
     "win": {
       "icon": "resources/icon.ico",
@@ -104,7 +105,10 @@
       "deleteAppDataOnUninstall": false,
       "installerIcon": "resources/icon.ico",
       "uninstallerIcon": "resources/icon.ico",
-      "installerHeaderIcon": "resources/icon.ico"
+      "installerHeaderIcon": "resources/icon.ico",
+      "allowElevation": true,
+      "displayLanguageSelector": false,
+      "include": "installer.nsh"
     },
     "portable": {
       "artifactName": "MamboChat-${version}-Portable.${ext}"

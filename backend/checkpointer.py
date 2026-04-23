@@ -9,7 +9,12 @@ from typing import Optional
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 # 定义独立的 SQLite 数据库文件路径，专门用于存储 Agent 状态
-CHECKPOINTER_DB_FILE = Path(os.path.dirname(__file__)).parent.joinpath("DB/checkpoints.db")
+from backend._cli_args import DATA_DIR as _CLI_DATA_DIR
+
+if _CLI_DATA_DIR:
+    CHECKPOINTER_DB_FILE = Path(_CLI_DATA_DIR).joinpath("DB/checkpoints.db")
+else:
+    CHECKPOINTER_DB_FILE = Path(os.path.dirname(__file__)).parent.joinpath("DB/checkpoints.db")
 CHECKPOINTER_DB_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 _conn: Optional[aiosqlite.Connection] = None

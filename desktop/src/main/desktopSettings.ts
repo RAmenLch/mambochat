@@ -171,6 +171,7 @@ function getSettingsHtml(): string {
   .status-bar.running { background: #f0f9eb; color: #67c23a; border: 1px solid #e1f3d8; }
   .status-bar.stopped { background: #f4f4f5; color: #909399; border: 1px solid #e9e9eb; }
   .status-bar.error { background: #fef0f0; color: #f56c6c; border: 1px solid #fde2e2; }
+  .status-bar.starting { background: #ecf5ff; color: #409eff; border: 1px solid #d9ecff; }
   .status-bar .dot {
     width: 8px; height: 8px; border-radius: 50%;
     flex-shrink: 0;
@@ -178,6 +179,14 @@ function getSettingsHtml(): string {
   .status-bar.running .dot { background: #67c23a; }
   .status-bar.stopped .dot { background: #c0c4cc; }
   .status-bar.error .dot { background: #f56c6c; }
+  .status-bar.starting .dot {
+    background: #409eff;
+    animation: pulse-dot 1s ease-in-out infinite;
+  }
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.8); }
+  }
   .status-detail {
     display: flex;
     gap: 20px;
@@ -356,15 +365,15 @@ function getSettingsHtml(): string {
   <span class="titlebar-title">${translate(locale, 'settings.title')}</span>
   <div class="titlebar-spacer"></div>
   <div class="titlebar-actions">
-    <button class="tb-btn" id="tbMinimize" title="Minimize">
+    <button class="tb-btn" id="tbMinimize" title="${translate(locale, 'titlebar.minimize')}">
       <svg width="10" height="1" viewBox="0 0 10 1"><rect width="10" height="1" fill="currentColor"/></svg>
     </button>
-    <button class="tb-btn" id="tbMaximize" title="Maximize">
+    <button class="tb-btn" id="tbMaximize" title="${translate(locale, 'titlebar.maximize')}">
       <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2">
         <rect x="0.6" y="0.6" width="8.8" height="8.8" rx="1"/>
       </svg>
     </button>
-    <button class="tb-btn tb-btn-close" id="tbClose" title="Close">
+    <button class="tb-btn tb-btn-close" id="tbClose" title="${translate(locale, 'titlebar.close')}">
       <svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
         <line x1="0.5" y1="0.5" x2="9.5" y2="9.5"/><line x1="9.5" y1="0.5" x2="0.5" y2="9.5"/>
       </svg>
@@ -712,6 +721,18 @@ function updateStatusUI(status) {
   const btnStart = document.getElementById('btnStart');
   const btnStop = document.getElementById('btnStop');
   const btnRestart = document.getElementById('btnRestart');
+
+  if (status.starting) {
+    bar.className = 'status-bar starting';
+    text.textContent = t('backend.starting');
+    detail.style.display = 'none';
+    // Disable ALL buttons during startup — prevent duplicate start
+    btnStart.style.display = '';
+    btnStart.disabled = true;
+    btnStop.style.display = 'none';
+    btnRestart.style.display = 'none';
+    return;
+  }
 
   bar.className = 'status-bar ' + (status.running ? 'running' : (status.error ? 'error' : 'stopped'));
 

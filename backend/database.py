@@ -10,7 +10,12 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy.orm import declarative_base
 
 # --- 数据库配置 ---
-DATABASE_FILE = Path(os.path.dirname(__file__)).parent.joinpath("DB/mambo.dat")
+from backend._cli_args import DATA_DIR as _CLI_DATA_DIR
+
+if _CLI_DATA_DIR:
+    DATABASE_FILE = Path(_CLI_DATA_DIR).joinpath("DB/mambo.dat")
+else:
+    DATABASE_FILE = Path(os.path.dirname(__file__)).parent.joinpath("DB/mambo.dat")
 # 确保父目录存在
 DATABASE_FILE.parent.mkdir(parents=True, exist_ok=True)
 

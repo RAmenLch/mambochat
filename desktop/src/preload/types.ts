@@ -38,6 +38,7 @@ export interface ElectronAPI {
 
 export interface BackendStatus {
   running: boolean
+  starting?: boolean
   port?: number
   pid?: number
   error?: string

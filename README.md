@@ -1,6 +1,6 @@
 # ![mambo](doc/img/logo_hajimi.svg) MamboChat (曼波茶)
 
-![Version](https://img.shields.io/badge/version-1.2.0-blue)
+![Version](https://img.shields.io/badge/version-1.2.1-blue)
 ![License](https://img.shields.io/badge/license-GPLv3-green)
 ![Vue](https://img.shields.io/badge/frontend-Vue3%20%2B%20ElementPlus-42b883)
 ![FastAPI](https://img.shields.io/badge/backend-FastAPI%20%2B%20Python3.11-009688)
@@ -84,22 +84,29 @@
         *   `./DB`: 存放 SQLite 数据库文件。
         *   `./uploads`: 存放上传的文件和头像。
 
-## 🚀 快速开始 (Windows 一键启动)
-1.  **克隆源码或通过github下载压缩包**
-    ```bash
-    git clone https://github.com/RAmenLch/mambochat.git
-    cd mambochat
-    ```
-2.  **双击或右键点击"在终端中打开"(WIN11)并执行命令**
-    ```bash
-    PS C:\mambochat> .\build_and_start.bat
-    ```
-    **如果是下载的发布版压缩包如`mambochat-v120-winx64.zip`,则双击或执行该文件**
-    ```bash
-    PS C:\mambochat> .\start.bat
-    ```    
-> build_and_start.bat 检查并下载依赖后启动  start.bat 直接启动
-> 注: 该脚本未在不同环境下经历测试,若出现问题欢迎创建 Issue
+## 🚀 快速开始 (Windows 桌面客户端)
+
+MamboChat 提供 Windows 桌面客户端安装包，一键安装即可使用，无需手动配置 Python 环境。
+
+### 安装步骤
+
+1. **下载安装包**
+   从 [Releases](https://github.com/RAmenLch/mambochat/releases) 页面下载最新版本的安装包（`MamboChat-Setup-x.x.x.exe`）。
+
+2. **运行安装程序**
+   双击 `MamboChat-Setup-1.2.1.exe`，按向导完成安装（可选择自定义安装目录）。
+
+3. **启动应用**
+   安装完成后，从桌面快捷方式或开始菜单启动 MamboChat。
+   ![桌面端](doc/img/桌面端.png)
+
+4. **桌面客户端配置**
+[桌面客户端配置文档](doc/DesktopSettings.md)
+
+> 桌面客户端已内嵌完整的 Python 运行时环境、前端资源、后端代码及 MCP Server，开箱即用。
+> 所有用户数据（数据库、上传文件、配置文件）存储在 `%APPDATA%/MamboChat/` 目录下。
+
+
 
 ## 💻 本地开发指南
 
@@ -138,6 +145,22 @@
     ```bash
     npm run dev
     ```
+
+### 从源码构建桌面客户端
+
+1. **准备环境**（下载 Python/Node.js 运行时、安装前后端依赖、构建前端）：
+   ```bash
+   build_and_start.bat
+   ```
+   > 脚本会自动完成环境初始化并启动服务，等待前后端均启动成功后，关闭两个弹出的服务窗口即可。
+
+2. **构建桌面客户端**：
+   ```bash
+   cd desktop
+   npm install
+   npm run dist:win    # 输出 NSIS 安装包 + 便携版到 release/
+   ```
+
 
 ## 🤝 贡献
 

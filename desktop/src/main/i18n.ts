@@ -43,6 +43,7 @@ export const translations: Record<DesktopLocale, DesktopTranslations> = {
     'backend.checking': '检查中...',
     'backend.running': '后端运行中',
     'backend.stopped': '后端已停止',
+    'backend.starting': '正在启动...',
     'backend.start': '启动',
     'backend.stop': '停止',
     'backend.restart': '重启',
@@ -72,9 +73,15 @@ export const translations: Record<DesktopLocale, DesktopTranslations> = {
     'status.pid': 'PID',
     'network.local': '本地',
     'network.network': '网络',
+    // Title Bar
+    'titlebar.minimize': '最小化',
+    'titlebar.maximize': '最大化',
+    'titlebar.close': '关闭',
     // Tray
     'tray.show': '显示窗口',
     'tray.quit': '退出 MamboChat',
+    // Error Messages
+    'error.backendControlLocalOnly': '后端控制仅在本地模式下可用',
   },
   'en': {
     // Title
@@ -105,6 +112,7 @@ export const translations: Record<DesktopLocale, DesktopTranslations> = {
     'backend.checking': 'Checking...',
     'backend.running': 'Backend Running',
     'backend.stopped': 'Backend Stopped',
+    'backend.starting': 'Starting...',
     'backend.start': 'Start',
     'backend.stop': 'Stop',
     'backend.restart': 'Restart',
@@ -134,9 +142,15 @@ export const translations: Record<DesktopLocale, DesktopTranslations> = {
     'status.pid': 'PID',
     'network.local': 'Local',
     'network.network': 'Network',
+    // Title Bar
+    'titlebar.minimize': 'Minimize',
+    'titlebar.maximize': 'Maximize',
+    'titlebar.close': 'Close',
     // Tray
     'tray.show': 'Show Window',
     'tray.quit': 'Quit MamboChat',
+    // Error Messages
+    'error.backendControlLocalOnly': 'Backend control is only available in local mode',
   },
 }
 

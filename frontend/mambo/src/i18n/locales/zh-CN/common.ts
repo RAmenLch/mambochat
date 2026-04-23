@@ -88,4 +88,14 @@ export default {
     completedBody: 'AI 助手已完成内容生成',
     permissionFailed: '请求系统通知权限失败:'
   },
+  titlebar: {
+    reload: '刷新',
+    settings: '配置',
+    minimize: '最小化',
+    maximize: '最大化',
+    close: '关闭',
+    connecting: '连接中...',
+    startingBackend: '后端启动中...',
+    openSettings: '打开设置',
+  },
 }

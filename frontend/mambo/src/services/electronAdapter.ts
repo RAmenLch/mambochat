@@ -18,6 +18,8 @@ const ELECTRON_MODE_KEY = '__mambochat_electron__'
 const CONNECTION_TIMEOUT_MS = 15_000
 
 let isElectron = false
+/** The detected app mode ('local' | 'remote'), available after initElectronAdapter() */
+export let backendMode: string | null = null
 
 export function detectElectron(): boolean {
   return !!(window.electronAPI)
@@ -48,6 +50,9 @@ export async function initElectronAdapter(): Promise<boolean> {
   } catch {
     // Config might not be ready yet
   }
+
+  // Expose mode so main.ts can choose the right splash text
+  backendMode = config?.mode || null
 
   // In Electron with gateway, all API requests go through the gateway via relative paths.
   // The gateway handles proxying to the actual backend (local or remote).

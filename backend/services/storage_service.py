@@ -110,6 +110,9 @@ class LocalStorageService(AbstractStorageService):
 
 # --- 服务实例化 ---
 
+from backend._cli_args import STORAGE_PATH as _CLI_STORAGE_PATH
+
 PROJECT_ROOT = Path(__file__).parent.parent
-STORAGE_PATH_STR = os.getenv("STORAGE_PATH", str(PROJECT_ROOT.joinpath("uploads")))
+_default = str(PROJECT_ROOT.joinpath("uploads"))
+STORAGE_PATH_STR = _CLI_STORAGE_PATH or _default
 storage_service: AbstractStorageService = LocalStorageService(base_path=STORAGE_PATH_STR)

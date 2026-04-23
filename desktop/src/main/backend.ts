@@ -13,7 +13,11 @@ import { createServer, createConnection } from 'net'
 import { app, BrowserWindow } from 'electron'
 import { join, isAbsolute } from 'path'
 import type { AppConfig } from './config'
+import { getDataDirectory } from './paths'
 import log from './log'
+
+/** Entry-point script used to launch the backend in packaged builds. */
+const RUNNER_SCRIPT = 'backend/run_backend.py'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -21,6 +25,7 @@ import log from './log'
 
 export interface BackendStatus {
   running: boolean
+  starting?: boolean
   port?: number
   pid?: number
   error?: string
@@ -35,6 +40,8 @@ export class BackendProcessManager {
   private process: ChildProcess | null = null
   private currentPort: number | null = null
   private stopping = false
+  /** Mutex: prevents concurrent start() calls */
+  private starting = false
 
   /** Callback invoked when the backend process exits unexpectedly (not via stop()). */
   onUnexpectedExit: (() => void) | null = null
@@ -59,6 +66,13 @@ export class BackendProcessManager {
       return this.currentPort
     }
 
+    // Prevent concurrent starts — enforce singleton lifecycle
+    if (this.starting) {
+      throw new Error('Backend is already starting, please wait')
+    }
+    this.starting = true
+    this.broadcastStatus({ running: false, starting: true })
+
     const { pythonPath, portStart, portEnd } = config.local
 
     // 1. Resolve Python executable path
@@ -81,16 +95,39 @@ export class BackendProcessManager {
     log.info(`[Backend] Python: ${exePath}`)
     log.info(`[Backend] WorkDir: ${appDir}`)
 
-    this.process = spawn(
-      exePath,
-      ['-m', 'uvicorn', 'backend.main:app', '--host', bindHost, '--port', String(port)],
-      {
-        cwd: appDir,
-        env: { ...process.env, ...env },
-        stdio: ['pipe', 'pipe', 'pipe'],
-        windowsHide: false,
+    let spawnedProcess: ChildProcess
+    try {
+      // In packaged builds use run_backend.py so we can pass --data-dir /
+      // --storage-path as CLI arguments.  In dev mode keep the classic
+      // `python -m uvicorn …` invocation (no extra args needed).
+      const args = app.isPackaged
+        ? [RUNNER_SCRIPT, 'backend.main:app', '--host', bindHost, '--port', String(port)]
+        : ['-m', 'uvicorn', 'backend.main:app', '--host', bindHost, '--port', String(port)]
+
+      // Append data-directory arguments (packaged only)
+      const dataDir = getDataDirectory()
+      if (dataDir) {
+        args.push('--data-dir', dataDir)
+        args.push('--storage-path', join(dataDir, 'uploads'))
       }
-    )
+
+      spawnedProcess = spawn(
+        exePath,
+        args,
+        {
+          cwd: appDir,
+          env: { ...process.env, ...env },
+          stdio: ['pipe', 'pipe', 'pipe'],
+          windowsHide: false,
+        }
+      )
+    } catch (err) {
+      this.starting = false
+      this.broadcastStatus({ running: false })
+      throw err
+    }
+
+    this.process = spawnedProcess
 
     // Pipe stdout/stderr for debugging
     this.process.stdout?.on('data', (data: Buffer) => {
@@ -107,6 +144,7 @@ export class BackendProcessManager {
       log.error('[Backend] Process error:', err.message)
       this.process = null
       this.currentPort = null
+      this.starting = false
     })
 
     this.process.on('exit', (code, signal) => {
@@ -114,6 +152,7 @@ export class BackendProcessManager {
       const pid = this.process?.pid
       this.process = null
       this.currentPort = null
+      this.starting = false
 
       // If we didn't initiate the stop, notify all windows and trigger callback
       if (!this.stopping) {
@@ -129,10 +168,33 @@ export class BackendProcessManager {
     })
 
     // 6. Wait for backend to become ready
-    await this.waitForReady(bindHost === '0.0.0.0' ? '127.0.0.1' : bindHost, port, 30_000)
+    try {
+      await this.waitForReady(bindHost, port, 30_000)
+    } catch (err) {
+      // Ready check failed — kill the orphaned process to prevent zombie instances
+      log.error('[Backend] Failed to reach ready state, cleaning up orphaned process')
+      try {
+        if (this.process && !this.process.killed) {
+          this.process.kill('SIGTERM')
+          if (process.platform === 'win32' && this.process.pid) {
+            try { execSync(`taskkill /T /F /PID ${this.process.pid}`, { stdio: 'ignore' }) } catch { /* ignore */ }
+          }
+        }
+      } catch (killErr) {
+        log.warn('[Backend] Error killing orphaned process:', killErr)
+      }
+      this.process = null
+      this.currentPort = null
+      this.starting = false
+      this.broadcastStatus({ running: false, error: String(err) })
+      throw err
+    }
 
     this.currentPort = port
+    this.starting = false
     log.info(`[Backend] Ready on port ${port}`)
+    
+    this.broadcastStatus({ running: true, port, pid: this.process?.pid })
     return port
   }
 
@@ -141,11 +203,19 @@ export class BackendProcessManager {
    * Returns a promise that resolves when the process has fully exited.
    */
   async stop(timeoutMs = 5000): Promise<void> {
-    if (!this.process) return
+    if (!this.process && !this.starting) return
+
+    // If we're in starting state but process hasn't been spawned yet (or failed),
+    // just reset the flag
+    if (!this.process) {
+      this.starting = false
+      return
+    }
 
     const pid = this.process.pid
     log.info(`[Backend] Stopping (PID: ${pid})...`)
     this.stopping = true
+    this.starting = false  // clear starting on explicit stop
 
     // Wrap exit in a promise
     const exitPromise = new Promise<void>((resolve) => {
@@ -199,6 +269,9 @@ export class BackendProcessManager {
    * Get current backend status.
    */
   getStatus(): BackendStatus {
+    if (this.starting) {
+      return { running: false, starting: true }
+    }
     if (!this.process || !this.currentPort) {
       return { running: false }
     }
@@ -214,6 +287,18 @@ export class BackendProcessManager {
    */
   getPort(): number | null {
     return this.currentPort
+  }
+
+  /**
+   * Broadcast status change to all renderer windows.
+   */
+  private broadcastStatus(status: { running: boolean; starting?: boolean; port?: number; pid?: number; error?: string }): void {
+    const fullStatus = { ...status, mode: 'local' as const }
+    BrowserWindow.getAllWindows().forEach(win => {
+      if (!win.isDestroyed()) {
+        win.webContents.send('backend:status', fullStatus)
+      }
+    })
   }
 
   // ---------------------------------------------------------------------------
@@ -340,7 +425,7 @@ export class BackendProcessManager {
       }
 
       // Start polling after a short delay to let the process initialize
-      setTimeout(poll, 1000)
+      setTimeout(poll, 500)
     })
   }
 }

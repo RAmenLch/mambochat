@@ -132,6 +132,7 @@
     </style>
     <script>
       // Detect Electron immediately and show title bar + splash
+      // Titlebar button tooltips will be updated by main.ts after vue-i18n initializes.
       if (window.electronAPI) {
         document.documentElement.classList.add('electron-mode');
         document.addEventListener('DOMContentLoaded', function() {

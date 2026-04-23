@@ -75,6 +75,8 @@ export class GatewayServer {
   private backendTarget: string = '' // e.g. "http://127.0.0.1:8000" or "http://192.168.1.100:8000"
   private frontendDistPath: string = ''
   private stopping = false
+  /** Tracks whether the backend is currently being started (not yet ready) */
+  private backendStarting = false
 
   private constructor() {}
 
@@ -182,7 +184,17 @@ export class GatewayServer {
    */
   setBackendTarget(target: string): void {
     this.backendTarget = target.replace(/\/+$/, '')
+    this.backendStarting = false
     log.info(`[Gateway] Backend target set to: ${this.backendTarget}`)
+  }
+
+  /**
+   * Mark that the backend is starting (not yet ready).
+   * During this period, API requests will get a "starting" response instead of 502.
+   */
+  setBackendStarting(): void {
+    this.backendStarting = true
+    log.info('[Gateway] Backend is marked as starting...')
   }
 
   /**
@@ -306,8 +318,13 @@ export class GatewayServer {
 
   private proxyRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
     if (!this.backendTarget) {
-      res.writeHead(502, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ detail: 'Backend is not available. Please start the backend first.' }))
+      // Backend not configured or still starting — return actionable info
+      const statusCode = this.backendStarting ? 503 : 502
+      const detail = this.backendStarting
+        ? 'Backend is starting up, please retry in a few seconds.'
+        : 'Backend is not available. Please start the backend first.'
+      res.writeHead(statusCode, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ detail, starting: this.backendStarting }))
       return
     }
 
