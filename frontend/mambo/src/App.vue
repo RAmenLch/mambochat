@@ -103,6 +103,11 @@ html.electron-mode #electron-titlebar {
   display: flex !important;
 }
 
+html.electron-mode {
+  /* 让 Element Plus 所有弹出层（message、notification、popover、dialog、drawer 等）的 z-index 始终高于自定义标题栏 */
+  --el-z-index-overlay: 100002 !important;
+}
+
 html.electron-mode #app {
   flex: 1;
   height: auto !important;

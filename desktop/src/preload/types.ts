@@ -18,6 +18,9 @@ export interface ElectronAPI {
     status: () => Promise<BackendStatus>
     onStatusChange: (callback: (status: BackendStatus) => void) => () => void
   }
+  runtime: {
+    onExtractionProgress: (callback: (progress: ExtractionProgress) => void) => () => void
+  }
   gateway: {
     status: () => Promise<GatewayStatus>
     restart: (host: string, port: number) => Promise<{ success: boolean; port?: number; error?: string }>
@@ -56,6 +59,12 @@ export interface GatewayStatus {
   port?: number
   host?: string
   mode?: string
+}
+
+export interface ExtractionProgress {
+  phase: 'checking' | 'counting' | 'extracting' | 'done' | 'error'
+  percent: number
+  detail: string
 }
 
 declare global {

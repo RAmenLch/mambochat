@@ -14,6 +14,7 @@ import { app, BrowserWindow } from 'electron'
 import { join, isAbsolute } from 'path'
 import type { AppConfig } from './config'
 import { getDataDirectory } from './paths'
+import { ensureRuntimeExtracted } from './runtime-extract'
 import log from './log'
 
 /** Entry-point script used to launch the backend in packaged builds. */
@@ -74,6 +75,9 @@ export class BackendProcessManager {
     this.broadcastStatus({ running: false, starting: true })
 
     const { pythonPath, portStart, portEnd } = config.local
+
+    // 0. Ensure runtime python is extracted from bundled tar (first launch only)
+    await ensureRuntimeExtracted()
 
     // 1. Resolve Python executable path
     const exePath = this.resolvePythonPath(pythonPath)

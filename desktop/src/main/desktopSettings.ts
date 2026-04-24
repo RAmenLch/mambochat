@@ -434,7 +434,7 @@ function getSettingsHtml(): string {
       </div>
       <div class="form-group">
         <label class="form-label">${translate(locale, 'local.pythonPath')}</label>
-        <input type="text" id="pythonPath" value="runtime/.venv/Scripts/python.exe">
+        <input type="text" id="pythonPath" value="runtime/python/python.exe">
         <div class="form-hint">${translate(locale, 'local.pythonPath.hint')}</div>
       </div>
 
@@ -829,6 +829,23 @@ async function init() {
 
     // Subscribe to backend status changes
     statusCleanup = api.backend.onStatusChange(status => updateStatusUI(status));
+
+    // Subscribe to runtime extraction progress
+    api.runtime.onExtractionProgress(progress => {
+      if (progress.phase === 'extracting') {
+        const bar = document.getElementById('statusBar');
+        const text = document.getElementById('statusText');
+        const detail = document.getElementById('statusDetail');
+        if (bar && bar.classList.contains('starting')) {
+          text.textContent = progress.detail;
+          detail.style.display = 'flex';
+          const detailPort = document.getElementById('detailPort');
+          const detailPid = document.getElementById('detailPid');
+          if (detailPort) detailPort.textContent = progress.percent + '%';
+          if (detailPid) detailPid.textContent = progress.phase;
+        }
+      }
+    });
 
     refreshStatus();
   } catch (e) {

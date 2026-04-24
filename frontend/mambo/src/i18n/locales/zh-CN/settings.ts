@@ -43,7 +43,7 @@ export default {
     localPortEnd: '端口范围结束',
     localPortRange: '端口范围',
     pythonPath: 'Python 路径',
-    pythonPathPlaceholder: 'runtime/.venv/Scripts/python.exe',
+    pythonPathPlaceholder: 'runtime/python/python.exe',
     remoteUrl: '远程后端地址',
     remoteUrlPlaceholder: 'http://192.168.1.100:8000',
     backendStatus: '后端状态',

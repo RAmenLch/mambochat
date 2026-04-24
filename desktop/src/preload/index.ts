@@ -24,6 +24,10 @@ export interface ElectronAPI {
     status: () => Promise<{ running: boolean; port?: number; pid?: number; error?: string }>
     onStatusChange: (callback: (status: any) => void) => () => void
   }
+  // Runtime extraction
+  runtime: {
+    onExtractionProgress: (callback: (progress: any) => void) => () => void
+  }
   // Gateway
   gateway: {
     status: () => Promise<{ running: boolean; port?: number; host?: string; mode?: string }>
@@ -70,6 +74,14 @@ const electronAPI: ElectronAPI = {
       const handler = (_event: any, status: any) => callback(status)
       ipcRenderer.on('backend:status', handler)
       return () => ipcRenderer.removeListener('backend:status', handler)
+    },
+  },
+
+  runtime: {
+    onExtractionProgress: (callback) => {
+      const handler = (_event: any, progress: any) => callback(progress)
+      ipcRenderer.on('runtime:extraction-progress', handler)
+      return () => ipcRenderer.removeListener('runtime:extraction-progress', handler)
     },
   },
 

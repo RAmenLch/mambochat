@@ -42,7 +42,7 @@ export function useContextMenu<T>(): UseContextMenuReturn<T> {
     position: 'fixed',
     top: '0px',
     left: '0px',
-    zIndex: 9999,
+    zIndex: 100002,
   });
 
   const handleContextMenu = (

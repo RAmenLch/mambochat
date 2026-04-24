@@ -43,7 +43,7 @@ export default {
     localPortEnd: 'Port Range End',
     localPortRange: 'Port Range',
     pythonPath: 'Python Path',
-    pythonPathPlaceholder: 'runtime/.venv/Scripts/python.exe',
+    pythonPathPlaceholder: 'runtime/python/python.exe',
     remoteUrl: 'Remote Backend URL',
     remoteUrlPlaceholder: 'http://192.168.1.100:8000',
     backendStatus: 'Backend Status',

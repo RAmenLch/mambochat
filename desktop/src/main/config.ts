@@ -52,7 +52,7 @@ export interface AppConfig {
 const DEFAULT_CONFIG: AppConfig = {
   mode: 'local',
   local: {
-    pythonPath: 'runtime/.venv/Scripts/python.exe',
+    pythonPath: 'runtime/python/python.exe',
     host: '127.0.0.1',
     portStart: 8000,
     portEnd: 8010,
@@ -144,11 +144,11 @@ export class AppConfigManager {
    * Also migrates outdated paths to their current values.
    */
   private mergeWithDefaults(partial: Partial<AppConfig>): AppConfig {
-    // Migrate old Python path to venv structure
+    // Migrate old .venv Python path to new runtime/python structure
     let pythonPath = partial.local?.pythonPath ?? DEFAULT_CONFIG.local.pythonPath
-    if (pythonPath === 'runtime/python/python.exe') {
+    if (pythonPath === 'runtime/.venv/Scripts/python.exe') {
       pythonPath = DEFAULT_CONFIG.local.pythonPath
-      log.info('[Config] Migrated pythonPath: runtime/python/python.exe -> runtime/.venv/Scripts/python.exe')
+      log.info('[Config] Migrated pythonPath: runtime/.venv/Scripts/python.exe -> runtime/python/python.exe')
     }
 
     return {

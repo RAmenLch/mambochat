@@ -58,6 +58,9 @@ const bootstrap = async (): Promise<void> => {
       const baseKey = backendMode === 'local' ? 'common.titlebar.startingBackend' : 'common.titlebar.connecting'
       splashText.textContent = i18n.global.t(baseKey) + ' — timed out'
     }
+    // Hide progress bar on timeout
+    const progressEl = document.getElementById('splash-progress')
+    if (progressEl) progressEl.classList.remove('visible')
     // Small delay so the user sees the timeout message before settings open
     await new Promise(r => setTimeout(r, 600))
     window.electronAPI?.app?.openDesktopSettings()
