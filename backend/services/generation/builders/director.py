@@ -262,6 +262,11 @@ class LLMInputDirector:
             language=materials.settings.get("language")
         )
 
+        # DeepSeek 等需要回传 reasoning_content 的模型，将 REASONING 加入 type_filter
+        # 使其走正常的 type_filter + CPL 流程，由转换层映射到独立的 reasoning_content 字段
+        if provider.worker_type == schemas_enums.ProviderWorkerType.DEEPSEEK.value and self._type_filter:
+            context_builder.type_filter = self._type_filter | {schemas_enums.SubMessageType.REASONING.value}
+
         message_context = await context_builder.build(
             raw_history=materials.history,
             system_prompt=final_system_prompt

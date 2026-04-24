@@ -261,16 +261,30 @@ class MessageContextBuilder:
         for round_data in rounds:
             assistant_msg: Dict[str, Any] = {"role": "assistant"}
 
-            if round_data["content_parts"]:
-                if len(round_data["content_parts"]) == 1 and round_data["content_parts"][0].get("type") == "text":
-                    assistant_msg["content"] = round_data["content_parts"][0]["text"]
+            # 从 content_parts 中分离 reasoning_text（REASONING 类型子消息）
+            # 与普通 content 分开，映射到独立的 API 字段
+            reasoning_texts = []
+            content_only_parts = []
+            for p in round_data["content_parts"]:
+                if p.get("type") == "reasoning_text":
+                    reasoning_texts.append(p.get("text", ""))
                 else:
-                    assistant_msg["content"] = round_data["content_parts"]
+                    content_only_parts.append(p)
+
+            if content_only_parts:
+                if len(content_only_parts) == 1 and content_only_parts[0].get("type") == "text":
+                    assistant_msg["content"] = content_only_parts[0]["text"]
+                else:
+                    assistant_msg["content"] = content_only_parts
             else:
                 assistant_msg["content"] = None
 
             if round_data["tool_calls"]:
                 assistant_msg["tool_calls"] = round_data["tool_calls"]
+
+            # 将 REASONING 内容放入独立字段（仅在有内容时添加，不影响其他模型）
+            if reasoning_texts:
+                assistant_msg["reasoning_content"] = "".join(reasoning_texts)
 
             result.append(assistant_msg)
             result.extend(round_data["tool_results"])
@@ -334,6 +348,9 @@ class MessageContextBuilder:
                 part = {"type": "text", "text": error_obj.message}
             except (ValueError, TypeError):
                 part = {"type": "text", "text": sub.content}
+        elif sub.type == schemas_enums.SubMessageType.REASONING.value:
+            # REASONING 内容需要映射到独立的 reasoning_content 字段，不混入 content
+            part = {"type": "reasoning_text", "text": sub.content}
         else:
             part = {"type": "text", "text": sub.content}
 

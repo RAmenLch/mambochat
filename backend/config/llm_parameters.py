@@ -215,6 +215,26 @@ SUPPORTED_LLM_PARAMETERS: List[LLMParameter] = [
         default_value="default",
         default_activate=False
     ),
+    LLMParameter(
+        key="deepseek::thinking.type",
+        label="Thinking Type (DeepSeek)",
+        path=["thinking", "type"],
+        description="控制 DeepSeek V4 思考模式开关。启用后模型会在输出最终回答前先进行思维链推理。注意：思考模式下 temperature/top_p/presence_penalty/frequency_penalty 不生效。",
+        type="string",
+        limit=["enabled", "disabled"],
+        default_value="enabled",
+        default_activate=False
+    ),
+    LLMParameter(
+        key="deepseek::reasoning_effort",
+        label="Reasoning Effort (DeepSeek)",
+        path=["reasoning_effort"],
+        description="控制 DeepSeek V4 思考模式的推理强度。high 为常规深度思考，max 为最强推理（适合复杂 Agent 场景）。仅当 Thinking Type 为 enabled 时生效。",
+        type="string",
+        limit=["high", "max"],
+        default_value="high",
+        default_activate=False
+    ),
 
 ]
 

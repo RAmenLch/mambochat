@@ -59,6 +59,8 @@ class ModelFactory:
             )
 
         elif worker_type == ProviderWorkerType.DEEPSEEK.value:
+            thinking = params_copy.pop("thinking", None)
+            reasoning_effort = params_copy.pop("reasoning_effort", None)
             return ChatDeepSeek(
                 model=model_config.model_id,
                 api_key=model_config.api_key,
@@ -68,7 +70,9 @@ class ModelFactory:
                 timeout=model_config.timeout,
                 streaming=stream,
                 callbacks=callbacks,
-                max_retries=max_retries
+                max_retries=max_retries,
+                thinking=thinking,
+                reasoning_effort=reasoning_effort
             )
 
         else:
