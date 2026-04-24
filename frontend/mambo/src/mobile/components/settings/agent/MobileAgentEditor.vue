@@ -83,7 +83,8 @@
                   </el-tooltip>
                 </template>
                 <el-input-number
-                  v-model="form.modelParameters.max_context_messages"
+                  :model-value="Number(form.modelParameters.max_context_messages) || 0"
+                  @update:model-value="(val: number | undefined) => form.modelParameters.max_context_messages = val"
                   :min="0"
                   :step="2"
                   controls-position="right"
