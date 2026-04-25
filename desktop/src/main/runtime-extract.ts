@@ -22,6 +22,7 @@ import { app, BrowserWindow } from 'electron'
 import * as tar from 'tar'
 import * as zlib from 'zlib'
 import log from './log'
+import { getDesktopLocale, translate } from './i18n'
 
 export interface ExtractionProgress {
   phase: 'checking' | 'counting' | 'extracting' | 'done' | 'error'
@@ -120,6 +121,8 @@ function safeRemove(dir: string): void {
 export async function ensureRuntimeExtracted(): Promise<void> {
   if (!app.isPackaged) return
 
+  const locale = getDesktopLocale()
+
   const resourcesPath = process.resourcesPath
   const runtimeDir = join(resourcesPath, 'runtime')
   const pythonTar = join(runtimeDir, 'python.tar')
@@ -148,7 +151,7 @@ export async function ensureRuntimeExtracted(): Promise<void> {
   if (!existsSync(pythonTar)) {
     broadcastProgress({
       phase: 'error', percent: 0,
-      detail: `Runtime archive not found at "${pythonTar}". Installation may be corrupted.`
+      detail: translate(locale, 'runtime.archiveNotFound')
     })
     throw new Error(
       `Runtime archive not found at "${pythonTar}". ` +
@@ -167,12 +170,12 @@ export async function ensureRuntimeExtracted(): Promise<void> {
   mkdirSync(runtimeDir, { recursive: true })
 
   log.info('[Runtime] First launch detected — extracting python runtime from tar...')
-  broadcastProgress({ phase: 'checking', percent: 0, detail: 'Preparing runtime environment...' })
+  broadcastProgress({ phase: 'checking', percent: 0, detail: translate(locale, 'runtime.checking') })
 
   // ------------------------------------------------------------------
   // Phase 1: Count total files for accurate progress
   // ------------------------------------------------------------------
-  broadcastProgress({ phase: 'counting', percent: 0, detail: 'Scanning archive...' })
+  broadcastProgress({ phase: 'counting', percent: 0, detail: translate(locale, 'runtime.counting') })
   log.info('[Runtime] Counting entries in tar archive...')
   let totalFiles: number
   try {
@@ -186,7 +189,7 @@ export async function ensureRuntimeExtracted(): Promise<void> {
   // ------------------------------------------------------------------
   // Phase 2: Extract into the **staging** directory
   // ------------------------------------------------------------------
-  broadcastProgress({ phase: 'extracting', percent: 0, detail: 'Extracting runtime...' })
+  broadcastProgress({ phase: 'extracting', percent: 0, detail: translate(locale, 'runtime.extracting') })
 
   let extractedFiles = 0
   let lastPercent = -1
@@ -207,7 +210,7 @@ export async function ensureRuntimeExtracted(): Promise<void> {
         lastPercent = pct
         broadcastProgress({
           phase: 'extracting', percent: pct,
-          detail: `Extracting runtime...`
+          detail: translate(locale, 'runtime.extracting')
         })
       }
       return
@@ -217,7 +220,7 @@ export async function ensureRuntimeExtracted(): Promise<void> {
       lastPercent = pct
       broadcastProgress({
         phase: 'extracting', percent: pct,
-        detail: `Extracting runtime (${pct}%)...`
+        detail: translate(locale, 'runtime.extractingPercent', { percent: pct })
       })
     }
   }
@@ -248,7 +251,7 @@ export async function ensureRuntimeExtracted(): Promise<void> {
     extractionFailed = true
     clearInterval(progressTimer)
     log.error('[Runtime] Failed to extract python runtime:', err)
-    broadcastProgress({ phase: 'error', percent: 0, detail: `Extraction error: ${String(err)}` })
+    broadcastProgress({ phase: 'error', percent: 0, detail: translate(locale, 'runtime.extractionError') + ': ' + String(err) })
 
     // Clean up staging artifacts
     log.info('[Runtime] Cleaning up incomplete extraction...')
@@ -271,7 +274,7 @@ export async function ensureRuntimeExtracted(): Promise<void> {
     extractionFailed = true
     const msg = 'python runtime extraction finished but python.exe not found'
     log.error('[Runtime] ' + msg)
-    broadcastProgress({ phase: 'error', percent: 0, detail: msg })
+    broadcastProgress({ phase: 'error', percent: 0, detail: translate(locale, 'runtime.pythonNotFound') })
     safeRemove(tmpParent)
     throw new Error(msg)
   }
@@ -283,7 +286,7 @@ export async function ensureRuntimeExtracted(): Promise<void> {
       extractionFailed = true
       const msg = `Extraction incomplete: got ${extractedFiles}/${totalFiles} files — expected 100%`
       log.error('[Runtime] ' + msg)
-      broadcastProgress({ phase: 'error', percent: 0, detail: msg })
+      broadcastProgress({ phase: 'error', percent: 0, detail: translate(locale, 'runtime.extractionIncomplete') + `: ${extractedFiles}/${totalFiles}` })
       safeRemove(tmpParent)
       throw new Error(msg)
     }
@@ -302,7 +305,7 @@ export async function ensureRuntimeExtracted(): Promise<void> {
     log.error('[Runtime] Atomic rename failed:', err)
     broadcastProgress({
       phase: 'error', percent: 0,
-      detail: `Failed to finalize extraction: ${String(err)}`
+      detail: translate(locale, 'runtime.extractionFinalizeFailed') + ': ' + String(err)
     })
     // Best-effort cleanup
     safeRemove(stagingDir)
@@ -324,5 +327,5 @@ export async function ensureRuntimeExtracted(): Promise<void> {
   }
 
   log.info('[Runtime] python runtime extraction complete')
-  broadcastProgress({ phase: 'done', percent: 100, detail: 'Runtime extraction complete' })
+  broadcastProgress({ phase: 'done', percent: 100, detail: translate(locale, 'runtime.done') })
 }

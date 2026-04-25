@@ -82,6 +82,17 @@ export const translations: Record<DesktopLocale, DesktopTranslations> = {
     'tray.quit': '退出 MamboChat',
     // Error Messages
     'error.backendControlLocalOnly': '后端控制仅在本地模式下可用',
+    // Runtime Extraction
+    'runtime.checking': '正在准备运行时环境...',
+    'runtime.counting': '正在扫描压缩包...',
+    'runtime.extracting': '正在解压运行时环境...',
+    'runtime.extractingPercent': '正在解压运行时环境 ({percent}%)...',
+    'runtime.done': '运行时环境解压完成',
+    'runtime.archiveNotFound': '未找到运行时压缩包，安装可能已损坏',
+    'runtime.extractionError': '解压出错',
+    'runtime.extractionIncomplete': '解压不完整',
+    'runtime.extractionFinalizeFailed': '解压收尾失败',
+    'runtime.pythonNotFound': '解压完成但未找到 python.exe',
   },
   'en': {
     // Title
@@ -151,6 +162,17 @@ export const translations: Record<DesktopLocale, DesktopTranslations> = {
     'tray.quit': 'Quit MamboChat',
     // Error Messages
     'error.backendControlLocalOnly': 'Backend control is only available in local mode',
+    // Runtime Extraction
+    'runtime.checking': 'Preparing runtime environment...',
+    'runtime.counting': 'Scanning archive...',
+    'runtime.extracting': 'Extracting runtime...',
+    'runtime.extractingPercent': 'Extracting runtime ({percent}%)...',
+    'runtime.done': 'Runtime extraction complete',
+    'runtime.archiveNotFound': 'Runtime archive not found. Installation may be corrupted',
+    'runtime.extractionError': 'Extraction error',
+    'runtime.extractionIncomplete': 'Extraction incomplete',
+    'runtime.extractionFinalizeFailed': 'Failed to finalize extraction',
+    'runtime.pythonNotFound': 'Extraction finished but python.exe not found',
   },
 }
 
