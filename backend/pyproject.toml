@@ -56,11 +56,13 @@ dependencies = [
     # Previously missing implicit deps (now explicit)
     "charset-normalizer",
     "wcmatch",
+
+    # Production server
+    "gunicorn==23.0.0",
 ]
 
 [dependency-groups]
 dev = [
-    "gunicorn==23.0.0",
 ]
 
 [tool.uv]
