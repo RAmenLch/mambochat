@@ -171,7 +171,13 @@ import {
   Sort,
 } from '@element-plus/icons-vue'
 import type { AllowDropType } from 'element-plus/es/components/tree/src/tree.type'
-import type Node from 'element-plus/es/components/tree/src/model/node'
+/** Element Plus Tree 内部节点结构（避免依赖内部路径） */
+interface ElTreeNode {
+  data: Record<string, any>
+  parent: ElTreeNode | null
+  level: number
+  childNodes: ElTreeNode[]
+}
 import ExplorerTree from '@/components/common/ExplorerTree.vue'
 import EntityFormDialog from '@/components/common/EntityFormDialog.vue'
 import MoveTargetDialog from './dialogs/MoveTargetDialog.vue'
@@ -205,7 +211,7 @@ const chatSortMode = ref<ChatSortMode>(
 
 const isManualSort = computed(() => chatSortMode.value === 'manual');
 
-const customAllowDrop = (draggingNode: Node, dropNode: Node, dropType: AllowDropType): boolean => {
+const customAllowDrop = (draggingNode: any, dropNode: any, dropType: AllowDropType): boolean => {
   if (isManualSort.value) return true;
   const isDropRoot = !(dropNode.data as BaseTreeItem).parentId;
   if (!isDropRoot) return true;

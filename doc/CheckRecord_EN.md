@@ -80,13 +80,25 @@
 
 ## 4. DeepSeek https://api.deepseek.com/v1
 
-### deepseek-chat [DeepSeek-V3.2] (DeepSeek Native)
+### deepseek-chat [deepseek-v4-flash] (DeepSeek Native)
 | Feature | Verified |
 |----|----|
 | Tool Calling|  ✔   |
 
-### deepseek-reason [DeepSeek-V3.2] (DeepSeek Native)
+### deepseek-reason [deepseek-v4-flash] (DeepSeek Native)
 | Feature        | Verified |
 |-----------|-|
-| Chain of Thought Output | ✔ | 
+| Chain of Thought Output | ✔ |
 | Tool Calling (CoT) |✔|
+
+### deepseek-v4-flash (DeepSeek Native)
+| Feature        | Verified | Notes                                                               |
+|-----------|----|------------------------------------------------------------------|
+| Chain of Thought Output     | ✔  | Can be disabled via Thinking Type (DeepSeek); adjustable via Reasoning Effort (DeepSeek) |
+| Tool Calling (CoT) | ✔  |                                                                  |
+
+### deepseek-v4-pro (DeepSeek Native)
+| Feature        | Verified | Notes                                                               |
+|-----------|----|------------------------------------------------------------------|
+| Chain of Thought Output     | ✔  | Can be disabled via Thinking Type (DeepSeek); adjustable via Reasoning Effort (DeepSeek) |
+| Tool Calling (CoT) | ✔  |                                                                  |

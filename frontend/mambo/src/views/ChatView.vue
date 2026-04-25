@@ -60,7 +60,7 @@ watch(isSidebarCollapsed, (isCollapsed) => {
 
 <style scoped>
 .chat-view-container {
-  height: 100vh;
+  height: 100%;
   background-color: var(--color-background);
   display: flex;
   overflow: hidden;

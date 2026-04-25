@@ -36,7 +36,7 @@
             <div class="agent-header">
               <el-avatar
                 :size="48"
-                :src="selectedAgent.agentAvatarUrl || ''"
+                :src="resolveFileUrl(selectedAgent.agentAvatarUrl) || ''"
                 :icon="User"
                 class="agent-avatar"
               />
@@ -132,7 +132,7 @@
                   :title="$t('common.action.edit')"
                 >
                   <div class="tag-inner">
-                    <el-avatar v-if="sub.avatar" :size="14" :src="sub.avatar" class="tag-avatar" />
+                    <el-avatar v-if="sub.avatar" :size="14" :src="resolveFileUrl(sub.avatar) ?? undefined" class="tag-avatar" />
                     <el-icon v-else><User /></el-icon>
                     <span>{{ sub.name }}</span>
                   </div>
@@ -164,6 +164,7 @@ import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { User, Cpu, Document, MagicStick, Collection, Connection, Monitor } from '@element-plus/icons-vue';
+import { resolveFileUrl } from '@/services/electronUrl';
 
 import { useAgentStore } from '@/stores/agentStore';
 import { useProviderStore } from '@/stores/providerStore';
@@ -238,7 +239,7 @@ const displaySubAgents = computed(() => {
   const subIds = selectedAgent.value?.subAgents || [];
   return subIds.map(id => {
     const agent = agentStore.allAgents.find(a => a.id === id);
-    return agent ? { id, name: agent.name, avatar: agent.agentAvatarUrl } : { id, name: t('common.status.unknownAgent'), avatar: null };
+    return agent ? { id, name: agent.name, avatar: resolveFileUrl(agent.agentAvatarUrl) } : { id, name: t('common.status.unknownAgent'), avatar: null };
   });
 });
 
@@ -299,11 +300,10 @@ const handleSaveSettings = () => {
 };
 
 const openAgentSettings = (agentId: string) => {
-  const routeUrl = router.resolve({
+  router.push({
     path: '/settings',
     query: { tab: 'agentManager', agentId }
   });
-  window.open(routeUrl.href, '_blank');
 };
 </script>
 

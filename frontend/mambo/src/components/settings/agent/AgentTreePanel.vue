@@ -34,9 +34,9 @@
         </el-icon>
         <template v-else>
             <el-avatar
-              v-if="(data as unknown as Agent).agentAvatarUrl"
+              v-if="resolveFileUrl((data as unknown as Agent).agentAvatarUrl)"
               :size="18"
-              :src="(data as unknown as Agent).agentAvatarUrl ?? undefined"
+              :src="resolveFileUrl((data as unknown as Agent).agentAvatarUrl)"
               class="tree-agent-avatar"
             />
           <el-icon v-else><User /></el-icon>
@@ -83,6 +83,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { useI18n } from 'vue-i18n';
 import { Plus, User, Folder, FolderAdd, EditPen, Delete } from '@element-plus/icons-vue';
+import { resolveFileUrl } from '@/services/electronUrl';
 import { useAgentStore } from '@/stores/agentStore';
 import { getAgent, getAgentChildren } from '@/api/agentService';
 import { buildChatTree } from '@/utils/treeHelper';

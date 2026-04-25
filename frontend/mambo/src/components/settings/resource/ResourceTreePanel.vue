@@ -148,7 +148,14 @@ import {
 } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import type { AllowDropType } from 'element-plus/es/components/tree/src/tree.type'
-import type Node from 'element-plus/es/components/tree/src/model/node'
+
+/** Element Plus Tree 内部节点结构（避免依赖内部路径） */
+interface ElTreeNode {
+  data: Record<string, any>
+  parent: ElTreeNode | null
+  level: number
+  childNodes: ElTreeNode[]
+}
 
 import { useResourceStore } from '@/stores/resourceStore'
 import { useProviderStore } from '@/stores/providerStore'
@@ -232,8 +239,8 @@ const embeddingModelOptions = computed<ModelGroup[]>(() => {
 
 // --- Drag & Drop Validation Logic ---
 
-const findKBParentId = (node: Node): string | null => {
-  let current: Node | null = node
+const findKBParentId = (node: ElTreeNode): string | null => {
+  let current: ElTreeNode | null = node
   while (current && current.level > 0) {
     const data = current.data as Resource
     if (data.resourceType === 'knowledge_base') {
@@ -245,8 +252,8 @@ const findKBParentId = (node: Node): string | null => {
 }
 
 const checkDropPermission = (
-  draggingNode: Node,
-  dropNode: Node,
+  draggingNode: ElTreeNode,
+  dropNode: ElTreeNode,
   dropType: AllowDropType,
 ): boolean => {
   const draggingData = draggingNode.data as Resource

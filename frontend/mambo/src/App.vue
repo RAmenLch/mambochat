@@ -90,4 +90,16 @@ body,
   padding: 0;
   overflow: hidden; /* 防止出现不必要的滚动条 */
 }
+
+/* ======================================================================
+ * Electron 桌面端 — 标题栏布局（与 index.html 内联样式配合）
+ * ====================================================================== */
+html.electron-mode #electron-titlebar {
+  display: flex !important;
+}
+
+html.electron-mode #app {
+  /* body 已有 padding-top:36px，#app 自然从标题栏下方开始 */
+  height: calc(100vh - var(--titlebar-height, 36px)) !important;
+}
 </style>

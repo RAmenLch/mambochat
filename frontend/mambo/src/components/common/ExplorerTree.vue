@@ -86,8 +86,15 @@ import type {
   NodeDropType,
   TreeNodeData,
 } from 'element-plus/es/components/tree/src/tree.type'
-import type Node from 'element-plus/es/components/tree/src/model/node'
 import type { BaseTreeItem, MoveRequest, MoveAction } from '@/api/types'
+
+/** Element Plus Tree 内部节点结构（避免依赖内部路径） */
+interface ElTreeNode {
+  data: Record<string, any>
+  parent: ElTreeNode | null
+  level: number
+  childNodes: ElTreeNode[]
+}
 import { uploadResourceFile } from '@/api/kbService'
 
 interface Props {
@@ -98,7 +105,7 @@ interface Props {
   folderItemType?: string
   persistenceKey?: string
   loadingFolderIds?: Set<string>
-  customAllowDrop?: (draggingNode: Node, dropNode: Node, dropType: AllowDropType) => boolean
+  customAllowDrop?: (draggingNode: any, dropNode: any, dropType: AllowDropType) => boolean
   enableMultiSelect?: boolean // 新增：是否开启多选模式
   draggable?: boolean // 是否允许拖拽排序
 }
@@ -117,7 +124,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   (e: 'node-click', data: BaseTreeItem): void
-  (e: 'node-contextmenu', event: MouseEvent, data: BaseTreeItem, node: Node): void
+  (e: 'node-contextmenu', event: MouseEvent, data: BaseTreeItem, node: any): void
   (e: 'root-contextmenu', event: MouseEvent): void
   (e: 'move', req: MoveRequest): void
   (e: 'node-expand', data: BaseTreeItem): void
@@ -148,7 +155,7 @@ const treeProps = {
   },
 }
 
-const handleNodeClick = (data: BaseTreeItem, node: Node, treeNode: unknown, event: MouseEvent) => {
+const handleNodeClick = (data: BaseTreeItem, node: any, treeNode: unknown, event: MouseEvent) => {
   // 如果未开启多选，直接触发原有逻辑
   if (!props.enableMultiSelect) {
     emit('node-click', data)
@@ -180,9 +187,9 @@ const handleNodeClick = (data: BaseTreeItem, node: Node, treeNode: unknown, even
       currentMultiSelectParentId.value = data.parentId;
     } else {
       if (node && node.parent) {
-        const siblings = node.parent.childNodes.map(child => child.data as BaseTreeItem);
-        const idx1 = siblings.findIndex(i => i.id === lastClickedId.value);
-        const idx2 = siblings.findIndex(i => i.id === data.id);
+        const siblings = node.parent.childNodes.map((child: any) => child.data as BaseTreeItem);
+        const idx1 = siblings.findIndex((i: BaseTreeItem) => i.id === lastClickedId.value);
+        const idx2 = siblings.findIndex((i: BaseTreeItem) => i.id === data.id);
 
         if (idx1 !== -1 && idx2 !== -1) {
           const minIdx = Math.min(idx1, idx2);
@@ -204,7 +211,7 @@ const handleNodeClick = (data: BaseTreeItem, node: Node, treeNode: unknown, even
   emit('node-click', data)
 }
 
-const handleNodeContextMenu = (event: MouseEvent, data: BaseTreeItem, node: Node) => {
+const handleNodeContextMenu = (event: Event, data: BaseTreeItem, node: any) => {
   if (props.enableMultiSelect) {
     if (!selectedIds.value.has(data.id)) {
       selectedIds.value.clear();
@@ -213,14 +220,14 @@ const handleNodeContextMenu = (event: MouseEvent, data: BaseTreeItem, node: Node
       currentMultiSelectParentId.value = data.parentId;
     }
   }
-  emit('node-contextmenu', event, data, node)
+  emit('node-contextmenu', event as MouseEvent, data, node)
 }
 
 const handleRootContextMenu = (event: MouseEvent) => {
   emit('root-contextmenu', event)
 }
 
-const allowDrop = (draggingNode: Node, dropNode: Node, dropType: AllowDropType) => {
+const allowDrop = (draggingNode: any, dropNode: any, dropType: AllowDropType) => {
   if (props.customAllowDrop) {
     if (!props.customAllowDrop(draggingNode, dropNode, dropType)) {
       return false
@@ -233,7 +240,7 @@ const allowDrop = (draggingNode: Node, dropNode: Node, dropType: AllowDropType) 
   return true
 }
 
-const handleNodeDrop = (draggingNode: Node, dropNode: Node, dropType: NodeDropType) => {
+const handleNodeDrop = (draggingNode: any, dropNode: any, dropType: NodeDropType) => {
   let action: MoveAction
   let referenceId: string
   const draggingData = draggingNode.data as BaseTreeItem

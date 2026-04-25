@@ -150,7 +150,7 @@
         <el-form-item :label="t('settings.global.enableProxy')">
           <el-switch
             :model-value="settingsForm.proxy_enabled ?? false"
-            @update:model-value="(val) => (settingsForm.proxy_enabled = val as boolean)"
+            @update:model-value="(val: string | number | boolean) => (settingsForm.proxy_enabled = val as boolean)"
           />
           <el-tooltip
             effect="dark"
@@ -224,7 +224,7 @@
         <el-form-item :label="t('settings.global.temperature')">
           <el-slider
             :model-value="settingsForm.default_temperature ?? 1.0"
-            @update:model-value="(val) => (settingsForm.default_temperature = val as number)"
+            @update:model-value="(val: number | number[]) => (settingsForm.default_temperature = (Array.isArray(val) ? val[0] : val))"
             :min="0"
             :max="2"
             :step="0.1"
@@ -235,7 +235,7 @@
         <el-form-item :label="t('settings.global.topP')">
           <el-slider
             :model-value="settingsForm.default_top_p ?? 1.0"
-            @update:model-value="(val) => (settingsForm.default_top_p = val as number)"
+            @update:model-value="(val: number | number[]) => (settingsForm.default_top_p = (Array.isArray(val) ? val[0] : val))"
             :min="0"
             :max="1"
             :step="0.01"
@@ -246,7 +246,7 @@
         <el-form-item :label="t('settings.global.stream')">
           <el-switch
             :model-value="settingsForm.default_stream ?? true"
-            @update:model-value="(val) => (settingsForm.default_stream = val as boolean)"
+            @update:model-value="(val: string | number | boolean) => (settingsForm.default_stream = val as boolean)"
           />
           <el-tooltip
             effect="dark"
@@ -260,7 +260,7 @@
         <el-form-item :label="t('settings.global.defaultEnableSuggest')">
           <el-switch
             :model-value="settingsForm.default_enable_suggest ?? false"
-            @update:model-value="(val) => (settingsForm.default_enable_suggest = val as boolean)"
+            @update:model-value="(val: string | number | boolean) => (settingsForm.default_enable_suggest = val as boolean)"
           />
           <el-tooltip
             effect="dark"
@@ -274,7 +274,7 @@
         <el-form-item :label="t('settings.global.defaultEnableAskUser')">
           <el-switch
             :model-value="settingsForm.default_enable_ask_user ?? false"
-            @update:model-value="(val) => (settingsForm.default_enable_ask_user = val as boolean)"
+            @update:model-value="(val: string | number | boolean) => (settingsForm.default_enable_ask_user = val as boolean)"
           />
           <el-tooltip
             effect="dark"
@@ -288,7 +288,7 @@
         <el-form-item :label="t('settings.global.defaultMaxRetries')">
           <el-input-number
             :model-value="settingsForm.default_max_retries ?? 1"
-            @update:model-value="(val) => (settingsForm.default_max_retries = val as number)"
+            @update:model-value="(val: number | undefined) => (settingsForm.default_max_retries = val ?? 1)"
             :min="1"
             :max="20"
             :step="1"

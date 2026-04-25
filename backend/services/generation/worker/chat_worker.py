@@ -45,6 +45,12 @@ class UniversalGraphWorker(AbstractGenerateWorker):
                 raw_tool_calls = msg.get("tool_calls")
                 lc_tool_calls = []
 
+                # 提取 reasoning_content（DeepSeek 思考模式需要回传）
+                additional_kwargs = {}
+                reasoning_content = msg.get("reasoning_content")
+                if reasoning_content:
+                    additional_kwargs["reasoning_content"] = reasoning_content
+
                 if raw_tool_calls and isinstance(raw_tool_calls, list):
                     for tc in raw_tool_calls:
                         if "function" in tc:
@@ -67,9 +73,9 @@ class UniversalGraphWorker(AbstractGenerateWorker):
                             })
 
                 if lc_tool_calls:
-                    lc_messages.append(AIMessage(content=content, name=name, tool_calls=lc_tool_calls))
+                    lc_messages.append(AIMessage(content=content, name=name, tool_calls=lc_tool_calls, additional_kwargs=additional_kwargs))
                 else:
-                    lc_messages.append(AIMessage(content=content, name=name))
+                    lc_messages.append(AIMessage(content=content, name=name, additional_kwargs=additional_kwargs))
 
             elif role == "tool":
                 tool_call_id = msg.get("tool_call_id")

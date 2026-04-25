@@ -3,13 +3,19 @@ import { ElMessage } from 'element-plus';
 import i18n from '@/i18n';
 
 const apiClient = axios.create({
-  // baseURL 将会指向 Vite 开发服务器的代理
-  // 在生产环境中，它会指向同源的 /api 路径
   baseURL: '/api',
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
+/**
+ * Update the API client's base URL.
+ * Called by the Electron adapter when the backend port is resolved.
+ */
+export function setApiBaseUrl(url: string): void {
+  apiClient.defaults.baseURL = url;
+}
 
 // 响应拦截器, 用于全局处理 API 错误
 apiClient.interceptors.response.use(

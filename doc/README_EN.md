@@ -1,6 +1,6 @@
 # ![mambo](img/logo_hajimi.svg) MamboChat
 
-![Version](https://img.shields.io/badge/version-1.2.0-blue)
+![Version](https://img.shields.io/badge/version-1.2.1-blue)
 ![License](https://img.shields.io/badge/license-GPLv3-green)
 ![Vue](https://img.shields.io/badge/frontend-Vue3%20%2B%20ElementPlus-42b883)
 ![FastAPI](https://img.shields.io/badge/backend-FastAPI%20%2B%20Python3.11-009688)
@@ -83,23 +83,27 @@ Use the provided `docker-compose.yml` to launch the service instantly.
         *   `./DB`: SQLite database files.
         *   `./uploads`: Uploaded files and avatars.
 
-## 🚀 Quick Start (Windows One-click Launch)
+## 🚀 Quick Start (Windows Desktop Client)
 
-1.  **Clone the repository or download the ZIP archive from GitHub**
-    ```bash
-    git clone https://github.com/RAmenLch/mambochat.git
-    cd mambochat
-    ```
-2.  **Double-click the file, or right-click and select "Open in Terminal" (Windows 11) to run the command**
-    ```bash
-    PS C:\mambochat> .\build_and_start.bat
-    ```
-    **If you downloaded a release package such as `mambochat-v120-winx64.zip`, double-click or run this file instead:**
-    ```bash
-    PS C:\mambochat> .\start.bat
-    ```    
-> `build_and_start.bat` checks for and downloads dependencies before launching, while `start.bat` launches directly.
-> Note: This script has not been tested across different environments. If you encounter any issues, please feel free to open an Issue.
+MamboChat provides a Windows desktop client installer — just install it and you're ready to go, no manual Python setup required.
+
+### Installation Steps
+
+1. **Download the installer**
+   Get the latest version from the [Releases](https://github.com/RAmenLch/mambochat/releases) page (`MamboChat-Setup-x.x.x.exe`).
+
+2. **Run the installer**
+   Double-click `MamboChat-Setup-1.2.1.exe` and follow the wizard (you can choose a custom install directory).
+
+3. **Launch MamboChat**
+   After installation, start MamboChat via the desktop shortcut or Start Menu.
+   ![Desktop Client](img/桌面端.png)
+
+4. **Desktop Client Settings**
+   [Desktop Client Configuration Guide](./DesktopSettings_EN.md)
+
+> The desktop client comes bundled with a complete Python runtime, frontend resources, backend code, and MCP Server — ready to use out of the box.
+> All user data (databases, uploaded files, config files) is stored under `%APPDATA%/MamboChat/`.
 
 
 ## 💻 Local Development Guide
@@ -139,6 +143,24 @@ If you need to do secondary development, you can start the frontend and backend 
     ```bash
     npm run dev
     ```
+
+### Build Desktop Client from Source
+
+1. **Prepare environment** (download Python/Node.js runtimes, install frontend/backend dependencies, build frontend):
+   ```bash
+   build_and_start.bat
+   ```
+   > This script will automatically initialize the environment and start services. Once both frontend and backend are running, close the two service windows.
+
+2. **Configure environment variables**:
+   Before running `npm` commands, make sure Node.js and npm are in your system `PATH`. If the `build_and_start.bat` script does not automatically add the downloaded Node.js to `PATH`, you need to manually add the `runtime/node` directory to your system environment variables; otherwise, subsequent `npm install` and related commands will fail.
+
+3. **Build the desktop client**:
+   ```bash
+   cd desktop
+   npm install
+   npm run dist:win    # Outputs NSIS installer + portable edition to release/
+   ```
 
 ## 🤝 Contributing
 

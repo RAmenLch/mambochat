@@ -18,11 +18,11 @@ export default defineConfig({
     vue(),
     AutoImport({
       imports: ['vue', 'vue-router', 'pinia'],
-      resolvers: [ElementPlusResolver()],
+      resolvers: [ElementPlusResolver({ importStyle: false })],
       dts: 'src/auto-imports.d.ts',
     }),
     Components({
-      resolvers: [ElementPlusResolver()],
+      resolvers: [ElementPlusResolver({ importStyle: false })],
       dts: 'src/components.d.ts',
     }),
     viteStaticCopy({
@@ -40,6 +40,7 @@ export default defineConfig({
     },
   },
   server: {
+    host: '127.0.0.1',
     proxy: {
       '/api': {
         target: backendTarget,

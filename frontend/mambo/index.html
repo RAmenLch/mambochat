@@ -5,8 +5,334 @@
     <link rel="icon" href="/logo.svg">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MamboChat</title>
+    <style>
+      /* ---- Electron title bar ---- */
+      :root {
+        --titlebar-height: 36px;
+      }
+      #electron-titlebar {
+        display: none;
+        height: var(--titlebar-height);
+        flex-shrink: 0;
+        align-items: center;
+        background: #fff;
+        border-bottom: 1px solid #e4e7ed;
+        padding-left: 12px;
+        -webkit-app-region: drag;
+        user-select: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 1000;
+      }
+      #electron-titlebar .titlebar-icon {
+        width: 20px; height: 20px;
+        margin-right: 8px;
+      }
+      #electron-titlebar .titlebar-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: #303133;
+        letter-spacing: -0.3px;
+      }
+      #electron-titlebar .titlebar-spacer { flex: 1; }
+      #electron-titlebar .titlebar-actions {
+        -webkit-app-region: no-drag;
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        margin-right: 6px;
+      }
+      .titlebar-btn {
+        width: 30px; height: 30px;
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        border-radius: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #606266;
+        font-size: 15px;
+        transition: all 0.15s;
+      }
+      .titlebar-btn:hover {
+        background: rgba(0,0,0,0.06);
+        color: #303133;
+      }
+      .titlebar-btn-close:hover {
+        background: #e81123 !important;
+        color: #fff !important;
+      }
+
+      /* ---- Electron splash overlay ---- */
+      #mambochat-splash {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 999;
+        background: #f5f7fa;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        transition: opacity 0.5s ease-out;
+      }
+      #mambochat-splash.visible { display: flex; }
+      #mambochat-splash.fade-out { opacity: 0; }
+
+      .splash-logo {
+        width: 72px; height: 72px;
+        animation: splash-pulse 2s ease-in-out infinite;
+      }
+      @keyframes splash-pulse {
+        0%, 100% { transform: scale(1); opacity: 0.9; }
+        50% { transform: scale(1.05); opacity: 1; }
+      }
+
+      .splash-spinner {
+        width: 28px; height: 28px;
+        border: 2.5px solid #e4e7ed;
+        border-top-color: #409eff;
+        border-radius: 50%;
+        animation: mc-spin 0.8s linear infinite;
+        margin-top: 24px;
+      }
+      @keyframes mc-spin { to { transform: rotate(360deg); } }
+
+      .splash-title {
+        margin-top: 16px;
+        font-size: 20px;
+        font-weight: 600;
+        color: #303133;
+        letter-spacing: -0.5px;
+      }
+      .splash-subtitle {
+        margin-top: 6px;
+        font-size: 13px;
+        color: #909399;
+        transition: opacity 0.2s;
+      }
+      .splash-progress {
+        margin-top: 12px;
+        width: 200px;
+        height: 4px;
+        background: #e4e7ed;
+        border-radius: 2px;
+        overflow: hidden;
+        display: none;
+      }
+      .splash-progress.visible { display: block; }
+      .splash-progress-bar {
+        height: 100%;
+        width: 0%;
+        background: #409eff;
+        border-radius: 2px;
+        transition: width 0.3s ease-out;
+      }
+
+      .splash-settings-btn {
+        margin-top: 28px;
+        padding: 8px 20px;
+        border: 1px solid #dcdfe6;
+        border-radius: 6px;
+        background: #fff;
+        color: #606266;
+        font-size: 13px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        transition: all 0.2s;
+      }
+      .splash-settings-btn:hover {
+        border-color: #409eff;
+        color: #409eff;
+        background: #ecf5ff;
+      }
+      .splash-settings-btn svg {
+        width: 14px; height: 14px;
+      }
+
+      /* ==================================================================
+       * Electron 模式 Z-Index 层级体系
+       * ==================================================================
+       * 标题栏:   z-index 1000  (position:fixed, 钉顶)
+       * Splash:   z-index 999   (position:fixed, 启动屏)
+       * Popper容器: z-index 2001 (position:fixed, Element Plus tooltip/popover/dropdown)
+       * Overlay:  z-index 2001  (position:fixed, dialog/drawer 遮罩)
+       * Message:  z-index 2001+ (position:fixed, ElMessage/ElNotification)
+       * ================================================================== */
+      html.electron-mode {
+        --el-z-index-overlay: 2001 !important;
+      }
+
+      html.electron-mode body {
+        padding-top: var(--titlebar-height) !important;
+        height: auto !important;
+        min-height: 100vh !important;
+        overflow: hidden !important;
+      }
+
+      /* ★ 核心修复：el-popper-container 默认 position:static，导致内部 tooltip
+         的 z-index 无法和标题栏竞争。强制设为 position:fixed 使其成为独立层 */
+      html.electron-mode [id^="el-popper-container"] {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        z-index: 2001 !important;
+        pointer-events: none !important;
+      }
+      html.electron-mode [id^="el-popper-container"] > * {
+        pointer-events: auto !important;
+      }
+
+      /* ElMessage — 全局消息提示 */
+      html.electron-mode .el-message {
+        top: calc(var(--titlebar-height) + 8px) !important;
+        z-index: 2002 !important;
+      }
+
+      /* ElNotification — 通知消息 */
+      html.electron-mode .el-notification {
+        top: calc(var(--titlebar-height) + 8px) !important;
+        z-index: 2002 !important;
+      }
+
+      /* ElImageViewer — 图片预览全屏查看器 */
+      html.electron-mode .el-image-viewer__wrapper {
+        top: var(--titlebar-height) !important;
+        height: calc(100% - var(--titlebar-height)) !important;
+        z-index: 2003 !important;
+      }
+
+      /* El-overlay — dialog/drawer 背景遮罩 */
+      html.electron-mode .el-overlay {
+        top: var(--titlebar-height) !important;
+        height: calc(100% - var(--titlebar-height)) !important;
+        z-index: 2001 !important;
+      }
+    </style>
+    <script>
+      // Detect Electron immediately and show title bar + splash
+      // Titlebar button tooltips will be updated by main.ts after vue-i18n initializes.
+      var TITLEBAR_H = 36;
+      if (window.electronAPI) {
+        document.documentElement.classList.add('electron-mode');
+        document.addEventListener('DOMContentLoaded', function() {
+          var tb = document.getElementById('electron-titlebar');
+          tb.style.display = 'flex';
+          document.getElementById('titlebar-reload').addEventListener('click', function() {
+            window.location.reload();
+          });
+          document.getElementById('titlebar-settings').addEventListener('click', function() {
+            window.electronAPI.app.openDesktopSettings();
+          });
+          document.getElementById('titlebar-minimize').addEventListener('click', function() {
+            window.electronAPI.win.minimize();
+          });
+          document.getElementById('titlebar-maximize').addEventListener('click', function() {
+            window.electronAPI.win.toggleMaximize();
+          });
+          document.getElementById('titlebar-close').addEventListener('click', function() {
+            window.electronAPI.win.close();
+          });
+          var splash = document.getElementById('mambochat-splash');
+          splash.classList.add('visible');
+          // Extraction progress UI is managed by electronAdapter.ts
+          document.getElementById('splash-settings-btn').addEventListener('click', function() {
+            window.electronAPI.app.openDesktopSettings();
+          });
+
+          // ====== Runtime: adjust fixed overlays to avoid titlebar area ======
+          var mo = new MutationObserver(function(mutations) {
+            for (var i = 0; i < mutations.length; i++) {
+              var added = mutations[i].addedNodes;
+              for (var j = 0; j < added.length; j++) {
+                if (added[j].nodeType !== 1) continue;
+                fixOverlayPosition(added[j]);
+              }
+            }
+          });
+          mo.observe(document.body, { childList: true, subtree: false });
+
+          // Fix any existing overlays
+          Array.prototype.forEach.call(document.body.children, fixOverlayPosition);
+        });
+
+        function fixOverlayPosition(el) {
+          var tag = (el.className || '') + ' ' + (el.id || '');
+          var cs = window.getComputedStyle(el);
+          if (cs.position !== 'fixed') return;
+
+          if (/el-message|el-notification/.test(tag)) {
+            el.style.top = (TITLEBAR_H + 8) + 'px';
+          }
+          else if (el.classList.contains('el-overlay')) {
+            el.style.top = TITLEBAR_H + 'px';
+            el.style.height = 'calc(100% - ' + TITLEBAR_H + 'px)';
+          }
+          else if (el.classList.contains('el-image-viewer__wrapper')) {
+            el.style.top = TITLEBAR_H + 'px';
+            el.style.height = 'calc(100% - ' + TITLEBAR_H + 'px)';
+          }
+        }
+      }
+    </script>
   </head>
   <body>
+    <!-- Electron custom title bar -->
+    <div id="electron-titlebar">
+      <img src="/logo.svg" class="titlebar-icon" alt="">
+      <span class="titlebar-title">MamboChat</span>
+      <div class="titlebar-spacer"></div>
+      <div class="titlebar-actions">
+        <button class="titlebar-btn" id="titlebar-reload" title="Reload">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.5 2v6h-6"/><path d="M2.5 22v-6h6"/><path d="M2.5 11.5a10 10 0 0 1 18.8-4.3"/><path d="M21.5 12.5a10 10 0 0 1-18.8 4.3"/>
+          </svg>
+        </button>
+        <button class="titlebar-btn" id="titlebar-settings" title="Settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72 1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+          </svg>
+        </button>
+        <button class="titlebar-btn" id="titlebar-minimize" title="Minimize">
+          <svg width="10" height="1" viewBox="0 0 10 1"><rect width="10" height="1" fill="currentColor"/></svg>
+        </button>
+        <button class="titlebar-btn" id="titlebar-maximize" title="Maximize">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2">
+            <rect x="0.6" y="0.6" width="8.8" height="8.8" rx="1"/>
+          </svg>
+        </button>
+        <button class="titlebar-btn titlebar-btn-close" id="titlebar-close" title="Close">
+          <svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+            <line x1="0.5" y1="0.5" x2="9.5" y2="9.5"/><line x1="9.5" y1="0.5" x2="0.5" y2="9.5"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Electron splash overlay -->
+    <div id="mambochat-splash">
+      <img src="/logo.svg" class="splash-logo" alt="MamboChat">
+      <div class="splash-spinner"></div>
+      <div class="splash-title">MamboChat</div>
+      <div class="splash-subtitle" id="splash-text">Connecting...</div>
+      <div class="splash-progress" id="splash-progress">
+        <div class="splash-progress-bar" id="splash-progress-bar"></div>
+      </div>
+      <button class="splash-settings-btn" id="splash-settings-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        Open Settings
+      </button>
+    </div>
+
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

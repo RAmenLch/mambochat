@@ -67,7 +67,7 @@
         <h2 class="about-title">
           {{ t('settings.about.title') }} <span class="about-subtitle">| {{ t('settings.about.subtitle') }}</span>
         </h2>
-        <el-tag type="info" size="small" effect="plain" class="version-tag">v1.2.0</el-tag>
+        <el-tag type="info" size="small" effect="plain" class="version-tag">v1.2.1</el-tag>
 
         <p class="about-desc">
           {{ t('settings.about.desc') }}
@@ -102,7 +102,7 @@ import ProviderModelManager from '@/components/settings/ProviderModelManager.vue
 import GlobalSettings from '@/components/settings/GlobalSettings.vue'
 import ResourceManager from '@/components/settings/ResourceManager.vue'
 import McpManager from '@/components/settings/McpManager.vue'
-import AgentManager from '@/components/settings/AgentManager.vue' // 引入新增的 AgentManager
+import AgentManager from '@/components/settings/AgentManager.vue'
 import { useIsMobile } from '@/composables/useIsMobile'
 
 // 异步加载移动端组件
@@ -116,7 +116,7 @@ const router = useRouter()
 const { t } = useI18n()
 
 const activeTab = ref(route.query.tab?.toString() || 'providerModel')
-const aboutDialogVisible = ref(false) // 控制关于弹窗显示
+const aboutDialogVisible = ref(false)
 
 watch(activeTab, (newTab) => {
   router.replace({ query: { ...route.query, tab: newTab } })
@@ -134,7 +134,7 @@ watch(
 
 <style scoped>
 .settings-container {
-  height: 100vh;
+  height: 100%;
   background-color: #f5f7fa;
   display: flex;
   flex-direction: column;

@@ -4,7 +4,7 @@
     :model-value="visible"
     :title="$t('resource.selector.title')"
     width="70%"
-    @update:model-value="val => emit('update:visible', val)"
+    @update:model-value="(val: boolean) => emit('update:visible', val)"
     @close="handleDialogClose"
   >
     <div class="resource-selector-body">

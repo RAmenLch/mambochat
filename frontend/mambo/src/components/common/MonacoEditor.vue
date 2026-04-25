@@ -305,7 +305,7 @@ watch(
 
 .custom-context-menu {
   position: fixed;
-  z-index: 9999;
+  z-index: 100002;
   background: #ffffff;
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 4px;

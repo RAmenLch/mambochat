@@ -21,7 +21,7 @@
             <div class="avatar-section">
               <AvatarUploader
                 :title="$t('agent.avatar')"
-                :avatar-url="form.agentAvatarUrl"
+                :avatar-url="resolveFileUrl(form.agentAvatarUrl) ?? null"
                 :icon="User"
                 :is-loading="isAvatarLoading"
                 @upload="handleUploadAvatar"
@@ -169,7 +169,7 @@
                   />
                   <el-switch
                     :model-value="param.isEnabled"
-                    @change="val => handleToggleParameter(param, val as boolean)"
+                    @change="(val: string | number | boolean) => handleToggleParameter(param, val as boolean)"
                     class="parameter-switch"
                   />
                 </div>
@@ -281,7 +281,7 @@
                       @close="handleRemoveSubAgent(subAgent.id)"
                     >
                       <div class="tag-inner">
-                        <el-avatar :size="14" :src="subAgent.agentAvatarUrl ?? undefined" :icon="User" class="tag-avatar" />
+                        <el-avatar :size="14" :src="resolveFileUrl(subAgent.agentAvatarUrl) ?? undefined" :icon="User" class="tag-avatar" />
                         <span class="tag-text">{{ subAgent.name }}</span>
                       </div>
                     </el-tag>
@@ -387,6 +387,7 @@ import { storeToRefs } from 'pinia';
 import { useI18n } from 'vue-i18n';
 import { ElMessage } from 'element-plus';
 import { User, QuestionFilled, Collection, Plus, Connection, Monitor } from '@element-plus/icons-vue';
+import { resolveFileUrl } from '@/services/electronUrl';
 
 import { useAgentStore } from '@/stores/agentStore';
 import { useProviderStore } from '@/stores/providerStore';

@@ -88,4 +88,14 @@ export default {
     completedBody: 'AI Assistant has completed the generation',
     permissionFailed: 'Failed to request system notification permission:'
   },
+  titlebar: {
+    reload: 'Reload',
+    settings: 'Settings',
+    minimize: 'Minimize',
+    maximize: 'Maximize',
+    close: 'Close',
+    connecting: 'Connecting...',
+    startingBackend: 'Starting backend...',
+    openSettings: 'Open Settings',
+  },
 }

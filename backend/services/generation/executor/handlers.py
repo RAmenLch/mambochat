@@ -232,7 +232,7 @@ async def handle_fail_sub_messages_by_message(
         .where(SubMessageModel.messageId == instruction.message_id)
         .where(SubMessageModel.type == schemas.enums.SubMessageType.REASONING.value)
         .where(SubMessageModel.status == target_status.value)
-        .values(config=json.dumps({"is_minimal": True, "context_participation_length": 0}))
+        .values(config=json.dumps({"is_minimal": True}))
     )
     await db.execute(stmt_reasoning)
     await db.commit()

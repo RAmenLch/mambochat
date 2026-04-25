@@ -138,7 +138,7 @@ class TextAndReasoningHandler(BaseStreamHandler):
                 context.created_stream_ids.add(reasoning_id)
                 yield CreateSubMessage(
                     sub_message_id=reasoning_id, type=schemas_enums.SubMessageType.REASONING.value,
-                    sortOrder=0, config={"context_participation_length": 0}
+                    sortOrder=0, config={"is_minimal": True}
                 )
             yield AppendToSubMessage(sub_message_id=reasoning_id, content=reasoning_content)
 

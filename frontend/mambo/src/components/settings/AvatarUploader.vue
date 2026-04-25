@@ -11,7 +11,7 @@
         class="avatar-uploader-trigger"
       >
         <el-tooltip :content="t('settings.avatar.uploadTip')" placement="top" :show-after="500">
-          <el-avatar :size="80" :src="avatarUrl || ''" v-loading="isLoading">
+          <el-avatar :size="80" :src="resolvedAvatarUrl || ''" v-loading="isLoading">
             <component :is="icon" v-if="icon" />
           </el-avatar>
         </el-tooltip>
@@ -60,20 +60,23 @@
 </template>
 
 <script setup lang="ts">
-import { ref, type Component } from 'vue'
+import { ref, computed, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
+import { resolveFileUrl } from '@/services/electronUrl'
 import type { UploadRequestOptions, UploadRawFile } from 'element-plus'
 import Cropper from 'cropperjs'
 import 'cropperjs/dist/cropper.css'
 
-defineProps<{
+const props = defineProps<{
   title: string
   avatarUrl: string | null
   icon: Component
   isLoading: boolean
 }>()
+
+const resolvedAvatarUrl = computed(() => resolveFileUrl(props.avatarUrl))
 
 const emit = defineEmits<{
   (e: 'upload', file: File): void

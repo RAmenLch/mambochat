@@ -2,7 +2,14 @@
 
 import { ref, computed, type Ref, type ComputedRef } from 'vue';
 import { ElMessage, ElMessageBox, type ElDropdown } from 'element-plus';
-import type Node from 'element-plus/es/components/tree/src/model/node';
+/** Element Plus Tree 内部节点结构（避免依赖内部路径） */
+interface ElTreeNode {
+  data: Record<string, any>;
+  parent: ElTreeNode | null;
+  level: number;
+  childNodes: ElTreeNode[];
+}
+
 import { useI18n } from 'vue-i18n';
 
 import { useContextMenu } from '@/composables/useContextMenu';
@@ -78,7 +85,7 @@ export interface UseTreeControllerReturn<T> {
   /** 处理节点展开事件 (懒加载) */
   handleNodeExpand: (data: BaseTreeItem) => void;
 
-  handleNodeContextMenu: (event: MouseEvent, data: BaseTreeItem, node: Node) => void;
+  handleNodeContextMenu: (event: MouseEvent, data: BaseTreeItem, node: any) => void;
   openRootContextMenu: (event: MouseEvent) => void;
   handleMenuCommand: (command: string) => Promise<T | null>; // 修改：返回 Promise<T | null>
   onDialogConfirm: (payload: DialogConfirmPayload) => Promise<void>;

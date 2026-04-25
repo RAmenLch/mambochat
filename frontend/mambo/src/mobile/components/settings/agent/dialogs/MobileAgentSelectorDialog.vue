@@ -6,7 +6,7 @@
     size="85%"
     :with-header="false"
     class="mobile-agent-selector-drawer"
-    @update:model-value="val => emit('update:visible', val)"
+    @update:model-value="(val: boolean) => emit('update:visible', val)"
     @open="handleOpen"
   >
     <div class="drawer-container">

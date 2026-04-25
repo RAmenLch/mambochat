@@ -1,58 +1,69 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["*"]
+
 [project]
 name = "mambo-chat-backend"
-version = "1.2.0"
+version = "1.2.1"
 description = "The backend service for the LLM-API Client project."
 requires-python = ">=3.11"
 dependencies = [
-    "aiofiles==23.2.1",
-    "aiosqlite==0.21.0",
-    "annotated-types==0.7.0",
-    "anyio==4.11.0",
-    "certifi==2025.10.5",
-    "click==8.3.0",
-    "colorama==0.4.6",
+    # Web
     "fastapi==0.119.0",
-    "greenlet==3.2.4",
-    "gunicorn==23.0.0",
-    "h11==0.16.0",
-    "httpcore==1.0.9",
-    "httpx==0.28.1",
-    "idna==3.11",
-    "packaging==25.0",
-    "pydantic==2.12.2",
-    "pydantic_core==2.41.4",
-    "python-multipart==0.0.9",
-    "sniffio==1.3.1",
-    "SQLAlchemy==2.0.44",
-    "starlette==0.48.0",
-    "typing-inspection==0.4.2",
-    "typing_extensions==4.15.0",
     "uvicorn==0.37.0",
-    "apscheduler==3.11.1",
-    "pytz",
-    "mcp",
-    "openai>=2.15.0",
-    "langchain-mcp-adapters>=0.2.1",
-    "langchain>=1.2.6",
-    "langchain-openai>=1.1.7",
-    "langchain-google-genai>=4.2.0",
+    "python-multipart==0.0.9",
+
+    # Database
+    "SQLAlchemy==2.0.44",
+    "aiosqlite==0.21.0",
     "sqlite-vec>=0.1.6",
-    "jieba==0.42.1",
-    "langchain-anthropic>=1.3.1",
     "alembic>=1.18.4",
-    "PyYAML>=6.0.3",
-    "langgraph-checkpoint-sqlite>=3.0.3",
-    "langgraph>=1.1.2",
+
+    # HTTP
+    "httpx==0.28.1",
+
+    # LLM / AI
+    "openai>=2.15.0",
+    "langchain>=1.2.6",
     "langchain-core>=1.2.19",
+    "langchain-openai>=1.1.7",
+    "langchain-anthropic>=1.3.1",
+    "langchain-google-genai>=4.2.0",
+    "langchain-mcp-adapters>=0.2.1",
+    "langgraph>=1.1.2",
+    "langgraph-checkpoint-sqlite>=3.0.3",
     "deepagents>=0.4.12",
-    "paramiko>=4.0.0",
+    "mcp",
+
+    # Document processing
     "langchain-pymupdf4llm>=0.0.18",
     "python-docx>=1.1.0",
+    "jieba==0.42.1",
+
+    # Remote execution
+    "paramiko>=4.0.0",
+
+    # Config / Scheduler / IO
+    "PyYAML>=6.0.3",
+    "apscheduler==3.11.1",
+    "aiofiles==23.2.1",
+    "pytz",
+
+    # Previously missing implicit deps (now explicit)
+    "charset-normalizer",
+    "wcmatch",
+
+    # Production server
+    "gunicorn==23.0.0",
+]
+
+[dependency-groups]
+dev = [
 ]
 
 [tool.uv]
-# 你可以在这里为 uv 添加一些配置，不过通常默认即可
-# 例如，指定 pypi 源
-# index-url = "https://pypi.org/simple"
-[tool.setuptools.packages.find]
-where = ["."]
+# 版本锁定交给 uv.lock，无需在 dependencies 中锁定传递依赖
