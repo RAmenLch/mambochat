@@ -154,7 +154,10 @@ MamboChat 提供 Windows 桌面客户端安装包，一键安装即可使用，�
    ```
    > 脚本会自动完成环境初始化并启动服务，等待前后端均启动成功后，关闭两个弹出的服务窗口即可。
 
-2. **构建桌面客户端**：
+2. **配置环境变量**：
+   在执行 `npm` 命令之前，请确保系统已配置 Node.js 和 npm 的环境变量。如果 `build_and_start.bat` 脚本下载的 Node.js 未自动添加到 `PATH`，需手动将 `runtime/node` 目录添加到系统环境变量中，否则后续 `npm install` 等命令将无法执行。
+
+3. **构建桌面客户端**：
    ```bash
    cd desktop
    npm install

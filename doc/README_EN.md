@@ -152,7 +152,10 @@ If you need to do secondary development, you can start the frontend and backend 
    ```
    > This script will automatically initialize the environment and start services. Once both frontend and backend are running, close the two service windows.
 
-2. **Build the desktop client**:
+2. **Configure environment variables**:
+   Before running `npm` commands, make sure Node.js and npm are in your system `PATH`. If the `build_and_start.bat` script does not automatically add the downloaded Node.js to `PATH`, you need to manually add the `runtime/node` directory to your system environment variables; otherwise, subsequent `npm install` and related commands will fail.
+
+3. **Build the desktop client**:
    ```bash
    cd desktop
    npm install

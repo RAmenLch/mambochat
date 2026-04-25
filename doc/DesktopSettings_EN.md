@@ -10,6 +10,8 @@ You can open it from the tray menu in the main application interface.
 
 ![Desktop Client Settings Window](img/桌面端.png)
 
+> **First Launch Note**: When starting Local Mode for the first time, the system needs to extract the embedded Python runtime environment (several hundred MB). This process may take a few minutes — please be patient. Once extraction is complete, subsequent launches will use the extracted environment directly and will not repeat this process.
+
 ---
 
 ### 1. Choose Runtime Mode
