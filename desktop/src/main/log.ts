@@ -3,9 +3,9 @@
  *
  * Uses electron-log to write logs to both the console and a rotating log file.
  * Log files are stored under the user data directory:
- *   - Windows: %APPDATA%/MamboChat/logs/
- *   - macOS:   ~/Library/Logs/MamboChat/
- *   - Linux:   ~/.config/MamboChat/logs/
+ *   - Windows: %APPDATA%/mambochat-desktop/logs/
+ *   - macOS:   ~/Library/Logs/mambochat-desktop/
+ *   - Linux:   ~/.config/mambochat-desktop/logs/
  */
 
 import log from 'electron-log/main'

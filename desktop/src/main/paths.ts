@@ -7,7 +7,7 @@
  *
  * Solution: Pass the persistent user-data root to the backend via the
  *           DATA_DIR / STORAGE_PATH environment variables. The backend reads
- *           those and stores everything under %AppData%/MamboChat/data/.
+ *           those and stores everything under %AppData%/mambochat-desktop/data/.
  *
  * The backend code falls back to relative paths when the env vars are absent,
  * so Docker and dev mode are unaffected — this module is only invoked in the

@@ -72,14 +72,14 @@ Function un.DataPageCreate
   ${If} $MamboLangZh == "1"
     ${NSD_CreateLabel} 0 0 100% 20u "是否删除用户数据？"
     Pop $0
-    ${NSD_CreateLabel} 0 30u 100% 60u "⚠ 如果勾选，会话历史记录、数据库及上传文件将被永久删除！$\r$\n$\r$\n如需备份数据，请提前复制以下目录：$\r$\n%APPDATA%\MamboChat\data"
+    ${NSD_CreateLabel} 0 30u 100% 60u "⚠ 如果勾选，会话历史记录、数据库及上传文件将被永久删除！$\r$\n$\r$\n如需备份数据，请提前复制以下目录：$\r$\n%APPDATA%\mambochat-desktop\data"
     Pop $0
     ${NSD_CreateCheckbox} 0 95u 100% 12u "删除用户数据（会话历史、数据库、上传文件）"
     Pop $MamboCheckbox
   ${Else}
     ${NSD_CreateLabel} 0 0 100% 20u "Delete user data?"
     Pop $0
-    ${NSD_CreateLabel} 0 30u 100% 60u "⚠ If checked, session history, database, and uploaded files will be permanently deleted!$\r$\n$\r$\nTo back up your data, copy the following directory beforehand:$\r$\n%APPDATA%\MamboChat\data"
+    ${NSD_CreateLabel} 0 30u 100% 60u "⚠ If checked, session history, database, and uploaded files will be permanently deleted!$\r$\n$\r$\nTo back up your data, copy the following directory beforehand:$\r$\n%APPDATA%\mambochat-desktop\data"
     Pop $0
     ${NSD_CreateCheckbox} 0 95u 100% 12u "Delete user data (session history, database, uploaded files)"
     Pop $MamboCheckbox
@@ -109,7 +109,7 @@ FunctionEnd
 ; --- 卸载时根据复选框选择处理数据 ---
 !macro customUnInstall
   ${If} $MamboDeleteData == "1"
-    RMDir /r "$APPDATA\MamboChat"
+    RMDir /r "$APPDATA\mambochat-desktop"
   ${EndIf}
 !macroend
 
