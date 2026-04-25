@@ -7,9 +7,12 @@
     <title>MamboChat</title>
     <style>
       /* ---- Electron title bar ---- */
+      :root {
+        --titlebar-height: 36px;
+      }
       #electron-titlebar {
         display: none;
-        height: 36px;
+        height: var(--titlebar-height);
         flex-shrink: 0;
         align-items: center;
         background: #fff;
@@ -17,8 +20,11 @@
         padding-left: 12px;
         -webkit-app-region: drag;
         user-select: none;
-        position: relative;
-        z-index: 100001;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 1000;
       }
       #electron-titlebar .titlebar-icon {
         width: 20px; height: 20px;
@@ -65,7 +71,7 @@
         display: none;
         position: fixed;
         inset: 0;
-        z-index: 100000;
+        z-index: 999;
         background: #f5f7fa;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         flex-direction: column;
@@ -148,10 +154,72 @@
       .splash-settings-btn svg {
         width: 14px; height: 14px;
       }
+
+      /* ==================================================================
+       * Electron 模式 Z-Index 层级体系
+       * ==================================================================
+       * 标题栏:   z-index 1000  (position:fixed, 钉顶)
+       * Splash:   z-index 999   (position:fixed, 启动屏)
+       * Popper容器: z-index 2001 (position:fixed, Element Plus tooltip/popover/dropdown)
+       * Overlay:  z-index 2001  (position:fixed, dialog/drawer 遮罩)
+       * Message:  z-index 2001+ (position:fixed, ElMessage/ElNotification)
+       * ================================================================== */
+      html.electron-mode {
+        --el-z-index-overlay: 2001 !important;
+      }
+
+      html.electron-mode body {
+        padding-top: var(--titlebar-height) !important;
+        height: auto !important;
+        min-height: 100vh !important;
+        overflow: hidden !important;
+      }
+
+      /* ★ 核心修复：el-popper-container 默认 position:static，导致内部 tooltip
+         的 z-index 无法和标题栏竞争。强制设为 position:fixed 使其成为独立层 */
+      html.electron-mode [id^="el-popper-container"] {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        z-index: 2001 !important;
+        pointer-events: none !important;
+      }
+      html.electron-mode [id^="el-popper-container"] > * {
+        pointer-events: auto !important;
+      }
+
+      /* ElMessage — 全局消息提示 */
+      html.electron-mode .el-message {
+        top: calc(var(--titlebar-height) + 8px) !important;
+        z-index: 2002 !important;
+      }
+
+      /* ElNotification — 通知消息 */
+      html.electron-mode .el-notification {
+        top: calc(var(--titlebar-height) + 8px) !important;
+        z-index: 2002 !important;
+      }
+
+      /* ElImageViewer — 图片预览全屏查看器 */
+      html.electron-mode .el-image-viewer__wrapper {
+        top: var(--titlebar-height) !important;
+        height: calc(100% - var(--titlebar-height)) !important;
+        z-index: 2003 !important;
+      }
+
+      /* El-overlay — dialog/drawer 背景遮罩 */
+      html.electron-mode .el-overlay {
+        top: var(--titlebar-height) !important;
+        height: calc(100% - var(--titlebar-height)) !important;
+        z-index: 2001 !important;
+      }
     </style>
     <script>
       // Detect Electron immediately and show title bar + splash
       // Titlebar button tooltips will be updated by main.ts after vue-i18n initializes.
+      var TITLEBAR_H = 36;
       if (window.electronAPI) {
         document.documentElement.classList.add('electron-mode');
         document.addEventListener('DOMContentLoaded', function() {
@@ -178,7 +246,40 @@
           document.getElementById('splash-settings-btn').addEventListener('click', function() {
             window.electronAPI.app.openDesktopSettings();
           });
+
+          // ====== Runtime: adjust fixed overlays to avoid titlebar area ======
+          var mo = new MutationObserver(function(mutations) {
+            for (var i = 0; i < mutations.length; i++) {
+              var added = mutations[i].addedNodes;
+              for (var j = 0; j < added.length; j++) {
+                if (added[j].nodeType !== 1) continue;
+                fixOverlayPosition(added[j]);
+              }
+            }
+          });
+          mo.observe(document.body, { childList: true, subtree: false });
+
+          // Fix any existing overlays
+          Array.prototype.forEach.call(document.body.children, fixOverlayPosition);
         });
+
+        function fixOverlayPosition(el) {
+          var tag = (el.className || '') + ' ' + (el.id || '');
+          var cs = window.getComputedStyle(el);
+          if (cs.position !== 'fixed') return;
+
+          if (/el-message|el-notification/.test(tag)) {
+            el.style.top = (TITLEBAR_H + 8) + 'px';
+          }
+          else if (el.classList.contains('el-overlay')) {
+            el.style.top = TITLEBAR_H + 'px';
+            el.style.height = 'calc(100% - ' + TITLEBAR_H + 'px)';
+          }
+          else if (el.classList.contains('el-image-viewer__wrapper')) {
+            el.style.top = TITLEBAR_H + 'px';
+            el.style.height = 'calc(100% - ' + TITLEBAR_H + 'px)';
+          }
+        }
       }
     </script>
   </head>

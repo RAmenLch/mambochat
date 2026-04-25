@@ -91,26 +91,15 @@ body,
   overflow: hidden; /* 防止出现不必要的滚动条 */
 }
 
-/* Electron mode: body is flex column, title bar + app fill viewport */
-html.electron-mode body {
-  display: flex;
-  flex-direction: column;
-  height: 100vh !important;
-  overflow: hidden;
-}
-
+/* ======================================================================
+ * Electron 桌面端 — 标题栏布局（与 index.html 内联样式配合）
+ * ====================================================================== */
 html.electron-mode #electron-titlebar {
   display: flex !important;
 }
 
-html.electron-mode {
-  /* 让 Element Plus 所有弹出层（message、notification、popover、dialog、drawer 等）的 z-index 始终高于自定义标题栏 */
-  --el-z-index-overlay: 100002 !important;
-}
-
 html.electron-mode #app {
-  flex: 1;
-  height: auto !important;
-  min-height: 0;
+  /* body 已有 padding-top:36px，#app 自然从标题栏下方开始 */
+  height: calc(100vh - var(--titlebar-height, 36px)) !important;
 }
 </style>
