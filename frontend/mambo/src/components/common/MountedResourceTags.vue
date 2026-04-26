@@ -132,7 +132,7 @@ function getPreviewText(resource: Resource): string {
   }
   const content = resource.latest_version?.content;
   if (!content) return `(${t('common.status.noData')})`;
-  return content.length > 500 ? content.substring(0, 500) + '...' : content;
+  return content;
 }
 
 // --- Drag & Drop ---
@@ -232,6 +232,7 @@ const handleRemove = (resourceId: string) => {
 <style>
 .resource-preview-tooltip {
   max-width: 60vw !important;
+  overflow: visible !important;
 }
 
 .resource-content-preview {
