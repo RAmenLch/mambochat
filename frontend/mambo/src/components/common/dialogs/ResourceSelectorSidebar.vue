@@ -64,7 +64,7 @@
         </el-scrollbar>
       </div>
 
-      <el-scrollbar v-else>
+      <el-scrollbar v-else class="tree-scrollbar">
         <div v-if="isResourcesLoading && resourceTree.length === 0" class="loading-state">
           <el-skeleton :rows="5" animated />
         </div>
@@ -368,6 +368,8 @@ const handleScroll = ({ scrollTop, scrollHeight, clientHeight }: any) => {
   display: flex;
   flex-direction: column;
   width: 300px;
+  height: 100%;
+  overflow: hidden;
   border-right: 1px solid var(--el-border-color-lighter);
   background-color: var(--el-bg-color-page);
 }
@@ -404,11 +406,17 @@ const handleScroll = ({ scrollTop, scrollHeight, clientHeight }: any) => {
 }
 
 .resource-tree-aside {
-  flex-grow: 1;
+  flex: 1 1 0%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   padding: 8px 0;
+}
+
+.tree-scrollbar {
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .custom-tree-node {
