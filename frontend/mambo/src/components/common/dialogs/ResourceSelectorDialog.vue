@@ -222,6 +222,10 @@ function handleDialogClose() {
   background-color: var(--el-bg-color);
 }
 
+.resource-selector-container :deep(.el-main) {
+  min-width: 0;
+}
+
 .action-buttons {
   display: flex;
   gap: 12px;

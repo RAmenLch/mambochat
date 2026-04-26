@@ -368,6 +368,8 @@ const handleScroll = ({ scrollTop, scrollHeight, clientHeight }: any) => {
   display: flex;
   flex-direction: column;
   width: 300px;
+  min-width: 300px;
+  flex-shrink: 0;
   height: 100%;
   overflow: hidden;
   border-right: 1px solid var(--el-border-color-lighter);
