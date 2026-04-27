@@ -110,9 +110,12 @@ class LocalStorageService(AbstractStorageService):
 
 # --- 服务实例化 ---
 
+import os
+
 from backend._cli_args import STORAGE_PATH as _CLI_STORAGE_PATH
 
-PROJECT_ROOT = Path(__file__).parent.parent
-_default = str(PROJECT_ROOT.joinpath("uploads"))
-STORAGE_PATH_STR = _CLI_STORAGE_PATH or _default
+_PROJECT_ROOT = Path(__file__).parent.parent
+_default = str(_PROJECT_ROOT.joinpath("uploads"))
+_ENV_STORAGE_PATH = os.getenv("MAMBO_DOCKER_STORAGE_PATH")
+STORAGE_PATH_STR = _CLI_STORAGE_PATH or _ENV_STORAGE_PATH or _default
 storage_service: AbstractStorageService = LocalStorageService(base_path=STORAGE_PATH_STR)

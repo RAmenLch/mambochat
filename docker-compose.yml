@@ -8,7 +8,7 @@ services:
       dockerfile: backend/Dockerfile
     environment:
         - TZ=Asia/Shanghai
-        - STORAGE_PATH=/app/uploads # 指定容器内的文件存储路径
+        - MAMBO_DOCKER_STORAGE_PATH=/app/uploads # 指定容器内的文件存储路径
     volumes:
       # 将宿主机的 ./DB 目录映射到容器内的 /app/DB 目录
       # 这样 SQLite 数据库文件就能持久化保存
