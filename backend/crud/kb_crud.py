@@ -232,6 +232,51 @@ async def get_chunks_by_resource_paginated(
     return items, total
 
 
+async def search_chunks_by_regex(
+        db: AsyncSession,
+        pattern: str,
+        kb_id: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20
+) -> Tuple[List[Any], int]:
+    """
+    使用正则表达式搜索知识库切片内容。
+    使用 SQLite REGEXP 自定义函数。
+    返回: (结果列表, 总数) — 结果包含 Chunk 和所属 Resource 信息
+    """
+    # 构建匹配条件
+    content_match = kb_model.ResourceKBChunk.content.op("REGEXP")(pattern)
+
+    query = select(
+        kb_model.ResourceKBChunk.id.label("chunk_id"),
+        kb_model.ResourceKBChunk.content.label("chunk_content"),
+        kb_model.ResourceKBChunk.chunk_index.label("chunk_index"),
+        resource_model.Resource.id.label("resource_id"),
+        resource_model.Resource.name.label("resource_name"),
+    ).join(
+        resource_model.Resource,
+        kb_model.ResourceKBChunk.resource_id == resource_model.Resource.id
+    ).where(
+        content_match,
+        kb_model.ResourceKBChunk.status == kb_schemas.KBChunkStatus.COMPLETED.value
+    )
+
+    if kb_id:
+        query = query.filter(resource_model.Resource.kb_id == kb_id)
+
+    count_query = select(func.count()).select_from(query.subquery())
+    total_result = await db.execute(count_query)
+    total = total_result.scalar()
+
+    offset = (page - 1) * page_size
+    query = query.order_by(kb_model.ResourceKBChunk.chunk_index.asc()).offset(offset).limit(page_size)
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    return rows, total
+
+
 # --- Vector Operations (Raw SQL) ---
 
 async def insert_vector(

@@ -91,6 +91,50 @@ async def get_child_names_by_parent_id(db: AsyncSession, parent_id: Optional[str
     return result.scalars().all()
 
 
+async def get_file_resource_by_name_and_kb_ids(
+        db: AsyncSession,
+        name: str,
+        kb_ids: List[str]
+) -> Optional[resource_model.Resource]:
+    """
+    根据文件名和知识库ID列表查找文件资源。
+    仅返回 itemType 为 resource 且 kb_id 在指定列表中的结果。
+    """
+    if not kb_ids:
+        return None
+
+    result = await db.execute(
+        select(resource_model.Resource)
+        .filter(
+            resource_model.Resource.name == name,
+            resource_model.Resource.kb_id.in_(kb_ids),
+            resource_model.Resource.itemType == ResourceItemType.RESOURCE.value
+        )
+    )
+    return result.scalars().first()
+
+
+async def get_file_resources_by_kb_ids(
+        db: AsyncSession,
+        kb_ids: List[str]
+) -> List[resource_model.Resource]:
+    """
+    获取指定知识库ID列表下的所有文件资源名称，用于列举可用文件。
+    """
+    if not kb_ids:
+        return []
+
+    result = await db.execute(
+        select(resource_model.Resource)
+        .filter(
+            resource_model.Resource.kb_id.in_(kb_ids),
+            resource_model.Resource.itemType == ResourceItemType.RESOURCE.value
+        )
+        .order_by(resource_model.Resource.name.asc())
+    )
+    return result.scalars().all()
+
+
 async def get_resource_with_versions(db: AsyncSession, resource_id: str) -> Optional[resource_model.Resource]:
     """通过ID获取单个资源及其所有版本列表。"""
     result = await db.execute(
