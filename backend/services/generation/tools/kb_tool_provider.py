@@ -52,12 +52,22 @@ class KBToolProvider(BaseToolProvider):
         provider_self = self
 
         @tool(provider_self._tool_name_search)
-        async def search_knowledge_base(query: str, kb_name: str, top_k: int = 5) -> str:
+        async def search_knowledge_base(
+                query: str,
+                kb_name: str,
+                resource_name: Optional[str] = None,
+                index_start: Optional[int] = None,
+                index_end: Optional[int] = None,
+                top_k: Optional[int] = None
+        ) -> str:
             """
             在指定的知识库中检索相关信息。
             query: 检索关键词或问题。
             kb_name: 知识库的名称，必须从系统提示词提供的列表中选择。
-            top_k: 返回的最相似结果数量，默认5。
+            resource_name: 可选，限定搜索的资源文件名称（仅查询知识库中的某个挂载文件切片）。
+            index_start: 可选，切片索引范围起始(包含)，需配合 resource_name 使用，不指定默认从0开始。
+            index_end: 可选，切片索引范围结束(包含)，需配合 resource_name 使用，不指定默认到末尾。
+            top_k: 可选，返回的最相似结果数量，默认5。
             """
             # 1. 查找目标知识库
             target_resource = None
@@ -75,7 +85,10 @@ class KBToolProvider(BaseToolProvider):
             request = KBSearchRequest(
                 query_text=query,
                 kb_id=target_resource.id,
-                top_k=top_k
+                resource_name=resource_name,
+                index_start=index_start,
+                index_end=index_end,
+                top_k=top_k if top_k is not None else 5
             )
 
             try:
@@ -87,7 +100,7 @@ class KBToolProvider(BaseToolProvider):
                 results_text = []
                 for item in response.items:
                     results_text.append(
-                        f"Source: {item.resource_name}\nContent: {item.chunk_content}"
+                        f"Source: {item.resource_name} (chunk_index: {item.chunk_index})\nContent: {item.chunk_content}"
                     )
                 return "\n\n---\n\n".join(results_text)
             except Exception as e:
@@ -195,16 +208,22 @@ class KBToolProvider(BaseToolProvider):
         kb_list_desc = []
         for res in self.kb_resources:
             desc = res.description or "No description"
-            kb_list_desc.append(f"- Name: {res.name}, Description: {desc}")
+            kb_list_desc.append(f"- **{res.name}**: {desc}")
 
         kb_info_str = "\n".join(kb_list_desc)
 
         return (
-            f"You have access to the following knowledge bases for background information:\n"
-            f"{kb_info_str}\n"
-            f"Use the '{self._tool_name_search}' tool to search them by semantic similarity. You MUST specify the correct 'kb_name' (the name of a knowledge base, not a file name).\n"
-            f"Use the '{self._tool_name_chunks}' tool to read chunk content by index range when you need more context around a search result. 'resource_name' is the file name (e.g. 'document.txt') within the knowledge base, NOT the knowledge base name.\n"
-            f"Use the '{self._tool_name_regex}' tool to search by regular expression pattern when you need precise text matching. You can optionally specify 'kb_name' to limit scope."
+            f"## Knowledge Bases\n"
+            f"You have access to the following knowledge bases:\n"
+            f"{kb_info_str}\n\n"
+            f"### Available Tools\n"
+            f"1. **{self._tool_name_search}** — Semantic search by query text. Required: `query`, `kb_name` (knowledge base name, NOT file name). Optional: `resource_name` (file within KB), `index_start`/`index_end` (chunk range), `top_k` (default 5). Use this as your primary search method.\n"
+            f"2. **{self._tool_name_chunks}** — Read chunk content by index range for deeper context. Required: `resource_name` (file name within KB, e.g. 'report.pdf'), `start_index`, `end_index`. Optional: `page`, `page_size`. Use after `{self._tool_name_search}` when you need surrounding context of a specific chunk.\n"
+            f"3. **{self._tool_name_regex}** — Regex pattern search for precise text matching. Required: `pattern`. Optional: `kb_name`, `page`, `page_size`.\n\n"
+            f"### Guidelines\n"
+            f"- Always ground answers in retrieved content; do not fabricate information.\n"
+            f"- Proactively search when a user's question relates to knowledge base content.\n"
+            f"- `kb_name` = knowledge base name; `resource_name` = file name within that knowledge base — they are different."
         )
 
     def matches_tool_name(self, tool_name: str) -> bool:

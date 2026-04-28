@@ -77,6 +77,22 @@ async def get_resources_by_parent_ids(db: AsyncSession, parent_ids: List[str]) -
     return result.scalars().all()
 
 
+async def get_resource_by_name_and_parent(
+        db: AsyncSession,
+        name: str,
+        parent_id: str
+) -> Optional[resource_model.Resource]:
+    """通过名称和父节点ID查找资源。"""
+    result = await db.execute(
+        select(resource_model.Resource)
+        .filter(
+            resource_model.Resource.name == name,
+            resource_model.Resource.parentId == parent_id
+        )
+    )
+    return result.scalars().first()
+
+
 async def get_child_names_by_parent_id(db: AsyncSession, parent_id: Optional[str]) -> List[str]:
     """
     获取指定父节点下所有直接子资源的名称列表，用于冲突检测。

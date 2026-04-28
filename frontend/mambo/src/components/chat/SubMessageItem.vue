@@ -180,6 +180,7 @@
               :is-generating="isGenerating"
               :range="block.range"
               :markup="block.markup"
+              :closed="block.closed !== false"
               @edit="handleCodeBlockEdit"
               @copy="handleBlockCopy"
             />

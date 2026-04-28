@@ -38,6 +38,7 @@ from backend.routers import (
 )
 from backend.services.cleanup_service import cleanup_zombie_files
 from backend.services.kb_service import SUP_DIM
+from backend.services.vec_migration import ensure_vec_tables
 
 scheduler = AsyncIOScheduler(timezone=TZ)
 
@@ -140,12 +141,7 @@ async def lifespan(app: FastAPI):
     await init_checkpointer()
 
     async with engine.begin() as conn:
-        dimensions = SUP_DIM
-        for dim in dimensions:
-            table_name = f"vec_dim_{dim}"
-            stmt = text(f"CREATE VIRTUAL TABLE IF NOT EXISTS {table_name} USING vec0(vector FLOAT[{dim}]);")
-            await conn.execute(stmt)
-
+        await ensure_vec_tables(conn, dimensions=SUP_DIM)
         await conn.execute(text("CREATE VIRTUAL TABLE IF NOT EXISTS kb_chunk_fts USING fts5(content_tokens);"))
 
     # 定时任务

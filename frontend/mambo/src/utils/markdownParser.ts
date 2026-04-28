@@ -25,6 +25,12 @@ export interface ParsedBlock {
    * 代码块的围栏字符 (如 ``` 或 ~~~)，用于编辑时保持格式一致。
    */
   markup?: string
+  /**
+   * 代码块是否已闭合。
+   * markdown-it 仅对已闭合的围栏产生 fence token（此时为 true）；
+   * 对于流式输出中尚未闭合的围栏，由额外检测逻辑产生（此时为 false）。
+   */
+  closed?: boolean
 }
 
 /**
@@ -148,6 +154,80 @@ function getLineOffsets(text: string): number[] {
 }
 
 /**
+ * 检测文本末尾是否存在未闭合的围栏代码块。
+ * 流式输出时，代码块可能尚未收到闭合的 ```，markdown-it 不会将其识别为 fence token，
+ * 而是作为普通段落文本处理。此函数检测这种情况并返回未闭合围栏的信息。
+ *
+ * @param text 完整的 Markdown 文本
+ * @param baseOffset 该文本在原始完整文本中的起始偏移量
+ * @param lineOffsets 行偏移量数组
+ * @returns 未闭合围栏信息，如果没有则返回 null
+ */
+function detectUnclosedFence(
+  text: string,
+  baseOffset: number,
+  lineOffsets: number[],
+): {
+  language: string
+  content: string
+  markup: string
+  startOffset: number
+  endOffset: number
+} | null {
+  const lines = text.split('\n')
+  let inFence = false
+  let fenceChar = ''
+  let fenceLen = 0
+  let language = ''
+  let contentStartLine = -1
+  let fenceStartLine = -1
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    // 按 CommonMark 规范：尾部空白不影响围栏判定
+    const trimmed = line.replace(/\s+$/, '')
+
+    if (!inFence) {
+      // 匹配围栏开头：最多3空格缩进，3个及以上反引号或波浪号，可选语言标识
+      const match = trimmed.match(/^( {0,3})((`{3,})|(~{3,}))(.*)/)
+      if (match) {
+        inFence = true
+        fenceChar = match[2][0]
+        fenceLen = match[2].length
+        language = match[5].trim()
+        contentStartLine = i + 1
+        fenceStartLine = i
+        continue
+      }
+    } else {
+      // 匹配围栏闭合：相同字符，长度 >= 开头，仅允许尾部空白
+      const escapedChar = fenceChar === '`' ? '`' : '~'
+      const closeRegex = new RegExp(`^ {0,3}${escapedChar}{${fenceLen},}\\s*$`)
+      if (closeRegex.test(trimmed)) {
+        inFence = false
+        continue
+      }
+    }
+  }
+
+  // 文本扫描完毕后仍然处于围栏内部 → 未闭合
+  if (inFence && fenceStartLine >= 0) {
+    const startOffset = baseOffset + (lineOffsets[fenceStartLine] ?? 0)
+    const endOffset = baseOffset + text.length
+    const content = lines.slice(contentStartLine).join('\n')
+    return {
+      language,
+      content,
+      markup: fenceChar.repeat(fenceLen),
+      startOffset,
+      endOffset,
+    }
+  }
+
+  return null
+}
+
+/**
  * 辅助函数，用于解析不含 Base64 图片的纯文本和代码块。
  * @param text - 不含 Base64 图片的 Markdown 文本片段。
  * @param baseOffset - 该片段在原始完整文本中的起始偏移量。
@@ -156,9 +236,37 @@ function getLineOffsets(text: string): number[] {
 function parseTextAndCode(text: string, baseOffset: number): ParsedBlock[] {
   if (!text) return []
 
-  const tokens = md.parse(text, {})
+  // 先用完整文本检测末尾是否有未闭合的围栏代码块（流式输出场景）
+  const fullLineOffsets = getLineOffsets(text)
+  const unclosedFence = detectUnclosedFence(text, baseOffset, fullLineOffsets)
+
+  let textToParse = text
+  let unclosedFenceBlock: ParsedBlock | null = null
+
+  if (unclosedFence) {
+    // 只将围栏开始位置之前的文本交给 markdown-it 解析
+    textToParse = text.substring(0, unclosedFence.startOffset - baseOffset)
+    unclosedFenceBlock = {
+      type: 'code',
+      content: unclosedFence.content,
+      language: unclosedFence.language,
+      markup: unclosedFence.markup,
+      range: {
+        start: unclosedFence.startOffset,
+        end: unclosedFence.endOffset,
+      },
+      closed: false,
+    }
+  }
+
+  if (!textToParse) {
+    // 整个文本都是未闭合围栏内容
+    return unclosedFenceBlock ? [unclosedFenceBlock] : []
+  }
+
+  const tokens = md.parse(textToParse, {})
   const blocks: ParsedBlock[] = []
-  const lineOffsets = getLineOffsets(text)
+  const lineOffsets = getLineOffsets(textToParse)
 
   type MarkdownItToken = (typeof tokens)[number]
 
@@ -297,7 +405,7 @@ function parseTextAndCode(text: string, baseOffset: number): ParsedBlock[] {
         endOffset = baseOffset + lineOffsets[endLine]
       } else {
         // 否则是文件末尾
-        endOffset = baseOffset + text.length
+        endOffset = baseOffset + textToParse.length
       }
 
       blocks.push({
@@ -309,6 +417,7 @@ function parseTextAndCode(text: string, baseOffset: number): ParsedBlock[] {
           start: startOffset,
           end: endOffset,
         },
+        closed: true,
       })
     } else {
       // 累积普通文本/HTML token
@@ -322,7 +431,7 @@ function parseTextAndCode(text: string, baseOffset: number): ParsedBlock[] {
       (acc, t) => acc || t,
       null as MarkdownItToken | null,
     )
-    let endOffset = baseOffset + text.length
+    let endOffset = baseOffset + textToParse.length
 
     // 尝试更精确地确定结束位置
     if (lastMappedToken && lastMappedToken.map) {
@@ -333,6 +442,11 @@ function parseTextAndCode(text: string, baseOffset: number): ParsedBlock[] {
     }
 
     renderAndPushHtmlBlock(endOffset)
+  }
+
+  // 添加未闭合的代码块（流式输出场景）
+  if (unclosedFenceBlock) {
+    blocks.push(unclosedFenceBlock)
   }
 
   return blocks
