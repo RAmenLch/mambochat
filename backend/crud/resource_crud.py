@@ -316,6 +316,26 @@ async def batch_update_resources_order(db: AsyncSession, updates: List[schemas.R
     return True
 
 
+async def batch_update_versions_order(db: AsyncSession, updates: List[schemas.ResourceVersionReorderItem]) -> bool:
+    """批量更新资源版本的排序。"""
+    if not updates:
+        return True
+
+    version_ids = [item.id for item in updates]
+    result = await db.execute(
+        select(resource_model.ResourceVersion).filter(resource_model.ResourceVersion.id.in_(version_ids))
+    )
+    versions_map = {ver.id: ver for ver in result.scalars().all()}
+
+    for update_item in updates:
+        version_to_update = versions_map.get(update_item.id)
+        if version_to_update:
+            version_to_update.sortOrder = update_item.sortOrder
+
+    await db.commit()
+    return True
+
+
 async def move_resources(db: AsyncSession, move_request: schemas.ResourceMoveRequest) -> bool:
     """
     移动资源或文件夹到指定位置。

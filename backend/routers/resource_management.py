@@ -391,6 +391,20 @@ async def set_active_version(resource_id: str, version_id: str, db: AsyncSession
     return updated_resource
 
 
+@router.post(
+    "/versions/reorder",
+    status_code=status.HTTP_200_OK,
+    summary="批量更新资源版本排序"
+)
+async def reorder_versions(updates: List[schemas.ResourceVersionReorderItem], db: AsyncSession = Depends(get_db)):
+    """
+    批量更新资源版本的排序。
+    接收一个包含 id 和 sortOrder 的列表，按顺序更新版本的排序值。
+    """
+    await resource_crud.batch_update_versions_order(db, updates=updates)
+    return {"message": "Version reorder successful"}
+
+
 # --- Search Operations ---
 
 @router.post(

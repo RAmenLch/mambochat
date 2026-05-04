@@ -117,6 +117,11 @@ class ResourceReorderItem(BaseModel):
     sortOrder: int
 
 
+class ResourceVersionReorderItem(BaseModel):
+    id: str
+    sortOrder: int
+
+
 class ResourceMoveRequest(BaseModel):
     item_ids: List[str] = Field(..., description="被移动的资源或文件夹ID列表")
     reference_id: str = Field(..., description="参考目标ID，'root'代表根目录")
