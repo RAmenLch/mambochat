@@ -1,6 +1,6 @@
 {
   "name": "mambochat-desktop",
-  "version": "1.2.1.1",
+  "version": "1.2.2",
   "private": true,
   "description": "MamboChat Desktop Application",
   "main": "dist/main/index.js",
@@ -28,7 +28,7 @@
     "@types/node": "^22.16.5",
     "concurrently": "^9.1.2",
     "electron": "^39.8.9",
-    "electron-builder": "^26.0.12",
+    "electron-builder": "^26.9.0",
     "electron-vite": "^3.1.0",
     "typescript": "~5.8.0",
     "vite": "^6.3.5",
