@@ -1,6 +1,6 @@
 {
   "name": "mambochat-desktop",
-  "version": "1.2.1",
+  "version": "1.2.1.1",
   "private": true,
   "description": "MamboChat Desktop Application",
   "main": "dist/main/index.js",
