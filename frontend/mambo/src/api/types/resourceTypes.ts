@@ -196,6 +196,11 @@ export interface ResourceReorderItem {
   sortOrder: number
 }
 
+export interface VersionReorderItem {
+  id: string
+  sortOrder: number
+}
+
 export interface ResourceVersionCreate {
   name: string
   commitMessage?: string | null

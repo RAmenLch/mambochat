@@ -14,6 +14,7 @@ import {
   getResourceDetails,
   createSkill,
   validateSkill,
+  reorderResourceVersions,
 } from '@/api/resourceService';
 import {
   uploadResourceFile,
@@ -36,6 +37,7 @@ import type {
   KBRunTaskRequest,
   SkillCreate,
   SkillValidationResult,
+  VersionReorderItem,
 } from '@/api/types';
 
 /**
@@ -212,6 +214,20 @@ export const useResourceStore = defineStore('resource', () => {
       }
     } catch (error) {
       console.error(`Failed to set active version for resource ${resourceId}:`, error);
+      await fetchResourceDetails(resourceId);
+    }
+  }
+
+  /**
+   * 批量更新资源版本的排序。
+   */
+  async function reorderVersions(resourceId: string, updates: VersionReorderItem[]) {
+    try {
+      await reorderResourceVersions(updates);
+      // 重新获取资源详情以同步版本排序
+      await fetchResourceDetails(resourceId);
+    } catch (error) {
+      console.error(`Failed to reorder versions for resource ${resourceId}:`, error);
       await fetchResourceDetails(resourceId);
     }
   }
@@ -405,6 +421,7 @@ export const useResourceStore = defineStore('resource', () => {
     updateResourceAttributes,
     createNewVersion,
     setActiveResourceVersion,
+    reorderVersions,
     fetchResourceDetails,
     fetchFileContent,
     saveFileContent,

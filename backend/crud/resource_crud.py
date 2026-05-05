@@ -77,6 +77,22 @@ async def get_resources_by_parent_ids(db: AsyncSession, parent_ids: List[str]) -
     return result.scalars().all()
 
 
+async def get_resource_by_name_and_parent(
+        db: AsyncSession,
+        name: str,
+        parent_id: str
+) -> Optional[resource_model.Resource]:
+    """通过名称和父节点ID查找资源。"""
+    result = await db.execute(
+        select(resource_model.Resource)
+        .filter(
+            resource_model.Resource.name == name,
+            resource_model.Resource.parentId == parent_id
+        )
+    )
+    return result.scalars().first()
+
+
 async def get_child_names_by_parent_id(db: AsyncSession, parent_id: Optional[str]) -> List[str]:
     """
     获取指定父节点下所有直接子资源的名称列表，用于冲突检测。
@@ -88,6 +104,50 @@ async def get_child_names_by_parent_id(db: AsyncSession, parent_id: Optional[str
         stmt = stmt.filter(resource_model.Resource.parentId == parent_id)
 
     result = await db.execute(stmt)
+    return result.scalars().all()
+
+
+async def get_file_resource_by_name_and_kb_ids(
+        db: AsyncSession,
+        name: str,
+        kb_ids: List[str]
+) -> Optional[resource_model.Resource]:
+    """
+    根据文件名和知识库ID列表查找文件资源。
+    仅返回 itemType 为 resource 且 kb_id 在指定列表中的结果。
+    """
+    if not kb_ids:
+        return None
+
+    result = await db.execute(
+        select(resource_model.Resource)
+        .filter(
+            resource_model.Resource.name == name,
+            resource_model.Resource.kb_id.in_(kb_ids),
+            resource_model.Resource.itemType == ResourceItemType.RESOURCE.value
+        )
+    )
+    return result.scalars().first()
+
+
+async def get_file_resources_by_kb_ids(
+        db: AsyncSession,
+        kb_ids: List[str]
+) -> List[resource_model.Resource]:
+    """
+    获取指定知识库ID列表下的所有文件资源名称，用于列举可用文件。
+    """
+    if not kb_ids:
+        return []
+
+    result = await db.execute(
+        select(resource_model.Resource)
+        .filter(
+            resource_model.Resource.kb_id.in_(kb_ids),
+            resource_model.Resource.itemType == ResourceItemType.RESOURCE.value
+        )
+        .order_by(resource_model.Resource.name.asc())
+    )
     return result.scalars().all()
 
 
@@ -251,6 +311,26 @@ async def batch_update_resources_order(db: AsyncSession, updates: List[schemas.R
         if resource_to_update:
             resource_to_update.parentId = update_item.parentId
             resource_to_update.sortOrder = update_item.sortOrder
+
+    await db.commit()
+    return True
+
+
+async def batch_update_versions_order(db: AsyncSession, updates: List[schemas.ResourceVersionReorderItem]) -> bool:
+    """批量更新资源版本的排序。"""
+    if not updates:
+        return True
+
+    version_ids = [item.id for item in updates]
+    result = await db.execute(
+        select(resource_model.ResourceVersion).filter(resource_model.ResourceVersion.id.in_(version_ids))
+    )
+    versions_map = {ver.id: ver for ver in result.scalars().all()}
+
+    for update_item in updates:
+        version_to_update = versions_map.get(update_item.id)
+        if version_to_update:
+            version_to_update.sortOrder = update_item.sortOrder
 
     await db.commit()
     return True

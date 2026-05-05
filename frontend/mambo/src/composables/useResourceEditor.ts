@@ -4,7 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { useResourceStore } from '@/stores/resourceStore'
 import { uploadResourceFile } from '@/api/kbService'
-import type { ResourceWithVersions, ResourceVersion, ResourceVersionCreate } from '@/api/types'
+import type { ResourceWithVersions, ResourceVersion, ResourceVersionCreate, VersionReorderItem } from '@/api/types'
 
 interface SubMessageTemplateAttributes {
   context_participation_length: number
@@ -279,6 +279,15 @@ export function useResourceEditor(props: {
     }
   }
 
+  async function handleReorderVersions(reorderedVersions: ResourceVersion[]) {
+    if (!props.resource) return
+    const updates: VersionReorderItem[] = reorderedVersions.map((v, index) => ({
+      id: v.id,
+      sortOrder: index,
+    }))
+    await resourceStore.reorderVersions(props.resource.id, updates)
+  }
+
   // --- Watchers ---
   watch(
     () => props.resource,
@@ -331,6 +340,7 @@ export function useResourceEditor(props: {
     handleFileChange,
     loadVersionIntoEditor,
     handleSetActiveVersion,
+    handleReorderVersions,
     openNewVersionDialog,
     handleConfirmNewVersion,
   }

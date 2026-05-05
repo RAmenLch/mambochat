@@ -67,6 +67,10 @@ class KBChunk(KBChunkBase):
 class KBSearchRequest(BaseModel):
     query_text: str = Field(..., min_length=1, description="查询文本")
     kb_id: Optional[str] = Field(None, description="限定搜索的知识库ID (Resource ID)")
+    resource_id: Optional[str] = Field(None, description="限定搜索的文件ID (Resource ID)")
+    resource_name: Optional[str] = Field(None, description="限定搜索的资源文件名称 (在知识库内的文件名)")
+    index_start: Optional[int] = Field(None, ge=0, description="切片索引范围起始(包含)，需配合 resource_name 或 resource_id 使用")
+    index_end: Optional[int] = Field(None, ge=0, description="切片索引范围结束(包含)，需配合 resource_name 或 resource_id 使用")
     top_k: int = Field(5, ge=1, le=20, description="返回的最相似结果数量")
 
 

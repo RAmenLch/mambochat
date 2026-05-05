@@ -5,10 +5,11 @@
       <span class="version-bar-title">{{ t('resource.version.history') }}</span>
     </div>
     <el-scrollbar>
-      <div class="version-list-horizontal">
+      <transition-group name="version-drag" tag="div" class="version-list-horizontal">
         <!-- Special KB Config Card -->
         <div
           v-if="kbId"
+          key="__kb_config__"
           class="version-card-horizontal special-kb-card"
           :class="{ 'is-viewing': viewMode === 'kb_config' }"
           @click="$emit('toggle-kb-view')"
@@ -24,12 +25,18 @@
           <div
             v-for="version in versions"
             :key="version.id"
-            class="version-card-horizontal"
+            :data-version-id="version.id"
+            class="version-card-horizontal draggable-version-card"
             :class="{
               'is-active': activeVersionId === version.id,
               'is-viewing': viewMode === 'editor' && viewingVersionId === version.id,
+              'is-dragging': draggedVersionId === version.id,
             }"
+            draggable="true"
             @click="$emit('select-version', version)"
+            @dragstart="handleDragStart(version.id, $event)"
+            @dragover.prevent="handleDragOver($event)"
+            @dragend="handleDragEnd"
           >
             <div class="version-card-header">
               <span class="version-name" :title="version.name">{{ version.name }}</span>
@@ -51,18 +58,19 @@
             </div>
           </div>
         </template>
-        <div v-else-if="!kbId" class="no-versions">{{ t('resource.version.empty') }}</div>
-      </div>
+        <div v-else-if="!kbId" key="__empty__" class="no-versions">{{ t('resource.version.empty') }}</div>
+      </transition-group>
     </el-scrollbar>
   </div>
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Setting } from '@element-plus/icons-vue'
 import type { ResourceVersion } from '@/api/types'
 
-defineProps<{
+const props = defineProps<{
   versions: ResourceVersion[]
   activeVersionId: string | null
   viewingVersionId: string | null
@@ -70,13 +78,56 @@ defineProps<{
   viewMode?: 'editor' | 'kb_config'
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'select-version', version: ResourceVersion): void
   (e: 'set-active', versionId: string): void
   (e: 'toggle-kb-view'): void
+  (e: 'reorder-versions', reorderedVersions: ResourceVersion[]): void
 }>()
 
 const { t } = useI18n()
+
+const draggedVersionId = ref<string | null>(null)
+let lastSwapTime = 0
+const SWAP_THROTTLE_MS = 150
+
+const handleDragStart = (versionId: string, event: DragEvent) => {
+  draggedVersionId.value = versionId
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', versionId)
+  }
+}
+
+const handleDragOver = (event: DragEvent) => {
+  if (!draggedVersionId.value) return
+
+  const now = Date.now()
+  if (now - lastSwapTime < SWAP_THROTTLE_MS) return
+
+  const target = event.target as HTMLElement
+  const targetCard = target.closest('.draggable-version-card') as HTMLElement | null
+  if (!targetCard) return
+
+  const targetVersionId = targetCard.dataset.versionId
+  if (!targetVersionId || targetVersionId === draggedVersionId.value) return
+
+  const list = [...props.versions]
+  const draggedIndex = list.findIndex(v => v.id === draggedVersionId.value)
+  const targetIndex = list.findIndex(v => v.id === targetVersionId)
+
+  if (draggedIndex !== -1 && targetIndex !== -1) {
+    const [draggedItem] = list.splice(draggedIndex, 1)
+    list.splice(targetIndex, 0, draggedItem)
+    emit('reorder-versions', list)
+    lastSwapTime = now
+  }
+}
+
+const handleDragEnd = () => {
+  draggedVersionId.value = null
+  lastSwapTime = 0
+}
 </script>
 
 <style scoped>
@@ -132,6 +183,29 @@ const { t } = useI18n()
 .version-card-horizontal.is-viewing {
   border-color: var(--el-color-primary);
   box-shadow: 0 0 0 1px var(--el-color-primary);
+}
+
+.draggable-version-card {
+  cursor: grab;
+  user-select: none;
+}
+
+.draggable-version-card:active {
+  cursor: grabbing;
+}
+
+.draggable-version-card.is-dragging {
+  opacity: 0.3;
+  background-color: var(--el-color-info-light-8);
+  border-style: dashed;
+}
+
+.version-drag-move {
+  transition: transform 0.3s ease;
+}
+
+.version-drag-leave-active {
+  display: none;
 }
 
 .version-card-header {

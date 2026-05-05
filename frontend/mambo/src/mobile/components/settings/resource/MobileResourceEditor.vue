@@ -127,6 +127,21 @@
                       </el-button>
                     </el-upload>
                   </div>
+
+                  <!-- 不可编辑文件也提供 meta 保存按钮 -->
+                  <div class="editor-actions">
+                    <el-button size="default" @click="resetForm">
+                      {{ $t('resource.editor.reset') }}
+                    </el-button>
+                    <el-button
+                      size="default"
+                      type="primary"
+                      @click="handleSaveChanges"
+                      :disabled="!isFormDirty"
+                    >
+                      {{ $t('common.action.save') }}
+                    </el-button>
+                  </div>
                 </template>
               </div>
 

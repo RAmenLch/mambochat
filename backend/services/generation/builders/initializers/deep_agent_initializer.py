@@ -19,6 +19,7 @@ from backend.services.generation.tools.base_tool_provider import BaseToolProvide
 from backend.services.generation.tools.mcp_tool_provider import MCPToolProvider
 from backend.services.generation.tools.suggest_tool_provider import SuggestToolProvider
 from backend.services.generation.tools.ask_user_tool_provider import AskUserToolProvider
+from backend.services.generation.tools.kb_tool_provider import KBToolProvider
 from backend.services.generation.tools.deep_builtin_tool_provider import DeepAgentBuiltinToolProvider
 from backend.services.file_service import FileService
 
@@ -46,6 +47,7 @@ class DeepAgentInitializer(AbstractAgentInitializer):
     async def initialize(self) -> Tuple[AgentConfig, str]:
         extended_prompts: List[str] = []
         skills = []
+        knowledge_bases = []
 
         file_service = FileService(self.db)
         dispatcher = ResourceDispatcher(self.db)
@@ -55,7 +57,11 @@ class DeepAgentInitializer(AbstractAgentInitializer):
 
             extended_prompts.extend(dispatch_result.get("system_prompts", []))
             extended_prompts.extend(dispatch_result.get("submessage_templates", []))
+            knowledge_bases = dispatch_result.get("knowledge_bases", [])
             skills = dispatch_result.get("skills", [])
+
+        if knowledge_bases:
+            self.providers.append(KBToolProvider(self.db, knowledge_bases))
 
         if skills:
             for skill in skills:

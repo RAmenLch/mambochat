@@ -681,6 +681,7 @@ class KnowledgeBaseService:
         embedding_model_id = kb_attrs.get("embedding_model_id")
         dimension = kb_attrs.get("dimension")
         rate_limit = kb_attrs.get("embedding_rate_limit", 0.0)
+        kb_id = kb_resource.id
 
         if not embedding_model_id or not dimension:
             raise HTTPException(status_code=400, detail="Knowledge Base configuration is incomplete.")
@@ -744,7 +745,8 @@ class KnowledgeBaseService:
             asyncio.create_task(self._run_embedding_loop(
                 resource_id, embedding_model_id, dimension, rate_limit,
                 resume=True,
-                splitter_config=target_splitter_config
+                splitter_config=target_splitter_config,
+                kb_id=kb_id
             ))
 
         elif request.action == kb_schemas.KBTaskAction.START:
@@ -762,7 +764,8 @@ class KnowledgeBaseService:
             asyncio.create_task(self._run_embedding_loop(
                 resource_id, embedding_model_id, dimension, rate_limit,
                 resume=False,
-                splitter_config=target_splitter_config
+                splitter_config=target_splitter_config,
+                kb_id=kb_id
             ))
 
         return {"message": "Task started."}
@@ -774,7 +777,8 @@ class KnowledgeBaseService:
             dimension: int,
             rate_limit: float,
             resume: bool,
-            splitter_config: kb_schemas.KBTextSplitterConfig
+            splitter_config: kb_schemas.KBTextSplitterConfig,
+            kb_id: str = ""
     ):
         """
         核心任务循环：处理切分、嵌入、存储(向量+FTS)、状态更新和取消。
@@ -901,7 +905,10 @@ class KnowledgeBaseService:
                             try:
                                 # 2. 插入向量
                                 if len(vector) == dimension:
-                                    vec_rowid = await kb_crud.insert_vector(session, dimension, vector)
+                                    vec_rowid = await kb_crud.insert_vector(
+                                        session, dimension, vector,
+                                        kb_id=kb_id, resource_id=resource_id
+                                    )
 
                                 # 3. 插入 FTS 索引 (使用 jieba 分词)
                                 tokens = " ".join(jieba.cut_for_search(chunk.content))
@@ -981,14 +988,26 @@ class KnowledgeBaseService:
     async def search_kb(self, request: kb_schemas.KBSearchRequest) -> kb_schemas.KBSearchResponse:
         """
         执行混合检索 (Vector + BM25) 并使用 RRF 融合排序。
+        支持 resource_name 解析和 chunk_index 范围后过滤：
+        不在 vec 表使用 MATCH 按 chunk_index 过滤，而是先做向量距离搜索扩大候选集，
+        再仅对匹配 chunk_index 范围的结果进行筛选。
         """
         target_kb_id = request.kb_id
         embedding_model_id = None
+        target_resource_id = request.resource_id
 
         if target_kb_id:
             kb_resource = await resource_crud.get_resource(self.db, target_kb_id)
             if kb_resource and kb_resource.latest_version:
                 embedding_model_id = (kb_resource.latest_version.attributes or {}).get("embedding_model_id")
+
+            # 解析 resource_name -> resource_id
+            if request.resource_name and not target_resource_id:
+                named_resource = await resource_crud.get_resource_by_name_and_parent(
+                    self.db, request.resource_name, target_kb_id
+                )
+                if named_resource:
+                    target_resource_id = named_resource.id
 
         if not embedding_model_id:
             raise HTTPException(status_code=400,
@@ -999,15 +1018,36 @@ class KnowledgeBaseService:
         except ValueError as e:
             raise HTTPException(status_code=500, detail=str(e))
 
-        # 1. 扩大候选集 (Candidate Multiplier = 2)
-        candidate_k = request.top_k * 2
+        # 是否需要 chunk_index 后过滤
+        need_index_filter = request.index_start is not None or request.index_end is not None
+
+        # 1. 扩大候选集 (Candidate Multiplier)
+        # 当无 chunk_index 过滤时使用 MATCH KNN + 后过滤策略，需扩大候选集
+        candidate_multiplier = 2
+        candidate_k = request.top_k * candidate_multiplier
 
         # 2. 并行执行双路召回
         # Vector Path
         async def _vector_search():
             try:
                 query_vector = await client.aembed_query(request.query_text)
-                return await kb_crud.search_vectors(self.db, dimension, query_vector, candidate_k)
+                if need_index_filter and target_resource_id:
+                    # 小数据集场景：JOIN vec + chunk 表，暴力计算距离 + chunk_index 过滤
+                    # 不使用 MATCH KNN，避免因后过滤丢掉近距离结果
+                    return await kb_crud.search_vectors_with_chunk_filter(
+                        self.db, dimension, query_vector, request.top_k,
+                        kb_id=target_kb_id,
+                        resource_id=target_resource_id,
+                        index_start=request.index_start,
+                        index_end=request.index_end
+                    )
+                else:
+                    # 常规场景：MATCH KNN + 分区键预过滤
+                    return await kb_crud.search_vectors(
+                        self.db, dimension, query_vector, candidate_k,
+                        kb_id=target_kb_id,
+                        resource_id=target_resource_id
+                    )
             except Exception as e:
                 logger.error(f"Vector search failed: {e}")
                 return []
@@ -1032,14 +1072,18 @@ class KnowledgeBaseService:
 
         vec_results, fts_results = await asyncio.gather(_vector_search(), _keyword_search())
 
-        # 3. 获取所有涉及的 Chunk 信息
+        # 3. 获取所有涉及的 Chunk 信息 (带 chunk_index 范围后过滤)
         vec_ids = [r[0] for r in vec_results]
         fts_ids = [r[0] for r in fts_results]
 
         if not vec_ids and not fts_ids:
             return kb_schemas.KBSearchResponse(total=0, items=[])
 
-        chunk_rows = await kb_crud.get_chunks_by_mixed_ids(self.db, vec_ids, fts_ids, kb_id_filter=target_kb_id)
+        chunk_rows = await kb_crud.get_chunks_by_mixed_ids(
+            self.db, vec_ids, fts_ids, kb_id_filter=target_kb_id,
+            index_start=request.index_start,
+            index_end=request.index_end
+        )
 
         # 建立映射: Chunk ID -> Chunk Object & Metadata
         chunk_map = {}

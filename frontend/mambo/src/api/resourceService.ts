@@ -7,6 +7,7 @@ import type {
   ResourceWithVersions,
   ResourceUpdate,
   ResourceReorderItem,
+  VersionReorderItem,
   ResourceVersion,
   ResourceVersionCreate,
   ResourceVersionUpdate,
@@ -68,6 +69,13 @@ export const deleteResource = (resourceId: string): Promise<Resource> => {
  */
 export const reorderResources = (updates: ResourceReorderItem[]): Promise<{ message: string }> => {
   return apiClient.post('/resources/reorder', updates);
+};
+
+/**
+ * 批量更新资源版本的排序。
+ */
+export const reorderResourceVersions = (updates: VersionReorderItem[]): Promise<{ message: string }> => {
+  return apiClient.post('/resources/versions/reorder', updates);
 };
 
 /**

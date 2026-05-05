@@ -3,6 +3,7 @@
 import json
 from typing import List, Optional, Tuple, Any
 from sqlalchemy.ext.asyncio import AsyncSession
+from backend.services.vec_migration import get_vec_table_name
 from sqlalchemy.future import select
 from sqlalchemy.orm import aliased
 from sqlalchemy import text, func, case, delete, update, or_
@@ -232,22 +233,76 @@ async def get_chunks_by_resource_paginated(
     return items, total
 
 
+async def search_chunks_by_regex(
+        db: AsyncSession,
+        pattern: str,
+        kb_id: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20
+) -> Tuple[List[Any], int]:
+    """
+    使用正则表达式检索知识库切片内容。
+    使用 SQLite REGEXP 自定义函数。
+    返回: (结果列表, 总数) — 结果包含 Chunk 和所属 Resource 信息
+    """
+    # 构建匹配条件
+    content_match = kb_model.ResourceKBChunk.content.op("REGEXP")(pattern)
+
+    query = select(
+        kb_model.ResourceKBChunk.id.label("chunk_id"),
+        kb_model.ResourceKBChunk.content.label("chunk_content"),
+        kb_model.ResourceKBChunk.chunk_index.label("chunk_index"),
+        resource_model.Resource.id.label("resource_id"),
+        resource_model.Resource.name.label("resource_name"),
+    ).join(
+        resource_model.Resource,
+        kb_model.ResourceKBChunk.resource_id == resource_model.Resource.id
+    ).where(
+        content_match,
+        kb_model.ResourceKBChunk.status == kb_schemas.KBChunkStatus.COMPLETED.value
+    )
+
+    if kb_id:
+        query = query.filter(resource_model.Resource.kb_id == kb_id)
+
+    count_query = select(func.count()).select_from(query.subquery())
+    total_result = await db.execute(count_query)
+    total = total_result.scalar()
+
+    offset = (page - 1) * page_size
+    query = query.order_by(kb_model.ResourceKBChunk.chunk_index.asc()).offset(offset).limit(page_size)
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    return rows, total
+
+
 # --- Vector Operations (Raw SQL) ---
 
 async def insert_vector(
         db: AsyncSession,
         dimension: int,
-        vector: List[float]
+        vector: List[float],
+        kb_id: str,
+        resource_id: str
 ) -> int:
     """
     将向量插入到指定维度的虚拟表中，并返回生成的 rowid。
-    注意：sqlite-vec 的虚拟表可能不支持 RETURNING rowid，需使用 lastrowid 获取。
+    v1 schema: 带 kb_id + resource_id 双分区键。
     """
-    table_name = f"vec_dim_{dimension}"
+    table_name = get_vec_table_name(dimension)
     vector_json = json.dumps(vector)
 
-    stmt = text(f"INSERT INTO {table_name} (vector) VALUES (:vector)")
-    result = await db.execute(stmt, {"vector": vector_json})
+    stmt = text(
+        f"INSERT INTO {table_name} (kb_id, resource_id, vector) "
+        f"VALUES (:kb_id, :resource_id, :vector)"
+    )
+    result = await db.execute(stmt, {
+        "kb_id": kb_id,
+        "resource_id": resource_id,
+        "vector": vector_json,
+    })
 
     # 使用 result.lastrowid 获取插入后的 rowid
     rowid = result.lastrowid
@@ -266,7 +321,7 @@ async def delete_vectors(
     if not rowids:
         return
 
-    table_name = f"vec_dim_{dimension}"
+    table_name = get_vec_table_name(dimension)
     # 将 rowids 转换为逗号分隔的字符串，注意安全，rowids 是 int 列表
     rowids_str = ",".join(map(str, rowids))
 
@@ -279,13 +334,31 @@ async def search_vectors(
         db: AsyncSession,
         dimension: int,
         query_vector: List[float],
-        top_k: int
+        top_k: int,
+        kb_id: Optional[str] = None,
+        resource_id: Optional[str] = None
 ) -> List[Tuple[int, float]]:
     """
     在指定维度的向量表中搜索最近邻。
+    v1 schema: 支持按 kb_id 和 resource_id 分区键预过滤。
     """
-    table_name = f"vec_dim_{dimension}"
+    table_name = get_vec_table_name(dimension)
     vector_json = json.dumps(query_vector)
+
+    # 构建分区键过滤条件
+    where_parts = []
+    params: dict = {"query_vector": vector_json}
+
+    if kb_id is not None:
+        where_parts.append("kb_id = :kb_id")
+        params["kb_id"] = kb_id
+    if resource_id is not None:
+        where_parts.append("resource_id = :resource_id")
+        params["resource_id"] = resource_id
+
+    where_clause = ""
+    if where_parts:
+        where_clause = "AND " + " AND ".join(where_parts)
 
     # 使用 'AND k = {top_k}' 显式约束，解决 sqlite-vec 优化器问题
     sql = f"""
@@ -293,11 +366,72 @@ async def search_vectors(
         FROM {table_name}
         WHERE vector MATCH :query_vector
           AND k = {top_k}
+          {where_clause}
         ORDER BY distance
     """
 
     stmt = text(sql)
-    result = await db.execute(stmt, {"query_vector": vector_json})
+    result = await db.execute(stmt, params)
+    return result.all()
+
+
+async def search_vectors_with_chunk_filter(
+        db: AsyncSession,
+        dimension: int,
+        query_vector: List[float],
+        top_k: int,
+        kb_id: Optional[str] = None,
+        resource_id: Optional[str] = None,
+        index_start: Optional[int] = None,
+        index_end: Optional[int] = None
+) -> List[Tuple[int, float]]:
+    """
+    针对小数据集的向量搜索：JOIN vec 表和 chunk 表，
+    使用 vec_distance_cosine() 暴力计算距离，同时按 chunk_index 范围过滤。
+    不使用 vec0 的 MATCH KNN，而是全表扫描 + 距离排序。
+
+    适用于 resource_id 已限定的小数据集场景，
+    比先 MATCH 再后过滤更精确（不会因为 chunk_index 过滤丢掉近距离结果）。
+
+    返回: List[(vec_rowid, distance)]
+    """
+    table_name = get_vec_table_name(dimension)
+    vector_json = json.dumps(query_vector)
+
+    where_parts = []
+    params: dict = {"query_vector": vector_json}
+
+    # vec 表分区键过滤
+    if kb_id is not None:
+        where_parts.append(f"v.kb_id = :kb_id")
+        params["kb_id"] = kb_id
+    if resource_id is not None:
+        where_parts.append(f"v.resource_id = :resource_id")
+        params["resource_id"] = resource_id
+
+    # chunk 表 chunk_index 范围过滤
+    if index_start is not None:
+        where_parts.append("c.chunk_index >= :index_start")
+        params["index_start"] = index_start
+    if index_end is not None:
+        where_parts.append("c.chunk_index <= :index_end")
+        params["index_end"] = index_end
+
+    where_clause = ""
+    if where_parts:
+        where_clause = "WHERE " + " AND ".join(where_parts)
+
+    sql = f"""
+        SELECT v.rowid, vec_distance_cosine(v.vector, :query_vector) as distance
+        FROM {table_name} v
+        JOIN ResourceKBChunk c ON c.vector_id = v.rowid
+        {where_clause}
+        ORDER BY distance
+        LIMIT {top_k}
+    """
+
+    stmt = text(sql)
+    result = await db.execute(stmt, params)
     return result.all()
 
 
@@ -368,11 +502,15 @@ async def get_chunks_by_mixed_ids(
         db: AsyncSession,
         vector_ids: List[int],
         fts_ids: List[int],
-        kb_id_filter: Optional[str] = None
+        kb_id_filter: Optional[str] = None,
+        index_start: Optional[int] = None,
+        index_end: Optional[int] = None
 ) -> List[Any]:
     """
     根据 vector_id 列表或 fts_id 列表反查 Chunk 及其所属 Resource 和 KB 信息。
     用于混合检索结果的组装。
+    支持 chunk_index 范围后过滤：先做向量/关键词搜索，再在关联 Chunk 时
+    按 chunk_index 范围筛选，不使用 vec 表的 MATCH。
     """
     if not vector_ids and not fts_ids:
         return []
@@ -432,6 +570,12 @@ async def get_chunks_by_mixed_ids(
 
     if kb_id_filter:
         query = query.where(cte.c.ancestor_id == kb_id_filter)
+
+    # chunk_index 范围后过滤：不使用 MATCH，在关联查询中按距离结果的 chunk_index 筛选
+    if index_start is not None:
+        query = query.where(kb_model.ResourceKBChunk.chunk_index >= index_start)
+    if index_end is not None:
+        query = query.where(kb_model.ResourceKBChunk.chunk_index <= index_end)
 
     result = await db.execute(query)
     return result.all()
