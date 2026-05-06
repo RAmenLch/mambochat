@@ -156,7 +156,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
 
         if exception:
             if isinstance(exception, RuntimeError):
-                error_message = str(exception)
+                error_message = str(type(exception))+ ":" + str(exception)
             elif isinstance(exception, asyncio.CancelledError):
                 error_message = "生成被用户取消。"
             else:
