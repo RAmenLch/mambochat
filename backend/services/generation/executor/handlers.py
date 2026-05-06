@@ -171,7 +171,7 @@ async def handle_update_zip_history(
             sortOrder=999,
             type=schemas.enums.SubMessageType.ZIP_HISTORY.value,
             status=instruction.status,
-            config=schemas.message.SubMessageConfig(zip_enable=False, context_participation_length=0)
+            config=schemas.message.SubMessageConfig(zip_enable=instruction.zip_enable, context_participation_length=0)
         )
         updated_sub_message = await message_crud.create_sub_message(
             db, message_id=instruction.target_message_id, sub_message_data=create_schema, sub_message_id=instruction.sub_message_id

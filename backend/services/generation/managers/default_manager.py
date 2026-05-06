@@ -15,7 +15,8 @@ from backend.services.mcp_connection_manager import McpConnectionError
 
 from backend.services.generation.core.instructions import (
     BaseInstruction, CreateSubMessage, AppendToSubMessage,
-    SetFinalStatus, InterruptGeneration, FailSubMessagesByMessage, UpdateSubMessageConfig, UpdateSubMessageStatus
+    SetFinalStatus, InterruptGeneration, FailSubMessagesByMessage,
+    UpdateSubMessageConfig, UpdateSubMessageStatus, UpdateZipHistorySubMessage
 )
 from backend.services.generation.builders.director import LLMInputDirector
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
@@ -44,6 +45,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
         self._pending_hitl_tool_calls = []
         self._recover_from_error = recover_from_error
         self._last_finish_reason: Optional[str] = None
+        self._last_summarization_event: Optional[Dict] = None
 
         self._handlers: List[BaseStreamHandler] = [
             HitlHandler(),
@@ -58,6 +60,34 @@ class DefaultGenerateManager(AbstractGenerateManager):
     def _extract_run_uuid(lc_run_id: Optional[str]) -> Optional[str]:
         if not lc_run_id: return None
         return lc_run_id[len("lc_run--"):] if lc_run_id.startswith("lc_run--") else lc_run_id
+
+    @staticmethod
+    def _extract_summary_content(event: Dict) -> Optional[str]:
+        """Extract the pure summary text from a deepagents ``_summarization_event``.
+
+        The summary is embedded in a ``HumanMessage`` whose content follows a
+        structured template::
+
+            You are in the middle of a conversation that has been summarized.
+            ...
+            <summary>
+            {actual summary}
+            </summary>
+
+        This method strips the wrapper and returns only the inner summary.
+        """
+        summary_msg = event.get("summary_message")
+        if summary_msg is None:
+            return None
+        content = getattr(summary_msg, "content", None)
+        if not isinstance(content, str) or not content:
+            return None
+        import re
+        match = re.search(r"<summary>\s*(.*?)\s*</summary>", content, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+        # Fallback: return trimmed content if template is absent
+        return content.strip()
 
     async def _execute_generation(
             self, worker: AbstractGenerateWorker, chat_id: str, assistant_message_id: str
@@ -103,6 +133,11 @@ class DefaultGenerateManager(AbstractGenerateManager):
 
         try:
             async for mode, event in cancellable_aiter(worker.generate(llm_input), cancel_event):
+                # ── Summarization signal ──────────────────────────────────
+                if mode == "summarization":
+                    self._last_summarization_event = event  # last-wins: cumulative final state
+                    continue
+                # ── Normal handler chain ─────────────────────────────────
                 decoder = worker.resolve_decoder(event)
 
                 event_id: Optional[str] = None
@@ -133,6 +168,18 @@ class DefaultGenerateManager(AbstractGenerateManager):
                     break
         except asyncio.CancelledError:
             raise
+
+        # ── Post-generation: persist summarization as ZipHistory sub-message ──
+        if self._last_summarization_event:
+            summary_content = self._extract_summary_content(self._last_summarization_event)
+            if summary_content:
+                yield UpdateZipHistorySubMessage(
+                    sub_message_id=generate_uuid(),
+                    target_message_id=assistant_message_id,
+                    content=summary_content,
+                    status=schemas_enums.MessageStatus.COMPLETED,
+                    zip_enable=True,
+                )
 
         async for instruction in self._finalize_generation(is_interrupted=should_interrupt):
             yield instruction

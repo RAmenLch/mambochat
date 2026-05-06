@@ -145,9 +145,13 @@ class UniversalGraphWorker(AbstractGenerateWorker):
             if mode == "updates" and isinstance(event, dict):
                 if "model" in event:
                     model_update = event["model"]
-                    if isinstance(model_update, dict) and "messages" in model_update:
-                        for message in model_update["messages"]:
-                            yield mode, message
+                    if isinstance(model_update, dict):
+                        # Extract summarization event (complete cumulative state, last-wins)
+                        if "_summarization_event" in model_update:
+                            yield "summarization", model_update["_summarization_event"]
+                        if "messages" in model_update:
+                            for message in model_update["messages"]:
+                                yield mode, message
                 if "tools" in event:
                     tools_update = event["tools"]
                     if isinstance(tools_update, dict) and "messages" in tools_update:
@@ -156,4 +160,11 @@ class UniversalGraphWorker(AbstractGenerateWorker):
                 if "__interrupt__" in event or "HumanInTheLoopMiddleware.after_model" in event:
                     yield mode, event
             elif mode == "messages" and isinstance(event, (list, tuple)) and len(event) > 0:
-                yield mode, event[0]
+                msg = event[0]
+                meta = event[1] if len(event) > 1 else {}
+                # Filter out summarization model outputs (both chunks and final messages)
+                if isinstance(meta, dict) and meta.get("lc_source") == "summarization":
+                    continue
+                yield mode, msg
+            else:
+                pass

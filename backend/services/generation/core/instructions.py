@@ -109,3 +109,4 @@ class UpdateZipHistorySubMessage(BaseInstruction):
     target_message_id: str = Field(..., description="挂载的目标父消息ID")
     content: str
     status: MessageStatus
+    zip_enable: bool = Field(default=False, description="是否在下一轮上下文构建时自动启用压缩")
