@@ -25,8 +25,9 @@ from backend.services.generation.worker.abstract_worker import AbstractGenerateW
 from backend.services.generation.managers.stream_handlers.base_handler import StreamContext, BaseStreamHandler
 from backend.services.generation.managers.stream_handlers.handlers import (
     HitlHandler, TextAndReasoningHandler, RoundClosureHandler,
-    ToolExecutionHandler, ImageAndUsageHandler
+    ToolExecutionHandler, ImageAndUsageHandler, FinishReasonMonitorHandler
 )
+from backend.services.generation.managers.stream_handlers.finish_reason_classifier import FinishReasonClassifier
 
 
 class DefaultGenerateManager(AbstractGenerateManager):
@@ -42,13 +43,15 @@ class DefaultGenerateManager(AbstractGenerateManager):
         self._created_stream_ids: Set[str] = set()
         self._pending_hitl_tool_calls = []
         self._recover_from_error = recover_from_error
+        self._last_finish_reason: Optional[str] = None
 
         self._handlers: List[BaseStreamHandler] = [
             HitlHandler(),
             TextAndReasoningHandler(),
             RoundClosureHandler(),
             ToolExecutionHandler(),
-            ImageAndUsageHandler()
+            ImageAndUsageHandler(),
+            FinishReasonMonitorHandler()
         ]
 
     @staticmethod
@@ -121,6 +124,10 @@ class DefaultGenerateManager(AbstractGenerateManager):
                             continue
                         yield instruction
 
+                # 从 Handler 链中提取最后一轮 finish_reason (last-wins)
+                if context.last_finish_reason:
+                    self._last_finish_reason = context.last_finish_reason
+
                 if context.should_interrupt:
                     should_interrupt = True
                     break
@@ -146,6 +153,22 @@ class DefaultGenerateManager(AbstractGenerateManager):
 
         if not is_interrupted:
             yield SetFinalStatus(status=schemas_enums.MessageStatus.COMPLETED)
+
+        # 异常 finish_reason -> 生成 ERROR 子消息提示用户
+        if self._last_finish_reason:
+            user_msg = FinishReasonClassifier.get_user_message(self._last_finish_reason)
+            if user_msg:
+                from backend.schemas.message import ErrorContent
+                error_content = ErrorContent(message=user_msg, stack_trace="")
+                yield CreateSubMessage(
+                    sub_message_id=generate_uuid(),
+                    type=schemas_enums.SubMessageType.ERROR.value,
+                    sortOrder=97,
+                    status=schemas_enums.MessageStatus.COMPLETED,
+                    initial_content=error_content.to_json_string(),
+                    config={"context_participation_length": 0}
+                )
+            self._last_finish_reason = None
 
     async def _cleanup_on_exception(
             self, assistant_message_id: str, final_status: schemas_enums.MessageStatus,

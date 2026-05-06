@@ -11,6 +11,7 @@ from backend.services.generation.core.instructions import (
     SaveAndPersistFile, InterruptGeneration
 )
 from backend.services.generation.managers.stream_handlers.base_handler import BaseStreamHandler, StreamContext
+from backend.services.generation.managers.stream_handlers.finish_reason_monitor_handler import FinishReasonMonitorHandler
 
 
 class HitlHandler(BaseStreamHandler):
