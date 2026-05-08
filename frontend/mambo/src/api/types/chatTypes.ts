@@ -26,6 +26,7 @@ export interface SubMessageConfig {
   is_minimal?: boolean
   context_participation_length?: number
   zip_enable?: boolean | null
+  target_sub_msg_id?: string | null
 }
 
 export interface SubMessage {

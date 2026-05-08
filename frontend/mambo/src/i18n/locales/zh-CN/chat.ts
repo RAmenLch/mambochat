@@ -105,6 +105,7 @@ export default {
     showStack: '查看堆栈',
     hideStack: '收起堆栈',
     retryFromError: '从错误中恢复',
+    zipCoverageTip: '历史摘要自此往上覆盖（含本分区）',
     mcp: {
       invalidCall: '无效的工具调用',
       unknownTool: '未知工具',

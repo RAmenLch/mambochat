@@ -111,7 +111,8 @@ class MessageContextBuilder:
 
     def _apply_zip_history_logic(self, history: List[MessageSchema]) -> List[MessageSchema]:
         last_enabled_zip_index = -1
-        zip_content = None
+        zip_content: Optional[str] = None
+        target_sub_msg_id: Optional[str] = None
 
         for i in range(len(history) - 1, -1, -1):
             msg = history[i]
@@ -121,25 +122,54 @@ class MessageContextBuilder:
                     if config.get('zip_enable') is True:
                         last_enabled_zip_index = i
                         zip_content = sub.content
+                        target_sub_msg_id = config.get('target_sub_msg_id')
                         break
             if last_enabled_zip_index != -1:
                 break
 
-        if last_enabled_zip_index != -1 and zip_content:
-            zip_summary_prompt = "对之前的对话进行了总结摘要。" if self.language == "zh-CN" else "A summary of the previous conversation has been generated."
-            user_msg = MessageSchema(
-                role=schemas_enums.MessageRole.USER.value,
-                sub_messages=[SubMessageSchema(content=zip_summary_prompt,
-                                              type=schemas_enums.SubMessageType.NORMAL.value, config='{}')]
-            )
-            assistant_msg = MessageSchema(
-                role=schemas_enums.MessageRole.ASSISTANT.value,
-                sub_messages=[
-                    SubMessageSchema(content=zip_content, type=schemas_enums.SubMessageType.NORMAL.value, config='{}')]
-            )
-            return [user_msg, assistant_msg] + history[last_enabled_zip_index + 1:]
+        if last_enabled_zip_index == -1 or not zip_content:
+            return history
 
-        return history
+        zip_summary_prompt = "对之前的对话进行了总结摘要。" if self.language == "zh-CN" else "A summary of the previous conversation has been generated."
+        user_msg = MessageSchema(
+            role=schemas_enums.MessageRole.USER.value,
+            sub_messages=[SubMessageSchema(content=zip_summary_prompt,
+                                          type=schemas_enums.SubMessageType.NORMAL.value, config='{}')]
+        )
+        assistant_msg = MessageSchema(
+            role=schemas_enums.MessageRole.ASSISTANT.value,
+            sub_messages=[
+                SubMessageSchema(content=zip_content, type=schemas_enums.SubMessageType.NORMAL.value, config='{}')]
+        )
+
+        if target_sub_msg_id:
+            # ── SubMessage 粒度：保留 zip 所在父消息中 target_sub_msg_id 之后的子消息 ──
+            zip_parent_msg = history[last_enabled_zip_index]
+            sorted_subs = sorted(
+                zip_parent_msg.sub_messages,
+                key=lambda s: (s.createdAt or dt.min, s.sortOrder),
+            )
+            target_found = False
+            kept_subs: List[SubMessageSchema] = []
+            for sub in sorted_subs:
+                if sub.id == target_sub_msg_id:
+                    target_found = True
+                    continue  # target_sub_msg_id 本身已被摘要覆盖，不保留
+                if target_found:
+                    kept_subs.append(sub)
+            if kept_subs:
+                trimmed_msg = MessageSchema(
+                    role=zip_parent_msg.role,
+                    id=zip_parent_msg.id,
+                    sub_messages=kept_subs,
+                )
+                return [user_msg, assistant_msg, trimmed_msg] + history[last_enabled_zip_index + 1:]
+            else:
+                # 没有剩余的 sub_message 则视为与 message 粒度一致
+                return [user_msg, assistant_msg] + history[last_enabled_zip_index + 1:]
+        else:
+            # ── Message 粒度：zip 覆盖 target_message_id（包含）之前的所有消息 ──
+            return [user_msg, assistant_msg] + history[last_enabled_zip_index + 1:]
 
     def _apply_slicing(self, history: List[MessageSchema]) -> List[MessageSchema]:
         if not history:
@@ -196,6 +226,7 @@ class MessageContextBuilder:
 
         if self.flatten_history and payload:
             flattened_content = ""
+            last_id = payload[-1].get("id") if payload else None
             for msg in payload:
                 role_label = "User" if msg["role"] == "user" else "Assistant"
                 raw_content = msg.get("content")
@@ -210,7 +241,10 @@ class MessageContextBuilder:
                 if content_str:
                     flattened_content += f"{role_label}: {content_str}\n\n"
 
-            payload = [{"role": "user", "content": flattened_content.strip()}]
+            flattened_msg: Dict[str, Any] = {"role": "user", "content": flattened_content.strip()}
+            if last_id:
+                flattened_msg["id"] = last_id
+            payload = [flattened_msg]
 
         if self.append_prompt:
             payload.append({"role": "user", "content": self.append_prompt})
@@ -225,7 +259,7 @@ class MessageContextBuilder:
         )
 
         rounds: List[Dict[str, List]] = []
-        current_round: Dict[str, List] = {"content_parts": [], "tool_calls": [], "tool_results": []}
+        current_round: Dict[str, List] = {"content_parts": [], "tool_calls": [], "tool_results": [], "last_sub_id": None}
         seen_tool_in_round = False
 
         for sub in sorted_subs:
@@ -239,20 +273,23 @@ class MessageContextBuilder:
                         current_round["tool_calls"].append(tool_content.to_openai_tool_call())
                         result_msg = tool_content.to_openai_tool_result_message()
                         if result_msg:
+                            result_msg["id"] = sub.id
                             current_round["tool_results"].append(result_msg)
+                        current_round["last_sub_id"] = sub.id
                     except (ValueError, TypeError):
                         continue
             else:
                 if seen_tool_in_round:
                     if current_round["content_parts"] or current_round["tool_calls"]:
                         rounds.append(current_round)
-                    current_round = {"content_parts": [], "tool_calls": [], "tool_results": []}
+                    current_round = {"content_parts": [], "tool_calls": [], "tool_results": [], "last_sub_id": None}
                     seen_tool_in_round = False
 
                 if self._should_include_sub_message(sub, recency_rank):
                     part = await self._convert_sub_message_to_part(sub)
                     if part:
                         current_round["content_parts"].append(part)
+                        current_round["last_sub_id"] = sub.id
 
         if current_round["content_parts"] or current_round["tool_calls"]:
             rounds.append(current_round)
@@ -260,6 +297,9 @@ class MessageContextBuilder:
         result = []
         for round_data in rounds:
             assistant_msg: Dict[str, Any] = {"role": "assistant"}
+            last_id = round_data.get("last_sub_id")
+            if last_id:
+                assistant_msg["id"] = last_id
 
             # 从 content_parts 中分离 reasoning_text（REASONING 类型子消息）
             # 与普通 content 分开，映射到独立的 API 字段
@@ -293,6 +333,7 @@ class MessageContextBuilder:
 
     async def _convert_message_to_llm_dict(self, msg: MessageSchema, recency_rank: int) -> Optional[Dict[str, Any]]:
         content_parts = []
+        last_sub_id: Optional[str] = None
 
         for sub in msg.sub_messages:
             if not self._should_include_sub_message(sub, recency_rank):
@@ -304,11 +345,14 @@ class MessageContextBuilder:
             part = await self._convert_sub_message_to_part(sub)
             if part:
                 content_parts.append(part)
+                last_sub_id = sub.id
 
         if not content_parts:
             return None
 
         res: Dict[str, Any] = {"role": msg.role}
+        if last_sub_id:
+            res["id"] = last_sub_id
 
         if msg.role == "tool":
             tool_call_id = getattr(msg, 'tool_call_id', None)
@@ -455,6 +499,8 @@ class MessageContextBuilder:
                     and isinstance(msg.get("content"), str)):
 
                 merged[-1]["content"] += "\n" + msg["content"]
+                if "id" in msg:
+                    merged[-1]["id"] = msg["id"]
             else:
                 merged.append(msg)
         return merged

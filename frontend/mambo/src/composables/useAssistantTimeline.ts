@@ -135,6 +135,74 @@ export function useAssistantTimeline(message: Ref<Message>) {
     message.value.sub_messages.find(sm => sm.type === 'ZipHistory') || null
   );
 
+  /**
+   * 计算需要显示 ZipHistory 覆盖指示器的 group ID 集合
+   * 前置条件：有 ZipHistory + 有 target_sub_msg_id
+   * 规则：
+   *   - McpTool/ReviewTool/AskUser → 只在包含该 tool 的 group 上标记
+   *   - Normal → 在该 group + 比它早的最晚 Reasoning group 上各标记
+   *   - Reasoning → 在该 group + 比它早的最晚 Normal group 上各标记
+   */
+  const zipCoverageGroupIds = computed<Set<string>>(() => {
+    const set = new Set<string>();
+
+    const zipSub = zipHistorySubMessage.value;
+    if (!zipSub) return set;
+    const targetSubMsgId = zipSub.config?.target_sub_msg_id;
+    if (!targetSubMsgId) return set;
+
+    // 找 target_sub_msg_id 对应的 sub-message
+    const targetSub = message.value.sub_messages.find(sm => sm.id === targetSubMsgId);
+    if (!targetSub) return set;
+
+    const allGroups = [
+      ...timeline.value.reasoningGroups,
+      ...timeline.value.normalGroups,
+    ];
+
+    // 找到包含 target_sub_msg_id 的 group
+    const targetGroup = allGroups.find(g => {
+      if (g.textSubMessage?.id === targetSubMsgId) return true;
+      if (g.toolSubMessages.some(t => t.id === targetSubMsgId)) return true;
+      return false;
+    });
+
+    if (!targetGroup) return set;
+    set.add(targetGroup.id);
+
+    // McpTool/ReviewTool/AskUser → 只标记所在 group，不额外连线
+    const isToolTarget = targetSub.type === 'McpTool'
+      || targetSub.type === 'ReviewTool'
+      || targetSub.type === 'AskUser';
+    if (isToolTarget) return set;
+
+    // Normal 或 Reasoning → 需要找另一个类型中 "比目标早且最晚" 的 group
+    const targetIsReasoning = targetSub.type === 'Reasoning';
+    const targetCreatedAt = new Date(targetSub.createdAt).getTime();
+
+    const otherGroups = targetIsReasoning
+      ? timeline.value.normalGroups
+      : timeline.value.reasoningGroups;
+
+    let bestMatch: BubbleSectionGroup | null = null;
+    let bestTime = -Infinity;
+
+    for (const g of otherGroups) {
+      if (!g.textSubMessage) continue;
+      const gTime = new Date(g.textSubMessage.createdAt).getTime();
+      if (gTime < targetCreatedAt && gTime > bestTime) {
+        bestTime = gTime;
+        bestMatch = g;
+      }
+    }
+
+    if (bestMatch) {
+      set.add(bestMatch.id);
+    }
+
+    return set;
+  });
+
   const suggestSubMessage = computed(() =>
     message.value.sub_messages.find(sm => sm.type === 'Suggest') || null
   );
@@ -169,6 +237,7 @@ export function useAssistantTimeline(message: Ref<Message>) {
     normalSection,
     usageSubMessages,
     zipHistorySubMessage,
+    zipCoverageGroupIds,
     suggestSubMessage,
     errorSubMessages,
     isReasoningMinimized,

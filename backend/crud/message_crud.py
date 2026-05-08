@@ -3,7 +3,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
-from sqlalchemy import update
+from sqlalchemy import update, delete as sa_delete
 from typing import List, Optional
 import json
 from datetime import datetime, timezone
@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from backend.models import chat_model
 from backend import schemas
 from backend.models.chat_model import SubMessage
-from backend.schemas.enums import MessageStatus
+from backend.schemas.enums import MessageStatus, SubMessageType
 from backend.config.timezone_config import get_configured_now, TZ
 
 
@@ -415,3 +415,60 @@ async def append_to_sub_message_content(db: AsyncSession, sub_message_id: str, c
     )
     await db.execute(stmt)
     await db.commit()
+
+
+async def get_sub_message_id_by_tool_call_id(
+    db: AsyncSession,
+    chat_id: str,
+    tool_call_id: str,
+) -> Optional[str]:
+    """通过 tool_call_id 在 MCP_TOOL 子消息的 content JSON 中查找 sub_message_id。
+
+    tool_call_id 存储在 SubMessage.content 的 McpToolContent JSON 中。
+    先通过 chat_id 缩范围 + content.contains 预过滤，再解析 JSON 精确匹配。
+    """
+    from backend.schemas.enums import SubMessageType
+    from backend.models.chat_model import Message
+
+    stmt = (
+        select(SubMessage.id, SubMessage.content)
+        .join(Message, SubMessage.messageId == Message.id)
+        .filter(
+            Message.chatId == chat_id,
+            SubMessage.type == SubMessageType.MCP_TOOL.value,
+            SubMessage.content.contains(tool_call_id),
+        )
+    )
+    result = await db.execute(stmt)
+    for row in result:
+        try:
+            content = json.loads(row.content)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if content.get("tool_call_id") == tool_call_id:
+            return row.id
+
+    return None
+
+
+async def delete_zip_history_by_message_id(
+    db: AsyncSession,
+    message_id: str,
+    exclude_id: Optional[str] = None,
+) -> int:
+    """
+    删除指定 message_id 下所有 ZipHistory 类型的子消息。
+    可通过 exclude_id 排除某个子消息 ID（用于更新场景：防止删掉正在更新的那一条）。
+    返回删除的行数。
+    """
+    stmt = (
+        sa_delete(SubMessage)
+        .where(SubMessage.messageId == message_id)
+        .where(SubMessage.type == SubMessageType.ZIP_HISTORY.value)
+    )
+    if exclude_id:
+        stmt = stmt.where(SubMessage.id != exclude_id)
+
+    result = await db.execute(stmt)
+    await db.commit()
+    return result.rowcount

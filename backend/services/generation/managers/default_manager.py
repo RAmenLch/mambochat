@@ -2,12 +2,16 @@
 
 import asyncio
 import json
+import logging
+import re
 import traceback
-from typing import AsyncGenerator, Optional, Dict, List, Set
+from typing import AsyncGenerator, Optional, Dict, List, Set, Tuple, Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage, BaseMessage
 from langchain_core.tools import BaseTool
 
+from backend.crud import message_crud
 from backend.models.base_model import generate_uuid
 from backend.schemas import enums as schemas_enums
 from backend.services.stream_manager_service import stream_manager, cancellable_aiter
@@ -29,6 +33,9 @@ from backend.services.generation.managers.stream_handlers.handlers import (
     ToolExecutionHandler, ImageAndUsageHandler, FinishReasonMonitorHandler
 )
 from backend.services.generation.managers.stream_handlers.finish_reason_classifier import FinishReasonClassifier
+from services.generation.core.llm_io import SummarizationEventInfo
+
+logger = logging.getLogger(__name__)
 
 
 class DefaultGenerateManager(AbstractGenerateManager):
@@ -45,7 +52,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
         self._pending_hitl_tool_calls = []
         self._recover_from_error = recover_from_error
         self._last_finish_reason: Optional[str] = None
-        self._last_summarization_event: Optional[Dict] = None
+        self._last_summarization_event: Optional[SummarizationEventInfo] = None
 
         self._handlers: List[BaseStreamHandler] = [
             HitlHandler(),
@@ -62,8 +69,8 @@ class DefaultGenerateManager(AbstractGenerateManager):
         return lc_run_id[len("lc_run--"):] if lc_run_id.startswith("lc_run--") else lc_run_id
 
     @staticmethod
-    def _extract_summary_content(event: Dict) -> Optional[str]:
-        """Extract the pure summary text from a deepagents ``_summarization_event``.
+    def _extract_summary_content(event_info: SummarizationEventInfo) -> Optional[str]:
+        """Extract the pure summary text from a SummarizationEventInfo.
 
         The summary is embedded in a ``HumanMessage`` whose content follows a
         structured template::
@@ -76,18 +83,70 @@ class DefaultGenerateManager(AbstractGenerateManager):
 
         This method strips the wrapper and returns only the inner summary.
         """
+        event = event_info.event
         summary_msg = event.get("summary_message")
         if summary_msg is None:
             return None
         content = getattr(summary_msg, "content", None)
         if not isinstance(content, str) or not content:
             return None
-        import re
         match = re.search(r"<summary>\s*(.*?)\s*</summary>", content, re.DOTALL)
         if match:
             return match.group(1).strip()
         # Fallback: return trimmed content if template is absent
         return content.strip()
+
+    async def _resolve_zip_target_ids(
+        self,
+        chat_id: str,
+        last_zip_message: BaseMessage,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """从 last_zip_message 解析 target_msg_id 和 target_sub_msg_id。
+
+        通过 DB 查询将 LangChain BaseMessage 映射回 Message / SubMessage 表的主键。
+        使用 isinstance 类型收窄，拒绝鸭子类型访问。
+        """
+        # ── ToolMessage: 通过 tool_call_id 在 MCP_TOOL 子消息的 content JSON 中查找 ──
+        if isinstance(last_zip_message, ToolMessage):
+            tool_call_id: str = last_zip_message.tool_call_id
+            return await self._find_target_by_tool_call_id(chat_id, tool_call_id)
+
+        # ── HumanMessage / AIMessage: 通过 id（即 sub_message ID）查 SubMessage 表 ──
+        if isinstance(last_zip_message, (HumanMessage, AIMessage)):
+            msg_id: str = last_zip_message.id
+            return await self._find_target_by_sub_msg_id(msg_id)
+
+        # ── 其他类型（如 SystemMessage）没有对应数据库记录 ──
+        return None, None
+
+    async def _find_target_by_tool_call_id(
+        self,
+        chat_id: str,
+        tool_call_id: str,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """通过 tool_call_id 在 MCP_TOOL 子消息中查找，返回 (messageId, sub_msg_id)。"""
+        sub_msg_id = await message_crud.get_sub_message_id_by_tool_call_id(
+            self.db_session, chat_id, tool_call_id,
+        )
+        if sub_msg_id is None:
+            return None, None
+        sub_msg = await message_crud.get_sub_message(self.db_session, sub_msg_id)
+        if sub_msg is None:
+            return None, None
+        return sub_msg.messageId, sub_msg.id
+
+    async def _find_target_by_sub_msg_id(
+        self,
+        sub_msg_id: str,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        pn = sub_msg_id[:36]+"-N"
+        not_pn = sub_msg_id[:36]
+        sub_msg = await message_crud.get_sub_message(self.db_session, pn)
+        if sub_msg is None:
+            sub_msg = await message_crud.get_sub_message(self.db_session, not_pn)
+        if sub_msg is None:
+            return None, None
+        return sub_msg.messageId, sub_msg.id
 
     async def _execute_generation(
             self, worker: AbstractGenerateWorker, chat_id: str, assistant_message_id: str
@@ -171,15 +230,29 @@ class DefaultGenerateManager(AbstractGenerateManager):
 
         # ── Post-generation: persist summarization as ZipHistory sub-message ──
         if self._last_summarization_event:
-            summary_content = self._extract_summary_content(self._last_summarization_event)
+            event_info = self._last_summarization_event
+            summary_content = self._extract_summary_content(event_info)
             if summary_content:
-                yield UpdateZipHistorySubMessage(
-                    sub_message_id=generate_uuid(),
-                    target_message_id=assistant_message_id,
-                    content=summary_content,
-                    status=schemas_enums.MessageStatus.COMPLETED,
-                    zip_enable=True,
+                # 由 Manager 负责从 last_zip_message 推导 target_msg_id / target_sub_msg_id
+                target_msg_id, target_sub_msg_id = await self._resolve_zip_target_ids(
+                    chat_id, event_info.last_zip_message,
                 )
+                if not target_msg_id or not target_sub_msg_id:
+                    logger.warning(
+                        "DefaultGenerateManager: unable to resolve target_msg_id / target_sub_msg_id "
+                        "from last_zip_message (id=%s, type=%s) — skipping ZipHistory creation",
+                        getattr(event_info.last_zip_message, "id", None),
+                        type(event_info.last_zip_message).__name__,
+                    )
+                else:
+                    yield UpdateZipHistorySubMessage(
+                        sub_message_id=generate_uuid(),
+                        target_message_id=target_msg_id,
+                        target_sub_msg_id=target_sub_msg_id,
+                        content=summary_content,
+                        status=schemas_enums.MessageStatus.COMPLETED,
+                        zip_enable=True,
+                    )
 
         async for instruction in self._finalize_generation(is_interrupted=should_interrupt):
             yield instruction

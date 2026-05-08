@@ -104,9 +104,15 @@ class UpdateZipHistorySubMessage(BaseInstruction):
     """
     指令：创建或更新一个 ZipHistory 类型的子消息。
     专属业务指令，用于对话历史压缩场景。
+
+    支持两种粒度：
+    1. message 粒度：target_sub_msg_id 为 None，表示压缩覆盖 target_message_id（包含）之前的所有消息
+    2. submessage 粒度：target_sub_msg_id 有值，表示压缩覆盖 target_message_id（不包含）之前的所有消息，
+       以及 target_message_id 内 target_sub_msg_id（包含）之前的所有子消息
     """
     sub_message_id: str = Field(..., description="预生成的子消息UUID")
     target_message_id: str = Field(..., description="挂载的目标父消息ID")
+    target_sub_msg_id: Optional[str] = Field(default=None, description="【可选】目标子消息ID，用于submessage粒度压缩")
     content: str
     status: MessageStatus
     zip_enable: bool = Field(default=False, description="是否在下一轮上下文构建时自动启用压缩")

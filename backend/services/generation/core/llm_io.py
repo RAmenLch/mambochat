@@ -2,6 +2,9 @@
 
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Union
+
+from deepagents.middleware.summarization import SummarizationEvent
+from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, Field, ConfigDict
 from langchain_core.tools import BaseTool
 
@@ -144,3 +147,23 @@ class LLMInput(BaseModel):
     context: MessageContext
     agent_config: AgentConfig
     run_time_config: RunTimeConfig
+
+
+
+class SummarizationEventInfo(BaseModel):
+    """Captures a summarization/compaction event emitted by the graph worker.
+
+    Attributes:
+        last_zip_message: The last message *before* the summarization cutoff —
+            i.e. ``state_messages[cutoff_index - 1]``.  Used by the manager to
+            derive ``target_msg_id`` / ``target_sub_msg_id`` for persisting the
+            ``ZipHistory`` sub-message.
+        event: The raw ``SummarizationEvent`` dict produced by the deepagents
+            summarization middleware, containing ``cutoff_index``,
+            ``summary_message``, and ``file_path``.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    last_zip_message: BaseMessage
+    event: SummarizationEvent

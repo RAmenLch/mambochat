@@ -1,10 +1,11 @@
 import json
+import traceback
 from typing import AsyncGenerator
 from langchain_core.messages import AIMessage
 
 from backend.models.base_model import generate_uuid
 from backend.schemas import enums as schemas_enums
-from backend.schemas.message import ReviewToolContent, AskUserContent
+from backend.schemas.message import ErrorContent, ReviewToolContent, AskUserContent
 from backend.services.generation.core.instructions import (
     BaseInstruction, CreateSubMessage, AppendToSubMessage,
     UpdateSubMessageConfig, UpdateSubMessageStatus,
@@ -196,7 +197,7 @@ class ImageAndUsageHandler(BaseStreamHandler):
         if image_data:
             url = image_data.get("image_url", {}).get("url")
             if url and url.startswith("data:image"):
-                async for inst in self._handle_image(url, context.created_stream_ids):
+                async for inst in self._handle_image(url):
                     yield inst
 
         # 2. 用量统计
@@ -204,7 +205,7 @@ class ImageAndUsageHandler(BaseStreamHandler):
         if usage_data:
             context.final_usage_data.update(usage_data)
 
-    async def _handle_image(self, base64_url: str, created_ids: set) -> AsyncGenerator[BaseInstruction, None]:
+    async def _handle_image(self, base64_url: str) -> AsyncGenerator[BaseInstruction, None]:
         try:
             header, encoded_data = base64_url.split(',', 1) if ',' in base64_url else ("data:image/png;", base64_url)
             mime_type = header.split(';')[0].split(':')[1]
@@ -219,6 +220,15 @@ class ImageAndUsageHandler(BaseStreamHandler):
                 sortOrder=2, status=schemas_enums.MessageStatus.COMPLETED, initial_content=file_id
             )
         except Exception as e:
-            content_ids = [sid for sid in created_ids if sid.endswith('-N')]
-            if content_ids:
-                yield AppendToSubMessage(sub_message_id=content_ids[-1], content=f"\n\n**处理生成图片时出错: {e}**")
+            error_content = ErrorContent(
+                message=f"处理生成图片时出错: {e}",
+                stack_trace=traceback.format_exc()
+            )
+            yield CreateSubMessage(
+                sub_message_id=generate_uuid(),
+                type=schemas_enums.SubMessageType.ERROR.value,
+                sortOrder=97,
+                status=schemas_enums.MessageStatus.COMPLETED,
+                initial_content=error_content.to_json_string(),
+                config={"context_participation_length": 0}
+            )

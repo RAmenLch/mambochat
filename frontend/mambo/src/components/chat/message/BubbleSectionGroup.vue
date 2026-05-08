@@ -51,6 +51,17 @@
         </span>
       </div>
     </div>
+
+    <!-- Zip History 覆盖指示器 -->
+    <div v-if="showZipCoverage" class="zip-coverage-indicator">
+      <el-tooltip :content="$t('chat.message.zipCoverageTip')" placement="top" :show-after="300">
+        <div class="zip-coverage-arrow">
+          <svg width="16" height="10" viewBox="0 0 16 10" fill="none">
+            <path d="M8 1L14 9H2L8 1Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+          </svg>
+        </div>
+      </el-tooltip>
+    </div>
   </div>
 </template>
 
@@ -71,8 +82,10 @@ const props = withDefaults(defineProps<{
   isGenerating: boolean;
   isInactive: boolean;
   isReasoning?: boolean;
+  showZipCoverage?: boolean;
 }>(), {
   isReasoning: false,
+  showZipCoverage: false,
 });
 
 const emit = defineEmits<{
@@ -225,5 +238,28 @@ function isToolError(tool: SubMessage): boolean {
 
 .minimized-item-title {
   white-space: nowrap;
+}
+
+/* ========== Zip History 覆盖指示器 ========== */
+.zip-coverage-indicator {
+  display: flex;
+  justify-content: flex-start;
+  padding-top: 6px;
+  margin-top: 4px;
+  padding-left: 4px;
+}
+
+.zip-coverage-arrow {
+  color: var(--el-color-success-light-3);
+  cursor: help;
+  transition: color 0.2s, transform 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.zip-coverage-arrow:hover {
+  color: var(--el-color-success);
+  transform: translateY(-1px);
 }
 </style>

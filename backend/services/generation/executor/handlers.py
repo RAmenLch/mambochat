@@ -156,12 +156,30 @@ async def handle_update_chat_name(
 async def handle_update_zip_history(
     instruction: UpdateZipHistorySubMessage, chat_id: str, assistant_message_id: str, db: AsyncSession
 ) -> None:
+    # 确保同一个 message 最多只有一个 ZipHistory：先删除该 message 下所有旧的 ZipHistory
+    # （排除当前 sub_message_id，因为 Manager 复用已有 ID 重压缩时不应删掉自己）
+    await message_crud.delete_zip_history_by_message_id(
+        db,
+        message_id=instruction.target_message_id,
+        exclude_id=instruction.sub_message_id,
+    )
+
     existing = await message_crud.get_sub_message(db, instruction.sub_message_id)
+
+    # 构建 config，包含 zip_enable 和 target_sub_msg_id（如果有）
+    config_kwargs = {
+        "zip_enable": instruction.zip_enable,
+        "context_participation_length": 0,
+    }
+    if instruction.target_sub_msg_id:
+        config_kwargs["target_sub_msg_id"] = instruction.target_sub_msg_id
 
     updated_sub_message = None
     if existing:
         update_schema = schemas.message.SubMessageUpdate(
-            content=instruction.content, status=instruction.status
+            content=instruction.content,
+            status=instruction.status,
+            config=schemas.message.SubMessageConfig(**config_kwargs),
         )
         updated_sub_message = await message_crud.update_sub_message(db, instruction.sub_message_id, update_schema)
     else:
@@ -171,7 +189,7 @@ async def handle_update_zip_history(
             sortOrder=999,
             type=schemas.enums.SubMessageType.ZIP_HISTORY.value,
             status=instruction.status,
-            config=schemas.message.SubMessageConfig(zip_enable=instruction.zip_enable, context_participation_length=0)
+            config=schemas.message.SubMessageConfig(**config_kwargs)
         )
         updated_sub_message = await message_crud.create_sub_message(
             db, message_id=instruction.target_message_id, sub_message_data=create_schema, sub_message_id=instruction.sub_message_id
