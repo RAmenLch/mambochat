@@ -46,6 +46,7 @@
               :parent-message="message"
               :is-generating="isGenerating"
               :is-inactive="isInactive(group)"
+              :show-zip-coverage="zipCoverageGroupIds.has(group.id)"
               is-reasoning
               @edit="(subMsg, payload) => $emit('edit', subMsg, payload)"
               @copy="(subMsg) => $emit('copy', subMsg)"
@@ -66,6 +67,7 @@
             :parent-message="message"
             :is-generating="isGenerating"
             :is-inactive="isInactive(group)"
+            :show-zip-coverage="zipCoverageGroupIds.has(group.id)"
             @edit="(subMsg, payload) => $emit('edit', subMsg, payload)"
             @copy="(subMsg) => $emit('copy', subMsg)"
             @open-tool-dialog="(toolId) => $emit('open-tool-dialog', toolId)"
@@ -157,6 +159,7 @@ const {
   isReasoningMinimized,
   hasPendingReviews,
   errorSubMessages,
+  zipCoverageGroupIds,
 } = useAssistantTimeline(messageRef);
 
 const isBubbleCollapsed = ref(false);

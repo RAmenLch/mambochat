@@ -43,6 +43,19 @@
             </el-select>
           </el-form-item>
 
+          <el-form-item>
+            <template #label>
+              <span>{{ $t('kb.config.labels.dimension') }}</span>
+              <el-tooltip
+                :content="$t('kb.config.dimensionTooltip')"
+                placement="top"
+              >
+                <el-icon class="label-icon"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </template>
+            <el-input :model-value="currentDimension" disabled />
+          </el-form-item>
+
           <el-form-item prop="embeddingRateLimit">
             <template #label>
               <span>{{ $t('kb.config.labels.rateLimit') }}</span>
@@ -192,6 +205,15 @@ const rules = computed<FormRules>(() => ({
 
 const embeddingModels = computed(() => {
   return providerStore.allModels.filter((m) => m.model_type === 'embedding')
+})
+
+// 知识库资源的向量维度（创建时固化，不可修改）
+const currentDimension = computed(() => {
+  const dim = currentAttributes.value.dimension
+  if (dim != null && dim !== '') {
+    return String(dim)
+  }
+  return '—'
 })
 
 const findNodeById = (nodes: ResourceNode[], id: string): ResourceNode | null => {

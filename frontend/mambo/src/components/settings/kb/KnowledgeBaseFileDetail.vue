@@ -214,6 +214,20 @@
                     </div>
                   </div>
                 </div>
+
+                <!-- 任务级别错误信息 -->
+                <div
+                  v-if="statusInfo?.file_status === 'FAILED' && taskErrorMessage"
+                  class="error-info-area"
+                >
+                  <el-alert
+                    :title="$t('kb.task.errorInfo')"
+                    :description="taskErrorMessage"
+                    type="error"
+                    show-icon
+                    :closable="false"
+                  />
+                </div>
               </div>
               <el-skeleton v-else :rows="5" animated />
             </el-card>
@@ -246,6 +260,14 @@
                       {{ chunk.status }}
                     </el-tag>
                   </div>
+                </div>
+                <!-- 单个切片失败原因 -->
+                <div
+                  v-if="chunk.status === 'FAILED' && chunk.error_message"
+                  class="chunk-error-line"
+                >
+                  <span class="chunk-error-label">{{ $t('kb.chunk.error') }}:</span>
+                  <span class="chunk-error-text">{{ chunk.error_message }}</span>
                 </div>
                 <div class="chunk-body">
                   <div
@@ -362,6 +384,18 @@ const progressStatus = computed(() => {
   if (s === 'STOPPED') return 'warning'
   if (s === 'COMPLETED') return 'success'
   return ''
+})
+
+/** 任务级别错误信息：优先来自 statusInfo，回退到本地填充 */
+const taskErrorMessage = computed(() => {
+  if (!statusInfo.value) return null
+  // SSE 推送的 error_message（由后端 KBProcessingStatus.error_message 提供）
+  if (statusInfo.value.error_message) return statusInfo.value.error_message
+  // 回退：如果没有任何切片数据但有 failed_chunks，给提示
+  if (statusInfo.value.file_status === 'FAILED' && statusInfo.value.failed_chunks > 0) {
+    return t('kb.task.noErrorDetail')
+  }
+  return null
 })
 
 const statusLabel = computed(() => {
@@ -907,4 +941,44 @@ onMounted(async () => {
   display: flex;
   justify-content: flex-end;
 }
-</style>
+
+/* Error Info Styles */
+.error-info-area {
+  width: 100%;
+  margin-top: 12px;
+  padding: 0 8px;
+}
+
+.error-info-area :deep(.el-alert__description) {
+  font-family: monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin-top: 4px;
+}
+
+.chunk-error-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  background-color: var(--el-color-danger-light-9);
+  border-left: 3px solid var(--el-color-danger);
+  border-radius: 3px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.chunk-error-label {
+  color: var(--el-color-danger);
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.chunk-error-text {
+  color: var(--el-text-color-primary);
+  word-break: break-all;
+  font-family: monospace;
+}</style>

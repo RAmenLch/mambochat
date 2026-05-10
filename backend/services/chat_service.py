@@ -76,7 +76,8 @@ async def duplicate_chat_with_messages(
                 sortOrder=msg.sortOrder,
                 chatId=new_chat.id,
                 parentId=last_new_msg_id,
-                lastActiveAt=msg.lastActiveAt
+                lastActiveAt=msg.lastActiveAt,
+                createdAt=msg.createdAt
             )
             db.add(new_msg)
             await db.flush()
@@ -95,7 +96,8 @@ async def duplicate_chat_with_messages(
                         type=sub.type,
                         config=sub.config,
                         status=safe_status,
-                        messageId=new_msg.id
+                        messageId=new_msg.id,
+                        createdAt=sub.createdAt
                     )
                 )
             db.add_all(new_sub_messages)

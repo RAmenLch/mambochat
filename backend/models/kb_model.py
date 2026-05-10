@@ -21,6 +21,9 @@ class ResourceKBChunk(Base):
     # 状态: PENDING, COMPLETED, FAILED
     status = Column(String(20), nullable=False, default="PENDING", index=True)
 
+    # 向量化失败的具体原因（仅 FAILED 时有值）
+    error_message = Column(TEXT, nullable=True)
+
     # 关联向量表的 rowid，仅当 status 为 COMPLETED 时有效
     vector_id = Column(Integer, nullable=True)
 

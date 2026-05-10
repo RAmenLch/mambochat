@@ -105,6 +105,7 @@ export default {
     showStack: 'View Stack Trace',
     hideStack: 'Hide Stack Trace',
     retryFromError: 'Recover from Error',
+    zipCoverageTip: 'History summary covers everything above this section (inclusive)',
     mcp: {
       invalidCall: 'Invalid tool call',
       unknownTool: 'Unknown tool',

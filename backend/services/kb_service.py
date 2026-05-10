@@ -515,9 +515,8 @@ class KnowledgeBaseService:
             meta_config = json.loads(model.meta_config) if model.meta_config else {}
             dimension = meta_config.get("embedding_dimension")
 
-            supported_dims = [384, 768, 1024, 1536, 2560, 3072, 4096]
-            if dimension not in supported_dims:
-                raise ValueError(f"Model dimension {dimension} is not supported. Supported: {supported_dims}")
+            if dimension not in SUP_DIM:
+                raise ValueError(f"Model dimension {dimension} is not supported. Supported: {SUP_DIM}")
 
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
@@ -637,7 +636,8 @@ class KnowledgeBaseService:
         return stats
 
     async def _publish_status(self, resource_id: str, status: KBFileStatus,
-                              total: int, completed: int, failed: int, stopped: int):
+                              total: int, completed: int, failed: int, stopped: int,
+                              error_message: str = None):
         """
         辅助方法：构建统一的 KBProcessingStatus 并推送。
         """
@@ -650,7 +650,8 @@ class KnowledgeBaseService:
             completed_chunks=completed,
             failed_chunks=failed,
             stopped_chunks=stopped,
-            file_status=status
+            file_status=status,
+            error_message=error_message
         )
         await stream_manager.publish(resource_id, data.model_dump())
 
@@ -797,8 +798,9 @@ class KnowledgeBaseService:
                 try:
                     client, _ = await temp_service._get_embedding_client(model_id)
                 except Exception as e:
-                    logger.error(f"Model init failed: {e}")
-                    await self._publish_status(resource_id, KBFileStatus.FAILED, 0, 0, 0, 0)
+                    logger.error(f"Model init failed for resource {resource_id}: {e}", exc_info=True)
+                    await self._publish_status(resource_id, KBFileStatus.FAILED, 0, 0, 0, 0,
+                                               error_message=f"Embedding模型初始化失败: {e}")
                     return
 
                 # --- 阶段 1: 准备数据 (Start 模式需切分) ---
@@ -829,7 +831,7 @@ class KnowledgeBaseService:
                         extractor = ExtractorFactory.get_extractor(resource.resourceType, mime_type=file_mime_type)
                         text_content = await extractor.extract(resource, session)
                     except Exception as e:
-                        logger.error(f"Extraction failed: {e}")
+                        logger.error(f"Extraction failed for resource {resource_id}: {e}", exc_info=True)
                         raise ValueError(f"Content extraction failed: {e}")
 
                     # 4. 切分
@@ -874,9 +876,16 @@ class KnowledgeBaseService:
 
                 batch_size = 10
 
+                logger.info(
+                    f"[KB:{kb_id}] Embedding started: resource={resource_id}, "
+                    f"total={total_count}, pending={len(pending_chunks)}, "
+                    f"processed={processed_count}, dimension={dimension}, batch_size={batch_size}"
+                )
+
                 await self._publish_status(resource_id, KBFileStatus.EMBEDDING,
                                            total_count, processed_count, failed_count, stopped_count)
 
+                batch_num = 0
                 for i in range(0, len(pending_chunks), batch_size):
                     if await stream_manager.is_cancellation_requested(resource_id):
                         remaining = len(pending_chunks) - i
@@ -888,10 +897,19 @@ class KnowledgeBaseService:
 
                     batch = pending_chunks[i:i + batch_size]
                     texts = [c.content for c in batch]
+                    batch_num += 1
 
                     try:
                         # 1. 生成向量
+                        logger.debug(
+                            f"[KB:{kb_id}] Batch #{batch_num}: requesting embeddings for "
+                            f"{len(texts)} texts, chunk_indices={[c.chunk_index for c in batch]}"
+                        )
                         vectors = await client.aembed_documents(texts)
+                        logger.debug(
+                            f"[KB:{kb_id}] Batch #{batch_num}: got {len(vectors)} vectors, "
+                            f"vector_dim={len(vectors[0]) if vectors else 'N/A'}"
+                        )
 
                         current_batch_success = 0
                         current_batch_failed = 0
@@ -909,6 +927,11 @@ class KnowledgeBaseService:
                                         session, dimension, vector,
                                         kb_id=kb_id, resource_id=resource_id
                                     )
+                                else:
+                                    logger.warning(
+                                        f"[KB:{kb_id}] Chunk #{chunk.chunk_index}: "
+                                        f"vector dimension mismatch, expected {dimension}, got {len(vector)}"
+                                    )
 
                                 # 3. 插入 FTS 索引 (使用 jieba 分词)
                                 tokens = " ".join(jieba.cut_for_search(chunk.content))
@@ -923,11 +946,25 @@ class KnowledgeBaseService:
                                     chunk.processed_at = now
                                     session.add(chunk)
                                     current_batch_success += 1
+                                    logger.debug(
+                                        f"[KB:{kb_id}] Chunk #{chunk.chunk_index}: "
+                                        f"embedded OK (vec_id={vec_rowid}, fts_id={fts_rowid})"
+                                    )
                                 else:
-                                    # 任何一路失败，回滚该条目
-                                    raise Exception("Dual index insertion incomplete")
+                                    # 任何一路失败，构造详细错误信息
+                                    missing = []
+                                    if vec_rowid is None:
+                                        missing.append(f"vector(None, dim={dimension}, actual_len={len(vector)})")
+                                    if fts_rowid is None:
+                                        missing.append(f"FTS(None)")
+                                    raise Exception(
+                                        f"Dual index insertion incomplete: {', '.join(missing)}"
+                                    )
 
                             except Exception as inner_e:
+                                # 记录详细的错误信息
+                                error_str = f"[Chunk #{chunk.chunk_index}] {type(inner_e).__name__}: {str(inner_e)}"
+                                logger.error(f"Chunk embedding failed for resource {resource_id}: {error_str}")
                                 # 回滚补偿：如果部分插入成功，尝试清理
                                 if vec_rowid:
                                     await kb_crud.delete_vectors(session, dimension, [vec_rowid])
@@ -937,6 +974,7 @@ class KnowledgeBaseService:
                                 chunk.vector_id = None
                                 chunk.fts_id = None
                                 chunk.status = kb_schemas.KBChunkStatus.FAILED.value
+                                chunk.error_message = error_str[:500]  # 截断防止过长
                                 session.add(chunk)
                                 current_batch_failed += 1
 
@@ -946,23 +984,34 @@ class KnowledgeBaseService:
                         if len(vectors) < len(batch):
                             diff = len(batch) - len(vectors)
                             current_batch_failed += diff
+                            missing_msg = f"Embedding API returned fewer vectors ({len(vectors)}) than texts ({len(batch)})"
+                            logger.error(f"Batch embedding partial failure for resource {resource_id}: {missing_msg}")
                             for k in range(len(vectors), len(batch)):
                                 chunk = batch[k]
                                 chunk.vector_id = None
                                 chunk.fts_id = None
                                 chunk.status = kb_schemas.KBChunkStatus.FAILED.value
+                                chunk.error_message = f"[Chunk #{chunk.chunk_index}] {missing_msg}"
                                 session.add(chunk)
                             await session.commit()
 
                         processed_count += current_batch_success
                         failed_count += current_batch_failed
 
+                        logger.info(
+                            f"[KB:{kb_id}] Batch #{batch_num} done: "
+                            f"success={current_batch_success}, failed={current_batch_failed}, "
+                            f"total_progress={processed_count}/{total_count}"
+                        )
+
                     except Exception as e:
-                        logger.error(f"Embedding batch failed: {e}")
+                        logger.error(f"Embedding batch failed for resource {resource_id}: {e}", exc_info=True)
+                        batch_error = f"Batch embedding API call failed: {type(e).__name__}: {str(e)}"
                         for chunk in batch:
                             chunk.vector_id = None
                             chunk.fts_id = None
                             chunk.status = kb_schemas.KBChunkStatus.FAILED.value
+                            chunk.error_message = batch_error[:500]
                             session.add(chunk)
                         await session.commit()
                         failed_count += len(batch)
@@ -973,14 +1022,21 @@ class KnowledgeBaseService:
                     if rate_limit > 0:
                         await asyncio.sleep(rate_limit)
 
+                logger.info(
+                    f"[KB:{kb_id}] Embedding completed: resource={resource_id}, "
+                    f"total={total_count}, success={processed_count}, "
+                    f"failed={failed_count}, stopped={stopped_count}, batches={batch_num}"
+                )
                 await self._publish_status(resource_id, KBFileStatus.COMPLETED,
                                            total_count, processed_count, failed_count, stopped_count)
 
             except Exception as e:
-                logger.error(f"Task failed for resource {resource_id}: {e}")
+                error_msg = f"{type(e).__name__}: {str(e)}"
+                logger.error(f"Task failed for resource {resource_id}: {error_msg}", exc_info=True)
                 failed_count = total_count - processed_count - stopped_count
                 await self._publish_status(resource_id, KBFileStatus.FAILED,
-                                           total_count, processed_count, failed_count, stopped_count)
+                                           total_count, processed_count, failed_count, stopped_count,
+                                           error_message=error_msg)
             finally:
                 KnowledgeBaseService._running_tasks.discard(resource_id)
                 await stream_manager.close_stream(resource_id)

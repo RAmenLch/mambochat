@@ -151,6 +151,20 @@
                 <span class="value warning">{{ statusInfo.stopped_chunks }}</span>
               </div>
             </div>
+
+            <!-- 任务级别错误信息 -->
+            <div
+              v-if="statusInfo?.file_status === 'FAILED' && taskErrorMessage"
+              class="error-info-area"
+            >
+              <el-alert
+                :title="$t('kb.task.errorInfo')"
+                :description="taskErrorMessage"
+                type="error"
+                show-icon
+                :closable="false"
+              />
+            </div>
           </div>
           <el-skeleton v-else :rows="3" animated />
         </el-card>
@@ -173,6 +187,14 @@
                   <el-tag size="small" :type="getChunkStatusType(chunk.status)" effect="plain">
                     {{ chunk.status }}
                   </el-tag>
+                </div>
+                <!-- 单个切片失败原因 -->
+                <div
+                  v-if="chunk.status === 'FAILED' && chunk.error_message"
+                  class="chunk-error-line"
+                >
+                  <span class="chunk-error-label">{{ $t('kb.chunk.error') }}:</span>
+                  <span class="chunk-error-text">{{ chunk.error_message }}</span>
                 </div>
                 <div class="chunk-content" :class="{ expanded: isExpanded(chunk.id) }">
                   {{ chunk.content }}
@@ -280,6 +302,16 @@ const progressStatus = computed(() => {
   if (s === 'STOPPED') return 'warning'
   if (s === 'COMPLETED') return 'success'
   return ''
+})
+
+/** 任务级别错误信息：优先来自 statusInfo，回退到本地填充 */
+const taskErrorMessage = computed(() => {
+  if (!statusInfo.value) return null
+  if (statusInfo.value.error_message) return statusInfo.value.error_message
+  if (statusInfo.value.file_status === 'FAILED' && statusInfo.value.failed_chunks > 0) {
+    return t('kb.task.noErrorDetail')
+  }
+  return null
 })
 
 const savedConfig = computed<KBSplitterConfig | undefined>(() => {
@@ -593,5 +625,45 @@ onMounted(async () => {
   margin-top: 16px;
   display: flex;
   justify-content: center;
+}
+
+/* Error Info Styles */
+.error-info-area {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.error-info-area :deep(.el-alert__description) {
+  font-family: monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin-top: 4px;
+}
+
+.chunk-error-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  background-color: var(--el-color-danger-light-9);
+  border-left: 3px solid var(--el-color-danger);
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.chunk-error-label {
+  color: var(--el-color-danger);
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.chunk-error-text {
+  color: var(--el-text-color-primary);
+  word-break: break-all;
+  font-family: monospace;
 }
 </style>

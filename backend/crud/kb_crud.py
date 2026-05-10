@@ -187,6 +187,19 @@ async def get_chunk_stats_by_resource(
     else:
         file_status = KBFileStatus.INITIAL
 
+    # 失败状态下，从 DB 中提取一条错误信息供前端展示
+    error_message = None
+    if failed > 0:
+        err_stmt = select(kb_model.ResourceKBChunk.error_message).where(
+            kb_model.ResourceKBChunk.resource_id == resource_id,
+            kb_model.ResourceKBChunk.status == kb_schemas.KBChunkStatus.FAILED.value,
+            kb_model.ResourceKBChunk.error_message.isnot(None)
+        ).limit(1)
+        err_result = await db.execute(err_stmt)
+        err_row = err_result.first()
+        if err_row:
+            error_message = err_row[0]
+
     return kb_schemas.KBProcessingStatus(
         resource_id=resource_id,
         total_chunks=total,
@@ -194,7 +207,8 @@ async def get_chunk_stats_by_resource(
         completed_chunks=completed,
         failed_chunks=failed,
         stopped_chunks=stopped,
-        file_status=file_status
+        file_status=file_status,
+        error_message=error_message
     )
 
 

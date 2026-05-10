@@ -2,12 +2,16 @@
 
 import asyncio
 import json
+import logging
+import re
 import traceback
-from typing import AsyncGenerator, Optional, Dict, List, Set
+from typing import AsyncGenerator, Optional, Dict, List, Set, Tuple, Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage, BaseMessage
 from langchain_core.tools import BaseTool
 
+from backend.crud import message_crud
 from backend.models.base_model import generate_uuid
 from backend.schemas import enums as schemas_enums
 from backend.services.stream_manager_service import stream_manager, cancellable_aiter
@@ -15,7 +19,8 @@ from backend.services.mcp_connection_manager import McpConnectionError
 
 from backend.services.generation.core.instructions import (
     BaseInstruction, CreateSubMessage, AppendToSubMessage,
-    SetFinalStatus, InterruptGeneration, FailSubMessagesByMessage, UpdateSubMessageConfig, UpdateSubMessageStatus
+    SetFinalStatus, InterruptGeneration, FailSubMessagesByMessage,
+    UpdateSubMessageConfig, UpdateSubMessageStatus, UpdateZipHistorySubMessage
 )
 from backend.services.generation.builders.director import LLMInputDirector
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
@@ -25,8 +30,12 @@ from backend.services.generation.worker.abstract_worker import AbstractGenerateW
 from backend.services.generation.managers.stream_handlers.base_handler import StreamContext, BaseStreamHandler
 from backend.services.generation.managers.stream_handlers.handlers import (
     HitlHandler, TextAndReasoningHandler, RoundClosureHandler,
-    ToolExecutionHandler, ImageAndUsageHandler
+    ToolExecutionHandler, ImageAndUsageHandler, FinishReasonMonitorHandler
 )
+from backend.services.generation.managers.stream_handlers.finish_reason_classifier import FinishReasonClassifier
+from services.generation.core.llm_io import SummarizationEventInfo
+
+logger = logging.getLogger(__name__)
 
 
 class DefaultGenerateManager(AbstractGenerateManager):
@@ -42,19 +51,102 @@ class DefaultGenerateManager(AbstractGenerateManager):
         self._created_stream_ids: Set[str] = set()
         self._pending_hitl_tool_calls = []
         self._recover_from_error = recover_from_error
+        self._last_finish_reason: Optional[str] = None
+        self._last_summarization_event: Optional[SummarizationEventInfo] = None
 
         self._handlers: List[BaseStreamHandler] = [
             HitlHandler(),
             TextAndReasoningHandler(),
             RoundClosureHandler(),
             ToolExecutionHandler(),
-            ImageAndUsageHandler()
+            ImageAndUsageHandler(),
+            FinishReasonMonitorHandler()
         ]
 
     @staticmethod
     def _extract_run_uuid(lc_run_id: Optional[str]) -> Optional[str]:
         if not lc_run_id: return None
         return lc_run_id[len("lc_run--"):] if lc_run_id.startswith("lc_run--") else lc_run_id
+
+    @staticmethod
+    def _extract_summary_content(event_info: SummarizationEventInfo) -> Optional[str]:
+        """Extract the pure summary text from a SummarizationEventInfo.
+
+        The summary is embedded in a ``HumanMessage`` whose content follows a
+        structured template::
+
+            You are in the middle of a conversation that has been summarized.
+            ...
+            <summary>
+            {actual summary}
+            </summary>
+
+        This method strips the wrapper and returns only the inner summary.
+        """
+        event = event_info.event
+        summary_msg = event.get("summary_message")
+        if summary_msg is None:
+            return None
+        content = getattr(summary_msg, "content", None)
+        if not isinstance(content, str) or not content:
+            return None
+        match = re.search(r"<summary>\s*(.*?)\s*</summary>", content, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+        # Fallback: return trimmed content if template is absent
+        return content.strip()
+
+    async def _resolve_zip_target_ids(
+        self,
+        chat_id: str,
+        last_zip_message: BaseMessage,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """从 last_zip_message 解析 target_msg_id 和 target_sub_msg_id。
+
+        通过 DB 查询将 LangChain BaseMessage 映射回 Message / SubMessage 表的主键。
+        使用 isinstance 类型收窄，拒绝鸭子类型访问。
+        """
+        # ── ToolMessage: 通过 tool_call_id 在 MCP_TOOL 子消息的 content JSON 中查找 ──
+        if isinstance(last_zip_message, ToolMessage):
+            tool_call_id: str = last_zip_message.tool_call_id
+            return await self._find_target_by_tool_call_id(chat_id, tool_call_id)
+
+        # ── HumanMessage / AIMessage: 通过 id（即 sub_message ID）查 SubMessage 表 ──
+        if isinstance(last_zip_message, (HumanMessage, AIMessage)):
+            msg_id: str = last_zip_message.id
+            return await self._find_target_by_sub_msg_id(msg_id)
+
+        # ── 其他类型（如 SystemMessage）没有对应数据库记录 ──
+        return None, None
+
+    async def _find_target_by_tool_call_id(
+        self,
+        chat_id: str,
+        tool_call_id: str,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """通过 tool_call_id 在 MCP_TOOL 子消息中查找，返回 (messageId, sub_msg_id)。"""
+        sub_msg_id = await message_crud.get_sub_message_id_by_tool_call_id(
+            self.db_session, chat_id, tool_call_id,
+        )
+        if sub_msg_id is None:
+            return None, None
+        sub_msg = await message_crud.get_sub_message(self.db_session, sub_msg_id)
+        if sub_msg is None:
+            return None, None
+        return sub_msg.messageId, sub_msg.id
+
+    async def _find_target_by_sub_msg_id(
+        self,
+        sub_msg_id: str,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        pn = sub_msg_id[:36]+"-N"
+        not_pn = sub_msg_id[:36]
+        sub_msg = await message_crud.get_sub_message(self.db_session, pn)
+        if sub_msg is None:
+            sub_msg = await message_crud.get_sub_message(self.db_session, not_pn)
+        if sub_msg is None:
+            return None, None
+        return sub_msg.messageId, sub_msg.id
 
     async def _execute_generation(
             self, worker: AbstractGenerateWorker, chat_id: str, assistant_message_id: str
@@ -100,6 +192,11 @@ class DefaultGenerateManager(AbstractGenerateManager):
 
         try:
             async for mode, event in cancellable_aiter(worker.generate(llm_input), cancel_event):
+                # ── Summarization signal ──────────────────────────────────
+                if mode == "summarization":
+                    self._last_summarization_event = event  # last-wins: cumulative final state
+                    continue
+                # ── Normal handler chain ─────────────────────────────────
                 decoder = worker.resolve_decoder(event)
 
                 event_id: Optional[str] = None
@@ -121,11 +218,41 @@ class DefaultGenerateManager(AbstractGenerateManager):
                             continue
                         yield instruction
 
+                # 从 Handler 链中提取最后一轮 finish_reason (last-wins)
+                if context.last_finish_reason:
+                    self._last_finish_reason = context.last_finish_reason
+
                 if context.should_interrupt:
                     should_interrupt = True
                     break
         except asyncio.CancelledError:
             raise
+
+        # ── Post-generation: persist summarization as ZipHistory sub-message ──
+        if self._last_summarization_event:
+            event_info = self._last_summarization_event
+            summary_content = self._extract_summary_content(event_info)
+            if summary_content:
+                # 由 Manager 负责从 last_zip_message 推导 target_msg_id / target_sub_msg_id
+                target_msg_id, target_sub_msg_id = await self._resolve_zip_target_ids(
+                    chat_id, event_info.last_zip_message,
+                )
+                if not target_msg_id or not target_sub_msg_id:
+                    logger.warning(
+                        "DefaultGenerateManager: unable to resolve target_msg_id / target_sub_msg_id "
+                        "from last_zip_message (id=%s, type=%s) — skipping ZipHistory creation",
+                        getattr(event_info.last_zip_message, "id", None),
+                        type(event_info.last_zip_message).__name__,
+                    )
+                else:
+                    yield UpdateZipHistorySubMessage(
+                        sub_message_id=generate_uuid(),
+                        target_message_id=target_msg_id,
+                        target_sub_msg_id=target_sub_msg_id,
+                        content=summary_content,
+                        status=schemas_enums.MessageStatus.COMPLETED,
+                        zip_enable=True,
+                    )
 
         async for instruction in self._finalize_generation(is_interrupted=should_interrupt):
             yield instruction
@@ -147,6 +274,22 @@ class DefaultGenerateManager(AbstractGenerateManager):
         if not is_interrupted:
             yield SetFinalStatus(status=schemas_enums.MessageStatus.COMPLETED)
 
+        # 异常 finish_reason -> 生成 ERROR 子消息提示用户
+        if self._last_finish_reason:
+            user_msg = FinishReasonClassifier.get_user_message(self._last_finish_reason)
+            if user_msg:
+                from backend.schemas.message import ErrorContent
+                error_content = ErrorContent(message=user_msg, stack_trace="")
+                yield CreateSubMessage(
+                    sub_message_id=generate_uuid(),
+                    type=schemas_enums.SubMessageType.ERROR.value,
+                    sortOrder=97,
+                    status=schemas_enums.MessageStatus.COMPLETED,
+                    initial_content=error_content.to_json_string(),
+                    config={"context_participation_length": 0}
+                )
+            self._last_finish_reason = None
+
     async def _cleanup_on_exception(
             self, assistant_message_id: str, final_status: schemas_enums.MessageStatus,
             exception: Optional[Exception] = None
@@ -156,7 +299,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
 
         if exception:
             if isinstance(exception, RuntimeError):
-                error_message = str(exception)
+                error_message = str(type(exception))+ ":" + str(exception)
             elif isinstance(exception, asyncio.CancelledError):
                 error_message = "生成被用户取消。"
             else:

@@ -1,6 +1,6 @@
 # ![mambo](doc/img/logo_hajimi.svg) MamboChat (曼波茶)
 
-![Version](https://img.shields.io/badge/version-1.2.2-blue)
+![Version](https://img.shields.io/badge/version-1.2.3-blue)
 ![License](https://img.shields.io/badge/license-GPLv3-green)
 ![Vue](https://img.shields.io/badge/frontend-Vue3%20%2B%20ElementPlus-42b883)
 ![FastAPI](https://img.shields.io/badge/backend-FastAPI%20%2B%20Python3.11-009688)
@@ -94,7 +94,7 @@ MamboChat 提供 Windows 桌面客户端安装包，一键安装即可使用，�
    从 [Releases](https://github.com/RAmenLch/mambochat/releases) 页面下载最新版本的安装包（`MamboChat-Setup-x.x.x.exe`）。
 
 2. **运行安装程序**
-   双击 `MamboChat-Setup-1.2.2.exe`，按向导完成安装（可选择自定义安装目录）。
+   双击 `MamboChat-Setup-1.2.3.exe`，按向导完成安装（可选择自定义安装目录）。
 
 3. **启动应用**
    安装完成后，从桌面快捷方式或开始菜单启动 MamboChat。

@@ -10,12 +10,12 @@
       <div class="config-section">
         <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="kb-form">
           <el-row :gutter="20">
-            <el-col :span="12">
+            <el-col :span="8">
               <el-form-item :label="$t('kb.config.labels.name')" prop="name">
                 <el-input v-model="form.name" :placeholder="$t('kb.form.namePlaceholder')" />
               </el-form-item>
             </el-col>
-            <el-col :span="12">
+            <el-col :span="10">
               <el-form-item :label="$t('kb.config.labels.embeddingModel')" prop="embeddingModelId">
                 <el-select
                   v-model="form.embeddingModelId"
@@ -38,6 +38,20 @@
                     </span>
                   </el-option>
                 </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :span="6">
+              <el-form-item>
+                <template #label>
+                  <span>{{ $t('kb.config.labels.dimension') }}</span>
+                  <el-tooltip
+                    :content="$t('kb.config.dimensionTooltip')"
+                    placement="top"
+                  >
+                    <el-icon class="label-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-input :model-value="currentDimension" disabled />
               </el-form-item>
             </el-col>
           </el-row>
@@ -208,6 +222,15 @@ const rules = computed<FormRules>(() => ({
 // 获取所有 Embedding 类型的模型
 const embeddingModels = computed(() => {
   return providerStore.allModels.filter((m) => m.model_type === 'embedding')
+})
+
+// 知识库资源的向量维度（创建时固化，不可修改）
+const currentDimension = computed(() => {
+  const dim = currentAttributes.value.dimension
+  if (dim != null && dim !== '') {
+    return String(dim)
+  }
+  return '—'
 })
 
 /**

@@ -1,94 +1,19 @@
 # backend/services/generation/worker/chat_worker.py
 
-import json
-from typing import AsyncGenerator, Any, List, Dict, Tuple
+from typing import AsyncGenerator, Any, Dict, Tuple, List
 
-from langchain_core.messages import (
-    BaseMessage,
-    HumanMessage,
-    SystemMessage,
-    AIMessage,
-    ToolMessage,
-    AIMessageChunk
-)
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command, Overwrite
 from deepagents.backends.utils import create_file_data
 
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker, StreamEvent
 from backend.services.generation.core.llm_io import LLMInput, AgentConfig
-from backend.services.generation.worker.decode import BaseDecode, DecoderRegistry
 from backend.services.generation.graph_builders.factory import GraphBuilderFactory
 from backend.schemas.enums import AgentTypeEnum
+from services.generation.core.llm_io import SummarizationEventInfo
 
 
 class UniversalGraphWorker(AbstractGenerateWorker):
-
-    def resolve_decoder(self, message: StreamEvent) -> BaseDecode:
-        provider = "default"
-        if isinstance(message, BaseMessage) and isinstance(message.response_metadata, dict):
-            provider = message.response_metadata.get("model_provider", "default")
-        return DecoderRegistry.get_decoder(provider)
-
-    def _convert_messages(self, messages: List[Dict[str, Any]]) -> List[BaseMessage]:
-        lc_messages = []
-        for msg in messages:
-            role = msg.get("role")
-            content = msg.get("content", "") or ''
-            name = msg.get("name")
-
-            if role == "system":
-                lc_messages.append(SystemMessage(content=content))
-            elif role == "user":
-                lc_messages.append(HumanMessage(content=content, name=name))
-            elif role == "assistant":
-                raw_tool_calls = msg.get("tool_calls")
-                lc_tool_calls = []
-
-                # 提取 reasoning_content（DeepSeek 思考模式需要回传）
-                additional_kwargs = {}
-                reasoning_content = msg.get("reasoning_content")
-                if reasoning_content:
-                    additional_kwargs["reasoning_content"] = reasoning_content
-
-                if raw_tool_calls and isinstance(raw_tool_calls, list):
-                    for tc in raw_tool_calls:
-                        if "function" in tc:
-                            try:
-                                args_str = tc["function"].get("arguments", "{}")
-                                args_dict = json.loads(args_str) if isinstance(args_str, str) else args_str
-                            except json.JSONDecodeError:
-                                args_dict = {}
-
-                            lc_tool_calls.append({
-                                "name": tc["function"].get("name", ""),
-                                "args": args_dict,
-                                "id": tc.get("id", "")
-                            })
-                        elif "name" in tc and "args" in tc:
-                            lc_tool_calls.append({
-                                "name": tc.get("name", ""),
-                                "args": tc.get("args", {}),
-                                "id": tc.get("id", "")
-                            })
-
-                if lc_tool_calls:
-                    lc_messages.append(AIMessage(content=content, name=name, tool_calls=lc_tool_calls, additional_kwargs=additional_kwargs))
-                else:
-                    lc_messages.append(AIMessage(content=content, name=name, additional_kwargs=additional_kwargs))
-
-            elif role == "tool":
-                tool_call_id = msg.get("tool_call_id")
-                if tool_call_id:
-                    lc_messages.append(ToolMessage(
-                        content=content,
-                        tool_call_id=tool_call_id,
-                        name=name
-                    ))
-            else:
-                lc_messages.append(HumanMessage(content=content, name=name))
-
-        return lc_messages
 
     def _collect_vfs_files_recursively(self, config: AgentConfig) -> Dict[str, Any]:
         files = {}
@@ -122,6 +47,9 @@ class UniversalGraphWorker(AbstractGenerateWorker):
             if llm_input.agent_config.agent_type == AgentTypeEnum.DEEP:
                 files_to_inject = self._collect_vfs_files_recursively(llm_input.agent_config)
 
+            # Clear stale summarization event from previous run (separate super-step, no Overwrite conflict)
+            await agent.aupdate_state(thread_config, {"_summarization_event": None})
+
             resume_payload = llm_input.agent_config.resume_payload
             if resume_payload:
                 input_data = Command(resume=resume_payload)
@@ -145,15 +73,48 @@ class UniversalGraphWorker(AbstractGenerateWorker):
             if mode == "updates" and isinstance(event, dict):
                 if "model" in event:
                     model_update = event["model"]
-                    if isinstance(model_update, dict) and "messages" in model_update:
-                        for message in model_update["messages"]:
-                            yield mode, message
+                    if isinstance(model_update, dict):
+                        # Extract summarization event (complete cumulative state, last-wins)
+                        if "_summarization_event" in model_update:
+                            summary = model_update["_summarization_event"]
+                            cutoff_index = summary.get("cutoff_index", 0)
+                            state = await agent.aget_state(thread_config)
+                            state_messages: List = state.values["messages"]
+                            if cutoff_index and state_messages and cutoff_index <= len(state_messages):
+                                last_zip_message = state_messages[cutoff_index - 1]
+                                yield "summarization", SummarizationEventInfo(
+                                    last_zip_message=last_zip_message,
+                                    event=summary,
+                                )
+                        if "messages" in model_update:
+                            for message in model_update["messages"]:
+                                yield mode, message
                 if "tools" in event:
                     tools_update = event["tools"]
-                    if isinstance(tools_update, dict) and "messages" in tools_update:
-                        for message in tools_update["messages"]:
-                            yield mode, message
+                    if isinstance(tools_update, dict):
+                        # Extract summarization event from compact_conversation tool (complete cumulative state, last-wins)
+                        if "_summarization_event" in tools_update:
+                            summary = tools_update["_summarization_event"]
+                            cutoff_index = summary.get("cutoff_index", 0)
+                            state = await agent.aget_state(thread_config)
+                            state_messages: List = state.values["messages"]
+                            if cutoff_index and state_messages and cutoff_index <= len(state_messages):
+                                last_zip_message = state_messages[cutoff_index - 1]
+                                yield "summarization", SummarizationEventInfo(
+                                    last_zip_message=last_zip_message,
+                                    event=summary,
+                                )
+                        if "messages" in tools_update:
+                            for message in tools_update["messages"]:
+                                yield mode, message
                 if "__interrupt__" in event or "HumanInTheLoopMiddleware.after_model" in event:
                     yield mode, event
             elif mode == "messages" and isinstance(event, (list, tuple)) and len(event) > 0:
-                yield mode, event[0]
+                msg = event[0]
+                meta = event[1] if len(event) > 1 else {}
+                # Filter out summarization model outputs (both chunks and final messages)
+                if isinstance(meta, dict) and meta.get("lc_source") == "summarization":
+                    continue
+                yield mode, msg
+            else:
+                pass

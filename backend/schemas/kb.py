@@ -48,6 +48,7 @@ class KBChunkBase(BaseModel):
     byte_size: int
     status: KBChunkStatus = KBChunkStatus.PENDING
     vector_id: Optional[int] = None
+    error_message: Optional[str] = None
 
 
 class KBChunkCreate(KBChunkBase):
@@ -107,6 +108,8 @@ class KBProcessingStatus(BaseModel):
     file_status: KBFileStatus
     # 标识资源内容是否新于向量索引
     is_stale: bool = False
+    # 向量化失败的具体错误原因（仅 FAILED 时有值）
+    error_message: Optional[str] = None
 
 
 class KBRunTaskRequest(BaseModel):

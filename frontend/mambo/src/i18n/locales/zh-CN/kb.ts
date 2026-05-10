@@ -45,9 +45,11 @@ export default {
     labels: {
       name: '知识库名称',
       embeddingModel: '嵌入模型',
+      dimension: '向量维度',
       rateLimit: '嵌入频率限制 (秒)',
       description: '描述',
     },
+    dimensionTooltip: '由已选嵌入模型决定，创建后不可修改',
     file: {
       listTitle: '文档列表',
       upload: '上传文档',
@@ -86,6 +88,8 @@ export default {
     pending: '处理中',
     failed: '失败',
     stopped: '已停止',
+    errorInfo: '错误详情',
+    noErrorDetail: '暂无详细错误信息',
   },
   status: {
     initial: '待处理',
@@ -96,11 +100,14 @@ export default {
     completed: '已完成',
     failed: '失败',
     stopped: '已停止',
+    errorInfo: '错误详情',
+    noErrorDetail: '暂无详细错误信息',
   },
   chunk: {
     title: '当前切分详情',
     totalCount: '共 {count} 个切片',
     empty: '暂无切片数据',
+    error: '向量化失败原因',
   },
   msg: {
     configSaved: '配置已保存',

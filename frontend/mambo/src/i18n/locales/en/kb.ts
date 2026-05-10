@@ -45,9 +45,11 @@ export default {
     labels: {
       name: 'KB Name',
       embeddingModel: 'Embedding Model',
+      dimension: 'Dimension',
       rateLimit: 'Rate Limit (sec)',
       description: 'Description',
     },
+    dimensionTooltip: 'Determined by the selected embedding model, cannot be changed after creation',
     file: {
       listTitle: 'Document List',
       upload: 'Upload Document',
@@ -87,6 +89,8 @@ export default {
     pending: 'Pending',
     failed: 'Failed',
     stopped: 'Stopped',
+    errorInfo: 'Error Details',
+    noErrorDetail: 'No detailed error information',
   },
   status: {
     initial: 'Pending',
@@ -97,11 +101,14 @@ export default {
     completed: 'Completed',
     failed: 'Failed',
     stopped: 'Stopped',
+    errorInfo: 'Error Details',
+    noErrorDetail: 'No detailed error information',
   },
   chunk: {
     title: 'Chunk Details',
     totalCount: 'Total {count} chunks',
     empty: 'No chunk data',
+    error: 'Embedding failure reason',
   },
   msg: {
     configSaved: 'Configuration saved',

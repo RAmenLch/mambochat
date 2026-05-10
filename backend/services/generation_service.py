@@ -5,11 +5,11 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import AsyncGenerator, Tuple, List, Optional, Type
+from typing import AsyncGenerator, Tuple, Optional, Type
 
 from backend.services.generation.executor.dispatcher import InstructionDispatcher
 from backend.services.stream_manager_service import stream_manager
-from backend.crud import chat_crud, message_crud, resource_crud, setting_crud, provider_crud
+from backend.crud import chat_crud, message_crud, resource_crud, setting_crud
 from backend import schemas
 from backend.models import chat_model
 from backend.database import AsyncSessionLocal
@@ -20,6 +20,7 @@ from backend.services.generation.managers.zip_history_manager import ZipHistoryG
 
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.worker.chat_worker import UniversalGraphWorker
+from backend.services.generation.worker.simple_worker import SimpleWorker
 
 from backend.schemas.enums import FileManagementType, MessageStatus, MessageRole, SubMessageType, ProviderWorkerType
 from backend.schemas.message import ErrorContent
@@ -195,24 +196,6 @@ async def _get_worker_for_chat(db: AsyncSession, chat_id: str) -> AbstractGenera
     return _create_worker_instance(worker_type)
 
 
-async def _get_worker_from_settings(db: AsyncSession, setting_keys: List[str]) -> AbstractGenerateWorker:
-    target_model_id = None
-
-    for key in setting_keys:
-        setting = await setting_crud.get_setting(db, key)
-        if setting and setting.value:
-            target_model_id = setting.value
-            break
-
-    worker_type = ProviderWorkerType.OPENAI
-
-    if target_model_id:
-        model = await provider_crud.get_model(db, target_model_id)
-        if model and model.provider:
-            worker_type = model.provider.worker_type
-
-    return _create_worker_instance(worker_type)
-
 
 async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
     """
@@ -342,7 +325,7 @@ async def run_title_generation_task(chat_id: str):
 
     async with AsyncSessionLocal() as db:
         try:
-            worker = await _get_worker_from_settings(db, ["title_generation_model_id", "default_model_id"])
+            worker = SimpleWorker()
 
             manager = TitleGenerateManager(db_session=db)
             executor = InstructionDispatcher(db_session=db)
@@ -370,7 +353,7 @@ async def run_zip_history_generation_task(chat_id: str, target_message_id: str):
 
     async with AsyncSessionLocal() as db:
         try:
-            worker = await _get_worker_for_chat(db, chat_id)
+            worker = SimpleWorker()
             manager = ZipHistoryGenerateManager(db_session=db)
             executor = InstructionDispatcher(db_session=db)
 

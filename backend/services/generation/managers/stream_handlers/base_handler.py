@@ -31,6 +31,7 @@ class StreamContext:
     pending_hitl_tool_calls: list
     final_usage_data: dict
     should_interrupt: bool = False
+    last_finish_reason: Optional[str] = None
 
 
 class BaseStreamHandler(ABC):

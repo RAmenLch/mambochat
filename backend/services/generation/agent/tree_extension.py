@@ -40,13 +40,75 @@ class _NonExecutableBackendProxy(TreeBackendProtocol):
 
     Inherits TreeBackendProtocol so that isinstance(proxy, TreeBackendProtocol)
     still returns True when the wrapped backend supports tree.
+
+    NOTE: We must explicitly delegate every method defined on BackendProtocol /
+    TreeBackendProtocol because ``__getattr__`` is only invoked when normal
+    attribute lookup *fails*.  Since the proxy inherits from these protocols,
+    Python's MRO will always find the base-class method (which raises
+    ``NotImplementedError``) *before* reaching ``__getattr__``, so the real
+    backend's override is silently skipped.
     """
 
     def __init__(self, backend) -> None:
         object.__setattr__(self, "_inner", backend)
 
-    def __getattr__(self, name):
-        return getattr(self._inner, name)
+    # -- properties ----------------------------------------------------------
+
+    @property
+    def id(self) -> str:
+        return self._inner.id
+
+    # -- file operations (new API) -------------------------------------------
+
+    def ls(self, path: str):
+        return self._inner.ls(path)
+
+    async def als(self, path: str):
+        return await self._inner.als(path)
+
+    def read(self, file_path: str, offset: int = 0, limit: int = 2000):
+        return self._inner.read(file_path, offset, limit)
+
+    async def aread(self, file_path: str, offset: int = 0, limit: int = 2000):
+        return await self._inner.aread(file_path, offset, limit)
+
+    def write(self, file_path: str, content: str):
+        return self._inner.write(file_path, content)
+
+    async def awrite(self, file_path: str, content: str):
+        return await self._inner.awrite(file_path, content)
+
+    def edit(self, file_path: str, old_string: str, new_string: str, replace_all: bool = False):
+        return self._inner.edit(file_path, old_string, new_string, replace_all)
+
+    async def aedit(self, file_path: str, old_string: str, new_string: str, replace_all: bool = False):
+        return await self._inner.aedit(file_path, old_string, new_string, replace_all)
+
+    def grep(self, pattern: str, path: str | None = None, glob: str | None = None):
+        return self._inner.grep(pattern, path, glob)
+
+    async def agrep(self, pattern: str, path: str | None = None, glob: str | None = None):
+        return await self._inner.agrep(pattern, path, glob)
+
+    def glob(self, pattern: str, path: str = "/"):
+        return self._inner.glob(pattern, path)
+
+    async def aglob(self, pattern: str, path: str = "/"):
+        return await self._inner.aglob(pattern, path)
+
+    def upload_files(self, files: list[tuple[str, bytes]]):
+        return self._inner.upload_files(files)
+
+    async def aupload_files(self, files: list[tuple[str, bytes]]):
+        return await self._inner.aupload_files(files)
+
+    def download_files(self, paths: list[str]):
+        return self._inner.download_files(paths)
+
+    async def adownload_files(self, paths: list[str]):
+        return await self._inner.adownload_files(paths)
+
+    # -- tree ----------------------------------------------------------------
 
     def tree(self, path: str = "/", depth: int = 3) -> str:
         return self._inner.tree(path, depth)
