@@ -45,9 +45,11 @@ export default {
     labels: {
       name: 'KB Name',
       embeddingModel: 'Embedding Model',
+      dimension: 'Dimension',
       rateLimit: 'Rate Limit (sec)',
       description: 'Description',
     },
+    dimensionTooltip: 'Determined by the selected embedding model, cannot be changed after creation',
     file: {
       listTitle: 'Document List',
       upload: 'Upload Document',

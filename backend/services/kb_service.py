@@ -515,9 +515,8 @@ class KnowledgeBaseService:
             meta_config = json.loads(model.meta_config) if model.meta_config else {}
             dimension = meta_config.get("embedding_dimension")
 
-            supported_dims = [384, 768, 1024, 1536, 2560, 3072, 4096]
-            if dimension not in supported_dims:
-                raise ValueError(f"Model dimension {dimension} is not supported. Supported: {supported_dims}")
+            if dimension not in SUP_DIM:
+                raise ValueError(f"Model dimension {dimension} is not supported. Supported: {SUP_DIM}")
 
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))

@@ -45,9 +45,11 @@ export default {
     labels: {
       name: '知识库名称',
       embeddingModel: '嵌入模型',
+      dimension: '向量维度',
       rateLimit: '嵌入频率限制 (秒)',
       description: '描述',
     },
+    dimensionTooltip: '由已选嵌入模型决定，创建后不可修改',
     file: {
       listTitle: '文档列表',
       upload: '上传文档',
