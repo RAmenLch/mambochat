@@ -3,6 +3,7 @@
 import asyncio
 import os
 import logging
+from logging.handlers import RotatingFileHandler
 from datetime import timedelta
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -43,7 +44,29 @@ from backend.services.vec_migration import ensure_vec_tables
 scheduler = AsyncIOScheduler(timezone=TZ)
 
 # 配置日志
-logging.basicConfig()
+LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+
+file_handler = RotatingFileHandler(
+    os.path.join(LOG_DIR, "mambochat.log"),
+    maxBytes=10 * 1024 * 1024,  # 10MB
+    backupCount=5,
+    encoding="utf-8"
+)
+file_handler.setFormatter(logging.Formatter(
+    "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+))
+file_handler.setLevel(logging.INFO)
+
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(logging.Formatter(
+    "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+))
+
+logging.basicConfig(
+    level=logging.INFO,
+    handlers=[file_handler, console_handler]
+)
 logger = logging.getLogger("alembic")
 logger.setLevel(logging.INFO)
 

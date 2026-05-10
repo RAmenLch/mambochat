@@ -637,7 +637,8 @@ class KnowledgeBaseService:
         return stats
 
     async def _publish_status(self, resource_id: str, status: KBFileStatus,
-                              total: int, completed: int, failed: int, stopped: int):
+                              total: int, completed: int, failed: int, stopped: int,
+                              error_message: str = None):
         """
         辅助方法：构建统一的 KBProcessingStatus 并推送。
         """
@@ -650,7 +651,8 @@ class KnowledgeBaseService:
             completed_chunks=completed,
             failed_chunks=failed,
             stopped_chunks=stopped,
-            file_status=status
+            file_status=status,
+            error_message=error_message
         )
         await stream_manager.publish(resource_id, data.model_dump())
 
@@ -797,8 +799,9 @@ class KnowledgeBaseService:
                 try:
                     client, _ = await temp_service._get_embedding_client(model_id)
                 except Exception as e:
-                    logger.error(f"Model init failed: {e}")
-                    await self._publish_status(resource_id, KBFileStatus.FAILED, 0, 0, 0, 0)
+                    logger.error(f"Model init failed for resource {resource_id}: {e}", exc_info=True)
+                    await self._publish_status(resource_id, KBFileStatus.FAILED, 0, 0, 0, 0,
+                                               error_message=f"Embedding模型初始化失败: {e}")
                     return
 
                 # --- 阶段 1: 准备数据 (Start 模式需切分) ---
@@ -829,7 +832,7 @@ class KnowledgeBaseService:
                         extractor = ExtractorFactory.get_extractor(resource.resourceType, mime_type=file_mime_type)
                         text_content = await extractor.extract(resource, session)
                     except Exception as e:
-                        logger.error(f"Extraction failed: {e}")
+                        logger.error(f"Extraction failed for resource {resource_id}: {e}", exc_info=True)
                         raise ValueError(f"Content extraction failed: {e}")
 
                     # 4. 切分
@@ -928,6 +931,9 @@ class KnowledgeBaseService:
                                     raise Exception("Dual index insertion incomplete")
 
                             except Exception as inner_e:
+                                # 记录详细的错误信息
+                                error_str = f"[Chunk #{chunk.chunk_index}] {type(inner_e).__name__}: {str(inner_e)}"
+                                logger.error(f"Chunk embedding failed for resource {resource_id}: {error_str}")
                                 # 回滚补偿：如果部分插入成功，尝试清理
                                 if vec_rowid:
                                     await kb_crud.delete_vectors(session, dimension, [vec_rowid])
@@ -937,6 +943,7 @@ class KnowledgeBaseService:
                                 chunk.vector_id = None
                                 chunk.fts_id = None
                                 chunk.status = kb_schemas.KBChunkStatus.FAILED.value
+                                chunk.error_message = error_str[:500]  # 截断防止过长
                                 session.add(chunk)
                                 current_batch_failed += 1
 
@@ -946,11 +953,14 @@ class KnowledgeBaseService:
                         if len(vectors) < len(batch):
                             diff = len(batch) - len(vectors)
                             current_batch_failed += diff
+                            missing_msg = f"Embedding API returned fewer vectors ({len(vectors)}) than texts ({len(batch)})"
+                            logger.error(f"Batch embedding partial failure for resource {resource_id}: {missing_msg}")
                             for k in range(len(vectors), len(batch)):
                                 chunk = batch[k]
                                 chunk.vector_id = None
                                 chunk.fts_id = None
                                 chunk.status = kb_schemas.KBChunkStatus.FAILED.value
+                                chunk.error_message = f"[Chunk #{chunk.chunk_index}] {missing_msg}"
                                 session.add(chunk)
                             await session.commit()
 
@@ -958,11 +968,13 @@ class KnowledgeBaseService:
                         failed_count += current_batch_failed
 
                     except Exception as e:
-                        logger.error(f"Embedding batch failed: {e}")
+                        logger.error(f"Embedding batch failed for resource {resource_id}: {e}", exc_info=True)
+                        batch_error = f"Batch embedding API call failed: {type(e).__name__}: {str(e)}"
                         for chunk in batch:
                             chunk.vector_id = None
                             chunk.fts_id = None
                             chunk.status = kb_schemas.KBChunkStatus.FAILED.value
+                            chunk.error_message = batch_error[:500]
                             session.add(chunk)
                         await session.commit()
                         failed_count += len(batch)
@@ -977,10 +989,12 @@ class KnowledgeBaseService:
                                            total_count, processed_count, failed_count, stopped_count)
 
             except Exception as e:
-                logger.error(f"Task failed for resource {resource_id}: {e}")
+                error_msg = f"{type(e).__name__}: {str(e)}"
+                logger.error(f"Task failed for resource {resource_id}: {error_msg}", exc_info=True)
                 failed_count = total_count - processed_count - stopped_count
                 await self._publish_status(resource_id, KBFileStatus.FAILED,
-                                           total_count, processed_count, failed_count, stopped_count)
+                                           total_count, processed_count, failed_count, stopped_count,
+                                           error_message=error_msg)
             finally:
                 KnowledgeBaseService._running_tasks.discard(resource_id)
                 await stream_manager.close_stream(resource_id)

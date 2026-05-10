@@ -56,6 +56,8 @@ export interface KBChunkStatus {
   stopped_chunks: number
   file_status: KBFileStatus
   is_stale: boolean
+  /** 任务级别的错误详情，由后端 SSE 推送 */
+  error_message?: string
 }
 
 export type SplitterType = 'simple' | 'separator' | 'markdown'
@@ -122,6 +124,8 @@ export interface KBChunk {
   byte_size: number
   status: 'PENDING' | 'COMPLETED' | 'FAILED' | 'STOPPED'
   vector_id?: number
+  /** 该切片向量化失败的具体原因 */
+  error_message?: string
 }
 
 export interface KBChunkListResponse {
