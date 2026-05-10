@@ -155,7 +155,7 @@ async def lifespan(app: FastAPI):
     await close_checkpointer()
 
 
-app = FastAPI(lifespan=lifespan, version="1.0.1")
+app = FastAPI(lifespan=lifespan, version="1.2.3")
 
 app.add_middleware(
     CORSMiddleware,
