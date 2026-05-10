@@ -877,9 +877,16 @@ class KnowledgeBaseService:
 
                 batch_size = 10
 
+                logger.info(
+                    f"[KB:{kb_id}] Embedding started: resource={resource_id}, "
+                    f"total={total_count}, pending={len(pending_chunks)}, "
+                    f"processed={processed_count}, dimension={dimension}, batch_size={batch_size}"
+                )
+
                 await self._publish_status(resource_id, KBFileStatus.EMBEDDING,
                                            total_count, processed_count, failed_count, stopped_count)
 
+                batch_num = 0
                 for i in range(0, len(pending_chunks), batch_size):
                     if await stream_manager.is_cancellation_requested(resource_id):
                         remaining = len(pending_chunks) - i
@@ -891,10 +898,19 @@ class KnowledgeBaseService:
 
                     batch = pending_chunks[i:i + batch_size]
                     texts = [c.content for c in batch]
+                    batch_num += 1
 
                     try:
                         # 1. 生成向量
+                        logger.debug(
+                            f"[KB:{kb_id}] Batch #{batch_num}: requesting embeddings for "
+                            f"{len(texts)} texts, chunk_indices={[c.chunk_index for c in batch]}"
+                        )
                         vectors = await client.aembed_documents(texts)
+                        logger.debug(
+                            f"[KB:{kb_id}] Batch #{batch_num}: got {len(vectors)} vectors, "
+                            f"vector_dim={len(vectors[0]) if vectors else 'N/A'}"
+                        )
 
                         current_batch_success = 0
                         current_batch_failed = 0
@@ -912,6 +928,11 @@ class KnowledgeBaseService:
                                         session, dimension, vector,
                                         kb_id=kb_id, resource_id=resource_id
                                     )
+                                else:
+                                    logger.warning(
+                                        f"[KB:{kb_id}] Chunk #{chunk.chunk_index}: "
+                                        f"vector dimension mismatch, expected {dimension}, got {len(vector)}"
+                                    )
 
                                 # 3. 插入 FTS 索引 (使用 jieba 分词)
                                 tokens = " ".join(jieba.cut_for_search(chunk.content))
@@ -926,9 +947,20 @@ class KnowledgeBaseService:
                                     chunk.processed_at = now
                                     session.add(chunk)
                                     current_batch_success += 1
+                                    logger.debug(
+                                        f"[KB:{kb_id}] Chunk #{chunk.chunk_index}: "
+                                        f"embedded OK (vec_id={vec_rowid}, fts_id={fts_rowid})"
+                                    )
                                 else:
-                                    # 任何一路失败，回滚该条目
-                                    raise Exception("Dual index insertion incomplete")
+                                    # 任何一路失败，构造详细错误信息
+                                    missing = []
+                                    if vec_rowid is None:
+                                        missing.append(f"vector(None, dim={dimension}, actual_len={len(vector)})")
+                                    if fts_rowid is None:
+                                        missing.append(f"FTS(None)")
+                                    raise Exception(
+                                        f"Dual index insertion incomplete: {', '.join(missing)}"
+                                    )
 
                             except Exception as inner_e:
                                 # 记录详细的错误信息
@@ -967,6 +999,12 @@ class KnowledgeBaseService:
                         processed_count += current_batch_success
                         failed_count += current_batch_failed
 
+                        logger.info(
+                            f"[KB:{kb_id}] Batch #{batch_num} done: "
+                            f"success={current_batch_success}, failed={current_batch_failed}, "
+                            f"total_progress={processed_count}/{total_count}"
+                        )
+
                     except Exception as e:
                         logger.error(f"Embedding batch failed for resource {resource_id}: {e}", exc_info=True)
                         batch_error = f"Batch embedding API call failed: {type(e).__name__}: {str(e)}"
@@ -985,6 +1023,11 @@ class KnowledgeBaseService:
                     if rate_limit > 0:
                         await asyncio.sleep(rate_limit)
 
+                logger.info(
+                    f"[KB:{kb_id}] Embedding completed: resource={resource_id}, "
+                    f"total={total_count}, success={processed_count}, "
+                    f"failed={failed_count}, stopped={stopped_count}, batches={batch_num}"
+                )
                 await self._publish_status(resource_id, KBFileStatus.COMPLETED,
                                            total_count, processed_count, failed_count, stopped_count)
 

@@ -47,6 +47,11 @@ scheduler = AsyncIOScheduler(timezone=TZ)
 LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 
+# 支持通过环境变量控制日志级别，默认 INFO
+# 可设置 MAMBO_LOG_LEVEL=DEBUG 来查看 embedding 等详细日志
+_log_level_name = os.getenv("MAMBO_LOG_LEVEL", "INFO").upper()
+_log_level = getattr(logging, _log_level_name, logging.INFO)
+
 file_handler = RotatingFileHandler(
     os.path.join(LOG_DIR, "mambochat.log"),
     maxBytes=10 * 1024 * 1024,  # 10MB
@@ -56,7 +61,7 @@ file_handler = RotatingFileHandler(
 file_handler.setFormatter(logging.Formatter(
     "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 ))
-file_handler.setLevel(logging.INFO)
+file_handler.setLevel(_log_level)
 
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(logging.Formatter(
@@ -64,11 +69,11 @@ console_handler.setFormatter(logging.Formatter(
 ))
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=_log_level,
     handlers=[file_handler, console_handler]
 )
 logger = logging.getLogger("alembic")
-logger.setLevel(logging.INFO)
+logger.setLevel(_log_level)
 
 def _get_db_head_revision(alembic_config):
     """获取 Alembic head 版本号"""

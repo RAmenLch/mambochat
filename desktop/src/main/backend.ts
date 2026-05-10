@@ -347,6 +347,9 @@ export class BackendProcessManager {
       PYTHONPATH: appDir,
       TZ: 'Asia/Shanghai',
       PYTHONIOENCODING: 'utf-8',
+      // 桌面端使用 DEBUG 级别，方便查看 embedding 等详细日志
+      // 生产部署可改为 INFO 或 WARNING
+      MAMBO_LOG_LEVEL: 'DEBUG',
     }
   }
 
