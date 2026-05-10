@@ -207,11 +207,11 @@ const embeddingModels = computed(() => {
   return providerStore.allModels.filter((m) => m.model_type === 'embedding')
 })
 
-// 当前选中嵌入模型的向量维度
+// 知识库资源的向量维度（创建时固化，不可修改）
 const currentDimension = computed(() => {
-  const model = providerStore.allModels.find((m) => m.id === form.embeddingModelId)
-  if (model?.meta_config?.embedding_dimension) {
-    return String(model.meta_config.embedding_dimension)
+  const dim = currentAttributes.value.dimension
+  if (dim != null && dim !== '') {
+    return String(dim)
   }
   return '—'
 })
