@@ -10,7 +10,7 @@ from backend.services.generation.worker.abstract_worker import AbstractGenerateW
 from backend.services.generation.core.llm_io import LLMInput, AgentConfig
 from backend.services.generation.graph_builders.factory import GraphBuilderFactory
 from backend.schemas.enums import AgentTypeEnum
-from services.generation.core.llm_io import SummarizationEventInfo
+from backend.services.generation.core.llm_io import SummarizationEventInfo
 
 
 class UniversalGraphWorker(AbstractGenerateWorker):
