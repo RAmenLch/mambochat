@@ -33,7 +33,7 @@ from backend.services.generation.managers.stream_handlers.handlers import (
     ToolExecutionHandler, ImageAndUsageHandler, FinishReasonMonitorHandler
 )
 from backend.services.generation.managers.stream_handlers.finish_reason_classifier import FinishReasonClassifier
-from services.generation.core.llm_io import SummarizationEventInfo
+from backend.services.generation.core.llm_io import SummarizationEventInfo
 
 logger = logging.getLogger(__name__)
 

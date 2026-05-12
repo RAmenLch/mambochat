@@ -13,7 +13,7 @@ from langchain_core.messages import (
 
 from backend.services.generation.core.llm_io import LLMInput
 from backend.services.generation.worker.decode import BaseDecode, DecoderRegistry
-from services.generation.core.llm_io import SummarizationEventInfo
+from backend.services.generation.core.llm_io import SummarizationEventInfo
 
 StreamEvent = Union[ToolMessage, AIMessageChunk, AIMessage, Dict[str, Any],SummarizationEventInfo]
 
