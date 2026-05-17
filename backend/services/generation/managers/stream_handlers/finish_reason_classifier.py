@@ -80,15 +80,34 @@ class FinishReasonClassifier:
         兼容各提供商在 response_metadata 中的不同 key 命名:
         - OpenAI / DeepSeek / GLM / OpenRouter: "finish_reason"
         - Claude (langchain): "stop_reason"
+
+        注意: langchain_core merge_dicts 对相同 key 的字符串值会执行 += 拼接,
+        导致多个连续 chunk 的相同 finish_reason 被累积为重复串 (如 "stopstop")。
+        此处通过已知 reason 的反向乘法匹配将其归一化。
         """
         if not metadata or not isinstance(metadata, dict):
             return None
+        # ---- 内部辅助：归一化可能因 merge_dicts 而重复拼接的 reason ----
+        def _normalize(reason_str: str) -> str:
+            # 对于每个已知 reason，检查当前值是否为其 N 次精确重复
+            for known in sorted(
+                {*cls.NORMAL_REASONS, *cls.ABNORMAL_REASONS},
+                key=len,
+                reverse=True,  # 先匹配长串，避免 tool_calls 被 tool 误匹配
+            ):
+                known_len = len(known)
+                total_len = len(reason_str)
+                if total_len > known_len and total_len % known_len == 0:
+                    if reason_str == known * (total_len // known_len):
+                        return known
+            return reason_str
+        # ----------------------------------------------------------------
         # 优先查找 finish_reason (OpenAI 兼容体系)
         reason = metadata.get("finish_reason")
         if reason:
-            return str(reason)
+            return _normalize(str(reason))
         # 兜底查找 stop_reason (Claude 体系)
         reason = metadata.get("stop_reason")
         if reason:
-            return str(reason)
+            return _normalize(str(reason))
         return None

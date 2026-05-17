@@ -67,7 +67,7 @@
         <h2 class="about-title">
           {{ t('settings.about.title') }} <span class="about-subtitle">| {{ t('settings.about.subtitle') }}</span>
         </h2>
-        <el-tag type="info" size="small" effect="plain" class="version-tag">v1.2.3</el-tag>
+        <el-tag type="info" size="small" effect="plain" class="version-tag">v1.2.4</el-tag>
 
         <p class="about-desc">
           {{ t('settings.about.desc') }}

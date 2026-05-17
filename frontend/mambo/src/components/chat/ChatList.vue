@@ -37,9 +37,20 @@
         </template>
 
         <template #item-icon="{ data }">
-          <el-icon>
-            <Folder v-if="data.itemType === 'folder'" />
-            <ChatDotRound v-else />
+          <el-icon v-if="data.itemType === 'folder'">
+            <Folder />
+          </el-icon>
+          <template v-else-if="data.chatMode === 'agent' && data.agentId">
+            <el-avatar
+              v-if="getAgentAvatarUrl(data.agentId)"
+              :size="18"
+              :src="getAgentAvatarUrl(data.agentId)!"
+              class="tree-agent-avatar"
+            />
+            <el-icon v-else><User /></el-icon>
+          </template>
+          <el-icon v-else>
+            <ChatDotRound />
           </el-icon>
         </template>
       </ExplorerTree>
@@ -159,7 +170,7 @@ import { onMounted, computed, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRouter, useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, EditPen, CopyDocument, Search, FolderChecked, Sort } from '@element-plus/icons-vue';
+import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, EditPen, CopyDocument, Search, FolderChecked, Sort, User } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import type { AllowDropType } from 'element-plus/es/components/tree/src/tree.type';
 /** Element Plus Tree 内部节点结构（避免依赖内部路径） */
@@ -171,6 +182,7 @@ interface ElTreeNode {
 }
 
 import type { Chat, ChatCreate, ChatUpdate, BaseTreeItem } from '@/api/types';
+import { resolveFileUrl } from '@/services/electronUrl';
 import { useChatListStore } from '@/stores/chatListStore';
 import { useChatSessionStore, LAST_ACTIVE_CHAT_KEY } from '@/stores/chatSessionStore';
 import { useProviderStore } from '@/stores/providerStore';
@@ -273,6 +285,13 @@ const agentOptions = computed((): SelectConfigOption[] => {
       value: a.id
     }));
 });
+
+// 获取 Agent 头像 URL
+const getAgentAvatarUrl = (agentId: string | null | undefined): string | null => {
+  if (!agentId) return null;
+  const agent = agentStore.allAgents.find(a => a.id === agentId);
+  return agent?.agentAvatarUrl ? (resolveFileUrl(agent.agentAvatarUrl) ?? null) : null;
+};
 
 const isTitleRefreshing = computed(() => refreshingTitleChatId.value === currentChat.value?.id);
 
@@ -612,6 +631,11 @@ async function handleSearchResultSelect(data: { chatId: string; subMessageId: st
 
 .sort-toggle-btn:hover {
   color: var(--el-color-primary);
+}
+
+:deep(.tree-agent-avatar) {
+  background-color: var(--el-fill-color-light);
+  color: var(--el-text-color-secondary);
 }
 
 .el-divider {
