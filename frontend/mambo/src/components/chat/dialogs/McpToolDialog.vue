@@ -3,8 +3,11 @@
   <el-dialog
     v-model="internalVisible"
     :title="mode === 'review_all' ? t('chat.message.mcp.batchReview') : t('chat.message.toolCall')"
-    width="600px"
+    :width="dialogWidth + 'px'"
+    top="3vh"
     destroy-on-close
+    class="mcp-tool-dialog"
+    :style="{ '--dialog-height': dialogHeight > 0 ? dialogHeight + 'px' : 'auto' }"
     @close="handleClose"
   >
     <el-tabs v-if="toolMessages.length > 0" v-model="activeTabId">
@@ -28,9 +31,10 @@
             <!-- Read-only view for completed McpTool -->
             <div v-if="msg.type === 'McpTool'">
               <div v-if="Object.keys(editForms[msg.id] || {}).length > 0" class="readonly-args-box">
-                <div v-for="(val, key) in editForms[msg.id]" :key="key" class="arg-row">
-                  <span class="arg-key">{{ key }}:</span>
-                  <span class="arg-val">{{ typeof val === 'object' ? JSON.stringify(val) : val }}</span>
+                <div v-for="(val, key) in editForms[msg.id]" :key="key" class="arg-row" :class="{ 'is-multiline': isMultilineValue(val) }">
+                  <span class="arg-key">{{ key }}</span>
+                  <pre class="arg-val" v-if="isMultilineValue(val)">{{ typeof val === 'object' ? JSON.stringify(val, null, 2) : val }}</pre>
+                  <span class="arg-val arg-val-inline" v-else>{{ typeof val === 'object' ? JSON.stringify(val) : val }}</span>
                 </div>
               </div>
               <div v-else class="no-args">{{ t('chat.message.mcp.noArguments') }}</div>
@@ -110,11 +114,18 @@
       </el-tab-pane>
     </el-tabs>
     <el-empty v-else :description="t('chat.message.mcp.noToolInfo')" />
+
+    <!-- 拖拽调整大小手柄 -->
+    <div class="resize-handle" @mousedown.prevent="startResize">
+      <svg viewBox="0 0 16 16" width="12" height="12" class="resize-icon">
+        <path d="M0 16 L16 0 M5 16 L16 5 M10 16 L16 10 M15 16 L16 15" stroke="currentColor" stroke-width="1" fill="none" opacity="0.4"/>
+      </svg>
+    </div>
   </el-dialog>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue';
+import { ref, watch, computed, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useMcpStore } from '@/stores/mcpStore';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
@@ -141,6 +152,47 @@ const emit = defineEmits<{
 const internalVisible = ref(false);
 const activeTabId = ref('');
 const editForms = ref<Record<string, Record<string, unknown>>>({});
+
+// ── 拖拽缩放 ──
+const dialogWidth = ref(800);
+const dialogHeight = ref(0); // 0 = 自动高度，拖拽后变为固定值
+const resizeState = { active: false, startX: 0, startY: 0, startW: 0, startH: 0 };
+
+function startResize(e: MouseEvent) {
+  const el = document.querySelector('.mcp-tool-dialog') as HTMLElement;
+  if (!el) return;
+  const rect = el.getBoundingClientRect();
+  resizeState.active = true;
+  resizeState.startX = e.clientX;
+  resizeState.startY = e.clientY;
+  resizeState.startW = rect.width;
+  resizeState.startH = rect.height;
+  // 首次拖拽时用当前真实高度初始化
+  if (dialogHeight.value === 0) dialogHeight.value = rect.height;
+  document.addEventListener('mousemove', onResize);
+  document.addEventListener('mouseup', stopResize);
+  document.body.style.userSelect = 'none';
+}
+
+function onResize(e: MouseEvent) {
+  if (!resizeState.active) return;
+  const dx = e.clientX - resizeState.startX;
+  const dy = e.clientY - resizeState.startY;
+  dialogWidth.value = Math.max(500, Math.min(window.innerWidth * 0.95, resizeState.startW + dx));
+  dialogHeight.value = Math.max(350, Math.min(window.innerHeight * 0.94, resizeState.startH + dy));
+}
+
+function stopResize() {
+  resizeState.active = false;
+  document.removeEventListener('mousemove', onResize);
+  document.removeEventListener('mouseup', stopResize);
+  document.body.style.userSelect = '';
+}
+
+onUnmounted(() => {
+  document.removeEventListener('mousemove', onResize);
+  document.removeEventListener('mouseup', stopResize);
+});
 
 const liveParentMessage = computed(() => {
   if (!props.parentMessageId) return null;
@@ -356,6 +408,15 @@ function getToolDecision(msg: SubMessage): ToolDecision | null {
   return null;
 }
 
+/**
+ * 判断值是否为多行内容（包含换行符的字符串，或复杂对象）
+ */
+function isMultilineValue(val: unknown): boolean {
+  if (typeof val === 'string' && val.includes('\n')) return true;
+  if (typeof val === 'object' && val !== null) return true;
+  return false;
+}
+
 function getDecisionText(decision: ToolDecision | null): string {
   if (!decision) return '';
   switch (decision.type) {
@@ -414,7 +475,41 @@ async function submitDecision(subMessageId: string, type: 'approve' | 'edit' | '
 </script>
 
 <style scoped>
-/* ... existing styles ... */
+/* Dialog sizing via CSS vars — width from el-dialog prop, height from custom property */
+:deep(.mcp-tool-dialog) {
+  min-width: 500px;
+  min-height: 350px;
+  max-width: 95vw;
+  max-height: 94vh;
+  height: var(--dialog-height, auto);
+  display: flex;
+  flex-direction: column;
+}
+:deep(.mcp-tool-dialog .el-dialog__body) {
+  padding-top: 8px;
+  overflow-y: auto;
+  flex: 1;
+  max-height: calc(94vh - 120px);
+}
+
+/* 拖拽手柄 */
+.resize-handle {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 22px;
+  height: 22px;
+  cursor: nwse-resize;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 0 2px 2px 0;
+  z-index: 1;
+}
+.resize-handle:hover .resize-icon {
+  opacity: 0.8;
+}
+
 .tool-detail-container {
   padding: 10px;
 }
@@ -452,23 +547,46 @@ h4 {
   padding: 12px;
 }
 .arg-row {
-  display: flex;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
   font-size: 13px;
 }
 .arg-row:last-child {
   margin-bottom: 0;
 }
+.arg-row.is-multiline {
+  margin-bottom: 16px;
+}
 .arg-key {
+  display: block;
   font-weight: 600;
-  color: var(--el-text-color-regular);
-  width: 120px;
-  flex-shrink: 0;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  margin-bottom: 4px;
+  text-transform: none;
 }
 .arg-val {
+  display: block;
   color: var(--el-text-color-primary);
   word-break: break-all;
   font-family: monospace;
+  font-size: 13px;
+}
+.arg-val-inline {
+  display: inline;
+  padding: 2px 6px;
+  background: var(--el-fill-color-light);
+  border-radius: 3px;
+}
+.arg-val:not(.arg-val-inline) {
+  background: var(--el-fill-color);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 4px;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
+  overflow-y: auto;
+  line-height: 1.5;
 }
 .result-box {
   background-color: var(--el-fill-color-light);
@@ -477,8 +595,9 @@ h4 {
   font-family: monospace;
   white-space: pre-wrap;
   word-break: break-all;
-  max-height: 200px;
+  max-height: 400px;
   overflow-y: auto;
+  line-height: 1.5;
 }
 .result-box.is-error {
   color: var(--el-color-error);
