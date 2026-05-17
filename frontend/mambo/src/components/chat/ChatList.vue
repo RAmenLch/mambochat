@@ -290,7 +290,7 @@ const agentOptions = computed((): SelectConfigOption[] => {
 const getAgentAvatarUrl = (agentId: string | null | undefined): string | null => {
   if (!agentId) return null;
   const agent = agentStore.allAgents.find(a => a.id === agentId);
-  return agent?.agentAvatarUrl ? resolveFileUrl(agent.agentAvatarUrl) : null;
+  return agent?.agentAvatarUrl ? (resolveFileUrl(agent.agentAvatarUrl) ?? null) : null;
 };
 
 const isTitleRefreshing = computed(() => refreshingTitleChatId.value === currentChat.value?.id);

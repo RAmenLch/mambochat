@@ -67,7 +67,7 @@
             :path="`${path}[${index}]`"
             :keyName="`[${index}]`"
           />
-          <span v-if="index < value.length - 1" class="json-comma">,</span>
+          <span v-if="(index as number) < value.length - 1" class="json-comma">,</span>
         </div>
       </span>
       <span v-if="!collapsed" class="json-bracket json-bracket--close">]</span>
@@ -253,7 +253,7 @@ const arraySummary = computed(() => {
     return result;
   }
 
-  const preview = props.value.slice(0, 2).map(item => {
+  const preview = props.value.slice(0, 2).map((item: any) => {
     if (typeof item === 'string') return `"${item.substring(0, 20)}${item.length > 20 ? '…' : ''}"`;
     if (typeof item === 'object' && item !== null) {
       if (Array.isArray(item)) return '[…]';
