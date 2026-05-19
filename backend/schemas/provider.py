@@ -19,6 +19,7 @@ class AIModelMetaConfig(BaseModel):
     embedding_dimension: Optional[int] = Field(None, description="Embeddings 模型的输出向量维度")
     max_context_length: Optional[int] = Field(None, description="Embeddings 模型的最大上下文Token限制")
     max_retries: Optional[int] = Field(0, description="模型请求最大重试次数, 0表示不配置, 使用全局默认值")
+    timeout: Optional[int] = Field(None, description="请求超时时间(秒), None 时使用全局默认值")
 
 
 # --- AIModel Schemas ---

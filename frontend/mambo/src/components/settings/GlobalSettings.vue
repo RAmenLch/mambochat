@@ -302,6 +302,23 @@
           </el-tooltip>
         </el-form-item>
 
+        <el-form-item :label="t('settings.global.defaultTimeout')">
+          <el-input-number
+            :model-value="settingsForm.default_timeout ?? 60"
+            @update:model-value="(val: number | undefined) => (settingsForm.default_timeout = val ?? 60)"
+            :min="10"
+            :max="600"
+            :step="10"
+          />
+          <el-tooltip
+            effect="dark"
+            :content="t('settings.global.defaultTimeoutTip')"
+            placement="top"
+          >
+            <el-icon class="label-icon"><QuestionFilled /></el-icon>
+          </el-tooltip>
+        </el-form-item>
+
         <!-- 状态栏替代了保存按钮 -->
         <div class="status-bar">
           <transition name="fade" mode="out-in">
@@ -371,6 +388,7 @@ const settingsForm = reactive<
   default_enable_suggest: false,
   default_enable_ask_user: false,
   default_max_retries: 1,
+  default_timeout: 60,
 })
 
 // 状态控制
@@ -431,6 +449,7 @@ watch(
       default_enable_suggest: newSettings.default_enable_suggest ?? false,
       default_enable_ask_user: newSettings.default_enable_ask_user ?? false,
       default_max_retries: newSettings.default_max_retries ?? 1,
+      default_timeout: newSettings.default_timeout ?? 60,
     })
 
     // 在 DOM 更新循环结束后释放锁，确保 watch(settingsForm) 不会被此次赋值触发

@@ -112,6 +112,29 @@
         </div>
       </el-form-item>
 
+      <el-form-item>
+        <template #label>
+          <span>{{ t('model.form.timeout') }}</span>
+          <el-tooltip :content="t('model.form.timeoutTip')" placement="top">
+            <el-icon class="label-icon"><QuestionFilled /></el-icon>
+          </el-tooltip>
+        </template>
+        <div class="slider-row">
+          <el-input-number
+            :model-value="modelForm.meta_config.timeout ?? null"
+            @update:model-value="(val: number | null | undefined) => (modelForm.meta_config!.timeout = val ?? null)"
+            :min="10"
+            :max="600"
+            :step="10"
+            :controls="false"
+            placeholder="60"
+            style="flex: 1; margin-right: 12px;"
+          />
+          <span v-if="!modelForm.meta_config.timeout" class="slider-tag">{{ t('model.form.useGlobal') }}</span>
+          <span v-else class="slider-tag slider-tag--value">{{ modelForm.meta_config.timeout }}s</span>
+        </div>
+      </el-form-item>
+
       <!-- 通用配置 -->
       <el-form-item :label="t('model.form.supportedParams')">
         <el-select
@@ -137,6 +160,7 @@
 <script setup lang="ts">
 import { ref, reactive, watch, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { QuestionFilled } from '@element-plus/icons-vue';
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
 import { useProviderStore } from '@/stores/providerStore';
 import { useSystemConfigStore } from '@/stores/systemConfigStore';
@@ -181,6 +205,7 @@ const getInitialMetaConfig = (): AIModelMetaConfig => ({
   output_modalities: [],
   supported_parameters: [],
   max_retries: 0,
+  timeout: null,
 });
 
 const modelForm = reactive<ModelFormData>({
@@ -235,6 +260,7 @@ function getSanitizedMetaConfig(): AIModelMetaConfig {
       context_length: config.context_length || null,
       supported_parameters: config.supported_parameters || [],
       max_retries: config.max_retries || 0,
+      timeout: config.timeout || null,
     };
 
     if (isChatModel.value) {
@@ -315,4 +341,5 @@ async function submitForm() {
   color: var(--el-color-primary);
   background: var(--el-color-primary-light-9);
 }
+.label-icon { margin-left: 4px; color: var(--el-text-color-secondary); cursor: help; }
 </style>

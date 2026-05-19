@@ -133,6 +133,8 @@ class DeepAgentInitializer(AbstractAgentInitializer):
             global_proxy_url = proxy_url_setting.value if proxy_url_setting else None
             max_retries_setting = await setting_crud.get_setting(self.db, "default_max_retries")
             global_max_retries = int(max_retries_setting.value) if max_retries_setting and max_retries_setting.value else 3
+            timeout_setting = await setting_crud.get_setting(self.db, "default_timeout")
+            global_default_timeout = int(timeout_setting.value) if timeout_setting and timeout_setting.value else 60
 
             from backend.services.generation.builders.initializers.agent_react_initializer import AgentBasedReActInitializer
 
@@ -171,13 +173,17 @@ class DeepAgentInitializer(AbstractAgentInitializer):
                         api_params = map_model_parameters(sub.parsed_model_parameters)
 
                         sub_model_max_retries = 0
+                        sub_model_timeout = None
                         if sub_model.meta_config:
                             try:
                                 meta = json.loads(sub_model.meta_config) if isinstance(sub_model.meta_config, str) else sub_model.meta_config
                                 sub_model_max_retries = int(meta.get("max_retries", 0))
+                                raw_timeout = meta.get("timeout")
+                                sub_model_timeout = int(raw_timeout) if raw_timeout is not None else None
                             except (json.JSONDecodeError, ValueError, TypeError):
                                 pass
                         sub_max_retries = sub_model_max_retries if sub_model_max_retries > 0 else global_max_retries
+                        sub_timeout = sub_model_timeout if sub_model_timeout is not None else global_default_timeout
 
                         sub_config.llm_config = ModelConfig(
                             model_id=sub_model.modelId,
@@ -185,7 +191,8 @@ class DeepAgentInitializer(AbstractAgentInitializer):
                             api_key=sub_model.provider.apiKey,
                             proxy_url=proxy_url,
                             parameters=api_params,
-                            max_retries=sub_max_retries
+                            max_retries=sub_max_retries,
+                            timeout=sub_timeout
                         )
 
                 sub_configs.append(sub_config)

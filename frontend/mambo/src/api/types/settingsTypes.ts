@@ -21,6 +21,7 @@ export interface GlobalSettingsUpdate {
   default_enable_suggest: boolean | null
   default_enable_ask_user: boolean | null
   default_max_retries: number | null
+  default_timeout: number | null
 }
 
 export interface ProxyTestRequest {

@@ -43,6 +43,7 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
         "last_selected_provider_id", "default_max_context_messages", "default_temperature",
         "default_top_p", "default_stream", "default_enable_suggest", "default_enable_ask_user",
         "default_max_retries",
+        "default_timeout",
         "proxy_enabled", "proxy_url",
         "user_avatar_file_id", "ai_avatar_file_id",
         "frontend_editor", "kb_default_chunk_size", "kb_default_chunk_overlap", "send_message_shortcut",
@@ -83,6 +84,7 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
     enable_suggest = _get_typed_setting(settings_map.get("default_enable_suggest"), False, bool)
     enable_ask_user = _get_typed_setting(settings_map.get("default_enable_ask_user"), False, bool)
     max_retries = _get_typed_setting(settings_map.get("default_max_retries"), 1, int)
+    default_timeout = _get_typed_setting(settings_map.get("default_timeout"), 60, int)
     proxy_enabled = _get_typed_setting(settings_map.get("proxy_enabled"), False, bool)
     proxy_url = _get_typed_setting(settings_map.get("proxy_url"), None, str)
 
@@ -104,6 +106,7 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
         default_enable_suggest=enable_suggest,
         default_enable_ask_user=enable_ask_user,
         default_max_retries=max_retries,
+        default_timeout=default_timeout,
         proxy_enabled=proxy_enabled,
         proxy_url=proxy_url,
         user_avatar_url=user_avatar_url,
@@ -168,6 +171,7 @@ async def update_global_settings(
         "default_max_context_messages", "default_temperature", "default_top_p",
         "default_stream", "default_enable_suggest", "default_enable_ask_user",
         "default_max_retries",
+        "default_timeout",
         "proxy_enabled", "proxy_url",
         "zip_history_system_prompt",
         "frontend_editor", "kb_default_chunk_size", "kb_default_chunk_overlap", "send_message_shortcut",
