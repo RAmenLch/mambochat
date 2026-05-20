@@ -164,12 +164,16 @@ class LLMInputDirector:
         global_default_timeout = int(materials.settings.get("default_timeout", 60))
         model_max_retries = 0
         model_timeout = None
+        model_stream_chunk_timeout = None
         if model.meta_config:
             try:
                 meta = json.loads(model.meta_config) if isinstance(model.meta_config, str) else model.meta_config
                 model_max_retries = int(meta.get("max_retries", 0))
                 raw_timeout = meta.get("timeout")
                 model_timeout = int(raw_timeout) if raw_timeout is not None else None
+                raw_stream_chunk_timeout = meta.get("stream_chunk_timeout")
+                if raw_stream_chunk_timeout is not None:
+                    model_stream_chunk_timeout = float(raw_stream_chunk_timeout)
             except (json.JSONDecodeError, ValueError, TypeError):
                 pass
         max_retries = model_max_retries if model_max_retries > 0 else global_max_retries
@@ -182,7 +186,8 @@ class LLMInputDirector:
             proxy_url=proxy_url,
             parameters=api_params,
             max_retries=max_retries,
-            timeout=timeout
+            timeout=timeout,
+            stream_chunk_timeout=model_stream_chunk_timeout
         )
 
         resume_payload = self._extract_resume_payload(materials.target_msg)

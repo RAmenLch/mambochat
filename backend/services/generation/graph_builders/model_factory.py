@@ -72,7 +72,12 @@ class ModelFactory:
                 callbacks=callbacks,
                 max_retries=max_retries,
                 thinking=thinking,
-                reasoning_effort=reasoning_effort
+                reasoning_effort=reasoning_effort,
+                stream_chunk_timeout=(
+                    model_config.stream_chunk_timeout
+                    if model_config.stream_chunk_timeout is not None
+                    else model_config.timeout * 2
+                )
             )
 
         else:
@@ -89,5 +94,10 @@ class ModelFactory:
                     "X-Title": "MamboChat",
                 },
                 callbacks=callbacks,
-                max_retries=max_retries
+                max_retries=max_retries,
+                stream_chunk_timeout=(
+                    model_config.stream_chunk_timeout
+                    if model_config.stream_chunk_timeout is not None
+                    else model_config.timeout * 2
+                )
             )

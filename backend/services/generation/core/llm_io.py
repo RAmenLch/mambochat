@@ -69,6 +69,11 @@ class ModelConfig(BaseModel):
     )
     timeout: int = Field(60, description="请求超时时间(秒)")
     max_retries: int = Field(0, description="模型请求最大重试次数, 0表示不配置, 将使用全局默认值")
+    stream_chunk_timeout: Optional[float] = Field(
+        None,
+        description="流式响应 chunk 间超时时间(秒)。为 None 或 0 时禁用。"
+                    "对于图片生成等耗时模型，建议设置为较大值（如 600）或 None。"
+    )
 
 
 class MessageContext(BaseModel):
