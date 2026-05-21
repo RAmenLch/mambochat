@@ -123,7 +123,7 @@ class _NonExecutableBackendProxy(TreeBackendProtocol):
 class TreeStateBackend(StateBackend, TreeBackendProtocol):
 
     def tree(self, path: str = "/", depth: int = 3) -> str:
-        files = self.runtime.state.get("files", {})
+        files = self._read_files()
         tree_dict: Dict[str, Any] = {}
         norm_path = path if path.endswith("/") else path + "/"
 

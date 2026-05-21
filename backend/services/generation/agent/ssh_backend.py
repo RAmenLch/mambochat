@@ -8,12 +8,14 @@ Search operations (grep, glob) prefer native remote commands (grep, rg, find) vi
 for performance, falling back to pure Python SFTP scanning only when unavailable.
 """
 
+import base64
 import fnmatch
 import json
 import logging
 import posixpath
 import shlex
 import stat
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -25,14 +27,17 @@ from deepagents.backends.protocol import (
     BackendProtocol,
     EditResult,
     ExecuteResponse,
+    FileData,
     FileDownloadResponse,
     FileInfo,
     FileUploadResponse,
     GrepMatch,
+    ReadResult,
     SandboxBackendProtocol,
     WriteResult,
 )
 from deepagents.backends.utils import (
+    _get_file_type,
     check_empty_content,
     format_content_with_line_numbers,
     perform_string_replacement,
@@ -100,14 +105,46 @@ class PureSFTPBackend(SandboxBackendProtocol, TreeBackendProtocol):
 
         self._ssh_client: paramiko.SSHClient | None = None
         self._sftp_client: paramiko.SFTPClient | None = None
+        self._lock = threading.Lock()
         # Cache for remote command availability
         self._remote_rg_available: bool | None = None
         self._remote_grep_available: bool | None = None
         self._remote_find_available: bool | None = None
 
     def _connect(self) -> None:
-        """Establish SSH and SFTP connections if not already connected."""
-        if self._ssh_client is None or self._ssh_client.get_transport() is None or not self._ssh_client.get_transport().is_active():
+        """Establish SSH and SFTP connections if not already connected.
+
+        Uses double-check locking to prevent race conditions when multiple
+        threads (e.g. from ``asyncio.gather`` tool calls) attempt to connect
+        simultaneously.
+        """
+        # Fast path: connection already alive, no lock needed
+        if self._ssh_client is not None:
+            transport = self._ssh_client.get_transport()
+            if transport is not None and transport.is_active():
+                return
+
+        with self._lock:
+            # Double-check after acquiring lock
+            if self._ssh_client is not None:
+                transport = self._ssh_client.get_transport()
+                if transport is not None and transport.is_active():
+                    return
+
+            # Close any stale connection before creating a new one
+            if self._sftp_client is not None:
+                try:
+                    self._sftp_client.close()
+                except Exception:
+                    pass
+                self._sftp_client = None
+            if self._ssh_client is not None:
+                try:
+                    self._ssh_client.close()
+                except Exception:
+                    pass
+                self._ssh_client = None
+
             self._ssh_client = paramiko.SSHClient()
             self._ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
@@ -162,13 +199,20 @@ class PureSFTPBackend(SandboxBackendProtocol, TreeBackendProtocol):
         return ExecuteResponse(output=combined, exit_code=exit_code, truncated=truncated)
 
     def close(self) -> None:
-        """Close connections."""
-        if self._sftp_client:
-            self._sftp_client.close()
-            self._sftp_client = None
-        if self._ssh_client:
-            self._ssh_client.close()
-            self._ssh_client = None
+        """Close connections (thread-safe)."""
+        with self._lock:
+            if self._sftp_client:
+                try:
+                    self._sftp_client.close()
+                except Exception:
+                    pass
+                self._sftp_client = None
+            if self._ssh_client:
+                try:
+                    self._ssh_client.close()
+                except Exception:
+                    pass
+                self._ssh_client = None
 
     def __del__(self) -> None:
         self.close()
@@ -356,31 +400,55 @@ class PureSFTPBackend(SandboxBackendProtocol, TreeBackendProtocol):
         results.sort(key=lambda x: x.get("path", ""))
         return results
 
-    def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> str:
+    def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
+        """Read file content, returning base64-encoded data for binary files.
+
+        Args:
+            file_path: Absolute virtual path to read.
+            offset: Line offset for text files (0-indexed). Ignored for binary.
+            limit: Max number of lines for text files. Ignored for binary.
+
+        Returns:
+            ReadResult with file_data on success, or error on failure.
+            Binary files (image, audio, video, pdf, etc.) return base64
+            content with ``encoding="base64"`` for the middleware to construct
+            multimodal content blocks for the AI model.
+        """
         self._connect()
         physical_path = self._resolve_path(file_path)
         try:
             assert self._sftp_client is not None
+
+            file_type = _get_file_type(file_path)
+
+            if file_type != "text":
+                with self._sftp_client.open(physical_path, 'rb') as f:
+                    raw = f.read()
+                encoded = base64.standard_b64encode(raw).decode("ascii")
+                return ReadResult(file_data=FileData(content=encoded, encoding="base64"))
+
             with self._sftp_client.open(physical_path, 'r') as f:
                 content = f.read().decode('utf-8')
 
             empty_msg = check_empty_content(content)
             if empty_msg:
-                return empty_msg
+                return ReadResult(file_data=FileData(content=empty_msg, encoding="utf-8"))
 
             lines = content.splitlines()
             start_idx = offset
             end_idx = min(start_idx + limit, len(lines))
 
             if start_idx >= len(lines):
-                return f"Error: Line offset {offset} exceeds file length ({len(lines)} lines)"
+                return ReadResult(error=f"Line offset {offset} exceeds file length ({len(lines)} lines)")
 
             selected_lines = lines[start_idx:end_idx]
-            return format_content_with_line_numbers(selected_lines, start_line=start_idx + 1)
+            return ReadResult(
+                file_data=FileData(content="\n".join(selected_lines), encoding="utf-8"),
+            )
         except IOError as e:
-            return f"Error reading file '{file_path}': {e}"
+            return ReadResult(error=f"Error reading file '{file_path}': {e}")
         except UnicodeDecodeError:
-            return f"Error: File '{file_path}' is not a valid UTF-8 text file."
+            return ReadResult(error=f"Error: File '{file_path}' is not a valid UTF-8 text file.")
 
     def write(self, file_path: str, content: str) -> WriteResult:
         try:
