@@ -39,7 +39,15 @@ class UniversalGraphWorker(AbstractGenerateWorker):
         graph_builder = GraphBuilderFactory.get_builder(llm_input.agent_config.agent_type)
         agent = graph_builder.build(llm_input.agent_config, llm_input.run_time_config)
 
-        thread_config: RunnableConfig = {"configurable": {"thread_id": llm_input.run_time_config.chat_id}}
+        thread_config: RunnableConfig = {
+            "configurable": {
+                "thread_id": llm_input.run_time_config.chat_id,
+            }
+        }
+        # 指定分支 checkpoint → LangGraph 会进行时间旅行，从该 checkpoint 分叉
+        if llm_input.run_time_config.branch_checkpoint_id:
+            thread_config["configurable"]["checkpoint_id"] = llm_input.run_time_config.branch_checkpoint_id
+
         if llm_input.agent_config.recover_from_error:
             input_data = None
         else:

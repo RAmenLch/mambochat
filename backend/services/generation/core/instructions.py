@@ -116,3 +116,11 @@ class UpdateZipHistorySubMessage(BaseInstruction):
     content: str
     status: MessageStatus
     zip_enable: bool = Field(default=False, description="是否在下一轮上下文构建时自动启用压缩")
+
+
+class SetMessageCheckpointId(BaseInstruction):
+    """指令：将 message_id ↔ checkpoint_id 映射存入 message_checkpoints_map 表。
+    由 Manager 在生成完成后（或失败时）yield，由 Executor 执行写入。
+    """
+    message_id: str = Field(..., description="目标 Message ID")
+    checkpoint_id: str = Field(..., description="LangGraph checkpoint ID")

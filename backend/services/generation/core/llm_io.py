@@ -34,6 +34,7 @@ class MessageSchema(BaseModel):
     role: str
     sub_messages: List[SubMessageSchema] = Field(default_factory=list)
     id: Optional[str] = None
+    parentId: Optional[str] = None  # 用于沿父链查找分支 checkpoint
 
 
 # --- 生成管道数据结构 ---
@@ -96,7 +97,11 @@ class MessageContext(BaseModel):
 class RunTimeConfig(BaseModel):
     chat_id: str = Field(..., description="当前生成的 Chat ID，用作 LangGraph 的 thread_id")
     message_id: Optional[str] = Field(None, description="当前轮的Message ID")
-    manager_name: Optional[str] = Field(None,description="当前manager名称")
+    manager_name: Optional[str] = Field(None, description="当前manager名称")
+    branch_checkpoint_id: Optional[str] = Field(
+        None,
+        description="分支起点 checkpoint_id。设置后 LangGraph 会进行时间旅行，从该 checkpoint 分叉",
+    )
 
 
 class AgentConfig(BaseModel):

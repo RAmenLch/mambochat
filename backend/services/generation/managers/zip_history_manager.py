@@ -109,7 +109,8 @@ class ZipHistoryGenerateManager(AbstractGenerateManager):
             self,
             assistant_message_id: str,
             final_status: schemas_enums.MessageStatus,
-            exception: Optional[Exception] = None
+            exception: Optional[Exception] = None,
+            chat_id: Optional[str] = None,
     ) -> AsyncGenerator[BaseInstruction, None]:
         """
         在发生未捕获的异常时，创建一个表示失败的ZipHistory子消息。
