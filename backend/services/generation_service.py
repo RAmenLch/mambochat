@@ -148,6 +148,16 @@ async def create_user_message_and_prepare_generation(
     for i, sub_msg in enumerate(all_sub_messages):
         sub_msg.sortOrder = i
 
+    # 先创建消息和 SubMessage，再更新文管理类型，避免竞态条件：
+    # 如果先更新 File.management_type 为 "sub_message"，在第二次 commit 之前，
+    # cleanup_service 的 _cleanup_sub_message_files 会判定该 File 为孤儿并删除，
+    # 导致用户消息中的图片异常消失。
+    user_message_create = schemas.MessageCreate(
+        role=MessageRole.USER,
+        sub_messages=all_sub_messages
+    )
+    user_message = await message_crud.create_message(db, message=user_message_create, chat_id=chat_id)
+
     file_service = FileService(db)
     for sub_message in request.sub_messages:
         if sub_message.type == 'File':
@@ -157,12 +167,6 @@ async def create_user_message_and_prepare_generation(
                 new_type=FileManagementType.SUB_MESSAGE.value,
                 merge=True
             )
-
-    user_message_create = schemas.MessageCreate(
-        role=MessageRole.USER,
-        sub_messages=all_sub_messages
-    )
-    user_message = await message_crud.create_message(db, message=user_message_create, chat_id=chat_id)
 
     assistant_placeholder = await prepare_for_regeneration(db, chat_id, user_message.id)
 
