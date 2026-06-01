@@ -29,6 +29,28 @@ FileBufSize 128
     ; 等待卸载完成，确保进程已完全释放文件
     Sleep 1000
   ${EndIf}
+
+  ; ============================================
+  ; 安装时解压 Python 运行时（避免首次启动等待）
+  ; ============================================
+  StrCpy $0 "$INSTDIR\resources\runtime"
+  IfFileExists "$0\python.tar" 0 extractSkip
+    DetailPrint "正在解压 Python 运行时，请稍候..."
+    ; Windows 10 17063+ 内置 tar.exe，位于 System32
+    nsExec::ExecToLog '"$SYSDIR\tar.exe" -xf "$0\python.tar" -C "$0"'
+    Pop $1
+    ${If} $1 == 0
+      ; 解压成功：删除 tar、写入戳记
+      Delete "$0\python.tar"
+      FileOpen $2 "$0\python\.extraction-ok" w
+      FileWrite $2 "${__DATE__} ${__TIME__}$\r$\n"
+      FileClose $2
+      DetailPrint "Python 运行时安装完成"
+    ${Else}
+      ; 解压失败：保留 python.tar，应用首次启动兜底解压
+      DetailPrint "Python 运行时解压失败（错误码: $1），将在首次启动时自动解压"
+    ${EndIf}
+  extractSkip:
 !macroend
 
 ; ============================================
