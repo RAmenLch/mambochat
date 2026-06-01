@@ -114,6 +114,8 @@ export default {
     defaultEnableAskUserTip: '新会话默认是否允许 AI 向用户提问以获取必要信息。',
     defaultMaxRetries: '模型请求最大重试次数',
     defaultMaxRetriesTip: '模型请求失败时的全局默认最大重试次数，必须 >= 1。',
+    defaultTimeout: '模型请求超时(秒)',
+    defaultTimeoutTip: '全局默认模型请求超时时间（秒）。单个模型可在模型编辑中覆盖此值。',
     saving: '正在保存设置...',
     saved: '所有更改已保存',
     saveError: '保存失败，请检查网络',

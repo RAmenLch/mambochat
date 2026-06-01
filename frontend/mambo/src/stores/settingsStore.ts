@@ -37,6 +37,7 @@ export const useSettingsStore = defineStore('settings', {
       default_enable_suggest: false,
       default_enable_ask_user: false,
       default_max_retries: 3,
+      default_timeout: 60,
     },
   }),
 

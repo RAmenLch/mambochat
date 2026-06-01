@@ -116,6 +116,8 @@ export default {
     defaultEnableAskUserTip: 'Allow AI to ask the user questions by default for new chats.',
     defaultMaxRetries: 'Max Retries',
     defaultMaxRetriesTip: 'Global default max retry count for model requests. Must be >= 1.',
+    defaultTimeout: 'Request Timeout (s)',
+    defaultTimeoutTip: 'Global default model request timeout in seconds. Overridable per-model.',
     saving: 'Saving settings...',
     saved: 'All changes saved',
     saveError: 'Save failed, check network',

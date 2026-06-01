@@ -8,7 +8,7 @@ from backend.services.generation.core.instructions import (
     BaseInstruction, CreateSubMessage, AppendToSubMessage, UpdateSubMessageContent,
     UpdateSubMessageStatus, UpdateSubMessageConfig, SetFinalStatus,
     UpdateChatName, SaveAndPersistFile, UpdateZipHistorySubMessage, NotifyUser,
-    FailSubMessagesByMessage
+    FailSubMessagesByMessage, SetMessageCheckpointId
 )
 from backend.services.generation.executor import handlers
 
@@ -59,6 +59,7 @@ class InstructionDispatcher:
         self.register(NotifyUser, handlers.handle_notify_user)
         self.register(FailSubMessagesByMessage, handlers.handle_fail_sub_messages_by_message)
         self.register(SetFinalStatus, handlers.handle_set_final_status)
+        self.register(SetMessageCheckpointId, handlers.handle_set_message_checkpoint_id)
 
     async def execute(
             self,

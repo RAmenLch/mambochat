@@ -153,7 +153,8 @@ class TitleGenerateManager(AbstractGenerateManager):
             self,
             assistant_message_id: str,
             final_status: schemas.enums.MessageStatus,
-            exception: Optional[Exception] = None
+            exception: Optional[Exception] = None,
+            chat_id: Optional[str] = None,
     ) -> AsyncGenerator[BaseInstruction, None]:
         """
         异常清理逻辑：发送全局通知。

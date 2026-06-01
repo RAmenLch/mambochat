@@ -12,6 +12,7 @@ export interface AIModelMetaConfig {
   output_modalities?: string[] | null
   supported_parameters?: string[] | null
   max_retries?: number | null
+  timeout?: number | null
 }
 
 export interface AIModelBase {

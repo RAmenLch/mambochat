@@ -56,7 +56,7 @@ class AbstractGenerateManager(ABC):
                 overall_status = schemas_enums.MessageStatus.FAILED
 
             # 调用子类的清理逻辑
-            async for instruction in self._cleanup_on_exception(assistant_message_id, overall_status, e):
+            async for instruction in self._cleanup_on_exception(assistant_message_id, overall_status, e, chat_id):
                 yield instruction
 
     @abstractmethod
@@ -77,7 +77,8 @@ class AbstractGenerateManager(ABC):
             self,
             assistant_message_id: str,
             final_status: schemas_enums.MessageStatus,
-            exception: Optional[Exception] = None
+            exception: Optional[Exception] = None,
+            chat_id: Optional[str] = None,
     ) -> AsyncGenerator[BaseInstruction, None]:
         """
         异常清理钩子，由子类实现。

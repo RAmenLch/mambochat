@@ -41,6 +41,8 @@ export default {
     supportedParams: 'Supported Params',
     maxRetries: 'Max Retries',
     useGlobal: 'Use Global',
+    timeout: 'Request Timeout (s)',
+    timeoutTip: 'Model request timeout in seconds. Leave empty to use global default.',
     updateSuccess: 'Model updated successfully!',
     createSuccess: 'Model added successfully!',
   },

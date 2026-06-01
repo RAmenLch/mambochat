@@ -41,6 +41,8 @@ export default {
     supportedParams: '支持的参数',
     maxRetries: '最大重试次数',
     useGlobal: '采用全局配置',
+    timeout: '请求超时(秒)',
+    timeoutTip: '模型请求超时时间, 留空则使用全局默认值',
     updateSuccess: '更新模型成功！',
     createSuccess: '新增模型成功！',
   },

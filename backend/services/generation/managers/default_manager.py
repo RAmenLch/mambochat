@@ -20,8 +20,10 @@ from backend.services.mcp_connection_manager import McpConnectionError
 from backend.services.generation.core.instructions import (
     BaseInstruction, CreateSubMessage, AppendToSubMessage,
     SetFinalStatus, InterruptGeneration, FailSubMessagesByMessage,
-    UpdateSubMessageConfig, UpdateSubMessageStatus, UpdateZipHistorySubMessage
+    UpdateSubMessageConfig, UpdateSubMessageStatus, UpdateZipHistorySubMessage,
+    SetMessageCheckpointId
 )
+from backend.checkpointer import get_checkpointer
 from backend.services.generation.builders.director import LLMInputDirector
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
 
@@ -254,6 +256,16 @@ class DefaultGenerateManager(AbstractGenerateManager):
                         zip_enable=True,
                     )
 
+        # ── Record checkpoint_id for branch tracking ──
+        saved = await get_checkpointer().aget_tuple(
+            {"configurable": {"thread_id": chat_id}}
+        )
+        if saved:
+            yield SetMessageCheckpointId(
+                message_id=assistant_message_id,
+                checkpoint_id=saved.checkpoint["id"],
+            )
+
         async for instruction in self._finalize_generation(is_interrupted=should_interrupt):
             yield instruction
 
@@ -292,7 +304,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
 
     async def _cleanup_on_exception(
             self, assistant_message_id: str, final_status: schemas_enums.MessageStatus,
-            exception: Optional[Exception] = None
+            exception: Optional[Exception] = None, chat_id: Optional[str] = None,
     ) -> AsyncGenerator[BaseInstruction, None]:
         error_message = ""
         error_stack = ""
@@ -320,3 +332,14 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 status=final_status,
                 initial_content=error_content.to_json_string()
             )
+
+        # 失败时记录 checkpoint_id（用于后续 retry 恢复）
+        if chat_id:
+            saved = await get_checkpointer().aget_tuple(
+                {"configurable": {"thread_id": chat_id}}
+            )
+            if saved:
+                yield SetMessageCheckpointId(
+                    message_id=assistant_message_id,
+                    checkpoint_id=saved.checkpoint["id"],
+                )

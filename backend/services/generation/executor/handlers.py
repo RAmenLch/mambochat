@@ -16,8 +16,9 @@ from backend.services.generation.core.instructions import (
     CreateSubMessage, AppendToSubMessage, UpdateSubMessageContent,
     UpdateSubMessageStatus, UpdateSubMessageConfig, SetFinalStatus,
     UpdateChatName, SaveAndPersistFile, UpdateZipHistorySubMessage, NotifyUser,
-    FailSubMessagesByMessage
+    FailSubMessagesByMessage, SetMessageCheckpointId
 )
+from backend.crud import checkpoint_map_crud
 
 
 async def handle_create_sub_message(
@@ -271,3 +272,12 @@ async def handle_set_final_status(
 ) -> schemas.enums.MessageStatus:
     """这是一个特殊的指令，它不操作数据库，而是直接向外层返回最终的状态枚举"""
     return instruction.status
+
+
+async def handle_set_message_checkpoint_id(
+    instruction: SetMessageCheckpointId, chat_id: str, assistant_message_id: str, db: AsyncSession
+) -> None:
+    """将 message_id ↔ checkpoint_id 映射写入 message_checkpoints_map 表。"""
+    await checkpoint_map_crud.set_checkpoint_id(
+        db, instruction.message_id, instruction.checkpoint_id, chat_id
+    )

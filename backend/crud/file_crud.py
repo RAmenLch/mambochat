@@ -90,17 +90,19 @@ async def update_file_management_type(
         return None
 
     if merge:
-        # 确保类型列表存在
-        if not db_file.management_type:
-            db_file.management_type = []
+        # 创建新列表副本，避免 SQLAlchemy JSONB 列原地修改不被追踪的问题
+        current_types = list(db_file.management_type or [])
 
         # 如果当前是临时类型，先移除临时标记
-        if 'temporary' in db_file.management_type:
-            db_file.management_type.remove('temporary')
+        if 'temporary' in current_types:
+            current_types.remove('temporary')
 
         # 添加新类型（避免重复）
-        if new_type not in db_file.management_type:
-            db_file.management_type.append(new_type)
+        if new_type not in current_types:
+            current_types.append(new_type)
+
+        # 通过赋值触发 SQLAlchemy 变更追踪
+        db_file.management_type = current_types
     else:
         # 直接替换整个列表
         db_file.management_type = [new_type]
@@ -126,8 +128,11 @@ async def remove_file_management_type(
     """
     db_file = await get_file(db, file_id)
     if db_file and db_file.management_type:
-        if type_to_remove in db_file.management_type:
-            db_file.management_type.remove(type_to_remove)
+        current_types = list(db_file.management_type)
+        if type_to_remove in current_types:
+            current_types.remove(type_to_remove)
+            # 通过赋值触发 SQLAlchemy 变更追踪
+            db_file.management_type = current_types
             await db.commit()
             await db.refresh(db_file)
     return db_file
