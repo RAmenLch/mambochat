@@ -4,7 +4,6 @@ from typing import AsyncGenerator, Any, Dict, Tuple, List
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command, Overwrite
-from deepagents.backends.utils import create_file_data
 
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker, StreamEvent
 from backend.services.generation.core.llm_io import LLMInput, AgentConfig
@@ -23,7 +22,7 @@ class UniversalGraphWorker(AbstractGenerateWorker):
                 for file_config in skill.files:
                     if file_config.content is not None:
                         virtual_path = f"/skills/{skill.name}/{file_config.file_path}"
-                        files[virtual_path] = create_file_data(file_config.content)
+                        files[virtual_path] = {"content": file_config.content, "encoding": "utf-8"}
 
         if config.sub_configs:
             for sub_config in config.sub_configs:
@@ -42,6 +41,7 @@ class UniversalGraphWorker(AbstractGenerateWorker):
         thread_config: RunnableConfig = {
             "configurable": {
                 "thread_id": llm_input.run_time_config.chat_id,
+                "checkpoint_ns": "",
             }
         }
         # 指定分支 checkpoint → LangGraph 会进行时间旅行，从该 checkpoint 分叉
@@ -52,7 +52,7 @@ class UniversalGraphWorker(AbstractGenerateWorker):
             input_data = None
         else:
             files_to_inject = {}
-            if llm_input.agent_config.agent_type == AgentTypeEnum.DEEP:
+            if llm_input.agent_config.agent_type in (AgentTypeEnum.DEEP, AgentTypeEnum.MAMBO):
                 files_to_inject = self._collect_vfs_files_recursively(llm_input.agent_config)
 
             # Clear stale summarization event from previous run (separate super-step, no Overwrite conflict)

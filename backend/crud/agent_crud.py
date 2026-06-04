@@ -124,8 +124,9 @@ async def update_agent(db: AsyncSession, agent_id: str, agent_update: schemas.Ag
             raise ValueError("Circular dependency detected: An agent cannot have itself as a sub-agent (directly or indirectly).")
         if len(update_data["subAgents"]) > 0:
             agent_type = db_agent.AgentType
-            if agent_type != AgentTypeEnum.DEEP.value and agent_type != AgentTypeEnum.DEEP:
-                raise ValueError("ReActAgent does not support sub-agents. Only DeepAgent can mount sub-agents.")
+            atype = agent_type.value if hasattr(agent_type, 'value') else agent_type
+            if atype not in (AgentTypeEnum.DEEP.value, AgentTypeEnum.MAMBO.value):
+                raise ValueError("ReActAgent does not support sub-agents. Only DeepAgent or Mambo can mount sub-agents.")
 
     for key, value in update_data.items():
         setattr(db_agent, key, value)

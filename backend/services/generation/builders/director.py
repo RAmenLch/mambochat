@@ -18,6 +18,7 @@ from backend.services.generation.builders.context_builder import MessageContextB
 from backend.services.generation.builders.initializers.chat_react_initializer import ChatBasedReActInitializer
 from backend.services.generation.builders.initializers.agent_react_initializer import AgentBasedReActInitializer
 from backend.services.generation.builders.initializers.deep_agent_initializer import DeepAgentInitializer
+from backend.services.generation.builders.initializers.mambo_agent_initializer import MamboAgentInitializer
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
 
 
@@ -223,7 +224,20 @@ class LLMInputDirector:
         resume_payload = self._extract_resume_payload(materials.target_msg)
 
         if is_agent_mode:
-            if materials.agent.AgentType == AgentTypeEnum.DEEP.value or materials.agent.AgentType == AgentTypeEnum.DEEP:
+            agent_type_str = materials.agent.AgentType
+            if hasattr(agent_type_str, 'value'):
+                agent_type_str = agent_type_str.value
+
+            if agent_type_str == AgentTypeEnum.MAMBO.value:
+                initializer = MamboAgentInitializer(
+                    db=self.db,
+                    agent=materials.agent,
+                    resume_payload=resume_payload,
+                    enable_tools=self._enable_tools,
+                    enable_resource_merge=self._enable_resource_merge,
+                    external_tools=self._tools
+                )
+            elif agent_type_str == AgentTypeEnum.DEEP.value:
                 initializer = DeepAgentInitializer(
                     db=self.db,
                     agent=materials.agent,
@@ -256,6 +270,12 @@ class LLMInputDirector:
         agent_config, extended_prompt = await initializer.initialize()
 
         agent_config.llm_config = llm_config
+
+        # 向没有自己模型的子 agent 继承父 agent 的 llm_config
+        if agent_config.sub_configs:
+            for sub in agent_config.sub_configs:
+                if sub.llm_config is None:
+                    sub.llm_config = llm_config
 
         self._providers = initializer.get_providers()
 

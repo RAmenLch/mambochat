@@ -137,11 +137,12 @@ const {
         initialName: t('agent.tree.newAgent'),
         selectConfig: {
           label: t('agent.type'),
-          options: [
-            { label: 'ReAct Agent', value: 'ReActAgent' },
-            { label: 'Deep Agent', value: 'DeepAgent' }
+            options: [
+            { label: 'Mambo Agent', value: 'Mambo' },
+            { label: 'Deep Agent', value: 'DeepAgent' },
+            { label: 'ReAct Agent', value: 'ReActAgent' }
           ],
-          initialValue: 'ReActAgent'
+          initialValue: 'Mambo'
         }
       };
     }
@@ -160,7 +161,7 @@ const {
       name: formPayload.name,
       itemType: isFolder ? 'folder' : 'agent',
       parentId: payload.parentId || null,
-      AgentType: isFolder ? undefined : ((formPayload.selectValue as any) || 'ReActAgent'),
+      AgentType: isFolder ? undefined : ((formPayload.selectValue as any) || 'Mambo'),
        backendIds: []
     });
 

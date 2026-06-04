@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Union
 
-from deepagents.middleware.summarization import SummarizationEvent
+from mambo_agents.middleware.summarization import SummarizationEvent
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, Field, ConfigDict
 from langchain_core.tools import BaseTool
@@ -115,7 +115,7 @@ class AgentConfig(BaseModel):
     description: str = Field(default="", description="Agent 描述，用于父代理路由")
     system_prompt: str = Field(default="", description="Agent 的系统提示词")
 
-    agent_type: AgentTypeEnum = Field(default=AgentTypeEnum.REACT, description="Agent 的类型标识")
+    agent_type: AgentTypeEnum = Field(default=AgentTypeEnum.MAMBO, description="Agent 的类型标识")
     llm_config: Optional[ModelConfig] = Field(default=None, description="该Agent专属的模型配置")
     mounted_backends: Optional[List[Dict[str, Any]]] = Field(
         default=None,
@@ -168,7 +168,7 @@ class SummarizationEventInfo(BaseModel):
             i.e. ``state_messages[cutoff_index - 1]``.  Used by the manager to
             derive ``target_msg_id`` / ``target_sub_msg_id`` for persisting the
             ``ZipHistory`` sub-message.
-        event: The raw ``SummarizationEvent`` dict produced by the deepagents
+        event: The raw ``SummarizationEvent`` dict produced by the
             summarization middleware, containing ``cutoff_index``,
             ``summary_message``, and ``file_path``.
     """

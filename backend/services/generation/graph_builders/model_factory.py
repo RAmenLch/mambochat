@@ -20,6 +20,11 @@ class ModelFactory:
 
     @staticmethod
     def create_model(model_config: ModelConfig, run_time_config: RunTimeConfig) -> BaseChatModel:
+        if model_config is None:
+            raise ValueError(
+                "ModelConfig is None — 该 Agent 没有绑定模型配置。"
+                "请检查 Agent 是否设置了 aiModelId 或继承了父 Agent 的 llm_config。"
+            )
         params_copy = model_config.parameters.copy()
         worker_type = params_copy.pop("_worker_type", ProviderWorkerType.OPENAI.value)
         stream = params_copy.pop("stream", True)

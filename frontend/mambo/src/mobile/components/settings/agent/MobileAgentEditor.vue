@@ -37,8 +37,9 @@
                 <el-col :span="24">
                   <el-form-item :label="$t('agent.type')">
                     <el-select v-model="form.AgentType" style="width: 100%">
-                      <el-option label="ReAct Agent" value="ReActAgent" />
+                      <el-option label="Mambo Agent" value="Mambo" />
                       <el-option label="Deep Agent" value="DeepAgent" />
+                      <el-option label="ReAct Agent" value="ReActAgent" />
                     </el-select>
                   </el-form-item>
                 </el-col>
@@ -238,7 +239,7 @@
               </el-form-item>
             </el-col>
 
-            <el-col :span="24" v-if="form.AgentType === 'DeepAgent'">
+            <el-col :span="24" v-if="form.AgentType === 'DeepAgent' || form.AgentType === 'Mambo'">
               <el-form-item :label="$t('agent.subAgents')">
                 <div class="mount-container">
                   <div class="mount-action">
@@ -270,8 +271,8 @@
             </el-col>
           </el-row>
 
-          <!-- [新增] 第三行：Backend 挂载 (仅 DeepAgent 可见) -->
-          <el-row :gutter="16" class="settings-row" v-if="form.AgentType === 'DeepAgent'">
+          <!-- [新增] 第三行：Backend 挂载 (仅 DeepAgent / Mambo 可见) -->
+          <el-row :gutter="16" class="settings-row" v-if="form.AgentType === 'DeepAgent' || form.AgentType === 'Mambo'">
             <el-col :span="24">
               <el-form-item :label="$t('agent.mountBackend')">
                 <div class="mount-container" style="height: auto; min-height: 120px;">
@@ -323,7 +324,7 @@
 
     <ResourceSelectorDialog
       v-model:visible="resourceSelectorVisible"
-      :context="form.AgentType === 'DeepAgent' ? 'agent-deep' : 'agent-react'"
+      :context="(form.AgentType === 'DeepAgent' || form.AgentType === 'Mambo') ? 'agent-deep' : 'agent-react'"
       @mount-resources="handleMountResources"
     />
 
@@ -587,7 +588,7 @@ async function handleSave() {
     }
 
     // [修复] 无论清空还是切换 AgentType，都显式发送 [] 让后端清空数据
-    const finalBackendIds = form.AgentType === 'DeepAgent' ? [...form.backendIds] : [];
+    const finalBackendIds = (form.AgentType === 'DeepAgent' || form.AgentType === 'Mambo') ? [...form.backendIds] : [];
 
     await agentStore.updateAgentSettings(currentAgentId.value, {
       name: form.name,
@@ -598,7 +599,7 @@ async function handleSave() {
       modelParameters: finalModelParameters,
       resourcePromptList: resourcePromptList.length > 0 ? [...resourcePromptList] : [],
       enabledMcpIds: form.enabledMcpIds.length > 0 ? [...form.enabledMcpIds] : [],
-      subAgents: form.AgentType === 'DeepAgent' && form.subAgents.length > 0 ? [...form.subAgents] : [],
+      subAgents: (form.AgentType === 'DeepAgent' || form.AgentType === 'Mambo') && form.subAgents.length > 0 ? [...form.subAgents] : [],
       backendIds: finalBackendIds // [新增]
     });
     ElMessage.success(t('agent.saveSuccess'));

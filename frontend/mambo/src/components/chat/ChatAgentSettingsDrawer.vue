@@ -108,7 +108,7 @@
               <div class="ext-empty" v-else>{{ $t('common.none') }}</div>
             </div>
 
-            <div class="ext-item" v-if="selectedAgent.AgentType === 'DeepAgent'">
+            <div class="ext-item" v-if="selectedAgent.AgentType === 'DeepAgent' || selectedAgent.AgentType === 'Mambo'">
               <div class="ext-label">{{ $t('agent.mountedBackend') }}:</div>
               <div class="ext-tags" v-if="displayBackendList.length > 0">
                 <el-tag v-for="b in displayBackendList" :key="b.id" size="small" type="warning" effect="light">

@@ -38,8 +38,9 @@
                 <el-col :span="12">
                   <el-form-item :label="$t('agent.type')">
                     <el-select v-model="form.AgentType" style="width: 100%">
-                      <el-option label="ReAct Agent" value="ReActAgent" />
+                      <el-option label="Mambo Agent" value="Mambo" />
                       <el-option label="Deep Agent" value="DeepAgent" />
+                      <el-option label="ReAct Agent" value="ReActAgent" />
                     </el-select>
                   </el-form-item>
                 </el-col>
@@ -262,7 +263,7 @@
               </el-form-item>
             </el-col>
 
-            <el-col :span="12" v-if="form.AgentType === 'DeepAgent'">
+            <el-col :span="12" v-if="form.AgentType === 'DeepAgent' || form.AgentType === 'Mambo'">
               <el-form-item :label="$t('agent.subAgents')">
                 <div class="mount-container">
                   <div class="mount-action">
@@ -294,8 +295,8 @@
             </el-col>
           </el-row>
 
-          <!-- 第三行：Backend 挂载 (仅 DeepAgent 可见) -->
-          <el-row :gutter="32" class="settings-row" v-if="form.AgentType === 'DeepAgent'">
+          <!-- 第三行：Backend 挂载 (仅 DeepAgent / Mambo 可见) -->
+          <el-row :gutter="32" class="settings-row" v-if="form.AgentType === 'DeepAgent' || form.AgentType === 'Mambo'">
             <el-col :span="24">
               <el-form-item :label="$t('agent.mountBackend')">
                 <div class="mount-container" style="height: auto; min-height: 120px;">
@@ -363,7 +364,7 @@
 
     <ResourceSelectorDialog
       v-model:visible="resourceSelectorVisible"
-      :context="form.AgentType === 'DeepAgent' ? 'agent-deep' : 'agent-react'"
+      :context="(form.AgentType === 'DeepAgent' || form.AgentType === 'Mambo') ? 'agent-deep' : 'agent-react'"
       @mount-resources="handleMountResources"
     />
 
@@ -678,7 +679,7 @@ async function handleSave() {
 
     // [修复] 1. 解除 Proxy 包装，防止序列化为空数组
     // [修复] 2. 无论清空还是切换 AgentType，都显式发送 [] 让后端清空数据，而不是发送 null
-    const finalBackendIds = form.AgentType === 'DeepAgent' ? [...form.backendIds] : [];
+    const finalBackendIds = (form.AgentType === 'DeepAgent' || form.AgentType === 'Mambo') ? [...form.backendIds] : [];
 
     await agentStore.updateAgentSettings(currentAgentId.value, {
       name: form.name,
@@ -691,7 +692,7 @@ async function handleSave() {
       // 建议顺手把这里的其他数组也加上展开运算符 [...array] 和 [] 回退，防止遇到同样的 Bug
       resourcePromptList: resourcePromptList.length > 0 ? [...resourcePromptList] : [],
       enabledMcpIds: form.enabledMcpIds.length > 0 ? [...form.enabledMcpIds] : [],
-      subAgents: form.AgentType === 'DeepAgent' && form.subAgents.length > 0 ? [...form.subAgents] : [],
+      subAgents: (form.AgentType === 'DeepAgent' || form.AgentType === 'Mambo') && form.subAgents.length > 0 ? [...form.subAgents] : [],
 
       backendIds: finalBackendIds, // 使用修复后的变量
       defaultBackendId: form.defaultBackendId, // [新增] 默认 Backend

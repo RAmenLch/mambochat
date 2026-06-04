@@ -2,6 +2,7 @@ from backend.schemas.enums import AgentTypeEnum
 from backend.services.generation.graph_builders.base_builder import BaseGraphBuilder
 from backend.services.generation.graph_builders.react_builder import ReactGraphBuilder
 from backend.services.generation.graph_builders.deep_agent_builder import DeepAgentGraphBuilder
+from backend.services.generation.graph_builders.mambo_agent_builder import MamboAgentGraphBuilder
 
 class GraphBuilderFactory:
     """
@@ -10,8 +11,8 @@ class GraphBuilderFactory:
     """
     _registry = {
         AgentTypeEnum.REACT: ReactGraphBuilder,
-        AgentTypeEnum.DEEP: DeepAgentGraphBuilder
-        # 未来可在此注册如 PLAN_AND_EXECUTE 等其他类型的 Agent
+        AgentTypeEnum.DEEP: DeepAgentGraphBuilder,
+        AgentTypeEnum.MAMBO: MamboAgentGraphBuilder,
     }
 
     @classmethod
