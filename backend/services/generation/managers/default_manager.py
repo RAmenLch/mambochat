@@ -32,7 +32,8 @@ from backend.services.generation.worker.abstract_worker import AbstractGenerateW
 from backend.services.generation.managers.stream_handlers.base_handler import StreamContext, BaseStreamHandler
 from backend.services.generation.managers.stream_handlers.handlers import (
     HitlHandler, TextAndReasoningHandler, RoundClosureHandler,
-    ToolExecutionHandler, ImageAndUsageHandler, FinishReasonMonitorHandler
+    ToolExecutionHandler, ImageAndUsageHandler, FinishReasonMonitorHandler,
+    SubAgentEventHandler
 )
 from backend.services.generation.managers.stream_handlers.finish_reason_classifier import FinishReasonClassifier
 from backend.services.generation.core.llm_io import SummarizationEventInfo
@@ -56,10 +57,13 @@ class DefaultGenerateManager(AbstractGenerateManager):
         self._last_finish_reason: Optional[str] = None
         self._last_summarization_event: Optional[SummarizationEventInfo] = None
 
+        self._subagent_step_counters: Dict[str, int] = {}
+
         self._handlers: List[BaseStreamHandler] = [
             HitlHandler(),
             TextAndReasoningHandler(),
             RoundClosureHandler(),
+            SubAgentEventHandler(),
             ToolExecutionHandler(),
             ImageAndUsageHandler(),
             FinishReasonMonitorHandler()
@@ -210,7 +214,8 @@ class DefaultGenerateManager(AbstractGenerateManager):
                     providers=providers, tool_map=tool_map, hitl_config=hitl_config,
                     created_stream_ids=self._created_stream_ids,
                     pending_hitl_tool_calls=self._pending_hitl_tool_calls,
-                    final_usage_data=self._final_usage_data
+                    final_usage_data=self._final_usage_data,
+                    subagent_step_counters=self._subagent_step_counters,
                 )
 
                 for handler in self._handlers:

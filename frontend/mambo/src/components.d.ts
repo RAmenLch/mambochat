@@ -126,6 +126,7 @@ declare module 'vue' {
     SkillOverview: typeof import('./components/settings/skill/SkillOverview.vue')['default']
     SubAgentTaskCard: typeof import('./components/chat/message/SubAgentTaskCard.vue')['default']
     SubMessageItem: typeof import('./components/chat/SubMessageItem.vue')['default']
+    TaskSubAgentPanel: typeof import('./components/chat/task/TaskSubAgentPanel.vue')['default']
     UsageInfo: typeof import('./components/chat/UsageInfo.vue')['default']
     ZipHistoryCard: typeof import('./components/chat/ZipHistoryCard.vue')['default']
   }
@@ -250,6 +251,7 @@ declare global {
   const SkillOverview: typeof import('./components/settings/skill/SkillOverview.vue')['default']
   const SubAgentTaskCard: typeof import('./components/chat/message/SubAgentTaskCard.vue')['default']
   const SubMessageItem: typeof import('./components/chat/SubMessageItem.vue')['default']
+  const TaskSubAgentPanel: typeof import('./components/chat/task/TaskSubAgentPanel.vue')['default']
   const UsageInfo: typeof import('./components/chat/UsageInfo.vue')['default']
   const ZipHistoryCard: typeof import('./components/chat/ZipHistoryCard.vue')['default']
 }

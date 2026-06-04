@@ -112,6 +112,20 @@
           {{ t('chat.message.mcp.parseError') }}
         </div>
       </el-tab-pane>
+
+      <!-- 子代理追踪 Tab（仅 task 工具 + 有步骤时显示） -->
+      <el-tab-pane
+        v-if="activeTaskSubSteps.length > 0"
+        :key="'subagent_' + taskToolCallId"
+        :label="'🤖 ' + $t('chat.subagent.tracking')"
+        :name="subagentTabName"
+      >
+        <div class="tool-detail-container">
+          <TaskSubAgentPanel
+            :steps="activeTaskSubSteps"
+          />
+        </div>
+      </el-tab-pane>
     </el-tabs>
     <el-empty v-else :description="t('chat.message.mcp.noToolInfo')" />
 
@@ -130,8 +144,9 @@ import { useI18n } from 'vue-i18n';
 import { useMcpStore } from '@/stores/mcpStore';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { useChatSessionStore } from '@/stores/chatSessionStore';
-import type { SubMessage, McpToolContent, ReviewToolContent, ToolDecision, SchemaProperty } from '@/api/types';
+import type { SubMessage, McpToolContent, ReviewToolContent, ToolDecision, SchemaProperty, TaskSubStepContent, Message } from '@/api/types';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import TaskSubAgentPanel from '../task/TaskSubAgentPanel.vue';
 
 const { t } = useI18n();
 const mcpStore = useMcpStore();
@@ -143,6 +158,8 @@ const props = defineProps<{
   parentMessageId: string | null;
   initialSubMessageId?: string;
   mode?: 'review_all' | 'single';
+  /** 直接传入父消息（用于子代理面板等场景），优先于 parentMessageId 查找 */
+  parentMessage?: Message | null;
 }>();
 
 const emit = defineEmits<{
@@ -195,6 +212,7 @@ onUnmounted(() => {
 });
 
 const liveParentMessage = computed(() => {
+  if (props.parentMessage) return props.parentMessage;
   if (!props.parentMessageId) return null;
   return sessionStore.currentChatMessages.find(m => m.id === props.parentMessageId) || null;
 });
@@ -223,6 +241,38 @@ const toolMessages = computed(() => {
       return content?.tool_call_id === targetToolCallId;
     });
   }
+});
+
+/** 从当前 toolMessages 中找到 task 工具的 tool_call_id */
+const taskToolCallId = computed(() => {
+  for (const msg of toolMessages.value) {
+    const content = getParsedContent(msg) as McpToolContent | null;
+    if (content?.name === 'task' && content?.tool_call_id) {
+      return content.tool_call_id;
+    }
+  }
+  return null;
+});
+
+const subagentTabName = computed(() =>
+  taskToolCallId.value ? `__subagent__` : ''
+);
+
+/** task 工具对应的子代理追踪步骤 */
+const activeTaskSubSteps = computed(() => {
+  if (!liveParentMessage.value || !taskToolCallId.value) return [];
+  const toolCallId = taskToolCallId.value;
+  return liveParentMessage.value.sub_messages.filter(sm =>
+    sm.type === 'TaskSubStep' && sm.config?.task_group_id === toolCallId
+  ).sort((a, b) => {
+    try {
+      const ca: TaskSubStepContent = JSON.parse(a.content);
+      const cb: TaskSubStepContent = JSON.parse(b.content);
+      return ca.step_order - cb.step_order;
+    } catch {
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    }
+  });
 });
 
 watch(() => toolMessages.value, (newVal) => {

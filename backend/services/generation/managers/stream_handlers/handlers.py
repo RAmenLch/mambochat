@@ -1,14 +1,14 @@
 import json
 import traceback
-from typing import AsyncGenerator
-from langchain_core.messages import AIMessage
+from typing import AsyncGenerator, List, Dict, Any
+from langchain_core.messages import AIMessage, ToolMessage
 
 from backend.models.base_model import generate_uuid
 from backend.schemas import enums as schemas_enums
-from backend.schemas.message import ErrorContent, ReviewToolContent, AskUserContent
+from backend.schemas.message import ErrorContent, ReviewToolContent, AskUserContent, TaskSubStepContent
 from backend.services.generation.core.instructions import (
     BaseInstruction, CreateSubMessage, AppendToSubMessage,
-    UpdateSubMessageConfig, UpdateSubMessageStatus,
+    UpdateSubMessageConfig, UpdateSubMessageStatus, UpdateSubMessageContent,
     SaveAndPersistFile, InterruptGeneration
 )
 from backend.services.generation.managers.stream_handlers.base_handler import BaseStreamHandler, StreamContext
@@ -232,3 +232,125 @@ class ImageAndUsageHandler(BaseStreamHandler):
                 initial_content=error_content.to_json_string(),
                 config={"context_participation_length": 0}
             )
+
+
+class SubAgentEventHandler(BaseStreamHandler):
+    """处理子代理内部流式事件（custom stream 中的 subagent_event）。
+
+    每个 subagent_event 来自 mambo_agents 的 SubAgentMiddleware，
+    携带子代理的推理、文本生成、工具调用和工具结果。
+    所有子消息标记 config.task_group_id（= tool_call_id）+ context_participation_length=0，
+    前端据此分组并排除出上下文。
+    """
+
+    async def handle(self, context: StreamContext) -> AsyncGenerator[BaseInstruction, None]:
+        if context.mode != "subagent_event":
+            return
+
+        event_data: dict = context.event
+        tool_call_id: str = event_data["tool_call_id"]
+        subagent_type: str = event_data["subagent_type"]
+        chunk: dict = event_data["chunk"]  # {"agent": {...}} 或 {"tools": {...}}
+
+        counter = context.subagent_step_counters.get(tool_call_id, 0)
+        instructions, counter = self._build_instructions(chunk, tool_call_id, subagent_type, counter)
+
+        for inst in instructions:
+            yield inst
+
+        context.subagent_step_counters[tool_call_id] = counter
+
+    def _build_instructions(
+        self, chunk: dict, tool_call_id: str, subagent_type: str, start_counter: int
+    ) -> tuple:
+        """解析 updates 粒度 chunk → (指令列表, 新counter)。"""
+        instructions: list = []
+        idx = start_counter
+
+        if "model" in chunk:
+            for msg in chunk["model"].get("messages", []):
+                if not isinstance(msg, AIMessage):
+                    continue
+
+                # 推理内容
+                reasoning = msg.additional_kwargs.get("reasoning_content")
+                if reasoning:
+                    idx += 1
+                    step = TaskSubStepContent(
+                        tool_call_id=tool_call_id,
+                        subagent_type=subagent_type,
+                        display_type="reasoning",
+                        content=reasoning if isinstance(reasoning, str) else str(reasoning),
+                        step_order=idx,
+                    )
+                    instructions.append(self._make_create(step.to_json_string(), idx, tool_call_id,
+                                                          config_extra={"is_minimal": True}))
+
+                # 文本正文
+                text = msg.content
+                if isinstance(text, str) and text.strip():
+                    idx += 1
+                    step = TaskSubStepContent(
+                        tool_call_id=tool_call_id,
+                        subagent_type=subagent_type,
+                        display_type="text",
+                        content=text.strip(),
+                        step_order=idx,
+                    )
+                    instructions.append(self._make_create(step.to_json_string(), idx, tool_call_id))
+
+                # 工具调用
+                for tc in msg.tool_calls or []:
+                    idx += 1
+                    name = tc.get("name", "")
+                    args = tc.get("args", {})
+                    step = TaskSubStepContent(
+                        tool_call_id=tool_call_id,
+                        subagent_type=subagent_type,
+                        display_type="tool_call",
+                        content="",
+                        tool_name=name,
+                        tool_args=args if isinstance(args, dict) else {},
+                        step_order=idx,
+                    )
+                    instructions.append(self._make_create(step.to_json_string(), idx, tool_call_id))
+
+        if "tools" in chunk:
+            for msg in chunk["tools"].get("messages", []):
+                if not isinstance(msg, ToolMessage):
+                    continue
+                idx += 1
+                result_text = str(msg.content) if msg.content else ""
+                step = TaskSubStepContent(
+                    tool_call_id=tool_call_id,
+                    subagent_type=subagent_type,
+                    display_type="tool_result",
+                    content=result_text,
+                    tool_name=msg.name or "",
+                    step_order=idx,
+                )
+                instructions.append(self._make_create(step.to_json_string(), idx, tool_call_id))
+
+        return instructions, idx
+
+    @staticmethod
+    def _make_create(
+        content: str,
+        sort_order: int,
+        task_group_id: str,
+        config_extra: dict | None = None,
+    ) -> CreateSubMessage:
+        config: Dict[str, Any] = {
+            "task_group_id": task_group_id,
+            "context_participation_length": 0,
+        }
+        if config_extra:
+            config.update(config_extra)
+        return CreateSubMessage(
+            sub_message_id=generate_uuid(),
+            type=schemas_enums.SubMessageType.TASK_SUBSTEP.value,
+            sortOrder=3,
+            status=schemas_enums.MessageStatus.COMPLETED,
+            initial_content=content,
+            config=config,
+        )

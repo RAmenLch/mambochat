@@ -1,7 +1,7 @@
 // frontend/mambo/src/composables/useAssistantTimeline.ts
 
 import { computed, type Ref } from 'vue';
-import type { Message, SubMessage, ReviewToolContent, AskUserContent } from '@/api/types';
+import type { Message, SubMessage, ReviewToolContent, AskUserContent, TaskSubStepContent } from '@/api/types';
 
 /** 时间线中的一个分组：一段文本 + 跟随的工具调用 */
 export interface BubbleSectionGroup {
@@ -44,11 +44,15 @@ function isAskUserAnswered(sm: SubMessage): boolean {
 
 export function useAssistantTimeline(message: Ref<Message>) {
 
-  // 1. 过滤掉无需在时间线主轴显示的独立组件，以及已审批的 ReviewTool 和已回答的 AskUser
+  // 1. 过滤掉无需在时间线主轴显示的独立组件，以及已审批的 ReviewTool 和已回答的 AskUser，以及子代理追踪步骤
   const timelineSubMessages = computed(() => {
     return message.value.sub_messages.filter(sm => {
       // 排除独立显示的类型
       if (['Usage', 'ZipHistory', 'Suggest', 'Error'].includes(sm.type)) {
+        return false;
+      }
+      // 排除 TaskSubStep：子代理内部步骤绑定到 task 工具气泡显示，不出现在主时间线
+      if (sm.type === 'TaskSubStep') {
         return false;
       }
       // 排除已审批的 ReviewTool (审批后后端通常会生成对应的 McpTool，所以隐藏原 ReviewTool 避免重复)
@@ -211,6 +215,31 @@ export function useAssistantTimeline(message: Ref<Message>) {
     message.value.sub_messages.filter(sm => sm.type === 'Error')
   );
 
+  // 6. 子代理追踪步骤：按 task_group_id 分组，供 task 工具气泡的 SubAgentPanel 使用
+  const taskSubAgentGroups = computed(() => {
+    const map = new Map<string, SubMessage[]>();
+    for (const sm of message.value.sub_messages) {
+      if (sm.type !== 'TaskSubStep') continue;
+      const gid = sm.config?.task_group_id;
+      if (!gid) continue;
+      if (!map.has(gid)) map.set(gid, []);
+      map.get(gid)!.push(sm);
+    }
+    // 组内按 step_order 排序
+    for (const msgs of map.values()) {
+      msgs.sort((a, b) => {
+        try {
+          const ca: TaskSubStepContent = JSON.parse(a.content);
+          const cb: TaskSubStepContent = JSON.parse(b.content);
+          return ca.step_order - cb.step_order;
+        } catch {
+          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        }
+      });
+    }
+    return map;
+  });
+
   // 5. 导出气泡状态
 
   /**
@@ -242,5 +271,6 @@ export function useAssistantTimeline(message: Ref<Message>) {
     errorSubMessages,
     isReasoningMinimized,
     hasPendingReviews,
+    taskSubAgentGroups,
   };
 }

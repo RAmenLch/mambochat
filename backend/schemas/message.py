@@ -1,7 +1,7 @@
 # backend/schemas/message.py
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
-from typing import Optional, List, Union, Dict, Any
+from typing import Optional, List, Union, Dict, Any, Literal
 import json
 
 from backend.schemas.enums import MessageRole, MessageStatus, SubMessageType, ToolDecisionType
@@ -86,6 +86,7 @@ class SubMessageConfig(BaseModel):
                                                         description="参加上下文长度: None(默认)-参与; 0-不参与; N>0-在倒数N条内参与")
     zip_enable: Optional[bool] = Field(None, description="【仅用于ZipHistory类型】标记此压缩历史是否已启用")
     target_sub_msg_id: Optional[str] = Field(None, description="【仅用于ZipHistory类型】子消息粒度的目标子消息ID")
+    task_group_id: Optional[str] = Field(None, description="【仅用于TaskSubStep类型】子代理任务分组键（= 主代理 task tool_call_id）")
 
 
 class SubMessageBase(BaseModel):
@@ -266,3 +267,39 @@ class AskUserContent(BaseModel):
             return cls(**data)
         except (json.JSONDecodeError, TypeError) as e:
             raise ValueError(f"Invalid JSON for AskUserContent: {e}")
+
+
+class TaskSubStepContent(BaseModel):
+    """TaskSubStep 子消息的 content JSON 结构。
+
+    每条子代理内部消息（推理 / 正文 / 工具调用 / 工具结果）对应一个 SubMessage，
+    content 字段存储此模型的 JSON。
+    前端通过 display_type 决定渲染方式：
+      - reasoning → 折叠式思考区
+      - text       → Markdown 正文
+      - tool_call  → 可点击工具调用按钮
+      - tool_result → 工具结果文本
+    """
+    tool_call_id: str = Field(..., description="主代理 task 工具调用的 tool_call_id")
+    subagent_type: str = Field(..., description="子代理类型名称，如 'general-purpose'")
+    display_type: Literal["reasoning", "text", "tool_call", "tool_result"]
+    content: str = ""
+    tool_name: Optional[str] = Field(None, description="工具名（tool_call / tool_result 时）")
+    tool_args: Optional[Dict[str, Any]] = Field(None, description="工具参数（tool_call 时）")
+    step_order: int = Field(0, description="同组内的序号，前端排序用")
+    description: Optional[str] = Field(None, description="task 描述（仅首条 step 携带）")
+
+    def to_json_string(self) -> str:
+        """序列化为存储在 DB content 字段的 JSON 字符串"""
+        return self.model_dump_json(exclude_none=False)
+
+    @classmethod
+    def from_json_string(cls, json_str: str) -> 'TaskSubStepContent':
+        """从 DB content 字符串反序列化"""
+        if not json_str:
+            raise ValueError("Empty content")
+        try:
+            data = json.loads(json_str)
+            return cls(**data)
+        except (json.JSONDecodeError, TypeError) as e:
+            raise ValueError(f"Invalid JSON for TaskSubStepContent: {e}")

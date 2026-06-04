@@ -20,6 +20,7 @@ export type SubMessageType =
   | 'ReviewTool'
   | 'AskUser'
   | 'Error'
+  | 'TaskSubStep'
 
 export interface SubMessageConfig {
   is_collapsed: boolean
@@ -27,6 +28,7 @@ export interface SubMessageConfig {
   context_participation_length?: number
   zip_enable?: boolean | null
   target_sub_msg_id?: string | null
+  task_group_id?: string | null
 }
 
 export interface SubMessage {
@@ -226,6 +228,19 @@ export interface AskUserAnswerRequest {
   sub_message_id: string
   answers: string[]
   ask_status: string
+}
+
+// --- TaskSubStep Types ---
+
+export interface TaskSubStepContent {
+  tool_call_id: string
+  subagent_type: string
+  display_type: 'reasoning' | 'text' | 'tool_call' | 'tool_result'
+  content: string
+  tool_name?: string | null
+  tool_args?: Record<string, unknown> | null
+  step_order: number
+  description?: string | null
 }
 
 // --- Search Types (Chat) ---

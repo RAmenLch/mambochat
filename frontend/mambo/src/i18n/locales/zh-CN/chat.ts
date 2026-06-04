@@ -226,4 +226,10 @@ export default {
     otherPlaceholder: '请输入自定义回答...',
     answerPlaceholder: '请输入回答...',
   },
+  subagent: {
+    tracking: '子代理追踪',
+    reasoning: '思考',
+    toolResult: '工具结果',
+    noSteps: '暂无追踪步骤',
+  },
 }

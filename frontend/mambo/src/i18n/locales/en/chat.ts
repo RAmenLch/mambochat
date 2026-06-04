@@ -229,4 +229,10 @@ export default {
     otherPlaceholder: 'Enter your custom answer...',
     answerPlaceholder: 'Enter your answer...',
   },
+  subagent: {
+    tracking: 'Sub-agent Tracking',
+    reasoning: 'Reasoning',
+    toolResult: 'Tool Result',
+    noSteps: 'No tracking steps',
+  },
 }

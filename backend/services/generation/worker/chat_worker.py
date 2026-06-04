@@ -70,7 +70,7 @@ class UniversalGraphWorker(AbstractGenerateWorker):
         async for stream_event in agent.astream(
                 input=input_data,
                 config=thread_config,
-                stream_mode=["messages", "updates"],
+                stream_mode=["messages", "updates", "custom"],
                 version="v2"
         ):
             if not isinstance(stream_event, dict):
@@ -124,5 +124,9 @@ class UniversalGraphWorker(AbstractGenerateWorker):
                 if isinstance(meta, dict) and meta.get("lc_source") == "summarization":
                     continue
                 yield mode, msg
+            elif mode == "custom":
+                # 子代理内部事件：mambo_agents SubAgentMiddleware 发射的 custom stream_writer 事件
+                if isinstance(event, dict) and event.get("type") == "subagent_event":
+                    yield "subagent_event", event
             else:
                 pass

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import AsyncGenerator, List, Dict, Set, Optional
 
 from langchain_core.tools import BaseTool
@@ -32,6 +32,9 @@ class StreamContext:
     final_usage_data: dict
     should_interrupt: bool = False
     last_finish_reason: Optional[str] = None
+
+    # 新增：subagent_event 相关追踪字段
+    subagent_step_counters: Dict[str, int] = field(default_factory=dict)
 
 
 class BaseStreamHandler(ABC):
