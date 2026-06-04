@@ -1,0 +1,321 @@
+# backend/services/generation/builders/initializers/mambo_agent_initializer.py
+
+import asyncio
+import json
+from typing import Tuple, List, Dict, Any, Optional
+from sqlalchemy.ext.asyncio import AsyncSession
+from langchain_core.tools import BaseTool
+
+from backend.schemas.enums import ToolReviewMode, AgentTypeEnum
+from backend.models.agent_model import Agent
+from backend.crud import mcp_crud, agent_crud, provider_crud, setting_crud, backend_crud
+
+from backend.services.generation.core.llm_io import AgentConfig, ModelConfig
+from backend.services.generation.builders.initializers.base_initializer import (
+    AbstractAgentInitializer,
+)
+from backend.services.generation.builders.resource_dispatcher import ResourceDispatcher
+from backend.services.generation.builders.param_utils import map_model_parameters
+
+from backend.services.generation.tools.base_tool_provider import BaseToolProvider
+from backend.services.generation.tools.mcp_tool_provider import MCPToolProvider
+from backend.services.generation.tools.suggest_tool_provider import SuggestToolProvider
+from backend.services.generation.tools.ask_user_tool_provider import AskUserToolProvider
+from backend.services.generation.tools.kb_tool_provider import KBToolProvider
+from backend.services.generation.tools.mambo_builtin_tool_provider import (
+    MamboAgentBuiltinToolProvider,
+)
+from backend.services.file_service import FileService
+
+
+class MamboAgentInitializer(AbstractAgentInitializer):
+    """Mambo Agent 初始化器。
+
+    负责根据 Agent ORM 配置装配工具链、加载后端、初始化子代理，
+    生成标准化的 AgentConfig。
+
+    与 DeepAgentInitializer 的核心差异：
+    - 使用 MamboAgentBuiltinToolProvider 拦截内置工具
+    - 只装配单个 Backend（mambo 不支持多 Backend 路由）
+    """
+
+    def __init__(
+        self,
+        db: AsyncSession,
+        agent: Agent,
+        resume_payload: Optional[Dict[str, Any]] = None,
+        enable_tools: bool = False,
+        enable_resource_merge: bool = False,
+        external_tools: Optional[List[BaseTool]] = None,
+    ):
+        self.db = db
+        self.agent = agent
+        self.resume_payload = resume_payload
+        self.enable_tools = enable_tools
+        self.enable_resource_merge = enable_resource_merge
+        self.external_tools = external_tools or []
+
+        self.providers: List[BaseToolProvider] = []
+        self.hitl_interrupt_on: Dict[str, bool] = {}
+
+    async def initialize(self) -> Tuple[AgentConfig, str]:
+        extended_prompts: List[str] = []
+        skills = []
+        knowledge_bases = []
+
+        file_service = FileService(self.db)
+        dispatcher = ResourceDispatcher(self.db)
+
+        if self.enable_resource_merge and self.agent.resourcePromptList:
+            dispatch_result = await dispatcher.dispatch(self.agent.resourcePromptList)
+
+            extended_prompts.extend(dispatch_result.get("system_prompts", []))
+            extended_prompts.extend(dispatch_result.get("submessage_templates", []))
+            knowledge_bases = dispatch_result.get("knowledge_bases", [])
+            skills = dispatch_result.get("skills", [])
+
+        if knowledge_bases:
+            self.providers.append(KBToolProvider(self.db, knowledge_bases))
+
+        if skills:
+            for skill in skills:
+                for file_config in skill.files:
+                    try:
+                        file_config.content = await file_service.get_text_content(
+                            file_config.file_id
+                        )
+                    except Exception:
+                        file_config.content = ""
+
+        if self.enable_tools:
+            params = self.agent.parsed_model_parameters
+
+            mcp_ids = self.agent.enabledMcpIds or []
+            if mcp_ids:
+                main_mcp_provider = MCPToolProvider(self.db, mcp_ids)
+                self.providers.append(main_mcp_provider)
+
+                mcp_tools = await mcp_crud.get_tools_by_server_ids(self.db, mcp_ids)
+                for tool in mcp_tools:
+                    if tool.review_mode == ToolReviewMode.REQUIRE_REVIEW.value:
+                        self.hitl_interrupt_on[tool.name] = True
+
+            enable_suggest = params.get("enable_suggest", False)
+            if enable_suggest:
+                self.providers.append(SuggestToolProvider(enable_suggest=True))
+
+            enable_ask_user = params.get("enable_ask_user", False)
+            if enable_ask_user:
+                self.providers.append(AskUserToolProvider(enable_ask_user=True))
+
+        # Mambo 内置工具拦截器
+        builtin_provider = MamboAgentBuiltinToolProvider()
+        self.providers.append(builtin_provider)
+
+        all_tools: List[BaseTool] = list(self.external_tools)
+        for provider in self.providers:
+            tools = await provider.get_tools()
+            if tools:
+                all_tools.extend(tools)
+
+            injection = provider.get_system_prompt_injection()
+            if injection:
+                extended_prompts.append(injection)
+
+        # --- Backend 装配（单 Backend）---
+        mounted_backends = []
+        if self.agent.backendIds:
+            backends_db = await backend_crud.get_backends_by_ids(
+                self.db, self.agent.backendIds
+            )
+            for b in backends_db:
+                config_data = dict(b.configData) if b.configData else {}
+                if b.tools_config:
+                    config_data["tools_config"] = b.tools_config
+                mounted_backends.append({
+                    "id": b.id,
+                    "name": b.name,
+                    "backendType": b.backendType,
+                    "configData": config_data,
+                })
+
+        # --- 子代理初始化 ---
+        sub_configs: List[AgentConfig] = []
+
+        if self.agent.subAgents:
+            sub_agents_db = await asyncio.gather(
+                *[agent_crud.get_agent(self.db, sid) for sid in self.agent.subAgents]
+            )
+
+            proxy_setting = await setting_crud.get_setting(self.db, "proxy_enabled")
+            proxy_url_setting = await setting_crud.get_setting(self.db, "proxy_url")
+            is_proxy_enabled = (
+                proxy_setting.value == "True" if proxy_setting else False
+            )
+            global_proxy_url = proxy_url_setting.value if proxy_url_setting else None
+            max_retries_setting = await setting_crud.get_setting(
+                self.db, "default_max_retries"
+            )
+            global_max_retries = (
+                int(max_retries_setting.value)
+                if max_retries_setting and max_retries_setting.value
+                else 3
+            )
+            timeout_setting = await setting_crud.get_setting(
+                self.db, "default_timeout"
+            )
+            global_default_timeout = (
+                int(timeout_setting.value)
+                if timeout_setting and timeout_setting.value
+                else 60
+            )
+
+            for sub in sub_agents_db:
+                if not sub:
+                    continue
+
+                atype = (
+                    sub.AgentType.value
+                    if hasattr(sub.AgentType, "value")
+                    else sub.AgentType
+                )
+                if atype in (AgentTypeEnum.MAMBO.value, "Mambo"):
+                    sub_init = MamboAgentInitializer(
+                        db=self.db,
+                        agent=sub,
+                        resume_payload=self.resume_payload,
+                        enable_tools=self.enable_tools,
+                        enable_resource_merge=self.enable_resource_merge,
+                        external_tools=self.external_tools,
+                    )
+                elif atype in (AgentTypeEnum.DEEP.value, "DeepAgent"):
+                    from backend.services.generation.builders.initializers.deep_agent_initializer import (
+                        DeepAgentInitializer,
+                    )
+                    sub_init = DeepAgentInitializer(
+                        db=self.db,
+                        agent=sub,
+                        resume_payload=self.resume_payload,
+                        enable_tools=self.enable_tools,
+                        enable_resource_merge=self.enable_resource_merge,
+                        external_tools=self.external_tools,
+                    )
+                else:
+                    from backend.services.generation.builders.initializers.agent_react_initializer import (
+                        AgentBasedReActInitializer,
+                    )
+                    sub_init = AgentBasedReActInitializer(
+                        db=self.db,
+                        agent=sub,
+                        resume_payload=self.resume_payload,
+                        enable_tools=self.enable_tools,
+                        enable_resource_merge=self.enable_resource_merge,
+                        external_tools=self.external_tools,
+                    )
+
+                sub_config, _ = await sub_init.initialize()
+
+                if sub.aiModelId:
+                    sub_model = await provider_crud.get_model(
+                        self.db, sub.aiModelId
+                    )
+                    if sub_model and sub_model.provider:
+                        proxy_url = None
+                        if sub_model.provider.use_proxy and is_proxy_enabled:
+                            proxy_url = global_proxy_url
+
+                        api_params = map_model_parameters(sub.parsed_model_parameters)
+
+                        sub_model_max_retries = 0
+                        sub_model_timeout = None
+                        sub_model_stream_chunk_timeout = None
+                        if sub_model.meta_config:
+                            try:
+                                meta = (
+                                    json.loads(sub_model.meta_config)
+                                    if isinstance(sub_model.meta_config, str)
+                                    else sub_model.meta_config
+                                )
+                                sub_model_max_retries = int(
+                                    meta.get("max_retries", 0)
+                                )
+                                raw_timeout = meta.get("timeout")
+                                sub_model_timeout = (
+                                    int(raw_timeout)
+                                    if raw_timeout is not None
+                                    else None
+                                )
+                                raw_stream_chunk_timeout = meta.get(
+                                    "stream_chunk_timeout"
+                                )
+                                if raw_stream_chunk_timeout is not None:
+                                    sub_model_stream_chunk_timeout = float(
+                                        raw_stream_chunk_timeout
+                                    )
+                            except (json.JSONDecodeError, ValueError, TypeError):
+                                pass
+                        sub_max_retries = (
+                            sub_model_max_retries
+                            if sub_model_max_retries > 0
+                            else global_max_retries
+                        )
+                        sub_timeout = (
+                            sub_model_timeout
+                            if sub_model_timeout is not None
+                            else global_default_timeout
+                        )
+
+                        sub_config.llm_config = ModelConfig(
+                            model_id=sub_model.modelId,
+                            api_host=sub_model.provider.apiHost,
+                            api_key=sub_model.provider.apiKey,
+                            proxy_url=proxy_url,
+                            parameters=api_params,
+                            max_retries=sub_max_retries,
+                            timeout=sub_timeout,
+                            stream_chunk_timeout=sub_model_stream_chunk_timeout,
+                        )
+
+                sub_configs.append(sub_config)
+                self.providers.extend(sub_init.get_providers())
+
+        base_prompt = self.agent.systemPrompt or ""
+        additional_system_prompt = (
+            "\n\n".join(extended_prompts) if extended_prompts else ""
+        )
+        final_system_prompt = (
+            f"{base_prompt}\n\n{additional_system_prompt}".strip()
+            if additional_system_prompt
+            else base_prompt
+        )
+
+        # HITL: check if default backend requires execute review
+        if self.agent.defaultBackendId and self.agent.backendIds:
+            backends_db_for_hitl = await backend_crud.get_backends_by_ids(
+                self.db, self.agent.backendIds
+            )
+            for b in backends_db_for_hitl:
+                if b.id == self.agent.defaultBackendId and b.tools_config:
+                    exec_cfg = b.tools_config.get("execute", {})
+                    if exec_cfg.get("enabled") and exec_cfg.get("require_review"):
+                        self.hitl_interrupt_on["execute"] = True
+                    break
+
+        agent_config = AgentConfig(
+            name=self.agent.name,
+            description=self.agent.description or "",
+            system_prompt=final_system_prompt,
+            agent_type=AgentTypeEnum.MAMBO,
+            tools=all_tools if all_tools else None,
+            skills=skills if skills else None,
+            sub_configs=sub_configs if sub_configs else None,
+            hitl_interrupt_on=self.hitl_interrupt_on,
+            resume_payload=self.resume_payload,
+            mounted_backends=mounted_backends if mounted_backends else None,
+            default_backend_id=self.agent.defaultBackendId,
+        )
+
+        return agent_config, additional_system_prompt
+
+    def get_providers(self) -> List[BaseToolProvider]:
+        return self.providers
