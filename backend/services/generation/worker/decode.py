@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Union
 
-from langchain_core.messages import AIMessageChunk, AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
 
 class BaseDecode(ABC):
@@ -65,17 +65,29 @@ class DefaultLangChainDecode(BaseDecode):
             return None
 
         if mode == "messages" and message.usage_metadata:
-            usage = {}
-            if "input_tokens" in message.usage_metadata:
-                usage["prompt_tokens"] = message.usage_metadata.get("input_tokens")
-            if "output_tokens" in message.usage_metadata:
-                usage["completion_tokens"] = message.usage_metadata.get("output_tokens")
-            if "total_tokens" in message.usage_metadata:
-                usage["total_tokens"] = message.usage_metadata.get("total_tokens")
-            if "output_token_details" in message.usage_metadata:
-                usage["completion_tokens_details"] = {}
-                usage["completion_tokens_details"]["reasoning_tokens"] = \
-                    message.usage_metadata.get("output_token_details").get("reasoning")
+            usage: Dict[str, Any] = {}
+            metadata: Dict[str, Any] = dict(message.usage_metadata)
+
+            if "input_tokens" in metadata:
+                usage["prompt_tokens"] = metadata["input_tokens"]
+            if "output_tokens" in metadata:
+                usage["completion_tokens"] = metadata["output_tokens"]
+            if "total_tokens" in metadata:
+                usage["total_tokens"] = metadata["total_tokens"]
+
+            if "output_token_details" in metadata:
+                reasoning = (metadata.get("output_token_details") or {}).get("reasoning")
+                if reasoning is not None:
+                    usage["completion_tokens_details"] = {"reasoning_tokens": reasoning}
+
+            # 缓存命中 = input_token_details.cache_read (LangChain 已统一提取)
+            input_details = dict(metadata.get("input_token_details") or {})
+            cache_read = input_details.get("cache_read")
+            if isinstance(cache_read, int) and cache_read > 0:
+                prompt_total = usage.get("prompt_tokens", 0) or 0
+                usage["cache_hit_tokens"] = cache_read
+                usage["cache_miss_tokens"] = max(prompt_total - cache_read, 0)
+
             return usage
         return None
 

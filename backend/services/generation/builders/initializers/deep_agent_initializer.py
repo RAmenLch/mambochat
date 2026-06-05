@@ -175,6 +175,7 @@ class DeepAgentInitializer(AbstractAgentInitializer):
                         sub_model_max_retries = 0
                         sub_model_timeout = None
                         sub_model_stream_chunk_timeout = None
+                        sub_model_context_length = None
                         if sub_model.meta_config:
                             try:
                                 meta = json.loads(sub_model.meta_config) if isinstance(sub_model.meta_config, str) else sub_model.meta_config
@@ -184,6 +185,9 @@ class DeepAgentInitializer(AbstractAgentInitializer):
                                 raw_stream_chunk_timeout = meta.get("stream_chunk_timeout")
                                 if raw_stream_chunk_timeout is not None:
                                     sub_model_stream_chunk_timeout = float(raw_stream_chunk_timeout)
+                                raw_context_length = meta.get("context_length")
+                                if raw_context_length is not None:
+                                    sub_model_context_length = int(raw_context_length)
                             except (json.JSONDecodeError, ValueError, TypeError):
                                 pass
                         sub_max_retries = sub_model_max_retries if sub_model_max_retries > 0 else global_max_retries
@@ -197,7 +201,8 @@ class DeepAgentInitializer(AbstractAgentInitializer):
                             parameters=api_params,
                             max_retries=sub_max_retries,
                             timeout=sub_timeout,
-                            stream_chunk_timeout=sub_model_stream_chunk_timeout
+                            stream_chunk_timeout=sub_model_stream_chunk_timeout,
+                            context_length=sub_model_context_length,
                         )
 
                 sub_configs.append(sub_config)

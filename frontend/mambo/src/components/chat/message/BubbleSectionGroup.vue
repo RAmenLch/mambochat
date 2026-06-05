@@ -6,22 +6,22 @@
     @mouseleave="isHovered = false"
   >
     <!-- 文本内容区域 -->
-    <div class="group-text-wrapper" v-if="group.textSubMessage">
+    <div class="group-text-wrapper" v-if="effectiveTextSubMessage">
       <!-- 悬浮操作栏 -->
       <div class="group-floating-actions" :class="{ 'is-visible': isHovered && !isGenerating }">
-        <el-tooltip :content="$t('common.action.edit')" placement="top" :show-after="500">
+        <el-tooltip v-if="showEdit" :content="$t('common.action.edit')" placement="top" :show-after="500">
           <el-button :icon="Edit" circle size="small" @click="handleEdit" />
         </el-tooltip>
-        <el-tooltip :content="$t('common.action.copy')" placement="top" :show-after="500">
+        <el-tooltip v-if="showCopy" :content="$t('common.action.copy')" placement="top" :show-after="500">
           <el-button :icon="CopyDocument" circle size="small" @click="handleCopy" />
         </el-tooltip>
-        <el-tooltip :content="isTextCollapsed ? $t('common.action.expand') : $t('common.action.collapse')" placement="top" :show-after="500">
+        <el-tooltip v-if="showCollapse" :content="isTextCollapsed ? $t('common.action.expand') : $t('common.action.collapse')" placement="top" :show-after="500">
           <el-button :icon="isTextCollapsed ? ArrowDownBold : ArrowUpBold" circle size="small" @click="toggleCollapse" />
         </el-tooltip>
       </div>
 
       <SubMessageItem
-        :sub-message="group.textSubMessage"
+        :sub-message="effectiveTextSubMessage"
         :parent-message="parentMessage"
         :show-header="false"
         :is-inline="true"
@@ -83,21 +83,50 @@ const props = withDefaults(defineProps<{
   isInactive: boolean;
   isReasoning?: boolean;
   showZipCoverage?: boolean;
+  showEdit?: boolean;
+  showCopy?: boolean;
+  showCollapse?: boolean;
+  externalCollapsed?: boolean;
 }>(), {
   isReasoning: false,
   showZipCoverage: false,
+  showEdit: true,
+  showCopy: true,
+  showCollapse: true,
 });
 
 const emit = defineEmits<{
   (e: 'edit', subMessage: SubMessage, payload: any): void;
   (e: 'copy', subMessage: SubMessage): void;
   (e: 'open-tool-dialog', subMessageId: string): void;
+  (e: 'toggle-collapse', subMessageId: string): void;
 }>();
 
 const interactionStore = useChatInteractionStore();
 const isHovered = ref(false);
 
-const isTextCollapsed = computed(() => props.group.textSubMessage?.config?.is_collapsed || false);
+/** 外部传入折叠状态时优先使用外部状态，否则从 store 中读取 */
+const isTextCollapsed = computed(() => {
+  if (props.externalCollapsed !== undefined) {
+    return props.externalCollapsed;
+  }
+  return props.group.textSubMessage?.config?.is_collapsed || false;
+});
+
+/** 当外部控制折叠时，将折叠状态注入到 subMessage.config 中一并传给 SubMessageItem */
+const effectiveTextSubMessage = computed(() => {
+  if (!props.group.textSubMessage) return undefined;
+  if (props.externalCollapsed !== undefined) {
+    return {
+      ...props.group.textSubMessage,
+      config: {
+        ...props.group.textSubMessage.config,
+        is_collapsed: props.externalCollapsed,
+      },
+    };
+  }
+  return props.group.textSubMessage;
+});
 
 function handleEdit() {
   if (props.group.textSubMessage) {
@@ -113,10 +142,14 @@ function handleCopy() {
 
 function toggleCollapse() {
   if (props.group.textSubMessage) {
-    interactionStore.updateSubMessage({
-      subMessageId: props.group.textSubMessage.id,
-      data: { config: { ...props.group.textSubMessage.config, is_collapsed: !isTextCollapsed.value } }
-    });
+    if (props.externalCollapsed !== undefined) {
+      emit('toggle-collapse', props.group.textSubMessage.id);
+    } else {
+      interactionStore.updateSubMessage({
+        subMessageId: props.group.textSubMessage.id,
+        data: { config: { ...props.group.textSubMessage.config, is_collapsed: !isTextCollapsed.value } }
+      });
+    }
   }
 }
 

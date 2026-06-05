@@ -154,10 +154,18 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
         # --- Checkpointer ---
         checkpointer = get_checkpointer()
 
+        # --- General Purpose (opt-in) ---
+        include_general_purpose = getattr(agent_config, 'include_general_purpose', False)
+
         # --- Summarization (opt-in) ---
         summarization = None
-        # mambo summarization can be configured via agent_config if needed
-        # For now, leave disabled (same as deepagents baseline)
+        if getattr(agent_config, 'enable_summarization', False) and agent_config.summarization_config:
+            cfg = agent_config.summarization_config
+            summarization = {
+                "trigger": (cfg["trigger_type"], cfg["trigger_value"]),
+                "keep": (cfg["keep_type"], cfg["keep_value"]),
+                "offload_to_backend": cfg.get("offload_to_backend", False),
+            }
 
         return create_mambo_agent(
             name=agent_config.name,
@@ -165,6 +173,8 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
             backend=backend,
             system_prompt=agent_config.system_prompt,
             subagents=compiled_subagents if compiled_subagents else None,
+            include_general_purpose=include_general_purpose,
+            summarization=summarization,
             tools=tools if tools else None,
             skills=skills if skills else None,
             checkpointer=checkpointer,

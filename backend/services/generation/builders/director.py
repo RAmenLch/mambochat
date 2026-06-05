@@ -196,6 +196,7 @@ class LLMInputDirector:
         model_max_retries = 0
         model_timeout = None
         model_stream_chunk_timeout = None
+        model_context_length: Optional[int] = None
         if model.meta_config:
             try:
                 meta = json.loads(model.meta_config) if isinstance(model.meta_config, str) else model.meta_config
@@ -205,6 +206,9 @@ class LLMInputDirector:
                 raw_stream_chunk_timeout = meta.get("stream_chunk_timeout")
                 if raw_stream_chunk_timeout is not None:
                     model_stream_chunk_timeout = float(raw_stream_chunk_timeout)
+                raw_context_length = meta.get("context_length")
+                if raw_context_length is not None:
+                    model_context_length = int(raw_context_length)
             except (json.JSONDecodeError, ValueError, TypeError):
                 pass
         max_retries = model_max_retries if model_max_retries > 0 else global_max_retries
@@ -218,6 +222,7 @@ class LLMInputDirector:
             parameters=api_params,
             max_retries=max_retries,
             timeout=timeout,
+            context_length=model_context_length,
             stream_chunk_timeout=model_stream_chunk_timeout
         )
 

@@ -75,6 +75,11 @@ class ModelConfig(BaseModel):
         description="流式响应 chunk 间超时时间(秒)。为 None 或 0 时禁用。"
                     "对于图片生成等耗时模型，建议设置为较大值（如 600）或 None。"
     )
+    context_length: Optional[int] = Field(
+        None,
+        description="模型最大上下文窗口 (tokens)，用于 summarization fraction 模式。"
+                    "从 AIModel.meta_config.context_length 读取。"
+    )
 
 
 class MessageContext(BaseModel):
@@ -146,6 +151,21 @@ class AgentConfig(BaseModel):
     recover_from_error: bool = Field(
         False,
         description="是否从错误中恢复（传入 input=None + thread_id 利用 LangGraph checkpoint 继续执行）"
+    )
+
+    # --- Mambo-Agent 专属配置 ---
+    include_general_purpose: bool = Field(
+        default=False,
+        description="是否启用 general-purpose 子代理（仅 Mambo Agent 有效）"
+    )
+    enable_summarization: bool = Field(
+        default=False,
+        description="是否启用对话摘要/压缩（仅 Mambo Agent 有效）"
+    )
+    summarization_config: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="摘要配置（仅 enable_summarization=True 时有效）。"
+                    "结构: {trigger_type, trigger_value, keep_type, keep_value, offload_to_backend}"
     )
 
 

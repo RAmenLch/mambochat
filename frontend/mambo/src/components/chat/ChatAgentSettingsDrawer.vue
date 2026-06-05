@@ -142,6 +142,39 @@
             </div>
           </div>
 
+          <!-- Mambo 专属配置预览 -->
+          <div class="preview-section" v-if="selectedAgent.AgentType === 'Mambo' && mamboPreview">
+            <div class="section-title"><el-icon><Setting /></el-icon> {{ $t('agent.mamboConfig') }}</div>
+            <div class="mambo-preview-grid">
+              <div class="info-item">
+                <span class="info-label">{{ $t('agent.generalPurpose') }}:</span>
+                <span class="info-value">{{ mamboPreview.generalPurpose ? t('common.status.enabled') : t('common.status.disabled') }}</span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">{{ $t('agent.summarization') }}:</span>
+                <span class="info-value">{{ mamboPreview.summaryEnabled ? t('common.status.enabled') : t('common.status.disabled') }}</span>
+              </div>
+            </div>
+            <template v-if="mamboPreview.summaryEnabled && mamboPreview.summaryConfig">
+              <div class="mambo-preview-grid" style="margin-top: 12px;">
+                <div class="info-item">
+                  <span class="info-label">{{ $t('agent.summarizationTrigger') }}:</span>
+                  <span class="info-value">{{ mamboTriggerLabel }} ({{ mamboPreview.summaryConfig.trigger_value }})</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">{{ $t('agent.summarizationKeep') }}:</span>
+                  <span class="info-value">{{ mamboKeepLabel }} ({{ mamboPreview.summaryConfig.keep_value }})</span>
+                </div>
+              </div>
+              <div class="mambo-preview-grid" style="margin-top: 12px;">
+                <div class="info-item">
+                  <span class="info-label">{{ $t('agent.summarizationOffload') }}:</span>
+                  <span class="info-value">{{ mamboPreview.summaryConfig.offload_to_backend ? t('common.status.enabled') : t('common.status.disabled') }}</span>
+                </div>
+              </div>
+            </template>
+          </div>
+
         </div>
       </el-scrollbar>
       <div v-else class="empty-agent-preview">
@@ -163,7 +196,7 @@ import { reactive, watch, computed, ref, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { User, Cpu, Document, MagicStick, Collection, Connection, Monitor } from '@element-plus/icons-vue';
+import { User, Cpu, Document, MagicStick, Collection, Connection, Monitor, Setting } from '@element-plus/icons-vue';
 import { resolveFileUrl } from '@/services/electronUrl';
 
 import { useAgentStore } from '@/stores/agentStore';
@@ -242,6 +275,35 @@ const displaySubAgents = computed(() => {
     return agent ? { id, name: agent.name, avatar: resolveFileUrl(agent.agentAvatarUrl) } : { id, name: t('common.status.unknownAgent'), avatar: null };
   });
 });
+
+// --- Mambo 专属配置预览 ---
+const mamboPreview = computed(() => {
+  if (!selectedAgent.value || selectedAgent.value.AgentType !== 'Mambo') return null;
+  const params = (selectedAgent.value as any).agentParameters;
+  if (!params) return null;
+  return {
+    generalPurpose: params.include_general_purpose ?? false,
+    summaryEnabled: params.enable_summarization ?? false,
+    summaryConfig: params.summarization_config ?? null,
+  };
+});
+
+const mamboTriggerLabel = computed(() => {
+  const triggerType = mamboPreview.value?.summaryConfig?.trigger_type;
+  if (triggerType === 'fraction') return t('agent.triggerFraction');
+  if (triggerType === 'tokens') return t('agent.triggerTokens');
+  if (triggerType === 'messages') return t('agent.triggerMessages');
+  return String(triggerType || '');
+});
+
+const mamboKeepLabel = computed(() => {
+  const keepType = mamboPreview.value?.summaryConfig?.keep_type;
+  if (keepType === 'fraction') return t('agent.keepFraction');
+  if (keepType === 'tokens') return t('agent.keepTokens');
+  if (keepType === 'messages') return t('agent.keepMessages');
+  return String(keepType || '');
+});
+// --- Mambo 专属配置预览 END ---
 
 onMounted(() => {
   if (agentStore.allAgents.length === 0) {
@@ -483,6 +545,12 @@ const openAgentSettings = (agentId: string) => {
   font-size: 13px;
   color: var(--el-text-color-placeholder);
   font-style: italic;
+}
+
+.mambo-preview-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
 }
 
 .empty-agent-preview {

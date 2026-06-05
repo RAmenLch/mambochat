@@ -56,5 +56,22 @@ export default {
     searchPlaceholder: 'Search Agent name or description...',
     noData: 'No Agents available',
     selected: '{count} Agents selected',
-  }
+  },
+  // Mambo Agent Configuration
+  mamboConfig: 'Mambo Agent Configuration',
+  generalPurpose: 'General Purpose Subagent',
+  generalPurposeDesc: 'Auto-create a general-purpose subagent that shares the main agent\'s model and file system tools',
+  summarization: 'Conversation Summarization',
+  summarizationDesc: 'Automatically compact older messages when token limits are approached',
+  summarizationTrigger: 'Trigger Condition',
+  summarizationKeep: 'Messages to Keep',
+  summarizationOffload: 'Persist to Backend',
+  summarizationOffloadDesc: 'Save evicted messages to the configured Backend before summarization',
+  triggerFraction: 'Context Fraction',
+  triggerTokens: 'Token Count',
+  triggerMessages: 'Message Count',
+  keepFraction: 'Context Fraction',
+  keepTokens: 'Token Count',
+  keepMessages: 'Message Count',
+  fractionWarning: 'Fraction mode requires the model to have "Max Context" configured. If missing, use token/message counts instead.',
 }

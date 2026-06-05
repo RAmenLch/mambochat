@@ -28,13 +28,13 @@ class ModelFactory:
         params_copy = model_config.parameters.copy()
         worker_type = params_copy.pop("_worker_type", ProviderWorkerType.OPENAI.value)
         stream = params_copy.pop("stream", True)
-        max_retries = model_config.max_retries or self.DEFAULT_MAX_RETRIES
+        max_retries = model_config.max_retries or ModelFactory.DEFAULT_MAX_RETRIES
 
         callbacks = [RawPayloadLoggingCallback(run_time_config)]
 
         if worker_type == ProviderWorkerType.ANTHROPIC.value:
             thinking = params_copy.pop("thinking", {"type": "enabled", "budget_tokens": 32000})
-            return ChatAnthropic(
+            model = ChatAnthropic(
                 model_name=model_config.model_id,
                 api_key=model_config.api_key,
                 base_url=model_config.api_host.rstrip("/").rstrip("/v1"),
@@ -50,7 +50,7 @@ class ModelFactory:
 
         elif worker_type == ProviderWorkerType.GOOGLE.value:
             include_thoughts = params_copy.pop("include_thoughts", True)
-            return ChatGoogleGenerativeAI(
+            model = ChatGoogleGenerativeAI(
                 model=model_config.model_id,
                 api_key=model_config.api_key,
                 include_thoughts=include_thoughts,
@@ -66,7 +66,7 @@ class ModelFactory:
         elif worker_type == ProviderWorkerType.DEEPSEEK.value:
             thinking = params_copy.pop("thinking", None)
             reasoning_effort = params_copy.pop("reasoning_effort", None)
-            return ChatDeepSeek(
+            model = ChatDeepSeek(
                 model=model_config.model_id,
                 api_key=model_config.api_key,
                 base_url=model_config.api_host.rstrip("/"),
@@ -86,7 +86,7 @@ class ModelFactory:
             )
 
         else:
-            return ExtendedChatOpenAI(
+            model = ExtendedChatOpenAI(
                 model=model_config.model_id,
                 api_key=model_config.api_key,
                 base_url=model_config.api_host.rstrip("/"),
@@ -106,3 +106,17 @@ class ModelFactory:
                     else model_config.timeout * 2
                 )
             )
+
+        # 注入 model profile，供 summarization fraction 模式使用
+        ModelFactory._inject_profile(model, model_config)
+
+        return model
+
+    @staticmethod
+    def _inject_profile(model: BaseChatModel, model_config: ModelConfig) -> None:
+        """如果 auto-resolve 未产生 profile 且有 context_length，则手动注入。"""
+        if model.profile is not None:
+            return
+        cl = model_config.context_length
+        if cl is not None and cl > 0:
+            model.profile = {"max_input_tokens": cl}

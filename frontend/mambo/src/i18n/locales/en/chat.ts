@@ -143,6 +143,8 @@ export default {
     completion: 'Completion',
     reasoning: 'Reasoning',
     total: 'Total',
+    cacheHit: 'Cache Hit',
+    cacheMiss: 'Cache Miss',
   },
   settings: {
     title: 'Chat Settings',

@@ -143,6 +143,8 @@ export default {
     completion: 'Completion',
     reasoning: 'Reasoning',
     total: 'Total',
+    cacheHit: '缓存命中',
+    cacheMiss: '缓存未命中',
   },
   settings: {
     title: '会话设置',

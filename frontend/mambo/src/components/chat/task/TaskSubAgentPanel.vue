@@ -13,6 +13,10 @@
           :group="group"
           :parent-message="virtualMessage"
           :is-generating="false"
+          :show-edit="false"
+          :external-collapsed="isSubMsgCollapsed(group.textSubMessage?.id)"
+          @copy="handleCopy"
+          @toggle-collapse="handleToggleCollapse"
           @open-tool-dialog="handleToolClick"
         />
       </div>
@@ -30,6 +34,10 @@
           :group="group"
           :parent-message="virtualMessage"
           :is-generating="false"
+          :show-edit="false"
+          :external-collapsed="isSubMsgCollapsed(group.textSubMessage?.id)"
+          @copy="handleCopy"
+          @toggle-collapse="handleToggleCollapse"
           @open-tool-dialog="handleToolClick"
         />
       </div>
@@ -52,8 +60,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { ElMessage } from 'element-plus';
 import type { Message, MessageRole, MessageStatus, SubMessage, SubMessageType, TaskSubStepContent } from '@/api/types';
 import { useAssistantTimeline } from '@/composables/useAssistantTimeline';
+import { copyToClipboard } from '@/utils/clipboard';
 import BubbleSectionGroupComponent from '../message/BubbleSectionGroup.vue';
 import McpToolDialog from '../dialogs/McpToolDialog.vue';
 
@@ -63,6 +73,35 @@ const { t } = useI18n();
 const props = defineProps<{
   steps: SubMessage[];
 }>();
+
+/** 本地折叠状态：子代理追踪面板内子消息的折叠与展开 */
+const collapsedSubMsgIds = ref<Set<string>>(new Set());
+
+function isSubMsgCollapsed(id: string | undefined): boolean | undefined {
+  if (!id) return undefined;
+  // 返回 undefined 会让 BubbleSectionGroup 走默认 store 逻辑，
+  // 但这里我们总是需要外部控制折叠状态
+  return collapsedSubMsgIds.value.has(id);
+}
+
+function handleToggleCollapse(subMsgId: string) {
+  const next = new Set(collapsedSubMsgIds.value);
+  if (next.has(subMsgId)) {
+    next.delete(subMsgId);
+  } else {
+    next.add(subMsgId);
+  }
+  collapsedSubMsgIds.value = next;
+}
+
+async function handleCopy(subMessage: SubMessage) {
+  try {
+    await copyToClipboard(subMessage.content);
+    ElMessage.success(t('common.msg.copySuccess'));
+  } catch {
+    ElMessage.error(t('common.msg.copyFailed'));
+  }
+}
 
 /** 将 TaskSubStep 数组转换为虚拟 Message，子消息使用 Reasoning/Normal/McpTool 类型 */
 const virtualMessage = computed<Message>(() => {

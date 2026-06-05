@@ -229,6 +229,7 @@ class MamboAgentInitializer(AbstractAgentInitializer):
                         sub_model_max_retries = 0
                         sub_model_timeout = None
                         sub_model_stream_chunk_timeout = None
+                        sub_model_context_length: Optional[int] = None
                         if sub_model.meta_config:
                             try:
                                 meta = (
@@ -252,6 +253,9 @@ class MamboAgentInitializer(AbstractAgentInitializer):
                                     sub_model_stream_chunk_timeout = float(
                                         raw_stream_chunk_timeout
                                     )
+                                raw_context_length = meta.get("context_length")
+                                if raw_context_length is not None:
+                                    sub_model_context_length = int(raw_context_length)
                             except (json.JSONDecodeError, ValueError, TypeError):
                                 pass
                         sub_max_retries = (
@@ -274,6 +278,7 @@ class MamboAgentInitializer(AbstractAgentInitializer):
                             max_retries=sub_max_retries,
                             timeout=sub_timeout,
                             stream_chunk_timeout=sub_model_stream_chunk_timeout,
+                            context_length=sub_model_context_length,
                         )
 
                 sub_configs.append(sub_config)
@@ -301,6 +306,12 @@ class MamboAgentInitializer(AbstractAgentInitializer):
                         self.hitl_interrupt_on["execute"] = True
                     break
 
+        # --- Mambo 专属参数：从 DB agentParameters 解析 ---
+        mambo_params: Dict[str, Any] = self.agent.agentParameters or {}
+        include_gp = mambo_params.get("include_general_purpose", False)
+        enable_sum = mambo_params.get("enable_summarization", False)
+        sum_config: Optional[Dict[str, Any]] = mambo_params.get("summarization_config", None)
+
         agent_config = AgentConfig(
             name=self.agent.name,
             description=self.agent.description or "",
@@ -313,6 +324,9 @@ class MamboAgentInitializer(AbstractAgentInitializer):
             resume_payload=self.resume_payload,
             mounted_backends=mounted_backends if mounted_backends else None,
             default_backend_id=self.agent.defaultBackendId,
+            include_general_purpose=include_gp,
+            enable_summarization=enable_sum,
+            summarization_config=sum_config if enable_sum else None,
         )
 
         return agent_config, additional_system_prompt

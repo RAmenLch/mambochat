@@ -56,5 +56,22 @@ export default {
     searchPlaceholder: '搜索 Agent 名称或描述...',
     noData: '暂无可选的 Agent',
     selected: '已选择 {count} 个 Agent',
-  }
+  },
+  // Mambo Agent 专属配置
+  mamboConfig: 'Mambo Agent 专属配置',
+  generalPurpose: '通用目的子代理',
+  generalPurposeDesc: '自动创建一个通用子代理，共享主代理的模型和文件系统工具',
+  summarization: '对话摘要',
+  summarizationDesc: '当上下文接近 token 上限时，自动压缩旧消息',
+  summarizationTrigger: '触发条件',
+  summarizationKeep: '保留消息',
+  summarizationOffload: '持久化到 Backend',
+  summarizationOffloadDesc: '摘要前将逐出的对话历史保存到 Backend',
+  triggerFraction: '上下文比例',
+  triggerTokens: 'Token 数量',
+  triggerMessages: '消息数量',
+  keepFraction: '上下文比例',
+  keepTokens: 'Token 数量',
+  keepMessages: '消息数量',
+  fractionWarning: '比例模式需要模型已配置「最大上下文」。若缺失请改用 Token 或消息数量模式。',
 }

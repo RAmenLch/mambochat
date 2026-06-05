@@ -359,6 +359,116 @@
 
         </el-card>
 
+        <!-- 4. Mambo 专属配置 (仅 Mambo 类型可见) -->
+        <el-card v-if="form.AgentType === 'Mambo'" shadow="never" class="config-card">
+          <template #header>
+            <span class="card-title">{{ $t('agent.mamboConfig') }}</span>
+          </template>
+
+          <!-- General Purpose 子代理 -->
+          <el-row :gutter="32" class="settings-row">
+            <el-col :span="24">
+              <el-form-item>
+                <template #label>
+                  <span>{{ $t('agent.generalPurpose') }}</span>
+                  <el-tooltip effect="dark" :content="$t('agent.generalPurposeDesc')" placement="top">
+                    <el-icon class="label-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-switch v-model="form.mambo_general_purpose" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+
+          <!-- 对话摘要 -->
+          <el-row :gutter="32" class="settings-row">
+            <el-col :span="24">
+              <el-form-item>
+                <template #label>
+                  <span>{{ $t('agent.summarization') }}</span>
+                  <el-tooltip effect="dark" :content="$t('agent.summarizationDesc')" placement="top">
+                    <el-icon class="label-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-switch v-model="form.mambo_summary_enabled" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+
+          <!-- 摘要参数（仅开启摘要后显示） -->
+          <template v-if="form.mambo_summary_enabled">
+            <p v-if="form.mambo_summary_trigger_type === 'fraction' || form.mambo_summary_keep_type === 'fraction'" class="mambo-fraction-warning">
+              <el-icon><WarningFilled /></el-icon> {{ $t('agent.fractionWarning') }}
+            </p>
+
+            <el-row :gutter="32" class="settings-row">
+              <el-col :span="12">
+                <el-form-item :label="$t('agent.summarizationTrigger')">
+                  <el-select v-model="form.mambo_summary_trigger_type" style="width: 100%">
+                    <el-option :label="$t('agent.triggerFraction')" value="fraction" />
+                    <el-option :label="$t('agent.triggerTokens')" value="tokens" />
+                    <el-option :label="$t('agent.triggerMessages')" value="messages" />
+                  </el-select>
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item>
+                  <template #label>&nbsp;</template>
+                  <el-input-number
+                    v-model="form.mambo_summary_trigger_value"
+                    :min="form.mambo_summary_trigger_type === 'fraction' ? 0.1 : 1"
+                    :max="form.mambo_summary_trigger_type === 'fraction' ? 1 : 1000000"
+                    :step="form.mambo_summary_trigger_type === 'fraction' ? 0.05 : 1000"
+                    :precision="form.mambo_summary_trigger_type === 'fraction' ? 2 : 0"
+                    controls-position="right"
+                    style="width: 100%"
+                  />
+                </el-form-item>
+              </el-col>
+            </el-row>
+
+            <el-row :gutter="32" class="settings-row">
+              <el-col :span="12">
+                <el-form-item :label="$t('agent.summarizationKeep')">
+                  <el-select v-model="form.mambo_summary_keep_type" style="width: 100%">
+                    <el-option :label="$t('agent.keepFraction')" value="fraction" />
+                    <el-option :label="$t('agent.keepTokens')" value="tokens" />
+                    <el-option :label="$t('agent.keepMessages')" value="messages" />
+                  </el-select>
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item>
+                  <template #label>&nbsp;</template>
+                  <el-input-number
+                    v-model="form.mambo_summary_keep_value"
+                    :min="form.mambo_summary_keep_type === 'fraction' ? 0.01 : 1"
+                    :max="form.mambo_summary_keep_type === 'fraction' ? 1 : 500000"
+                    :step="form.mambo_summary_keep_type === 'fraction' ? 0.05 : 1000"
+                    :precision="form.mambo_summary_keep_type === 'fraction' ? 2 : 0"
+                    controls-position="right"
+                    style="width: 100%"
+                  />
+                </el-form-item>
+              </el-col>
+            </el-row>
+
+            <el-row :gutter="32" class="settings-row">
+              <el-col :span="24">
+                <el-form-item>
+                  <template #label>
+                    <span>{{ $t('agent.summarizationOffload') }}</span>
+                    <el-tooltip effect="dark" :content="$t('agent.summarizationOffloadDesc')" placement="top">
+                      <el-icon class="label-icon"><QuestionFilled /></el-icon>
+                    </el-tooltip>
+                  </template>
+                  <el-switch v-model="form.mambo_summary_offload" />
+                </el-form-item>
+              </el-col>
+            </el-row>
+          </template>
+        </el-card>
+
       </el-form>
     </el-scrollbar>
 
@@ -387,7 +497,7 @@ import { ref, reactive, watch, computed, onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useI18n } from 'vue-i18n';
 import { ElMessage } from 'element-plus';
-import { User, QuestionFilled, Collection, Plus, Connection, Monitor } from '@element-plus/icons-vue';
+import { User, QuestionFilled, Collection, Plus, Connection, Monitor, WarningFilled } from '@element-plus/icons-vue';
 import { resolveFileUrl } from '@/services/electronUrl';
 
 import { useAgentStore } from '@/stores/agentStore';
@@ -442,6 +552,15 @@ const form = reactive({
   subAgents: [] as string[],
   backendIds: [] as string[], // [新增]
   defaultBackendId: null as string | null, // [新增] 默认 Backend
+
+  // Mambo 专属配置
+  mambo_general_purpose: false,
+  mambo_summary_enabled: false,
+  mambo_summary_trigger_type: 'tokens' as 'fraction' | 'tokens' | 'messages',
+  mambo_summary_trigger_value: 180000,
+  mambo_summary_keep_type: 'messages' as 'fraction' | 'tokens' | 'messages',
+  mambo_summary_keep_value: 20,
+  mambo_summary_offload: false,
 });
 
 // --- Backend 挂载逻辑 [新增] ---
@@ -539,6 +658,24 @@ watch(agentData, async (newVal) => {
     form.backendIds = newVal.backendIds ? [...newVal.backendIds] : []; // [新增] 还原 Backend 绑定数据
     form.defaultBackendId = (newVal as any).defaultBackendId || null; // [新增] 还原默认 Backend
 
+    // Mambo 专属配置还原
+    const mamboParams: Record<string, any> = newVal.agentParameters ? JSON.parse(JSON.stringify(newVal.agentParameters)) : {};
+    form.mambo_general_purpose = mamboParams.include_general_purpose ?? false;
+    form.mambo_summary_enabled = mamboParams.enable_summarization ?? false;
+    if (mamboParams.summarization_config) {
+      form.mambo_summary_trigger_type = mamboParams.summarization_config.trigger_type || 'tokens';
+      form.mambo_summary_trigger_value = mamboParams.summarization_config.trigger_value ?? 180000;
+      form.mambo_summary_keep_type = mamboParams.summarization_config.keep_type || 'messages';
+      form.mambo_summary_keep_value = mamboParams.summarization_config.keep_value ?? 20;
+      form.mambo_summary_offload = mamboParams.summarization_config.offload_to_backend ?? false;
+    } else {
+      form.mambo_summary_trigger_type = 'tokens';
+      form.mambo_summary_trigger_value = 180000;
+      form.mambo_summary_keep_type = 'messages';
+      form.mambo_summary_keep_value = 20;
+      form.mambo_summary_offload = false;
+    }
+
     if (newVal.resourcePromptList && newVal.resourcePromptList.length > 0) {
       try {
         const promises = newVal.resourcePromptList.map(id => getResourceDetails(id));
@@ -584,6 +721,19 @@ watch(() => form.aiModelId, (newModelId) => {
     if (keysToKeep.has(key)) newParams[key] = form.modelParameters[key];
   }
   form.modelParameters = newParams;
+});
+
+// 摘要类型切换时，自动匹配对应模式的默认值
+watch(() => form.mambo_summary_trigger_type, (newType) => {
+  if (newType === 'fraction') form.mambo_summary_trigger_value = 0.9;
+  else if (newType === 'tokens') form.mambo_summary_trigger_value = 180000;
+  else if (newType === 'messages') form.mambo_summary_trigger_value = 200;
+});
+
+watch(() => form.mambo_summary_keep_type, (newType) => {
+  if (newType === 'fraction') form.mambo_summary_keep_value = 0.2;
+  else if (newType === 'tokens') form.mambo_summary_keep_value = 40000;
+  else if (newType === 'messages') form.mambo_summary_keep_value = 20;
 });
 
 function getSliderStep(min: number, max: number): number {
@@ -657,6 +807,23 @@ async function handleDeleteAvatar() {
   }
 }
 
+function buildMamboAgentParameters(): Record<string, any> | null {
+  const params: Record<string, any> = {
+    include_general_purpose: form.mambo_general_purpose,
+    enable_summarization: form.mambo_summary_enabled,
+  };
+  if (form.mambo_summary_enabled) {
+    params.summarization_config = {
+      trigger_type: form.mambo_summary_trigger_type,
+      trigger_value: form.mambo_summary_trigger_value,
+      keep_type: form.mambo_summary_keep_type,
+      keep_value: form.mambo_summary_keep_value,
+      offload_to_backend: form.mambo_summary_offload,
+    };
+  }
+  return Object.keys(params).length > 0 ? params : null;
+}
+
 async function handleSave() {
   if (!currentAgentId.value) return;
   isSaving.value = true;
@@ -696,6 +863,11 @@ async function handleSave() {
 
       backendIds: finalBackendIds, // 使用修复后的变量
       defaultBackendId: form.defaultBackendId, // [新增] 默认 Backend
+
+      // Mambo 专属参数
+      agentParameters: form.AgentType === 'Mambo'
+        ? buildMamboAgentParameters()
+        : null,
     });
 
     ElMessage.success(t('agent.saveSuccess'));
@@ -879,5 +1051,18 @@ onMounted(() => {
   align-items: center;
   height: 100%;
   background-color: var(--el-bg-color);
+}
+
+.mambo-fraction-warning {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 12px 0;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--el-color-warning);
+  background-color: var(--el-color-warning-light-9);
+  border-radius: 4px;
+  line-height: 1.4;
 }
 </style>

@@ -92,6 +92,7 @@
         :is-single-view-collapsed="isSingleViewCollapsed"
         :first-sub-message="firstSubMessage"
         :usage-sub-message="usageSubMessage"
+        :max-context-tokens="modelMaxContextTokens"
         @regenerate="handleRegenerate"
         @toggle-collapse="toggleSingleViewCollapse"
         @edit-request="handleEditRequest"
@@ -123,6 +124,7 @@ import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useAgentStore } from '@/stores/agentStore'
+import { useProviderStore } from '@/stores/providerStore'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { User, Cpu, Loading, CircleCheck, Clock } from '@element-plus/icons-vue'
 import { copyToClipboard } from '@/utils/clipboard'
@@ -162,6 +164,7 @@ const interactionStore = useChatInteractionStore()
 const sessionStore = useChatSessionStore()
 const settingsStore = useSettingsStore()
 const agentStore = useAgentStore()
+const providerStore = useProviderStore()
 const { globalSettings } = storeToRefs(settingsStore)
 const { messageRecencyRanks } = storeToRefs(sessionStore)
 
@@ -186,6 +189,15 @@ const usageSubMessage = computed(() => {
   const usageMessages = props.message.sub_messages.filter((sm) => sm.type === 'Usage');
   if (usageMessages.length === 0) return undefined;
   return usageMessages.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+});
+
+/** 当前会话所用模型的 context_length（token 数），> 0 时启用环形图 */
+const modelMaxContextTokens = computed<number | undefined>(() => {
+  const modelId = sessionStore.currentChat?.aiModelId;
+  if (!modelId) return undefined;
+  const model = providerStore.allModels.find(m => m.id === modelId);
+  if (!model?.meta_config?.context_length) return undefined;
+  return model.meta_config.context_length;
 });
 const zipHistorySubMessage = computed(() => props.message.sub_messages.find((sm) => sm.type === 'ZipHistory'))
 const suggestSubMessage = computed(() => props.message.sub_messages.find((sm) => sm.type === 'Suggest'))
