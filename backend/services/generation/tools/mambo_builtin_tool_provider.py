@@ -28,6 +28,7 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
     # mambo_agents 内置工具名称集合
     # - core six: ls, read, write, edit, glob, grep (BackendToolsMiddleware)
     # - backend extras: tree, delete, execute, sandbox_run 等 (由 backend.tools 决定)
+    # - workspace: copy (HybridWorkspaceBackend 跨后端复制)
     # - subagent: task (SubAgentMiddleware)
     # - async subagent: async_task, async_status (AsyncSubAgentMiddleware)
     # - planning: write_plans (MamboPlanMiddleware)
@@ -38,6 +39,7 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
         "edit",
         "glob",
         "grep",
+        "copy",
         "tree",
         "delete",
         "execute",

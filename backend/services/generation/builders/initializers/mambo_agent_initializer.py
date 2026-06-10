@@ -6,9 +6,9 @@ from typing import Tuple, List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_core.tools import BaseTool
 
-from backend.schemas.enums import ToolReviewMode, AgentTypeEnum
+from backend.schemas.enums import ToolReviewMode, AgentTypeEnum, ResourceType
 from backend.models.agent_model import Agent
-from backend.crud import mcp_crud, agent_crud, provider_crud, setting_crud, backend_crud
+from backend.crud import mcp_crud, agent_crud, provider_crud, setting_crud, backend_crud, resource_crud
 
 from backend.services.generation.core.llm_io import AgentConfig, ModelConfig
 from backend.services.generation.builders.initializers.base_initializer import (
@@ -36,7 +36,7 @@ class MamboAgentInitializer(AbstractAgentInitializer):
 
     与 DeepAgentInitializer 的核心差异：
     - 使用 MamboAgentBuiltinToolProvider 拦截内置工具
-    - 只装配单个 Backend（mambo 不支持多 Backend 路由）
+    - 装配单个 Backend（通过 HybridWorkspaceBackend 支持 /.mambo/ 虚拟空间路由）
     """
 
     def __init__(
@@ -77,6 +77,12 @@ class MamboAgentInitializer(AbstractAgentInitializer):
         if knowledge_bases:
             self.providers.append(KBToolProvider(self.db, knowledge_bases))
 
+        # ---- 构建 skill_resource_roots（Mambo skills → /.mambo/skills/<name>/）----
+        skill_resource_roots: Dict[str, str] = {}
+        if skills and self.agent.resourcePromptList:
+            skill_resource_roots = await self._build_skill_roots()
+
+        # DeepAgent 子代理仍然需要 skills 内容用于 VFS 注入
         if skills:
             for skill in skills:
                 for file_config in skill.files:
@@ -324,12 +330,38 @@ class MamboAgentInitializer(AbstractAgentInitializer):
             resume_payload=self.resume_payload,
             mounted_backends=mounted_backends if mounted_backends else None,
             default_backend_id=self.agent.defaultBackendId,
+            skill_resource_roots=skill_resource_roots if skill_resource_roots else None,
             include_general_purpose=include_gp,
             enable_summarization=enable_sum,
             summarization_config=sum_config if enable_sum else None,
         )
 
         return agent_config, additional_system_prompt
+
+    async def _build_skill_roots(self) -> Dict[str, str]:
+        """从 resourcePromptList 中提取 SKILL 类型资源，构建根挂载映射。
+
+        遍历 resourcePromptList，筛选 resourceType == "skill" 的文件夹资源，
+        构建 {skill_name: root_resource_id} 映射。
+        每个 skill 将被创建为独立的 MamboResourceBackend(resource_id=root_resource_id)，
+        挂载到 HybridWorkspaceBackend.virtual_workspaces["skills/{name}"]。
+
+        Returns:
+            {"skill_name": "res_xxx", ...}
+        """
+        if not self.agent.resourcePromptList:
+            return {}
+
+        roots: Dict[str, str] = {}
+        for rid in self.agent.resourcePromptList:
+            res = await resource_crud.get_resource(self.db, rid)
+            if res is None:
+                continue
+            if res.resourceType != ResourceType.SKILL.value:
+                continue
+            roots[res.name] = res.id
+
+        return roots
 
     def get_providers(self) -> List[BaseToolProvider]:
         return self.providers

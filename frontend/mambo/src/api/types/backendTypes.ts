@@ -1,6 +1,6 @@
 // frontend/mambo/src/api/types/backendTypes.ts
 
-export type BackendType = 'ssh' | 'api';
+export type BackendType = 'ssh' | 'api' | 'resource';
 
 export interface ToolPermission {
   enabled: boolean;
@@ -39,7 +39,13 @@ export interface ApiConfigData {
   ignore_dirs?: string[] | null;
 }
 
-export type BackendConfigData = SshConfigData | ApiConfigData;
+export interface ResourceConfigData {
+  resource_id: string;
+  edit_whitelist?: string[] | null;
+  edit_blacklist?: string[] | null;
+}
+
+export type BackendConfigData = SshConfigData | ApiConfigData | ResourceConfigData;
 
 export interface BackendConfig {
   id: string;
@@ -82,4 +88,8 @@ export function isSshConfig(data: BackendConfigData): data is SshConfigData {
 
 export function isApiConfig(data: BackendConfigData): data is ApiConfigData {
   return 'api_key' in data;
+}
+
+export function isResourceConfig(data: BackendConfigData): data is ResourceConfigData {
+  return 'resource_id' in data;
 }

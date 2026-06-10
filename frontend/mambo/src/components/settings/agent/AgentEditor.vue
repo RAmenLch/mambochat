@@ -521,12 +521,12 @@ const agentStore = useAgentStore();
 const providerStore = useProviderStore();
 const systemConfigStore = useSystemConfigStore();
 const mcpStore = useMcpStore();
-const backendStore = useBackendStore(); // [新增]
+const backendStore = useBackendStore();
 
 const { currentAgentId, agentList } = storeToRefs(agentStore);
 const { groupedModels, allModels } = storeToRefs(providerStore);
 const { activeUserMcpServices } = storeToRefs(mcpStore);
-const { backendList } = storeToRefs(backendStore); // [新增]
+const { backendList } = storeToRefs(backendStore);
 
 const isSaving = ref(false);
 const isAvatarLoading = ref(false);
@@ -550,8 +550,8 @@ const form = reactive({
   agentAvatarUrl: null as string | null,
   enabledMcpIds: [] as string[],
   subAgents: [] as string[],
-  backendIds: [] as string[], // [新增]
-  defaultBackendId: null as string | null, // [新增] 默认 Backend
+  backendIds: [] as string[],
+  defaultBackendId: null as string | null,
 
   // Mambo 专属配置
   mambo_general_purpose: false,
@@ -655,8 +655,8 @@ watch(agentData, async (newVal) => {
     form.agentAvatarUrl = newVal.agentAvatarUrl || null;
     form.enabledMcpIds = newVal.enabledMcpIds ? [...newVal.enabledMcpIds] : [];
     form.subAgents = newVal.subAgents ? [...newVal.subAgents] : [];
-    form.backendIds = newVal.backendIds ? [...newVal.backendIds] : []; // [新增] 还原 Backend 绑定数据
-    form.defaultBackendId = (newVal as any).defaultBackendId || null; // [新增] 还原默认 Backend
+    form.backendIds = newVal.backendIds ? [...newVal.backendIds] : [];
+    form.defaultBackendId = (newVal as any).defaultBackendId || null;
 
     // Mambo 专属配置还原
     const mamboParams: Record<string, any> = newVal.agentParameters ? JSON.parse(JSON.stringify(newVal.agentParameters)) : {};
@@ -861,8 +861,8 @@ async function handleSave() {
       enabledMcpIds: form.enabledMcpIds.length > 0 ? [...form.enabledMcpIds] : [],
       subAgents: (form.AgentType === 'DeepAgent' || form.AgentType === 'Mambo') && form.subAgents.length > 0 ? [...form.subAgents] : [],
 
-      backendIds: finalBackendIds, // 使用修复后的变量
-      defaultBackendId: form.defaultBackendId, // [新增] 默认 Backend
+      backendIds: finalBackendIds,
+      defaultBackendId: form.defaultBackendId,
 
       // Mambo 专属参数
       agentParameters: form.AgentType === 'Mambo'

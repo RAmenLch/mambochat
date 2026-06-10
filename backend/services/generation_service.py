@@ -20,9 +20,10 @@ from backend.services.generation.managers.zip_history_manager import ZipHistoryG
 
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.worker.chat_worker import UniversalGraphWorker
+from backend.services.generation.worker.deep_agent_chat_worker import DeepAgentChatWorker
 from backend.services.generation.worker.simple_worker import SimpleWorker
 
-from backend.schemas.enums import FileManagementType, MessageStatus, MessageRole, SubMessageType, ProviderWorkerType
+from backend.schemas.enums import FileManagementType, MessageStatus, MessageRole, SubMessageType, ProviderWorkerType, AgentTypeEnum, ChatMode
 from backend.schemas.message import ErrorContent
 from backend.config.timezone_config import get_configured_now, TZ
 from backend.services.file_service import FileService
@@ -192,12 +193,26 @@ def _create_worker_instance(worker_type: str) -> AbstractGenerateWorker:
 
 
 async def _get_worker_for_chat(db: AsyncSession, chat_id: str) -> AbstractGenerateWorker:
-    db_chat = await chat_crud.get_chat(db, chat_id=chat_id)
-    worker_type = ProviderWorkerType.OPENAI
-    if db_chat and db_chat.ai_model and db_chat.ai_model.provider:
-        worker_type = db_chat.ai_model.provider.worker_type
+    """根据 Chat 绑定的 Agent 类型选择对应的 Worker。
 
-    return _create_worker_instance(worker_type)
+    - DeepAgent → DeepAgentChatWorker（需要 VFS files 注入）
+    - 其他（ReAct / Mambo / 无 Agent）→ UniversalGraphWorker
+    """
+    from backend.crud import agent_crud
+
+    db_chat = await chat_crud.get_chat(db, chat_id=chat_id)
+
+    # DeepAgent 需要 VFS 注入，使用专用 Worker
+    if db_chat and db_chat.chatMode == ChatMode.AGENT.value and db_chat.agentId:
+        agent = await agent_crud.get_agent(db, db_chat.agentId)
+        if agent:
+            agent_type = agent.AgentType
+            if hasattr(agent_type, 'value'):
+                agent_type = agent_type.value
+            if agent_type == AgentTypeEnum.DEEP.value:
+                return DeepAgentChatWorker()
+
+    return UniversalGraphWorker()
 
 
 

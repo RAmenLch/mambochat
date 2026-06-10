@@ -16,9 +16,9 @@
       <el-table-column prop="name" :label="$t('backend.name')" width="150" />
       <el-table-column prop="backendType" :label="$t('backend.type')" width="120">
         <template #default="{ row }">
-          <el-tag size="small" :type="row.backendType === 'api' ? 'success' : 'info'">
-            {{ row.backendType === 'api' ? 'API' : 'SSH' }}
-          </el-tag>
+          <el-tag v-if="row.backendType === 'ssh'" size="small" type="info">SSH</el-tag>
+          <el-tag v-else-if="row.backendType === 'api'" size="small" type="success">API</el-tag>
+          <el-tag v-else-if="row.backendType === 'resource'" size="small" type="warning">Resource</el-tag>
         </template>
       </el-table-column>
       <el-table-column :label="$t('backend.host')" min-width="220">
@@ -38,6 +38,12 @@
               >
                 {{ clientStatusMap[row.id]?.connected ? 'Connected' : 'Offline' }}
               </el-tag>
+            </div>
+          </template>
+          <template v-else-if="row.backendType === 'resource'">
+            <div class="api-info">
+              <span class="api-label">Resource ID:</span>
+              <span class="api-id">{{ row.configData.resource_id }}</span>
             </div>
           </template>
         </template>
@@ -73,6 +79,7 @@
           <el-select v-model="form.backendType" :disabled="isEdit" style="width: 100%" @change="handleTypeChange">
             <el-option label="SSH (远程服务器)" value="ssh" />
             <el-option label="API (客户端连接)" value="api" />
+            <el-option label="Resource (资源文件夹)" value="resource" />
           </el-select>
         </el-form-item>
 
@@ -121,6 +128,46 @@
           </div>
         </template>
 
+        <!-- Resource 配置 -->
+        <template v-if="form.backendType === 'resource'">
+          <el-divider content-position="left">资源文件夹配置</el-divider>
+          <el-form-item label="Resource ID" prop="configData.resource_id">
+            <el-select
+              v-model="form.configData.resource_id"
+              placeholder="选择 FOLDER 类型资源作为 workspace root"
+              filterable
+              clearable
+              style="width: 100%"
+              :loading="isResourceFoldersLoading"
+              @visible-change="onResourceFolderDropdownVisible"
+            >
+              <el-option
+                v-for="folder in resourceFolderOptions"
+                :key="folder.id"
+                :label="folder.name"
+                :value="folder.id"
+              >
+                <span>{{ folder.name }}</span>
+                <span class="resource-mount-path" style="float: right; color: var(--el-text-color-secondary); font-size: 12px;" v-if="folder.path">{{ folder.path }}</span>
+              </el-option>
+            </el-select>
+          </el-form-item>
+          <el-form-item label="Edit Whitelist" prop="configData.edit_whitelist">
+            <el-select v-model="form.configData.edit_whitelist" multiple filterable allow-create default-first-option placeholder="例如: *.py, *.md (回车添加)" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="Edit Blacklist" prop="configData.edit_blacklist">
+            <el-select v-model="form.configData.edit_blacklist" multiple filterable allow-create default-first-option placeholder="例如: .env (回车添加)" style="width: 100%" />
+          </el-form-item>
+          <div class="api-tip">
+            <el-alert type="success" :closable="false" show-icon>
+              <template #title>
+                将资源文件夹映射为 Agent 的虚拟文件系统（workspace root）。<br/>
+                仅 <b>Mambo Agent</b> 可挂载 Resource 类型 Backend，DeepAgent 不可用。
+              </template>
+            </el-alert>
+          </div>
+        </template>
+
         <!-- 通用配置 (仅 SSH) -->
         <template v-if="form.backendType === 'ssh'">
           <el-divider content-position="left">通用配置</el-divider>
@@ -139,19 +186,21 @@
           </el-form-item>
         </template>
 
-        <!-- 工具配置 -->
-        <el-divider content-position="left">{{ $t('backend.toolConfig') }}</el-divider>
-        <el-form-item label="Execute (命令执行)">
-          <div class="tools-config-row">
-            <span class="tools-config-label">{{ $t('backend.toolEnabled') }}</span>
-            <el-switch v-model="form.tools_config!.execute.enabled" />
-            <template v-if="form.tools_config!.execute.enabled">
-              <span class="tools-config-label" style="margin-left: 16px;">{{ $t('backend.toolRequireReview') }}</span>
-              <el-switch v-model="form.tools_config!.execute.require_review" />
-            </template>
-          </div>
-          <div class="tools-config-tip">{{ $t('backend.toolExecuteTip') }}</div>
-        </el-form-item>
+        <!-- 工具配置 (仅 SSH / API) -->
+        <template v-if="form.backendType === 'ssh' || form.backendType === 'api'">
+          <el-divider content-position="left">{{ $t('backend.toolConfig') }}</el-divider>
+          <el-form-item label="Execute (命令执行)">
+            <div class="tools-config-row">
+              <span class="tools-config-label">{{ $t('backend.toolEnabled') }}</span>
+              <el-switch v-model="form.tools_config!.execute.enabled" />
+              <template v-if="form.tools_config!.execute.enabled">
+                <span class="tools-config-label" style="margin-left: 16px;">{{ $t('backend.toolRequireReview') }}</span>
+                <el-switch v-model="form.tools_config!.execute.require_review" />
+              </template>
+            </div>
+            <div class="tools-config-tip">{{ $t('backend.toolExecuteTip') }}</div>
+          </el-form-item>
+        </template>
       </el-form>
       <template #footer>
         <div class="dialog-footer-actions">
@@ -194,13 +243,16 @@ import { storeToRefs } from 'pinia';
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
 import { Plus, Key, Connection, View, Hide } from '@element-plus/icons-vue';
 import { useBackendStore } from '@/stores/backendStore';
+import { useResourceStore } from '@/stores/resourceStore';
 import { copyToClipboard } from '@/utils/clipboard';
 import { getClientStatus } from '@/api/backendService';
-import type { BackendConfig, BackendCreate, BackendType, SshConfigData, ApiConfigData, SshTestRequest } from '@/api/types/backendTypes';
+import type { BackendConfig, BackendCreate, BackendType, SshConfigData, ApiConfigData, ResourceConfigData, SshTestRequest } from '@/api/types/backendTypes';
 import { isSshConfig, defaultToolsConfig } from '@/api/types/backendTypes';
 
 const backendStore = useBackendStore();
+const resourceStore = useResourceStore();
 const { backendList, isLoading, systemPublicKey } = storeToRefs(backendStore);
+const { resourceTree } = storeToRefs(resourceStore);
 
 const dialogVisible = ref(false);
 const keyDialogVisible = ref(false);
@@ -231,11 +283,17 @@ const apiDefaultConfig = (): ApiConfigData => ({
   edit_blacklist: [],
 });
 
+const resourceDefaultConfig = (): ResourceConfigData => ({
+  resource_id: '',
+  edit_whitelist: [],
+  edit_blacklist: [],
+});
+
 const defaultForm = (type: BackendType = 'ssh'): BackendCreate => ({
   name: '',
   description: '',
   backendType: type,
-  configData: type === 'ssh' ? sshDefaultConfig() : apiDefaultConfig(),
+  configData: type === 'ssh' ? sshDefaultConfig() : type === 'api' ? apiDefaultConfig() : resourceDefaultConfig(),
   tools_config: defaultToolsConfig()
 });
 
@@ -258,7 +316,19 @@ const apiRules: FormRules = {
   'configData.api_key': [{ required: true, message: '请输入 API Key', trigger: 'blur' }]
 };
 
-const currentRules = computed(() => form.backendType === 'ssh' ? sshRules : apiRules);
+const resourceRules: FormRules = {
+  name: [
+    { required: true, message: '请输入名称', trigger: 'blur' },
+    { pattern: /^[a-zA-Z0-9_]+$/, message: '仅允许包含字母、数字和下划线', trigger: 'blur' }
+  ],
+  'configData.resource_id': [{ required: true, message: '请选择资源文件夹', trigger: 'change' }]
+};
+
+const currentRules = computed(() => {
+  if (form.backendType === 'ssh') return sshRules;
+  if (form.backendType === 'api') return apiRules;
+  return resourceRules;
+});
 
 const handleTypeChange = (type: BackendType) => {
   const newForm = defaultForm(type);
@@ -267,6 +337,37 @@ const handleTypeChange = (type: BackendType) => {
   Object.assign(form, newForm);
   formRef.value?.clearValidate();
 };
+
+// --- 资源文件夹选择器逻辑 ---
+const isResourceFoldersLoading = ref(false);
+
+function collectFolders(nodes: any[]): { id: string; name: string; path: string }[] {
+  const folders: { id: string; name: string; path: string }[] = [];
+  for (const node of nodes) {
+    if (node.itemType === 'folder') {
+      folders.push({ id: node.id, name: node.name, path: '' });
+    }
+    if (node.children && node.children.length > 0) {
+      folders.push(...collectFolders(node.children));
+    }
+  }
+  return folders;
+}
+
+const resourceFolderOptions = computed(() => {
+  return collectFolders(resourceTree.value);
+});
+
+async function onResourceFolderDropdownVisible(visible: boolean) {
+  if (visible && resourceTree.value.length === 0) {
+    isResourceFoldersLoading.value = true;
+    try {
+      await resourceStore.initializeList();
+    } finally {
+      isResourceFoldersLoading.value = false;
+    }
+  }
+}
 
 function maskKey(key?: string | null): string {
   if (!key) return '***';
@@ -381,11 +482,14 @@ const submitForm = async () => {
           if (cd.edit_blacklist?.length === 0) cd.edit_blacklist = null;
           if (cd.ignore_dirs?.length === 0) cd.ignore_dirs = null;
           if (!cd.password) cd.password = null;
-        } else {
+        } else if (submitData.backendType === 'api') {
+          if (cd.edit_whitelist?.length === 0) cd.edit_whitelist = null;
+          if (cd.edit_blacklist?.length === 0) cd.edit_blacklist = null;
+          if (!cd.api_key) cd.api_key = null;
+        } else if (submitData.backendType === 'resource') {
           if (cd.edit_whitelist?.length === 0) cd.edit_whitelist = null;
           if (cd.edit_blacklist?.length === 0) cd.edit_blacklist = null;
         }
-        if (submitData.backendType === 'api' && !cd.api_key) cd.api_key = null;
 
         if (isEdit.value && currentEditId.value) {
           await backendStore.updateExistingBackend(currentEditId.value, submitData);

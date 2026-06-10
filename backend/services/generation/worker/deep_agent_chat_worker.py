@@ -1,31 +1,60 @@
-# backend/services/generation/worker/chat_worker.py
-"""通用 Graph Worker —— 适用于 ReactAgent、Mambo Agent 等不需要 VFS 注入的 Agent 类型。
+# backend/services/generation/worker/deep_agent_chat_worker.py
+"""DeepAgent 专用 ChatWorker —— 继承通用 Worker，增加 VFS files 注入。
 
-DeepAgent 需要 VFS files 注入，请使用 deep_agent_chat_worker.DeepAgentChatWorker。
+DeepAgent 使用 CompositeBackend + TreeStateBackend 架构，
+需要通过 input_data["files"] 将 skills 文件注入到 VFS 中。
+Mambo Agent 不需要此操作（skills 通过 MamboResourceBackend shortcuts 挂载）。
 """
 
-from typing import AsyncGenerator, Tuple, List
+from typing import AsyncGenerator, Any, Dict, Tuple, List
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command, Overwrite
 
-from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker, StreamEvent
-from backend.services.generation.core.llm_io import LLMInput
+from backend.services.generation.core.llm_io import LLMInput, AgentConfig, SummarizationEventInfo
 from backend.services.generation.graph_builders.factory import GraphBuilderFactory
-from backend.services.generation.core.llm_io import SummarizationEventInfo
+from backend.services.generation.worker.abstract_worker import StreamEvent
+from backend.services.generation.worker.chat_worker import UniversalGraphWorker
 
 
-class UniversalGraphWorker(AbstractGenerateWorker):
-    """通用 Graph Worker：适用于不需要 VFS 文件注入的 Agent（React / Mambo）。
+class DeepAgentChatWorker(UniversalGraphWorker):
+    """DeepAgent 专用 Worker：在通用流程基础上注入 VFS files。
 
-    DeepAgent 请使用 DeepAgentChatWorker。
+    仅需覆盖 generate() 方法，在构建 input_data 时附加
+    _collect_vfs_files_recursively 收集的 skills 文件内容。
     """
 
-    async def generate(
-            self,
-            llm_input: LLMInput
-    ) -> AsyncGenerator[Tuple[str, StreamEvent], None]:
+    def _collect_vfs_files_recursively(self, config: AgentConfig) -> Dict[str, Any]:
+        """递归收集所有 skills 文件，构建 VFS files 注入字典。
 
+        将 SkillConfig.files 中的每个文件映射为 VFS 路径：
+            /skills/{skill_name}/{file_path}
+
+        Returns:
+            {"path": {"content": str, "encoding": "utf-8"}, ...}
+        """
+        files: Dict[str, Any] = {}
+
+        if config.skills:
+            for skill in config.skills:
+                for file_config in skill.files:
+                    if file_config.content is not None:
+                        virtual_path = f"/skills/{skill.name}/{file_config.file_path}"
+                        files[virtual_path] = {
+                            "content": file_config.content,
+                            "encoding": "utf-8",
+                        }
+
+        if config.sub_configs:
+            for sub_config in config.sub_configs:
+                files.update(self._collect_vfs_files_recursively(sub_config))
+
+        return files
+
+    async def generate(
+        self,
+        llm_input: LLMInput,
+    ) -> AsyncGenerator[Tuple[str, StreamEvent], None]:
         graph_builder = GraphBuilderFactory.get_builder(llm_input.agent_config.agent_type)
         agent = graph_builder.build(llm_input.agent_config, llm_input.run_time_config)
 
@@ -35,14 +64,15 @@ class UniversalGraphWorker(AbstractGenerateWorker):
                 "checkpoint_ns": "",
             }
         }
-        # 指定分支 checkpoint → LangGraph 会进行时间旅行，从该 checkpoint 分叉
         if llm_input.run_time_config.branch_checkpoint_id:
             thread_config["configurable"]["checkpoint_id"] = llm_input.run_time_config.branch_checkpoint_id
 
         if llm_input.agent_config.recover_from_error:
             input_data = None
         else:
-            # Clear stale summarization event from previous run (separate super-step, no Overwrite conflict)
+            # DeepAgent 特有：收集 skills 文件注入 VFS
+            files_to_inject = self._collect_vfs_files_recursively(llm_input.agent_config)
+
             await agent.aupdate_state(thread_config, {"_summarization_event": None})
 
             resume_payload = llm_input.agent_config.resume_payload
@@ -51,12 +81,14 @@ class UniversalGraphWorker(AbstractGenerateWorker):
             else:
                 messages = self._convert_messages(llm_input.context.messages)
                 input_data = {"messages": Overwrite(value=messages)}
+                if files_to_inject:
+                    input_data["files"] = files_to_inject
 
         async for stream_event in agent.astream(
-                input=input_data,
-                config=thread_config,
-                stream_mode=["messages", "updates", "custom"],
-                version="v2"
+            input=input_data,
+            config=thread_config,
+            stream_mode=["messages", "updates", "custom"],
+            version="v2",
         ):
             if not isinstance(stream_event, dict):
                 continue
@@ -67,7 +99,6 @@ class UniversalGraphWorker(AbstractGenerateWorker):
                 if "model" in event:
                     model_update = event["model"]
                     if isinstance(model_update, dict):
-                        # Extract summarization event (complete cumulative state, last-wins)
                         if "_summarization_event" in model_update:
                             summary = model_update["_summarization_event"]
                             cutoff_index = summary.get("cutoff_index", 0)
@@ -85,7 +116,6 @@ class UniversalGraphWorker(AbstractGenerateWorker):
                 if "tools" in event:
                     tools_update = event["tools"]
                     if isinstance(tools_update, dict):
-                        # Extract summarization event from compact_conversation tool (complete cumulative state, last-wins)
                         if "_summarization_event" in tools_update:
                             summary = tools_update["_summarization_event"]
                             cutoff_index = summary.get("cutoff_index", 0)
@@ -105,12 +135,10 @@ class UniversalGraphWorker(AbstractGenerateWorker):
             elif mode == "messages" and isinstance(event, (list, tuple)) and len(event) > 0:
                 msg = event[0]
                 meta = event[1] if len(event) > 1 else {}
-                # Filter out summarization model outputs (both chunks and final messages)
                 if isinstance(meta, dict) and meta.get("lc_source") == "summarization":
                     continue
                 yield mode, msg
             elif mode == "custom":
-                # 子代理内部事件：mambo_agents SubAgentMiddleware 发射的 custom stream_writer 事件
                 if isinstance(event, dict) and event.get("type") == "subagent_event":
                     yield "subagent_event", event
             else:

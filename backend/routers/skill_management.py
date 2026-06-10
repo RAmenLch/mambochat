@@ -15,6 +15,7 @@ from backend.models import resource_model
 from backend.crud import resource_crud
 from backend.services.file_service import FileService
 from backend.services.skill_import_service import SkillImportService
+from backend.services.resource_service import validate_name_uniqueness
 from backend.utils.skills_utils import SkillValidator, build_file_node_tree
 
 router = APIRouter()
@@ -25,7 +26,10 @@ async def create_skill(skill_in: schemas.SkillCreate, db: AsyncSession = Depends
     """
     新建一个 SKILL 文件夹，并自动初始化包含 frontmatter 的 SKILL.md 文件。
     """
-    # 1. 创建 SKILL 文件夹 Resource
+    # 1. 校验同一父文件夹下不允许同名资源
+    await validate_name_uniqueness(db, skill_in.name, skill_in.parentId)
+
+    # 2. 创建 SKILL 文件夹 Resource
     folder_create = schemas.ResourceCreate(
         name=skill_in.name,
         description=skill_in.description,

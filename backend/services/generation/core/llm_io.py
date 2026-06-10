@@ -134,7 +134,13 @@ class AgentConfig(BaseModel):
 
     skills: Optional[List[SkillConfig]] = Field(
         default=None,
-        description="挂载给 Agent 的外部技能包 (SKILL) 列表"
+        description="挂载给 Agent 的外部技能包 (SKILL) 列表（DeepAgent 用于 VFS 注入）"
+    )
+    skill_resource_roots: Optional[Dict[str, str]] = Field(
+        None,
+        description="技能包根资源映射（Mambo Agent）：{skill_name: root_resource_id}。"
+                    "每个 skill 用一个 MamboResourceBackend(resource_id=...) 独立挂载到 "
+                    "HybridWorkspaceBackend 的 /.mambo/skills/{name}/ 虚拟路径"
     )
     sub_configs: Optional[List['AgentConfig']] = Field(
         default=None,

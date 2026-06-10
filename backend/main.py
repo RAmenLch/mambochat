@@ -5,8 +5,9 @@ import os
 import logging
 from logging.handlers import RotatingFileHandler
 from datetime import timedelta
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import text, select
@@ -192,6 +193,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# --- 全局异常日志中间件 ---
+# Starlette ServerErrorMiddleware 在非 debug 模式下默认不输出异常 traceback，
+# 通过此中间件确保所有未处理异常都被写入日志。
+@app.middleware("http")
+async def log_unhandled_exceptions(request: Request, call_next):
+    try:
+        response = await call_next(request)
+        return response
+    except Exception:
+        logger.exception(
+            "未处理的 HTTP 异常: %s %s", request.method, request.url.path
+        )
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal Server Error"}
+        )
 
 # --- 挂载路由 ---
 app.include_router(chat_management.router, prefix="/api", tags=["Chat Management"])

@@ -1,7 +1,20 @@
 # backend/services/generation/graph_builders/mambo_agent_builder.py
+"""Mambo Agent 图构建器。
 
-from typing import List, Dict, Any, Sequence
+Backend 装配策略：
+1. Resource Backend（mounted_backends 中的 RESOURCE 类型）→ MamboResourceBackend（优先）
+2. SSH / API Backend → SshBackend / MamboAPIBackend（回退）
+3. Skills（skill_resource_roots）→ shortcuts 方式挂载到 /.mambo/skills/<name>/
 
+所有 Backend 统一通过 HybridWorkspaceBackend 路由：
+  - /workspace/          → MamboResourceBackend 或 SSH/API Backend
+  - /.mambo/             → 默认 StateBackend（中间件暂存）
+  - /.mambo/skills/      → MamboResourceBackend（shortcuts: {name: resource_id}）
+"""
+
+from typing import List, Dict, Any, Callable
+
+from sqlalchemy.ext.asyncio import AsyncSession
 from langgraph.graph.state import CompiledStateGraph
 
 from mambo_agents import (
@@ -9,60 +22,110 @@ from mambo_agents import (
     SubAgent,
     CompiledSubAgent,
     BackendProtocol,
-    StateBackend,
-    TempWorkspaceBackend,
+    HybridWorkspaceBackend,
 )
 from mambo_agents.backends.ssh import SshBackend
+from mambo_agents.backends.state import StateBackend
 
 from backend.checkpointer import get_checkpointer
+from backend.database import AsyncSessionLocal
 from backend.services.generation.core.llm_io import AgentConfig, RunTimeConfig
 from backend.services.generation.graph_builders.base_builder import BaseGraphBuilder
 from backend.services.generation.graph_builders.model_factory import ModelFactory
 from backend.services.generation.agent.mambo_api_backend import MamboAPIBackend
+from backend.services.generation.agent.mambo_resource_backend import MamboResourceBackend
 from backend.utils.ssh_utils import get_or_create_system_ssh_key
 from backend.schemas.enums import BackendType
 
 
-def _build_mambo_backend(
-    mounted_backends: List[Dict[str, Any]],
-    default_backend_id: str | None = None,
-) -> BackendProtocol | None:
-    """Build a single backend instance for mambo_agents.
+def _make_session_factory() -> Callable[[], AsyncSession]:
+    """创建异步 session 工厂，用于 MamboResourceBackend 的数据库访问。"""
+    return lambda: AsyncSessionLocal()
 
-    Mambo supports only one backend. Priority:
-    1. default_backend_id (user-chosen default)
-    2. First backend in mounted_backends list
-    3. None (will use StateBackend by default in create_mambo_agent)
 
-    The returned backend is wrapped in TempWorkspaceBackend so that
-    middleware can write to /.mambo/ (StateBackend prefix).
+def _build_mambo_backend(agent_config: AgentConfig) -> BackendProtocol | None:
+    """构建 Mambo Agent 的完整 Backend 体系。
+
+    装配逻辑（所有类型平等，不分优先级）：
+    1. 按 default_backend_id 选一个作为 real_backend，否则取列表第一个
+    2. 其余的（任意类型）→ virtual_workspaces[name]，AI 通过 /.mambo/{name}/ 访问
+    3. Skills（skill_resource_roots）→ virtual_workspaces["skills"]
+
+    Returns:
+        HybridWorkspaceBackend 或 None（交给 create_mambo_agent 用默认 StateBackend）
     """
-    if not mounted_backends:
+    session_factory = _make_session_factory()
+    virtual_workspaces: Dict[str, BackendProtocol] = {}
+
+    mounted = agent_config.mounted_backends or []
+
+    if not mounted:
+        # 只有 skills 则用 StateBackend 兜底
+        if agent_config.skill_resource_roots:
+            virtual_workspaces["skills"] = MamboResourceBackend(
+                resource_id=None,
+                session_factory=session_factory,
+                shortcuts=agent_config.skill_resource_roots,
+                workspace_root="/",
+            )
+            return HybridWorkspaceBackend(
+                real_backend=StateBackend(),
+                virtual_workspaces=virtual_workspaces,
+            )
         return None
 
-    # Select the target backend
-    target_mb: Dict[str, Any] | None = None
+    # ---- 1. 确定 real_backend：default_backend_id > 列表第一位 ----
+    real_be: BackendProtocol | None = None
+    target_mb = _pick_default(mounted, agent_config.default_backend_id)
+    if target_mb:
+        real_be = _build_any_backend(target_mb, session_factory)
 
-    if default_backend_id:
-        for mb in mounted_backends:
-            if mb.get("id") == default_backend_id:
-                target_mb = mb
-                break
+    # ---- 2. 其余所有后端 → virtual_workspaces[name] ----
+    real_id = _resolve_real_backend_id(mounted, agent_config.default_backend_id)
+    for mb in mounted:
+        if mb.get("id") == real_id:
+            continue
+        name = mb.get("name", "")
+        if not name:
+            continue
+        be = _build_any_backend(mb, session_factory)
+        if be:
+            virtual_workspaces[name] = be
 
-    if target_mb is None:
-        target_mb = mounted_backends[0]
+    # ---- 3. Skills ----
+    if agent_config.skill_resource_roots:
+        virtual_workspaces["skills"] = MamboResourceBackend(
+            resource_id=None,
+            session_factory=session_factory,
+            shortcuts=agent_config.skill_resource_roots,
+            workspace_root="/",
+        )
 
-    b_type = target_mb.get("backendType")
-    b_id = target_mb.get("id")
-    b_name = target_mb.get("name", "")
-    config = target_mb.get("configData", {})
+    # ---- 4. 组装 ----
+    if real_be is None:
+        real_be = StateBackend()
+
+    return HybridWorkspaceBackend(
+        real_backend=real_be,
+        virtual_workspaces=virtual_workspaces if virtual_workspaces else None,
+    )
+
+
+def _build_any_backend(
+    mb: Dict[str, Any],
+    session_factory: Callable[[], AsyncSession],
+) -> BackendProtocol | None:
+    """构建任意类型的 Backend 实例（SSH / API / RESOURCE）。"""
+    b_type = mb.get("backendType")
+    b_id = mb.get("id")
+    b_name = mb.get("name", "")
+    config = mb.get("configData", {})
 
     if b_type == BackendType.SSH.value:
         priv_key_path = None
         if not config.get("password"):
             priv_key_path, _ = get_or_create_system_ssh_key()
-
-        backend: BackendProtocol = SshBackend(
+        return SshBackend(
             host=config.get("hostname", ""),
             port=config.get("port", 22),
             username=config.get("username", ""),
@@ -75,17 +138,48 @@ def _build_mambo_backend(
         )
 
     elif b_type == BackendType.API.value:
-        backend = MamboAPIBackend(
+        return MamboAPIBackend(
             backend_id=b_id,
             backend_name=b_name,
             edit_whitelist=config.get("edit_whitelist"),
             edit_blacklist=config.get("edit_blacklist"),
         )
-    else:
-        return None
 
-    # Wrap with TempWorkspaceBackend so middleware can store under /.mambo/
-    return TempWorkspaceBackend(backend)
+    elif b_type == BackendType.RESOURCE.value:
+        return MamboResourceBackend(
+            resource_id=config.get("resource_id", ""),
+            session_factory=session_factory,
+            edit_whitelist=_to_frozenset(config.get("edit_whitelist")),
+            edit_blacklist=_to_frozenset(config.get("edit_blacklist")),
+        )
+
+    return None
+
+
+def _resolve_real_backend_id(
+    backends: List[Dict[str, Any]],
+    default_backend_id: str | None = None,
+) -> str | None:
+    """解析哪个 Backend ID 会被选作 real_backend。"""
+    if not backends:
+        return None
+    if default_backend_id:
+        for mb in backends:
+            if mb.get("id") == default_backend_id:
+                return default_backend_id
+    return backends[0].get("id")
+
+
+def _pick_default(
+    backends: List[Dict[str, Any]],
+    default_backend_id: str | None = None,
+) -> Dict[str, Any]:
+    """按 default_backend_id 优先，否则取第一个。"""
+    if default_backend_id:
+        for mb in backends:
+            if mb.get("id") == default_backend_id:
+                return mb
+    return backends[0]
 
 
 def _to_frozenset(value: Any) -> frozenset[str] | None:
@@ -101,12 +195,11 @@ def _to_frozenset(value: Any) -> frozenset[str] | None:
 class MamboAgentGraphBuilder(BaseGraphBuilder):
     """针对 Mambo Agent 架构的图构建器。
 
-    使用 mambo_agents.create_mambo_agent() 代替 deepagents.create_deep_agent()。
-
     核心差异 vs DeepAgentGraphBuilder:
-    - 单 Backend（无 CompositeBackend / 路由）
+    - Backend 通过 HybridWorkspaceBackend 路由 /.mambo/ 虚拟空间
+    - 支持资源文件夹挂载（MamboResourceBackend）
+    - Skills 通过 shortcuts 挂载到 /.mambo/skills/
     - Tree 内置（无需 TreeMiddleware / TreeStateBackend）
-    - Skills 格式不同（SkillSource tuples）
     - 支持 summarization / planning 等 mambo 内置能力
     """
 
@@ -136,20 +229,18 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
                     )
                 )
 
-        # --- Build single backend ---
-        backend = _build_mambo_backend(
-            mounted_backends=agent_config.mounted_backends or [],
-            default_backend_id=agent_config.default_backend_id,
-        )
+        # --- Build backend（统一入口：资源挂载 + SSH/API + Skills shortcuts）---
+        backend = _build_mambo_backend(agent_config)
 
         # --- Tools ---
         tools = [t for t in agent_config.tools] if agent_config.tools else []
 
-        # --- Skills (mambo format: Sequence[SkillSource]) ---
-        skills: list[str | tuple[str, str]] = []
-        if agent_config.skills:
-            for skill in agent_config.skills:
-                skills.append(f"/skills/{skill.name}")
+        # --- Skills → SkillsMiddleware 通过 backend 扫描 /.mambo/skills/ 路径下的 SKILL.md ---
+        # shortcuts {name: resource_id} → 每个 skill 文件夹直接展开在 /.mambo/skills/<name>/
+        # SkillsMiddleware: ls → 发现子目录 → download_files → 解析 frontmatter → 注入系统提示词
+        skills_sources: list[str] | None = None
+        if agent_config.skill_resource_roots:
+            skills_sources = ["/.mambo/skills/"]
 
         # --- Checkpointer ---
         checkpointer = get_checkpointer()
@@ -176,7 +267,7 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
             include_general_purpose=include_general_purpose,
             summarization=summarization,
             tools=tools if tools else None,
-            skills=skills if skills else None,
+            skills=skills_sources,
             checkpointer=checkpointer,
             interrupt_on=agent_config.hitl_interrupt_on if agent_config.hitl_interrupt_on else None,
         )

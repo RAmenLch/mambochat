@@ -30,6 +30,17 @@ class APIConfigData(BaseModel):
     edit_whitelist: Optional[List[str]] = Field(None, description="允许编辑的文件通配符列表")
     edit_blacklist: Optional[List[str]] = Field(None, description="禁止编辑的文件通配符列表")
 
+
+class ResourceConfigData(BaseModel):
+    """Resource Backend 配置结构 - 将 Resource DB 文件夹树映射为虚拟文件系统
+
+    挂载一个 FOLDER 类型的 Resource 作为 Agent 的 workspace root，
+    其后代子树将被加载为虚拟文件系统供 Agent 读写。
+    """
+    resource_id: str = Field(..., description="挂载的资源文件夹 ID（FOLDER 类型 Resource）")
+    edit_whitelist: Optional[List[str]] = Field(None, description="允许编辑的文件通配符列表")
+    edit_blacklist: Optional[List[str]] = Field(None, description="禁止编辑的文件通配符列表")
+
 class BackendConfigBase(BaseModel):
     name: str = Field(..., description="Backend 挂载路由名称 (仅限字母数字下划线)")
     description: Optional[str] = Field(None, description="描述")
@@ -67,6 +78,8 @@ class BackendConfigBase(BaseModel):
                 APIConfigData(**temp_v)
             else:
                 APIConfigData(**v)
+        elif backend_type == BackendType.RESOURCE.value:
+            ResourceConfigData(**v)
         return v
 
 class BackendConfigCreate(BackendConfigBase):

@@ -14,6 +14,7 @@ from backend import schemas
 from backend.schemas.enums import ResourceItemType, ResourceType, FileManagementType
 from backend.crud import resource_crud, setting_crud
 from backend.services.file_service import FileService
+from backend.services.resource_service import validate_name_uniqueness
 from backend.utils.skills_utils import SkillValidator, FileNode, identify_skill_roots
 from backend.models import resource_model
 
@@ -305,10 +306,8 @@ class SkillImportService:
         # Create Skill Folder
         safe_skill_name = self._sanitize_name(skill_name)
 
-        # Check conflict
-        existing_names = await resource_crud.get_child_names_by_parent_id(self.db, current_parent_id)
-        if safe_skill_name in existing_names:
-            raise ValueError(f"Skill name conflict: '{safe_skill_name}' already exists in the destination.")
+        # Check name conflict using shared validator
+        await validate_name_uniqueness(self.db, safe_skill_name, current_parent_id)
 
         skill_schema = schemas.ResourceCreate(
             name=safe_skill_name,

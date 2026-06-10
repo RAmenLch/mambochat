@@ -16,6 +16,7 @@ from backend.models import resource_model
 from backend.schemas import kb as kb_schemas
 from backend.schemas.enums import FileManagementType, ResourceType, ResourceItemType, KBFileStatus
 from backend.services import chat_service, resource_service
+from backend.services.resource_service import validate_name_uniqueness
 from backend.services.kb_service import KnowledgeBaseService
 from backend.services.file_service import FileService
 
@@ -138,6 +139,9 @@ async def create_resource(resource: schemas.ResourceCreate, db: AsyncSession = D
         # 预先获取 kb_node
         kb_node = next((res for res in ancestors if res.resourceType == ResourceType.KNOWLEDGE_BASE.value), None)
 
+    # 校验同一父文件夹下不允许同名资源
+    await validate_name_uniqueness(db, resource.name, resource.parentId)
+
     # 1. 先创建资源
     new_resource = await resource_crud.create_resource(db=db, resource=resource)
 
@@ -202,6 +206,9 @@ async def upload_resource_file(
                     chunk_size=500,
                     chunk_overlap=50
                 ).model_dump()
+
+        # 校验同一父文件夹下不允许同名资源
+        await validate_name_uniqueness(db, file.filename, parent_id)
 
         resource_create = schemas.ResourceCreate(
             name=file.filename,
@@ -295,6 +302,13 @@ async def update_resource(resource_id: str, resource_update: schemas.ResourceUpd
     更新资源的基本信息，如名称、描述。
     注意：移动操作请使用 /move 接口。
     """
+    # 如果名称有变更，检查同一父文件夹下是否有同名资源
+    if resource_update.name is not None:
+        existing_resource = await resource_crud.get_resource(db, resource_id)
+        if not existing_resource:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found")
+        await validate_name_uniqueness(db, resource_update.name, existing_resource.parentId, exclude_id=resource_id)
+
     updated_resource = await resource_crud.update_resource(db, resource_id=resource_id, resource_update=resource_update)
     if not updated_resource:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found")

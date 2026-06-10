@@ -130,3 +130,4 @@ class BackendType(str, Enum):
     """定义 Backend 的类型"""
     SSH = "ssh"
     API = "api"
+    RESOURCE = "resource"
