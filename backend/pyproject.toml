@@ -71,6 +71,11 @@ dev = [
 [tool.uv]
 # 版本锁定交给 uv.lock，无需在 dependencies 中锁定传递依赖
 
+# 声明 PyPI 官方索引（供 sources 引用）
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple/"
+
 # mambo-agents 是预发布版本，国内镜像不会同步，
 # 必须直接从 PyPI 官方源拉取
 [tool.uv.sources]
