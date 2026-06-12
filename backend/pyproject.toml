@@ -73,6 +73,5 @@ dev = [
 
 # mambo-agents 是预发布版本，国内镜像不会同步，
 # 必须直接从 PyPI 官方源拉取
-[[tool.uv.sources]]
-name = "mambo-agents"
-index = "pypi"
+[tool.uv.sources]
+mambo-agents = { index = "pypi" }
