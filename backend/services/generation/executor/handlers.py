@@ -174,6 +174,8 @@ async def handle_update_zip_history(
     }
     if instruction.target_sub_msg_id:
         config_kwargs["target_sub_msg_id"] = instruction.target_sub_msg_id
+    if instruction.auto:
+        config_kwargs["auto_summary"] = True
 
     updated_sub_message = None
     if existing:

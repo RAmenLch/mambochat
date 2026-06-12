@@ -101,7 +101,16 @@ def _build_mambo_backend(agent_config: AgentConfig) -> BackendProtocol | None:
             workspace_root="/",
         )
 
-    # ---- 4. 组装 ----
+    # ---- 4. Memory（长期记忆） ----
+    if agent_config.memory_resource_roots:
+        virtual_workspaces["memory"] = MamboResourceBackend(
+            resource_id=None,
+            session_factory=session_factory,
+            shortcuts=agent_config.memory_resource_roots,
+            workspace_root="/",
+        )
+
+    # ---- 5. 组装 ----
     if real_be is None:
         real_be = StateBackend()
 
@@ -125,6 +134,10 @@ def _build_any_backend(
         priv_key_path = None
         if not config.get("password"):
             priv_key_path, _ = get_or_create_system_ssh_key()
+        # Extract execute enable flag from tools_config
+        tools_config = config.get("tools_config", {})
+        execute_cfg = tools_config.get("execute", {})
+        execute_enabled = execute_cfg.get("enabled", False)
         return SshBackend(
             host=config.get("hostname", ""),
             port=config.get("port", 22),
@@ -132,6 +145,7 @@ def _build_any_backend(
             password=config.get("password"),
             key_filename=priv_key_path,
             remote_root=config.get("root_dir", "~"),
+            enable_execute=execute_enabled,
             edit_whitelist=_to_frozenset(config.get("edit_whitelist")),
             edit_blacklist=_to_frozenset(config.get("edit_blacklist")),
             ignore_dirs=_to_frozenset(config.get("ignore_dirs")),
@@ -258,6 +272,20 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
                 "offload_to_backend": cfg.get("offload_to_backend", False),
             }
 
+        # --- Planning (opt-in, default on) ---
+        _plan_middleware = None
+        if getattr(agent_config, 'enable_planning', True):
+            from mambo_agents.middleware.planning import MamboPlanMiddleware
+            _plan_middleware = [MamboPlanMiddleware()]
+
+        # --- Memory sources（长期记忆） ---
+        memory_sources: list[str] | None = None
+        if agent_config.memory_resource_roots:
+            memory_sources = [
+                f"/.mambo/memory/{name}"
+                for name in agent_config.memory_resource_roots
+            ]
+
         return create_mambo_agent(
             name=agent_config.name,
             model=model,
@@ -268,6 +296,8 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
             summarization=summarization,
             tools=tools if tools else None,
             skills=skills_sources,
+            memory_sources=memory_sources,
+            middleware=_plan_middleware,
             checkpointer=checkpointer,
             interrupt_on=agent_config.hitl_interrupt_on if agent_config.hitl_interrupt_on else None,
         )

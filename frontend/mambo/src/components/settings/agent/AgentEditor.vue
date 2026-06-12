@@ -380,6 +380,72 @@
             </el-col>
           </el-row>
 
+          <!-- 计划任务清单 -->
+          <el-row :gutter="32" class="settings-row">
+            <el-col :span="24">
+              <el-form-item>
+                <template #label>
+                  <span>{{ $t('agent.mamboPlanning') }}</span>
+                  <el-tooltip effect="dark" :content="$t('agent.mamboPlanningDesc')" placement="top">
+                    <el-icon class="label-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-switch v-model="form.mambo_planning_enabled" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+
+          <!-- 长期记忆 -->
+          <el-row :gutter="32" class="settings-row">
+            <el-col :span="24">
+              <el-form-item>
+                <template #label>
+                  <span>{{ $t('agent.mamboMemory') }}</span>
+                  <el-tooltip effect="dark" :content="$t('agent.mamboMemoryDesc')" placement="top">
+                    <el-icon class="label-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-switch v-model="form.mambo_memory_enabled" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+
+          <!-- 记忆资源（仅开启记忆后显示） -->
+          <template v-if="form.mambo_memory_enabled">
+            <el-row :gutter="32" class="settings-row">
+              <el-col :span="24">
+                <el-form-item :label="$t('agent.memoryResources')">
+                  <div class="mount-container" style="height: auto; min-height: 100px;">
+                    <div class="mount-action">
+                      <el-button type="primary" plain size="small" @click="memorySelectorVisible = true">
+                        <el-icon><Collection /></el-icon> {{ $t('agent.mountMemory') }}
+                      </el-button>
+                    </div>
+                    <div v-if="mountedMemoryResources.length > 0" class="tag-list-wrapper">
+                      <el-tag
+                        v-for="res in mountedMemoryResources"
+                        :key="res.id"
+                        closable
+                        type="success"
+                        effect="light"
+                        class="custom-tag"
+                        @close="handleRemoveMemory(res.id)"
+                      >
+                        <div class="tag-inner">
+                          <span class="tag-text">{{ res.name }}</span>
+                          <span class="memory-type-hint">({{ getMemoryTypeLabel(res.resourceType) }})</span>
+                        </div>
+                      </el-tag>
+                    </div>
+                    <div v-else class="empty-mount">
+                      {{ $t('agent.noMemory') }}
+                    </div>
+                  </div>
+                </el-form-item>
+              </el-col>
+            </el-row>
+          </template>
+
           <!-- 对话摘要 -->
           <el-row :gutter="32" class="settings-row">
             <el-col :span="24">
@@ -485,6 +551,12 @@
       :initial-selected-ids="form.subAgents"
       @select="handleMountSubAgents"
     />
+
+    <ResourceSelectorDialog
+      v-model:visible="memorySelectorVisible"
+      context="agent-memory"
+      @mount-resources="handleMountMemory"
+    />
   </div>
 
   <div v-else class="empty-state">
@@ -532,6 +604,7 @@ const isSaving = ref(false);
 const isAvatarLoading = ref(false);
 const resourceSelectorVisible = ref(false);
 const agentSelectorVisible = ref(false);
+const memorySelectorVisible = ref(false);
 const modelSelectRef = ref();
 const { scrollToTopIfStarred } = useModelSelectScroll();
 
@@ -539,6 +612,7 @@ const agentData = computed(() => agentList.value.find(a => a.id === currentAgent
 
 const mountedResources = ref<Resource[]>([]);
 const mountedSubAgents = ref<Agent[]>([]);
+const mountedMemoryResources = ref<Resource[]>([]);
 
 const form = reactive({
   name: '',
@@ -555,6 +629,9 @@ const form = reactive({
 
   // Mambo 专属配置
   mambo_general_purpose: false,
+  mambo_planning_enabled: true,
+  mambo_memory_enabled: false,
+  mambo_memory_resource_ids: [] as string[],
   mambo_summary_enabled: false,
   mambo_summary_trigger_type: 'tokens' as 'fraction' | 'tokens' | 'messages',
   mambo_summary_trigger_value: 180000,
@@ -661,6 +738,9 @@ watch(agentData, async (newVal) => {
     // Mambo 专属配置还原
     const mamboParams: Record<string, any> = newVal.agentParameters ? JSON.parse(JSON.stringify(newVal.agentParameters)) : {};
     form.mambo_general_purpose = mamboParams.include_general_purpose ?? false;
+    form.mambo_planning_enabled = mamboParams.enable_planning ?? true;
+    form.mambo_memory_enabled = mamboParams.enable_memory ?? false;
+    form.mambo_memory_resource_ids = mamboParams.memory_resource_ids ? [...mamboParams.memory_resource_ids] : [];
     form.mambo_summary_enabled = mamboParams.enable_summarization ?? false;
     if (mamboParams.summarization_config) {
       form.mambo_summary_trigger_type = mamboParams.summarization_config.trigger_type || 'tokens';
@@ -700,6 +780,20 @@ watch(agentData, async (newVal) => {
       }
     } else {
       mountedSubAgents.value = [];
+    }
+
+    // 加载 memory 资源详情
+    if (form.mambo_memory_resource_ids.length > 0) {
+      try {
+        const promises = form.mambo_memory_resource_ids.map(id => getResourceDetails(id));
+        const results = await Promise.all(promises);
+        mountedMemoryResources.value = results.filter(r => !!r) as Resource[];
+      } catch (error) {
+        console.error('Failed to load memory resources:', error);
+        mountedMemoryResources.value = [];
+      }
+    } else {
+      mountedMemoryResources.value = [];
     }
   }
 }, { immediate: true, deep: true });
@@ -771,6 +865,33 @@ function handleRemoveSubAgent(id: string) {
   form.subAgents = mountedSubAgents.value.map(a => a.id);
 }
 
+// --- Memory 挂载逻辑 ---
+function handleMountMemory(resources: Resource[]) {
+  if (resources.length === 0) return;
+  const existingIds = new Set(mountedMemoryResources.value.map(r => r.id));
+  const newResources = resources.filter(r => !existingIds.has(r.id));
+
+  if (newResources.length > 0) {
+    mountedMemoryResources.value = [...mountedMemoryResources.value, ...newResources];
+    form.mambo_memory_resource_ids = mountedMemoryResources.value.map(r => r.id);
+    ElMessage.success(t('common.msg.updateSuccess'));
+  }
+}
+
+function handleRemoveMemory(id: string) {
+  mountedMemoryResources.value = mountedMemoryResources.value.filter(r => r.id !== id);
+  form.mambo_memory_resource_ids = mountedMemoryResources.value.map(r => r.id);
+}
+
+function getMemoryTypeLabel(type: string | undefined): string {
+  const labels: Record<string, string> = {
+    file: 'File',
+    system_prompt: 'System Prompt',
+    submessage_template: 'Template',
+  };
+  return labels[type ?? ''] ?? type ?? 'Unknown';
+}
+
 async function handleUploadAvatar(file: File) {
   if (!currentAgentId.value) return;
   isAvatarLoading.value = true;
@@ -810,8 +931,13 @@ async function handleDeleteAvatar() {
 function buildMamboAgentParameters(): Record<string, any> | null {
   const params: Record<string, any> = {
     include_general_purpose: form.mambo_general_purpose,
+    enable_planning: form.mambo_planning_enabled,
+    enable_memory: form.mambo_memory_enabled,
     enable_summarization: form.mambo_summary_enabled,
   };
+  if (form.mambo_memory_enabled) {
+    params.memory_resource_ids = [...form.mambo_memory_resource_ids];
+  }
   if (form.mambo_summary_enabled) {
     params.summarization_config = {
       trigger_type: form.mambo_summary_trigger_type,
@@ -863,6 +989,9 @@ async function handleSave() {
 
       backendIds: finalBackendIds,
       defaultBackendId: form.defaultBackendId,
+      memoryResourceIds: form.AgentType === 'Mambo' && form.mambo_memory_enabled
+        ? [...form.mambo_memory_resource_ids]
+        : [],
 
       // Mambo 专属参数
       agentParameters: form.AgentType === 'Mambo'
@@ -1011,6 +1140,11 @@ onMounted(() => {
   max-width: 150px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.memory-type-hint {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
   white-space: nowrap;
 }
 

@@ -348,6 +348,57 @@ async def validate_mounted_resources(db: AsyncSession, resource_ids: List[str]):
             skill_names.add(res.name)
 
 
+async def validate_memory_resources(db: AsyncSession, resource_ids: List[str]):
+    """验证长期记忆资源列表。
+
+    在更新 Agent 时调用，确保：
+    1. 资源存在
+    2. 资源类型为 FILE / SYSTEM_PROMPT / SUBMESSAGE_TEMPLATE（非文件夹）
+    3. 无同名资源（同名会导致 /.mambo/memory/ 路径冲突）
+    """
+    if not resource_ids:
+        return
+
+    ALLOWED_TYPES: frozenset[str] = frozenset({
+        ResourceType.FILE.value,
+        ResourceType.SYSTEM_PROMPT.value,
+        ResourceType.SUBMESSAGE_TEMPLATE.value,
+    })
+
+    resources = await resource_crud.get_resources_by_ids(db, resource_ids)
+    resources_map = {res.id: res for res in resources}
+    seen_names: set[str] = set()
+
+    for rid in resource_ids:
+        res = resources_map.get(rid)
+        if not res:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Memory resource ID {rid} not found.",
+            )
+
+        if res.resourceType not in ALLOWED_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Resource '{res.name}' (type={res.resourceType}) "
+                    f"is not allowed for memory. Only FILE / SYSTEM_PROMPT / "
+                    f"SUBMESSAGE_TEMPLATE resources are supported."
+                ),
+            )
+
+        if res.name in seen_names:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Duplicate memory resource name: '{res.name}'. "
+                    f"Memory resources must have unique names."
+                ),
+            )
+        seen_names.add(res.name)
+
+
+
 
 
 

@@ -116,6 +116,7 @@ class UpdateZipHistorySubMessage(BaseInstruction):
     content: str
     status: MessageStatus
     zip_enable: bool = Field(default=False, description="是否在下一轮上下文构建时自动启用压缩")
+    auto: bool = Field(default=False, description="是否为自动摘要（由 Agent middleware 触发）")
 
 
 class SetMessageCheckpointId(BaseInstruction):

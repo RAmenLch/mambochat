@@ -129,7 +129,8 @@ async def update_agent(db: AsyncSession, agent_id: str, agent_update: schemas.Ag
                 raise ValueError("ReActAgent does not support sub-agents. Only DeepAgent or Mambo can mount sub-agents.")
 
     for key, value in update_data.items():
-        setattr(db_agent, key, value)
+        if hasattr(db_agent, key):
+            setattr(db_agent, key, value)
 
     await db.commit()
     await db.refresh(db_agent)

@@ -28,15 +28,15 @@ dependencies = [
 
     # LLM / AI
     "openai>=2.15.0",
-    "langchain>=1.2.6",
-    "langchain-core>=1.2.19",
-    "langchain-openai>=1.1.7",
-    "langchain-anthropic>=1.3.1",
-    "langchain-google-genai>=4.2.0",
-    "langchain-mcp-adapters>=0.2.1",
+    "langchain>=1.2.6,<1.4",
+    "langchain-core>=1.2.19,<1.5",
+    "langchain-openai>=1.1.7,<2",
+    "langchain-anthropic>=1.3.1,<2",
+    "langchain-google-genai>=4.2.0,<5",
+    "langchain-mcp-adapters>=0.2.1,<1",
     "langgraph>=1.1.2,<1.2",
     "langgraph-prebuilt>=1.0.8,<1.0.11",
-    "langgraph-checkpoint-sqlite>=3.0.3",
+    "langgraph-checkpoint-sqlite>=3.0.3,<4",
     "deepagents>=0.4.12",
     "mcp",
 
@@ -61,8 +61,7 @@ dependencies = [
     # Production server
     "gunicorn==23.0.0",
 
-    # TODO: 替换为正式 PyPI 版本
-    "mambo-agents==0.1.1",
+    "mambo-agents==0.2.0a4",
 ]
 
 [dependency-groups]
@@ -71,3 +70,9 @@ dev = [
 
 [tool.uv]
 # 版本锁定交给 uv.lock，无需在 dependencies 中锁定传递依赖
+
+# mambo-agents 是预发布版本，国内镜像不会同步，
+# 必须直接从 PyPI 官方源拉取
+[[tool.uv.sources]]
+name = "mambo-agents"
+index = "pypi"

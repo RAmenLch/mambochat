@@ -9,7 +9,7 @@ from backend import schemas
 from backend.models import agent_model
 from backend.database import get_db
 from backend.services.file_service import FileService
-from backend.services.resource_service import validate_mounted_resources
+from backend.services.resource_service import validate_mounted_resources, validate_memory_resources
 from backend.schemas.enums import FileManagementType
 
 router = APIRouter()
@@ -124,6 +124,13 @@ async def update_agent_settings(
 ):
     if agent_update.resourcePromptList is not None:
         await validate_mounted_resources(db, agent_update.resourcePromptList)
+
+    if agent_update.memoryResourceIds is not None:
+        await validate_memory_resources(db, agent_update.memoryResourceIds)
+        # 合并 memory_resource_ids 到 agentParameters（enable_memory 由前端控制）
+        current_params = agent_update.agentParameters or {}
+        current_params["memory_resource_ids"] = agent_update.memoryResourceIds
+        agent_update.agentParameters = current_params
 
     try:
         updated_agent = await agent_crud.update_agent(db, agent_id=agent_id, agent_update=agent_update)

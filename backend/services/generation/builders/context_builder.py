@@ -7,6 +7,8 @@ from typing import List, Dict, Any, Optional, Set, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from langchain_core.messages import HumanMessage
+
 from backend.schemas import enums as schemas_enums
 from backend.schemas.message import McpToolContent, ErrorContent
 from backend.services.file_service import FileService
@@ -80,6 +82,11 @@ class MessageContextBuilder:
         # 内部缓存，防止同一文件在单次装配中重复读取
         self._file_content_cache: Dict[str, Dict[str, Any]] = {}
 
+        # 自动摘要重算：由 _apply_zip_history_logic 填充，_build_payload 消费
+        self._auto_target_sub_msg_id: Optional[str] = None
+        self._auto_summary_content: Optional[str] = None
+        self._auto_cutoff_index: Optional[int] = None
+
     async def build(self, raw_history: List[MessageSchema], system_prompt: Optional[str] = None) -> MessageContext:
         """
         核心装配方法。
@@ -88,6 +95,8 @@ class MessageContextBuilder:
         effective_history = raw_history
 
         # 1. 应用历史压缩逻辑 (内存级)
+        #    自动摘要 → 跳过替换，仅提取元数据供后续 cutoff 重算
+        #    手动摘要 → 保持原有替换逻辑
         if self.enable_zip_history:
             effective_history = self._apply_zip_history_logic(effective_history)
 
@@ -98,14 +107,20 @@ class MessageContextBuilder:
         if self.max_context_messages:
             effective_history = self._apply_max_context_limit(effective_history)
 
-        # 4. 构建 Payload 并执行 I/O 操作 (仅对最终保留的消息执行)
+        # 4. 构建 Payload（内部完成 auto target 搜索 + merge 追踪 + cutoff 计算）
         messages_payload = await self._build_payload(effective_history)
 
         # 5. 注入 System Prompt
         if system_prompt:
             messages_payload.insert(0, {"role": "system", "content": system_prompt})
 
-        return MessageContext(messages=messages_payload)
+        # 6. 构造自动摘要事件（供 Worker 同步 LangGraph state）
+        auto_event = self._build_auto_summarization_event()
+
+        return MessageContext(
+            messages=messages_payload,
+            auto_summarization_event=auto_event,
+        )
 
     # --- 内存级过滤与切片逻辑 ---
 
@@ -113,6 +128,7 @@ class MessageContextBuilder:
         last_enabled_zip_index = -1
         zip_content: Optional[str] = None
         target_sub_msg_id: Optional[str] = None
+        is_auto: bool = False
 
         for i in range(len(history) - 1, -1, -1):
             msg = history[i]
@@ -123,12 +139,26 @@ class MessageContextBuilder:
                         last_enabled_zip_index = i
                         zip_content = sub.content
                         target_sub_msg_id = config.get('target_sub_msg_id')
+                        is_auto = config.get('auto_summary') is True
                         break
             if last_enabled_zip_index != -1:
                 break
 
         if last_enabled_zip_index == -1 or not zip_content:
+            self._auto_target_sub_msg_id = None
+            self._auto_summary_content = None
             return history
+
+        if is_auto:
+            # 自动摘要：不替换历史（由 middleware 的 _summarization_event 处理）
+            # 仅记录元数据供后续 cutoff_index 重算
+            self._auto_target_sub_msg_id = target_sub_msg_id
+            self._auto_summary_content = zip_content
+            return history
+
+        # ── 手动摘要：保持原有替换逻辑 ──
+        self._auto_target_sub_msg_id = None
+        self._auto_summary_content = None
 
         zip_summary_prompt = "对之前的对话进行了总结摘要。" if self.language == "zh-CN" else "A summary of the previous conversation has been generated."
         user_msg = MessageSchema(
@@ -224,7 +254,24 @@ class MessageContextBuilder:
                 if llm_msg:
                     payload.append(llm_msg)
 
+        # ── 阶段 A：搜索 auto target（在 merge/flatten 之前）──
+        target_position: Optional[int] = None
+        if self._auto_target_sub_msg_id:
+            for idx, m in enumerate(payload):
+                if m.get("id") == self._auto_target_sub_msg_id:
+                    target_position = idx
+                    break
+            if target_position is None:
+                # target 消息已被删除 → 摘要失效
+                self._auto_target_sub_msg_id = None
+                self._auto_summary_content = None
+
         if self.flatten_history and payload:
+            # flatten 会破坏所有 id 跟踪 → 自动摘要失效
+            self._auto_target_sub_msg_id = None
+            self._auto_summary_content = None
+            target_position = None
+
             flattened_content = ""
             last_id = payload[-1].get("id") if payload else None
             for msg in payload:
@@ -249,7 +296,14 @@ class MessageContextBuilder:
         if self.append_prompt:
             payload.append({"role": "user", "content": self.append_prompt})
 
-        return self._merge_consecutive_roles(payload)
+        # ── 阶段 B：merge（追踪版，仅当有 target 时）──
+        if target_position is not None:
+            payload = self._merge_consecutive_roles_with_tracking(payload, target_position)
+        else:
+            payload = self._merge_consecutive_roles(payload)
+            self._auto_cutoff_index = None
+
+        return payload
 
     async def _convert_assistant_to_rounds(self, msg: MessageSchema, recency_rank: int) -> List[Dict[str, Any]]:
         # 按 createdAt 排序，保证时间顺序
@@ -504,3 +558,71 @@ class MessageContextBuilder:
             else:
                 merged.append(msg)
         return merged
+
+    def _merge_consecutive_roles_with_tracking(
+        self,
+        payload: List[Dict[str, Any]],
+        target_position: int,
+    ) -> List[Dict[str, Any]]:
+        """合并相邻同角色消息，同时追踪 target 被合并后的新位置。
+
+        追踪策略：在处理到 i == target_position 的那一刻，
+        target 一定在 merged[-1]（要么刚刚 append，要么刚被 merge 进前一条）。
+        此时记录 len(merged) - 1 即为 target 在最终列表中的位置。
+        """
+        if not payload:
+            self._auto_cutoff_index = None
+            return []
+
+        merged: List[Dict[str, Any]] = []
+        target_new_pos: Optional[int] = None
+
+        for i, msg in enumerate(payload):
+            has_tool_calls = "tool_calls" in msg
+            last_has_tool_calls = merged and "tool_calls" in merged[-1]
+            is_tool_message = msg.get("role") == "tool"
+
+            can_merge = (
+                merged
+                and merged[-1]["role"] == msg["role"]
+                and not has_tool_calls
+                and not last_has_tool_calls
+                and not is_tool_message
+                and isinstance(merged[-1].get("content"), str)
+                and isinstance(msg.get("content"), str)
+            )
+
+            if can_merge:
+                merged[-1]["content"] += "\n" + msg["content"]
+                if "id" in msg:
+                    merged[-1]["id"] = msg["id"]
+            else:
+                merged.append(msg)
+
+            if i == target_position:
+                target_new_pos = len(merged) - 1
+
+        if target_new_pos is not None:
+            self._auto_cutoff_index = target_new_pos + 1
+        else:
+            self._auto_cutoff_index = None
+
+        return merged
+
+    def _build_auto_summarization_event(self) -> Optional[Dict[str, Any]]:
+        """由 build() 在最后调用，构造投递给 Worker 的 SummarizationEvent。
+
+        基于 DB 中 auto ZipHistory 的内容和重算的 cutoff_index 构建，
+        如果无有效自动摘要则返回 None。
+        """
+        if self._auto_cutoff_index is None or not self._auto_summary_content:
+            return None
+
+        return {
+            "cutoff_index": self._auto_cutoff_index,
+            "summary_message": HumanMessage(
+                content=self._auto_summary_content,
+                additional_kwargs={"lc_source": "summarization"},
+            ),
+            "file_path": None,
+        }

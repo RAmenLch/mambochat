@@ -73,7 +73,10 @@ class DeepAgentChatWorker(UniversalGraphWorker):
             # DeepAgent 特有：收集 skills 文件注入 VFS
             files_to_inject = self._collect_vfs_files_recursively(llm_input.agent_config)
 
-            await agent.aupdate_state(thread_config, {"_summarization_event": None})
+            await agent.aupdate_state(
+                thread_config,
+                {"_summarization_event": llm_input.context.auto_summarization_event},
+            )
 
             resume_payload = llm_input.agent_config.resume_payload
             if resume_payload:

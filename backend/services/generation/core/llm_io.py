@@ -93,9 +93,18 @@ class MessageContext(BaseModel):
     上下文消息配置。
     包含经过过滤、切片、多模态转换后的标准 LLM 消息列表。
     """
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     messages: List[Dict[str, Any]] = Field(
         default_factory=list,
         description="标准化的 LLM 消息列表。要求包含 'role' 和 'content'，可能包含 'tool_calls' 等扩展字段。"
+    )
+
+    auto_summarization_event: Optional[SummarizationEvent] = Field(
+        default=None,
+        description="由 ContextBuilder 重建的自动摘要事件（基于 DB 中 auto ZipHistory 重算 cutoff_index）。"
+                    "Worker 用此值同步 LangGraph state 的 _summarization_event。"
+                    "None 表示无有效自动摘要，应清除 state。"
     )
 
     def set_system_prompt(self, content: str) -> "MessageContext":
@@ -183,6 +192,15 @@ class AgentConfig(BaseModel):
         default=None,
         description="摘要配置（仅 enable_summarization=True 时有效）。"
                     "结构: {trigger_type, trigger_value, keep_type, keep_value, offload_to_backend}"
+    )
+    enable_planning: bool = Field(
+        default=True,
+        description="是否启用计划任务清单（write_plans 工具，仅 Mambo Agent 有效）"
+    )
+    memory_resource_roots: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="长期记忆资源映射（仅 Mambo Agent）：{resource_name: resource_id}。"
+                    "传入后在 builder 中挂载到 /.mambo/memory/<name>/"
     )
 
 

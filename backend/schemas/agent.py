@@ -68,6 +68,7 @@ class AgentUpdate(BaseModel):
     subAgents: Optional[List[str]] = None
     backendIds: Optional[List[str]] = None
     defaultBackendId: Optional[str] = None
+    memoryResourceIds: Optional[List[str]] = None
 
 class AgentResponse(AgentBase):
     """用于 API 响应的 Agent Schema，包含系统生成的标识和时间戳"""

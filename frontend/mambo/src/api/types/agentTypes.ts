@@ -42,6 +42,7 @@ export interface AgentCreate {
   subAgents?: string[] | null;
   backendIds: string[] | null;
   defaultBackendId?: string | null;
+  memoryResourceIds?: string[] | null;
 }
 
 export type AgentUpdate = Partial<AgentCreate>

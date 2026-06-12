@@ -317,6 +317,14 @@ class MamboAgentInitializer(AbstractAgentInitializer):
         include_gp = mambo_params.get("include_general_purpose", False)
         enable_sum = mambo_params.get("enable_summarization", False)
         sum_config: Optional[Dict[str, Any]] = mambo_params.get("summarization_config", None)
+        enable_planning = mambo_params.get("enable_planning", True)
+        enable_memory = mambo_params.get("enable_memory", False)
+        memory_resource_ids: List[str] = mambo_params.get("memory_resource_ids", [])
+
+        # 构建 memory_resource_roots（类似 skill_resource_roots）
+        memory_roots: Dict[str, str] = {}
+        if enable_memory and memory_resource_ids:
+            memory_roots = await self._build_memory_roots(memory_resource_ids)
 
         agent_config = AgentConfig(
             name=self.agent.name,
@@ -334,6 +342,8 @@ class MamboAgentInitializer(AbstractAgentInitializer):
             include_general_purpose=include_gp,
             enable_summarization=enable_sum,
             summarization_config=sum_config if enable_sum else None,
+            enable_planning=enable_planning,
+            memory_resource_roots=memory_roots if memory_roots else None,
         )
 
         return agent_config, additional_system_prompt
@@ -361,6 +371,25 @@ class MamboAgentInitializer(AbstractAgentInitializer):
                 continue
             roots[res.name] = res.id
 
+        return roots
+
+    async def _build_memory_roots(
+        self, resource_ids: List[str]
+    ) -> Dict[str, str]:
+        """根据 memory_resource_ids 构建 {name: resource_id} 映射。
+
+        注意：资源类型过滤和同名检测已在 Router 层
+        (validate_memory_resources) 完成，此处仅做解析映射。
+
+        Returns:
+            {"resource_name": "res_xxx", ...}
+        """
+        roots: Dict[str, str] = {}
+        for rid in resource_ids:
+            res = await resource_crud.get_resource(self.db, rid)
+            if res is None:
+                continue
+            roots[res.name] = res.id
         return roots
 
     def get_providers(self) -> List[BaseToolProvider]:

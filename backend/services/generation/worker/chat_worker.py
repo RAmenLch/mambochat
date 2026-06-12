@@ -42,8 +42,13 @@ class UniversalGraphWorker(AbstractGenerateWorker):
         if llm_input.agent_config.recover_from_error:
             input_data = None
         else:
-            # Clear stale summarization event from previous run (separate super-step, no Overwrite conflict)
-            await agent.aupdate_state(thread_config, {"_summarization_event": None})
+            # Sync _summarization_event with context_builder's rebuilt event
+            # - None → clear stale event from previous run
+            # - non-None → overwrite with recalculated cutoff_index from DB
+            await agent.aupdate_state(
+                thread_config,
+                {"_summarization_event": llm_input.context.auto_summarization_event},
+            )
 
             resume_payload = llm_input.agent_config.resume_payload
             if resume_payload:

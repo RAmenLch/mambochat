@@ -86,6 +86,7 @@ class SubMessageConfig(BaseModel):
                                                         description="参加上下文长度: None(默认)-参与; 0-不参与; N>0-在倒数N条内参与")
     zip_enable: Optional[bool] = Field(None, description="【仅用于ZipHistory类型】标记此压缩历史是否已启用")
     target_sub_msg_id: Optional[str] = Field(None, description="【仅用于ZipHistory类型】子消息粒度的目标子消息ID")
+    auto_summary: Optional[bool] = Field(None, description="【仅用于ZipHistory类型】是否为自动摘要（True=自动，None/False=手动）")
     task_group_id: Optional[str] = Field(None, description="【仅用于TaskSubStep类型】子代理任务分组键（= 主代理 task tool_call_id）")
 
 

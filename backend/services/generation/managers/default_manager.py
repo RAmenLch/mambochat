@@ -3,7 +3,6 @@
 import asyncio
 import json
 import logging
-import re
 import traceback
 from typing import AsyncGenerator, Optional, Dict, List, Set, Tuple, Any
 
@@ -73,34 +72,6 @@ class DefaultGenerateManager(AbstractGenerateManager):
     def _extract_run_uuid(lc_run_id: Optional[str]) -> Optional[str]:
         if not lc_run_id: return None
         return lc_run_id[len("lc_run--"):] if lc_run_id.startswith("lc_run--") else lc_run_id
-
-    @staticmethod
-    def _extract_summary_content(event_info: SummarizationEventInfo) -> Optional[str]:
-        """Extract the pure summary text from a SummarizationEventInfo.
-
-        The summary is embedded in a ``HumanMessage`` whose content follows a
-        structured template::
-
-            You are in the middle of a conversation that has been summarized.
-            ...
-            <summary>
-            {actual summary}
-            </summary>
-
-        This method strips the wrapper and returns only the inner summary.
-        """
-        event = event_info.event
-        summary_msg = event.get("summary_message")
-        if summary_msg is None:
-            return None
-        content = getattr(summary_msg, "content", None)
-        if not isinstance(content, str) or not content:
-            return None
-        match = re.search(r"<summary>\s*(.*?)\s*</summary>", content, re.DOTALL)
-        if match:
-            return match.group(1).strip()
-        # Fallback: return trimmed content if template is absent
-        return content.strip()
 
     async def _resolve_zip_target_ids(
         self,
@@ -238,28 +209,31 @@ class DefaultGenerateManager(AbstractGenerateManager):
         # ── Post-generation: persist summarization as ZipHistory sub-message ──
         if self._last_summarization_event:
             event_info = self._last_summarization_event
-            summary_content = self._extract_summary_content(event_info)
-            if summary_content:
-                # 由 Manager 负责从 last_zip_message 推导 target_msg_id / target_sub_msg_id
-                target_msg_id, target_sub_msg_id = await self._resolve_zip_target_ids(
-                    chat_id, event_info.last_zip_message,
-                )
-                if not target_msg_id or not target_sub_msg_id:
-                    logger.warning(
-                        "DefaultGenerateManager: unable to resolve target_msg_id / target_sub_msg_id "
-                        "from last_zip_message (id=%s, type=%s) — skipping ZipHistory creation",
-                        getattr(event_info.last_zip_message, "id", None),
-                        type(event_info.last_zip_message).__name__,
+            summary_msg = event_info.event.get("summary_message")
+            if summary_msg is not None:
+                summary_content = getattr(summary_msg, "content", None)
+                if isinstance(summary_content, str) and summary_content:
+                    # 由 Manager 负责从 last_zip_message 推导 target_msg_id / target_sub_msg_id
+                    target_msg_id, target_sub_msg_id = await self._resolve_zip_target_ids(
+                        chat_id, event_info.last_zip_message,
                     )
-                else:
-                    yield UpdateZipHistorySubMessage(
-                        sub_message_id=generate_uuid(),
-                        target_message_id=target_msg_id,
-                        target_sub_msg_id=target_sub_msg_id,
-                        content=summary_content,
-                        status=schemas_enums.MessageStatus.COMPLETED,
-                        zip_enable=True,
-                    )
+                    if not target_msg_id or not target_sub_msg_id:
+                        logger.warning(
+                            "DefaultGenerateManager: unable to resolve target_msg_id / target_sub_msg_id "
+                            "from last_zip_message (id=%s, type=%s) — skipping ZipHistory creation",
+                            getattr(event_info.last_zip_message, "id", None),
+                            type(event_info.last_zip_message).__name__,
+                        )
+                    else:
+                        yield UpdateZipHistorySubMessage(
+                            sub_message_id=generate_uuid(),
+                            target_message_id=target_msg_id,
+                            target_sub_msg_id=target_sub_msg_id,
+                            content=summary_content,
+                            status=schemas_enums.MessageStatus.COMPLETED,
+                            zip_enable=True,
+                            auto=True,
+                        )
 
         # ── Record checkpoint_id for branch tracking ──
         saved = await get_checkpointer().aget_tuple(
