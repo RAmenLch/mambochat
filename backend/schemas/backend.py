@@ -2,11 +2,9 @@ from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from backend.schemas.enums import BackendType
-import re
+from backend.utils.path_safe import validate_path_safe_name
 
 PASSWORD_MASK = "********"
-
-FORBIDDEN_BACKEND_NAMES = {"skills", "memories", "state", "root", "tmp", "temp"}
 
 class SSHConfigData(BaseModel):
     """SSH Backend 严格的配置结构"""
@@ -54,11 +52,7 @@ class BackendConfigBase(BaseModel):
     @field_validator('name')
     @classmethod
     def validate_name(cls, v):
-        if not re.match(r"^[a-zA-Z0-9_]+$", v):
-            raise ValueError("Backend name 只能包含字母、数字和下划线，因为它将作为路径路由")
-        if v.lower() in FORBIDDEN_BACKEND_NAMES:
-            raise ValueError(f"Backend name 不能使用系统保留字: {', '.join(FORBIDDEN_BACKEND_NAMES)}")
-        return v
+        return validate_path_safe_name(v, label="Backend name")
 
     @field_validator('configData')
     @classmethod
@@ -94,11 +88,8 @@ class BackendConfigUpdate(BaseModel):
     @field_validator('name')
     @classmethod
     def validate_name(cls, v):
-        if v:
-            if not re.match(r"^[a-zA-Z0-9_]+$", v):
-                raise ValueError("Backend name 只能包含字母、数字和下划线")
-            if v.lower() in FORBIDDEN_BACKEND_NAMES:
-                raise ValueError(f"Backend name 不能使用系统保留字: {', '.join(FORBIDDEN_BACKEND_NAMES)}")
+        if v is not None:
+            return validate_path_safe_name(v, label="Backend name")
         return v
 
 class BackendConfigResponse(BackendConfigBase):

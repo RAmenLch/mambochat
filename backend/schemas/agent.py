@@ -1,16 +1,22 @@
 # backend/schemas/agent.py
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 # [修复] 为 AgentType 设置别名 AgentTypeEnum，防止与字段名冲突
 from backend.schemas.enums import AgentItemType, AgentTypeEnum, MoveAction
+from backend.utils.path_safe import validate_path_safe_name
 
 
 class AgentBase(BaseModel):
     """Agent 基础 Schema，定义通用字段与严格的数据类型"""
     name: str = Field(..., max_length=100, description="Agent 或文件夹名称")
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        return validate_path_safe_name(v, label="Agent 名称")
     description: Optional[str] = Field(None, description="用户编辑的介绍")
 
     itemType: AgentItemType = Field(AgentItemType.AGENT, description="节点类型: 'agent' 或 'folder'")
@@ -40,6 +46,13 @@ class AgentCreate(AgentBase):
 class AgentUpdate(BaseModel):
     """用于更新 Agent 的 Schema，所有字段均为可选（支持局部更新）"""
     name: Optional[str] = Field(None, max_length=100)
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        if v is not None:
+            return validate_path_safe_name(v, label="Agent 名称")
+        return v
     description: Optional[str] = None
     itemType: Optional[AgentItemType] = None
     parentId: Optional[str] = None

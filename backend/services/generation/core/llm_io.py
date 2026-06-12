@@ -5,10 +5,11 @@ from typing import List, Dict, Any, Optional, Union
 
 from mambo_agents.middleware.summarization import SummarizationEvent
 from langchain_core.messages import BaseMessage
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from langchain_core.tools import BaseTool
 
 from backend.schemas.enums import AgentTypeEnum
+from backend.utils.path_safe import validate_path_safe_name
 
 
 # --- 消息结构化 Schema ---
@@ -53,6 +54,11 @@ class SkillConfig(BaseModel):
     """
     name: str = Field(..., description="SKILL 的名称")
     files: List[SkillFileConfig] = Field(default_factory=list, description="该 SKILL 下的所有文件列表")
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        return validate_path_safe_name(v, label="Skill 名称")
 
 
 class ModelConfig(BaseModel):
@@ -116,8 +122,13 @@ class AgentConfig(BaseModel):
     """
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    name: str = Field(default="default-agent", description="Agent 名称")
+    name: str = Field(default="default_agent", description="Agent 名称")
     description: str = Field(default="", description="Agent 描述，用于父代理路由")
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        return validate_path_safe_name(v, label="Agent 名称")
     system_prompt: str = Field(default="", description="Agent 的系统提示词")
 
     agent_type: AgentTypeEnum = Field(default=AgentTypeEnum.MAMBO, description="Agent 的类型标识")

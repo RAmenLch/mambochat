@@ -1,18 +1,24 @@
 # backend/schemas/resource.py
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, field_validator
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 from backend.schemas.message import SubMessageConfig
 from backend.schemas.enums import MoveAction, ResourceItemType, ResourceType
 from backend.schemas.file import File as FileSchema  # 导入 File Schema
+from backend.utils.path_safe import validate_path_safe_name
 
 
 # --- ResourceVersion Schemas ---
 
 class ResourceVersionBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        return validate_path_safe_name(v, label="ResourceVersion 名称")
     commitMessage: Optional[str] = None
     content: Optional[str] = None
     attributes: Optional[Dict[str, Any]] = None
@@ -27,6 +33,13 @@ class ResourceVersionUpdate(BaseModel):
     commitMessage: Optional[str] = None
     content: Optional[str] = None
     attributes: Optional[Dict[str, Any]] = None
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        if v is not None:
+            return validate_path_safe_name(v, label="ResourceVersion 名称")
+        return v
 
 
 class ResourceVersion(ResourceVersionBase):
@@ -47,6 +60,11 @@ class ResourceVersion(ResourceVersionBase):
 
 class ResourceBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        return validate_path_safe_name(v, label="Resource 名称")
     description: Optional[str] = None
 
     itemType: ResourceItemType = Field(ResourceItemType.RESOURCE, description="项目类型: 'resource' 或 'folder'")
@@ -82,6 +100,13 @@ class ResourceUpdate(BaseModel):
     sortOrder: Optional[int] = None
     kb_id: Optional[str] = None
     kb_config: Optional[Dict[str, Any]] = None
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        if v is not None:
+            return validate_path_safe_name(v, label="Resource 名称")
+        return v
 
 
 class ResourceSimple(ResourceBase):
@@ -163,6 +188,11 @@ class SkillCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=64, description="Skill 名称 (需符合规范)")
     description: str = Field(..., min_length=1, max_length=1024, description="Skill 描述")
     parentId: Optional[str] = Field(None, description="父文件夹ID")
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        return validate_path_safe_name(v, label="Skill 名称")
 
 
 # --- Skill Import Schemas ---
