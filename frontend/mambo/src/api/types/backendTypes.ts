@@ -25,6 +25,7 @@ export interface SshConfigData {
   edit_blacklist?: string[] | null;
   ignore_dirs?: string[] | null;
   api_key?: string;
+  resource_id?: string;
 }
 
 export interface ApiConfigData {
@@ -37,12 +38,20 @@ export interface ApiConfigData {
   password?: string | null;
   root_dir?: string;
   ignore_dirs?: string[] | null;
+  resource_id?: string;
 }
 
 export interface ResourceConfigData {
   resource_id: string;
   edit_whitelist?: string[] | null;
   edit_blacklist?: string[] | null;
+  hostname?: string;
+  username?: string;
+  port?: number;
+  password?: string | null;
+  root_dir?: string;
+  ignore_dirs?: string[] | null;
+  api_key?: string;
 }
 
 export type BackendConfigData = SshConfigData | ApiConfigData | ResourceConfigData;

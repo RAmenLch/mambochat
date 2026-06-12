@@ -433,7 +433,7 @@
                       >
                         <div class="tag-inner">
                           <span class="tag-text">{{ res.name }}</span>
-                          <span class="memory-type-hint">({{ getMemoryTypeLabel(res.resourceType) }})</span>
+                          <span class="memory-type-hint">({{ getMemoryTypeLabel(res.resourceType ?? undefined) }})</span>
                         </div>
                       </el-tag>
                     </div>
