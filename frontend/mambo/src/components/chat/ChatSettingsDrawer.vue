@@ -118,6 +118,12 @@
             >
               <el-option v-for="opt in param.limit" :key="opt" :label="opt" :value="opt" />
             </el-select>
+            <el-input
+              v-else-if="param.type === 'string'"
+              v-model="chatSettingsForm.modelParameters[param.key]"
+              :disabled="!param.isEnabled"
+              class="parameter-input"
+            />
             <el-switch
               v-else-if="param.type === 'boolean'"
               v-model="chatSettingsForm.modelParameters[param.key]"

@@ -168,6 +168,20 @@
                     :disabled="!param.isEnabled"
                     class="parameter-input"
                   />
+                  <el-select
+                    v-else-if="param.type === 'string' && Array.isArray(param.limit)"
+                    v-model="form.modelParameters[param.key]"
+                    :disabled="!param.isEnabled"
+                    class="parameter-input"
+                  >
+                    <el-option v-for="opt in param.limit" :key="opt" :label="opt" :value="opt" />
+                  </el-select>
+                  <el-input
+                    v-else-if="param.type === 'string'"
+                    v-model="form.modelParameters[param.key]"
+                    :disabled="!param.isEnabled"
+                    class="parameter-input"
+                  />
                   <el-switch
                     :model-value="param.isEnabled"
                     @change="(val: string | number | boolean) => handleToggleParameter(param, val as boolean)"
