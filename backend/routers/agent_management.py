@@ -132,6 +132,11 @@ async def update_agent_settings(
         current_params["memory_resource_ids"] = agent_update.memoryResourceIds
         agent_update.agentParameters = current_params
 
+    if agent_update.securityReviewConfig is not None:
+        current_params = agent_update.agentParameters or {}
+        current_params["security_review"] = agent_update.securityReviewConfig.model_dump()
+        agent_update.agentParameters = current_params
+
     try:
         updated_agent = await agent_crud.update_agent(db, agent_id=agent_id, agent_update=agent_update)
         if updated_agent is None:

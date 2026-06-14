@@ -549,6 +549,57 @@
           </template>
         </el-card>
 
+        <!-- AI 安全审核（仅 Mambo） -->
+        <el-card v-if="form.AgentType === 'Mambo'" shadow="never" class="config-card">
+          <template #header>
+            <span class="card-title">{{ $t('agent.securityReview') }}</span>
+          </template>
+
+          <el-row :gutter="32" class="settings-row">
+            <el-col :span="24">
+              <el-form-item>
+                <template #label>
+                  <span>{{ $t('agent.securityReviewEnable') }}</span>
+                  <el-tooltip effect="dark" :content="$t('agent.securityReviewEnableDesc')" placement="top">
+                    <el-icon class="label-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-switch v-model="form.mambo_security_review_enabled" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+
+          <template v-if="form.mambo_security_review_enabled">
+            <el-row :gutter="32" class="settings-row">
+              <el-col :span="12">
+                <el-form-item :label="$t('agent.securityReviewModel')">
+                  <el-select v-model="form.mambo_security_review_model_id" :placeholder="$t('agent.securityReviewModelPlaceholder')" style="width: 100%" clearable>
+                    <el-option-group v-for="group in filteredGroupedModels" :key="group.label" :label="group.label">
+                      <el-option v-for="item in group.options" :key="item.id" :label="item.name" :value="item.id" />
+                    </el-option-group>
+                  </el-select>
+                </el-form-item>
+              </el-col>
+            </el-row>
+
+            <el-row :gutter="32" class="settings-row">
+              <el-col :span="24">
+                <el-form-item :label="$t('agent.securityReviewTools')">
+                  <el-input v-model="mambo_security_review_tools_str" :placeholder="$t('agent.securityReviewToolsPlaceholder')" />
+                </el-form-item>
+              </el-col>
+            </el-row>
+
+            <el-row :gutter="32" class="settings-row">
+              <el-col :span="24">
+                <el-form-item :label="$t('agent.securityReviewPrompt')">
+                  <el-input v-model="form.mambo_security_review_system_prompt" type="textarea" :rows="3" :placeholder="$t('agent.securityReviewPromptPlaceholder')" />
+                </el-form-item>
+              </el-col>
+            </el-row>
+          </template>
+        </el-card>
+
       </el-form>
     </el-scrollbar>
 
@@ -622,6 +673,8 @@ const memorySelectorVisible = ref(false);
 const modelSelectRef = ref();
 const { scrollToTopIfStarred } = useModelSelectScroll();
 
+const mambo_security_review_tools_str = ref('');
+
 const agentData = computed(() => agentList.value.find(a => a.id === currentAgentId.value));
 
 const mountedResources = ref<Resource[]>([]);
@@ -652,6 +705,11 @@ const form = reactive({
   mambo_summary_keep_type: 'messages' as 'fraction' | 'tokens' | 'messages',
   mambo_summary_keep_value: 20,
   mambo_summary_offload: false,
+
+  // Mambo 安全审核
+  mambo_security_review_enabled: false,
+  mambo_security_review_model_id: null as string | null,
+  mambo_security_review_system_prompt: '',
 });
 
 // --- Backend 挂载逻辑 [新增] ---
@@ -768,6 +826,20 @@ watch(agentData, async (newVal) => {
       form.mambo_summary_keep_type = 'messages';
       form.mambo_summary_keep_value = 20;
       form.mambo_summary_offload = false;
+    }
+
+    // 安全审核配置还原
+    const srCfg = mamboParams.security_review;
+    if (srCfg && srCfg.enabled) {
+      form.mambo_security_review_enabled = true;
+      form.mambo_security_review_model_id = srCfg.model_id || null;
+      form.mambo_security_review_system_prompt = srCfg.system_prompt || '';
+      mambo_security_review_tools_str.value = (srCfg.review_tools || []).join(', ');
+    } else {
+      form.mambo_security_review_enabled = false;
+      form.mambo_security_review_model_id = null;
+      form.mambo_security_review_system_prompt = '';
+      mambo_security_review_tools_str.value = '';
     }
 
     if (newVal.resourcePromptList && newVal.resourcePromptList.length > 0) {
@@ -961,6 +1033,15 @@ function buildMamboAgentParameters(): Record<string, any> | null {
       offload_to_backend: form.mambo_summary_offload,
     };
   }
+  if (form.mambo_security_review_enabled) {
+    const toolsStr = mambo_security_review_tools_str.value.trim();
+    params.security_review = {
+      enabled: true,
+      model_id: form.mambo_security_review_model_id || null,
+      system_prompt: form.mambo_security_review_system_prompt || null,
+      review_tools: toolsStr ? toolsStr.split(',').map(s => s.trim()).filter(Boolean) : null,
+    };
+  }
   return Object.keys(params).length > 0 ? params : null;
 }
 
@@ -1006,6 +1087,17 @@ async function handleSave() {
       memoryResourceIds: form.AgentType === 'Mambo' && form.mambo_memory_enabled
         ? [...form.mambo_memory_resource_ids]
         : [],
+
+      securityReviewConfig: form.AgentType === 'Mambo' && form.mambo_security_review_enabled
+        ? {
+            enabled: true,
+            model_id: form.mambo_security_review_model_id || null,
+            system_prompt: form.mambo_security_review_system_prompt || null,
+            review_tools: mambo_security_review_tools_str.value.trim()
+              ? mambo_security_review_tools_str.value.trim().split(',').map(s => s.trim()).filter(Boolean)
+              : null,
+          }
+        : null,
 
       // Mambo 专属参数
       agentParameters: form.AgentType === 'Mambo'

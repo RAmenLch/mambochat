@@ -98,20 +98,12 @@ class HitlHandler(BaseStreamHandler):
         # 2. 处理恢复数据
         middleware_data = Decode.get_hitl_middleware_data(context.mode, context.event)
         if middleware_data:
-            for call in middleware_data.get("approved_calls", []):
-                name = call.get("name")
-                for provider in context.providers:
-                    if provider.matches_tool_name(name):
-                        async for inst in provider.create_call_instruction(call.get("id"), name, call.get("args") or {}, context.tool_map.get(name)):
-                            yield inst
-                        break
-
+            # MCP_TOOL 子消息已由 ToolExecutionHandler 创建，此处不再重复创建 create_call_instruction；
+            # 仅对 rejected 工具调用 create_result_instruction 写入拒绝原因
             for res in middleware_data.get("rejected_results", []):
                 name = res.get("name")
                 for provider in context.providers:
                     if provider.matches_tool_name(name):
-                        async for inst in provider.create_call_instruction(res.get("id"), name, {}, context.tool_map.get(name)):
-                            yield inst
                         async for inst in provider.create_result_instruction(res.get("id"), res.get("content"), True):
                             yield inst
                         break
@@ -173,7 +165,6 @@ class ToolExecutionHandler(BaseStreamHandler):
                 context.pending_hitl_tool_calls.extend(tool_calls)
 
             for tc in tool_calls:
-                if has_hitl: continue
                 name = tc.get("name")
                 for provider in context.providers:
                     if provider.matches_tool_name(name):

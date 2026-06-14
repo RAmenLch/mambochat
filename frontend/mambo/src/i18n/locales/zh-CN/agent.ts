@@ -81,4 +81,14 @@ export default {
   keepTokens: 'Token 数量',
   keepMessages: '消息数量',
   fractionWarning: '比例模式需要模型已配置「最大上下文」。若缺失请改用 Token 或消息数量模式。',
+  // AI 安全审核
+  securityReview: 'AI 安全审核',
+  securityReviewEnable: '启用 AI 安全审核',
+  securityReviewEnableDesc: '在人工确认前，先由 AI 模型对工具调用进行安全风险预审。安全的调用自动放行，不安全的升级人工确认。仅对已开启 HITL（人工介入）的工具生效——如在 MCP 设置中开启了「需要审核」的工具，或 Backend 中开启了审核模式的 execute。',
+  securityReviewModel: '审核模型',
+  securityReviewModelPlaceholder: '默认复用主 Agent 模型',
+  securityReviewTools: '审核范围（逗号分隔工具名）',
+  securityReviewToolsPlaceholder: '例如: write, edit, execute。留空 = 所有 HITL 工具',
+  securityReviewPrompt: '自定义审核提示词（可选）',
+  securityReviewPromptPlaceholder: '留空使用内置默认安全审核提示词',
 }

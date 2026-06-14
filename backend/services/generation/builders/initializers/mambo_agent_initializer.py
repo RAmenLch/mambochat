@@ -10,7 +10,7 @@ from backend.schemas.enums import ToolReviewMode, AgentTypeEnum, ResourceType
 from backend.models.agent_model import Agent
 from backend.crud import mcp_crud, agent_crud, provider_crud, setting_crud, backend_crud, resource_crud
 
-from backend.services.generation.core.llm_io import AgentConfig, ModelConfig
+from backend.services.generation.core.llm_io import AgentConfig, ModelConfig, SecurityReviewAgentConfig
 from backend.services.generation.builders.initializers.base_initializer import (
     AbstractAgentInitializer,
 )
@@ -148,32 +148,33 @@ class MamboAgentInitializer(AbstractAgentInitializer):
         # --- 子代理初始化 ---
         sub_configs: List[AgentConfig] = []
 
+        # 全局设置（子代理 & 安全审核共用）
+        proxy_setting = await setting_crud.get_setting(self.db, "proxy_enabled")
+        proxy_url_setting = await setting_crud.get_setting(self.db, "proxy_url")
+        is_proxy_enabled = (
+            proxy_setting.value == "True" if proxy_setting else False
+        )
+        global_proxy_url = proxy_url_setting.value if proxy_url_setting else None
+        max_retries_setting = await setting_crud.get_setting(
+            self.db, "default_max_retries"
+        )
+        global_max_retries = (
+            int(max_retries_setting.value)
+            if max_retries_setting and max_retries_setting.value
+            else 3
+        )
+        timeout_setting = await setting_crud.get_setting(
+            self.db, "default_timeout"
+        )
+        global_default_timeout = (
+            int(timeout_setting.value)
+            if timeout_setting and timeout_setting.value
+            else 60
+        )
+
         if self.agent.subAgents:
             sub_agents_db = await asyncio.gather(
                 *[agent_crud.get_agent(self.db, sid) for sid in self.agent.subAgents]
-            )
-
-            proxy_setting = await setting_crud.get_setting(self.db, "proxy_enabled")
-            proxy_url_setting = await setting_crud.get_setting(self.db, "proxy_url")
-            is_proxy_enabled = (
-                proxy_setting.value == "True" if proxy_setting else False
-            )
-            global_proxy_url = proxy_url_setting.value if proxy_url_setting else None
-            max_retries_setting = await setting_crud.get_setting(
-                self.db, "default_max_retries"
-            )
-            global_max_retries = (
-                int(max_retries_setting.value)
-                if max_retries_setting and max_retries_setting.value
-                else 3
-            )
-            timeout_setting = await setting_crud.get_setting(
-                self.db, "default_timeout"
-            )
-            global_default_timeout = (
-                int(timeout_setting.value)
-                if timeout_setting and timeout_setting.value
-                else 60
             )
 
             for sub in sub_agents_db:
@@ -326,6 +327,55 @@ class MamboAgentInitializer(AbstractAgentInitializer):
         if enable_memory and memory_resource_ids:
             memory_roots = await self._build_memory_roots(memory_resource_ids)
 
+        # --- 安全审核配置解析 ---
+        security_review_config: Optional[SecurityReviewAgentConfig] = None
+        security_review_llm_config: Optional[ModelConfig] = None
+        sec_review_raw = mambo_params.get("security_review", None)
+        if sec_review_raw and isinstance(sec_review_raw, dict) and sec_review_raw.get("enabled"):
+            security_review_config = SecurityReviewAgentConfig(
+                enabled=True,
+                model_id=sec_review_raw.get("model_id"),
+                system_prompt=sec_review_raw.get("system_prompt"),
+                review_tools=sec_review_raw.get("review_tools"),
+            )
+            if security_review_config.model_id:
+                sr_model = await provider_crud.get_model(self.db, security_review_config.model_id)
+                if sr_model and sr_model.provider:
+                    proxy_url = None
+                    if sr_model.provider.use_proxy and is_proxy_enabled:
+                        proxy_url = global_proxy_url
+                    api_params = map_model_parameters({})
+                    api_params["_worker_type"] = sr_model.provider.worker_type
+
+                    sr_max_retries = global_max_retries
+                    sr_timeout = global_default_timeout
+                    sr_stream_chunk_timeout = None
+                    sr_context_length: Optional[int] = None
+                    if sr_model.meta_config:
+                        try:
+                            meta = json.loads(sr_model.meta_config) if isinstance(sr_model.meta_config, str) else sr_model.meta_config
+                            sr_max_retries = int(meta.get("max_retries", global_max_retries))
+                            raw_t = meta.get("timeout")
+                            sr_timeout = int(raw_t) if raw_t is not None else global_default_timeout
+                            raw_sct = meta.get("stream_chunk_timeout")
+                            sr_stream_chunk_timeout = float(raw_sct) if raw_sct is not None else None
+                            raw_cl = meta.get("context_length")
+                            sr_context_length = int(raw_cl) if raw_cl is not None else None
+                        except (json.JSONDecodeError, ValueError, TypeError):
+                            pass
+
+                    security_review_llm_config = ModelConfig(
+                        model_id=sr_model.modelId,
+                        api_host=sr_model.provider.apiHost,
+                        api_key=sr_model.provider.apiKey,
+                        proxy_url=proxy_url,
+                        parameters=api_params,
+                        max_retries=sr_max_retries,
+                        timeout=sr_timeout,
+                        stream_chunk_timeout=sr_stream_chunk_timeout,
+                        context_length=sr_context_length,
+                    )
+
         agent_config = AgentConfig(
             name=self.agent.name,
             description=self.agent.description or "",
@@ -344,6 +394,8 @@ class MamboAgentInitializer(AbstractAgentInitializer):
             summarization_config=sum_config if enable_sum else None,
             enable_planning=enable_planning,
             memory_resource_roots=memory_roots if memory_roots else None,
+            security_review_config=security_review_config,
+            security_review_llm_config=security_review_llm_config,
         )
 
         return agent_config, additional_system_prompt

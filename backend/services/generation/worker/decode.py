@@ -97,8 +97,8 @@ class DefaultLangChainDecode(BaseDecode):
         return None
 
     def get_hitl_middleware_data(self, mode: str, event: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        if mode == "updates" and isinstance(event, dict) and "HumanInTheLoopMiddleware.after_model" in event:
-            data = event["HumanInTheLoopMiddleware.after_model"]
+        if mode == "updates" and isinstance(event, dict):
+            data = event.get("HumanInTheLoopMiddleware.after_model") or event.get("AutoSecurityReviewMiddleware.after_model")
             if not data:
                 return None
 

@@ -124,6 +124,27 @@ class RunTimeConfig(BaseModel):
     )
 
 
+class SecurityReviewAgentConfig(BaseModel):
+    """AI 安全审核配置（Mambo Agent 专属）。
+
+    model_id 引用 AIModel 表 ID，在 MamboAgentInitializer 中解析为 ModelConfig，
+    在 MamboAgentGraphBuilder 中通过 ModelFactory 实例化为 BaseChatModel。
+    """
+    enabled: bool = Field(default=False, description="是否启用 AI 安全审核")
+    model_id: Optional[str] = Field(
+        None,
+        description="审核模型的 AIModel ID。None 时复用主 Agent 模型"
+    )
+    system_prompt: Optional[str] = Field(
+        None,
+        description="自定义审核系统提示词。None 时使用内置默认提示词"
+    )
+    review_tools: Optional[List[str]] = Field(
+        None,
+        description="需要 AI 审核的工具名列表。None 或空列表表示审核所有 interrupt_on 工具"
+    )
+
+
 class AgentConfig(BaseModel):
     """
     Agent 运行与调度配置。
@@ -201,6 +222,14 @@ class AgentConfig(BaseModel):
         default=None,
         description="长期记忆资源映射（仅 Mambo Agent）：{resource_name: resource_id}。"
                     "传入后在 builder 中挂载到 /.mambo/memory/<name>/"
+    )
+    security_review_config: Optional[SecurityReviewAgentConfig] = Field(
+        default=None,
+        description="AI 安全审核配置（仅 Mambo Agent 有效）。为 None 时不启用"
+    )
+    security_review_llm_config: Optional[ModelConfig] = Field(
+        default=None,
+        description="安全审核模型的已解析配置（由 Initializer 填充，供 Builder 使用）"
     )
 
 

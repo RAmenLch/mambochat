@@ -9,6 +9,14 @@ from backend.schemas.enums import AgentItemType, AgentTypeEnum, MoveAction
 from backend.utils.path_safe import validate_path_safe_name
 
 
+class SecurityReviewConfigSchema(BaseModel):
+    """AI 安全审核配置的 API Schema"""
+    enabled: bool = Field(default=False)
+    model_id: Optional[str] = Field(None)
+    system_prompt: Optional[str] = Field(None)
+    review_tools: Optional[List[str]] = Field(None)
+
+
 class AgentBase(BaseModel):
     """Agent 基础 Schema，定义通用字段与严格的数据类型"""
     name: str = Field(..., max_length=100, description="Agent 或文件夹名称")
@@ -69,6 +77,7 @@ class AgentUpdate(BaseModel):
     backendIds: Optional[List[str]] = None
     defaultBackendId: Optional[str] = None
     memoryResourceIds: Optional[List[str]] = None
+    securityReviewConfig: Optional[SecurityReviewConfigSchema] = None
 
 class AgentResponse(AgentBase):
     """用于 API 响应的 Agent Schema，包含系统生成的标识和时间戳"""

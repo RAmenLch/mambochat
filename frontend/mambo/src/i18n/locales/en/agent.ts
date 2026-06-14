@@ -81,4 +81,14 @@ export default {
   keepTokens: 'Token Count',
   keepMessages: 'Message Count',
   fractionWarning: 'Fraction mode requires the model to have "Max Context" configured. If missing, use token/message counts instead.',
+  // AI Security Review
+  securityReview: 'AI Security Review',
+  securityReviewEnable: 'Enable AI Security Review',
+  securityReviewEnableDesc: 'Before human approval, an AI model pre-screens tool calls for safety risks. Safe calls are auto-approved; unsafe calls are escalated to human review. Only effective for tools that have HITL (Human-in-the-Loop) enabled — e.g. tools with "require review" turned on in MCP settings, or Backend execute with review mode.',
+  securityReviewModel: 'Review Model',
+  securityReviewModelPlaceholder: 'Default: reuse main Agent model',
+  securityReviewTools: 'Review Scope (comma-separated tool names)',
+  securityReviewToolsPlaceholder: 'e.g. write, edit, execute. Leave empty = all HITL tools',
+  securityReviewPrompt: 'Custom Review Prompt (optional)',
+  securityReviewPromptPlaceholder: 'Leave empty to use the built-in security review prompt',
 }

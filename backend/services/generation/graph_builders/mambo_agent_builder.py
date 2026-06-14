@@ -26,6 +26,7 @@ from mambo_agents import (
 )
 from mambo_agents.backends.ssh import SshBackend
 from mambo_agents.backends.state import StateBackend
+from mambo_agents.middleware.security_review import SecurityReviewConfig
 
 from backend.checkpointer import get_checkpointer
 from backend.database import AsyncSessionLocal
@@ -278,6 +279,27 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
             from mambo_agents.middleware.planning import MamboPlanMiddleware
             _plan_middleware = [MamboPlanMiddleware()]
 
+        # --- Security Review (opt-in) ---
+        security_review = None
+        sr_config = getattr(agent_config, 'security_review_config', None)
+        if sr_config and sr_config.enabled:
+            if agent_config.security_review_llm_config:
+                review_model = ModelFactory.create_model(
+                    agent_config.security_review_llm_config, run_time_config
+                )
+            else:
+                review_model = model
+            review_tools = sr_config.review_tools
+            if review_tools and len(review_tools) > 0:
+                review_tools = frozenset(review_tools)
+            else:
+                review_tools = "all"
+            security_review = SecurityReviewConfig(
+                model=review_model,
+                system_prompt=sr_config.system_prompt,
+                review_tools=review_tools,
+            )
+
         # --- Memory sources（长期记忆） ---
         memory_sources: list[str] | None = None
         if agent_config.memory_resource_roots:
@@ -300,4 +322,5 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
             middleware=_plan_middleware,
             checkpointer=checkpointer,
             interrupt_on=agent_config.hitl_interrupt_on if agent_config.hitl_interrupt_on else None,
+            security_review=security_review,
         )

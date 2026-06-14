@@ -73,7 +73,7 @@
     >
       <el-form ref="formRef" :model="form" :rules="currentRules" label-position="top" v-loading="isSaving">
         <el-form-item :label="$t('backend.name')" prop="name">
-          <el-input v-model="form.name" :disabled="isEdit" placeholder="仅允许字母、数字、下划线" />
+          <el-input v-model="form.name" placeholder="仅允许字母、数字、下划线" />
         </el-form-item>
         <el-form-item :label="$t('backend.description')" prop="description">
           <el-input v-model="form.description" type="textarea" :rows="2" />
