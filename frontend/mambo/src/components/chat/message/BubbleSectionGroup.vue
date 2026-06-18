@@ -49,6 +49,9 @@
         <span class="minimized-item-title">
           {{ getToolName(tool) }}
         </span>
+        <span v-if="getSecurityReviewForTool(tool)" class="security-review-badge" :class="{ 'is-failed': !getSecurityReviewForTool(tool)!.passed }">
+          🛡️ {{ getSecurityReviewForTool(tool)!.passed ? t('agent.securityReviewPassed') : t('agent.securityReviewFailed') }}
+        </span>
       </div>
     </div>
 
@@ -68,7 +71,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import type { Message, SubMessage, McpToolContent, ReviewToolContent, AskUserContent } from '@/api/types';
+import type { Message, SubMessage, McpToolContent, ReviewToolContent, AskUserContent, SecurityReviewContent } from '@/api/types';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import SubMessageItem from '../SubMessageItem.vue';
 import type { BubbleSectionGroup } from '@/composables/useAssistantTimeline';
@@ -169,6 +172,34 @@ function getToolName(tool: SubMessage): string {
   return content?.name || t('chat.message.mcp.unknownTool');
 }
 
+/** tool_call_id → SecurityReviewContent 映射 */
+const securityReviewMap = computed(() => {
+  const map = new Map<string, SecurityReviewContent>();
+  for (const sm of props.parentMessage.sub_messages) {
+    if (sm.type === 'SecurityReview') {
+      try {
+        const content = JSON.parse(sm.content) as SecurityReviewContent;
+        map.set(content.tool_call_id, content);
+      } catch { /* ignore */ }
+    }
+  }
+  return map;
+});
+
+function getSecurityReviewForTool(tool: SubMessage): SecurityReviewContent | undefined {
+  try {
+    if (tool.type === 'McpTool') {
+      const content = JSON.parse(tool.content) as McpToolContent;
+      return securityReviewMap.value.get(content.tool_call_id);
+    }
+    if (tool.type === 'ReviewTool') {
+      const content = JSON.parse(tool.content) as ReviewToolContent;
+      return securityReviewMap.value.get(content.tool_call_id);
+    }
+  } catch { /* ignore */ }
+  return undefined;
+}
+
 function isToolError(tool: SubMessage): boolean {
   if (tool.type !== 'McpTool') return false;
   const content = getParsedContent(tool) as McpToolContent | null;
@@ -267,6 +298,20 @@ function isToolError(tool: SubMessage): boolean {
 .minimized-item.has-ask-user:hover {
   border-color: var(--el-color-primary);
   color: var(--el-color-primary);
+}
+
+.security-review-badge {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background-color: var(--el-color-success-light-9);
+  color: var(--el-color-success);
+  white-space: nowrap;
+}
+
+.security-review-badge.is-failed {
+  background-color: var(--el-color-danger-light-9);
+  color: var(--el-color-danger);
 }
 
 .minimized-item-title {

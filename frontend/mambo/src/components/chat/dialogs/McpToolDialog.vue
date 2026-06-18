@@ -113,6 +113,44 @@
         </div>
       </el-tab-pane>
 
+      <!-- AI 安全审核 Tab（仅 McpTool + 有对应 SecurityReview 时显示） -->
+      <el-tab-pane
+        v-if="activeSecurityReviewContent"
+        :key="'security_review_' + activeSecurityReviewContent.tool_call_id"
+        :label="'🛡️ ' + $t('agent.securityReviewPassed')"
+        :name="securityReviewTabName"
+      >
+        <div class="tool-detail-container">
+          <div class="tool-header">
+            <h3>{{ activeSecurityReviewContent.tool_name }}</h3>
+            <el-tag
+              :type="activeSecurityReviewContent.passed ? 'success' : 'danger'"
+              size="default"
+              effect="light"
+              class="security-review-status-tag"
+            >
+              {{ activeSecurityReviewContent.passed ? $t('agent.securityReviewPassed') : $t('agent.securityReviewFailed') }}
+            </el-tag>
+            <p class="tool-desc">{{ activeSecurityReviewContent.passed ? $t('agent.securityReviewDesc') : $t('agent.securityReviewFailedDesc') }}</p>
+          </div>
+
+          <el-descriptions :column="1" border size="default" class="security-review-descriptions">
+            <el-descriptions-item :label="$t('agent.securityReviewRiskLevel')">
+              <el-tag
+                :type="riskLevelTagType"
+                size="small"
+                effect="plain"
+              >
+                {{ activeSecurityReviewContent.risk_level.toUpperCase() }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item :label="$t('agent.securityReviewReason')">
+              <div class="security-review-reason">{{ activeSecurityReviewContent.reason }}</div>
+            </el-descriptions-item>
+          </el-descriptions>
+        </div>
+      </el-tab-pane>
+
       <!-- 子代理追踪 Tab（仅 task 工具 + 有步骤时显示） -->
       <el-tab-pane
         v-if="activeTaskSubSteps.length > 0"
@@ -144,7 +182,7 @@ import { useI18n } from 'vue-i18n';
 import { useMcpStore } from '@/stores/mcpStore';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { useChatSessionStore } from '@/stores/chatSessionStore';
-import type { SubMessage, McpToolContent, ReviewToolContent, ToolDecision, SchemaProperty, TaskSubStepContent, Message } from '@/api/types';
+import type { SubMessage, McpToolContent, ReviewToolContent, ToolDecision, SchemaProperty, TaskSubStepContent, Message, SecurityReviewContent } from '@/api/types';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import TaskSubAgentPanel from '../task/TaskSubAgentPanel.vue';
 
@@ -257,6 +295,59 @@ const taskToolCallId = computed(() => {
 const subagentTabName = computed(() =>
   taskToolCallId.value ? `__subagent__` : ''
 );
+
+/** 当前工具对应 SecurityReview 内容（从 toolMessages 的所有 tool_call_id 推导）*/
+const activeSecurityReviewContent = computed(() => {
+  if (props.mode === 'review_all') return null;
+  for (const msg of toolMessages.value) {
+    if (msg.type !== 'McpTool' && msg.type !== 'ReviewTool') continue;
+    try {
+      let toolCallId: string | undefined;
+      if (msg.type === 'McpTool') {
+        toolCallId = (getParsedContent(msg) as McpToolContent | null)?.tool_call_id;
+      } else {
+        toolCallId = (getParsedContent(msg) as ReviewToolContent | null)?.tool_call_id;
+      }
+      if (toolCallId) {
+        const sr = securityReviewMap.value.get(toolCallId);
+        if (sr) return sr;
+      }
+    } catch { /* ignore */ }
+  }
+  return null;
+});
+
+const securityReviewTabName = computed(() =>
+  activeSecurityReviewContent.value ? `__security_review__` : ''
+);
+
+/** 风险等级对应的 el-tag type */
+const riskLevelTagType = computed(() => {
+  const level = activeSecurityReviewContent.value?.risk_level;
+  switch (level) {
+    case 'low': return 'success';
+    case 'medium': return 'warning';
+    case 'high': return 'danger';
+    case 'critical': return 'danger';
+    default: return 'info';
+  }
+});
+
+/** parentMessage 中所有 SecurityReview 子消息的 tool_call_id → content 映射 */
+const securityReviewMap = computed(() => {
+  const map = new Map<string, SecurityReviewContent>();
+  const msg = liveParentMessage.value;
+  if (!msg) return map;
+  for (const sm of msg.sub_messages) {
+    if (sm.type === 'SecurityReview') {
+      try {
+        const content = JSON.parse(sm.content) as SecurityReviewContent;
+        map.set(content.tool_call_id, content);
+      } catch { /* ignore */ }
+    }
+  }
+  return map;
+});
 
 /** task 工具对应的子代理追踪步骤 */
 const activeTaskSubSteps = computed(() => {
@@ -676,5 +767,20 @@ h4 {
   padding: 20px;
   text-align: center;
   color: var(--el-color-error);
+}
+
+.security-review-status-tag {
+  margin-bottom: 8px;
+}
+
+.security-review-descriptions {
+  margin-top: 12px;
+}
+
+.security-review-reason {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+  font-size: 13px;
 }
 </style>

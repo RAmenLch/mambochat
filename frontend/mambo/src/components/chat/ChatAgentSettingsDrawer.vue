@@ -77,6 +77,14 @@
                 <span class="info-label">Temperature:</span>
                 <span class="info-value">{{ selectedAgent.modelParameters.temperature }}</span>
               </div>
+              <div class="info-item" v-if="selectedAgent.modelParameters?.enable_suggest !== undefined">
+                <span class="info-label">{{ $t('chat.settings.enableSuggest') }}:</span>
+                <span class="info-value">{{ selectedAgent.modelParameters.enable_suggest ? t('common.status.enabled') : t('common.status.disabled') }}</span>
+              </div>
+              <div class="info-item" v-if="selectedAgent.modelParameters?.enable_ask_user !== undefined">
+                <span class="info-label">{{ $t('chat.settings.enableAskUser') }}:</span>
+                <span class="info-value">{{ selectedAgent.modelParameters.enable_ask_user ? t('common.status.enabled') : t('common.status.disabled') }}</span>
+              </div>
             </div>
           </div>
 
@@ -109,10 +117,17 @@
             </div>
 
             <div class="ext-item" v-if="selectedAgent.AgentType === 'DeepAgent' || selectedAgent.AgentType === 'Mambo'">
-              <div class="ext-label">{{ $t('agent.mountedBackend') }}:</div>
+              <div class="ext-label">{{ $t('agent.mountBackend') }}:</div>
               <div class="ext-tags" v-if="displayBackendList.length > 0">
-                <el-tag v-for="b in displayBackendList" :key="b.id" size="small" type="warning" effect="light">
+                <el-tag
+                  v-for="b in displayBackendList"
+                  :key="b.id"
+                  size="small"
+                  :type="b.id === defaultBackendId ? 'danger' : 'warning'"
+                  effect="light"
+                >
                   <el-icon><Monitor /></el-icon> {{ b.name }}
+                  <span v-if="b.id === defaultBackendId" class="default-star">★</span>
                 </el-tag>
               </div>
               <div class="ext-empty" v-else>{{ $t('common.none') }}</div>
@@ -151,8 +166,26 @@
                 <span class="info-value">{{ mamboPreview.generalPurpose ? t('common.status.enabled') : t('common.status.disabled') }}</span>
               </div>
               <div class="info-item">
+                <span class="info-label">{{ $t('agent.mamboPlanning') }}:</span>
+                <span class="info-value">{{ mamboPreview.planningEnabled ? t('common.status.enabled') : t('common.status.disabled') }}</span>
+              </div>
+            </div>
+            <div class="mambo-preview-grid">
+              <div class="info-item">
+                <span class="info-label">{{ $t('agent.mamboMemory') }}:</span>
+                <span class="info-value">{{ mamboPreview.memoryEnabled ? t('common.status.enabled') : t('common.status.disabled') }}</span>
+              </div>
+              <div class="info-item">
                 <span class="info-label">{{ $t('agent.summarization') }}:</span>
                 <span class="info-value">{{ mamboPreview.summaryEnabled ? t('common.status.enabled') : t('common.status.disabled') }}</span>
+              </div>
+            </div>
+            <div v-if="mamboPreview.memoryEnabled && displayMemoryResources.length > 0" class="ext-item" style="margin-top: 12px;">
+              <div class="ext-label">{{ $t('agent.memoryResources') }}:</div>
+              <div class="ext-tags">
+                <el-tag v-for="res in displayMemoryResources" :key="res.id" size="small" type="success" effect="light">
+                  {{ res.name }}
+                </el-tag>
               </div>
             </div>
             <template v-if="mamboPreview.summaryEnabled && mamboPreview.summaryConfig">
@@ -173,6 +206,29 @@
                 </div>
               </div>
             </template>
+          </div>
+
+          <!-- Mambo 安全审核预览 -->
+          <div class="preview-section" v-if="selectedAgent.AgentType === 'Mambo' && securityReviewPreview">
+            <div class="section-title"><el-icon><WarningFilled /></el-icon> {{ $t('agent.securityReview') }}</div>
+            <div class="mambo-preview-grid">
+              <div class="info-item">
+                <span class="info-label">{{ $t('agent.securityReviewEnable') }}:</span>
+                <span class="info-value">{{ securityReviewPreview.enabled ? t('common.status.enabled') : t('common.status.disabled') }}</span>
+              </div>
+              <div class="info-item" v-if="securityReviewPreview.enabled && securityReviewPreview.model_name">
+                <span class="info-label">{{ $t('agent.securityReviewModel') }}:</span>
+                <span class="info-value">{{ securityReviewPreview.model_name }}</span>
+              </div>
+            </div>
+            <div v-if="securityReviewPreview.enabled && securityReviewPreview.review_tools && securityReviewPreview.review_tools.length > 0" class="ext-item" style="margin-top: 12px;">
+              <div class="ext-label">{{ $t('agent.securityReviewTools') }}:</div>
+              <div class="ext-tags">
+                <el-tag v-for="tool in securityReviewPreview.review_tools" :key="tool" size="small" type="danger" effect="light">
+                  {{ tool }}
+                </el-tag>
+              </div>
+            </div>
           </div>
 
         </div>
@@ -196,7 +252,7 @@ import { reactive, watch, computed, ref, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { User, Cpu, Document, MagicStick, Collection, Connection, Monitor, Setting } from '@element-plus/icons-vue';
+import { User, Cpu, Document, MagicStick, Collection, Connection, Monitor, Setting, WarningFilled } from '@element-plus/icons-vue';
 import { resolveFileUrl } from '@/services/electronUrl';
 
 import { useAgentStore } from '@/stores/agentStore';
@@ -283,9 +339,37 @@ const mamboPreview = computed(() => {
   if (!params) return null;
   return {
     generalPurpose: params.include_general_purpose ?? false,
+    planningEnabled: params.enable_planning ?? true,
+    memoryEnabled: params.enable_memory ?? false,
+    memoryResourceIds: params.memory_resource_ids ?? [],
     summaryEnabled: params.enable_summarization ?? false,
     summaryConfig: params.summarization_config ?? null,
   };
+});
+
+const securityReviewPreview = computed(() => {
+  if (!selectedAgent.value || selectedAgent.value.AgentType !== 'Mambo') return null;
+  const params = (selectedAgent.value as any).agentParameters;
+  if (!params?.security_review) return null;
+  const sr = params.security_review;
+  let modelName = '';
+  if (sr.model_id) {
+    const model = providerStore.allModels.find(m => m.id === sr.model_id);
+    modelName = model ? model.name : sr.model_id;
+  }
+  return {
+    enabled: sr.enabled ?? false,
+    model_id: sr.model_id ?? null,
+    model_name: modelName,
+    system_prompt: sr.system_prompt ?? null,
+    review_tools: sr.review_tools ?? null,
+  };
+});
+
+const displayMemoryResources = ref<Resource[]>([]);
+
+const defaultBackendId = computed(() => {
+  return (selectedAgent.value as any)?.defaultBackendId ?? null;
 });
 
 const mamboTriggerLabel = computed(() => {
@@ -333,6 +417,21 @@ watch(() => selectedAgent.value?.resourcePromptList, async (resourceIds) => {
   } catch (error) {
     console.error('Failed to load preview resources:', error);
     previewResources.value = [];
+  }
+}, { immediate: true });
+
+watch(() => mamboPreview.value?.memoryResourceIds, async (memoryIds) => {
+  if (!memoryIds || memoryIds.length === 0) {
+    displayMemoryResources.value = [];
+    return;
+  }
+  try {
+    const promises = memoryIds.map((id: string) => getResourceDetails(id).catch(() => null));
+    const results = await Promise.all(promises);
+    displayMemoryResources.value = results.filter(r => r !== null) as Resource[];
+  } catch (error) {
+    console.error('Failed to load memory resources:', error);
+    displayMemoryResources.value = [];
   }
 }, { immediate: true });
 
@@ -558,5 +657,11 @@ const openAgentSettings = (agentId: string) => {
   justify-content: center;
   align-items: center;
   height: 200px;
+}
+
+.default-star {
+  margin-left: 4px;
+  font-size: 10px;
+  color: var(--el-color-danger);
 }
 </style>

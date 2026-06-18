@@ -118,5 +118,8 @@ class UniversalGraphWorker(AbstractGenerateWorker):
                 # 子代理内部事件：mambo_agents SubAgentMiddleware 发射的 custom stream_writer 事件
                 if isinstance(event, dict) and event.get("type") == "subagent_event":
                     yield "subagent_event", event
+                # AI 安全审核事件：AutoSecurityReviewMiddleware 发射的 SecurityReviewPassedEvent / SecurityReviewFailedEvent
+                elif isinstance(event, dict) and event.get("type") in ("security_review_passed", "security_review_failed"):
+                    yield "security_review", event
             else:
                 pass

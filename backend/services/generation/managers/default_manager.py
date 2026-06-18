@@ -32,7 +32,7 @@ from backend.services.generation.managers.stream_handlers.base_handler import St
 from backend.services.generation.managers.stream_handlers.handlers import (
     HitlHandler, TextAndReasoningHandler, RoundClosureHandler,
     ToolExecutionHandler, ImageAndUsageHandler, FinishReasonMonitorHandler,
-    SubAgentEventHandler
+    SubAgentEventHandler, SecurityReviewHandler
 )
 from backend.services.generation.managers.stream_handlers.finish_reason_classifier import FinishReasonClassifier
 from backend.services.generation.core.llm_io import SummarizationEventInfo
@@ -63,6 +63,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
             TextAndReasoningHandler(),
             RoundClosureHandler(),
             SubAgentEventHandler(),
+            SecurityReviewHandler(),
             ToolExecutionHandler(),
             ImageAndUsageHandler(),
             FinishReasonMonitorHandler()

@@ -91,4 +91,11 @@ export default {
   securityReviewToolsPlaceholder: '例如: write, edit, execute。留空 = 所有 HITL 工具',
   securityReviewPrompt: '自定义审核提示词（可选）',
   securityReviewPromptPlaceholder: '留空使用内置默认安全审核提示词',
+  securityReviewPassed: 'AI 审核通过',
+  securityReviewFailed: 'AI 审核不通过',
+  securityReviewLabel: '安全审核',
+  securityReviewDesc: '此工具调用已通过 AI 安全审核，无需人工干预',
+  securityReviewFailedDesc: '此工具调用未通过 AI 安全审核，已升级人工确认',
+  securityReviewRiskLevel: '风险等级',
+  securityReviewReason: '审核理由',
 }

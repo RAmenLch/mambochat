@@ -33,6 +33,7 @@ class SubMessageType(str, Enum):
     ASK_USER = "AskUser"
     ERROR = "Error"
     TASK_SUBSTEP = "TaskSubStep"
+    SECURITY_REVIEW = "SecurityReview"
 
 
 class FileManagementType(str, Enum):

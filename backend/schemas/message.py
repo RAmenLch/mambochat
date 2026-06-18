@@ -242,6 +242,33 @@ class ReviewToolContent(BaseModel):
             raise ValueError(f"Invalid JSON for ReviewToolContent: {e}")
 
 
+class SecurityReviewContent(BaseModel):
+    """
+    专门用于处理 SubMessageType.SECURITY_REVIEW 的 content 字段结构。
+    当 AI 安全审核通过或拒绝工具调用时产生，不阻断执行，仅供事后核查。
+    """
+    tool_call_id: str = Field(..., description="被审核的工具调用 ID")
+    tool_name: str = Field(..., description="被审核的工具名称")
+    risk_level: str = Field(..., description="AI 评估的风险等级: low / medium / high / critical")
+    reason: str = Field(..., description="AI 审核理由")
+    passed: bool = Field(..., description="True=审核通过自动放行, False=审核不通过升级人工")
+
+    def to_json_string(self) -> str:
+        """序列化为存储在 DB content 字段的 JSON 字符串"""
+        return self.model_dump_json(exclude_none=False)
+
+    @classmethod
+    def from_json_string(cls, json_str: str) -> 'SecurityReviewContent':
+        """从 DB content 字符串反序列化"""
+        if not json_str:
+            raise ValueError("Empty content")
+        try:
+            data = json.loads(json_str)
+            return cls(**data)
+        except (json.JSONDecodeError, TypeError) as e:
+            raise ValueError(f"Invalid JSON for SecurityReviewContent: {e}")
+
+
 class AskUserContent(BaseModel):
     """
     专门用于处理 SubMessageType.ASK_USER 的 content 字段结构。

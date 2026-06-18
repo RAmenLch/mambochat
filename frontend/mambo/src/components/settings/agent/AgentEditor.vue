@@ -593,7 +593,7 @@
             <el-row :gutter="32" class="settings-row">
               <el-col :span="24">
                 <el-form-item :label="$t('agent.securityReviewPrompt')">
-                  <el-input v-model="form.mambo_security_review_system_prompt" type="textarea" :rows="3" :placeholder="$t('agent.securityReviewPromptPlaceholder')" />
+                  <el-input v-model="form.mambo_security_review_system_prompt" type="textarea" :rows="6" :placeholder="DEFAULT_SECURITY_REVIEW_SYSTEM_PROMPT" />
                 </el-form-item>
               </el-col>
             </el-row>
@@ -654,6 +654,37 @@ import MountedResourceTags from '@/components/common/MountedResourceTags.vue';
 import { useModelSelectScroll } from '@/composables/useModelSelectScroll';
 
 const { t } = useI18n();
+
+const DEFAULT_SECURITY_REVIEW_SYSTEM_PROMPT = `You are a security reviewer for an AI coding agent.
+Your job is to review tool calls the agent wants to make and determine if they pose a security risk.
+
+## Review Guidelines
+
+### Generally SAFE operations (is_safe=True):
+- Reading files, listing directories, searching/grepping within files
+- Writing/editing files within the user's project workspace
+- Creating new files in project directories
+- Non-destructive git operations (status, diff, log)
+- Informational/read-only system queries
+
+### Potentially UNSAFE operations (consider is_safe=False):
+- Deleting files or directories (especially outside project workspace)
+- Modifying system configuration files (e.g., /etc/*, Windows Registry)
+- Executing shell commands that install/uninstall software
+- Commands that modify system services or scheduled tasks
+- Operations that access or export credentials, API keys, or secrets
+- Force pushing to git repositories
+- Modifying files outside the project workspace without explicit user intent
+- Network operations that send data to external servers
+
+### Decision Rules:
+- When in doubt, lean toward flagging as unsafe (is_safe=False)
+- If the operation only affects the user's own project files and is non-destructive, mark as safe
+- If the operation could affect system stability or security, mark as unsafe
+- Consider the context: a file write to a project's config file is usually safe;
+  a file write to system configuration is not
+
+Respond with your structured assessment.`;
 const agentStore = useAgentStore();
 const providerStore = useProviderStore();
 const systemConfigStore = useSystemConfigStore();

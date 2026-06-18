@@ -21,6 +21,7 @@ export type SubMessageType =
   | 'AskUser'
   | 'Error'
   | 'TaskSubStep'
+  | 'SecurityReview'
 
 export interface SubMessageConfig {
   is_collapsed: boolean
@@ -194,6 +195,14 @@ export interface ToolDecision {
   type: 'approve' | 'edit' | 'reject'
   edited_action?: { name: string; args: Record<string, unknown> } | null
   message?: string | null
+}
+
+export interface SecurityReviewContent {
+  tool_call_id: string
+  tool_name: string
+  risk_level: 'low' | 'medium' | 'high' | 'critical'
+  reason: string
+  passed: boolean
 }
 
 export interface ReviewToolRequest {

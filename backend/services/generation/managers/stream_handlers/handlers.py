@@ -5,7 +5,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 
 from backend.models.base_model import generate_uuid
 from backend.schemas import enums as schemas_enums
-from backend.schemas.message import ErrorContent, ReviewToolContent, AskUserContent, TaskSubStepContent
+from backend.schemas.message import ErrorContent, ReviewToolContent, AskUserContent, TaskSubStepContent, SecurityReviewContent
 from backend.services.generation.core.instructions import (
     BaseInstruction, CreateSubMessage, AppendToSubMessage,
     UpdateSubMessageConfig, UpdateSubMessageStatus, UpdateSubMessageContent,
@@ -69,7 +69,13 @@ class HitlHandler(BaseStreamHandler):
                 reviewable_calls = [tc for tc in context.pending_hitl_tool_calls if context.hitl_config.get(tc.get("name"))]
 
                 for idx, action_req in enumerate(interrupt_data["action_requests"]):
-                    tool_call_id = reviewable_calls[idx].get("id") if idx < len(reviewable_calls) else (action_req.get("id") or generate_uuid())
+                    # 优先使用中断消息自带的 tool_call_id（security_review 中间件的 ActionRequest.tool_call_id）
+                    tool_call_id = action_req.get("tool_call_id")
+                    if not tool_call_id and idx < len(reviewable_calls):
+                        # 回退：按 index 从 pending 列表中取（兼容 deepagents 等不提供该字段的中间件）
+                        tool_call_id = reviewable_calls[idx].get("id")
+                    if not tool_call_id:
+                        tool_call_id = generate_uuid()
                     name = action_req.get("name")
                     target_tool = context.tool_map.get(name)
 
@@ -344,4 +350,35 @@ class SubAgentEventHandler(BaseStreamHandler):
             status=schemas_enums.MessageStatus.COMPLETED,
             initial_content=content,
             config=config,
+        )
+
+
+class SecurityReviewHandler(BaseStreamHandler):
+    """处理 AI 安全审核通过事件（custom stream 中的 security_review_passed）。
+
+    当 AutoSecurityReviewMiddleware 判定工具调用安全、自动放行时，
+    SecurityReviewPassedEvent 通过 get_stream_writer() 发射 custom 事件。
+    此 Handler 将其转为 SubMessageType.SECURITY_REVIEW 存入 DB，
+    前端据此展示 AI 审核标记并与对应 McpTool 按钮绑定。
+    """
+    async def handle(self, context: StreamContext) -> AsyncGenerator[BaseInstruction, None]:
+        if context.mode != "security_review":
+            return
+
+        event_data: dict = context.event
+        event_type: str = event_data.get("type", "")
+        content = SecurityReviewContent(
+            tool_call_id=event_data["tool_call_id"],
+            tool_name=event_data["tool_name"],
+            risk_level=event_data["risk_level"],
+            reason=event_data["reason"],
+            passed=(event_type == "security_review_passed"),
+        )
+        yield CreateSubMessage(
+            sub_message_id=generate_uuid(),
+            type=schemas_enums.SubMessageType.SECURITY_REVIEW.value,
+            sortOrder=2,
+            status=schemas_enums.MessageStatus.COMPLETED,
+            initial_content=content.to_json_string(),
+            config={"context_participation_length": 0},
         )

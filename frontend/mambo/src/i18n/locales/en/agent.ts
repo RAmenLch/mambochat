@@ -91,4 +91,11 @@ export default {
   securityReviewToolsPlaceholder: 'e.g. write, edit, execute. Leave empty = all HITL tools',
   securityReviewPrompt: 'Custom Review Prompt (optional)',
   securityReviewPromptPlaceholder: 'Leave empty to use the built-in security review prompt',
+  securityReviewPassed: 'AI Review Passed',
+  securityReviewFailed: 'AI Review Failed',
+  securityReviewLabel: 'Security Review',
+  securityReviewDesc: 'This tool call has passed AI security review. No human intervention required.',
+  securityReviewFailedDesc: 'This tool call failed AI security review and has been escalated for human approval.',
+  securityReviewRiskLevel: 'Risk Level',
+  securityReviewReason: 'Review Reason',
 }
