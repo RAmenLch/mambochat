@@ -465,7 +465,10 @@ class LLMInputDirector:
             latest_batch_decisions.sort(key=lambda x: x.interrupt_index)
 
             for item in latest_batch_decisions:
-                decision_dict = {"type": item.decision.type.value}
+                decision_dict = {
+                    "type": item.decision.type.value,
+                    "tool_call_id": item.tool_call_id,
+                }
                 if item.decision.type.value == "edit" and item.decision.edited_action:
                     decision_dict["edited_action"] = item.decision.edited_action.model_dump()
                 if item.decision.type.value == "reject":

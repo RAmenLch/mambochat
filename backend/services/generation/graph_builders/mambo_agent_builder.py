@@ -298,6 +298,7 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
                 model=review_model,
                 system_prompt=sr_config.system_prompt,
                 review_tools=review_tools,
+                review_mode="agent",
             )
 
         # --- Memory sources（长期记忆） ---
