@@ -30,7 +30,7 @@ import concurrent.futures
 import fnmatch
 import logging
 import posixpath
-import threading
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import PurePosixPath
@@ -197,7 +197,7 @@ class MamboResourceBackend(BackendProtocol):
         self._session_factory = session_factory
         self._edit_whitelist = edit_whitelist or frozenset()
         self._edit_blacklist = edit_blacklist or frozenset()
-        self._lock = threading.Lock()
+        self._lock = asyncio.Lock()
 
         self._cache: dict[str, _CachedNode] = {}
         self._load_subtree()
@@ -454,7 +454,7 @@ class MamboResourceBackend(BackendProtocol):
 
     async def als(self, path: str) -> LsResult:
         """Override parent: call async impl directly, serialized via lock."""
-        with self._lock:
+        async with self._lock:
             return await self._als_impl(path)
 
     async def _als_impl(self, path: str) -> LsResult:
@@ -511,7 +511,7 @@ class MamboResourceBackend(BackendProtocol):
         include_line_numbers: bool = False,
     ) -> ReadResult:
         """Override parent: call async impl directly, serialized via lock."""
-        with self._lock:
+        async with self._lock:
             return await self._aread_raw_impl(
                 file_path, offset, limit, include_line_numbers,
             )
@@ -526,7 +526,7 @@ class MamboResourceBackend(BackendProtocol):
         _apply_max_chars: bool = True,
     ) -> ReadResult:
         """Override parent: call aread_raw directly, serialized via lock."""
-        with self._lock:
+        async with self._lock:
             result = await self._aread_raw_impl(
                 file_path, offset, limit, include_line_numbers,
             )
@@ -612,7 +612,7 @@ class MamboResourceBackend(BackendProtocol):
         self, file_path: str, content: str, overwrite: bool = False,
     ) -> WriteResult:
         """Override parent: call async impl directly, serialized via lock."""
-        with self._lock:
+        async with self._lock:
             return await self._awrite_impl(file_path, content, overwrite)
 
     async def _awrite_impl(
@@ -865,7 +865,7 @@ class MamboResourceBackend(BackendProtocol):
         replace_all: bool = False,
     ) -> EditResult:
         """Override parent: call async impl directly, serialized via lock."""
-        with self._lock:
+        async with self._lock:
             return await self._aedit_impl(
                 file_path, old_str, new_str, replace_all=replace_all,
             )
@@ -941,27 +941,12 @@ class MamboResourceBackend(BackendProtocol):
         pattern: str,
         path: str = "/workspace",
         glob: str | None = None,
+        regex: bool = False,
     ) -> GrepResult:
-        return self._sync_bridge(
-            _GrepResult, self._agrep_impl, pattern, path, glob,
-        )
-
-    async def agrep(
-        self,
-        pattern: str,
-        path: str = "/workspace",
-        glob: str | None = None,
-    ) -> GrepResult:
-        """Override parent: call async impl directly, serialized via lock."""
-        with self._lock:
-            return await self._agrep_impl(pattern, path, glob)
-
-    async def _agrep_impl(
-        self,
-        pattern: str,
-        path: str = "/workspace",
-        glob: str | None = None,
-    ) -> GrepResult:
+        """Grep files under *path*.  Direct-text nodes are matched synchronously
+        without any DB I/O; only file-id nodes (FILE / KB_FILE) go through
+        the async bridge — and even then, concurrently via ``asyncio.gather``
+        rather than one-at-a-time."""
         try:
             norm = self._normalize_path(path)
         except WorkspacePathError as e:
@@ -969,7 +954,17 @@ class MamboResourceBackend(BackendProtocol):
 
         prefix = norm.rstrip("/") + "/"
 
+        compiled: re.Pattern | None = None
+        if regex:
+            try:
+                compiled = re.compile(pattern)
+            except re.error as e:
+                return GrepResult(error=f"Invalid regex pattern: {e}")
+
         matches: list[GrepMatch] = []
+
+        # --- Phase 1 (sync): grep direct-text nodes inline — zero DB, zero blocking ---
+        file_id_pairs: list[tuple[str, str]] = []  # (vpath, node_id)
         for vpath, node in self._cache.items():
             if node.is_dir:
                 continue
@@ -978,15 +973,134 @@ class MamboResourceBackend(BackendProtocol):
             if glob is not None and not fnmatch.fnmatch(node.name, glob):
                 continue
 
-            r = await self._aread_raw_impl(vpath, limit=500_000)
-            if r.error or r.content is None:
+            if _is_direct_text_type(node.resource_type):
+                for li, line in enumerate((node.content or "").splitlines(), start=1):
+                    if compiled is not None:
+                        if compiled.search(line):
+                            matches.append(
+                                GrepMatch(path=vpath, line=li, text=line[:2000])
+                            )
+                    else:
+                        if pattern in line:
+                            matches.append(
+                                GrepMatch(path=vpath, line=li, text=line[:2000])
+                            )
+            elif _is_file_id_type(node.resource_type):
+                file_id_pairs.append((vpath, node.id))
+
+        # --- Phase 2 (async): grep file-id nodes via concurrent DB reads ---
+        if file_id_pairs:
+            result = self._sync_bridge(
+                _GrepResult,
+                self._grep_file_id_nodes,
+                file_id_pairs, compiled, pattern,
+            )
+            if result.error:
+                return result
+            if result.matches:
+                matches.extend(result.matches)
+
+        return GrepResult(matches=matches)
+
+    async def _grep_file_id_nodes(
+        self,
+        pairs: list[tuple[str, str]],
+        compiled: re.Pattern | None,
+        pattern: str,
+    ) -> GrepResult:
+        """Async helper: concurrently read + grep file-id nodes.
+        Called from ``_sync_bridge`` inside a worker-thread event loop."""
+        reads = [
+            self._aread_raw_impl(vpath, limit=500_000)
+            for vpath, _ in pairs
+        ]
+        results = await asyncio.gather(*reads, return_exceptions=True)
+
+        matches: list[GrepMatch] = []
+        for (vpath, _), result in zip(pairs, results):
+            if isinstance(result, BaseException):
+                continue
+            if result.error or result.content is None:
                 continue
 
-            for li, line in enumerate(r.content.splitlines(), start=1):
-                if pattern in line:
-                    matches.append(
-                        GrepMatch(path=vpath, line=li, text=line[:2000])
-                    )
+            for li, line in enumerate(result.content.splitlines(), start=1):
+                if compiled is not None:
+                    if compiled.search(line):
+                        matches.append(
+                            GrepMatch(path=vpath, line=li, text=line[:2000])
+                        )
+                else:
+                    if pattern in line:
+                        matches.append(
+                            GrepMatch(path=vpath, line=li, text=line[:2000])
+                        )
+
+        return GrepResult(matches=matches)
+
+    async def agrep(
+        self,
+        pattern: str,
+        path: str = "/workspace",
+        glob: str | None = None,
+        regex: bool = False,
+    ) -> GrepResult:
+        """Override parent: call async impl directly, serialized via lock."""
+        async with self._lock:
+            return await self._agrep_impl(pattern, path, glob, regex)
+
+    async def _agrep_impl(
+        self,
+        pattern: str,
+        path: str = "/workspace",
+        glob: str | None = None,
+        regex: bool = False,
+    ) -> GrepResult:
+        try:
+            norm = self._normalize_path(path)
+        except WorkspacePathError as e:
+            return GrepResult(error=str(e))
+
+        prefix = norm.rstrip("/") + "/"
+
+        compiled: re.Pattern | None = None
+        if regex:
+            try:
+                compiled = re.compile(pattern)
+            except re.error as e:
+                return GrepResult(error=f"Invalid regex pattern: {e}")
+
+        matches: list[GrepMatch] = []
+
+        # --- Phase 1 (sync): grep direct-text nodes inline — zero DB calls ---
+        file_id_pairs: list[tuple[str, str]] = []
+        for vpath, node in self._cache.items():
+            if node.is_dir:
+                continue
+            if vpath != norm and not vpath.startswith(prefix):
+                continue
+            if glob is not None and not fnmatch.fnmatch(node.name, glob):
+                continue
+
+            if _is_direct_text_type(node.resource_type):
+                for li, line in enumerate((node.content or "").splitlines(), start=1):
+                    if compiled is not None:
+                        if compiled.search(line):
+                            matches.append(
+                                GrepMatch(path=vpath, line=li, text=line[:2000])
+                            )
+                    else:
+                        if pattern in line:
+                            matches.append(
+                                GrepMatch(path=vpath, line=li, text=line[:2000])
+                            )
+            elif _is_file_id_type(node.resource_type):
+                file_id_pairs.append((vpath, node.id))
+
+        # --- Phase 2 (async): grep file-id nodes concurrently ---
+        if file_id_pairs:
+            result = await self._grep_file_id_nodes(file_id_pairs, compiled, pattern)
+            if result.matches:
+                matches.extend(result.matches)
 
         return GrepResult(matches=matches)
 
@@ -1001,7 +1115,7 @@ class MamboResourceBackend(BackendProtocol):
 
     async def aglob(self, pattern: str, path: str = "/workspace") -> GlobResult:
         """Override parent: call async impl directly, serialized via lock."""
-        with self._lock:
+        async with self._lock:
             return await self._aglob_impl(pattern, path)
 
     async def _aglob_impl(
