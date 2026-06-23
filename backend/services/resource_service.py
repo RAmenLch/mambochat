@@ -133,8 +133,11 @@ async def validate_move_operation(db: AsyncSession, move_request: schemas.Resour
 
     # 收集移动到目标文件夹的 item 名称，检测是否与目标文件夹中已有资源重名
     if items:
-        # 目标文件夹中已有的子资源名称
-        target_child_names = await resource_crud.get_child_names_by_parent_id(db, target_parent_id)
+        # 排除被移动的资源自身（同一文件夹内排序场景），只检查与其他已有资源的名称冲突
+        moved_ids = set(move_request.item_ids)
+        target_child_names = await resource_crud.get_child_names_by_parent_id(
+            db, target_parent_id, exclude_ids=moved_ids
+        )
         target_name_set = set(target_child_names)
         incoming_names = {item.name for item in items}
         conflicts = target_name_set & incoming_names

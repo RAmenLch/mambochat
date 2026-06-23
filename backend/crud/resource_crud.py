@@ -93,15 +93,23 @@ async def get_resource_by_name_and_parent(
     return result.scalars().first()
 
 
-async def get_child_names_by_parent_id(db: AsyncSession, parent_id: Optional[str]) -> List[str]:
+async def get_child_names_by_parent_id(
+        db: AsyncSession,
+        parent_id: Optional[str],
+        exclude_ids: Optional[set] = None
+) -> List[str]:
     """
     获取指定父节点下所有直接子资源的名称列表，用于冲突检测。
+    可选排除指定 ID 的资源（如移动时排除被移动项自身）。
     """
     stmt = select(resource_model.Resource.name)
     if parent_id is None:
         stmt = stmt.filter(resource_model.Resource.parentId.is_(None))
     else:
         stmt = stmt.filter(resource_model.Resource.parentId == parent_id)
+
+    if exclude_ids:
+        stmt = stmt.filter(resource_model.Resource.id.notin_(exclude_ids))
 
     result = await db.execute(stmt)
     return result.scalars().all()
