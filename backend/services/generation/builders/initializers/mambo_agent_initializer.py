@@ -313,14 +313,20 @@ class MamboAgentInitializer(AbstractAgentInitializer):
                         self.hitl_interrupt_on["execute"] = True
                     break
 
-        # --- Mambo 专属参数：从 DB agentParameters 解析 ---
-        mambo_params: Dict[str, Any] = self.agent.agentParameters or {}
-        include_gp = mambo_params.get("include_general_purpose", False)
-        enable_sum = mambo_params.get("enable_summarization", False)
-        sum_config: Optional[Dict[str, Any]] = mambo_params.get("summarization_config", None)
-        enable_planning = mambo_params.get("enable_planning", True)
-        enable_memory = mambo_params.get("enable_memory", False)
-        memory_resource_ids: List[str] = mambo_params.get("memory_resource_ids", [])
+        # --- Mambo 专属参数：从 DB agentParameters 解析（结构化访问） ---
+        from backend.schemas.agent import MamboAgentParametersSchema
+        raw = self.agent.agentParameters or {}
+        mambo_params: MamboAgentParametersSchema = (
+            MamboAgentParametersSchema.model_validate(raw)
+            if isinstance(raw, dict)
+            else raw  # 已是结构化实例（一般不会发生，防御）
+        )
+        include_gp = mambo_params.include_general_purpose
+        enable_sum = mambo_params.enable_summarization
+        sum_config = mambo_params.summarization_config
+        enable_planning = mambo_params.enable_planning
+        enable_memory = mambo_params.enable_memory
+        memory_resource_ids = mambo_params.memory_resource_ids
 
         # 构建 memory_resource_roots（类似 skill_resource_roots）
         memory_roots: Dict[str, str] = {}
@@ -330,13 +336,13 @@ class MamboAgentInitializer(AbstractAgentInitializer):
         # --- 安全审核配置解析 ---
         security_review_config: Optional[SecurityReviewAgentConfig] = None
         security_review_llm_config: Optional[ModelConfig] = None
-        sec_review_raw = mambo_params.get("security_review", None)
-        if sec_review_raw and isinstance(sec_review_raw, dict) and sec_review_raw.get("enabled"):
+        sr = mambo_params.security_review
+        if sr and sr.enabled:
             security_review_config = SecurityReviewAgentConfig(
                 enabled=True,
-                model_id=sec_review_raw.get("model_id"),
-                system_prompt=sec_review_raw.get("system_prompt"),
-                review_tools=sec_review_raw.get("review_tools"),
+                model_id=sr.model_id,
+                system_prompt=sr.system_prompt,
+                review_tools=sr.review_tools,
             )
             if security_review_config.model_id:
                 sr_model = await provider_crud.get_model(self.db, security_review_config.model_id)
@@ -391,7 +397,7 @@ class MamboAgentInitializer(AbstractAgentInitializer):
             skill_resource_roots=skill_resource_roots if skill_resource_roots else None,
             include_general_purpose=include_gp,
             enable_summarization=enable_sum,
-            summarization_config=sum_config if enable_sum else None,
+            summarization_config=sum_config.model_dump() if (enable_sum and sum_config) else None,
             enable_planning=enable_planning,
             memory_resource_roots=memory_roots if memory_roots else None,
             security_review_config=security_review_config,

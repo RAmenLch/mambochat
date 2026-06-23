@@ -678,7 +678,7 @@ import { useBackendStore } from '@/stores/backendStore'; // [新增] 引入 Back
 
 import { uploadAgentAvatar, deleteAgentAvatar, getAgent, getAgentHitlTools } from '@/api/agentService';
 import { getResourceDetails } from '@/api/resourceService';
-import type { Resource, Agent, HitlToolInfo } from '@/api/types';
+import type { Resource, Agent, HitlToolInfo, MamboAgentParameters } from '@/api/types';
 
 import AvatarUploader from '../AvatarUploader.vue';
 import ResourceSelectorDialog from '@/components/common/dialogs/ResourceSelectorDialog.vue';
@@ -884,8 +884,16 @@ watch(agentData, async (newVal) => {
     form.backendIds = newVal.backendIds ? [...newVal.backendIds] : [];
     form.defaultBackendId = (newVal as any).defaultBackendId || null;
 
-    // Mambo 专属配置还原
-    const mamboParams: Record<string, any> = newVal.agentParameters ? JSON.parse(JSON.stringify(newVal.agentParameters)) : {};
+    // Mambo 专属配置还原（结构化访问）
+    const mamboParams: MamboAgentParameters = newVal.agentParameters ?? {
+      include_general_purpose: false,
+      enable_planning: true,
+      enable_memory: false,
+      enable_summarization: false,
+      memory_resource_ids: [],
+      summarization_config: null,
+      security_review: null,
+    };
     form.mambo_general_purpose = mamboParams.include_general_purpose ?? false;
     form.mambo_planning_enabled = mamboParams.enable_planning ?? true;
     form.mambo_memory_enabled = mamboParams.enable_memory ?? false;
@@ -1105,34 +1113,34 @@ async function handleDeleteAvatar() {
   }
 }
 
-function buildMamboAgentParameters(): Record<string, any> | null {
-  const params: Record<string, any> = {
+function buildMamboAgentParameters(): MamboAgentParameters | null {
+  const params = {
     include_general_purpose: form.mambo_general_purpose,
     enable_planning: form.mambo_planning_enabled,
     enable_memory: form.mambo_memory_enabled,
     enable_summarization: form.mambo_summary_enabled,
+    memory_resource_ids: form.mambo_memory_enabled
+      ? [...form.mambo_memory_resource_ids]
+      : [] as string[],
+    summarization_config: form.mambo_summary_enabled
+      ? {
+          trigger_type: form.mambo_summary_trigger_type,
+          trigger_value: form.mambo_summary_trigger_value,
+          keep_type: form.mambo_summary_keep_type,
+          keep_value: form.mambo_summary_keep_value,
+          offload_to_backend: form.mambo_summary_offload,
+        }
+      : null,
+    security_review: form.mambo_security_review_enabled
+      ? {
+          enabled: true,
+          model_id: form.mambo_security_review_model_id || null,
+          system_prompt: form.mambo_security_review_system_prompt || null,
+          review_tools: form.mambo_security_review_tools.length > 0 ? [...form.mambo_security_review_tools] : null,
+        }
+      : null,
   };
-  if (form.mambo_memory_enabled) {
-    params.memory_resource_ids = [...form.mambo_memory_resource_ids];
-  }
-  if (form.mambo_summary_enabled) {
-    params.summarization_config = {
-      trigger_type: form.mambo_summary_trigger_type,
-      trigger_value: form.mambo_summary_trigger_value,
-      keep_type: form.mambo_summary_keep_type,
-      keep_value: form.mambo_summary_keep_value,
-      offload_to_backend: form.mambo_summary_offload,
-    };
-  }
-  if (form.mambo_security_review_enabled) {
-    params.security_review = {
-      enabled: true,
-      model_id: form.mambo_security_review_model_id || null,
-      system_prompt: form.mambo_security_review_system_prompt || null,
-      review_tools: form.mambo_security_review_tools.length > 0 ? [...form.mambo_security_review_tools] : null,
-    };
-  }
-  return Object.keys(params).length > 0 ? params : null;
+  return params;
 }
 
 async function handleSave() {

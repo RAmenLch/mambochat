@@ -2,6 +2,31 @@
 export type AgentItemType = 'agent' | 'folder';
 export type AgentType = 'ReActAgent' | 'DeepAgent' | 'Mambo';
 
+export interface SummarizationConfig {
+  trigger_type: 'fraction' | 'tokens' | 'messages'
+  trigger_value: number
+  keep_type: 'fraction' | 'tokens' | 'messages'
+  keep_value: number
+  offload_to_backend: boolean
+}
+
+export interface SecurityReviewConfig {
+  enabled: boolean
+  model_id?: string | null
+  system_prompt?: string | null
+  review_tools?: string[] | null
+}
+
+export interface MamboAgentParameters {
+  include_general_purpose: boolean
+  enable_planning: boolean
+  enable_memory: boolean
+  enable_summarization: boolean
+  memory_resource_ids: string[]
+  summarization_config?: SummarizationConfig | null
+  security_review?: SecurityReviewConfig | null
+}
+
 export interface Agent {
   id: string;
   createdAt: string;
@@ -14,7 +39,7 @@ export interface Agent {
   AgentType: AgentType;
   systemPrompt: string | null;
   modelParameters: Record<string, any> | null;
-  agentParameters: Record<string, any> | null;
+  agentParameters: MamboAgentParameters | null;
   aiModelId: string | null;
   agentAvatarId: string | null;
   agentAvatarUrl: string | null;
@@ -23,13 +48,6 @@ export interface Agent {
   subAgents: string[] | null;
   backendIds: string[] | null;
   defaultBackendId: string | null;
-}
-
-export interface SecurityReviewConfig {
-  enabled: boolean
-  model_id?: string | null
-  system_prompt?: string | null
-  review_tools?: string[] | null
 }
 
 export interface AgentCreate {
@@ -41,7 +59,7 @@ export interface AgentCreate {
   AgentType?: AgentType;
   systemPrompt?: string | null;
   modelParameters?: Record<string, any> | null;
-  agentParameters?: Record<string, any> | null;
+  agentParameters?: MamboAgentParameters | null;
   aiModelId?: string | null;
   agentAvatarId?: string | null;
   resourcePromptList?: string[] | null;
@@ -49,6 +67,7 @@ export interface AgentCreate {
   subAgents?: string[] | null;
   backendIds: string[] | null;
   defaultBackendId?: string | null;
+  // 转运字段（Router 层合并进 agentParameters）
   memoryResourceIds?: string[] | null;
   securityReviewConfig?: SecurityReviewConfig | null;
 }

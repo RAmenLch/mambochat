@@ -9,6 +9,9 @@ from backend.models import agent_model
 from backend import schemas
 from backend.schemas.enums import MoveAction, AgentTypeEnum
 
+# Agent ORM 表的所有列名集合（用于 update_agent 显式过滤，替代 hasattr 鸭子判断）
+_AGENT_COLUMNS: frozenset[str] = frozenset(agent_model.Agent.__table__.columns.keys())
+
 
 async def check_subagent_cycle(db: AsyncSession, target_agent_id: str, new_subagents: List[str]) -> bool:
     """检查更新 subAgents 是否会引起循环依赖"""
@@ -100,7 +103,7 @@ async def create_agent(db: AsyncSession, agent: schemas.AgentCreate) -> agent_mo
         agent.sortOrder = (max_order if max_order is not None else -1) + 1
 
     # agent_model 中的复杂字段已定义为 JSON，SQLAlchemy 会自动处理序列化
-    agent_data = agent.model_dump()
+    agent_data = {k: v for k, v in agent.model_dump().items() if k in _AGENT_COLUMNS}
 
     db_agent = agent_model.Agent(**agent_data)
     db.add(db_agent)
@@ -128,9 +131,9 @@ async def update_agent(db: AsyncSession, agent_id: str, agent_update: schemas.Ag
             if atype not in (AgentTypeEnum.DEEP.value, AgentTypeEnum.MAMBO.value):
                 raise ValueError("ReActAgent does not support sub-agents. Only DeepAgent or Mambo can mount sub-agents.")
 
-    for key, value in update_data.items():
-        if hasattr(db_agent, key):
-            setattr(db_agent, key, value)
+    # 仅更新实际 ORM 列，自动过滤掉 memoryResourceIds / securityReviewConfig 等转运字段
+    for key in _AGENT_COLUMNS & update_data.keys():
+        setattr(db_agent, key, update_data[key])
 
     await db.commit()
     await db.refresh(db_agent)
