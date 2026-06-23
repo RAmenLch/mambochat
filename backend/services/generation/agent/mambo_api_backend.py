@@ -370,6 +370,8 @@ class MamboAPIBackend(BackendProtocol):
     def grep(
         self, pattern: str, path: str = "/", glob: str | None = None,
         regex: bool = False,
+        offset: int = 0,
+        limit: int | None = None,
     ) -> GrepResult:
         import asyncio
         import concurrent.futures
@@ -382,7 +384,7 @@ class MamboAPIBackend(BackendProtocol):
         with concurrent.futures.ThreadPoolExecutor() as pool:
             try:
                 return pool.submit(
-                    asyncio.run, self.agrep(pattern, path, glob, regex)
+                    asyncio.run, self.agrep(pattern, path, glob, regex, offset, limit)
                 ).result()
             except Exception as e:
                 return GrepResult(error=str(e))
@@ -390,13 +392,16 @@ class MamboAPIBackend(BackendProtocol):
     async def agrep(
         self, pattern: str, path: str = "/", glob: str | None = None,
         regex: bool = False,
+        offset: int = 0,
+        limit: int | None = None,
     ) -> GrepResult:
         search_path = self._normalize_path(path) if path else "/"
         result = await self._run_ws_call(
             "grep",
             self._call,
             "grep_files",
-            {"pattern": pattern, "path": search_path, "glob": glob, "regex": regex},
+            {"pattern": pattern, "path": search_path, "glob": glob, "regex": regex,
+             "offset": offset, "limit": limit},
         )
         if result is None:
             return GrepResult(error="Connection to API client failed")

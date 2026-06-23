@@ -84,11 +84,27 @@ class _NonExecutableBackendProxy(TreeBackendProtocol):
     async def aedit(self, file_path: str, old_string: str, new_string: str, replace_all: bool = False):
         return await self._inner.aedit(file_path, old_string, new_string, replace_all)
 
-    def grep(self, pattern: str, path: str | None = None, glob: str | None = None):
-        return self._inner.grep(pattern, path, glob)
+    def grep(
+        self,
+        pattern: str,
+        path: str | None = None,
+        glob: str | None = None,
+        regex: bool = False,
+        offset: int = 0,
+        limit: int | None = None,
+    ):
+        return self._inner.grep(pattern, path, glob, regex, offset, limit)
 
-    async def agrep(self, pattern: str, path: str | None = None, glob: str | None = None):
-        return await self._inner.agrep(pattern, path, glob)
+    async def agrep(
+        self,
+        pattern: str,
+        path: str | None = None,
+        glob: str | None = None,
+        regex: bool = False,
+        offset: int = 0,
+        limit: int | None = None,
+    ):
+        return await self._inner.agrep(pattern, path, glob, regex, offset, limit)
 
     def glob(self, pattern: str, path: str = "/"):
         return self._inner.glob(pattern, path)

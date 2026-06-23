@@ -944,6 +944,8 @@ class MamboResourceBackend(BackendProtocol):
         path: str = "/workspace",
         glob: str | None = None,
         regex: bool = False,
+        offset: int = 0,
+        limit: int | None = None,
     ) -> GrepResult:
         """Grep files under *path*.  Direct-text nodes are matched synchronously
         without any DB I/O; only file-id nodes (FILE / KB_FILE) go through
@@ -1002,7 +1004,8 @@ class MamboResourceBackend(BackendProtocol):
             if result.matches:
                 matches.extend(result.matches)
 
-        return GrepResult(matches=matches)
+        # Apply offset / limit slicing
+        return self._apply_grep_limit(matches, offset, limit)
 
     async def _grep_file_id_nodes(
         self,
@@ -1045,10 +1048,12 @@ class MamboResourceBackend(BackendProtocol):
         path: str = "/workspace",
         glob: str | None = None,
         regex: bool = False,
+        offset: int = 0,
+        limit: int | None = None,
     ) -> GrepResult:
         """Override parent: call async impl directly, serialized via lock."""
         async with self._lock:
-            return await self._agrep_impl(pattern, path, glob, regex)
+            return await self._agrep_impl(pattern, path, glob, regex, offset, limit)
 
     async def _agrep_impl(
         self,
@@ -1056,6 +1061,8 @@ class MamboResourceBackend(BackendProtocol):
         path: str = "/workspace",
         glob: str | None = None,
         regex: bool = False,
+        offset: int = 0,
+        limit: int | None = None,
     ) -> GrepResult:
         try:
             norm = self._normalize_path(path)
@@ -1104,7 +1111,8 @@ class MamboResourceBackend(BackendProtocol):
             if result.matches:
                 matches.extend(result.matches)
 
-        return GrepResult(matches=matches)
+        # Apply offset / limit slicing
+        return self._apply_grep_limit(matches, offset, limit)
 
     # ==================================================================
     # Core: glob  (async-first: _aglob_impl)

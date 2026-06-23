@@ -8,23 +8,20 @@ ARG PYPI_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 ARG PYPI_EXTRA_URL=https://pypi.org/simple/
 
 # 1. 安装 uv
-RUN pip install --no-cache-dir uv -i ${PYPI_INDEX_URL} --extra-index-url ${PYPI_EXTRA_URL}
+RUN pip install --no-cache-dir uv -i ${PYPI_INDEX_URL}
 
 # 2. 准备环境依赖
 WORKDIR /app
 
-# 2.1 安装 Backend 依赖
-# --extra-index-url 确保国内镜像没有的包（如 mambo-agents 预发布版）自动回退到 PyPI 官方源
+# 2.1 安装 Backend 依赖（mambo-agents 预发布版由 pyproject.toml 的 [tool.uv.sources] 精准指向 PyPI 官方源）
 COPY backend/pyproject.toml /app/backend/pyproject.toml
 RUN uv pip install --system --no-cache -r /app/backend/pyproject.toml \
-    -i ${PYPI_INDEX_URL} \
-    --extra-index-url ${PYPI_EXTRA_URL}
+    -i ${PYPI_INDEX_URL}
 
 # 2.2 安装 ddgs MCP 依赖
 COPY MCP_SERVER/ddgs/pyproject.toml /app/MCP_SERVER/ddgs/pyproject.toml
 RUN uv pip install --system --no-cache -r /app/MCP_SERVER/ddgs/pyproject.toml \
-    -i ${PYPI_INDEX_URL} \
-    --extra-index-url ${PYPI_EXTRA_URL}
+    -i ${PYPI_INDEX_URL}
 
 
 
