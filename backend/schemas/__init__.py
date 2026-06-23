@@ -31,4 +31,4 @@ from .resource import (Resource, ResourceVersion,
                        SkillCreate,SkillValidationResult,SkillImportResponse,SkillImportResultItem,GithubImportRequest
                        )
 
-from .agent import (AgentBase,AgentCreate,AgentUpdate,AgentResponse,AgentMoveRequest)
+from .agent import (AgentBase,AgentCreate,AgentUpdate,AgentResponse,AgentMoveRequest,SecurityReviewConfigSchema,HitlToolInfo)

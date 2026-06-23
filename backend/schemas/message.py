@@ -316,6 +316,7 @@ class TaskSubStepContent(BaseModel):
     tool_args: Optional[Dict[str, Any]] = Field(None, description="工具参数（tool_call 时）")
     step_order: int = Field(0, description="同组内的序号，前端排序用")
     description: Optional[str] = Field(None, description="task 描述（仅首条 step 携带）")
+    sub_tool_call_id: Optional[str] = Field(None, description="子代理内部工具调用的 tool_call_id，用于绑定 AI 审核/中断审核事件")
 
     def to_json_string(self) -> str:
         """序列化为存储在 DB content 字段的 JSON 字符串"""

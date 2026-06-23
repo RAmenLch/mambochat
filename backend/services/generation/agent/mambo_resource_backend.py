@@ -83,6 +83,7 @@ class _CachedNode:
     is_dir: bool
     resource_type: str | None
     content: str | None
+    desc: str
     size: int
     modified_at: str
 
@@ -481,6 +482,7 @@ class MamboResourceBackend(BackendProtocol):
                 is_dir=node.is_dir,
                 size=node.size,
                 modified_at=node.modified_at,
+                desc=node.desc,
             ))
 
         entries.sort(key=lambda fi: (not fi.is_dir, fi.path))
@@ -1141,6 +1143,7 @@ class MamboResourceBackend(BackendProtocol):
                 is_dir=False,
                 size=node.size,
                 modified_at=node.modified_at,
+                desc=node.desc,
             ))
 
         matched.sort(key=lambda fi: fi.path)
@@ -1195,6 +1198,7 @@ def _resource_to_node(res: resource_model.Resource) -> _CachedNode:
         is_dir=res.itemType == ResourceItemType.FOLDER.value,
         resource_type=res.resourceType,
         content=content,
+        desc=getattr(res, "description", None) or "",
         size=size,
         modified_at=modified,
     )

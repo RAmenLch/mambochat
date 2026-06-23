@@ -17,6 +17,12 @@ class SecurityReviewConfigSchema(BaseModel):
     review_tools: Optional[List[str]] = Field(None)
 
 
+class HitlToolInfo(BaseModel):
+    """HITL 可审核工具信息（用于前端审核范围选择器）"""
+    name: str = Field(..., description="工具名")
+    source: str = Field(..., description="工具来源: 'mcp' 或 'backend'")
+
+
 class AgentBase(BaseModel):
     """Agent 基础 Schema，定义通用字段与严格的数据类型"""
     name: str = Field(..., max_length=100, description="Agent 或文件夹名称")

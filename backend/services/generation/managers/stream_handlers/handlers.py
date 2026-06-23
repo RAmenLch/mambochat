@@ -235,10 +235,18 @@ class SubAgentEventHandler(BaseStreamHandler):
     """处理子代理内部流式事件（custom stream 中的 subagent_event）。
 
     每个 subagent_event 来自 mambo_agents 的 SubAgentMiddleware，
-    携带子代理的推理、文本生成、工具调用和工具结果。
+    携带子代理的推理、文本生成、工具调用和工具结果 — 以及子代理中间件的
+    custom 事件（如 AutoSecurityReviewMiddleware 的安全审核通知）。
+
     所有子消息标记 config.task_group_id（= tool_call_id）+ context_participation_length=0，
     前端据此分组并排除出上下文。
     """
+
+    # subagent custom event types that map to SecurityReview submessages
+    _SECURITY_REVIEW_TYPES: frozenset[str] = frozenset({
+        "security_review_passed",
+        "security_review_failed",
+    })
 
     async def handle(self, context: StreamContext) -> AsyncGenerator[BaseInstruction, None]:
         if context.mode != "subagent_event":
@@ -247,8 +255,32 @@ class SubAgentEventHandler(BaseStreamHandler):
         event_data: dict = context.event
         tool_call_id: str = event_data["tool_call_id"]
         subagent_type: str = event_data["subagent_type"]
-        chunk: dict = event_data["chunk"]  # {"agent": {...}} 或 {"tools": {...}}
+        chunk: dict = event_data["chunk"]
 
+        # --- Branch: subagent custom events (e.g. security_review) ---
+        chunk_type = chunk.get("type", "")
+        if chunk_type in self._SECURITY_REVIEW_TYPES:
+            content = SecurityReviewContent(
+                tool_call_id=chunk["tool_call_id"],
+                tool_name=chunk["tool_name"],
+                risk_level=chunk["risk_level"],
+                reason=chunk["reason"],
+                passed=(chunk_type == "security_review_passed"),
+            )
+            yield CreateSubMessage(
+                sub_message_id=generate_uuid(),
+                type=schemas_enums.SubMessageType.SECURITY_REVIEW.value,
+                sortOrder=2,
+                status=schemas_enums.MessageStatus.COMPLETED,
+                initial_content=content.to_json_string(),
+                config={
+                    "context_participation_length": 0,
+                    "task_group_id": tool_call_id,
+                },
+            )
+            return
+
+        # --- Branch: updates chunks (model / tools state) ---
         counter = context.subagent_step_counters.get(tool_call_id, 0)
         instructions, counter = self._build_instructions(chunk, tool_call_id, subagent_type, counter)
 
@@ -309,6 +341,7 @@ class SubAgentEventHandler(BaseStreamHandler):
                         tool_name=name,
                         tool_args=args if isinstance(args, dict) else {},
                         step_order=idx,
+                        sub_tool_call_id=tc.get("id"),
                     )
                     instructions.append(self._make_create(step.to_json_string(), idx, tool_call_id))
 
@@ -325,6 +358,7 @@ class SubAgentEventHandler(BaseStreamHandler):
                     content=result_text,
                     tool_name=msg.name or "",
                     step_order=idx,
+                    sub_tool_call_id=getattr(msg, "tool_call_id", None),
                 )
                 instructions.append(self._make_create(step.to_json_string(), idx, tool_call_id))
 

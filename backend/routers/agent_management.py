@@ -4,13 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
-from backend.crud import agent_crud, file_crud
+from backend.crud import agent_crud, file_crud, mcp_crud, backend_crud
 from backend import schemas
 from backend.models import agent_model
 from backend.database import get_db
 from backend.services.file_service import FileService
 from backend.services.resource_service import validate_mounted_resources, validate_memory_resources
-from backend.schemas.enums import FileManagementType
+from backend.schemas.enums import FileManagementType, ToolReviewMode
 
 router = APIRouter()
 
@@ -169,6 +169,51 @@ async def move_agents(move_request: schemas.AgentMoveRequest, db: AsyncSession =
     if not success:
         raise HTTPException(status_code=400, detail="Move operation failed")
     return {"message": "Move successful"}
+
+
+@router.get(
+    "/agents/{agent_id}/hitl-tools",
+    response_model=List[schemas.HitlToolInfo],
+    summary="获取 Agent 的可 AI 审核工具列表"
+)
+async def get_agent_hitl_tools(agent_id: str, db: AsyncSession = Depends(get_db)):
+    """返回当前 agent 已纳入 HITL（可被 AI 安全审核）的工具名列表。
+
+    工具来源包括：
+    - MCP 工具中 review_mode 为 require_review 的
+    - 默认 Backend 中 execute 工具开启了 require_review 的
+
+    前端「审核范围」选择器应基于此列表展示可选项。
+    """
+    db_agent = await agent_crud.get_agent(db, agent_id=agent_id)
+    if db_agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    tools: List[schemas.HitlToolInfo] = []
+    seen: set[str] = set()
+
+    # 来源1: MCP 工具中 review_mode == REQUIRE_REVIEW 的
+    mcp_ids = db_agent.enabledMcpIds or []
+    if mcp_ids:
+        mcp_tools = await mcp_crud.get_tools_by_server_ids(db, mcp_ids)
+        for tool in mcp_tools:
+            if tool.review_mode == ToolReviewMode.REQUIRE_REVIEW.value and tool.name not in seen:
+                tools.append(schemas.HitlToolInfo(name=tool.name, source="mcp"))
+                seen.add(tool.name)
+
+    # 来源2: 默认 Backend 的 execute.require_review
+    if db_agent.defaultBackendId and db_agent.backendIds:
+        backends_db = await backend_crud.get_backends_by_ids(db, db_agent.backendIds)
+        for b in backends_db:
+            if b.id == db_agent.defaultBackendId and b.tools_config:
+                exec_cfg = b.tools_config.get("execute", {})
+                if exec_cfg.get("enabled") and exec_cfg.get("require_review"):
+                    if "execute" not in seen:
+                        tools.append(schemas.HitlToolInfo(name="execute", source="backend"))
+                        seen.add("execute")
+                    break
+
+    return tools
 
 
 @router.put(

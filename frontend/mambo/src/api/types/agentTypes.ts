@@ -51,6 +51,11 @@ export interface ChatDuplicateRequest {
   up_to_message_id?: string | null;
 }
 
+export interface HitlToolInfo {
+  name: string;
+  source: 'mcp' | 'backend';
+}
+
 export interface ChatArchiveRequest {
   item_ids: string[];
   new_folder_name: string;

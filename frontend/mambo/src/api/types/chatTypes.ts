@@ -250,6 +250,8 @@ export interface TaskSubStepContent {
   tool_args?: Record<string, unknown> | null
   step_order: number
   description?: string | null
+  /** 子代理内部工具调用的 tool_call_id，用于绑定 AI 审核 / 中断审核事件 */
+  sub_tool_call_id?: string | null
 }
 
 // --- Search Types (Chat) ---

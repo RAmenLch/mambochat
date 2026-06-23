@@ -161,6 +161,8 @@
         <div class="tool-detail-container">
           <TaskSubAgentPanel
             :steps="activeTaskSubSteps"
+            :security-review-map="securityReviewMap"
+            :review-tool-map="reviewToolMap"
           />
         </div>
       </el-tab-pane>
@@ -342,6 +344,22 @@ const securityReviewMap = computed(() => {
     if (sm.type === 'SecurityReview') {
       try {
         const content = JSON.parse(sm.content) as SecurityReviewContent;
+        map.set(content.tool_call_id, content);
+      } catch { /* ignore */ }
+    }
+  }
+  return map;
+});
+
+/** parentMessage 中所有 ReviewTool 子消息的 tool_call_id → content 映射 */
+const reviewToolMap = computed(() => {
+  const map = new Map<string, ReviewToolContent>();
+  const msg = liveParentMessage.value;
+  if (!msg) return map;
+  for (const sm of msg.sub_messages) {
+    if (sm.type === 'ReviewTool') {
+      try {
+        const content = JSON.parse(sm.content) as ReviewToolContent;
         map.set(content.tool_call_id, content);
       } catch { /* ignore */ }
     }

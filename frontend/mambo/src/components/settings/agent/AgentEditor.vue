@@ -585,7 +585,40 @@
             <el-row :gutter="32" class="settings-row">
               <el-col :span="24">
                 <el-form-item :label="$t('agent.securityReviewTools')">
-                  <el-input v-model="mambo_security_review_tools_str" :placeholder="$t('agent.securityReviewToolsPlaceholder')" />
+                  <el-select
+                    v-model="form.mambo_security_review_tools"
+                    multiple
+                    filterable
+                    :placeholder="$t('agent.securityReviewToolsPlaceholder')"
+                    style="width: 100%"
+                    :no-data-text="$t('agent.securityReviewToolsEmpty')"
+                  >
+                    <el-option
+                      v-for="tool in hitlToolOptions"
+                      :key="tool.name"
+                      :label="tool.name"
+                      :value="tool.name"
+                    >
+                      <span style="float: left">{{ tool.name }}</span>
+                      <span style="float: right; color: var(--el-text-color-secondary); font-size: 12px; margin-left: 12px;">
+                        {{ tool.source === 'backend' ? 'Backend' : 'MCP' }}
+                      </span>
+                    </el-option>
+                  </el-select>
+                  <div v-if="staleToolNames.length > 0" class="stale-tools-warning">
+                    <el-icon><WarningFilled /></el-icon>
+                    <span>{{ $t('agent.securityReviewToolsStale') }}：</span>
+                    <el-tag
+                      v-for="name in staleToolNames"
+                      :key="name"
+                      type="warning"
+                      size="small"
+                      closable
+                      @close="removeReviewTool(name)"
+                    >
+                      <s>{{ name }}</s>
+                    </el-tag>
+                  </div>
                 </el-form-item>
               </el-col>
             </el-row>
@@ -643,9 +676,9 @@ import { useSystemConfigStore } from '@/stores/systemConfigStore';
 import { useMcpStore } from '@/stores/mcpStore';
 import { useBackendStore } from '@/stores/backendStore'; // [新增] 引入 BackendStore
 
-import { uploadAgentAvatar, deleteAgentAvatar, getAgent } from '@/api/agentService';
+import { uploadAgentAvatar, deleteAgentAvatar, getAgent, getAgentHitlTools } from '@/api/agentService';
 import { getResourceDetails } from '@/api/resourceService';
-import type { Resource, Agent } from '@/api/types';
+import type { Resource, Agent, HitlToolInfo } from '@/api/types';
 
 import AvatarUploader from '../AvatarUploader.vue';
 import ResourceSelectorDialog from '@/components/common/dialogs/ResourceSelectorDialog.vue';
@@ -704,7 +737,19 @@ const memorySelectorVisible = ref(false);
 const modelSelectRef = ref();
 const { scrollToTopIfStarred } = useModelSelectScroll();
 
-const mambo_security_review_tools_str = ref('');
+const hitlToolOptions = ref<HitlToolInfo[]>([]);
+const hitlToolOptionsLoaded = ref(false);
+
+/** 已保存但当前不在 HITL 中的工具（用户之前选了，后来被取消审核） */
+const staleToolNames = computed(() => {
+  if (!hitlToolOptionsLoaded.value) return [] as string[];
+  const activeNames = new Set(hitlToolOptions.value.map(t => t.name));
+  return form.mambo_security_review_tools.filter(name => !activeNames.has(name) && name.trim());
+});
+
+function removeReviewTool(toolName: string) {
+  form.mambo_security_review_tools = form.mambo_security_review_tools.filter(v => v !== toolName);
+}
 
 const agentData = computed(() => agentList.value.find(a => a.id === currentAgentId.value));
 
@@ -741,6 +786,7 @@ const form = reactive({
   mambo_security_review_enabled: false,
   mambo_security_review_model_id: null as string | null,
   mambo_security_review_system_prompt: '',
+  mambo_security_review_tools: [] as string[],
 });
 
 // --- Backend 挂载逻辑 [新增] ---
@@ -865,13 +911,16 @@ watch(agentData, async (newVal) => {
       form.mambo_security_review_enabled = true;
       form.mambo_security_review_model_id = srCfg.model_id || null;
       form.mambo_security_review_system_prompt = srCfg.system_prompt || '';
-      mambo_security_review_tools_str.value = (srCfg.review_tools || []).join(', ');
+      form.mambo_security_review_tools = (srCfg.review_tools || []) as string[];
     } else {
       form.mambo_security_review_enabled = false;
       form.mambo_security_review_model_id = null;
       form.mambo_security_review_system_prompt = '';
-      mambo_security_review_tools_str.value = '';
+      form.mambo_security_review_tools = [];
     }
+
+    // 加载 HITL 可审核工具列表
+    fetchHitlTools(newVal.id);
 
     if (newVal.resourcePromptList && newVal.resourcePromptList.length > 0) {
       try {
@@ -1009,6 +1058,17 @@ function getMemoryTypeLabel(type: string | undefined): string {
   return labels[type ?? ''] ?? type ?? 'Unknown';
 }
 
+async function fetchHitlTools(agentId: string) {
+  hitlToolOptionsLoaded.value = false;
+  try {
+    hitlToolOptions.value = await getAgentHitlTools(agentId);
+  } catch {
+    hitlToolOptions.value = [];
+  } finally {
+    hitlToolOptionsLoaded.value = true;
+  }
+}
+
 async function handleUploadAvatar(file: File) {
   if (!currentAgentId.value) return;
   isAvatarLoading.value = true;
@@ -1065,12 +1125,11 @@ function buildMamboAgentParameters(): Record<string, any> | null {
     };
   }
   if (form.mambo_security_review_enabled) {
-    const toolsStr = mambo_security_review_tools_str.value.trim();
     params.security_review = {
       enabled: true,
       model_id: form.mambo_security_review_model_id || null,
       system_prompt: form.mambo_security_review_system_prompt || null,
-      review_tools: toolsStr ? toolsStr.split(',').map(s => s.trim()).filter(Boolean) : null,
+      review_tools: form.mambo_security_review_tools.length > 0 ? [...form.mambo_security_review_tools] : null,
     };
   }
   return Object.keys(params).length > 0 ? params : null;
@@ -1124,9 +1183,7 @@ async function handleSave() {
             enabled: true,
             model_id: form.mambo_security_review_model_id || null,
             system_prompt: form.mambo_security_review_system_prompt || null,
-            review_tools: mambo_security_review_tools_str.value.trim()
-              ? mambo_security_review_tools_str.value.trim().split(',').map(s => s.trim()).filter(Boolean)
-              : null,
+            review_tools: form.mambo_security_review_tools.length > 0 ? [...form.mambo_security_review_tools] : null,
           }
         : null,
 
@@ -1336,4 +1393,20 @@ onMounted(() => {
   border-radius: 4px;
   line-height: 1.4;
 }
+
+.stale-tools-warning {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--el-color-warning);
+  background-color: var(--el-color-warning-light-9);
+  border: 1px solid var(--el-color-warning-light-5);
+  border-radius: 6px;
+  line-height: 1.5;
+}
 </style>
+
