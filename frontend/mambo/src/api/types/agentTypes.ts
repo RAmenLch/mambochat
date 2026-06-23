@@ -25,6 +25,13 @@ export interface Agent {
   defaultBackendId: string | null;
 }
 
+export interface SecurityReviewConfig {
+  enabled: boolean
+  model_id?: string | null
+  system_prompt?: string | null
+  review_tools?: string[] | null
+}
+
 export interface AgentCreate {
   name: string;
   description?: string | null;
@@ -43,6 +50,7 @@ export interface AgentCreate {
   backendIds: string[] | null;
   defaultBackendId?: string | null;
   memoryResourceIds?: string[] | null;
+  securityReviewConfig?: SecurityReviewConfig | null;
 }
 
 export type AgentUpdate = Partial<AgentCreate>

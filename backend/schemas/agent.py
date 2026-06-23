@@ -51,6 +51,8 @@ class AgentBase(BaseModel):
     subAgents: Optional[List[str]] = Field(None, description="子 Agent ID列表")
     backendIds: Optional[List[str]] = Field(default_factory=list, description="挂载的 Backend 配置 ID 列表")
     defaultBackendId: Optional[str] = Field(None, description="用户选择的默认 Backend ID")
+    memoryResourceIds: Optional[List[str]] = Field(None, description="记忆资源配置ID列表")
+    securityReviewConfig: Optional[SecurityReviewConfigSchema] = Field(None, description="AI 安全审核配置")
 
 class AgentCreate(AgentBase):
     """用于创建 Agent 的 Schema（继承 Base 保持一致）"""
