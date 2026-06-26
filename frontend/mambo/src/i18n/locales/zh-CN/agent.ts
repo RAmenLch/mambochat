@@ -63,6 +63,8 @@ export default {
   generalPurposeDesc: '自动创建一个通用子代理，共享主代理的模型和文件系统工具',
   mamboPlanning: '计划任务清单',
   mamboPlanningDesc: '启用 write_plans 工具，Agent 可以创建和管理结构化任务列表来跟踪进度',
+  mamboShow: '文件展示工具',
+  mamboShowDesc: '启用 show 工具，Agent 可以将文本文件或图片直接展示在对话中',
   mamboMemory: '长期记忆',
   mamboMemoryDesc: '启用后 Agent 将从指定的记忆文件中加载持久化上下文，并能在对话中更新记忆',
   memoryResources: '记忆资源',

@@ -79,6 +79,13 @@ export const reorderResourceVersions = (updates: VersionReorderItem[]): Promise<
 };
 
 /**
+ * 删除指定的资源版本。
+ */
+export const deleteResourceVersion = (versionId: string): Promise<{ message: string }> => {
+  return apiClient.delete(`/resources/versions/${versionId}`);
+};
+
+/**
  * 为指定的资源创建一个新的版本快照。
  */
 export const createResourceVersion = (resourceId: string, data: ResourceVersionCreate): Promise<ResourceVersion> => {

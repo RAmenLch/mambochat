@@ -74,6 +74,11 @@ export default {
     empty: 'No history versions',
     switchSuccess: 'Active version switched',
     confirmActive: 'Are you sure you want to set this version as the active version?',
+    delete: 'Delete Version',
+    confirmDelete: 'Are you sure you want to delete version "{name}"? This action cannot be undone.',
+    cannotDeleteActive: 'Cannot delete the active version',
+    cannotDeleteLast: 'Cannot delete the last version',
+    deleteSuccess: 'Version deleted',
   },
   dialog: {
     saveAsNewTitle: 'Save as New Version',

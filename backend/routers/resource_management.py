@@ -419,6 +419,23 @@ async def reorder_versions(updates: List[schemas.ResourceVersionReorderItem], db
     return {"message": "Version reorder successful"}
 
 
+@router.delete(
+    "/versions/{version_id}",
+    status_code=status.HTTP_200_OK,
+    summary="删除指定资源版本"
+)
+async def delete_version(version_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    删除指定的资源版本。
+    不能删除当前活跃版本，也不能删除资源的最后一个版本。
+    """
+    deleted_version = await resource_crud.delete_resource_version(db, version_id=version_id)
+    if deleted_version is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Cannot delete active version or version not found")
+    return {"message": "Version deleted successfully"}
+
+
 # --- Search Operations ---
 
 @router.post(

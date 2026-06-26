@@ -249,9 +249,18 @@ async def create_resource_version(db: AsyncSession, resource_id: str, version_cr
     if not db_resource or db_resource.itemType != ResourceItemType.RESOURCE.value:
         return None
 
+    # 自动计算 sortOrder（追加到末尾）
+    stmt = select(func.max(resource_model.ResourceVersion.sortOrder)).filter(
+        resource_model.ResourceVersion.resourceId == resource_id
+    )
+    result = await db.execute(stmt)
+    max_order = result.scalar()
+    next_order = (max_order if max_order is not None else -1) + 1
+
     new_version = resource_model.ResourceVersion(
         **version_create.model_dump(),
-        resourceId=resource_id
+        resourceId=resource_id,
+        sortOrder=next_order,
     )
     db.add(new_version)
     await db.commit()
@@ -303,6 +312,27 @@ async def set_active_version(db: AsyncSession, resource_id: str, version_id: str
     await db.refresh(db_resource, ['latest_version'])
 
     return db_resource
+
+
+async def delete_resource_version(db: AsyncSession, version_id: str) -> Optional[resource_model.ResourceVersion]:
+    """删除指定的资源版本。如果版本是活跃版本则拒绝删除。"""
+    result = await db.execute(
+        select(resource_model.ResourceVersion)
+        .options(joinedload(resource_model.ResourceVersion.resource))
+        .filter(resource_model.ResourceVersion.id == version_id)
+    )
+    db_version = result.scalars().first()
+    if not db_version:
+        return None
+
+    # 不允许删除活跃版本
+    parent_resource = db_version.resource
+    if parent_resource and parent_resource.latestVersionId == version_id:
+        return None
+
+    await db.delete(db_version)
+    await db.commit()
+    return db_version
 
 
 async def batch_update_resources_order(db: AsyncSession, updates: List[schemas.ResourceReorderItem]) -> bool:

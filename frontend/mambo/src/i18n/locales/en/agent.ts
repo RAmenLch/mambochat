@@ -63,6 +63,8 @@ export default {
   generalPurposeDesc: 'Auto-create a general-purpose subagent that shares the main agent\'s model and file system tools',
   mamboPlanning: 'Task Planning',
   mamboPlanningDesc: 'Enable the write_plans tool — agent can create and manage structured task lists to track progress',
+  mamboShow: 'Show Tool',
+  mamboShowDesc: 'Enable the show tool — agent can display text files or images directly in the chat',
   mamboMemory: 'Long-term Memory',
   mamboMemoryDesc: 'Load persistent context from memory files and allow the agent to update memories during conversations',
   memoryResources: 'Memory Resources',

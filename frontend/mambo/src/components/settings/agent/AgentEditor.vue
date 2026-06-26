@@ -409,6 +409,21 @@
             </el-col>
           </el-row>
 
+          <!-- show 工具（展示文件/图片给用户） -->
+          <el-row :gutter="32" class="settings-row">
+            <el-col :span="24">
+              <el-form-item>
+                <template #label>
+                  <span>{{ $t('agent.mamboShow') }}</span>
+                  <el-tooltip effect="dark" :content="$t('agent.mamboShowDesc')" placement="top">
+                    <el-icon class="label-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-switch v-model="form.mambo_show_enabled" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+
           <!-- 长期记忆 -->
           <el-row :gutter="32" class="settings-row">
             <el-col :span="24">
@@ -773,6 +788,7 @@ const form = reactive({
   // Mambo 专属配置
   mambo_general_purpose: false,
   mambo_planning_enabled: true,
+  mambo_show_enabled: true,
   mambo_memory_enabled: false,
   mambo_memory_resource_ids: [] as string[],
   mambo_summary_enabled: false,
@@ -890,12 +906,14 @@ watch(agentData, async (newVal) => {
       enable_planning: true,
       enable_memory: false,
       enable_summarization: false,
+      enable_show: true,
       memory_resource_ids: [],
       summarization_config: null,
       security_review: null,
     };
     form.mambo_general_purpose = mamboParams.include_general_purpose ?? false;
     form.mambo_planning_enabled = mamboParams.enable_planning ?? true;
+    form.mambo_show_enabled = mamboParams.enable_show ?? true;
     form.mambo_memory_enabled = mamboParams.enable_memory ?? false;
     form.mambo_memory_resource_ids = mamboParams.memory_resource_ids ? [...mamboParams.memory_resource_ids] : [];
     form.mambo_summary_enabled = mamboParams.enable_summarization ?? false;
@@ -1117,6 +1135,7 @@ function buildMamboAgentParameters(): MamboAgentParameters | null {
   const params = {
     include_general_purpose: form.mambo_general_purpose,
     enable_planning: form.mambo_planning_enabled,
+    enable_show: form.mambo_show_enabled,
     enable_memory: form.mambo_memory_enabled,
     enable_summarization: form.mambo_summary_enabled,
     memory_resource_ids: form.mambo_memory_enabled

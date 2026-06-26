@@ -72,6 +72,11 @@ export default {
     empty: '暂无历史版本',
     switchSuccess: '活跃版本已切换',
     confirmActive: '确定要将此版本设为当前活跃版本吗？',
+    delete: '删除版本',
+    confirmDelete: '确定要删除版本 "{name}" 吗？此操作不可撤销。',
+    cannotDeleteActive: '无法删除当前活跃版本',
+    cannotDeleteLast: '无法删除最后一个版本',
+    deleteSuccess: '版本已删除',
   },
   dialog: {
     saveAsNewTitle: '另存为新版本',

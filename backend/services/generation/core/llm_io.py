@@ -218,6 +218,10 @@ class AgentConfig(BaseModel):
         default=True,
         description="是否启用计划任务清单（write_plans 工具，仅 Mambo Agent 有效）"
     )
+    enable_show: bool = Field(
+        default=True,
+        description="是否启用 show 工具（展示文件/图片给用户，仅 Mambo Agent 有效）"
+    )
     memory_resource_roots: Optional[Dict[str, str]] = Field(
         default=None,
         description="长期记忆资源映射（仅 Mambo Agent）：{resource_name: resource_id}。"

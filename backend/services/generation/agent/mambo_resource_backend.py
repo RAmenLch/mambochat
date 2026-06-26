@@ -10,9 +10,35 @@ is loaded into an in-memory cache for fast path resolution.
 Content semantics by ResourceType:
 
 * FOLDER (any)          → directory, no content
-* FILE / KB_FILE        → content is a file_id, resolved via FileService
-* SYSTEM_PROMPT         → content is the raw text (direct text type)
-* SUBMESSAGE_TEMPLATE   → content is the raw text (direct text type)
+* RESOURCE (any)        → both a flat file + a ``$v`` version-folder
+* FILE / KB_FILE        → version content is a file_id, resolved via FileService
+* SYSTEM_PROMPT         → version content is the raw text (direct text type)
+* SUBMESSAGE_TEMPLATE   → version content is the raw text (direct text type)
+
+Version-folder convention
+=========================
+When version editing is enabled, every resource with ``itemType == RESOURCE``
+appears as **both** a flat file and a version folder::
+
+    /workspace/my_prompt      ← flat file (read/edit/write on active version)
+    /workspace/my_prompt$v/   ← version folder (browse individual versions)
+
+Inside the ``$v/`` folder, each ``ResourceVersion`` appears as a file named::
+
+    {version_name}:{sort_order}:{active_flag}
+
+where ``active_flag`` is ``"active"`` for the latest version, or empty.
+Example: ``v1:0:active``, ``v2:1:``.
+
+* ``ls`` does NOT show ``$v`` folders or their contents — they are invisible
+  to normal directory listing to avoid confusing the agent.
+* ``read`` / ``edit`` / ``write`` on the flat file → operates on active version
+  (same as legacy behavior).
+* ``read`` on a version file inside ``$v/`` → returns that version's content.
+* ``edit`` / ``write(overwrite)`` on a version file → updates it **in-place**
+  (no new version is created).  New versions cannot be added via ``write``.
+* ``ls_version`` → the ONLY way to discover and list versions.
+* ``grep`` / ``glob`` skip ``$v/`` files (they search the flat file path).
 
 Safety invariants
 =================
@@ -20,7 +46,9 @@ Safety invariants
 * Workspace boundary enforced on every path
 * Path traversal (``..``) rejected
 * Edit whitelist/blacklist (fnmatch on filename) gate all writes
+  (version files inside ``$v/`` bypass the filter)
 * New files are always created as ResourceType.FILE
+* New versions cannot be created via ``write`` in ``$v/`` folders
 """
 
 from __future__ import annotations
@@ -34,11 +62,13 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import PurePosixPath
-from typing import Callable
+from typing import Callable, ClassVar
 
+from langchain_core.tools import StructuredTool
+from pydantic import BaseModel, ConfigDict, Field, create_model
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 from mambo_agents.backends.protocol import (
     BackendProtocol,
@@ -50,6 +80,7 @@ from mambo_agents.backends.protocol import (
     LsResult,
     ReadResult,
     ReadSummarizer,
+    VirtualPath,
     WorkspacePathError,
     WriteResult,
     _get_file_type,
@@ -57,6 +88,7 @@ from mambo_agents.backends.protocol import (
 )
 from mambo_agents.backends.utils import (
     detect_trailing_newline_mismatch,
+    format_validation_error,
     format_with_line_numbers,
 )
 
@@ -86,6 +118,8 @@ class _CachedNode:
     desc: str
     size: int
     modified_at: str
+    is_version_node: bool = False
+    """True for $v folders and their version-file children — invisible to ls/grep/glob."""
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +143,84 @@ def _is_direct_text_type(rt: str | None) -> bool:
 
 def _is_file_id_type(rt: str | None) -> bool:
     return rt in _FILE_ID_TYPES
+
+
+# Pre-compiled regex for UUID-like strings (36-char with dashes)
+_UUID_RE = re.compile(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
+
+
+def _looks_like_uuid(s: str) -> bool:
+    """Return True if *s* looks like a UUID (e.g. file_id stored in content)."""
+    return len(s) == 36 and bool(_UUID_RE.match(s))
+
+
+# ---------------------------------------------------------------------------
+# Version-folder constants & helpers
+# ---------------------------------------------------------------------------
+
+_VERSION_FOLDER_SUFFIX = "$v"
+"""Suffix appended to resource names to mark them as version-folders."""
+
+_SYNTHETIC_VERSION_PREFIX = "__v__"
+"""Prefix for synthetic node IDs representing version files."""
+
+
+def _is_synthetic_version_id(node_id: str) -> bool:
+    """Return True if *node_id* is a synthetic version-file node."""
+    return node_id.startswith(_SYNTHETIC_VERSION_PREFIX)
+
+
+def _extract_version_id(node_id: str) -> str:
+    """Extract the real DB version ID from a synthetic node ID."""
+    if not node_id.startswith(_SYNTHETIC_VERSION_PREFIX):
+        raise ValueError(f"Not a synthetic version ID: {node_id}")
+    return node_id[len(_SYNTHETIC_VERSION_PREFIX):]
+
+
+def _format_updated_at(dt: datetime | None) -> str:
+    """Format a datetime to ISO-8601 string for cache storage."""
+    if dt is None:
+        return ""
+    return dt.isoformat() if isinstance(dt, datetime) else str(dt)
+
+
+# ---------------------------------------------------------------------------
+# ls_version result model
+# ---------------------------------------------------------------------------
+
+
+class VersionInfo(BaseModel):
+    """Single version entry returned by ``ls_version``."""
+
+    model_config = ConfigDict(frozen=True)
+
+    version_id: str = ""
+    name: str = ""
+    sort_order: int = 0
+    is_active: bool = False
+    updated_at: str = ""
+    file_path: str = ""
+    """Virtual path to use with read/edit/write on this version file."""
+
+
+class LsVersionResult(BaseModel):
+    """Result from ``ls_version()`` — ``ls``-style with direct paths."""
+
+    error: str | None = None
+    versions: list[VersionInfo] | None = None
+
+    def __str__(self) -> str:
+        if self.error:
+            return f"Error: {self.error}"
+        if not self.versions:
+            return "(no versions found)"
+        lines: list[str] = []
+        for v in self.versions:
+            active_tag = " [ACTIVE]" if v.is_active else ""
+            lines.append(
+                f"{v.file_path}  -- {v.name}{active_tag} | order={v.sort_order} | {v.updated_at}"
+            )
+        return "\n".join(lines)
 
 
 # ============================================================================
@@ -173,17 +285,26 @@ class MamboResourceBackend(BackendProtocol):
         Callback for oversized text (inherited).
     """
 
+    BACKEND_TOOL_NAMES: ClassVar[frozenset[str]] = frozenset({"ls_version"})
+    """Tool names exposed by this backend (used for UI tracking registration).
+
+    The ``MamboAgentBuiltinToolProvider`` reads this class attribute to
+    automatically register these tools for UI call tracking, avoiding
+    the need to manually update ``BUILTIN_TOOLS``.
+    """
+
     def __init__(
         self,
         resource_id: str | None,
         session_factory: Callable[[], AsyncSession],
         *,
         shortcuts: dict[str, str] | None = None,
-        workspace_root: str = "/workspace",
+        workspace_root: VirtualPath = VirtualPath("/workspace"),
         edit_whitelist: frozenset[str] | None = None,
         edit_blacklist: frozenset[str] | None = None,
         max_read_chars: int = 100_000,
         summarizer: ReadSummarizer | None = None,
+        enable_version_editing: bool = True,
     ) -> None:
         super().__init__(max_read_chars=max_read_chars, summarizer=summarizer)
 
@@ -192,12 +313,15 @@ class MamboResourceBackend(BackendProtocol):
                 "edit_whitelist and edit_blacklist are mutually exclusive."
             )
 
-        self.workspace_root = workspace_root.rstrip("/")
+        if not isinstance(workspace_root, VirtualPath):
+            workspace_root = VirtualPath(workspace_root)
+        self.workspace_root = workspace_root
         self._root_resource_id = resource_id
         self._shortcuts: dict[str, str] = shortcuts or {}
         self._session_factory = session_factory
         self._edit_whitelist = edit_whitelist or frozenset()
         self._edit_blacklist = edit_blacklist or frozenset()
+        self._enable_version_editing = enable_version_editing
         self._lock = asyncio.Lock()
 
         self._cache: dict[str, _CachedNode] = {}
@@ -208,25 +332,59 @@ class MamboResourceBackend(BackendProtocol):
     # ------------------------------------------------------------------
 
     @property
-    def tools(self) -> list:
-        return []
+    def tools(self) -> list[StructuredTool]:
+        wr = self.workspace_root.value
+        tool_list: list[StructuredTool] = []
+        if self._enable_version_editing:
+            tool_list.append(
+                StructuredTool(
+                    name="ls_version",
+                    description=(
+                        "List all versions of a resource. The path should point to "
+                        "a resource (which appears as a `$v` folder in `ls` output). "
+                        "The `$v` suffix is auto-appended if not present. "
+                        "Returns version ID, name, order, active status, "
+                        "content preview, and update time. "
+                        "Use the version IDs from this listing to read/edit "
+                        "specific version files inside the `$v/` folder."
+                    ),
+                    args_schema=create_model(
+                        "LsVersionSchema",
+                        path=(VirtualPath, Field(description=f"Path to a resource (e.g. '{wr}/my_prompt$v/' or '{wr}/my_prompt'). The '$v' suffix is auto-appended if missing.")),
+                    ),
+                    func=self._safe_tool_func("ls_version", self.ls_version),
+                    coroutine=self._safe_tool_coroutine("ls_version", self.als_version),
+                    handle_validation_error=format_validation_error,
+                )
+            )
+        return tool_list
 
     @property
     def description(self) -> str:
-        wr = self.workspace_root
+        wr = self.workspace_root.value
         parts: list[str] = []
         if self._root_resource_id:
             parts.append(f"Rooted at resource '{self._root_resource_id}'")
         if self._shortcuts:
             sc_keys = ", ".join(f"'{k}'" for k in self._shortcuts)
             parts.append(f"Shortcuts: {sc_keys}")
-        return (
+        base = (
             f"Resource-tree backend. {'; '.join(parts)} "
             f"All file paths must be under '{wr}'. "
+        )
+        if self._enable_version_editing:
+            base += (
+                "Version editing is enabled. Resources work as normal flat files "
+                "(read/edit/write on the active version). "
+                "Use the ls_version tool (NOT ls) to discover and manage "
+                "individual versions. ls will NOT show version folders. "
+            )
+        base += (
             "The read tool defaults to no line numbers. "
             "Set include_line_numbers=True when you need to reference "
             "specific lines."
         )
+        return base
 
     # ==================================================================
     # Cache management
@@ -252,15 +410,93 @@ class MamboResourceBackend(BackendProtocol):
                     db, self._root_resource_id
                 )
                 if root_res is not None:
-                    cache[self.workspace_root] = _resource_to_node(root_res)
+                    root_vpath = self.workspace_root.normalized
+                    cache[root_vpath] = _resource_to_node(root_res)
                     await self._load_subtree_into_cache(
-                        cache, db, self._root_resource_id, self.workspace_root
+                        cache, db, self._root_resource_id, root_vpath
                     )
 
             # --- 2. Shortcut mappings ---
             await self._load_shortcuts_into_cache(cache, db)
 
+            # --- 3. Resolve real file sizes for file-id backed nodes ---
+            await self._resolve_file_sizes(cache, db)
+
         self._cache = cache
+
+    async def _resolve_file_sizes(
+        self,
+        cache: dict[str, _CachedNode],
+        db: AsyncSession,
+    ) -> None:
+        """Resolve real file sizes from FileService for FILE / KB_FILE type nodes.
+
+        For direct-text types (SYSTEM_PROMPT / SUBMESSAGE_TEMPLATE) the
+        ``size`` is already correctly set from ``len(content)`` in
+        ``_resource_to_node``.  For file-id types (FILE / KB_FILE) the
+        ``content`` field stores a file_id UUID, not the actual content
+        bytes, so we need to query the File table to get the real size.
+
+        Also handles fallback cases where ``resource_type`` may be None
+        or an unknown value but the ``content`` is still a file_id.
+        """
+        # Collect file_ids from candidates that need size resolution.
+        # Using dict[str, list[str]] because multiple cache nodes (flat file
+        # + version files inside $v/) can share the same file_id.
+        file_id_to_vpaths: dict[str, list[str]] = {}  # file_id -> [vpath, ...]
+        unknown_nodes: list[tuple[str, _CachedNode]] = []
+
+        for vpath, node in cache.items():
+            if node.is_dir:
+                continue
+
+            # Already resolved: direct-text types have correct size
+            if _is_direct_text_type(node.resource_type):
+                continue
+
+            # File-id types: content IS a file_id
+            if _is_file_id_type(node.resource_type) and node.content:
+                file_id_to_vpaths.setdefault(node.content, []).append(vpath)
+                continue
+
+            # Fallback: resource_type is None / unknown, but content
+            # looks like a UUID (36-char with dashes → possible file_id)
+            if node.size == 0 and node.content and _looks_like_uuid(node.content):
+                unknown_nodes.append((vpath, node))
+
+        if not file_id_to_vpaths and not unknown_nodes:
+            logger.info("[resource-backend] _resolve_file_sizes: no file-backed nodes found in cache (%d total nodes)",
+                        len(cache))
+            return
+
+        # Batch-query File table for all collected file_ids
+        all_file_ids: list[str] = list(file_id_to_vpaths.keys())
+        all_file_ids.extend(n.content for _, n in unknown_nodes)
+
+        fs = FileService(db)
+        files = await fs.batch_get_files(all_file_ids)
+        id_to_size: dict[str, int] = {f.id: f.size for f in files}
+
+        resolved = 0
+        total_nodes = sum(len(vps) for vps in file_id_to_vpaths.values())
+        for file_id, vpaths in file_id_to_vpaths.items():
+            actual_size = id_to_size.get(file_id, 0)
+            if actual_size > 0:
+                for vpath in vpaths:
+                    cache[vpath].size = actual_size
+                resolved += len(vpaths)
+            else:
+                logger.warning("[resource-backend] size NOT resolved for %d node(s) (file_id=%s not in File table)",
+                               len(vpaths), file_id[:36])
+
+        for vpath, node in unknown_nodes:
+            actual_size = id_to_size.get(node.content, 0)  # type: ignore[arg-type]
+            if actual_size > 0:
+                node.size = actual_size
+                resolved += 1
+
+        logger.info("[resource-backend] _resolve_file_sizes: resolved %d / %d file-backed nodes (%d unique file_ids, %d fallback)",
+                    resolved, total_nodes, len(file_id_to_vpaths), len(unknown_nodes))
 
     async def _load_subtree_into_cache(
         self,
@@ -270,8 +506,14 @@ class MamboResourceBackend(BackendProtocol):
         base_vpath: str,
     ) -> None:
         """Load all descendants of *root_id* and populate *cache*
-        with virtual paths rooted at *base_vpath*."""
-        descendants = await self._load_descendants(db, root_id)
+        with virtual paths rooted at *base_vpath*.
+
+        When ``_enable_version_editing`` is True, resources become
+        ``$v`` version-folders with individual version files inside.
+        When False, resources appear as flat files (legacy mode).
+        """
+        load_versions = self._enable_version_editing
+        descendants = await self._load_descendants(db, root_id, load_versions=load_versions)
         if not descendants:
             return
 
@@ -286,8 +528,69 @@ class MamboResourceBackend(BackendProtocol):
                 res.id, res.name, parent_map, name_map,
                 root_id=root_id, base_vpath=base_vpath,
             )
-            if virt:
+            if not virt:
+                continue
+
+            if self._enable_version_editing and res.itemType == ResourceItemType.RESOURCE.value:
+                # --- Resource: flat file + $v folder (additional view) ---
+                # Flat file: same as before — read/edit/write on active version
                 cache[virt] = _resource_to_node(res)
+                # $v folder: exposes all versions as individual files
+                folder_vpath = virt + _VERSION_FOLDER_SUFFIX
+                cache[folder_vpath] = _CachedNode(
+                    id=res.id,
+                    name=res.name + _VERSION_FOLDER_SUFFIX,
+                    parent_id=res.parentId,
+                    is_dir=True,
+                    resource_type=res.resourceType,
+                    content=None,
+                    desc=getattr(res, "description", None) or "",
+                    size=0,
+                    modified_at=_format_updated_at(res.updatedAt),
+                    is_version_node=True,
+                )
+                self._load_versions_into_cache(cache, res, folder_vpath)
+            else:
+                # --- FOLDER or legacy mode RESOURCE → flat node only ---
+                cache[virt] = _resource_to_node(res)
+
+    def _load_versions_into_cache(
+        self,
+        cache: dict[str, _CachedNode],
+        resource: resource_model.Resource,
+        folder_vpath: str,
+    ) -> None:
+        """Populate *cache* with a version-file node for each version
+        of *resource*, nested under *folder_vpath*.
+
+        Version files are named by their UUID (e.g. ``{version_id}``).
+        Metadata (name/order/active) is stored in ``desc`` for display.
+        """
+        versions = getattr(resource, "versions", None) or []
+        if not versions:
+            return
+
+        active_version_id = resource.latestVersionId
+
+        for ver in versions:
+            is_active = (ver.id == active_version_id)
+            ver_vpath = f"{folder_vpath}/{ver.id}"
+
+            content = ver.content
+            size = len(content) if content and _is_direct_text_type(resource.resourceType) else 0
+
+            cache[ver_vpath] = _CachedNode(
+                id=_SYNTHETIC_VERSION_PREFIX + ver.id,
+                name=ver.id,
+                parent_id=resource.id,
+                is_dir=False,
+                resource_type=resource.resourceType,
+                content=content,
+                desc=f"{ver.name}" + (" [ACTIVE]" if is_active else ""),
+                size=size,
+                modified_at=_format_updated_at(ver.updatedAt),
+                is_version_node=True,
+            )
 
     async def _load_shortcuts_into_cache(
         self,
@@ -298,9 +601,12 @@ class MamboResourceBackend(BackendProtocol):
 
         Each shortcut maps a virtual name to a single resource ID.
         Folder resources are expanded in-place (no extra nesting).
+        When ``_enable_version_editing`` is True, resource shortcuts
+        become ``$v`` version-folders.
         """
         for name, res_id in self._shortcuts.items():
-            vpath = f"{self.workspace_root}/{name}"
+            root_norm = self.workspace_root.normalized
+            vpath = f"{root_norm}/{name}"
 
             res = await resource_crud.get_resource(db, res_id)
             if res is None:
@@ -316,16 +622,38 @@ class MamboResourceBackend(BackendProtocol):
                 # 文件夹资源直接展开到 shortcut 路径下，根节点也注册为目录项
                 cache[vpath] = _resource_to_node(res)
                 await self._load_subtree_into_cache(cache, db, res_id, vpath)
+            elif self._enable_version_editing:
+                # Both: flat file + $v folder (additional version view)
+                cache[vpath] = _resource_to_node(res)
+                res_with_versions = await resource_crud.get_resource_with_versions(db, res_id)
+                if res_with_versions is None:
+                    continue
+                folder_vpath = vpath + _VERSION_FOLDER_SUFFIX
+                cache[folder_vpath] = _CachedNode(
+                    id=res_with_versions.id,
+                    name=name + _VERSION_FOLDER_SUFFIX,
+                    parent_id=res_with_versions.parentId,
+                    is_dir=True,
+                    resource_type=res_with_versions.resourceType,
+                    content=None,
+                    desc=getattr(res_with_versions, "description", None) or "",
+                    size=0,
+                    modified_at=_format_updated_at(res_with_versions.updatedAt),
+                    is_version_node=True,
+                )
+                self._load_versions_into_cache(cache, res_with_versions, folder_vpath)
             else:
-                # 文件资源挂载为 shortcut 路径下的单个文件
+                # Legacy mode: mount as flat file
                 cache[vpath] = _resource_to_node(res)
 
     async def _load_descendants(
-        self, db: AsyncSession, root_id: str | None = None
+        self, db: AsyncSession, root_id: str | None = None,
+        *, load_versions: bool = False,
     ) -> list[resource_model.Resource]:
         """CTE-recursive: load all descendants under *root_id*.
 
         If *root_id* is omitted, defaults to ``self._root_resource_id``.
+        When *load_versions* is True, also eager-load all ResourceVersion rows.
         """
         actual_root = root_id or self._root_resource_id
         if actual_root is None:
@@ -342,9 +670,13 @@ class MamboResourceBackend(BackendProtocol):
             select(child_t).join(cte, child_t.parentId == cte.c.id)
         )
 
+        options = [joinedload(resource_model.Resource.latest_version)]
+        if load_versions:
+            options.append(selectinload(resource_model.Resource.versions))
+
         stmt = (
             select(resource_model.Resource)
-            .options(joinedload(resource_model.Resource.latest_version))
+            .options(*options)
             .join(cte, resource_model.Resource.id == cte.c.id)
             .where(resource_model.Resource.id != actual_root)
         )
@@ -373,7 +705,7 @@ class MamboResourceBackend(BackendProtocol):
             Defaults to ``self.workspace_root``.
         """
         r_id = root_id or self._root_resource_id
-        base = base_vpath or self.workspace_root
+        base = base_vpath or self.workspace_root.normalized
 
         pid = parent_map.get(res_id)
         if pid == r_id:
@@ -395,27 +727,32 @@ class MamboResourceBackend(BackendProtocol):
     # Path resolution & validation
     # ==================================================================
 
-    def _normalize_path(self, path: str) -> str:
-        """Ensure path starts with workspace_root; reject traversals."""
-        if not path.startswith("/"):
-            path = "/" + path
-        norm = posixpath.normpath(path)
+    def _normalize_path(self, path: VirtualPath) -> str:
+        """Ensure path starts with workspace_root; reject traversals.
 
-        wr = self.workspace_root
+        Accepts VirtualPath (preferred) or str (backward-compat).
+        Returns a plain string for use as cache key.
+        """
+        if not isinstance(path, VirtualPath):
+            path = VirtualPath(path)
+        raw = path.value
+        norm = posixpath.normpath(raw)
+
+        wr = self.workspace_root.value
         if norm != wr and not norm.startswith(wr + "/"):
             raise WorkspacePathError(
-                f"Path '{path}' is outside the workspace. "
+                f"Path '{raw}' is outside the workspace. "
                 f"All file paths must be under '{wr}'."
             )
 
-        if ".." in PurePosixPath(path).parts:
+        if ".." in PurePosixPath(raw).parts:
             raise WorkspacePathError(
-                f"Path '{path}' contains '..' which is not allowed."
+                f"Path '{raw}' contains '..' which is not allowed."
             )
 
         return norm
 
-    def _resolve(self, path: str) -> _CachedNode | None:
+    def _resolve(self, path: VirtualPath) -> _CachedNode | None:
         """Resolve a virtual path to a cached node."""
         try:
             norm = self._normalize_path(path)
@@ -423,9 +760,9 @@ class MamboResourceBackend(BackendProtocol):
             return None
         return self._cache.get(norm)
 
-    def _check_edit_allowed(self, path: str) -> bool:
+    def _check_edit_allowed(self, path: VirtualPath) -> bool:
         """Gate writes by filename whitelist/blacklist (fnmatch)."""
-        filename = PurePosixPath(path).name
+        filename = PurePosixPath(str(path)).name
         if self._edit_whitelist:
             return any(
                 fnmatch.fnmatch(filename, pat) for pat in self._edit_whitelist
@@ -450,15 +787,15 @@ class MamboResourceBackend(BackendProtocol):
     # Core: ls  (async-first: _als_impl)
     # ==================================================================
 
-    def ls(self, path: str) -> LsResult:
+    def ls(self, path: VirtualPath) -> LsResult:
         return self._sync_bridge(_LsResult, self._als_impl, path)
 
-    async def als(self, path: str) -> LsResult:
+    async def als(self, path: VirtualPath) -> LsResult:
         """Override parent: call async impl directly, serialized via lock."""
         async with self._lock:
             return await self._als_impl(path)
 
-    async def _als_impl(self, path: str) -> LsResult:
+    async def _als_impl(self, path: VirtualPath) -> LsResult:
         try:
             norm = self._normalize_path(path)
         except WorkspacePathError as e:
@@ -472,13 +809,16 @@ class MamboResourceBackend(BackendProtocol):
                 continue
             if not vpath.startswith(prefix):
                 continue
+            # Skip version nodes — invisible to normal ls
+            if node.is_version_node:
+                continue
             # Must be a direct child (no intermediate '/')
             rel = vpath[len(prefix):]
             if "/" in rel:
                 continue
 
             entries.append(FileInfo(
-                path=vpath + ("/" if node.is_dir else ""),
+                path=VirtualPath(vpath + ("/" if node.is_dir else "")),
                 is_dir=node.is_dir,
                 size=node.size,
                 modified_at=node.modified_at,
@@ -494,7 +834,7 @@ class MamboResourceBackend(BackendProtocol):
 
     def read_raw(
         self,
-        file_path: str,
+        file_path: VirtualPath,
         offset: int = 0,
         limit: int = 2000,
         include_line_numbers: bool = False,
@@ -507,7 +847,7 @@ class MamboResourceBackend(BackendProtocol):
 
     async def aread_raw(
         self,
-        file_path: str,
+        file_path: VirtualPath,
         offset: int = 0,
         limit: int = 2000,
         include_line_numbers: bool = False,
@@ -520,7 +860,7 @@ class MamboResourceBackend(BackendProtocol):
 
     async def aread(
         self,
-        file_path: str,
+        file_path: VirtualPath,
         offset: int = 0,
         limit: int = 2000,
         include_line_numbers: bool = False,
@@ -538,7 +878,7 @@ class MamboResourceBackend(BackendProtocol):
 
     async def _aread_raw_impl(
         self,
-        file_path: str,
+        file_path: VirtualPath,
         offset: int = 0,
         limit: int = 2000,
         include_line_numbers: bool = False,
@@ -554,24 +894,32 @@ class MamboResourceBackend(BackendProtocol):
         if node.is_dir:
             return ReadResult(error=f"'{file_path}' is a directory")
 
-        # ---- fetch text content ----
+        # ---- fetch text content (binary → base64 fallback) ----
         text: str
+        encoding: str = "utf-8"
         try:
             if _is_file_id_type(node.resource_type):
                 text = await self._read_file_id_content(node)
             else:
                 text = node.content or ""
+        except UnicodeDecodeError:
+            # Binary file → base64-encode so download_files can recover the bytes
+            text, encoding = await self._read_file_id_as_base64(node, norm)
         except Exception as e:
             return ReadResult(
                 content="",
                 total_lines=0,
                 encoding="utf-8",
-                file_type=_get_file_type(file_path),
-                mime_type=_get_mime_type(file_path),
-                error=f"Error reading '{file_path}': {e}",
+                file_type=_get_file_type(norm),
+                mime_type=_get_mime_type(norm),
+                error=f"Error reading '{norm}': {e}",
             )
 
-        # ---- apply offset / limit / line numbers ----
+        # ---- apply offset / limit / line numbers (text only) ----
+        if encoding == "base64":
+            return ReadResult(content=text, total_lines=1, encoding="base64",
+                              file_type=_get_file_type(norm), mime_type=_get_mime_type(norm))
+
         lines = text.splitlines(keepends=True)
         total = len(lines)
 
@@ -580,7 +928,7 @@ class MamboResourceBackend(BackendProtocol):
                 error=f"Line offset {offset} exceeds file length ({total} lines)"
             )
 
-        sliced = lines[offset: offset + limit]
+        sliced = lines[offset:] if limit is None else lines[offset: offset + limit]
         raw_text = "".join(sliced)
 
         if include_line_numbers:
@@ -599,26 +947,43 @@ class MamboResourceBackend(BackendProtocol):
             raw = await fs.get_file_content(node.content)
         return raw.decode("utf-8")
 
+    async def _read_file_id_as_base64(
+        self, node: _CachedNode, norm: str,
+    ) -> tuple[str, str]:
+        """Resolve a binary file_id to base64-encoded string via FileService.
+
+        Used as fallback when UTF-8 decode fails (images, PDFs, etc.).
+        Returns ``(base64_str, "base64")`` so that ``download_files`` can
+        recover the original bytes via ``base64.standard_b64decode``.
+        """
+        import base64
+        if not node.content:
+            return "", "base64"
+        async with self._session_factory() as db:
+            fs = FileService(db)
+            raw = await fs.get_file_content(node.content)
+        return base64.standard_b64encode(raw).decode("ascii"), "base64"
+
     # ==================================================================
     # Core: write  (async-first: _awrite_impl)
     # ==================================================================
 
     def write(
-        self, file_path: str, content: str, overwrite: bool = False,
+        self, file_path: VirtualPath, content: str, overwrite: bool = False,
     ) -> WriteResult:
         return self._sync_bridge(
             _WriteResult, self._awrite_impl, file_path, content, overwrite,
         )
 
     async def awrite(
-        self, file_path: str, content: str, overwrite: bool = False,
+        self, file_path: VirtualPath, content: str, overwrite: bool = False,
     ) -> WriteResult:
         """Override parent: call async impl directly, serialized via lock."""
         async with self._lock:
             return await self._awrite_impl(file_path, content, overwrite)
 
     async def _awrite_impl(
-        self, file_path: str, content: str, overwrite: bool = False,
+        self, file_path: VirtualPath, content: str, overwrite: bool = False,
     ) -> WriteResult:
         # 1. Validate
         try:
@@ -626,19 +991,32 @@ class MamboResourceBackend(BackendProtocol):
         except WorkspacePathError as e:
             return WriteResult(error=str(e))
 
-        if not self._check_edit_allowed(norm):
-            return WriteResult(
-                error=f"Path '{file_path}' is not allowed for write. "
-                       "Check edit_whitelist / edit_blacklist."
-            )
-
-        parent_path, filename = self._split_parent_and_name(
-            norm, self.workspace_root
-        )
-
         # 2. Check target
         existing = self._resolve(norm)
         is_update = existing is not None
+
+        # Determine if we're in a version-node context
+        is_target_version_node = existing is not None and existing.is_version_node
+        parent_path, _ = self._split_parent_and_name(norm, self.workspace_root.value)
+        parent_node = self._resolve(VirtualPath(parent_path))
+        is_parent_version_folder = parent_node is not None and parent_node.is_version_node
+
+        # Whitelist/blacklist: bypass for version-nodes (synthetic names)
+        if not is_target_version_node and not is_parent_version_folder:
+            if not self._check_edit_allowed(norm):
+                return WriteResult(
+                    error=f"Path '{file_path}' is not allowed for write. "
+                           "Check edit_whitelist / edit_blacklist."
+                )
+
+        # Block new file creation inside $v/ folders
+        if is_parent_version_folder and not is_update:
+            return WriteResult(
+                error=f"Cannot create new version in '{file_path}'. "
+                       "Version files can only be edited (use edit tool) "
+                       "or overwritten (use write with overwrite=True on "
+                       "an existing version file)."
+            )
 
         if is_update:
             # SAFETY: refuse to write content into a folder
@@ -653,10 +1031,18 @@ class MamboResourceBackend(BackendProtocol):
                 )
 
         # 3. Perform write
+        parent_path, filename = self._split_parent_and_name(
+            norm, self.workspace_root.value
+        )
+
         try:
             async with self._session_factory() as db:
                 if is_update:
-                    await self._update_existing(db, norm, existing, content)
+                    if existing.is_version_node:
+                        # Version file → update version content in-place
+                        await self._update_version_content(db, existing, content)
+                    else:
+                        await self._update_existing(db, norm, existing, content)
                 else:
                     await self._create_new_file(db, parent_path, filename, content)
         except Exception as e:
@@ -720,6 +1106,44 @@ class MamboResourceBackend(BackendProtocol):
         )
         if new_ver:
             await resource_crud.set_active_version(db, node.id, new_ver.id)
+
+    async def _update_version_content(
+        self,
+        db: AsyncSession,
+        node: _CachedNode,
+        content: str,
+    ) -> None:
+        """Update a specific version's content **in-place** (no new version).
+
+        Used when writing/editing a version file inside a ``$v/`` folder.
+        For FILE/KB_FILE types: save content via FileService → store file_id.
+        For direct-text types: store content inline.
+        """
+        version_id = _extract_version_id(node.id)
+
+        # Idempotent: if content unchanged, do nothing
+        if _is_direct_text_type(node.resource_type):
+            if content == (node.content or ""):
+                return
+
+        new_content_val: str
+        if _is_file_id_type(node.resource_type):
+            fs = FileService(db)
+            db_file = await fs.save_file_from_bytes(
+                data=content.encode("utf-8"),
+                filename=node.name,
+                mime_type="text/plain",
+                management_type=["resource"],
+                sub_path="resources",
+            )
+            new_content_val = db_file.id
+        else:
+            new_content_val = content
+
+        await resource_crud.update_resource_version(
+            db, version_id,
+            schemas.ResourceVersionUpdate(content=new_content_val),
+        )
 
     async def _create_new_file(
         self,
@@ -797,10 +1221,11 @@ class MamboResourceBackend(BackendProtocol):
                 "请先在 Agent 设置中挂载一个资源文件夹以启用写入支持。"
             )
 
-        if parent_path == self.workspace_root:
+        wr_value = self.workspace_root.value
+        if parent_path == wr_value:
             return self._root_resource_id, []
 
-        rel = parent_path[len(self.workspace_root):].lstrip("/")
+        rel = parent_path[len(wr_value):].lstrip("/")
         segments = [s for s in rel.split("/") if s]
         if not segments:
             return self._root_resource_id, []
@@ -810,7 +1235,7 @@ class MamboResourceBackend(BackendProtocol):
 
         for i, seg in enumerate(segments):
             target_vpath = (
-                f"{self.workspace_root}/{'/'.join(segments[: i + 1])}"
+                f"{wr_value}/{'/'.join(segments[: i + 1])}"
             )
             cached = self._cache.get(target_vpath)
 
@@ -847,7 +1272,7 @@ class MamboResourceBackend(BackendProtocol):
 
     def edit(
         self,
-        file_path: str,
+        file_path: VirtualPath,
         old_str: str,
         new_str: str,
         *,
@@ -860,7 +1285,7 @@ class MamboResourceBackend(BackendProtocol):
 
     async def aedit(
         self,
-        file_path: str,
+        file_path: VirtualPath,
         old_str: str,
         new_str: str,
         *,
@@ -874,7 +1299,7 @@ class MamboResourceBackend(BackendProtocol):
 
     async def _aedit_impl(
         self,
-        file_path: str,
+        file_path: VirtualPath,
         old_str: str,
         new_str: str,
         *,
@@ -941,7 +1366,7 @@ class MamboResourceBackend(BackendProtocol):
     def grep(
         self,
         pattern: str,
-        path: str = "/workspace",
+        path: VirtualPath = VirtualPath("/workspace"),
         glob: str | None = None,
         regex: bool = False,
         offset: int = 0,
@@ -970,7 +1395,7 @@ class MamboResourceBackend(BackendProtocol):
         # --- Phase 1 (sync): grep direct-text nodes inline — zero DB, zero blocking ---
         file_id_pairs: list[tuple[str, str]] = []  # (vpath, node_id)
         for vpath, node in self._cache.items():
-            if node.is_dir:
+            if node.is_dir or node.is_version_node:
                 continue
             if vpath != norm and not vpath.startswith(prefix):
                 continue
@@ -982,12 +1407,12 @@ class MamboResourceBackend(BackendProtocol):
                     if compiled is not None:
                         if compiled.search(line):
                             matches.append(
-                                GrepMatch(path=vpath, line=li, text=line[:2000])
+                                GrepMatch(path=VirtualPath(vpath), line=li, text=line[:2000])
                             )
                     else:
                         if pattern in line:
                             matches.append(
-                                GrepMatch(path=vpath, line=li, text=line[:2000])
+                                GrepMatch(path=VirtualPath(vpath), line=li, text=line[:2000])
                             )
             elif _is_file_id_type(node.resource_type):
                 file_id_pairs.append((vpath, node.id))
@@ -1016,7 +1441,7 @@ class MamboResourceBackend(BackendProtocol):
         """Async helper: concurrently read + grep file-id nodes.
         Called from ``_sync_bridge`` inside a worker-thread event loop."""
         reads = [
-            self._aread_raw_impl(vpath, limit=500_000)
+            self._aread_raw_impl(VirtualPath(vpath), limit=500_000)
             for vpath, _ in pairs
         ]
         results = await asyncio.gather(*reads, return_exceptions=True)
@@ -1032,12 +1457,12 @@ class MamboResourceBackend(BackendProtocol):
                 if compiled is not None:
                     if compiled.search(line):
                         matches.append(
-                            GrepMatch(path=vpath, line=li, text=line[:2000])
+                            GrepMatch(path=VirtualPath(vpath), line=li, text=line[:2000])
                         )
                 else:
                     if pattern in line:
                         matches.append(
-                            GrepMatch(path=vpath, line=li, text=line[:2000])
+                            GrepMatch(path=VirtualPath(vpath), line=li, text=line[:2000])
                         )
 
         return GrepResult(matches=matches)
@@ -1045,7 +1470,7 @@ class MamboResourceBackend(BackendProtocol):
     async def agrep(
         self,
         pattern: str,
-        path: str = "/workspace",
+        path: VirtualPath = VirtualPath("/workspace"),
         glob: str | None = None,
         regex: bool = False,
         offset: int = 0,
@@ -1058,7 +1483,7 @@ class MamboResourceBackend(BackendProtocol):
     async def _agrep_impl(
         self,
         pattern: str,
-        path: str = "/workspace",
+        path: VirtualPath = VirtualPath("/workspace"),
         glob: str | None = None,
         regex: bool = False,
         offset: int = 0,
@@ -1083,7 +1508,7 @@ class MamboResourceBackend(BackendProtocol):
         # --- Phase 1 (sync): grep direct-text nodes inline — zero DB calls ---
         file_id_pairs: list[tuple[str, str]] = []
         for vpath, node in self._cache.items():
-            if node.is_dir:
+            if node.is_dir or node.is_version_node:
                 continue
             if vpath != norm and not vpath.startswith(prefix):
                 continue
@@ -1095,12 +1520,12 @@ class MamboResourceBackend(BackendProtocol):
                     if compiled is not None:
                         if compiled.search(line):
                             matches.append(
-                                GrepMatch(path=vpath, line=li, text=line[:2000])
+                                GrepMatch(path=VirtualPath(vpath), line=li, text=line[:2000])
                             )
                     else:
                         if pattern in line:
                             matches.append(
-                                GrepMatch(path=vpath, line=li, text=line[:2000])
+                                GrepMatch(path=VirtualPath(vpath), line=li, text=line[:2000])
                             )
             elif _is_file_id_type(node.resource_type):
                 file_id_pairs.append((vpath, node.id))
@@ -1118,18 +1543,18 @@ class MamboResourceBackend(BackendProtocol):
     # Core: glob  (async-first: _aglob_impl)
     # ==================================================================
 
-    def glob(self, pattern: str, path: str = "/workspace") -> GlobResult:
+    def glob(self, pattern: str, path: VirtualPath = VirtualPath("/workspace")) -> GlobResult:
         return self._sync_bridge(
             _GlobResult, self._aglob_impl, pattern, path,
         )
 
-    async def aglob(self, pattern: str, path: str = "/workspace") -> GlobResult:
+    async def aglob(self, pattern: str, path: VirtualPath = VirtualPath("/workspace")) -> GlobResult:
         """Override parent: call async impl directly, serialized via lock."""
         async with self._lock:
             return await self._aglob_impl(pattern, path)
 
     async def _aglob_impl(
-        self, pattern: str, path: str = "/workspace",
+        self, pattern: str, path: VirtualPath = VirtualPath("/workspace"),
     ) -> GlobResult:
         try:
             norm = self._normalize_path(path)
@@ -1140,14 +1565,14 @@ class MamboResourceBackend(BackendProtocol):
 
         matched: list[FileInfo] = []
         for vpath, node in self._cache.items():
-            if node.is_dir:
+            if node.is_dir or node.is_version_node:
                 continue
             if vpath != norm and not vpath.startswith(prefix):
                 continue
             if not fnmatch.fnmatch(node.name, pattern):
                 continue
             matched.append(FileInfo(
-                path=vpath,
+                path=VirtualPath(vpath),
                 is_dir=False,
                 size=node.size,
                 modified_at=node.modified_at,
@@ -1156,6 +1581,82 @@ class MamboResourceBackend(BackendProtocol):
 
         matched.sort(key=lambda fi: fi.path)
         return GlobResult(matches=matched)
+
+    # ==================================================================
+    # Extra: ls_version  (async-first: _als_version_impl)
+    # ==================================================================
+
+    def ls_version(self, path: VirtualPath) -> LsVersionResult:
+        """List all versions of a resource by path (synchronous bridge)."""
+        return self._sync_bridge(_LsVersionResult, self._als_version_impl, path)
+
+    async def als_version(self, path: VirtualPath) -> LsVersionResult:
+        """Override parent: call async impl directly, serialized via lock."""
+        async with self._lock:
+            return await self._als_version_impl(path)
+
+    async def _als_version_impl(self, path: VirtualPath) -> LsVersionResult:
+        """Async impl: list all versions of a resource.
+
+        Accepts paths with or without the ``$v`` suffix:
+          - ``/workspace/my_prompt$v/`` → direct
+          - ``/workspace/my_prompt``    → auto-appended to ``...$v/``
+        """
+        try:
+            raw = str(path)
+        except Exception:
+            raw = str(path)
+
+        # Auto-append $v suffix if not present
+        normalized = raw.rstrip("/")
+        if not normalized.endswith(_VERSION_FOLDER_SUFFIX):
+            normalized = normalized + _VERSION_FOLDER_SUFFIX
+
+        try:
+            norm = self._normalize_path(VirtualPath(normalized))
+        except WorkspacePathError as e:
+            return LsVersionResult(error=str(e))
+
+        # Resolve the $v folder node
+        folder_node = self._resolve(norm)
+        if folder_node is None:
+            return LsVersionResult(error=f"Resource version folder '{normalized}' not found. "
+                                            f"Use ls to find resources (they end with '$v/').")
+        if not folder_node.is_dir:
+            return LsVersionResult(error=f"'{normalized}' is not a version folder. "
+                                            f"Version folders end with '$v/'.")
+
+        # Collect version children from cache
+        prefix = norm.rstrip("/") + "/"
+        # Query DB for full version metadata (sort_order is not in cache)
+        res_id = folder_node.id
+        async with self._session_factory() as db:
+            res = await resource_crud.get_resource_with_versions(db, res_id)
+        if res is None or not res.versions:
+            return LsVersionResult(versions=[])
+
+        active_version_id = res.latestVersionId
+        version_infos: list[VersionInfo] = []
+
+        for ver in res.versions:
+            is_active = (ver.id == active_version_id)
+            ver_vpath = f"{norm.rstrip('/')}/{ver.id}"
+
+            # Only include versions that exist in cache (consistency check)
+            if ver_vpath not in self._cache:
+                continue
+
+            version_infos.append(VersionInfo(
+                version_id=ver.id,
+                name=ver.name,
+                sort_order=ver.sortOrder,
+                is_active=is_active,
+                updated_at=_format_updated_at(ver.updatedAt),
+                file_path=ver_vpath,
+            ))
+
+        version_infos.sort(key=lambda v: v.sort_order)
+        return LsVersionResult(versions=version_infos) if version_infos else LsVersionResult(versions=[])
 
     # ==================================================================
     # Sync bridge
@@ -1223,6 +1724,7 @@ def _construct_error(result_cls: type, msg: str):
 
 # Type aliases to pass class objects around
 _LsResult = LsResult
+_LsVersionResult = LsVersionResult
 _ReadResult = ReadResult
 _WriteResult = WriteResult
 _EditResult = EditResult

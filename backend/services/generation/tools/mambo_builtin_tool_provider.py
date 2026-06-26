@@ -1,5 +1,6 @@
 # backend/services/generation/tools/mambo_builtin_tool_provider.py
 
+import json
 from typing import List, Optional, Dict, Any, AsyncGenerator
 
 from langchain_core.tools import BaseTool
@@ -23,15 +24,20 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
     拦截 mambo_agents 底层隐式注入的内置系统工具调用（来自 BackendToolsMiddleware
     和 SubAgentMiddleware 等），并将其转换为前端可渲染的 UI 消息指令。
     复用现有的 MCP_TOOL 子消息类型，使前端能够无缝展示文件操作、终端执行等进度。
+
+    **后端级工具自动注册**：
+    ``register_tool(name)`` 方法允许后续动态注册 backend 暴露的工具名称（如
+    ``ls_version``），避免每次新增 backend 工具都要手动更新 ``BUILTIN_TOOLS``。
     """
 
-    # mambo_agents 内置工具名称集合
+    # 中间件注入的固定内置工具（与 backend 无关）
     # - core six: ls, read, write, edit, glob, grep (BackendToolsMiddleware)
-    # - backend extras: tree, delete, execute, sandbox_run 等 (由 backend.tools 决定)
     # - workspace: copy (HybridWorkspaceBackend 跨后端复制)
+    # - backend extras: tree, delete, execute, sandbox_run 等 (由 backend.tools 决定)
     # - subagent: task (SubAgentMiddleware)
     # - async subagent: async_task, async_status (AsyncSubAgentMiddleware)
     # - planning: write_plans (MamboPlanMiddleware)
+    # 注：backend 专属工具（如 ls_version）通过 register_tool() 动态注入，不在此硬编码
     BUILTIN_TOOLS = frozenset({
         "ls",
         "read",
@@ -47,11 +53,13 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
         "async_task",
         "async_status",
         "write_plans",
+        "show",
     })
 
-    def __init__(self):
+    def __init__(self, extra_tool_names: frozenset[str] | None = None):
         self._tool_sub_msg_map: Dict[str, str] = {}
         self._tool_info_cache: Dict[str, McpToolContent] = {}
+        self._extra_tool_names: set[str] = set(extra_tool_names) if extra_tool_names else set()
 
     async def get_tools(self) -> List[BaseTool]:
         return []
@@ -60,7 +68,11 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
         return None
 
     def matches_tool_name(self, tool_name: str) -> bool:
-        return tool_name in self.BUILTIN_TOOLS
+        return tool_name in self.BUILTIN_TOOLS or tool_name in self._extra_tool_names
+
+    def register_tool(self, name: str) -> None:
+        """动态注册一个后端级工具的名称，使其可被 UI 追踪。"""
+        self._extra_tool_names.add(name)
 
     async def create_call_instruction(
         self,
@@ -102,6 +114,24 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
         sub_id = self._tool_sub_msg_map.get(tool_call_id)
         cached_content = self._tool_info_cache.get(tool_call_id)
 
+        # --- show 工具特殊处理：额外创建 FILE 子消息 ---
+        if cached_content and cached_content.name == "show" and not is_error:
+            try:
+                data = json.loads(result_text)
+                file_id = data.get("file_id")
+                if file_id:
+                    yield CreateSubMessage(
+                        sub_message_id=generate_uuid(),
+                        type=schemas_enums.SubMessageType.FILE.value,
+                        sortOrder=2,
+                        status=schemas_enums.MessageStatus.COMPLETED,
+                        initial_content=file_id,
+                        config={"context_participation_length": 0},
+                    )
+            except (json.JSONDecodeError, KeyError, TypeError):
+                pass
+
+        # --- 通用 MCP_TOOL 结果更新 ---
         if sub_id and cached_content:
             cached_content.result = result_text
             cached_content.is_error = is_error

@@ -148,6 +148,9 @@ class MamboAgentInitializer(AbstractAgentInitializer):
         # --- 子代理初始化 ---
         sub_configs: List[AgentConfig] = []
 
+        # 从已加载的后端配置中自动注册后端级工具名称到 builtin_provider
+        self._register_backend_tools(builtin_provider, mounted_backends)
+
         # 全局设置（子代理 & 安全审核共用）
         proxy_setting = await setting_crud.get_setting(self.db, "proxy_enabled")
         proxy_url_setting = await setting_crud.get_setting(self.db, "proxy_url")
@@ -326,6 +329,7 @@ class MamboAgentInitializer(AbstractAgentInitializer):
         sum_config = mambo_params.summarization_config
         enable_planning = mambo_params.enable_planning
         enable_memory = mambo_params.enable_memory
+        enable_show = mambo_params.enable_show
         memory_resource_ids = mambo_params.memory_resource_ids
 
         # 构建 memory_resource_roots（类似 skill_resource_roots）
@@ -399,6 +403,7 @@ class MamboAgentInitializer(AbstractAgentInitializer):
             enable_summarization=enable_sum,
             summarization_config=sum_config.model_dump() if (enable_sum and sum_config) else None,
             enable_planning=enable_planning,
+            enable_show=enable_show,
             memory_resource_roots=memory_roots if memory_roots else None,
             security_review_config=security_review_config,
             security_review_llm_config=security_review_llm_config,
@@ -449,6 +454,26 @@ class MamboAgentInitializer(AbstractAgentInitializer):
                 continue
             roots[res.name] = res.id
         return roots
+
+    @staticmethod
+    def _register_backend_tools(builtin_provider: "MamboAgentBuiltinToolProvider", mounted_backends: List[Dict[str, Any]]) -> None:
+        """从已挂载的 backend 配置中收集其声明的工具名称，注册到 builtin_provider。
+
+        通过读取后端类的 ``BACKEND_TOOL_NAMES`` 类属性实现自动发现，
+        无需在 ``BUILTIN_TOOLS`` 中手动维护后端工具列表。
+        """
+        from backend.services.generation.agent.mambo_resource_backend import MamboResourceBackend
+
+        for mb in mounted_backends:
+            b_type = mb.get("backendType")
+            if b_type != "resource":
+                continue
+            config = mb.get("configData", {})
+            # 仅当 enable_version_editing 未显式关闭时才注册
+            if config.get("enable_version_editing", True) is False:
+                continue
+            for name in MamboResourceBackend.BACKEND_TOOL_NAMES:
+                builtin_provider.register_tool(name)
 
     def get_providers(self) -> List[BaseToolProvider]:
         return self.providers

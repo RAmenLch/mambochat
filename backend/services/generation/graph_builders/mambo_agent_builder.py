@@ -24,6 +24,7 @@ from mambo_agents import (
     BackendProtocol,
     HybridWorkspaceBackend,
 )
+from mambo_agents.backends.schemas import VirtualPath
 from mambo_agents.backends.ssh import SshBackend
 from mambo_agents.backends.state import StateBackend
 from mambo_agents.middleware.security_review import SecurityReviewConfig
@@ -67,7 +68,7 @@ def _build_mambo_backend(agent_config: AgentConfig) -> BackendProtocol | None:
                 resource_id=None,
                 session_factory=session_factory,
                 shortcuts=agent_config.skill_resource_roots,
-                workspace_root="/",
+                workspace_root=VirtualPath("/workspace"),
             )
             return HybridWorkspaceBackend(
                 real_backend=StateBackend(),
@@ -94,21 +95,27 @@ def _build_mambo_backend(agent_config: AgentConfig) -> BackendProtocol | None:
             virtual_workspaces[name] = be
 
     # ---- 3. Skills ----
+    # Skills are shortcut-only backends (no workspace root).  They always
+    # use legacy flat-file mode — individual skill files are NOT versioned.
     if agent_config.skill_resource_roots:
         virtual_workspaces["skills"] = MamboResourceBackend(
             resource_id=None,
             session_factory=session_factory,
             shortcuts=agent_config.skill_resource_roots,
-            workspace_root="/",
+            workspace_root=VirtualPath("/workspace"),
+            enable_version_editing=False,
         )
 
     # ---- 4. Memory（长期记忆） ----
+    # Memory is shortcut-only too.  Memory files like Agent.md are loaded
+    # from resource folders but should appear as flat files.
     if agent_config.memory_resource_roots:
         virtual_workspaces["memory"] = MamboResourceBackend(
             resource_id=None,
             session_factory=session_factory,
             shortcuts=agent_config.memory_resource_roots,
-            workspace_root="/",
+            workspace_root=VirtualPath("/workspace"),
+            enable_version_editing=False,
         )
 
     # ---- 5. 组装 ----
@@ -166,6 +173,7 @@ def _build_any_backend(
             session_factory=session_factory,
             edit_whitelist=_to_frozenset(config.get("edit_whitelist")),
             edit_blacklist=_to_frozenset(config.get("edit_blacklist")),
+            enable_version_editing=config.get("enable_version_editing", True),
         )
 
     return None
@@ -302,12 +310,28 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
             )
 
         # --- Memory sources（长期记忆） ---
-        memory_sources: list[str] | None = None
+        memory_sources: list[VirtualPath] | None = None
         if agent_config.memory_resource_roots:
             memory_sources = [
-                f"/.mambo/memory/{name}"
+                VirtualPath(f"/.mambo/memory/{name}")
                 for name in agent_config.memory_resource_roots
             ]
+
+        # --- Show tool middleware (opt-in, default on) ---
+        _show_middleware = None
+        if getattr(agent_config, 'enable_show', True):
+            from backend.services.generation.agent.show_middleware import ShowMiddleware
+            _show_middleware = ShowMiddleware(
+                backend=backend,
+                session_factory=_make_session_factory(),
+            )
+
+        # --- Merge middlewares ---
+        _middlewares: list = []
+        if _plan_middleware:
+            _middlewares.extend(_plan_middleware)
+        if _show_middleware:
+            _middlewares.append(_show_middleware)
 
         return create_mambo_agent(
             name=agent_config.name,
@@ -320,7 +344,7 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
             tools=tools if tools else None,
             skills=skills_sources,
             memory_sources=memory_sources,
-            middleware=_plan_middleware,
+            middleware=_middlewares if _middlewares else None,
             checkpointer=checkpointer,
             interrupt_on=agent_config.hitl_interrupt_on if agent_config.hitl_interrupt_on else None,
             security_review=security_review,

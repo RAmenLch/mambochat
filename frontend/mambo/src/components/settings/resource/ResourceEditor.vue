@@ -13,6 +13,7 @@
       @set-active="handleSetActiveVersion"
       @toggle-kb-view="viewMode = 'kb_config'"
       @reorder-versions="handleReorderVersions"
+      @delete-version="handleDeleteVersion"
     />
 
     <!-- Region: KB Configuration View -->
@@ -143,6 +144,7 @@ const {
   loadVersionIntoEditor,
   handleSetActiveVersion,
   handleReorderVersions,
+  handleDeleteVersion,
   openNewVersionDialog,
   handleConfirmNewVersion,
 } = useResourceEditor(props)

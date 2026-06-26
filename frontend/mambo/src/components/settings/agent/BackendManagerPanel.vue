@@ -152,6 +152,13 @@
               </el-option>
             </el-select>
           </el-form-item>
+          <el-form-item :label="$t('backend.enableVersionEditing')">
+            <div class="tools-config-row">
+              <el-switch v-model="form.configData.enable_version_editing" />
+              <span class="tools-config-label" style="margin-left: 12px;">{{ form.configData.enable_version_editing ? $t('backend.versionEditingEnabled') : $t('backend.versionEditingDisabled') }}</span>
+            </div>
+            <div class="tools-config-tip">{{ $t('backend.versionEditingTip') }}</div>
+          </el-form-item>
           <el-form-item label="Edit Whitelist" prop="configData.edit_whitelist">
             <el-select v-model="form.configData.edit_whitelist" multiple filterable allow-create default-first-option placeholder="例如: *.py, *.md (回车添加)" style="width: 100%" />
           </el-form-item>
@@ -287,6 +294,7 @@ const resourceDefaultConfig = (): ResourceConfigData => ({
   resource_id: '',
   edit_whitelist: [],
   edit_blacklist: [],
+  enable_version_editing: true,
 });
 
 const defaultForm = (type: BackendType = 'ssh'): BackendCreate => ({
@@ -412,15 +420,20 @@ const handleEdit = (row: BackendConfig) => {
   showApiKey.value = false;
 
   const type = row.backendType;
+  const rawData = JSON.parse(JSON.stringify(row.configData)) as Record<string, any>;
+  // Normalize enable_version_editing: default to true when undefined/null
+  if (rawData.enable_version_editing == null) {
+    rawData.enable_version_editing = true;
+  }
   Object.assign(form, {
     name: row.name,
     description: row.description || '',
     backendType: type,
     configData: {
-      ...(JSON.parse(JSON.stringify(row.configData))),
-      edit_whitelist: (row.configData as any).edit_whitelist || [],
-      edit_blacklist: (row.configData as any).edit_blacklist || [],
-      ignore_dirs: (row.configData as any).ignore_dirs || [],
+      ...rawData,
+      edit_whitelist: rawData.edit_whitelist || [],
+      edit_blacklist: rawData.edit_blacklist || [],
+      ignore_dirs: rawData.ignore_dirs || [],
     },
     tools_config: row.tools_config ? JSON.parse(JSON.stringify(row.tools_config)) : defaultToolsConfig(),
   });

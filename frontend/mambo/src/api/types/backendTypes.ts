@@ -45,6 +45,7 @@ export interface ResourceConfigData {
   resource_id: string;
   edit_whitelist?: string[] | null;
   edit_blacklist?: string[] | null;
+  enable_version_editing?: boolean;
   hostname?: string;
   username?: string;
   port?: number;

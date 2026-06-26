@@ -29,6 +29,7 @@ from mambo_agents.backends.protocol import (
     GrepResult,
     LsResult,
     ReadResult,
+    VirtualPath,
     WriteResult,
 )
 
@@ -118,17 +119,22 @@ class MamboAPIBackend(BackendProtocol):
             self.backend_id, method, params, timeout=self.timeout
         )
 
-    def _normalize_path(self, virtual_path: str) -> str:
-        """Normalize a virtual path: ensure leading /, prevent traversal."""
-        if not virtual_path.startswith("/"):
-            virtual_path = "/" + virtual_path
-        norm = posixpath.normpath(virtual_path)
+    def _normalize_path(self, virtual_path: VirtualPath) -> str:
+        """Normalize a virtual path: ensure leading /, prevent traversal.
+
+        Accepts VirtualPath (preferred) or str (backward-compat).
+        Returns a plain string for use as cache key / WS params.
+        """
+        if not isinstance(virtual_path, VirtualPath):
+            virtual_path = VirtualPath(virtual_path)
+        raw = virtual_path.value
+        norm = posixpath.normpath(raw)
         if norm.startswith(".."):
             raise ValueError("Path traversal not allowed.")
         return norm
 
-    def _check_edit_permission(self, virtual_path: str) -> None:
-        filename = posixpath.basename(virtual_path)
+    def _check_edit_permission(self, virtual_path: VirtualPath) -> None:
+        filename = posixpath.basename(str(virtual_path))
         if self.edit_whitelist and not any(
             fnmatch.fnmatch(filename, p) for p in self.edit_whitelist
         ):
@@ -160,7 +166,7 @@ class MamboAPIBackend(BackendProtocol):
     # Core file operations (mambo BackendProtocol)
     # ------------------------------------------------------------------
 
-    def _ls_sync(self, path: str) -> LsResult:
+    def _ls_sync(self, path: VirtualPath) -> LsResult:
         """Sync ls via event-loop delegation."""
         import asyncio
         import concurrent.futures
@@ -176,10 +182,10 @@ class MamboAPIBackend(BackendProtocol):
             except Exception as e:
                 return LsResult(error=str(e))
 
-    def ls(self, path: str) -> LsResult:
+    def ls(self, path: VirtualPath) -> LsResult:
         return self._ls_sync(path)
 
-    async def als(self, path: str) -> LsResult:
+    async def als(self, path: VirtualPath) -> LsResult:
         norm = self._normalize_path(path)
         result = await self._run_ws_call("ls", self._call, "ls", {"path": norm})
         if result is None:
@@ -192,7 +198,7 @@ class MamboAPIBackend(BackendProtocol):
         for item in data:
             entries.append(
                 FileInfo(
-                    path=item.get("path", ""),
+                    path=VirtualPath(item.get("path", "/")),
                     is_dir=item.get("is_dir", False),
                     size=item.get("size", 0),
                     modified_at=item.get("modified_at", ""),
@@ -202,7 +208,7 @@ class MamboAPIBackend(BackendProtocol):
 
     def _read_sync(
         self,
-        file_path: str,
+        file_path: VirtualPath,
         offset: int = 0,
         limit: int = 2000,
         include_line_numbers: bool = False,
@@ -226,7 +232,7 @@ class MamboAPIBackend(BackendProtocol):
 
     def read_raw(
         self,
-        file_path: str,
+        file_path: VirtualPath,
         offset: int = 0,
         limit: int = 2000,
         include_line_numbers: bool = False,
@@ -235,7 +241,7 @@ class MamboAPIBackend(BackendProtocol):
 
     async def aread_raw(
         self,
-        file_path: str,
+        file_path: VirtualPath,
         offset: int = 0,
         limit: int = 2000,
         include_line_numbers: bool = False,
@@ -269,7 +275,7 @@ class MamboAPIBackend(BackendProtocol):
         return "\n".join(result)
 
     def write(
-        self, file_path: str, content: str, overwrite: bool = False
+        self, file_path: VirtualPath, content: str, overwrite: bool = False
     ) -> WriteResult:
         import asyncio
         import concurrent.futures
@@ -288,7 +294,7 @@ class MamboAPIBackend(BackendProtocol):
                 return WriteResult(error=str(e))
 
     async def awrite(
-        self, file_path: str, content: str, overwrite: bool = False
+        self, file_path: VirtualPath, content: str, overwrite: bool = False
     ) -> WriteResult:
         try:
             self._check_edit_permission(file_path)
@@ -310,7 +316,7 @@ class MamboAPIBackend(BackendProtocol):
 
     def edit(
         self,
-        file_path: str,
+        file_path: VirtualPath,
         old_str: str,
         new_str: str,
         *,
@@ -335,7 +341,7 @@ class MamboAPIBackend(BackendProtocol):
 
     async def aedit(
         self,
-        file_path: str,
+        file_path: VirtualPath,
         old_str: str,
         new_str: str,
         *,
@@ -368,7 +374,7 @@ class MamboAPIBackend(BackendProtocol):
         )
 
     def grep(
-        self, pattern: str, path: str = "/", glob: str | None = None,
+        self, pattern: str, path: VirtualPath = VirtualPath("/workspace"), glob: str | None = None,
         regex: bool = False,
         offset: int = 0,
         limit: int | None = None,
@@ -390,7 +396,7 @@ class MamboAPIBackend(BackendProtocol):
                 return GrepResult(error=str(e))
 
     async def agrep(
-        self, pattern: str, path: str = "/", glob: str | None = None,
+        self, pattern: str, path: VirtualPath = VirtualPath("/workspace"), glob: str | None = None,
         regex: bool = False,
         offset: int = 0,
         limit: int | None = None,
@@ -412,7 +418,7 @@ class MamboAPIBackend(BackendProtocol):
             for m in result:
                 matches.append(
                     GrepMatch(
-                        path=m.get("path", ""),
+                        path=VirtualPath(m.get("path", "/")),
                         line=m.get("line", 0),
                         text=m.get("text", ""),
                     )
@@ -420,7 +426,7 @@ class MamboAPIBackend(BackendProtocol):
             return GrepResult(matches=matches)
         return GrepResult(matches=[])
 
-    def glob(self, pattern: str, path: str = "/") -> GlobResult:
+    def glob(self, pattern: str, path: VirtualPath = VirtualPath("/workspace")) -> GlobResult:
         import asyncio
         import concurrent.futures
 
@@ -437,7 +443,7 @@ class MamboAPIBackend(BackendProtocol):
             except Exception as e:
                 return GlobResult(error=str(e))
 
-    async def aglob(self, pattern: str, path: str = "/") -> GlobResult:
+    async def aglob(self, pattern: str, path: VirtualPath = VirtualPath("/workspace")) -> GlobResult:
         norm = self._normalize_path(path)
         result = await self._run_ws_call(
             "glob",
@@ -454,7 +460,7 @@ class MamboAPIBackend(BackendProtocol):
         for item in data:
             matches.append(
                 FileInfo(
-                    path=item.get("path", ""),
+                    path=VirtualPath(item.get("path", "/")),
                     is_dir=item.get("is_dir", False),
                     size=item.get("size", 0),
                     modified_at=item.get("modified_at", ""),

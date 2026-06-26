@@ -288,6 +288,29 @@ export function useResourceEditor(props: {
     await resourceStore.reorderVersions(props.resource.id, updates)
   }
 
+  async function handleDeleteVersion(versionId: string) {
+    if (!props.resource) return
+
+    const version = props.resource.versions.find(v => v.id === versionId)
+    if (!version) return
+
+    try {
+      await ElMessageBox.confirm(
+        t('resource.version.confirmDelete', { name: version.name }),
+        t('resource.version.delete'),
+        {
+          type: 'warning',
+          confirmButtonText: t('common.action.confirm'),
+          cancelButtonText: t('common.action.cancel'),
+        }
+      )
+      await resourceStore.deleteVersion(props.resource.id, versionId)
+      ElMessage.success(t('resource.version.deleteSuccess'))
+    } catch {
+      /* User canceled */
+    }
+  }
+
   // --- Watchers ---
   watch(
     () => props.resource,
@@ -341,6 +364,7 @@ export function useResourceEditor(props: {
     loadVersionIntoEditor,
     handleSetActiveVersion,
     handleReorderVersions,
+    handleDeleteVersion,
     openNewVersionDialog,
     handleConfirmNewVersion,
   }

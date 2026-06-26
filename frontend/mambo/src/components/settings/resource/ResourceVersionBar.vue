@@ -34,6 +34,7 @@
             }"
             draggable="true"
             @click="$emit('select-version', version)"
+            @contextmenu.prevent="handleContextMenu(version, $event)"
             @dragstart="handleDragStart(version.id, $event)"
             @dragover.prevent="handleDragOver($event)"
             @dragend="handleDragEnd"
@@ -61,13 +62,38 @@
         <div v-else-if="!kbId" key="__empty__" class="no-versions">{{ t('resource.version.empty') }}</div>
       </transition-group>
     </el-scrollbar>
+
+    <!-- Context Menu -->
+    <teleport to="body">
+      <div
+        v-if="contextMenu.visible"
+        class="context-menu-overlay"
+        @click="closeContextMenu"
+        @contextmenu.prevent="closeContextMenu"
+      />
+      <div
+        v-if="contextMenu.visible"
+        class="version-context-menu"
+        :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+        @click.stop
+      >
+        <div
+          class="context-menu-item"
+          :class="{ 'is-disabled': contextMenu.disableDelete }"
+          @click="handleDeleteClick"
+        >
+          <el-icon :size="14"><Delete /></el-icon>
+          <span>{{ t('resource.version.delete') }}</span>
+        </div>
+      </div>
+    </teleport>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Setting } from '@element-plus/icons-vue'
+import { Setting, Delete } from '@element-plus/icons-vue'
 import type { ResourceVersion } from '@/api/types'
 
 const props = defineProps<{
@@ -83,6 +109,7 @@ const emit = defineEmits<{
   (e: 'set-active', versionId: string): void
   (e: 'toggle-kb-view'): void
   (e: 'reorder-versions', reorderedVersions: ResourceVersion[]): void
+  (e: 'delete-version', versionId: string): void
 }>()
 
 const { t } = useI18n()
@@ -90,6 +117,51 @@ const { t } = useI18n()
 const draggedVersionId = ref<string | null>(null)
 let lastSwapTime = 0
 const SWAP_THROTTLE_MS = 150
+
+// Context menu state
+const contextMenu = reactive({
+  visible: false,
+  x: 0,
+  y: 0,
+  versionId: null as string | null,
+  disableDelete: false,
+})
+
+function handleContextMenu(version: ResourceVersion, event: MouseEvent) {
+  const isActive = props.activeVersionId === version.id
+  const isLastOne = props.versions.length <= 1
+
+  // Clamp position to viewport
+  const menuWidth = 160
+  const menuHeight = 40
+  let posX = event.clientX
+  let posY = event.clientY
+
+  if (posX + menuWidth > window.innerWidth) {
+    posX = window.innerWidth - menuWidth - 4
+  }
+  if (posY + menuHeight > window.innerHeight) {
+    posY = window.innerHeight - menuHeight - 4
+  }
+
+  contextMenu.visible = true
+  contextMenu.x = posX
+  contextMenu.y = posY
+  contextMenu.versionId = version.id
+  contextMenu.disableDelete = isActive || isLastOne
+}
+
+function closeContextMenu() {
+  contextMenu.visible = false
+  contextMenu.versionId = null
+}
+
+function handleDeleteClick() {
+  if (contextMenu.disableDelete || !contextMenu.versionId) return
+
+  emit('delete-version', contextMenu.versionId)
+  closeContextMenu()
+}
 
 const handleDragStart = (versionId: string, event: DragEvent) => {
   draggedVersionId.value = versionId
@@ -270,5 +342,45 @@ const handleDragEnd = () => {
 .special-label {
   font-size: 12px;
   font-weight: 600;
+}
+
+/* Context Menu */
+.version-context-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 150px;
+  background: #fff;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  padding: 4px 0;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  color: var(--el-text-color-primary);
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.context-menu-item:hover:not(.is-disabled) {
+  background-color: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+}
+
+.context-menu-item.is-disabled {
+  color: var(--el-text-color-placeholder);
+  cursor: not-allowed;
+}
+
+.context-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  background: transparent;
 }
 </style>

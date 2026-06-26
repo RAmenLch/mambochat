@@ -13,4 +13,8 @@ export default {
   toolEnabled: 'Enabled',
   toolRequireReview: 'Require Review',
   toolExecuteTip: 'When enabled, the Agent can execute shell commands on this Backend. Enabling review is recommended for security.',
+  enableVersionEditing: 'Version Override Editing',
+  versionEditingEnabled: 'Enabled — AI can view/edit individual versions',
+  versionEditingDisabled: 'Disabled — AI only sees the latest version',
+  versionEditingTip: 'When enabled, resources appear as $v folders containing individual version files. The AI can use ls_version to list versions and directly edit version file content in-place. When disabled, resources appear as flat files and only the latest version is accessible.',
 }

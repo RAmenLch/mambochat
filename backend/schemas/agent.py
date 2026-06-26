@@ -34,6 +34,7 @@ class MamboAgentParametersSchema(BaseModel):
     enable_planning: bool = Field(True, description="是否启用计划中间件")
     enable_memory: bool = Field(False, description="是否启用长期记忆")
     enable_summarization: bool = Field(False, description="是否启用对话摘要")
+    enable_show: bool = Field(True, description="是否启用 show 工具（展示文件/图片给用户）")
     memory_resource_ids: List[str] = Field(default_factory=list, description="记忆资源ID列表")
     summarization_config: Optional[SummarizationConfigSchema] = Field(None, description="摘要详细配置")
     security_review: Optional[SecurityReviewConfigSchema] = Field(None, description="AI 安全审核配置")

@@ -22,6 +22,7 @@ export interface MamboAgentParameters {
   enable_planning: boolean
   enable_memory: boolean
   enable_summarization: boolean
+  enable_show: boolean
   memory_resource_ids: string[]
   summarization_config?: SummarizationConfig | null
   security_review?: SecurityReviewConfig | null

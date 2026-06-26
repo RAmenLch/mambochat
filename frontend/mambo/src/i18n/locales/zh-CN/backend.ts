@@ -13,4 +13,8 @@ export default {
   toolEnabled: '启用',
   toolRequireReview: '需审核',
   toolExecuteTip: '启用后 Agent 可在该 Backend 上执行 Shell 命令，建议开启审核以保障安全。',
+  enableVersionEditing: '版本覆盖编辑',
+  versionEditingEnabled: '已启用 — AI 可查看/编辑单个版本',
+  versionEditingDisabled: '已禁用 — AI 仅能查看最新版本',
+  versionEditingTip: '启用后，资源会以 $v 文件夹形式暴露，文件夹内的每个版本作为独立文件。AI 可使用 ls_version 列出版本列表，并直接原位编辑版本文件内容。禁用后，资源显示为普通文件，仅能访问最新版本。',
 }
