@@ -47,6 +47,7 @@
           :is-generating="message.status === 'generating'"
           :current-message-rank="currentMessageRank"
           @edit="handleEditRequest"
+          @edit-file="handleFileEdit"
           @copy="handleCopySingle"
           @open-tool-dialog="(toolId) => $emit('open-tool-dialog', message, toolId, 'single')"
         />

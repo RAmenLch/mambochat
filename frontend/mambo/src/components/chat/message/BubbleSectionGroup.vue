@@ -27,6 +27,7 @@
         :is-inline="true"
         @edit="(payload) => $emit('edit', group.textSubMessage!, payload)"
         @copy="$emit('copy', group.textSubMessage!)"
+        @edit-file="(file) => $emit('edit-file', file)"
       />
     </div>
 
@@ -71,7 +72,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import type { Message, SubMessage, McpToolContent, ReviewToolContent, AskUserContent, SecurityReviewContent } from '@/api/types';
+import type { Message, SubMessage, McpToolContent, ReviewToolContent, AskUserContent, SecurityReviewContent, FileResponse } from '@/api/types';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import SubMessageItem from '../SubMessageItem.vue';
 import type { BubbleSectionGroup } from '@/composables/useAssistantTimeline';
@@ -101,6 +102,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   (e: 'edit', subMessage: SubMessage, payload: any): void;
   (e: 'copy', subMessage: SubMessage): void;
+  (e: 'edit-file', file: FileResponse): void;
   (e: 'open-tool-dialog', subMessageId: string): void;
   (e: 'toggle-collapse', subMessageId: string): void;
 }>();

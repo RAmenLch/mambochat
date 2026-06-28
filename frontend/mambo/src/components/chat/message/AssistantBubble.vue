@@ -50,6 +50,7 @@
               is-reasoning
               @edit="(subMsg, payload) => $emit('edit', subMsg, payload)"
               @copy="(subMsg) => $emit('copy', subMsg)"
+              @edit-file="(file) => $emit('edit-file', file)"
               @open-tool-dialog="(toolId) => $emit('open-tool-dialog', toolId)"
             />
           </div>
@@ -70,6 +71,7 @@
             :show-zip-coverage="zipCoverageGroupIds.has(group.id)"
             @edit="(subMsg, payload) => $emit('edit', subMsg, payload)"
             @copy="(subMsg) => $emit('copy', subMsg)"
+            @edit-file="(file) => $emit('edit-file', file)"
             @open-tool-dialog="(toolId) => $emit('open-tool-dialog', toolId)"
           />
 
@@ -124,7 +126,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import type { Message, SubMessage, ErrorContent } from '@/api/types';
+import type { Message, SubMessage, ErrorContent, FileResponse } from '@/api/types';
 import { useAssistantTimeline, type BubbleSectionGroup } from '@/composables/useAssistantTimeline';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { useChatSessionStore } from '@/stores/chatSessionStore';
@@ -143,6 +145,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'edit', subMessage: SubMessage, payload: any): void;
   (e: 'copy', subMessage: SubMessage): void;
+  (e: 'edit-file', file: FileResponse): void;
   (e: 'open-tool-dialog', subMessageId: string): void;
 }>();
 
