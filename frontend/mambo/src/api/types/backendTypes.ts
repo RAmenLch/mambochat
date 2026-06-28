@@ -26,6 +26,7 @@ export interface SshConfigData {
   ignore_dirs?: string[] | null;
   api_key?: string;
   resource_id?: string;
+  enable_version_editing?: boolean;
 }
 
 export interface ApiConfigData {
@@ -39,6 +40,7 @@ export interface ApiConfigData {
   root_dir?: string;
   ignore_dirs?: string[] | null;
   resource_id?: string;
+  enable_version_editing?: boolean;
 }
 
 export interface ResourceConfigData {
