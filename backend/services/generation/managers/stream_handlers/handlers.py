@@ -16,88 +16,116 @@ from backend.services.generation.managers.stream_handlers.finish_reason_monitor_
 
 
 class HitlHandler(BaseStreamHandler):
-    """处理人机交互 (HITL) 的中断与恢复"""
+    """处理人机交互 (HITL) 的中断与恢复。
+
+    当多个工具并行调用 interrupt() 时，LangGraph 的 output_writes 按 task
+    逐个发射 __interrupt__ 事件（每个 task 一个独立的 updates 事件）。
+    对于 ask_user 类型，不能在第一个事件就直接 InterruptGeneration()，
+    否则后续事件的 __interrupt__ 会被丢弃，导致只有部分 AskUserContent 被创建。
+    因此 ask_user 使用延迟中断策略：通过 context.hitl_batch_id 共享批次号，
+    让所有 __interrupt__ 事件都流经后再由 default_manager 统一处理中断状态。
+    """
     async def handle(self, context: StreamContext) -> AsyncGenerator[BaseInstruction, None]:
         Decode = context.decode
 
         # 1. 拦截中断请求
-        interrupt_data = Decode.get_hitl_interrupt(context.mode, context.event)
-        if interrupt_data:
-            # --- ask_user 类型中断 ---
-            if interrupt_data.get("type") == "ask_user":
-                questions = interrupt_data.get("questions", [])
-                tool_call_id = interrupt_data.get("tool_call_id", "")
-                current_batch_id = generate_uuid()
+        interrupt_list = Decode.get_hitl_interrupt(context.mode, context.event)
+        if interrupt_list:
+            has_ask_user = False
 
-                # 创建 McpTool 子消息（记录工具调用信息，参与上下文）
-                pending_call = next(
-                    (tc for tc in context.pending_hitl_tool_calls if tc.get("id") == tool_call_id),
-                    None
-                )
-                if pending_call:
-                    for provider in context.providers:
-                        if provider.matches_tool_name("ask_user"):
-                            async for inst in provider.create_call_instruction(
-                                tool_call_id, "ask_user", pending_call.get("args") or {},
-                                context.tool_map.get("ask_user")
-                            ):
-                                yield inst
-                            break
+            for idx, entry in enumerate(interrupt_list):
+                interrupt_data = entry["value"]
+                interrupt_id = entry.get("id")
 
-                # 创建 AskUser 子消息（展示提问 UI）
-                ask_content = AskUserContent(
-                    tool_call_id=tool_call_id,
-                    questions=questions,
-                    answers=None,
-                    interrupt_index=0,
-                    batch_id=current_batch_id,
-                )
-                yield CreateSubMessage(
-                    sub_message_id=generate_uuid(),
-                    type=schemas_enums.SubMessageType.ASK_USER.value,
-                    sortOrder=2,
-                    status=schemas_enums.MessageStatus.PENDING_REVIEW,
-                    initial_content=ask_content.to_json_string(),
-                    config={"context_participation_length": 0}
-                )
-                yield InterruptGeneration()
-                return
+                # --- ask_user 类型中断 ---
+                if interrupt_data.get("type") == "ask_user":
+                    has_ask_user = True
+                    questions = interrupt_data.get("questions", [])
+                    tool_call_id = interrupt_data.get("tool_call_id", "")
 
-            # --- HITL 审核中断 ---
-            if "action_requests" in interrupt_data:
-                current_batch_id = generate_uuid()
-                reviewable_calls = [tc for tc in context.pending_hitl_tool_calls if context.hitl_config.get(tc.get("name"))]
+                    # 多个 task 的 ask_user 中断共享同一个 batch_id
+                    if context.hitl_batch_id is None:
+                        context.hitl_batch_id = generate_uuid()
+                    current_batch_id = context.hitl_batch_id
 
-                for idx, action_req in enumerate(interrupt_data["action_requests"]):
-                    # 优先使用中断消息自带的 tool_call_id（security_review 中间件的 ActionRequest.tool_call_id）
-                    tool_call_id = action_req.get("tool_call_id")
-                    if not tool_call_id and idx < len(reviewable_calls):
-                        # 回退：按 index 从 pending 列表中取（兼容 deepagents 等不提供该字段的中间件）
-                        tool_call_id = reviewable_calls[idx].get("id")
-                    if not tool_call_id:
-                        tool_call_id = generate_uuid()
-                    name = action_req.get("name")
-                    target_tool = context.tool_map.get(name)
+                    # 跨事件递增 interrupt_index（首个事件=0，第二个=1，...）
+                    current_interrupt_index = context.hitl_interrupt_counter
+                    context.hitl_interrupt_counter += 1
 
-                    review_content = ReviewToolContent(
-                        tool_call_id=tool_call_id,
-                        name=name,
-                        arguments=action_req.get("args", {}),
-                        input_schema=target_tool.args if target_tool else None,
-                        description=action_req.get("description"),
-                        interrupt_index=idx,
-                        batch_id=current_batch_id,
-                        decision=None
+                    # 创建 McpTool 子消息（记录工具调用信息，参与上下文）
+                    pending_call = next(
+                        (tc for tc in context.pending_hitl_tool_calls if tc.get("id") == tool_call_id),
+                        None
                     )
+                    if pending_call:
+                        for provider in context.providers:
+                            if provider.matches_tool_name("ask_user"):
+                                async for inst in provider.create_call_instruction(
+                                    tool_call_id, "ask_user", pending_call.get("args") or {},
+                                    context.tool_map.get("ask_user")
+                                ):
+                                    yield inst
+                                break
 
+                    # 创建 AskUser 子消息（展示提问 UI）
+                    ask_content = AskUserContent(
+                        tool_call_id=tool_call_id,
+                        questions=questions,
+                        answers=None,
+                        interrupt_index=current_interrupt_index,
+                        batch_id=current_batch_id,
+                        interrupt_id=interrupt_id,
+                    )
                     yield CreateSubMessage(
                         sub_message_id=generate_uuid(),
-                        type=schemas_enums.SubMessageType.REVIEW_TOOL.value,
+                        type=schemas_enums.SubMessageType.ASK_USER.value,
                         sortOrder=2,
                         status=schemas_enums.MessageStatus.PENDING_REVIEW,
-                        initial_content=review_content.to_json_string(),
+                        initial_content=ask_content.to_json_string(),
                         config={"context_participation_length": 0}
                     )
+
+                # --- HITL 审核中断 ---
+                elif "action_requests" in interrupt_data:
+                    reviewable_calls = [tc for tc in context.pending_hitl_tool_calls if context.hitl_config.get(tc.get("name"))]
+                    current_batch_id = generate_uuid()
+
+                    for action_idx, action_req in enumerate(interrupt_data["action_requests"]):
+                        tool_call_id = action_req.get("tool_call_id")
+                        if not tool_call_id and action_idx < len(reviewable_calls):
+                            tool_call_id = reviewable_calls[action_idx].get("id")
+                        if not tool_call_id:
+                            tool_call_id = generate_uuid()
+                        name = action_req.get("name")
+                        target_tool = context.tool_map.get(name)
+
+                        review_content = ReviewToolContent(
+                            tool_call_id=tool_call_id,
+                            name=name,
+                            arguments=action_req.get("args", {}),
+                            input_schema=target_tool.args if target_tool else None,
+                            description=action_req.get("description"),
+                            interrupt_index=action_idx,
+                            batch_id=current_batch_id,
+                            decision=None
+                        )
+
+                        yield CreateSubMessage(
+                            sub_message_id=generate_uuid(),
+                            type=schemas_enums.SubMessageType.REVIEW_TOOL.value,
+                            sortOrder=2,
+                            status=schemas_enums.MessageStatus.PENDING_REVIEW,
+                            initial_content=review_content.to_json_string(),
+                            config={"context_participation_length": 0}
+                        )
+
+            if has_ask_user:
+                # ask_user 多中断：延迟中断，让后续 __interrupt__ 事件继续流入
+                # 所有 ask_user 中断通过 context.hitl_batch_id 共享批次号
+                return
+
+            # HITL 审核中断：立即中断（单个任务的所有 action_requests 已在一个事件中）
+            if interrupt_list:
                 yield InterruptGeneration()
                 return
 

@@ -35,27 +35,30 @@ class UniversalGraphWorker(AbstractGenerateWorker):
                 "checkpoint_ns": "",
             }
         }
-        # 指定分支 checkpoint → LangGraph 会进行时间旅行，从该 checkpoint 分叉
+        resume_payload = llm_input.agent_config.resume_payload
         if llm_input.run_time_config.branch_checkpoint_id:
             thread_config["configurable"]["checkpoint_id"] = llm_input.run_time_config.branch_checkpoint_id
 
         if llm_input.agent_config.recover_from_error:
             input_data = None
         else:
-            # Sync _summarization_event with context_builder's rebuilt event
-            # - None → clear stale event from previous run
-            # - non-None → overwrite with recalculated cutoff_index from DB
-            await agent.aupdate_state(
-                thread_config,
-                {"_summarization_event": llm_input.context.auto_summarization_event},
-            )
-
-            resume_payload = llm_input.agent_config.resume_payload
-            if resume_payload:
-                input_data = Command(resume=resume_payload)
-            else:
+            # When resuming from an interrupt (ask_user / HITL), skip
+            # aupdate_state — it creates a new checkpoint that drops the
+            # pending INTERRUPT write, preventing the interrupted task
+            # from being rescheduled, and can re-trigger the model node
+            # via _summarization_event channel version bump.
+            if not resume_payload:
+                # Sync _summarization_event with context_builder's rebuilt event
+                # - None → clear stale event from previous run
+                # - non-None → overwrite with recalculated cutoff_index from DB
+                await agent.aupdate_state(
+                    thread_config,
+                    {"_summarization_event": llm_input.context.auto_summarization_event},
+                )
                 messages = self._convert_messages(llm_input.context.messages)
                 input_data = {"messages": Overwrite(value=messages)}
+            else:
+                input_data = Command(resume=resume_payload)
 
         async for stream_event in agent.astream(
                 input=input_data,

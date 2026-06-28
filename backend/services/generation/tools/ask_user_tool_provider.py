@@ -199,7 +199,10 @@ class AskUserToolProvider(BaseToolProvider):
                 "questions": questions,
                 "tool_call_id": tool_call_id,
             }
+            import time
+            # time.sleep(2)
             response = interrupt(ask_request)
+            print(response)
             return _parse_answers(response, questions, tool_call_id)
 
         return [ask_user]

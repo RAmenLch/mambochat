@@ -230,6 +230,8 @@ export default {
     other: 'Other',
     otherPlaceholder: 'Enter your custom answer...',
     answerPlaceholder: 'Enter your answer...',
+    questionTab: 'Question {index}/{total}',
+    noPending: 'No pending questions',
   },
   subagent: {
     tracking: 'Sub-agent Tracking',

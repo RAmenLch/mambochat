@@ -280,6 +280,7 @@ class AskUserContent(BaseModel):
     interrupt_index: int = Field(..., description="中断事件中的序号")
     batch_id: str = Field(..., description="中断批次号")
     ask_status: Optional[str] = Field(None, description="回答状态: 'answered' / 'cancelled' / None(待回答)")
+    interrupt_id: Optional[str] = Field(None, description="LangGraph 中断 ID，用于多中断恢复场景精确匹配")
 
     def to_json_string(self) -> str:
         """序列化为存储在 DB content 字段的 JSON 字符串"""

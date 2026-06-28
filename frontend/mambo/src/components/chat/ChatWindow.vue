@@ -137,8 +137,7 @@
     <AskUserDialog
       v-model:visible="askUserDialogVisible"
       :parent-message-id="askUserDialogMessageId"
-      :sub-message-id="askUserDialogSubMessageId"
-      :ask-user-content="askUserDialogContent"
+      :initial-sub-message-id="askUserDialogInitialSubMessageId"
     />
 
     <LogViewerDialog
@@ -157,7 +156,7 @@ import { storeToRefs } from 'pinia';
 import { ElScrollbar, ElMessage } from 'element-plus';
 import { UploadFilled } from '@element-plus/icons-vue';
 import type { Ref } from 'vue';
-import type { ChatUpdate, SubMessageCreate, AIModel, Resource, Message, SubMessage, AskUserContent } from '@/api/types';
+import type { ChatUpdate, SubMessageCreate, AIModel, Resource, Message, SubMessage } from '@/api/types';
 import { uploadFile } from '@/api/fileService';
 import { duplicateChat } from '@/api/chatService';
 
@@ -286,8 +285,8 @@ const toolDialogMode = ref<'review_all' | 'single'>('single');
 
 const askUserDialogVisible = ref(false);
 const askUserDialogMessageId = ref<string | null>(null);
-const askUserDialogSubMessageId = ref<string | null>(null);
-const askUserDialogContent = ref<AskUserContent | null>(null);
+/** 单合模式：指定打开的 subMessageId（时间线点击）；null = 多合模式（所有 pending） */
+const askUserDialogInitialSubMessageId = ref<string | null>(null);
 
 const logDialogVisible = ref(false);
 const logDialogMessageId = ref<string | null>(null);
@@ -330,13 +329,8 @@ function handleOpenToolDialog(message: Message, subMessageId: string, mode: 'rev
 }
 
 function handleOpenAskUserDialog(message: Message, subMessage: SubMessage) {
-  try {
-    askUserDialogContent.value = JSON.parse(subMessage.content) as AskUserContent;
-  } catch {
-    askUserDialogContent.value = null;
-  }
   askUserDialogMessageId.value = message.id;
-  askUserDialogSubMessageId.value = subMessage.id;
+  askUserDialogInitialSubMessageId.value = subMessage.id;
   askUserDialogVisible.value = true;
 }
 
@@ -347,13 +341,15 @@ function handleViewLogs(messageId: string) {
 
 function handleOpenReviewFromInput() {
   if (pendingReviewSubMessages.value.length > 0) {
-    const pendingSubMsg = pendingReviewSubMessages.value[0];
-    const parentMsg = currentChatMessages.value.find(m => m.id === pendingSubMsg.messageId);
+    const firstSubMsg = pendingReviewSubMessages.value[0];
+    const parentMsg = currentChatMessages.value.find(m => m.id === firstSubMsg.messageId);
     if (parentMsg) {
-      if (pendingSubMsg.type === 'AskUser') {
-        handleOpenAskUserDialog(parentMsg, pendingSubMsg);
+      if (firstSubMsg.type === 'AskUser') {
+        askUserDialogMessageId.value = parentMsg.id;
+        askUserDialogInitialSubMessageId.value = null;  // 多合模式：显示所有 pending
+        askUserDialogVisible.value = true;
       } else {
-        handleOpenToolDialog(parentMsg, pendingSubMsg.id, 'review_all');
+        handleOpenToolDialog(parentMsg, firstSubMsg.id, 'review_all');
       }
     }
   }

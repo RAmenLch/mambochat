@@ -58,6 +58,11 @@ class DefaultGenerateManager(AbstractGenerateManager):
 
         self._subagent_step_counters: Dict[str, int] = {}
 
+        # 多 ask_user 中断批次追踪：当多个工具并行调用 interrupt() 时，
+        # __interrupt__ 事件按 task 逐个发射，此 ID 在事件间共享同一个 batch_id
+        self._hitl_batch_id: Optional[str] = None
+        self._hitl_interrupt_counter: int = 0
+
         self._handlers: List[BaseStreamHandler] = [
             HitlHandler(),
             TextAndReasoningHandler(),
@@ -188,6 +193,8 @@ class DefaultGenerateManager(AbstractGenerateManager):
                     pending_hitl_tool_calls=self._pending_hitl_tool_calls,
                     final_usage_data=self._final_usage_data,
                     subagent_step_counters=self._subagent_step_counters,
+                    hitl_batch_id=self._hitl_batch_id,
+                    hitl_interrupt_counter=self._hitl_interrupt_counter,
                 )
 
                 for handler in self._handlers:
@@ -201,11 +208,23 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 if context.last_finish_reason:
                     self._last_finish_reason = context.last_finish_reason
 
+                # 同步 ask_user 多中断批次号到 manager（用于后续事件共享同一 batch_id）
+                if context.hitl_batch_id is not None:
+                    self._hitl_batch_id = context.hitl_batch_id
+                    self._hitl_interrupt_counter = context.hitl_interrupt_counter
+
+                # HITL 审核中断（security_review）：应立即 break
+                # ask_user 多中断：不 break，让后续 __interrupt__ 事件继续流入
                 if context.should_interrupt:
                     should_interrupt = True
                     break
         except asyncio.CancelledError:
             raise
+
+        # ask_user 多中断场景：context.should_interrupt 不会被设置（不使用 InterruptGeneration），
+        # 但 self._hitl_batch_id 已被 HitlHandler 设置，表示发生过中断
+        if self._hitl_batch_id is not None:
+            should_interrupt = True
 
         # ── Post-generation: persist summarization as ZipHistory sub-message ──
         if self._last_summarization_event:
@@ -235,11 +254,8 @@ class DefaultGenerateManager(AbstractGenerateManager):
                             zip_enable=True,
                             auto=True,
                         )
-
         # ── Record checkpoint_id for branch tracking ──
-        saved = await get_checkpointer().aget_tuple(
-            {"configurable": {"thread_id": chat_id}}
-        )
+        saved = await self._get_interrupt_checkpoint(chat_id)
         if saved:
             yield SetMessageCheckpointId(
                 message_id=assistant_message_id,
@@ -281,6 +297,32 @@ class DefaultGenerateManager(AbstractGenerateManager):
                     config={"context_participation_length": 0}
                 )
             self._last_finish_reason = None
+
+    @staticmethod
+    async def _get_interrupt_checkpoint(chat_id: str):
+        """获取包含 __interrupt__ write 的 checkpoint。
+
+        LangGraph 默认 durability="async" 时，ask_user 工具调用 interrupt()
+        抛出 GraphInterrupt。GraphInterrupt 通过 async generator 的 yield 逃逸
+        到调用方，触发 GeneratorExit 清理 generator。此时 after_tick 提交的
+        checkpoint 保存任务在 BackgroundExecutor 中尚未落盘，直接调用
+        aget_tuple 可能拿到上一步不含 __interrupt__ write 的 checkpoint，
+        导致 resume 时找不到被中断的 task。
+
+        这里重试最多 10 次（每次 0.05s），等待含 __interrupt__ write 的
+        checkpoint 落盘后再返回。
+        """
+        for _ in range(10):
+            saved = await get_checkpointer().aget_tuple(
+                {"configurable": {"thread_id": chat_id}}
+            )
+            if saved and saved.pending_writes and any(
+                w[1] == "__interrupt__" for w in saved.pending_writes
+            ):
+                return saved
+            await asyncio.sleep(0.05)
+        # 超时兜底：返回最后一次 aget_tuple 的结果（即使不含 __interrupt__）
+        return saved
 
     async def _cleanup_on_exception(
             self, assistant_message_id: str, final_status: schemas_enums.MessageStatus,

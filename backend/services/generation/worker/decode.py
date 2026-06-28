@@ -1,7 +1,7 @@
 # backend/services/generation/worker/decode.py
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
@@ -28,7 +28,7 @@ class BaseDecode(ABC):
         pass
 
     @abstractmethod
-    def get_hitl_interrupt(self, mode: str, event: Union[BaseMessage, Dict[str, Any]]) -> Optional[Any]:
+    def get_hitl_interrupt(self, mode: str, event: Union[BaseMessage, Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
         pass
 
     @abstractmethod
@@ -91,9 +91,19 @@ class DefaultLangChainDecode(BaseDecode):
             return usage
         return None
 
-    def get_hitl_interrupt(self, mode: str, event: Union[BaseMessage, Dict[str, Any]]) -> Optional[Any]:
+    def get_hitl_interrupt(self, mode: str, event: Union[BaseMessage, Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+        """返回所有 __interrupt__ 的值和 ID 列表。
+
+        当多个 ask_user 工具并行调用时，__interrupt__ 事件会包含多个中断。
+        每个 entry 包含: {"value": interrupt.value, "id": interrupt.id}
+        interrupt.id 是 LangGraph 为每个中断分配的唯一标识，
+        用于多中断恢复时构造 Command(resume={id: payload})。
+        """
         if mode == "updates" and isinstance(event, dict) and "__interrupt__" in event:
-            return event["__interrupt__"][0].value
+            return [
+                {"value": entry.value, "id": getattr(entry, "id", None)}
+                for entry in event["__interrupt__"]
+            ]
         return None
 
     def get_hitl_middleware_data(self, mode: str, event: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:

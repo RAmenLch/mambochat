@@ -227,6 +227,8 @@ export default {
     other: '其他',
     otherPlaceholder: '请输入自定义回答...',
     answerPlaceholder: '请输入回答...',
+    questionTab: '提问 {index}/{total}',
+    noPending: '没有待回答的问题',
   },
   subagent: {
     tracking: '子代理追踪',

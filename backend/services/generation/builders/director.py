@@ -11,6 +11,11 @@ from backend.schemas.enums import ChatMode, AgentTypeEnum
 from backend.schemas.message import ReviewToolContent, McpToolContent, AskUserContent
 from backend.models.provider_model import AIModel
 
+try:
+    from mambo_agents.middleware.security_review import INTERRUPT_SOURCE as _SECURITY_REVIEW_SOURCE
+except ImportError:  # pragma: no cover - 兼容旧版 mambo_agents
+    _SECURITY_REVIEW_SOURCE = "mambo_security_review"
+
 from backend.services.generation.core.llm_io import LLMInput, ModelConfig, RunTimeConfig, MessageSchema
 from backend.services.generation.builders.material_loader import GenerationMaterialLoader, GenerationMaterials
 from backend.services.generation.builders.param_utils import map_model_parameters
@@ -442,8 +447,8 @@ class LLMInputDirector:
                 except (ValueError, ImportError):
                     pass
 
-        # 2. 提取 AskUser 回答
-        decided_ask_users = []
+        # 2. 提取所有 AskUser 回答（当前批次的）
+        decided_ask_users: List[Tuple[Any, AskUserContent]] = []
         for sub in target_msg.sub_messages:
             if sub.type == schemas_enums.SubMessageType.ASK_USER.value:
                 try:
@@ -478,22 +483,66 @@ class LLMInputDirector:
                 resume_decisions.append(decision_dict)
 
         # 4. 构建 AskUser 恢复载荷
-        ask_user_payload = None
+        # 先确定当前批次的所有 AskUser 回答
         if decided_ask_users:
             decided_ask_users.sort(key=lambda x: x[0], reverse=True)
             latest_ask_user = decided_ask_users[0][1]
-            ask_user_payload = {
-                "status": latest_ask_user.ask_status or "answered",
-                "answers": latest_ask_user.answers,
-            }
+            latest_batch_id = latest_ask_user.batch_id
+
+            # 收集同一批次的所有 AskUser（按 interrupt_index 排序）
+            same_batch = [
+                item[1] for item in decided_ask_users
+                if item[1].batch_id == latest_batch_id
+            ]
+            same_batch.sort(key=lambda x: x.interrupt_index)
+
+            # 如果只有一个 ask_user，或无法获取 interrupt_id，使用单值恢复
+            if len(same_batch) == 1:
+                item = same_batch[0]
+                ask_user_payload = {
+                    "status": item.ask_status or "answered",
+                    "answers": item.answers,
+                }
+            else:
+                # 多中断场景：构建 {interrupt_id: payload} 字典
+                ask_user_payload = {}
+                all_have_ids = True
+                for item in same_batch:
+                    if item.interrupt_id:
+                        ask_user_payload[item.interrupt_id] = {
+                            "status": item.ask_status or "answered",
+                            "answers": item.answers,
+                        }
+                    else:
+                        all_have_ids = False
+                        break
+
+                # 如果无法获取所有 interrupt_id（旧数据），回退为只取最新的
+                if not all_have_ids:
+                    ask_user_payload = {
+                        "status": latest_ask_user.ask_status or "answered",
+                        "answers": latest_ask_user.answers,
+                    }
+        else:
+            ask_user_payload = None
 
         # 5. 组合恢复载荷
         # 如果同时存在 ReviewTool 和 AskUser，只返回后触发的那个（按时间排序取最新）
-        all_decided = decided_reviews + decided_ask_users
-        all_decided.sort(key=lambda x: x[0], reverse=True)
-        latest_type = all_decided[0][1]
+        if decided_ask_users:
+            all_decided = decided_reviews + [(item[0], item[1]) for item in decided_ask_users]
+            all_decided.sort(key=lambda x: x[0], reverse=True)
+            latest_type = all_decided[0][1]
 
-        if isinstance(latest_type, AskUserContent):
-            return ask_user_payload
-        else:
-            return {"decisions": resume_decisions}
+            if isinstance(latest_type, AskUserContent):
+                return ask_user_payload
+            else:
+                return {
+                    "source": _SECURITY_REVIEW_SOURCE,
+                    "decisions": resume_decisions,
+                }
+        elif decided_reviews:
+            return {
+                "source": _SECURITY_REVIEW_SOURCE,
+                "decisions": resume_decisions,
+            }
+        return None

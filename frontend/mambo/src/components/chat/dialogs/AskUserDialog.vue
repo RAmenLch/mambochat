@@ -1,79 +1,87 @@
 <template>
   <el-dialog
-    :model-value="visible"
-    @update:model-value="$emit('update:visible', $event)"
-    :title="$t('chat.askUser.title')"
+    v-model="internalVisible"
+    :title="t('chat.askUser.title')"
     width="560px"
     :close-on-click-modal="false"
     destroy-on-close
+    @close="handleClose"
   >
-    <div v-if="content" class="ask-user-form">
-      <div
-        v-for="(q, index) in content.questions"
-        :key="index"
-        class="question-item"
+    <el-tabs v-if="askUserSubMessages.length > 0" v-model="activeTabId">
+      <el-tab-pane
+        v-for="(entry, vi) in askUserSubMessages"
+        :key="entry.subMsg.id"
+        :label="t('chat.askUser.questionTab', { index: vi + 1, total: askUserSubMessages.length })"
+        :name="entry.subMsg.id"
       >
-        <div class="question-text">
-          <span class="question-index">{{ index + 1 }}.</span>
-          {{ q.question }}
-          <el-tag v-if="q.required === false" size="small" type="info" style="margin-left: 8px">
-            {{ $t('chat.askUser.optional') }}
-          </el-tag>
-        </div>
+        <div class="ask-user-form">
+          <div
+            v-for="(q, qIdx) in entry.content.questions"
+            :key="qIdx"
+            class="question-item"
+          >
+            <div class="question-text">
+              <span class="question-index">{{ qIdx + 1 }}.</span>
+              {{ q.question }}
+              <el-tag v-if="q.required === false" size="small" type="info" style="margin-left: 8px">
+                {{ t('chat.askUser.optional') }}
+              </el-tag>
+            </div>
 
-        <!-- 多选类型 -->
-        <template v-if="q.type === 'multiple_choice' && q.choices && q.choices.length > 0">
-          <el-radio-group v-model="answers[index]" class="question-choices">
-            <el-radio
-              v-for="choice in q.choices"
-              :key="choice.value"
-              :value="choice.value"
-              style="margin-bottom: 8px"
-            >
-              {{ choice.value }}
-            </el-radio>
-          </el-radio-group>
-          <div class="other-option">
-            <el-radio
-              v-model="answers[index]"
-              value="__other__"
-              style="margin-bottom: 4px"
-            >
-              {{ $t('chat.askUser.other') }}
-            </el-radio>
-            <el-input
-              v-if="answers[index] === '__other__'"
-              v-model="otherTexts[index]"
-              :placeholder="$t('chat.askUser.otherPlaceholder')"
-              size="small"
-              style="margin-top: 4px; margin-left: 28px; max-width: 400px"
-              @input="(val: string) => { if (val) answers[index] = val }"
-            />
+            <template v-if="q.type === 'multiple_choice' && q.choices && q.choices.length > 0">
+              <el-radio-group v-model="answersState[entry.subMsg.id][qIdx]" class="question-choices">
+                <el-radio
+                  v-for="choice in q.choices"
+                  :key="choice.value"
+                  :value="choice.value"
+                  style="margin-bottom: 8px"
+                >
+                  {{ choice.value }}
+                </el-radio>
+              </el-radio-group>
+              <div class="other-option">
+                <el-radio
+                  v-model="answersState[entry.subMsg.id][qIdx]"
+                  value="__other__"
+                  style="margin-bottom: 4px"
+                >
+                  {{ t('chat.askUser.other') }}
+                </el-radio>
+                <el-input
+                  v-if="answersState[entry.subMsg.id][qIdx] === '__other__'"
+                  v-model="otherTextsState[entry.subMsg.id][qIdx]"
+                  :placeholder="t('chat.askUser.otherPlaceholder')"
+                  size="small"
+                  style="margin-top: 4px; margin-left: 28px; max-width: 400px"
+                  @input="(val: string) => { if (val) answersState[entry.subMsg.id][qIdx] = val }"
+                />
+              </div>
+            </template>
+
+            <template v-else>
+              <el-input
+                v-model="answersState[entry.subMsg.id][qIdx]"
+                type="textarea"
+                :rows="2"
+                :placeholder="t('chat.askUser.answerPlaceholder')"
+              />
+            </template>
           </div>
-        </template>
 
-        <!-- 文本类型 -->
-        <template v-else>
-          <el-input
-            v-model="answers[index]"
-            type="textarea"
-            :rows="2"
-            :placeholder="$t('chat.askUser.answerPlaceholder')"
-          />
-        </template>
-      </div>
-    </div>
+          <div class="tab-actions">
+            <el-button
+              type="primary"
+              :disabled="!isTabValid(entry.subMsg.id)"
+              @click="submitSingleTab(entry.subMsg.id)"
+            >
+              {{ t('common.action.submit') }}
+            </el-button>
+          </div>
+        </div>
+      </el-tab-pane>
+    </el-tabs>
 
-    <template #footer>
-      <div class="dialog-footer">
-        <el-button @click="handleCancel">
-          {{ $t('common.action.cancel') }}
-        </el-button>
-        <el-button type="primary" @click="handleSubmit" :disabled="!isValid">
-          {{ $t('common.action.submit') }}
-        </el-button>
-      </div>
-    </template>
+    <el-empty v-else :description="t('chat.askUser.noPending')" />
   </el-dialog>
 </template>
 
@@ -81,13 +89,19 @@
 import { ref, computed, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
-import type { AskUserContent } from '@/api/types';
+import { useChatSessionStore } from '@/stores/chatSessionStore';
+import type { AskUserContent, SubMessage } from '@/api/types';
+
+interface ParsedAskUserEntry {
+  subMsg: SubMessage;
+  content: AskUserContent;
+}
 
 const props = defineProps<{
   visible: boolean;
   parentMessageId: string | null;
-  subMessageId: string | null;
-  askUserContent: AskUserContent | null;
+  /** 单合模式：指定 subMessageId（从时间线点击），null = 多合模式 */
+  initialSubMessageId?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -96,56 +110,117 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 const chatInteractionStore = useChatInteractionStore();
+const sessionStore = useChatSessionStore();
 
-const content = ref<AskUserContent | null>(null);
-const answers = ref<string[]>([]);
-const otherTexts = ref<Record<number, string>>({});
+const internalVisible = ref(false);
+const activeTabId = ref('');
 
-const isValid = computed(() => {
-  if (!content.value) return false;
-  return content.value.questions.every((q, i) => {
-    if (q.required === false) return true;
-    return answers.value[i]?.trim();
-  });
+/** subMsgId → questionIndex → answer */
+const answersState = ref<Record<string, string[]>>({});
+/** subMsgId → questionIndex → text */
+const otherTextsState = ref<Record<string, Record<number, string>>>({});
+
+// ── 与 McpToolDialog 完全一致的 store → computed 级联模式 ──
+
+const liveParentMessage = computed(() => {
+  if (!props.parentMessageId) return null;
+  return sessionStore.currentChatMessages.find(m => m.id === props.parentMessageId) || null;
 });
 
-watch(
-  () => props.visible,
-  (newVal) => {
-    if (newVal) {
-      content.value = props.askUserContent;
-      if (content.value) {
-        answers.value = content.value.questions.map(() => '');
-        otherTexts.value = {};
-      }
-    }
+const askUserSubMessages = computed<ParsedAskUserEntry[]>(() => {
+  if (!liveParentMessage.value) return [];
+
+  const all = liveParentMessage.value.sub_messages.filter(sm => {
+    if (sm.type !== 'AskUser') return false;
+    if (sm.status !== 'pending_review') return false;
+    try {
+      const c = JSON.parse(sm.content) as AskUserContent;
+      return c.answers === null;
+    } catch { return false; }
+  });
+
+  if (props.initialSubMessageId) {
+    const target = all.find(sm => sm.id === props.initialSubMessageId);
+    if (!target) return [];
+    return [parseEntry(target)!].filter(Boolean);
   }
-);
 
-function handleCancel() {
-  if (!content.value || !props.parentMessageId || !props.subMessageId) return;
+  return all.map(parseEntry).filter(Boolean) as ParsedAskUserEntry[];
+});
 
-  const cancelledAnswers = content.value.questions.map(() => '');
-  emit('update:visible', false);
-  chatInteractionStore.submitAskUserAnswer(
-    props.parentMessageId,
-    props.subMessageId,
-    cancelledAnswers,
-    'cancelled'
-  );
+function parseEntry(sm: SubMessage): ParsedAskUserEntry | null {
+  try {
+    const content = JSON.parse(sm.content) as AskUserContent;
+    if (!content?.questions) return null;
+    return { subMsg: sm, content };
+  } catch { return null; }
 }
 
-function handleSubmit() {
-  if (!content.value || !props.parentMessageId || !props.subMessageId) return;
+// ── 校验 ──
 
-  const finalAnswers = answers.value.map((a, i) => {
-    if (a === '__other__') return otherTexts.value[i] || '';
+function isTabValid(subMsgId: string): boolean {
+  const ans = answersState.value[subMsgId];
+  const entry = askUserSubMessages.value.find(e => e.subMsg.id === subMsgId);
+  if (!entry || !ans) return false;
+  return entry.content.questions.every((q, qIdx) => {
+    if (q.required === false) return true;
+    return (ans[qIdx] ?? '')?.trim();
+  });
+}
+
+// ── 打开/关闭 ──
+
+watch(() => props.visible, (newVal) => {
+  internalVisible.value = newVal;
+  if (newVal) {
+    for (const entry of askUserSubMessages.value) {
+      if (!answersState.value[entry.subMsg.id]) {
+        answersState.value[entry.subMsg.id] = entry.content.questions.map(() => '');
+      }
+      if (!otherTextsState.value[entry.subMsg.id]) {
+        otherTextsState.value[entry.subMsg.id] = {};
+      }
+    }
+    if (askUserSubMessages.value.length > 0) {
+      const targetId = askUserSubMessages.value.find(
+        m => m.subMsg.id === props.initialSubMessageId
+      ) ? props.initialSubMessageId : askUserSubMessages.value[0].subMsg.id;
+      activeTabId.value = targetId || '';
+    }
+  }
+});
+
+watch(() => askUserSubMessages.value, (newVal) => {
+  if (internalVisible.value) {
+    if (newVal.length === 0) {
+      emit('update:visible', false);
+    } else if (!newVal.find(m => m.subMsg.id === activeTabId.value)) {
+      activeTabId.value = newVal[0].subMsg.id;
+    }
+  }
+});
+
+function handleClose() {
+  emit('update:visible', false);
+}
+
+// ── 提交 ──
+
+function submitSingleTab(subMsgId: string) {
+  if (!props.parentMessageId) return;
+  const ans = answersState.value[subMsgId];
+  const entry = askUserSubMessages.value.find(e => e.subMsg.id === subMsgId);
+  if (!entry || !ans) return;
+
+  const otherTexts = otherTextsState.value[subMsgId] || {};
+  const finalAnswers = ans.map((a, i) => {
+    if (a === '__other__') return otherTexts[i] || '';
     return a;
   });
-  emit('update:visible', false);
+
   chatInteractionStore.submitAskUserAnswer(
     props.parentMessageId,
-    props.subMessageId,
+    subMsgId,
     finalAnswers,
     'answered'
   );
@@ -187,9 +262,10 @@ function handleSubmit() {
   margin-top: 4px;
 }
 
-.dialog-footer {
+.tab-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--el-border-color-light);
 }
 </style>

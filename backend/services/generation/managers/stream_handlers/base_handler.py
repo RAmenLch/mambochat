@@ -36,6 +36,14 @@ class StreamContext:
     # 新增：subagent_event 相关追踪字段
     subagent_step_counters: Dict[str, int] = field(default_factory=dict)
 
+    # 多中断批次追踪：当多个工具并行调用 interrupt() 时，多个 __interrupt__
+    # 事件会按 task 逐个发射。此字段让 HitlHandler 在多次 handle() 调用间
+    # 共享同一个 batch_id，确保所有中断属于同一批次。
+    hitl_batch_id: Optional[str] = None
+
+    # 多中断序号：跨事件递增，确保每个 AskUserContent 有唯一的 interrupt_index
+    hitl_interrupt_counter: int = 0
+
 
 class BaseStreamHandler(ABC):
     """流事件处理器抽象基类"""
