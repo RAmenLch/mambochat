@@ -48,16 +48,14 @@ async def _download_safe(
 ) -> tuple[bytes | None, str | None]:
     """Download file bytes from backend; return (content_bytes, error_str).
 
-    Uses ``download_files`` (protocol method) which calls ``read_raw(limit=None)``
-    internally — no truncation, and supports binary files via base64.
+    Uses ``adownload_files`` (async protocol method) so that backends with
+    per-instance locks (e.g. ``SshBackend._async_lock``) can serialize
+    SFTP access and avoid paramiko deadlocks on concurrent calls.
     """
-    import asyncio
     try:
-        results = await asyncio.to_thread(
-            backend.download_files, [VirtualPath(path)]
-        )
+        results = await backend.adownload_files([VirtualPath(path)])
         if not results:
-            return None, "download_files returned empty results"
+            return None, "adownload_files returned empty results"
         r = results[0]
         if r.error:
             return None, r.error
