@@ -114,6 +114,25 @@ class ShowMiddleware(AgentMiddleware):
         filename = PurePosixPath(path).name
         mime = _get_mime_type(path)
 
+        # If the content is valid UTF-8 text, treat it as text regardless of
+        # file extension.  This handles files like .env, Dockerfile, or other
+        # non-.txt extensions that contain plain UTF-8 text but whose MIME
+        # type was guessed as application/octet-stream (or another non-text
+        # type) by mimetypes / _get_mime_type.
+        if content_bytes:
+            sample = content_bytes[:8192]
+            try:
+                sample.decode("utf-8")
+                # Content is valid UTF-8 → use FileUtils to resolve the proper
+                # text MIME type (falling back to text/plain when the extension
+                # is not in the map).
+                from backend.utils.file_utils import FileUtils
+                mime = FileUtils.correct_mime_type(filename, mime, sample)
+            except (UnicodeDecodeError, ValueError, LookupError):
+                # Not valid UTF-8 text; keep the original MIME guess and let
+                # save_file_from_bytes perform its own detection / rejection.
+                pass
+
         async with self._session_factory() as db:
             fs = FileService(db)
             db_file = await fs.save_file_from_bytes(
