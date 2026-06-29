@@ -63,7 +63,12 @@
             <div class="info-grid">
               <div class="info-item">
                 <span class="info-label">{{ $t('agent.bindModel') }}:</span>
-                <span class="info-value">{{ displayModelName }}</span>
+                <span class="info-value">
+                  {{ displayModelName }}
+                  <el-tag v-if="isModelDeleted" size="small" type="warning" effect="light" class="deleted-model-tag">
+                    {{ $t('common.status.deleted') }}
+                  </el-tag>
+                </span>
               </div>
               <div class="info-item" v-if="selectedAgent.modelParameters?.max_context_messages !== undefined">
                 <span class="info-label">{{ $t('agent.contextMessages') }}:</span>
@@ -109,8 +114,8 @@
             <div class="ext-item">
               <div class="ext-label">{{ $t('agent.enableMcp') }}:</div>
               <div class="ext-tags" v-if="displayMcpList.length > 0">
-                <el-tag v-for="mcp in displayMcpList" :key="mcp.id" size="small" type="info" effect="light">
-                  <el-icon><Connection /></el-icon> {{ mcp.name }}
+                <el-tag v-for="mcp in displayMcpList" :key="mcp.id" size="small" :type="mcp.name === t('common.status.unknownMcp') ? 'info' : undefined" :class="{ 'deleted-tag': mcp.name === t('common.status.unknownMcp') }" effect="light">
+                  <el-icon><Connection /></el-icon> {{ mcp.name === t('common.status.unknownMcp') ? mcp.name + ' (ID: ' + mcp.id.substring(0, 8) + '...)' : mcp.name }}
                 </el-tag>
               </div>
               <div class="ext-empty" v-else>{{ $t('common.none') }}</div>
@@ -123,11 +128,12 @@
                   v-for="b in displayBackendList"
                   :key="b.id"
                   size="small"
-                  :type="b.id === defaultBackendId ? 'danger' : 'warning'"
+                  :type="b.name === t('common.status.unknownBackend') ? 'info' : (b.id === defaultBackendId ? 'danger' : 'warning')"
                   effect="light"
+                  :class="{ 'deleted-tag': b.name === t('common.status.unknownBackend') }"
                 >
-                  <el-icon><Monitor /></el-icon> {{ b.name }}
-                  <span v-if="b.id === defaultBackendId" class="default-star">★</span>
+                  <el-icon><Monitor /></el-icon> {{ b.name === t('common.status.unknownBackend') ? b.name + ' (ID: ' + b.id.substring(0, 8) + '...)' : b.name }}
+                  <span v-if="b.id === defaultBackendId && b.name !== t('common.status.unknownBackend')" class="default-star">★</span>
                 </el-tag>
               </div>
               <div class="ext-empty" v-else>{{ $t('common.none') }}</div>
@@ -142,14 +148,14 @@
                   size="small"
                   type="primary"
                   effect="light"
-                  class="clickable-tag custom-agent-tag"
-                  @click="openAgentSettings(sub.id)"
-                  :title="$t('common.action.edit')"
+                  :class="{ 'clickable-tag custom-agent-tag': sub.name !== t('common.status.unknownAgent'), 'deleted-tag': sub.name === t('common.status.unknownAgent') }"
+                  @click="sub.name !== t('common.status.unknownAgent') && openAgentSettings(sub.id)"
+                  :title="sub.name !== t('common.status.unknownAgent') ? $t('common.action.edit') : $t('resource.deletedTooltip')"
                 >
                   <div class="tag-inner">
-                    <el-avatar v-if="sub.avatar" :size="14" :src="resolveFileUrl(sub.avatar) ?? undefined" class="tag-avatar" />
+                    <el-avatar v-if="sub.avatar && sub.name !== t('common.status.unknownAgent')" :size="14" :src="resolveFileUrl(sub.avatar) ?? undefined" class="tag-avatar" />
                     <el-icon v-else><User /></el-icon>
-                    <span>{{ sub.name }}</span>
+                    <span>{{ sub.name === t('common.status.unknownAgent') ? sub.name + ' (ID: ' + sub.id.substring(0, 8) + '...)' : sub.name }}</span>
                   </div>
                 </el-tag>
               </div>
@@ -308,6 +314,11 @@ const displayModelName = computed(() => {
   return model ? model.name : t('common.status.unknownModel');
 });
 
+const isModelDeleted = computed(() => {
+  if (!selectedAgent.value?.aiModelId) return false;
+  return !providerStore.allModels.find(m => m.id === selectedAgent.value!.aiModelId);
+});
+
 const displayMcpList = computed(() => {
   const mcpIds = selectedAgent.value?.enabledMcpIds || [];
   return mcpIds.map(id => {
@@ -413,7 +424,12 @@ watch(() => selectedAgent.value?.resourcePromptList, async (resourceIds) => {
   try {
     const promises = resourceIds.map(id => getResourceDetails(id).catch(() => null));
     const results = await Promise.all(promises);
-    previewResources.value = results.filter(r => r !== null) as Resource[];
+    // 用已删除资源的占位 stub 替换 null，保留顺序
+    previewResources.value = results.map((r, i) => {
+      if (r) return r;
+      const id = resourceIds[i];
+      return { id, name: t('resource.deletedNameWithId', { id: id.substring(0, 8) }), resourceType: 'file', _deleted: true } as unknown as Resource;
+    });
   } catch (error) {
     console.error('Failed to load preview resources:', error);
     previewResources.value = [];
@@ -428,7 +444,12 @@ watch(() => mamboPreview.value?.memoryResourceIds, async (memoryIds) => {
   try {
     const promises = memoryIds.map((id: string) => getResourceDetails(id).catch(() => null));
     const results = await Promise.all(promises);
-    displayMemoryResources.value = results.filter(r => r !== null) as Resource[];
+    // 用已删除资源的占位 stub 替换 null，保留顺序
+    displayMemoryResources.value = results.map((r, i) => {
+      if (r) return r;
+      const id = memoryIds[i];
+      return { id, name: t('resource.deletedNameWithId', { id: id.substring(0, 8) }), resourceType: 'file', _deleted: true } as unknown as Resource;
+    });
   } catch (error) {
     console.error('Failed to load memory resources:', error);
     displayMemoryResources.value = [];
@@ -663,5 +684,16 @@ const openAgentSettings = (agentId: string) => {
   margin-left: 4px;
   font-size: 10px;
   color: var(--el-color-danger);
+}
+
+.deleted-tag {
+  opacity: 0.5;
+  border-style: dashed;
+  cursor: default;
+}
+
+.deleted-model-tag {
+  margin-left: 6px;
+  font-size: 11px;
 }
 </style>

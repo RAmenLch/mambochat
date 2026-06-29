@@ -102,4 +102,5 @@ export default {
   securityReviewFailedDesc: 'This tool call failed AI security review and has been escalated for human approval.',
   securityReviewRiskLevel: 'Risk Level',
   securityReviewReason: 'Review Reason',
+  subAgentDeleted: '[Deleted] {id}',
 }

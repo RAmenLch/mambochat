@@ -12,15 +12,16 @@
       :data-resource-id="resource.id"
       :closable="!readonly"
       disable-transitions
-      :type="colorByType ? getTagType(resource) : 'info'"
-      :class="{ 'draggable-tag': !readonly, 'is-dragging': draggedResourceId === resource.id }"
-      :draggable="!readonly ? 'true' : 'false'"
-      @dragstart="!readonly && handleDragStart(resource.id, $event)"
+      :type="(resource as any)._deleted ? 'info' : (colorByType ? getTagType(resource) : 'info')"
+      :class="{ 'draggable-tag': !readonly && !(resource as any)._deleted, 'is-dragging': draggedResourceId === resource.id, 'deleted-tag': (resource as any)._deleted }"
+      :draggable="!readonly && !(resource as any)._deleted ? 'true' : 'false'"
+      @dragstart="!readonly && !(resource as any)._deleted && handleDragStart(resource.id, $event)"
       @dragover.prevent="!readonly && handleDragOver($event)"
       @dragend="!readonly && handleDragEnd()"
       @close="!readonly && handleRemove(resource.id)"
     >
       <el-tooltip
+        v-if="!(resource as any)._deleted"
         placement="top"
         effect="dark"
         :show-after="300"
@@ -40,6 +41,15 @@
           {{ resource.name }}
         </span>
       </el-tooltip>
+      <el-tooltip v-else placement="top" effect="dark" :show-after="300">
+        <template #content>
+          {{ $t('resource.deletedTooltip') }}
+        </template>
+        <span class="resource-tag-name deleted-tag-text">
+          <el-icon class="tag-type-icon"><WarningFilled /></el-icon>
+          <s>{{ (resource as any).name || ('ID: ' + resource.id.substring(0, 8) + '...') }}</s>
+        </span>
+      </el-tooltip>
     </el-tag>
   </transition-group>
 </template>
@@ -47,7 +57,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import type { PropType, Component } from 'vue';
-import { Search, Document, Memo, Tickets, Reading } from '@element-plus/icons-vue';
+import { Search, Document, Memo, Tickets, Reading, WarningFilled } from '@element-plus/icons-vue';
 import type { Resource } from '@/api/types/resourceTypes';
 import { useI18n } from 'vue-i18n';
 
@@ -203,6 +213,17 @@ const handleRemove = (resourceId: string) => {
   opacity: 0.3;
   background-color: var(--el-color-info-light-8);
   border-style: dashed;
+}
+
+.deleted-tag {
+  opacity: 0.55;
+  cursor: default;
+  border-style: dashed;
+}
+
+.deleted-tag-text {
+  color: var(--el-text-color-placeholder);
+  font-style: italic;
 }
 
 .resource-tag-name {

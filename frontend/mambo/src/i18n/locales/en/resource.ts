@@ -127,6 +127,8 @@ export default {
     typeMismatch: 'Only resources of type {type} can be selected',
     searchFailed: 'Search failed, please try again later',
   },
+  deletedTooltip: 'This resource has been deleted. Click X to remove',
+  deletedNameWithId: '[Deleted] {id}',
   skill: {
     valid: 'Valid',
     invalid: 'Invalid',

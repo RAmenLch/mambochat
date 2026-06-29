@@ -124,6 +124,8 @@ export default {
     typeMismatch: '只能选择类型为 {type} 的资源',
     searchFailed: '搜索失败，请稍后重试',
   },
+  deletedTooltip: '此资源已被删除，请点击 X 取消选择',
+  deletedNameWithId: '[已删除] {id}',
   skill: {
     valid: '符合规范',
     invalid: '不符合规范',

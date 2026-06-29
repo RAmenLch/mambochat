@@ -15,6 +15,7 @@ export default {
     unknownMcp: '未知 MCP',
     unknownBackend: '未知 Backend',
     unknownAgent: '未知 Agent',
+    deleted: '已删除',
   },
   time: {
     today: '今天',

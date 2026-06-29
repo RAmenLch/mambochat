@@ -102,4 +102,5 @@ export default {
   securityReviewFailedDesc: '此工具调用未通过 AI 安全审核，已升级人工确认',
   securityReviewRiskLevel: '风险等级',
   securityReviewReason: '审核理由',
+  subAgentDeleted: '[已删除] {id}',
 }

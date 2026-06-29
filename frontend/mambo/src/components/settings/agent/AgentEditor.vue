@@ -261,12 +261,12 @@
                       closable
                       type="info"
                       effect="light"
-                      class="custom-tag"
+                      :class="{ 'custom-tag': true, 'deleted-tag': mcp.name === 'Unknown MCP' }"
                       @close="handleRemoveMcp(mcp.id)"
                     >
                       <div class="tag-inner">
                         <el-icon class="tag-icon"><Connection /></el-icon>
-                        <span class="tag-text">{{ mcp.name }}</span>
+                        <span class="tag-text">{{ mcp.name === 'Unknown MCP' ? t('common.status.unknownMcp') + ' (ID: ' + mcp.id.substring(0, 8) + '...)' : mcp.name }}</span>
                       </div>
                     </el-tag>
                   </div>
@@ -290,13 +290,14 @@
                       v-for="subAgent in mountedSubAgents"
                       :key="subAgent.id"
                       closable
-                      type="primary"
+                      :type="(subAgent as any)._deleted ? 'info' : 'primary'"
                       effect="light"
-                      class="custom-tag"
+                      :class="{ 'custom-tag': true, 'deleted-tag': (subAgent as any)._deleted }"
                       @close="handleRemoveSubAgent(subAgent.id)"
                     >
                       <div class="tag-inner">
-                        <el-avatar :size="14" :src="resolveFileUrl(subAgent.agentAvatarUrl) ?? undefined" :icon="User" class="tag-avatar" />
+                        <el-avatar v-if="!(subAgent as any)._deleted" :size="14" :src="resolveFileUrl(subAgent.agentAvatarUrl) ?? undefined" :icon="User" class="tag-avatar" />
+                        <el-icon v-else><WarningFilled /></el-icon>
                         <span class="tag-text">{{ subAgent.name }}</span>
                       </div>
                     </el-tag>
@@ -351,15 +352,15 @@
                       v-for="b in mountedBackendList"
                       :key="b.id"
                       closable
-                      :type="b.id === form.defaultBackendId ? 'danger' : 'warning'"
+                      :type="b.name === 'Unknown Backend' ? 'info' : (b.id === form.defaultBackendId ? 'danger' : 'warning')"
                       effect="light"
-                      class="custom-tag"
+                      :class="{ 'custom-tag': true, 'deleted-tag': b.name === 'Unknown Backend' }"
                       @close="handleRemoveBackend(b.id)"
                     >
                       <div class="tag-inner">
                         <el-icon class="tag-icon"><Monitor /></el-icon>
-                        <span class="tag-text">{{ b.name }}</span>
-                        <span v-if="b.id === form.defaultBackendId" class="default-star">★</span>
+                        <span class="tag-text">{{ b.name === 'Unknown Backend' ? t('common.status.unknownBackend') + ' (ID: ' + b.id.substring(0, 8) + '...)' : b.name }}</span>
+                        <span v-if="b.id === form.defaultBackendId && b.name !== 'Unknown Backend'" class="default-star">★</span>
                       </div>
                     </el-tag>
                   </div>
@@ -950,9 +951,14 @@ watch(agentData, async (newVal) => {
 
     if (newVal.resourcePromptList && newVal.resourcePromptList.length > 0) {
       try {
-        const promises = newVal.resourcePromptList.map(id => getResourceDetails(id));
+        const promises = newVal.resourcePromptList.map(id => getResourceDetails(id).catch(() => null));
         const results = await Promise.all(promises);
-        mountedResources.value = results.filter(r => !!r) as Resource[];
+        // 已删除的资源创建占位 stub，保留顺序，引导用户取消选择
+        mountedResources.value = results.map((r, i) => {
+          if (r) return r;
+          const id = newVal.resourcePromptList[i];
+          return { id, name: t('resource.deletedNameWithId', { id: id.substring(0, 8) }), resourceType: 'file', _deleted: true } as unknown as Resource;
+        });
       } catch (error) {
         console.error('Failed to load agent resources:', error);
         mountedResources.value = [];
@@ -963,9 +969,13 @@ watch(agentData, async (newVal) => {
 
     if (newVal.subAgents && newVal.subAgents.length > 0) {
       try {
-        const promises = newVal.subAgents.map(id => getAgent(id));
+        const promises = newVal.subAgents.map(id => getAgent(id).catch(() => null));
         const results = await Promise.all(promises);
-        mountedSubAgents.value = results.filter(r => !!r) as Agent[];
+        mountedSubAgents.value = results.map((r, i) => {
+          if (r) return r;
+          const id = newVal.subAgents[i];
+          return { id, name: t('agent.subAgentDeleted', { id: id.substring(0, 8) }), AgentType: 'ReActAgent', _deleted: true } as unknown as Agent;
+        });
       } catch (error) {
         console.error('Failed to load sub agents:', error);
         mountedSubAgents.value = [];
@@ -977,9 +987,13 @@ watch(agentData, async (newVal) => {
     // 加载 memory 资源详情
     if (form.mambo_memory_resource_ids.length > 0) {
       try {
-        const promises = form.mambo_memory_resource_ids.map(id => getResourceDetails(id));
+        const promises = form.mambo_memory_resource_ids.map(id => getResourceDetails(id).catch(() => null));
         const results = await Promise.all(promises);
-        mountedMemoryResources.value = results.filter(r => !!r) as Resource[];
+        mountedMemoryResources.value = results.map((r, i) => {
+          if (r) return r;
+          const id = form.mambo_memory_resource_ids[i];
+          return { id, name: t('resource.deletedNameWithId', { id: id.substring(0, 8) }), resourceType: 'file', _deleted: true } as unknown as Resource;
+        });
       } catch (error) {
         console.error('Failed to load memory resources:', error);
         mountedMemoryResources.value = [];
@@ -1166,7 +1180,9 @@ async function handleSave() {
   if (!currentAgentId.value) return;
   isSaving.value = true;
   try {
-    const resourcePromptList = mountedResources.value.map(r => r.id);
+    const resourcePromptList = mountedResources.value
+      .filter(r => !(r as any)._deleted)
+      .map(r => r.id);
 
     const finalModelParameters: Record<string, any> = {
       max_context_messages: form.modelParameters.max_context_messages,
@@ -1197,7 +1213,9 @@ async function handleSave() {
       // 建议顺手把这里的其他数组也加上展开运算符 [...array] 和 [] 回退，防止遇到同样的 Bug
       resourcePromptList: resourcePromptList.length > 0 ? [...resourcePromptList] : [],
       enabledMcpIds: form.enabledMcpIds.length > 0 ? [...form.enabledMcpIds] : [],
-      subAgents: (form.AgentType === 'DeepAgent' || form.AgentType === 'Mambo') && form.subAgents.length > 0 ? [...form.subAgents] : [],
+      subAgents: (form.AgentType === 'DeepAgent' || form.AgentType === 'Mambo') && form.subAgents.length > 0
+        ? [...mountedSubAgents.value.filter(a => !(a as any)._deleted).map(a => a.id)]
+        : [],
 
       backendIds: finalBackendIds,
       defaultBackendId: form.defaultBackendId,
@@ -1434,6 +1452,11 @@ onMounted(() => {
   border: 1px solid var(--el-color-warning-light-5);
   border-radius: 6px;
   line-height: 1.5;
+}
+
+.deleted-tag {
+  opacity: 0.5;
+  border-style: dashed;
 }
 </style>
 

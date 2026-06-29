@@ -154,8 +154,8 @@ def _build_any_backend(
             key_filename=priv_key_path,
             remote_root=config.get("root_dir", "~"),
             enable_execute=execute_enabled,
-            edit_whitelist=_to_frozenset(config.get("edit_whitelist")),
-            edit_blacklist=_to_frozenset(config.get("edit_blacklist")),
+            edit_whitelist=_to_virtual_path_frozenset(config.get("edit_whitelist")),
+            edit_blacklist=_to_virtual_path_frozenset(config.get("edit_blacklist")),
             ignore_dirs=_to_frozenset(config.get("ignore_dirs")),
         )
 
@@ -213,6 +213,22 @@ def _to_frozenset(value: Any) -> frozenset[str] | None:
         return value if value else None
     s = frozenset(value)
     return s if s else None
+
+
+def _to_virtual_path_frozenset(value: Any) -> frozenset[VirtualPath] | None:
+    """Convert a list/iterable of path strings to frozenset[VirtualPath], or return None for empty."""
+    if value is None:
+        return None
+    if isinstance(value, frozenset):
+        if not value:
+            return None
+        # Already VirtualPath instances or strings → wrap in VirtualPath
+        return frozenset(
+            p if isinstance(p, VirtualPath) else VirtualPath(p) for p in value
+        )
+    if not value:
+        return None
+    return frozenset(VirtualPath(p) for p in value)
 
 
 class MamboAgentGraphBuilder(BaseGraphBuilder):

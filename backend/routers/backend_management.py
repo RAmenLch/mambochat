@@ -13,6 +13,8 @@ from backend.schemas.backend import (
     SSHPublicKeyResponse,
     SSHTestRequest,
     SSHTestResponse,
+    SSHLsRequest,
+    SSHLsResponse,
     PASSWORD_MASK,
     SSHConfigData,
     APIConfigData
@@ -98,6 +100,80 @@ async def test_ssh_connection(request: SSHTestRequest, db: AsyncSession = Depend
         test_config["password"] = None
 
     return await _test_ssh_connection(test_config)
+
+
+@router.post("/ssh/ls", response_model=SSHLsResponse, summary="列出远程 SSH 目录")
+async def ssh_list_directory(request: SSHLsRequest, db: AsyncSession = Depends(get_db)):
+    """
+    列出远程服务器上的目录内容。
+
+    用于前端目录选择器，允许用户在配置 SSH Backend 时浏览远程文件系统，
+    为 edit_whitelist / edit_blacklist 选择路径前缀。
+    """
+    # 密码脱敏合并：如果提供了 backend_id 且密码是掩码，从数据库获取真实密码
+    password = request.password
+    if request.backend_id:
+        db_obj = await backend_crud.get_backend(db, request.backend_id)
+        if db_obj and db_obj.backendType == BackendType.SSH.value:
+            merged = _merge_password(
+                {"password": password}, db_obj.configData
+            )
+            password = merged.get("password")
+    if password == PASSWORD_MASK:
+        password = None
+
+    try:
+        ssh_config = SSHConfigData(
+            hostname=request.hostname,
+            port=request.port,
+            username=request.username,
+            password=password,
+            root_dir=request.root_dir,
+        )
+
+        priv_key_path = None
+        if not ssh_config.password:
+            priv_key_path, _ = get_or_create_system_ssh_key()
+
+        backend = PureSFTPBackend(
+            hostname=ssh_config.hostname,
+            port=ssh_config.port,
+            username=ssh_config.username,
+            password=ssh_config.password,
+            key_filename=priv_key_path,
+            root_dir=ssh_config.root_dir,
+        )
+
+        list_path = request.path or "/"
+        entries = backend.ls_info(list_path)
+
+        # Determine parent path for navigation
+        parent = None
+        if list_path != "/":
+            parent_dir = list_path.rstrip("/")
+            if "/" in parent_dir:
+                parent = parent_dir.rsplit("/", 1)[0] or "/"
+            else:
+                parent = "/"
+
+        backend.close()
+
+        return SSHLsResponse(
+            success=True,
+            message="",
+            entries=[
+                {
+                    "path": e.get("path", ""),
+                    "is_dir": e.get("is_dir", False),
+                    "size": e.get("size", 0),
+                    "modified_at": e.get("modified_at", ""),
+                }
+                for e in entries
+            ],
+            parent_path=parent,
+        )
+    except Exception as e:
+        return SSHLsResponse(success=False, message=f"目录列表失败: {str(e)}")
 
 
 @router.get("/ssh/public-key", response_model=SSHPublicKeyResponse, summary="获取系统全局 SSH 公钥")

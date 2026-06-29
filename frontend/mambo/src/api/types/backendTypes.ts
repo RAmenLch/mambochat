@@ -94,6 +94,30 @@ export interface SshTestResponse {
   message: string;
 }
 
+export interface SshLsEntry {
+  path: string;
+  is_dir: boolean;
+  size: number;
+  modified_at: string;
+}
+
+export interface SshLsRequest {
+  path: string;
+  hostname: string;
+  port: number;
+  username: string;
+  password?: string | null;
+  root_dir: string;
+  backend_id?: string | null;
+}
+
+export interface SshLsResponse {
+  success: boolean;
+  message: string;
+  entries?: SshLsEntry[] | null;
+  parent_path?: string | null;
+}
+
 export function isSshConfig(data: BackendConfigData): data is SshConfigData {
   return 'hostname' in data;
 }

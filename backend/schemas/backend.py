@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from backend.schemas.enums import BackendType
@@ -13,8 +13,8 @@ class SSHConfigData(BaseModel):
     username: str = Field(..., description="SSH 登录用户名")
     password: Optional[str] = Field(None, description="SSH 密码。如果不填，则使用系统的全局私钥进行免密登录")
     root_dir: str = Field("/", description="挂载的远程根目录")
-    edit_whitelist: Optional[List[str]] = Field(None, description="允许编辑的文件通配符列表，如 ['*.py', '*.txt']")
-    edit_blacklist: Optional[List[str]] = Field(None, description="禁止编辑的文件通配符列表")
+    edit_whitelist: Optional[List[str]] = Field(None, description="允许编辑的虚拟路径前缀列表，如 ['/workspace/src/', '/workspace/app/']")
+    edit_blacklist: Optional[List[str]] = Field(None, description="禁止编辑的虚拟路径前缀列表")
     ignore_dirs: Optional[List[str]] = Field(None, description="遍历时忽略的目录，如 ['.git', 'node_modules']")
 
 
@@ -76,6 +76,19 @@ class BackendConfigBase(BaseModel):
             ResourceConfigData(**v)
         return v
 
+    @model_validator(mode='after')
+    def validate_edit_list_mutual_exclusion(self):
+        """白名单和黑名单互斥，不能同时设置。"""
+        cd = self.configData or {}
+        wl = cd.get("edit_whitelist")
+        bl = cd.get("edit_blacklist")
+        if wl and bl and len(wl) > 0 and len(bl) > 0:
+            raise ValueError(
+                "edit_whitelist and edit_blacklist are mutually exclusive. "
+                "Please set at most one of them."
+            )
+        return self
+
 class BackendConfigCreate(BackendConfigBase):
     pass
 
@@ -109,3 +122,30 @@ class SSHTestRequest(BaseModel):
 class SSHTestResponse(BaseModel):
     success: bool = Field(..., description="测试是否成功")
     message: str = Field(..., description="成功或失败的详细信息")
+
+
+class SSHLsEntry(BaseModel):
+    """远程目录列表中的单个条目"""
+    path: str = Field(..., description="路径（相对于 root_dir，以 / 开头；目录以 / 结尾）")
+    is_dir: bool = Field(False, description="是否为目录")
+    size: int = Field(0, description="文件大小（字节）")
+    modified_at: str = Field("", description="ISO-8601 修改时间戳")
+
+
+class SSHLsRequest(BaseModel):
+    """列出远程 SSH 目录的请求"""
+    path: str = Field("/", description="要列出的路径（相对于 root_dir，如 / 表示 root_dir 本身）")
+    hostname: str = Field(..., description="远程服务器 IP 或域名")
+    port: int = Field(22, description="SSH 端口")
+    username: str = Field(..., description="SSH 登录用户名")
+    password: Optional[str] = Field(None, description="SSH 密码")
+    root_dir: str = Field("/", description="远程根目录（如 /home/user）")
+    backend_id: Optional[str] = Field(None, description="已保存的 Backend ID，用于密码脱敏合并")
+
+
+class SSHLsResponse(BaseModel):
+    """列出远程 SSH 目录的响应"""
+    success: bool = Field(..., description="操作是否成功")
+    message: str = Field("", description="成功或失败的详细信息")
+    entries: Optional[List[SSHLsEntry]] = Field(None, description="目录条目列表")
+    parent_path: Optional[str] = Field(None, description="父目录路径")

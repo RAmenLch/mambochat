@@ -112,10 +112,19 @@
               </template>
             </el-input>
           </el-form-item>
-          <el-form-item label="Edit Whitelist" prop="configData.edit_whitelist">
+          <el-divider content-position="left">编辑权限控制</el-divider>
+
+          <el-form-item label="编辑模式">
+            <el-radio-group v-model="editMode" @change="onEditModeChange">
+              <el-radio value="whitelist">白名单（仅允许匹配文件）</el-radio>
+              <el-radio value="blacklist">黑名单（禁止匹配文件）</el-radio>
+            </el-radio-group>
+          </el-form-item>
+
+          <el-form-item v-if="editMode === 'whitelist'" label="Edit Whitelist" prop="configData.edit_whitelist">
             <el-select v-model="form.configData.edit_whitelist" multiple filterable allow-create default-first-option placeholder="例如: *.py (回车添加)" style="width: 100%" />
           </el-form-item>
-          <el-form-item label="Edit Blacklist" prop="configData.edit_blacklist">
+          <el-form-item v-if="editMode === 'blacklist'" label="Edit Blacklist" prop="configData.edit_blacklist">
             <el-select v-model="form.configData.edit_blacklist" multiple filterable allow-create default-first-option placeholder="例如: .env (回车添加)" style="width: 100%" />
           </el-form-item>
           <div class="api-tip">
@@ -159,10 +168,19 @@
             </div>
             <div class="tools-config-tip">{{ $t('backend.versionEditingTip') }}</div>
           </el-form-item>
-          <el-form-item label="Edit Whitelist" prop="configData.edit_whitelist">
+          <el-divider content-position="left">编辑权限控制</el-divider>
+
+          <el-form-item label="编辑模式">
+            <el-radio-group v-model="editMode" @change="onEditModeChange">
+              <el-radio value="whitelist">白名单（仅允许匹配文件）</el-radio>
+              <el-radio value="blacklist">黑名单（禁止匹配文件）</el-radio>
+            </el-radio-group>
+          </el-form-item>
+
+          <el-form-item v-if="editMode === 'whitelist'" label="Edit Whitelist" prop="configData.edit_whitelist">
             <el-select v-model="form.configData.edit_whitelist" multiple filterable allow-create default-first-option placeholder="例如: *.py, *.md (回车添加)" style="width: 100%" />
           </el-form-item>
-          <el-form-item label="Edit Blacklist" prop="configData.edit_blacklist">
+          <el-form-item v-if="editMode === 'blacklist'" label="Edit Blacklist" prop="configData.edit_blacklist">
             <el-select v-model="form.configData.edit_blacklist" multiple filterable allow-create default-first-option placeholder="例如: .env (回车添加)" style="width: 100%" />
           </el-form-item>
           <div class="api-tip">
@@ -182,12 +200,49 @@
           <el-form-item label="Root Dir" prop="configData.root_dir">
             <el-input v-model="form.configData.root_dir" placeholder="默认: /" />
           </el-form-item>
-          <el-form-item label="Edit Whitelist" prop="configData.edit_whitelist">
-            <el-select v-model="form.configData.edit_whitelist" multiple filterable allow-create default-first-option placeholder="例如: *.py (回车添加)" style="width: 100%" />
+
+          <el-divider content-position="left">编辑权限控制</el-divider>
+
+          <el-form-item label="编辑模式">
+            <el-radio-group v-model="editMode" @change="onEditModeChange">
+              <el-radio value="whitelist">白名单（仅允许以下目录）</el-radio>
+              <el-radio value="blacklist">黑名单（禁止以下目录）</el-radio>
+            </el-radio-group>
           </el-form-item>
-          <el-form-item label="Edit Blacklist" prop="configData.edit_blacklist">
-            <el-select v-model="form.configData.edit_blacklist" multiple filterable allow-create default-first-option placeholder="例如: .env (回车添加)" style="width: 100%" />
+
+          <el-form-item v-if="editMode === 'whitelist'" label="Edit Whitelist" prop="configData.edit_whitelist">
+            <div class="path-picker-row">
+              <el-tag
+                v-for="(item, idx) in (form.configData as SshConfigData).edit_whitelist"
+                :key="'wl-' + idx"
+                closable
+                @close="removeWhitelistItem(idx)"
+                class="path-tag"
+              >{{ item }}</el-tag>
+              <el-button size="small" @click="openDirPicker('whitelist')" :disabled="!canBrowseSSH">
+                <el-icon><FolderOpened /></el-icon> 浏览选择
+              </el-button>
+            </div>
+            <div class="path-picker-tip">从远程服务器选取虚拟路径前缀（如 /workspace/src/）</div>
           </el-form-item>
+
+          <el-form-item v-if="editMode === 'blacklist'" label="Edit Blacklist" prop="configData.edit_blacklist">
+            <div class="path-picker-row">
+              <el-tag
+                v-for="(item, idx) in (form.configData as SshConfigData).edit_blacklist"
+                :key="'bl-' + idx"
+                closable
+                @close="removeBlacklistItem(idx)"
+                type="danger"
+                class="path-tag"
+              >{{ item }}</el-tag>
+              <el-button size="small" @click="openDirPicker('blacklist')" :disabled="!canBrowseSSH" type="danger" plain>
+                <el-icon><FolderOpened /></el-icon> 浏览选择
+              </el-button>
+            </div>
+            <div class="path-picker-tip">从远程服务器选取虚拟路径前缀（如 /workspace/build/）</div>
+          </el-form-item>
+
           <el-form-item label="Ignore Dirs" prop="configData.ignore_dirs">
             <el-select v-model="form.configData.ignore_dirs" multiple filterable allow-create default-first-option placeholder="例如: .git, node_modules (回车添加)" style="width: 100%" />
           </el-form-item>
@@ -241,6 +296,73 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 远程目录选择器弹窗 -->
+    <el-dialog
+      v-model="dirPickerVisible"
+      :title="dirPickerMode === 'whitelist' ? '选择允许编辑的目录（勾选 → 确认）' : '选择禁止编辑的目录（勾选 → 确认）'"
+      width="580px"
+      :close-on-click-modal="false"
+      @open="onDirPickerOpen"
+    >
+      <div class="dir-picker-container">
+        <div v-if="dirPickerError" class="dir-picker-error">
+          <el-alert type="error" :closable="false" show-icon :title="dirPickerError" />
+        </div>
+        <!-- 面包屑导航 + 当前目录勾选 -->
+        <div class="dir-picker-breadcrumb">
+          <el-checkbox
+            v-model="isCurrentDirChecked"
+            :disabled="!currentRemoteDir || currentRemoteDir === '/'"
+            class="crumb-checkbox"
+          />
+          <el-button link size="small" @click="navigateDir('/')" :disabled="currentRemoteDir === '/'">
+            <el-icon><HomeFilled /></el-icon>
+          </el-button>
+          <template v-for="(part, idx) in breadcrumbParts" :key="idx">
+            <span class="crumb-sep">/</span>
+            <el-button link size="small" @click="navigateDir(part.remotePath)">{{ part.name }}</el-button>
+          </template>
+        </div>
+        <!-- 提示 -->
+        <div class="dir-picker-hint">
+          已选 {{ tempSelectedPaths.size }} 个目录
+          <el-button v-if="tempSelectedPaths.size > 0" link size="small" type="danger" @click="clearTempSelection">清空</el-button>
+        </div>
+        <!-- 目录列表 -->
+        <div v-loading="isDirLoading" class="dir-picker-list">
+          <div v-if="!isDirLoading && dirEntries.length === 0 && !dirPickerError" class="dir-empty">目录为空</div>
+          <div
+            v-for="entry in dirEntries"
+            :key="entry.path"
+            class="dir-entry"
+            :class="{ 'is-checked': isTempSelected(entry) }"
+          >
+            <el-checkbox
+              :model-value="isTempSelected(entry)"
+              @change="toggleTempSelect(entry)"
+              @click.stop
+              class="dir-entry-checkbox"
+            />
+            <div class="dir-entry-body" @click="onDirEntryClick(entry)">
+              <el-icon class="dir-entry-icon"><Folder /></el-icon>
+              <span class="dir-entry-name">{{ entry.name }}</span>
+              <el-icon class="dir-entry-arrow"><ArrowRight /></el-icon>
+            </div>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="dirPickerVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          @click="confirmSelection"
+          :disabled="tempSelectedPaths.size === 0"
+        >
+          确认选择 ({{ tempSelectedPaths.size }})
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -248,12 +370,12 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
-import { Plus, Key, Connection, View, Hide } from '@element-plus/icons-vue';
+import { Plus, Key, Connection, View, Hide, FolderOpened, HomeFilled, Folder, ArrowRight } from '@element-plus/icons-vue';
 import { useBackendStore } from '@/stores/backendStore';
 import { useResourceStore } from '@/stores/resourceStore';
 import { copyToClipboard } from '@/utils/clipboard';
-import { getClientStatus } from '@/api/backendService';
-import type { BackendConfig, BackendCreate, BackendType, SshConfigData, ApiConfigData, ResourceConfigData, SshTestRequest } from '@/api/types/backendTypes';
+import { getClientStatus, sshListDirectory } from '@/api/backendService';
+import type { BackendConfig, BackendCreate, BackendType, SshConfigData, ApiConfigData, ResourceConfigData, SshTestRequest, SshLsEntry } from '@/api/types/backendTypes';
 import { isSshConfig, defaultToolsConfig } from '@/api/types/backendTypes';
 
 const backendStore = useBackendStore();
@@ -272,6 +394,192 @@ const currentEditId = ref<string | null>(null);
 const formRef = ref<FormInstance>();
 const clientStatusMap = ref<Record<string, { connected: boolean }>>({});
 let statusPollTimer: ReturnType<typeof setInterval> | null = null;
+
+// --- 远程目录选择器状态 ---
+const VIRTUAL_WORKSPACE_ROOT = '/workspace';
+const dirPickerVisible = ref(false);
+const dirPickerMode = ref<'whitelist' | 'blacklist'>('whitelist');
+const isDirLoading = ref(false);
+const dirPickerError = ref('');
+const dirEntries = ref<(SshLsEntry & { name: string })[]>([]);
+const currentRemoteDir = ref('/');
+const tempSelectedPaths = ref(new Set<string>());
+
+// --- 编辑权限模式（白名单 / 黑名单互斥）---
+const editMode = ref<'whitelist' | 'blacklist'>('whitelist');
+
+function resolveEditMode(): 'whitelist' | 'blacklist' {
+  const cd = form.configData as any;
+  if (cd.edit_blacklist && cd.edit_blacklist.length > 0) return 'blacklist';
+  return 'whitelist';
+}
+
+function onEditModeChange() {
+  const cd = form.configData as any;
+  if (editMode.value === 'whitelist') {
+    cd.edit_blacklist = [];
+  } else {
+    cd.edit_whitelist = [];
+  }
+}
+
+// 是否可以浏览 SSH 目录 — 需要填好 hostname + username
+const canBrowseSSH = computed(() => {
+  const cd = form.configData as SshConfigData;
+  return !!(cd.hostname && cd.username);
+});
+
+const currentVirtualPath = computed(() => {
+  if (!currentRemoteDir.value || currentRemoteDir.value === '/') {
+    return VIRTUAL_WORKSPACE_ROOT + '/';
+  }
+  const clean = currentRemoteDir.value.replace(/\/$/, '');
+  return VIRTUAL_WORKSPACE_ROOT + clean + '/';
+});
+
+// 当前目录是否在临时勾选集合中
+const isCurrentDirChecked = computed({
+  get: () => tempSelectedPaths.value.has(currentVirtualPath.value),
+  set: (val) => {
+    const vp = currentVirtualPath.value;
+    if (val) {
+      tempSelectedPaths.value = new Set([...tempSelectedPaths.value, vp]);
+    } else {
+      const next = new Set(tempSelectedPaths.value);
+      next.delete(vp);
+      tempSelectedPaths.value = next;
+    }
+  },
+});
+
+const breadcrumbParts = computed(() => {
+  if (!currentRemoteDir.value || currentRemoteDir.value === '/') return [];
+  const parts = currentRemoteDir.value.split('/').filter(Boolean);
+  const result: { name: string; remotePath: string }[] = [];
+  let accum = '';
+  for (const p of parts) {
+    accum += '/' + p;
+    result.push({ name: p, remotePath: accum + '/' });
+  }
+  return result;
+});
+
+function isTempSelected(entry: SshLsEntry & { name: string }): boolean {
+  return tempSelectedPaths.value.has(remotePathToVirtual(entry.path));
+}
+
+function toggleTempSelect(entry: SshLsEntry & { name: string }) {
+  const vp = remotePathToVirtual(entry.path);
+  const next = new Set(tempSelectedPaths.value);
+  if (next.has(vp)) {
+    next.delete(vp);
+  } else {
+    next.add(vp);
+  }
+  tempSelectedPaths.value = next;
+}
+
+function clearTempSelection() {
+  tempSelectedPaths.value = new Set();
+}
+
+function confirmSelection() {
+  const list = dirPickerMode.value === 'whitelist'
+    ? (form.configData as SshConfigData).edit_whitelist!
+    : (form.configData as SshConfigData).edit_blacklist!;
+  if (!list) return;
+
+  for (const vp of tempSelectedPaths.value) {
+    if (!list.includes(vp)) {
+      list.push(vp);
+    }
+  }
+  dirPickerVisible.value = false;
+}
+
+function remotePathToVirtual(remotePath: string): string {
+  let clean = remotePath.replace(/\/$/, '');
+  return VIRTUAL_WORKSPACE_ROOT + clean + '/';
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+function removeWhitelistItem(idx: number) {
+  const arr = (form.configData as SshConfigData).edit_whitelist!;
+  arr.splice(idx, 1);
+}
+
+function removeBlacklistItem(idx: number) {
+  const arr = (form.configData as SshConfigData).edit_blacklist!;
+  arr.splice(idx, 1);
+}
+
+function openDirPicker(mode: 'whitelist' | 'blacklist') {
+  dirPickerMode.value = mode;
+  dirPickerVisible.value = true;
+}
+
+async function onDirPickerOpen() {
+  dirPickerError.value = '';
+  tempSelectedPaths.value = new Set();
+  currentRemoteDir.value = '/';
+  await loadRemoteDir('/');
+}
+
+async function navigateDir(remotePath: string) {
+  dirPickerError.value = '';
+  currentRemoteDir.value = remotePath;
+  await loadRemoteDir(remotePath);
+}
+
+async function loadRemoteDir(remotePath: string) {
+  isDirLoading.value = true;
+  dirPickerError.value = '';
+  try {
+    const cd = form.configData as SshConfigData;
+    const res = await sshListDirectory({
+      path: remotePath,
+      hostname: cd.hostname,
+      port: cd.port || 22,
+      username: cd.username,
+      password: cd.password || null,
+      root_dir: cd.root_dir || '/',
+      backend_id: isEdit.value ? currentEditId.value : null,
+    });
+    if (res.success && res.entries) {
+      dirEntries.value = res.entries
+        .filter(e => e.is_dir || e.path.endsWith('/'))
+        .map(e => ({ ...e, name: extractName(e.path) }))
+        .sort((a, b) => {
+          return a.name.localeCompare(b.name);
+        });
+    } else {
+      dirPickerError.value = res.message || '加载目录失败';
+      dirEntries.value = [];
+    }
+  } catch (err: any) {
+    dirPickerError.value = err?.message || '连接远程服务器失败';
+    dirEntries.value = [];
+  } finally {
+    isDirLoading.value = false;
+  }
+}
+
+function extractName(path: string): string {
+  const cleaned = path.replace(/\/$/, '');
+  const idx = cleaned.lastIndexOf('/');
+  return idx >= 0 ? cleaned.slice(idx + 1) : cleaned;
+}
+
+function onDirEntryClick(entry: SshLsEntry & { name: string }) {
+  if (entry.is_dir) {
+    navigateDir(entry.path);
+  }
+}
 
 const sshDefaultConfig = (): SshConfigData => ({
   hostname: '',
@@ -343,6 +651,7 @@ const handleTypeChange = (type: BackendType) => {
   newForm.name = form.name;
   newForm.description = form.description;
   Object.assign(form, newForm);
+  editMode.value = 'whitelist';
   formRef.value?.clearValidate();
 };
 
@@ -410,6 +719,7 @@ const handleCreate = () => {
   currentEditId.value = null;
   showApiKey.value = false;
   Object.assign(form, defaultForm('ssh'));
+  editMode.value = 'whitelist';
   dialogVisible.value = true;
   formRef.value?.clearValidate();
 };
@@ -425,6 +735,14 @@ const handleEdit = (row: BackendConfig) => {
   if (rawData.enable_version_editing == null) {
     rawData.enable_version_editing = true;
   }
+  // Enforce mutual exclusion for legacy data: if both are set, keep only whitelist
+  const wl = rawData.edit_whitelist || [];
+  const bl = rawData.edit_blacklist || [];
+  if (wl.length > 0 && bl.length > 0) {
+    // Both set — clear blacklist (whitelist takes priority)
+    rawData.edit_blacklist = [];
+  }
+
   Object.assign(form, {
     name: row.name,
     description: row.description || '',
@@ -437,6 +755,7 @@ const handleEdit = (row: BackendConfig) => {
     },
     tools_config: row.tools_config ? JSON.parse(JSON.stringify(row.tools_config)) : defaultToolsConfig(),
   });
+  editMode.value = resolveEditMode();
   dialogVisible.value = true;
   formRef.value?.clearValidate();
 };
@@ -623,5 +942,141 @@ const copyPublicKey = async () => {
   margin-top: 4px;
   font-size: 12px;
   color: var(--el-text-color-placeholder);
+}
+
+/* 路径选择器 */
+.path-picker-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+}
+
+.path-tag {
+  margin-bottom: 2px;
+}
+
+.path-picker-tip {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+}
+
+/* 目录选择器弹窗 */
+.dir-picker-container {
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+}
+
+.dir-picker-error {
+  margin-bottom: 12px;
+}
+
+.dir-picker-breadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-bottom: 8px;
+  padding: 8px;
+  background: var(--el-fill-color-light);
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.crumb-checkbox {
+  margin-right: 6px;
+  height: auto;
+}
+
+.crumb-sep {
+  color: var(--el-text-color-placeholder);
+  margin: 0 2px;
+}
+
+.dir-picker-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding: 0 4px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+
+.dir-picker-list {
+  flex: 1;
+  max-height: 360px;
+  overflow-y: auto;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 4px;
+}
+
+.dir-empty {
+  padding: 40px;
+  text-align: center;
+  color: var(--el-text-color-placeholder);
+}
+
+.dir-entry {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border-bottom: 1px solid var(--el-border-color-extra-light);
+  transition: background-color 0.15s;
+}
+
+.dir-entry-checkbox {
+  padding: 8px 0 8px 12px;
+  margin: 0;
+  flex-shrink: 0;
+  height: auto;
+}
+
+.dir-entry.is-checked {
+  background: var(--el-color-primary-light-9);
+}
+
+.dir-entry-body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  padding: 8px 12px;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.dir-entry-body:hover {
+  background: var(--el-fill-color-light);
+}
+
+.dir-entry.is-checked .dir-entry-body:hover {
+  background: var(--el-color-primary-light-8);
+}
+
+.dir-entry-icon {
+  color: var(--el-color-warning);
+  flex-shrink: 0;
+}
+
+.dir-entry-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dir-entry-size {
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+  flex-shrink: 0;
+}
+
+.dir-entry-arrow {
+  color: var(--el-text-color-placeholder);
+  flex-shrink: 0;
 }
 </style>

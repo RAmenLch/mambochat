@@ -15,6 +15,7 @@ export default {
     unknownMcp: 'Unknown MCP',
     unknownBackend: 'Unknown Backend',
     unknownAgent: 'Unknown Agent',
+    deleted: 'Deleted',
   },
   time: {
     today: 'Today',

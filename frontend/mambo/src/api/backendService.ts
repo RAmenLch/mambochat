@@ -1,5 +1,5 @@
 import apiClient from './index';
-import type { BackendConfig, BackendCreate, BackendUpdate, SshPublicKeyResponse, SshTestRequest, SshTestResponse } from './types/backendTypes';
+import type { BackendConfig, BackendCreate, BackendUpdate, SshPublicKeyResponse, SshTestRequest, SshTestResponse, SshLsRequest, SshLsResponse } from './types/backendTypes';
 
 export const getBackends = (skip = 0, limit = 100): Promise<BackendConfig[]> => {
   return apiClient.get('/backends/', { params: { skip, limit } });
@@ -27,6 +27,10 @@ export const getSshPublicKey = (): Promise<SshPublicKeyResponse> => {
 
 export const testSshConnection = (data: SshTestRequest): Promise<SshTestResponse> => {
   return apiClient.post('/backends/ssh/test', data);
+};
+
+export const sshListDirectory = (data: SshLsRequest): Promise<SshLsResponse> => {
+  return apiClient.post('/backends/ssh/ls', data);
 };
 
 export interface ClientStatusResponse {
