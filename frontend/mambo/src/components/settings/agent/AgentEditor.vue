@@ -950,13 +950,14 @@ watch(agentData, async (newVal) => {
     fetchHitlTools(newVal.id);
 
     if (newVal.resourcePromptList && newVal.resourcePromptList.length > 0) {
+      const rpList = newVal.resourcePromptList;
       try {
-        const promises = newVal.resourcePromptList.map(id => getResourceDetails(id).catch(() => null));
+        const promises = rpList.map(id => getResourceDetails(id).catch(() => null));
         const results = await Promise.all(promises);
         // 已删除的资源创建占位 stub，保留顺序，引导用户取消选择
         mountedResources.value = results.map((r, i) => {
           if (r) return r;
-          const id = newVal.resourcePromptList[i];
+          const id = rpList[i];
           return { id, name: t('resource.deletedNameWithId', { id: id.substring(0, 8) }), resourceType: 'file', _deleted: true } as unknown as Resource;
         });
       } catch (error) {
@@ -968,12 +969,13 @@ watch(agentData, async (newVal) => {
     }
 
     if (newVal.subAgents && newVal.subAgents.length > 0) {
+      const saList = newVal.subAgents;
       try {
-        const promises = newVal.subAgents.map(id => getAgent(id).catch(() => null));
+        const promises = saList.map(id => getAgent(id).catch(() => null));
         const results = await Promise.all(promises);
         mountedSubAgents.value = results.map((r, i) => {
           if (r) return r;
-          const id = newVal.subAgents[i];
+          const id = saList[i];
           return { id, name: t('agent.subAgentDeleted', { id: id.substring(0, 8) }), AgentType: 'ReActAgent', _deleted: true } as unknown as Agent;
         });
       } catch (error) {
