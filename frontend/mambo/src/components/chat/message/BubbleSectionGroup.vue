@@ -31,6 +31,21 @@
       />
     </div>
 
+    <!-- 文件/图片分组区域（连续多图合并同行展示） -->
+    <div class="group-files-wrapper" v-if="group.fileSubMessages && group.fileSubMessages.length > 0">
+      <SubMessageItem
+        v-for="(fileMsg, fileIdx) in group.fileSubMessages"
+        :key="fileMsg.id"
+        :sub-message="fileMsg"
+        :parent-message="parentMessage"
+        :show-header="false"
+        :is-inline="false"
+        :preview-src-list="fileGroupPreviewList"
+        :preview-index="fileGroupPreviewIndex(fileIdx)"
+        @edit-file="(file) => $emit('edit-file', file)"
+      />
+    </div>
+
     <!-- 工具调用小气泡 -->
     <div class="group-tools-wrapper" v-if="group.toolSubMessages.length > 0">
       <div
@@ -207,6 +222,28 @@ function isToolError(tool: SubMessage): boolean {
   const content = getParsedContent(tool) as McpToolContent | null;
   return content?.is_error || false;
 }
+
+/** 文件组中所有图片的聚合预览列表（用于键盘导航） */
+const fileGroupPreviewList = computed(() => {
+  if (!props.group.fileSubMessages) return [];
+  return props.group.fileSubMessages
+    .filter(sm => sm.type === 'File' && sm.file_info?.mime_type?.startsWith('image/'))
+    .map(sm => sm.file_info!.url);
+});
+
+/** 计算当前图片在聚合预览列表中的索引 */
+function fileGroupPreviewIndex(fileIdx: number): number {
+  if (!props.group.fileSubMessages) return 0;
+  let imgIdx = 0;
+  for (let i = 0; i <= fileIdx; i++) {
+    const sm = props.group.fileSubMessages[i];
+    if (sm.type === 'File' && sm.file_info?.mime_type?.startsWith('image/')) {
+      if (i === fileIdx) return imgIdx;
+      imgIdx++;
+    }
+  }
+  return imgIdx;
+}
 </script>
 
 <style scoped>
@@ -261,6 +298,13 @@ function isToolError(tool: SubMessage): boolean {
   gap: 8px;
   margin-top: 8px;
   padding-left: 4px;
+}
+
+/* 文件/图片分组容器：flex-wrap 同行排布多张图片 */
+.group-files-wrapper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 /* 【关键修改】工具小气泡设为较浅的灰色 */

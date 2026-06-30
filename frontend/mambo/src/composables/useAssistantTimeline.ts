@@ -6,8 +6,10 @@ import type { Message, SubMessage, ReviewToolContent, AskUserContent, TaskSubSte
 /** 时间线中的一个分组：一段文本 + 跟随的工具调用 */
 export interface BubbleSectionGroup {
   id: string;
-  textSubMessage: SubMessage | null; // 主文本(Reasoning/Normal)。若工具先于文本出现，则可能为 null
-  toolSubMessages: SubMessage[];     // 紧随其后的 McpTool 或 待审核的 ReviewTool
+  textSubMessage: SubMessage | null;  // 主文本(Reasoning/Normal)。若工具先于文本出现，则可能为 null
+  toolSubMessages: SubMessage[];      // 紧随其后的 McpTool 或 待审核的 ReviewTool
+  /** 连续多个 File 类型子消息会合并到同一个分组中，用于同行展示多张图片 */
+  fileSubMessages?: SubMessage[];
 }
 
 /** 大气泡内的一个区域（思考 或 正文） */
@@ -97,10 +99,14 @@ export function useAssistantTimeline(message: Ref<Message>) {
         currentGroup = { id: sm.id, textSubMessage: sm, toolSubMessages: [] };
       }
       else if (sm.type === 'File') {
-        // File 类型(如生成的图片)作为独立文本节点渲染，SubMessageItem 会根据 type === 'File' 展示文件卡片或图片
-        pushCurrentGroup();
-        currentSection = 'normal';
-        currentGroup = { id: sm.id, textSubMessage: sm, toolSubMessages: [] };
+        // 连续 File 类型合并到同一个分组，以便同行展示多张图片
+        if (currentGroup && currentGroup.fileSubMessages && currentGroup.fileSubMessages.length > 0) {
+          currentGroup.fileSubMessages.push(sm);
+        } else {
+          pushCurrentGroup();
+          currentSection = 'normal';
+          currentGroup = { id: sm.id, textSubMessage: null, toolSubMessages: [], fileSubMessages: [sm] };
+        }
       }
       else if (sm.type === 'McpTool' || sm.type === 'ReviewTool' || sm.type === 'AskUser') {
         if (!currentGroup) {

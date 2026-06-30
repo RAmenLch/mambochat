@@ -15,9 +15,9 @@
       <el-image
         v-if="subMessage.file_info.mime_type.startsWith('image/')"
         :src="subMessage.file_info.url"
-        :preview-src-list="[subMessage.file_info.url]"
-        :initial-index="0"
-        fit="cover"
+        :preview-src-list="previewSrcList"
+        :initial-index="previewIndex"
+        fit="contain"
         class="file-image-thumbnail"
         hide-on-click-modal
       >
@@ -244,6 +244,10 @@ const props = withDefaults(
     isMinimizeDisabled?: boolean
     isInactive?: boolean
     isInline?: boolean
+    /** 预览图片列表，用于 el-image 的 preview-src-list（聚合同组所有图片 URL 以支持键盘导航） */
+    previewSrcList?: string[]
+    /** 当前图片在 previewSrcList 中的索引 */
+    previewIndex?: number
   }>(),
   {
     id: '',
@@ -252,6 +256,8 @@ const props = withDefaults(
     isMinimizeDisabled: false,
     isInactive: false,
     isInline: false,
+    previewSrcList: () => [],
+    previewIndex: 0,
   },
 )
 
@@ -490,14 +496,18 @@ function scrollToTop() {
   border: none;
   background-color: transparent;
   padding: 0;
-  max-width: 260px;
+  max-width: 240px;
+  flex: 0 0 auto;
+  overflow: visible;
 }
 .file-display-container {
-  width: 100%;
+  overflow: visible;
 }
+/* el-image 固定展示框，fit="contain" 等比缩放完整显示图片 */
 .file-image-thumbnail {
-  width: 100%;
-  height: 160px;
+  width: 230px;
+  height: 240px;
+  display: block;
   border-radius: 6px;
   border: 1px solid var(--el-border-color-lighter);
   background-color: var(--color-background);
