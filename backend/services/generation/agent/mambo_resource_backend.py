@@ -90,7 +90,11 @@ from mambo_agents.backends.utils import (
     detect_trailing_newline_mismatch,
     format_validation_error,
     format_with_line_numbers,
+    TreeEntry,
+    format_tree_entries,
 )
+
+from mambo_agents.backends.schemas import human_size
 
 from backend.crud import resource_crud
 from backend import schemas
@@ -285,7 +289,7 @@ class MamboResourceBackend(BackendProtocol):
         Callback for oversized text (inherited).
     """
 
-    BACKEND_TOOL_NAMES: ClassVar[frozenset[str]] = frozenset({"ls_version"})
+    BACKEND_TOOL_NAMES: ClassVar[frozenset[str]] = frozenset({"ls_version", "tree"})
     """Tool names exposed by this backend (used for UI tracking registration).
 
     The ``MamboAgentBuiltinToolProvider`` reads this class attribute to
@@ -334,7 +338,23 @@ class MamboResourceBackend(BackendProtocol):
     @property
     def tools(self) -> list[StructuredTool]:
         wr = self.workspace_root.value
-        tool_list: list[StructuredTool] = []
+        tool_list: list[StructuredTool] = [
+            StructuredTool(
+                name="tree",
+                description=(
+                    "View the directory tree structure of the resource workspace. "
+                    "Shows directories and files with their sizes in a tree format."
+                ),
+                args_schema=create_model(
+                    "TreeSchema",
+                    path=(VirtualPath, Field(default=VirtualPath(wr), description=f"Root directory to display (e.g. '{wr}')")),
+                    depth=(int, Field(default=3, description="Maximum recursion depth")),
+                ),
+                func=self._safe_tool_func("tree", self.tree),
+                coroutine=self._safe_tool_coroutine("tree", self.atree),
+                handle_validation_error=format_validation_error,
+            ),
+        ]
         if self._enable_version_editing:
             tool_list.append(
                 StructuredTool(
@@ -827,6 +847,138 @@ class MamboResourceBackend(BackendProtocol):
 
         entries.sort(key=lambda fi: (not fi.is_dir, fi.path))
         return LsResult(entries=entries) if entries else LsResult(entries=[])
+
+    # ==================================================================
+    # Core: tree  (cache-based — no SSH needed)
+    # ==================================================================
+
+    def tree(self, path: VirtualPath = VirtualPath("/workspace"), depth: int = 3) -> str:
+        """Render a directory tree of the resource workspace.
+
+        Traverses the in-memory cache to build a tree view showing
+        directories and files with their sizes.
+
+        Args:
+            path: Root directory to display (default workspace root).
+            depth: Maximum recursion depth (default 3).
+
+        Returns:
+            Formatted tree string.
+        """
+        try:
+            norm = self._normalize_path(path)
+        except WorkspacePathError as e:
+            return str(e)
+
+        prefix = norm.rstrip("/") + "/"
+
+        # Collect visible entries: relative_path -> node
+        entries_map: dict[str, _CachedNode] = {}
+        for vpath, node in self._cache.items():
+            if node.is_version_node:
+                continue
+            if vpath != norm and not vpath.startswith(prefix):
+                continue
+            rel = vpath[len(prefix):]
+            if rel:
+                entries_map[rel] = node
+
+        # Sort by relative path for correct parent→child ordering
+        sorted_paths = sorted(entries_map.keys())
+
+        root_name = PurePosixPath(norm).name or norm.rstrip("/")
+        tree_entries: list[TreeEntry] = [TreeEntry(name=root_name + "/", depth=0)]
+
+        # First pass: identify all directories and their children count
+        seen_dirs: set[str] = set()
+        dir_has_visible_children: dict[str, bool] = {}
+
+        for rel in sorted_paths:
+            d = rel.count("/") + 1
+            if d > depth:
+                continue
+            node = entries_map[rel]
+
+            # Register parent directories along the path
+            parts = PurePosixPath(rel).parts
+            for i in range(1, len(parts)):
+                parent_rel = str(PurePosixPath(*parts[:i]))
+                if parent_rel not in seen_dirs:
+                    seen_dirs.add(parent_rel)
+                    dir_has_visible_children[parent_rel] = True
+
+            if node.is_dir:
+                seen_dirs.add(rel)
+
+        # Second pass: check which directories to show and whether they're empty
+        dirs_to_show: dict[str, _CachedNode] = {}
+        for rel in sorted_paths:
+            d = rel.count("/") + 1
+            if d > depth:
+                # Track that parent dir has depth-exceeded children
+                if d == depth + 1:
+                    parent_rel = str(PurePosixPath(rel).parent)
+                    if parent_rel != "." and parent_rel in dir_has_visible_children:
+                        pass  # mark handled below
+                continue
+            node = entries_map[rel]
+            if node.is_dir:
+                # Only show if depth <= depth
+                if d <= depth:
+                    dirs_to_show[rel] = node
+                    # Check if this dir has visible children at depth <= depth
+                    has_kids = any(
+                        other.startswith(rel + "/")
+                        and other != rel
+                        and other.count("/") + 1 <= depth
+                        for other in sorted_paths
+                    )
+                    dir_has_visible_children[rel] = has_kids
+
+        # Build entries sorted by path (directories before sibling files)
+        sorted_entries: list[tuple[str, TreeEntry]] = []
+
+        for rel in sorted(dirs_to_show.keys()):
+            d = rel.count("/") + 1
+            if d > depth:
+                continue
+            has_kids = dir_has_visible_children.get(rel, False)
+            if d == depth and has_kids:
+                marker = "depth_exceeded"
+            elif not has_kids:
+                marker = "empty"
+            else:
+                marker = ""
+
+            sort_path = rel + "/"
+            sorted_entries.append((sort_path, TreeEntry(
+                name=PurePosixPath(rel).name + "/",
+                depth=d,
+                marker=marker,
+            )))
+
+        for rel in sorted_paths:
+            d = rel.count("/") + 1
+            if d > depth:
+                continue
+            node = entries_map[rel]
+            if node.is_dir:
+                continue  # already handled above
+            size_str = human_size(node.size)
+            sorted_entries.append((rel, TreeEntry(
+                name=f"{PurePosixPath(rel).name} ({size_str})",
+                depth=d,
+            )))
+
+        sorted_entries.sort(key=lambda x: x[0])
+        tree_entries.extend(e[1] for e in sorted_entries)
+
+        return format_tree_entries(tree_entries)
+
+    async def atree(self, path: VirtualPath = VirtualPath("/workspace"), depth: int = 3) -> str:
+        """Async wrapper: delegates to sync ``tree()`` via thread pool."""
+        import asyncio
+        return await asyncio.to_thread(self.tree, path, depth)
 
     # ==================================================================
     # Core: read  (async-first: _aread_raw_impl)
@@ -1563,13 +1715,20 @@ class MamboResourceBackend(BackendProtocol):
 
         prefix = norm.rstrip("/") + "/"
 
+        # fnmatch.fnmatch is applied to node.name (filename only), so any
+        # directory prefix in *pattern* (e.g. "**/", "*/", "dir/") will
+        # never match a bare filename.  Strip everything before the last
+        # "/" — the directory scope is already enforced by the prefix
+        # check (vpath.startswith(prefix)) above.
+        name_pattern = pattern.rsplit("/", 1)[-1] if "/" in pattern else pattern
+
         matched: list[FileInfo] = []
         for vpath, node in self._cache.items():
             if node.is_dir or node.is_version_node:
                 continue
             if vpath != norm and not vpath.startswith(prefix):
                 continue
-            if not fnmatch.fnmatch(node.name, pattern):
+            if not fnmatch.fnmatch(node.name, name_pattern):
                 continue
             matched.append(FileInfo(
                 path=VirtualPath(vpath),

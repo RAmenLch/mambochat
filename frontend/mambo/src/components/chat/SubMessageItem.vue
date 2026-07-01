@@ -493,11 +493,11 @@ function scrollToTop() {
 }
 
 .sub-message-item.is-file {
+  display: inline-flex;
   border: none;
   background-color: transparent;
   padding: 0;
   max-width: 240px;
-  flex: 0 0 auto;
   overflow: visible;
 }
 .file-display-container {

@@ -42,6 +42,15 @@ async def handle_create_sub_message(
     )
 
     stream_data = schemas.message.SubMessage.model_validate(db_sub_message).model_dump(mode='json')
+
+    # 对于 File 类型的子消息，主动填充 file_info，以便前端在 SSE 流中立即加载图片
+    if instruction.type == 'File' and db_sub_message.content:
+        file_service = FileService(db)
+        file_record = await file_service.get_file(db_sub_message.content)
+        if file_record:
+            file_schema = file_service.convert_to_schema(file_record)
+            stream_data['file_info'] = file_schema.model_dump(mode='json')
+
     await stream_manager.publish(
         assistant_message_id,
         {"type": "create", "sub_message": stream_data}

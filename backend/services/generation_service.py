@@ -422,6 +422,18 @@ async def subscribe_to_stream(
     calculated_status = await _calculate_message_status(message)
 
     sub_messages_data = [schemas.SubMessage.model_validate(sm).model_dump(mode='json') for sm in message.sub_messages]
+
+    # 为 File 类型的子消息填充 file_info，以便前端在 SSE 流中立即加载图片
+    file_ids = [sm.content for sm in message.sub_messages if sm.type == 'File' and sm.content]
+    if file_ids:
+        from backend.services.file_service import FileService
+        file_service = FileService(db)
+        file_records = await file_service.batch_get_files(file_ids)
+        file_map = {f.id: file_service.convert_to_schema(f).model_dump(mode='json') for f in file_records}
+        for sm_data in sub_messages_data:
+            if sm_data.get('type') == 'File' and sm_data.get('content') in file_map:
+                sm_data['file_info'] = file_map[sm_data['content']]
+
     initial_event_data = {
         "type": "replace",
         "sub_messages": sub_messages_data,
