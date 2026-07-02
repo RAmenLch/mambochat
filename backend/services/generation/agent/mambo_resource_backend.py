@@ -80,6 +80,7 @@ from mambo_agents.backends.protocol import (
     LsResult,
     ReadResult,
     ReadSummarizer,
+    Result,
     VirtualPath,
     WorkspacePathError,
     WriteResult,
@@ -203,15 +204,31 @@ class VersionInfo(BaseModel):
     sort_order: int = 0
     is_active: bool = False
     updated_at: str = ""
-    file_path: str = ""
+    file_path: VirtualPath = Field(default_factory=lambda: VirtualPath("/"))
     """Virtual path to use with read/edit/write on this version file."""
 
 
-class LsVersionResult(BaseModel):
+class LsVersionResult(Result):
     """Result from ``ls_version()`` — ``ls``-style with direct paths."""
 
     error: str | None = None
     versions: list[VersionInfo] | None = None
+
+    def apply_reverse_translation(
+        self,
+        reverse_fn,
+        target_ws_root: VirtualPath,
+        virtual_prefix: VirtualPath,
+    ) -> "LsVersionResult":
+        if self.versions is None:
+            return self
+        versions = [
+            v.model_copy(update={
+                "file_path": reverse_fn(v.file_path, target_ws_root, virtual_prefix),
+            })
+            for v in self.versions
+        ]
+        return self.model_copy(update={"versions": versions})
 
     def __str__(self) -> str:
         if self.error:
@@ -838,7 +855,7 @@ class MamboResourceBackend(BackendProtocol):
                 continue
 
             entries.append(FileInfo(
-                path=VirtualPath(vpath + ("/" if node.is_dir else "")),
+                path=VirtualPath(vpath),
                 is_dir=node.is_dir,
                 size=node.size,
                 modified_at=node.modified_at,
@@ -1547,7 +1564,7 @@ class MamboResourceBackend(BackendProtocol):
         # --- Phase 1 (sync): grep direct-text nodes inline — zero DB, zero blocking ---
         file_id_pairs: list[tuple[str, str]] = []  # (vpath, node_id)
         for vpath, node in self._cache.items():
-            if node.is_dir or node.is_version_node:
+            if node.is_version_node:
                 continue
             if vpath != norm and not vpath.startswith(prefix):
                 continue
@@ -1660,7 +1677,7 @@ class MamboResourceBackend(BackendProtocol):
         # --- Phase 1 (sync): grep direct-text nodes inline — zero DB calls ---
         file_id_pairs: list[tuple[str, str]] = []
         for vpath, node in self._cache.items():
-            if node.is_dir or node.is_version_node:
+            if node.is_version_node:
                 continue
             if vpath != norm and not vpath.startswith(prefix):
                 continue
@@ -1724,7 +1741,7 @@ class MamboResourceBackend(BackendProtocol):
 
         matched: list[FileInfo] = []
         for vpath, node in self._cache.items():
-            if node.is_dir or node.is_version_node:
+            if node.is_version_node:
                 continue
             if vpath != norm and not vpath.startswith(prefix):
                 continue
@@ -1732,7 +1749,7 @@ class MamboResourceBackend(BackendProtocol):
                 continue
             matched.append(FileInfo(
                 path=VirtualPath(vpath),
-                is_dir=False,
+                is_dir=node.is_dir,
                 size=node.size,
                 modified_at=node.modified_at,
                 desc=node.desc,

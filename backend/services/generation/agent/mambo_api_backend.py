@@ -196,9 +196,11 @@ class MamboAPIBackend(BackendProtocol):
         from mambo_agents.backends.protocol import FileInfo
 
         for item in data:
+            path_raw = item.get("path", "/")
+            path_clean = path_raw.rstrip("/") if path_raw and path_raw != "/" else path_raw
             entries.append(
                 FileInfo(
-                    path=VirtualPath(item.get("path", "/")),
+                    path=VirtualPath(path_clean),
                     is_dir=item.get("is_dir", False),
                     size=item.get("size", 0),
                     modified_at=item.get("modified_at", ""),
