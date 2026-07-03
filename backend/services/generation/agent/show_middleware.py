@@ -58,7 +58,7 @@ async def _download_safe(
             return None, "adownload_files returned empty results"
         r = results[0]
         if r.error:
-            return None, r.error
+            return None, str(r.error)
         return r.content, None
     except Exception as exc:
         return None, str(exc)

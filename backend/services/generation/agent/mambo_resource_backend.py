@@ -82,11 +82,11 @@ from mambo_agents.backends.protocol import (
     ReadSummarizer,
     Result,
     VirtualPath,
-    WorkspacePathError,
     WriteResult,
     _get_file_type,
     _get_mime_type,
 )
+from mambo_agents.backends.schemas import BackendError, ErrorCode
 from mambo_agents.backends.utils import (
     detect_trailing_newline_mismatch,
     format_validation_error,
@@ -211,7 +211,6 @@ class VersionInfo(BaseModel):
 class LsVersionResult(Result):
     """Result from ``ls_version()`` — ``ls``-style with direct paths."""
 
-    error: str | None = None
     versions: list[VersionInfo] | None = None
 
     def apply_reverse_translation(
@@ -777,14 +776,17 @@ class MamboResourceBackend(BackendProtocol):
 
         wr = self.workspace_root.value
         if norm != wr and not norm.startswith(wr + "/"):
-            raise WorkspacePathError(
-                f"Path '{raw}' is outside the workspace. "
-                f"All file paths must be under '{wr}'."
+            raise BackendError(
+                code=ErrorCode.OUTSIDE_WORKSPACE,
+                path=path,
+                message=f"路径在 workspace 外。所有路径必须在 '{wr}' 下。",
             )
 
         if ".." in PurePosixPath(raw).parts:
-            raise WorkspacePathError(
-                f"Path '{raw}' contains '..' which is not allowed."
+            raise BackendError(
+                code=ErrorCode.PATH_TRAVERSAL,
+                path=path,
+                message="路径不能包含 '..' 穿越。",
             )
 
         return norm
@@ -793,7 +795,7 @@ class MamboResourceBackend(BackendProtocol):
         """Resolve a virtual path to a cached node."""
         try:
             norm = self._normalize_path(path)
-        except WorkspacePathError:
+        except BackendError:
             return None
         return self._cache.get(norm)
 
@@ -835,8 +837,23 @@ class MamboResourceBackend(BackendProtocol):
     async def _als_impl(self, path: VirtualPath) -> LsResult:
         try:
             norm = self._normalize_path(path)
-        except WorkspacePathError as e:
-            return LsResult(error=str(e))
+        except BackendError as e:
+            return LsResult(error=e)
+
+        # --- Validate target exists and is a directory ---
+        target = self._resolve(norm)
+        if target is None:
+            return LsResult(error=BackendError(
+                code=ErrorCode.NOT_FOUND,
+                path=path,
+                message=f"Path '{path}' not found",
+            ))
+        if not target.is_dir:
+            return LsResult(error=BackendError(
+                code=ErrorCode.NOT_DIR,
+                path=path,
+                message=f"'{path}' is not a directory",
+            ))
 
         entries: list[FileInfo] = []
         prefix = norm.rstrip("/") + "/"
@@ -884,8 +901,23 @@ class MamboResourceBackend(BackendProtocol):
         """
         try:
             norm = self._normalize_path(path)
-        except WorkspacePathError as e:
+        except BackendError as e:
             return str(e)
+
+        # --- Validate target exists and is a directory ---
+        target = self._resolve(norm)
+        if target is None:
+            return str(BackendError(
+                code=ErrorCode.NOT_FOUND,
+                path=path,
+                message=f"Path '{path}' not found",
+            ))
+        if not target.is_dir:
+            return str(BackendError(
+                code=ErrorCode.NOT_DIR,
+                path=path,
+                message=f"'{path}' is not a directory",
+            ))
 
         prefix = norm.rstrip("/") + "/"
 
@@ -947,7 +979,6 @@ class MamboResourceBackend(BackendProtocol):
                     has_kids = any(
                         other.startswith(rel + "/")
                         and other != rel
-                        and other.count("/") + 1 <= depth
                         for other in sorted_paths
                     )
                     dir_has_visible_children[rel] = has_kids
@@ -1054,14 +1085,22 @@ class MamboResourceBackend(BackendProtocol):
     ) -> ReadResult:
         try:
             norm = self._normalize_path(file_path)
-        except WorkspacePathError as e:
-            return ReadResult(error=str(e))
+        except BackendError as e:
+            return ReadResult(error=e)
 
         node = self._resolve(norm)
         if node is None:
-            return ReadResult(error=f"File '{file_path}' not found")
+            return ReadResult(error=BackendError(
+                code=ErrorCode.NOT_FOUND,
+                path=file_path,
+                message=f"File '{file_path}' not found",
+            ))
         if node.is_dir:
-            return ReadResult(error=f"'{file_path}' is a directory")
+            return ReadResult(error=BackendError(
+                code=ErrorCode.IS_DIR,
+                path=file_path,
+                message=f"'{file_path}' is a directory",
+            ))
 
         # ---- fetch text content (binary → base64 fallback) ----
         text: str
@@ -1081,7 +1120,11 @@ class MamboResourceBackend(BackendProtocol):
                 encoding="utf-8",
                 file_type=_get_file_type(norm),
                 mime_type=_get_mime_type(norm),
-                error=f"Error reading '{norm}': {e}",
+                error=BackendError(
+                    code=ErrorCode.IO_ERROR,
+                    path=VirtualPath(norm),
+                    message=f"Error reading '{norm}': {e}",
+                ),
             )
 
         # ---- apply offset / limit / line numbers (text only) ----
@@ -1094,7 +1137,10 @@ class MamboResourceBackend(BackendProtocol):
 
         if total > 0 and offset >= total:
             return ReadResult(
-                error=f"Line offset {offset} exceeds file length ({total} lines)"
+                error=BackendError(
+                    code=ErrorCode.INVALID,
+                    message=f"Line offset {offset} exceeds file length ({total} lines)",
+                )
             )
 
         sliced = lines[offset:] if limit is None else lines[offset: offset + limit]
@@ -1157,8 +1203,8 @@ class MamboResourceBackend(BackendProtocol):
         # 1. Validate
         try:
             norm = self._normalize_path(file_path)
-        except WorkspacePathError as e:
-            return WriteResult(error=str(e))
+        except BackendError as e:
+            return WriteResult(error=e)
 
         # 2. Check target
         existing = self._resolve(norm)
@@ -1174,29 +1220,45 @@ class MamboResourceBackend(BackendProtocol):
         if not is_target_version_node and not is_parent_version_folder:
             if not self._check_edit_allowed(norm):
                 return WriteResult(
-                    error=f"Path '{file_path}' is not allowed for write. "
-                           "Check edit_whitelist / edit_blacklist."
+                    error=BackendError(
+                        code=ErrorCode.EDIT_NOT_ALLOWED,
+                        path=file_path,
+                        message=f"Path '{file_path}' is not allowed for write. "
+                                 "Check edit_whitelist / edit_blacklist.",
+                    )
                 )
 
         # Block new file creation inside $v/ folders
         if is_parent_version_folder and not is_update:
             return WriteResult(
-                error=f"Cannot create new version in '{file_path}'. "
-                       "Version files can only be edited (use edit tool) "
-                       "or overwritten (use write with overwrite=True on "
-                       "an existing version file)."
+                error=BackendError(
+                    code=ErrorCode.INVALID,
+                    path=file_path,
+                    message=f"Cannot create new version in '{file_path}'. "
+                             "Version files can only be edited (use edit tool) "
+                             "or overwritten (use write with overwrite=True on "
+                             "an existing version file).",
+                )
             )
 
         if is_update:
             # SAFETY: refuse to write content into a folder
             if existing.is_dir:
                 return WriteResult(
-                    error=f"Cannot write '{file_path}': it is a folder, not a file."
+                    error=BackendError(
+                        code=ErrorCode.IS_DIR,
+                        path=file_path,
+                        message=f"Cannot write '{file_path}': it is a folder, not a file.",
+                    )
                 )
             if not overwrite:
                 return WriteResult(
-                    error=f"Cannot write '{file_path}': file exists. "
-                           "Use overwrite=True to replace."
+                    error=BackendError(
+                        code=ErrorCode.ALREADY_EXISTS,
+                        path=file_path,
+                        message=f"Cannot write '{file_path}': file exists. "
+                                 "Use overwrite=True to replace.",
+                    )
                 )
 
         # 3. Perform write
@@ -1216,7 +1278,11 @@ class MamboResourceBackend(BackendProtocol):
                     await self._create_new_file(db, parent_path, filename, content)
         except Exception as e:
             logger.exception("Write failed for '%s'", file_path)
-            return WriteResult(error=f"Write failed: {e}")
+            return WriteResult(error=BackendError(
+                code=ErrorCode.IO_ERROR,
+                path=file_path,
+                message=f"Write failed: {e}",
+            ))
 
         # 4. Refresh cache
         await self._arefresh_cache()
@@ -1477,13 +1543,17 @@ class MamboResourceBackend(BackendProtocol):
         # 1. Validate
         try:
             norm = self._normalize_path(file_path)
-        except WorkspacePathError as e:
-            return EditResult(error=str(e))
+        except BackendError as e:
+            return EditResult(error=e)
 
         if not self._check_edit_allowed(norm):
             return EditResult(
-                error=f"Path '{file_path}' is not allowed for edit. "
-                       "Check edit_whitelist / edit_blacklist."
+                error=BackendError(
+                    code=ErrorCode.EDIT_NOT_ALLOWED,
+                    path=file_path,
+                    message=f"Path '{file_path}' is not allowed for edit. "
+                             "Check edit_whitelist / edit_blacklist.",
+                )
             )
 
         # 2. Read current content
@@ -1501,19 +1571,27 @@ class MamboResourceBackend(BackendProtocol):
 
         if occurrences == 0:
             trail_mismatch = detect_trailing_newline_mismatch(
-                file_path, old_str, current,
+                old_str, current,
             )
             if trail_mismatch is not None:
                 return trail_mismatch
             return EditResult(
-                error=f"Cannot edit '{file_path}': old_str not found in file. "
-                       "Read the file first to see its exact content."
+                error=BackendError(
+                    code=ErrorCode.OLD_STR_NOT_FOUND,
+                    path=file_path,
+                    message=f"Cannot edit '{file_path}': old_str not found in file. "
+                             "Read the file first to see its exact content.",
+                )
             )
 
         if occurrences > 1 and not replace_all:
             return EditResult(
-                error=f"Cannot edit '{file_path}': old_str appears "
-                       f"{occurrences} times. Use replace_all=True."
+                error=BackendError(
+                    code=ErrorCode.MULTI_OCCURRENCES,
+                    path=file_path,
+                    message=f"Cannot edit '{file_path}': old_str appears "
+                             f"{occurrences} times. Use replace_all=True.",
+                )
             )
 
         # 5. Perform replacement
@@ -1547,8 +1625,8 @@ class MamboResourceBackend(BackendProtocol):
         rather than one-at-a-time."""
         try:
             norm = self._normalize_path(path)
-        except WorkspacePathError as e:
-            return GrepResult(error=str(e))
+        except BackendError as e:
+            return GrepResult(error=e)
 
         prefix = norm.rstrip("/") + "/"
 
@@ -1557,7 +1635,9 @@ class MamboResourceBackend(BackendProtocol):
             try:
                 compiled = re.compile(pattern)
             except re.error as e:
-                return GrepResult(error=f"Invalid regex pattern: {e}")
+                return GrepResult(error=BackendError(
+                    code=ErrorCode.INVALID, message=f"Invalid regex pattern: {e}",
+                ))
 
         matches: list[GrepMatch] = []
 
@@ -1660,8 +1740,8 @@ class MamboResourceBackend(BackendProtocol):
     ) -> GrepResult:
         try:
             norm = self._normalize_path(path)
-        except WorkspacePathError as e:
-            return GrepResult(error=str(e))
+        except BackendError as e:
+            return GrepResult(error=e)
 
         prefix = norm.rstrip("/") + "/"
 
@@ -1670,7 +1750,9 @@ class MamboResourceBackend(BackendProtocol):
             try:
                 compiled = re.compile(pattern)
             except re.error as e:
-                return GrepResult(error=f"Invalid regex pattern: {e}")
+                return GrepResult(error=BackendError(
+                    code=ErrorCode.INVALID, message=f"Invalid regex pattern: {e}",
+                ))
 
         matches: list[GrepMatch] = []
 
@@ -1727,8 +1809,8 @@ class MamboResourceBackend(BackendProtocol):
     ) -> GlobResult:
         try:
             norm = self._normalize_path(path)
-        except WorkspacePathError as e:
-            return GlobResult(error=str(e))
+        except BackendError as e:
+            return GlobResult(error=e)
 
         prefix = norm.rstrip("/") + "/"
 
@@ -1790,17 +1872,23 @@ class MamboResourceBackend(BackendProtocol):
 
         try:
             norm = self._normalize_path(VirtualPath(normalized))
-        except WorkspacePathError as e:
-            return LsVersionResult(error=str(e))
+        except BackendError as e:
+            return LsVersionResult(error=e)
 
         # Resolve the $v folder node
         folder_node = self._resolve(norm)
         if folder_node is None:
-            return LsVersionResult(error=f"Resource version folder '{normalized}' not found. "
-                                            f"Use ls to find resources (they end with '$v/').")
+            return LsVersionResult(error=BackendError(
+                code=ErrorCode.NOT_FOUND,
+                message=f"Resource version folder '{normalized}' not found. "
+                        f"Use ls to find resources (they end with '$v/').",
+            ))
         if not folder_node.is_dir:
-            return LsVersionResult(error=f"'{normalized}' is not a version folder. "
-                                            f"Version folders end with '$v/'.")
+            return LsVersionResult(error=BackendError(
+                code=ErrorCode.NOT_DIR,
+                message=f"'{normalized}' is not a version folder. "
+                        f"Version folders end with '$v/'.",
+            ))
 
         # Collect version children from cache
         prefix = norm.rstrip("/") + "/"
@@ -1892,7 +1980,7 @@ def _resource_to_node(res: resource_model.Resource) -> _CachedNode:
 def _construct_error(result_cls: type, msg: str):
     """Build an error-bearing result for any protocol result type."""
     try:
-        return result_cls(error=msg)
+        return result_cls(error=BackendError(code=ErrorCode.IO_ERROR, message=msg))
     except Exception:
         # Fallback for result types without 'error' field
         return result_cls()

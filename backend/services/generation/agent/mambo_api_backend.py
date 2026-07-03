@@ -32,6 +32,7 @@ from mambo_agents.backends.protocol import (
     VirtualPath,
     WriteResult,
 )
+from mambo_agents.backends.schemas import BackendError, ErrorCode
 
 logger = logging.getLogger(__name__)
 
@@ -174,13 +175,17 @@ class MamboAPIBackend(BackendProtocol):
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            return LsResult(error="No event loop available")
+            return LsResult(error=BackendError(
+                code=ErrorCode.IO_ERROR, message="No event loop available",
+            ))
 
         with concurrent.futures.ThreadPoolExecutor() as pool:
             try:
                 return pool.submit(asyncio.run, self.als(path)).result()
             except Exception as e:
-                return LsResult(error=str(e))
+                return LsResult(error=BackendError(
+                    code=ErrorCode.IO_ERROR, message=str(e),
+                ))
 
     def ls(self, path: VirtualPath) -> LsResult:
         return self._ls_sync(path)
@@ -189,7 +194,9 @@ class MamboAPIBackend(BackendProtocol):
         norm = self._normalize_path(path)
         result = await self._run_ws_call("ls", self._call, "ls", {"path": norm})
         if result is None:
-            return LsResult(error="Connection to API client failed")
+            return LsResult(error=BackendError(
+                code=ErrorCode.IO_ERROR, message="Connection to API client failed",
+            ))
 
         data = result if isinstance(result, list) else result.get("items", [])
         entries = []
@@ -221,7 +228,9 @@ class MamboAPIBackend(BackendProtocol):
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            return ReadResult(error="No event loop available")
+            return ReadResult(error=BackendError(
+                code=ErrorCode.IO_ERROR, message="No event loop available",
+            ))
 
         with concurrent.futures.ThreadPoolExecutor() as pool:
             try:
@@ -230,7 +239,9 @@ class MamboAPIBackend(BackendProtocol):
                     self.aread_raw(file_path, offset, limit, include_line_numbers),
                 ).result()
             except Exception as e:
-                return ReadResult(error=str(e))
+                return ReadResult(error=BackendError(
+                    code=ErrorCode.IO_ERROR, message=str(e),
+                ))
 
     def read_raw(
         self,
@@ -253,10 +264,16 @@ class MamboAPIBackend(BackendProtocol):
             "read", self._call, "read_file", {"path": norm, "offset": offset, "limit": limit}
         )
         if result is None:
-            return ReadResult(error=f"Connection to API client failed")
+            return ReadResult(error=BackendError(
+                code=ErrorCode.IO_ERROR, message="Connection to API client failed",
+            ))
 
         if result.get("error"):
-            return ReadResult(error=f"Error reading file '{file_path}': {result['error']}")
+            return ReadResult(error=BackendError(
+                code=ErrorCode.IO_ERROR,
+                path=file_path,
+                message=f"Error reading file '{file_path}': {result['error']}",
+            ))
 
         content = result.get("content", "")
         lines = result.get("lines")
@@ -285,7 +302,9 @@ class MamboAPIBackend(BackendProtocol):
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            return WriteResult(error="No event loop available")
+            return WriteResult(error=BackendError(
+                code=ErrorCode.IO_ERROR, message="No event loop available",
+            ))
 
         with concurrent.futures.ThreadPoolExecutor() as pool:
             try:
@@ -293,7 +312,9 @@ class MamboAPIBackend(BackendProtocol):
                     asyncio.run, self.awrite(file_path, content, overwrite)
                 ).result()
             except Exception as e:
-                return WriteResult(error=str(e))
+                return WriteResult(error=BackendError(
+                    code=ErrorCode.IO_ERROR, message=str(e),
+                ))
 
     async def awrite(
         self, file_path: VirtualPath, content: str, overwrite: bool = False
@@ -301,7 +322,11 @@ class MamboAPIBackend(BackendProtocol):
         try:
             self._check_edit_permission(file_path)
         except PermissionError as e:
-            return WriteResult(error=str(e))
+            return WriteResult(error=BackendError(
+                code=ErrorCode.EDIT_NOT_ALLOWED,
+                path=file_path,
+                message=str(e),
+            ))
 
         norm = self._normalize_path(file_path)
         result = await self._run_ws_call(
@@ -311,9 +336,13 @@ class MamboAPIBackend(BackendProtocol):
             {"path": norm, "content": content},
         )
         if result is None:
-            return WriteResult(error="Connection to API client failed")
+            return WriteResult(error=BackendError(
+                code=ErrorCode.IO_ERROR, message="Connection to API client failed",
+            ))
         if result.get("error"):
-            return WriteResult(error=result["error"])
+            return WriteResult(error=BackendError(
+                code=ErrorCode.IO_ERROR, message=result["error"],
+            ))
         return WriteResult(path=file_path)
 
     def edit(
@@ -330,7 +359,9 @@ class MamboAPIBackend(BackendProtocol):
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            return EditResult(error="No event loop available")
+            return EditResult(error=BackendError(
+                code=ErrorCode.IO_ERROR, message="No event loop available",
+            ))
 
         with concurrent.futures.ThreadPoolExecutor() as pool:
             try:
@@ -339,7 +370,9 @@ class MamboAPIBackend(BackendProtocol):
                     self.aedit(file_path, old_str, new_str, replace_all=replace_all),
                 ).result()
             except Exception as e:
-                return EditResult(error=str(e))
+                return EditResult(error=BackendError(
+                    code=ErrorCode.IO_ERROR, message=str(e),
+                ))
 
     async def aedit(
         self,
@@ -352,7 +385,11 @@ class MamboAPIBackend(BackendProtocol):
         try:
             self._check_edit_permission(file_path)
         except PermissionError as e:
-            return EditResult(error=str(e))
+            return EditResult(error=BackendError(
+                code=ErrorCode.EDIT_NOT_ALLOWED,
+                path=file_path,
+                message=str(e),
+            ))
 
         norm = self._normalize_path(file_path)
         result = await self._run_ws_call(
@@ -367,9 +404,13 @@ class MamboAPIBackend(BackendProtocol):
             },
         )
         if result is None:
-            return EditResult(error="Connection to API client failed")
+            return EditResult(error=BackendError(
+                code=ErrorCode.IO_ERROR, message="Connection to API client failed",
+            ))
         if result.get("error"):
-            return EditResult(error=result["error"])
+            return EditResult(error=BackendError(
+                code=ErrorCode.IO_ERROR, message=result["error"],
+            ))
         return EditResult(
             path=file_path,
             occurrences=result.get("occurrences", 0),
@@ -387,7 +428,9 @@ class MamboAPIBackend(BackendProtocol):
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            return GrepResult(error="No event loop available")
+            return GrepResult(error=BackendError(
+                code=ErrorCode.IO_ERROR, message="No event loop available",
+            ))
 
         with concurrent.futures.ThreadPoolExecutor() as pool:
             try:
@@ -395,7 +438,9 @@ class MamboAPIBackend(BackendProtocol):
                     asyncio.run, self.agrep(pattern, path, glob, regex, offset, limit)
                 ).result()
             except Exception as e:
-                return GrepResult(error=str(e))
+                return GrepResult(error=BackendError(
+                    code=ErrorCode.IO_ERROR, message=str(e),
+                ))
 
     async def agrep(
         self, pattern: str, path: VirtualPath = VirtualPath("/workspace"), glob: str | None = None,
@@ -412,9 +457,13 @@ class MamboAPIBackend(BackendProtocol):
              "offset": offset, "limit": limit},
         )
         if result is None:
-            return GrepResult(error="Connection to API client failed")
+            return GrepResult(error=BackendError(
+                code=ErrorCode.IO_ERROR, message="Connection to API client failed",
+            ))
         if isinstance(result, dict) and result.get("error"):
-            return GrepResult(error=result["error"])
+            return GrepResult(error=BackendError(
+                code=ErrorCode.IO_ERROR, message=result["error"],
+            ))
         if isinstance(result, list):
             matches: list[GrepMatch] = []
             for m in result:
@@ -435,7 +484,9 @@ class MamboAPIBackend(BackendProtocol):
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            return GlobResult(error="No event loop available")
+            return GlobResult(error=BackendError(
+                code=ErrorCode.IO_ERROR, message="No event loop available",
+            ))
 
         with concurrent.futures.ThreadPoolExecutor() as pool:
             try:
@@ -443,7 +494,9 @@ class MamboAPIBackend(BackendProtocol):
                     asyncio.run, self.aglob(pattern, path)
                 ).result()
             except Exception as e:
-                return GlobResult(error=str(e))
+                return GlobResult(error=BackendError(
+                    code=ErrorCode.IO_ERROR, message=str(e),
+                ))
 
     async def aglob(self, pattern: str, path: VirtualPath = VirtualPath("/workspace")) -> GlobResult:
         norm = self._normalize_path(path)
@@ -454,7 +507,9 @@ class MamboAPIBackend(BackendProtocol):
             {"pattern": pattern, "path": norm},
         )
         if result is None:
-            return GlobResult(error="Connection to API client failed")
+            return GlobResult(error=BackendError(
+                code=ErrorCode.IO_ERROR, message="Connection to API client failed",
+            ))
         data = result if isinstance(result, list) else result.get("items", [])
         from mambo_agents.backends.protocol import FileInfo
 
