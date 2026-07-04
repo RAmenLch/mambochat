@@ -49,9 +49,10 @@
         </template>
       </el-table-column>
       <el-table-column prop="description" :label="$t('backend.description')" show-overflow-tooltip />
-      <el-table-column :label="$t('common.action.operate')" width="180" fixed="right">
+      <el-table-column :label="$t('common.action.operate')" width="250" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="handleEdit(row)">{{ $t('common.action.edit') }}</el-button>
+          <el-button link type="success" @click="handleDuplicate(row.id)">{{ $t('backend.duplicate') }}</el-button>
           <el-popconfirm :title="$t('common.msg.confirmDelete')" @confirm="handleDelete(row.id)">
             <template #reference>
               <el-button link type="danger">{{ $t('common.action.delete') }}</el-button>
@@ -70,7 +71,7 @@
     >
       <el-form ref="formRef" :model="form" :rules="currentRules" label-width="120px" v-loading="isSaving">
         <el-form-item :label="$t('backend.name')" prop="name">
-          <el-input v-model="form.name" placeholder="仅允许字母、数字、下划线 (作为路由路径)" />
+          <el-input v-model="form.name" placeholder="支持中文，禁止 / \ 和控制字符" />
         </el-form-item>
         <el-form-item :label="$t('backend.description')" prop="description">
           <el-input v-model="form.description" type="textarea" :rows="2" />
@@ -613,30 +614,38 @@ const defaultForm = (type: BackendType = 'ssh'): BackendCreate => ({
   tools_config: defaultToolsConfig()
 });
 
+// 名称校验：与后端 validate_path_safe_name 一致（黑名单策略）
+const NAME_UNSAFE_RE = /[\/\\\x00-\x1f\x7f]/;
+const RESERVED_NAMES = new Set(['skills', 'memories', 'state', 'root', 'tmp', 'temp', 'workspace', 'this_chat_tmp', '.mambo']);
+
+function validateName(_rule: any, value: string, callback: (error?: Error) => void) {
+  if (!value) return callback(new Error('请输入名称'));
+  if (NAME_UNSAFE_RE.test(value)) return callback(new Error('名称不能包含 / \\ 或控制字符'));
+  if (value === '.' || value === '..') return callback(new Error('名称不能为 "." 或 ".."'));
+  if (RESERVED_NAMES.has(value.toLowerCase())) return callback(new Error(`"${value}" 是系统保留名称，请换一个`));
+  callback();
+}
+
+const nameRules = [
+  { required: true, message: '请输入名称', trigger: 'blur' },
+  { validator: validateName, trigger: 'blur' },
+];
+
 const form = reactive<BackendCreate>(defaultForm('ssh'));
 
 const sshRules: FormRules = {
-  name: [
-    { required: true, message: '请输入名称', trigger: 'blur' },
-    { pattern: /^[a-zA-Z0-9_]+$/, message: '仅允许包含字母、数字和下划线', trigger: 'blur' }
-  ],
+  name: nameRules,
   'configData.hostname': [{ required: true, message: '请输入主机地址', trigger: 'blur' }],
   'configData.username': [{ required: true, message: '请输入用户名', trigger: 'blur' }]
 };
 
 const apiRules: FormRules = {
-  name: [
-    { required: true, message: '请输入名称', trigger: 'blur' },
-    { pattern: /^[a-zA-Z0-9_]+$/, message: '仅允许包含字母、数字和下划线', trigger: 'blur' }
-  ],
+  name: nameRules,
   'configData.api_key': [{ required: true, message: '请输入 API Key', trigger: 'blur' }]
 };
 
 const resourceRules: FormRules = {
-  name: [
-    { required: true, message: '请输入名称', trigger: 'blur' },
-    { pattern: /^[a-zA-Z0-9_]+$/, message: '仅允许包含字母、数字和下划线', trigger: 'blur' }
-  ],
+  name: nameRules,
   'configData.resource_id': [{ required: true, message: '请选择资源文件夹', trigger: 'change' }]
 };
 
@@ -766,6 +775,15 @@ const handleDelete = async (id: string) => {
     ElMessage.success('删除成功');
   } catch (error) {
     ElMessage.error('删除失败');
+  }
+};
+
+const handleDuplicate = async (id: string) => {
+  try {
+    await backendStore.duplicateBackendItem(id);
+    ElMessage.success(t('backend.duplicateSuccess'));
+  } catch (error) {
+    ElMessage.error(t('backend.duplicateFailed'));
   }
 };
 

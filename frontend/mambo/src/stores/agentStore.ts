@@ -1,7 +1,7 @@
 // frontend/mambo/src/stores/agentStore.ts
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import { getAgentChildren, createAgent, updateAgent, deleteAgent, moveAgent, getAgents } from '@/api/agentService';
+import { getAgentChildren, createAgent, updateAgent, deleteAgent, moveAgent, getAgents, duplicateAgent } from '@/api/agentService';
 import type { Agent, AgentCreate, AgentUpdate, MoveRequest } from '@/api/types';
 import { useTreeStoreActions } from '@/composables/useTreeStoreActions';
 
@@ -81,6 +81,14 @@ export const useAgentStore = defineStore('agent', () => {
     currentAgentId.value = agentId;
   }
 
+  // [新增] 复制 Agent 副本
+  async function duplicateAgentItem(agentId: string) {
+    const newAgent = await duplicateAgent(agentId);
+    agentList.value.push(newAgent);
+    allAgents.value.push(newAgent);
+    return newAgent;
+  }
+
   return {
     agentList,
     allAgents, // [新增]
@@ -96,6 +104,7 @@ export const useAgentStore = defineStore('agent', () => {
     updateAgentSettings: updateAgentSettingsWrapper, // [修改]
     deleteItem,
     moveAgentItem,
+    duplicateAgentItem, // [新增]
     selectAgent
   };
 });

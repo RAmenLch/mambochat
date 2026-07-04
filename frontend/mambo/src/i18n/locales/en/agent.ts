@@ -50,6 +50,9 @@ export default {
     newFolder: 'New Folder',
     rename: 'Rename',
     delete: 'Delete',
+    duplicate: 'Duplicate',
+    duplicateSuccess: 'Agent duplicated successfully',
+    duplicateFailed: 'Failed to duplicate Agent',
   },
   selector: {
     title: 'Select Sub Agents',

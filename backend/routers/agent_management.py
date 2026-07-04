@@ -255,6 +255,65 @@ async def upload_agent_avatar(
     return file_service.convert_to_schema(new_file_record)
 
 
+@router.post(
+    "/agents/{agent_id}/duplicate",
+    response_model=schemas.AgentResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="复制 Agent（副本）"
+)
+async def duplicate_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
+    """基于现有 Agent 创建一个副本，名称自动添加 ' - 副本' 后缀"""
+    import re
+
+    db_agent = await agent_crud.get_agent(db, agent_id=agent_id)
+    if db_agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    # 解析原名称的基准名（去掉已有的 "-副本" 或 "-副本N" 后缀）
+    base_name = db_agent.name
+    match = re.match(r'^(.*?)(?:-副本(?:\d+)?)?$', base_name)
+    if match:
+        base_name = match.group(1).strip()
+
+    # 查找已有副本编号，生成新名称
+    all_agents = await agent_crud.get_agents(db, skip=0, limit=10000)
+    existing_nums: list = []
+    pattern = re.compile(r'^' + re.escape(base_name) + r'-副本(\d+)?$')
+    for a in all_agents:
+        m = pattern.match(a.name)
+        if m:
+            num = int(m.group(1)) if m.group(1) else 1
+            existing_nums.append(num)
+
+    if not existing_nums:
+        new_name = f"{base_name}-副本"
+    else:
+        next_num = max(existing_nums) + 1
+        new_name = f"{base_name}-副本{next_num}"
+
+    # 构造副本 Agent（完整复制，含头像）
+    new_agent = schemas.AgentCreate(
+        name=new_name,
+        parentId=db_agent.parentId,
+        itemType=db_agent.itemType,
+        AgentType=db_agent.AgentType,
+        systemPrompt=db_agent.systemPrompt,
+        description=db_agent.description,
+        modelParameters=db_agent.modelParameters,
+        agentParameters=db_agent.agentParameters,
+        aiModelId=db_agent.aiModelId,
+        agentAvatarId=db_agent.agentAvatarId,
+        resourcePromptList=db_agent.resourcePromptList or [],
+        enabledMcpIds=db_agent.enabledMcpIds or [],
+        subAgents=db_agent.subAgents or [],
+        backendIds=db_agent.backendIds or [],
+        defaultBackendId=db_agent.defaultBackendId,
+    )
+
+    db_new = await agent_crud.create_agent(db=db, agent=new_agent)
+    return await _attach_avatar_url(db, db_new)
+
+
 @router.delete(
     "/agents/{agent_id}/avatar",
     status_code=status.HTTP_204_NO_CONTENT,

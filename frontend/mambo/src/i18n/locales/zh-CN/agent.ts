@@ -50,6 +50,9 @@ export default {
     newFolder: '新建文件夹',
     rename: '重命名',
     delete: '删除',
+    duplicate: '复制副本',
+    duplicateSuccess: 'Agent 副本创建成功',
+    duplicateFailed: 'Agent 副本创建失败',
   },
   selector: {
     title: '选择子 Agent',

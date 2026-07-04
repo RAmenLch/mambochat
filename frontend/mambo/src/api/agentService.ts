@@ -53,3 +53,8 @@ export const deleteAgentAvatar = (agentId: string): Promise<void> => {
 export const getAgentHitlTools = (agentId: string): Promise<HitlToolInfo[]> => {
   return apiClient.get(`/agents/${agentId}/hitl-tools`);
 };
+
+// [新增] 复制 Agent（副本）
+export const duplicateAgent = (agentId: string): Promise<Agent> => {
+  return apiClient.post(`/agents/${agentId}/duplicate`);
+};

@@ -1,7 +1,7 @@
 // frontend/mambo/src/stores/backendStore.ts
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import { getBackends, createBackend, updateBackend, deleteBackend, getSshPublicKey, testSshConnection } from '@/api/backendService';
+import { getBackends, createBackend, updateBackend, deleteBackend, getSshPublicKey, testSshConnection, duplicateBackend } from '@/api/backendService';
 import type { BackendConfig, BackendCreate, BackendUpdate, SshTestRequest } from '@/api/types/backendTypes';
 
 export const useBackendStore = defineStore('backend', () => {
@@ -56,6 +56,13 @@ export const useBackendStore = defineStore('backend', () => {
     return await testSshConnection(data);
   }
 
+  // [新增] 复制 Backend 副本
+  async function duplicateBackendItem(backendId: string) {
+    const newBackend = await duplicateBackend(backendId);
+    backendList.value.push(newBackend);
+    return newBackend;
+  }
+
   return {
     backendList,
     isLoading,
@@ -65,6 +72,7 @@ export const useBackendStore = defineStore('backend', () => {
     createNewBackend,
     updateExistingBackend,
     removeBackend,
-    testConnection // [新增]
+    testConnection, // [新增]
+    duplicateBackendItem // [新增]
   };
 });

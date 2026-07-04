@@ -44,7 +44,7 @@
       </template>
     </ExplorerTree>
 
-    <el-dropdown ref="contextMenuRef" trigger="contextmenu" @command="handleMenuCommand" popper-class="no-animation-popper">
+    <el-dropdown ref="contextMenuRef" trigger="contextmenu" @command="handleContextMenuCommand" popper-class="no-animation-popper">
       <span :style="contextMenuPosition" />
       <template #dropdown>
         <el-dropdown-menu>
@@ -55,7 +55,10 @@
             <el-icon><FolderAdd /></el-icon>{{ $t('agent.tree.newFolder') }}
           </el-dropdown-item>
           <template v-if="contextMenuItem">
-            <el-dropdown-item command="rename" :divided="contextMenuItem.itemType === 'folder'">
+            <el-dropdown-item v-if="contextMenuItem.itemType === 'agent'" command="duplicate" :divided="contextMenuItem.itemType === 'folder'">
+              <el-icon><DocumentCopy /></el-icon>{{ $t('agent.tree.duplicate') }}
+            </el-dropdown-item>
+            <el-dropdown-item command="rename" divided>
               <el-icon><EditPen /></el-icon>{{ $t('agent.tree.rename') }}
             </el-dropdown-item>
             <el-dropdown-item command="delete" class="delete-item">
@@ -82,7 +85,8 @@ import { computed, onMounted, watch, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { useI18n } from 'vue-i18n';
-import { Plus, User, Folder, FolderAdd, EditPen, Delete } from '@element-plus/icons-vue';
+import { Plus, User, Folder, FolderAdd, EditPen, Delete, DocumentCopy } from '@element-plus/icons-vue';
+import { ElMessage } from 'element-plus';
 import { resolveFileUrl } from '@/services/electronUrl';
 import { useAgentStore } from '@/stores/agentStore';
 import { getAgent, getAgentChildren } from '@/api/agentService';
@@ -157,6 +161,21 @@ const {
 });
 
 const handleHeaderCommand = (command: string) => handleMenuCommand(command);
+
+// 包装 handleMenuCommand，拦截「复制副本」命令直接执行
+const originalHandleMenuCommand = handleMenuCommand;
+const handleContextMenuCommand = async (command: string) => {
+  if (command === 'duplicate' && contextMenuItem.value) {
+    try {
+      await agentStore.duplicateAgentItem(contextMenuItem.value.id);
+      ElMessage.success(t('agent.tree.duplicateSuccess'));
+    } catch (error) {
+      ElMessage.error(t('agent.tree.duplicateFailed'));
+    }
+    return;
+  }
+  await originalHandleMenuCommand(command);
+};
 
 const handleNodeClick = (data: BaseTreeItem) => {
   if (data.itemType === 'agent') {

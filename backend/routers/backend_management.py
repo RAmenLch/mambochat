@@ -242,6 +242,53 @@ async def update_backend(backend_id: str, backend_in: BackendConfigUpdate, db: A
     return _mask_password(updated_obj)
 
 
+@router.post("/{backend_id}/duplicate", response_model=BackendConfigResponse, status_code=status.HTTP_201_CREATED, summary="复制 Backend（副本）")
+async def duplicate_backend(backend_id: str, db: AsyncSession = Depends(get_db)):
+    """基于现有 Backend 创建一个副本，名称自动添加 ' - 副本' 后缀"""
+    import re
+    import copy
+
+    db_obj = await backend_crud.get_backend(db, backend_id)
+    if not db_obj:
+        raise HTTPException(status_code=404, detail="Backend not found")
+
+    # 解析基准名
+    base_name = db_obj.name
+    match = re.match(r'^(.*?)(?:-副本(?:\d+)?)?$', base_name)
+    if match:
+        base_name = match.group(1).strip()
+
+    # 查找已有副本
+    all_backends = await backend_crud.get_all_backends(db, skip=0, limit=10000)
+    existing_nums: list = []
+    pattern = re.compile(r'^' + re.escape(base_name) + r'-副本(\d+)?$')
+    for b in all_backends:
+        m = pattern.match(b.name)
+        if m:
+            num = int(m.group(1)) if m.group(1) else 1
+            existing_nums.append(num)
+
+    if not existing_nums:
+        new_name = f"{base_name}-副本"
+    else:
+        next_num = max(existing_nums) + 1
+        new_name = f"{base_name}-副本{next_num}"
+
+    # 构造副本配置（完整复制）
+    config_data = copy.deepcopy(db_obj.configData)
+
+    new_backend = BackendConfigCreate(
+        name=new_name,
+        description=db_obj.description,
+        backendType=db_obj.backendType,
+        configData=config_data,
+        tools_config=db_obj.tools_config,
+    )
+
+    db_new = await backend_crud.create_backend(db, new_backend)
+    return _mask_password(db_new)
+
+
 @router.delete("/{backend_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_backend(backend_id: str, db: AsyncSession = Depends(get_db)):
     success = await backend_crud.delete_backend(db, backend_id)

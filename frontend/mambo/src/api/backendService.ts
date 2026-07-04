@@ -41,3 +41,8 @@ export interface ClientStatusResponse {
 export const getClientStatus = (backendId: string): Promise<ClientStatusResponse> => {
   return apiClient.get(`/api-client/status/${backendId}`);
 };
+
+// [新增] 复制 Backend（副本）
+export const duplicateBackend = (backendId: string): Promise<BackendConfig> => {
+  return apiClient.post(`/backends/${backendId}/duplicate`);
+};
