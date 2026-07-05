@@ -50,6 +50,8 @@ export default {
     webSearchDisabled: '联网搜索已禁用',
     chatPartition: '聊天分区',
     chatSettings: '会话设置',
+    versionHistory: '版本历史',
+    versionHistoryTip: '查看文件版本历史与变更记录',
     mcpStatus: {
       healthy: '连接正常',
       unhealthy: '连接异常',

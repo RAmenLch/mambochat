@@ -126,8 +126,9 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
   /**
    * 从指定消息开始重新生成对话。
    * @param messageId - 作为重新生成起点的消息ID。
+   * @param versionRollback - 可选，版本回滚配置。
    */
-  async function regenerateFrom(messageId: string) {
+  async function regenerateFrom(messageId: string, versionRollback?: { files: string[] }) {
     const chatId = sessionStore.currentChatId;
     if (!chatId || sessionStore.isGenerating) return;
 
@@ -139,7 +140,7 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     sessionStore._spliceMessages(sliceIndex);
 
     try {
-      const assistantPlaceholder = await prepareRegenerate(chatId, messageId);
+      const assistantPlaceholder = await prepareRegenerate(chatId, messageId, versionRollback);
       sessionStore._addMessage(assistantPlaceholder);
       if (assistantPlaceholder.status === 'generating') {
         _subscribeToMessageStream(assistantPlaceholder);

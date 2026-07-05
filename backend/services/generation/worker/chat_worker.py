@@ -4,7 +4,7 @@
 DeepAgent 需要 VFS files 注入，请使用 deep_agent_chat_worker.DeepAgentChatWorker。
 """
 
-from typing import AsyncGenerator, Tuple, List
+from typing import AsyncGenerator, Tuple, List, Optional
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command, Overwrite
@@ -36,8 +36,29 @@ class UniversalGraphWorker(AbstractGenerateWorker):
             }
         }
         resume_payload = llm_input.agent_config.resume_payload
+        # 将父 checkpoint 通过自定义字段传递给 VersionControlMiddleware，
+        # 避免被 LangGraph prepare_single_task 的 checkpoint_id=None 覆盖
+        vc_parent_cp: Optional[str] = None
         if llm_input.run_time_config.branch_checkpoint_id:
             thread_config["configurable"]["checkpoint_id"] = llm_input.run_time_config.branch_checkpoint_id
+            vc_parent_cp = llm_input.run_time_config.branch_checkpoint_id
+        else:
+            # 正常对话：从 checkpointer 查询上一次的 checkpoint_id
+            _cq_config = {"configurable": {"thread_id": llm_input.run_time_config.chat_id}}
+            try:
+                cp_tuple = await agent.checkpointer.aget_tuple(_cq_config)
+                if cp_tuple and cp_tuple.checkpoint:
+                    vc_parent_cp = cp_tuple.checkpoint["id"]
+            except Exception:
+                pass
+
+        # 将父 checkpoint 存入自定义字段，避免被 LangGraph per-task config 覆盖
+        if vc_parent_cp:
+            thread_config["configurable"]["version_control_parent_cp"] = vc_parent_cp
+
+        # 版本回滚配置：传递给 VersionControlMiddleware
+        if llm_input.run_time_config.version_rollback:
+            thread_config["configurable"]["version_rollback"] = llm_input.run_time_config.version_rollback
 
         if llm_input.agent_config.recover_from_error:
             input_data = None

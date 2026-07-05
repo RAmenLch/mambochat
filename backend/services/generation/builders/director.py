@@ -139,13 +139,7 @@ class LLMInputDirector:
     async def _resolve_branch_checkpoint(
         self, target_msg_id: str, history: List[MessageSchema]
     ) -> Optional[str]:
-        """确定分支起点的 checkpoint_id。
-
-        查找逻辑：
-        1. target_msg 自身有 checkpoint 记录 → 直接返回（resume/retry 场景）
-        2. 否则沿 parentId 向上查找最近的有 checkpoint 记录的祖先
-        3. 都找不到 → 返回 None（新对话，从最新 checkpoint 开始）
-        """
+        """确定分支起点的 checkpoint_id。"""
         # 1. 查自身
         cp = await checkpoint_map_crud.get_checkpoint_id(self.db, target_msg_id)
         if cp:
@@ -156,7 +150,14 @@ class LLMInputDirector:
         current_id: str = target_msg_id
         while True:
             msg = history_map.get(current_id)
-            if not msg or not msg.parentId:
+            if not msg:
+                from backend.crud import message_crud
+                db_msg = await message_crud.get_message(self.db, current_id)
+                if not db_msg or not db_msg.parentId:
+                    break
+                current_id = db_msg.parentId
+                continue
+            if not msg.parentId:
                 break
             parent_id = msg.parentId
             cp = await checkpoint_map_crud.get_checkpoint_id(self.db, parent_id)
@@ -345,16 +346,28 @@ class LLMInputDirector:
 
         # 确定分支 checkpoint（用于 LangGraph 时间旅行）
         branch_checkpoint_id: Optional[str] = None
-        if self._cutoff_message_id and materials.target_msg:
+        if self._cutoff_message_id:
+            from backend.services.generation_service import pop_branch_checkpoint
+            branch_checkpoint_id = pop_branch_checkpoint(self._cutoff_message_id)
+            print(f"[VC DEBUG dir] pop_branch_checkpoint({self._cutoff_message_id}) = {branch_checkpoint_id}")
+        if not branch_checkpoint_id and self._cutoff_message_id and materials.target_msg:
             branch_checkpoint_id = await self._resolve_branch_checkpoint(
                 self._cutoff_message_id, materials.history
             )
+            print(f"[VC DEBUG dir] resolve_branch_checkpoint({self._cutoff_message_id}) = {branch_checkpoint_id}")
+
+        # 读取 version_rollback（由 regenerate 端点注入）
+        version_rollback = None
+        if self._cutoff_message_id:
+            from backend.services.generation_service import pop_version_rollback
+            version_rollback = pop_version_rollback(self._cutoff_message_id)
 
         rt_config = RunTimeConfig(
             chat_id=self.chat_id,
             message_id=self._cutoff_message_id,
             manager_name=self._manager_name,
             branch_checkpoint_id=branch_checkpoint_id,
+            version_rollback=version_rollback,
         )
 
         return LLMInput(

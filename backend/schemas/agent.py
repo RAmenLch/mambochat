@@ -28,6 +28,12 @@ class SecurityReviewConfigSchema(BaseModel):
     review_tools: Optional[List[str]] = Field(None)
 
 
+class VersionControlConfigSchema(BaseModel):
+    """版本控制中间件配置"""
+    enabled: bool = Field(False, description="是否启用版本控制（文件变更历史自动备份）")
+    auto_snapshot: bool = Field(True, description="是否自动在文件写入/编辑/删除时创建快照")
+
+
 class MamboAgentParametersSchema(BaseModel):
     """Mambo Agent 专属参数（持久化到 Agent.agentParameters JSON 列）"""
     include_general_purpose: bool = Field(False, description="是否启用通用子代理")
@@ -38,6 +44,7 @@ class MamboAgentParametersSchema(BaseModel):
     memory_resource_ids: List[str] = Field(default_factory=list, description="记忆资源ID列表")
     summarization_config: Optional[SummarizationConfigSchema] = Field(None, description="摘要详细配置")
     security_review: Optional[SecurityReviewConfigSchema] = Field(None, description="AI 安全审核配置")
+    version_control: Optional[VersionControlConfigSchema] = Field(None, description="版本控制配置")
 
 
 class HitlToolInfo(BaseModel):

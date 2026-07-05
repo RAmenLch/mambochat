@@ -1,9 +1,9 @@
 # backend/routers/chat_interaction.py
 
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Body, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.responses import StreamingResponse
-from typing import List
+from typing import List, Optional
 
 from backend.services import generation_service
 from backend.services.stream_manager_service import stream_manager
@@ -318,15 +318,39 @@ async def prepare_to_regenerate(
         chat_id: str,
         from_message_id: str,
         background_tasks: BackgroundTasks,
-        db: AsyncSession = Depends(get_db)
+        db: AsyncSession = Depends(get_db),
+        version_rollback: Optional[dict] = Body(None, description="版本回滚配置: {'files': ['/workspace/main.py']}"),
 ):
     if not await stream_manager.try_acquire_generation_lock(chat_id):
         raise HTTPException(status_code=409, detail="该会话已有正在进行的生成任务，请等待完成后再试。")
 
     try:
+        # 解析 regenerate 的 branch checkpoint：找到 from_message 之前最新一个有 checkpoint 的消息
+        branch_cp_id: Optional[str] = None
+        from backend.crud import checkpoint_map_crud
+
+        ref_msg = await message_crud.get_message(db, message_id=from_message_id)
+        if ref_msg:
+            all_msgs = await message_crud.get_messages_by_chat(db, chat_id=chat_id)
+            # 按 createdAt 排序，取 from_message 之前的消息
+            prev_msgs = [m for m in all_msgs if (m.createdAt or '') < (ref_msg.createdAt or '')]
+            prev_msgs.sort(key=lambda m: m.createdAt or '', reverse=True)
+            for m in prev_msgs:
+                cp = await checkpoint_map_crud.get_checkpoint_id(db, m.id)
+                if cp:
+                    branch_cp_id = cp
+                    break
+
         assistant_placeholder = await generation_service.prepare_for_regeneration(
-            db=db, chat_id=chat_id, base_message_id=from_message_id
+            db=db, chat_id=chat_id, base_message_id=from_message_id,
+            version_rollback=version_rollback,
         )
+
+        # 存入 branch_checkpoint，由 director 取出
+        if branch_cp_id:
+            from backend.services.generation_service import store_branch_checkpoint
+            store_branch_checkpoint(assistant_placeholder.id, branch_cp_id)
+
         await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id)
 
         # 修复: 从活跃路径中重新获取，以避免 DetachedInstanceError 并装配 sibling 元数据

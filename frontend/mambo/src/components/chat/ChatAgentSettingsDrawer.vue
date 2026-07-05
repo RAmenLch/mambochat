@@ -186,6 +186,17 @@
                 <span class="info-value">{{ mamboPreview.summaryEnabled ? t('common.status.enabled') : t('common.status.disabled') }}</span>
               </div>
             </div>
+            <div class="mambo-preview-grid">
+              <div class="info-item">
+                <span class="info-label">{{ $t('agent.versionControl') }}:</span>
+                <span class="info-value">
+                  <el-tag v-if="mamboPreview.versionControlEnabled" size="small" type="success" effect="light">
+                    {{ $t('common.status.enabled') }}
+                  </el-tag>
+                  <span v-else>{{ $t('common.status.disabled') }}</span>
+                </span>
+              </div>
+            </div>
             <div v-if="mamboPreview.memoryEnabled && displayMemoryResources.length > 0" class="ext-item" style="margin-top: 12px;">
               <div class="ext-label">{{ $t('agent.memoryResources') }}:</div>
               <div class="ext-tags">
@@ -355,6 +366,7 @@ const mamboPreview = computed(() => {
     memoryResourceIds: params.memory_resource_ids ?? [],
     summaryEnabled: params.enable_summarization ?? false,
     summaryConfig: params.summarization_config ?? null,
+    versionControlEnabled: params.version_control?.enabled ?? false,
   };
 });
 

@@ -122,6 +122,10 @@ class RunTimeConfig(BaseModel):
         None,
         description="分支起点 checkpoint_id。设置后 LangGraph 会进行时间旅行，从该 checkpoint 分叉",
     )
+    version_rollback: Optional[Dict[str, Any]] = Field(
+        None,
+        description="版本回滚配置，传入 VersionControlMiddleware. 例如 {'files': ['/workspace/main.py']}",
+    )
 
 
 class SecurityReviewAgentConfig(BaseModel):
@@ -234,6 +238,14 @@ class AgentConfig(BaseModel):
     security_review_llm_config: Optional[ModelConfig] = Field(
         default=None,
         description="安全审核模型的已解析配置（由 Initializer 填充，供 Builder 使用）"
+    )
+    enable_version_control: bool = Field(
+        default=False,
+        description="是否启用版本控制中间件（文件变更历史自动备份，仅 Mambo Agent 有效）"
+    )
+    version_control_config: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="版本控制详细配置，包含 auto_snapshot 等"
     )
 
 

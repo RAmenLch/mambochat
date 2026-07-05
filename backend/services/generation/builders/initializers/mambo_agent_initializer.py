@@ -337,6 +337,15 @@ class MamboAgentInitializer(AbstractAgentInitializer):
         if enable_memory and memory_resource_ids:
             memory_roots = await self._build_memory_roots(memory_resource_ids)
 
+        # --- 版本控制配置解析 ---
+        vc = mambo_params.version_control
+        enable_vc = vc is not None and vc.enabled
+        vc_config = None
+        if enable_vc:
+            vc_config = {
+                "auto_snapshot": vc.auto_snapshot,
+            }
+
         # --- 安全审核配置解析 ---
         security_review_config: Optional[SecurityReviewAgentConfig] = None
         security_review_llm_config: Optional[ModelConfig] = None
@@ -407,6 +416,8 @@ class MamboAgentInitializer(AbstractAgentInitializer):
             memory_resource_roots=memory_roots if memory_roots else None,
             security_review_config=security_review_config,
             security_review_llm_config=security_review_llm_config,
+            enable_version_control=enable_vc,
+            version_control_config=vc_config,
         )
 
         return agent_config, additional_system_prompt

@@ -568,6 +568,27 @@
         <!-- AI 安全审核（仅 Mambo） -->
         <el-card v-if="form.AgentType === 'Mambo'" shadow="never" class="config-card">
           <template #header>
+            <span class="card-title">{{ $t('agent.versionControl') }}</span>
+          </template>
+
+          <el-row :gutter="32" class="settings-row">
+            <el-col :span="24">
+              <el-form-item>
+                <template #label>
+                  <span>{{ $t('agent.versionControl') }}</span>
+                  <el-tooltip effect="dark" :content="$t('agent.versionControlDesc')" placement="top">
+                    <el-icon class="label-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-switch v-model="form.mambo_version_control_enabled" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </el-card>
+
+        <!-- AI 安全审核（仅 Mambo） -->
+        <el-card v-if="form.AgentType === 'Mambo'" shadow="never" class="config-card">
+          <template #header>
             <span class="card-title">{{ $t('agent.securityReview') }}</span>
           </template>
 
@@ -804,6 +825,9 @@ const form = reactive({
   mambo_security_review_model_id: null as string | null,
   mambo_security_review_system_prompt: '',
   mambo_security_review_tools: [] as string[],
+
+  // Mambo 版本控制
+  mambo_version_control_enabled: false,
 });
 
 // --- Backend 挂载逻辑 [新增] ---
@@ -944,6 +968,14 @@ watch(agentData, async (newVal) => {
       form.mambo_security_review_model_id = null;
       form.mambo_security_review_system_prompt = '';
       form.mambo_security_review_tools = [];
+    }
+
+    // 版本控制配置还原
+    const vcCfg = mamboParams.version_control;
+    if (vcCfg && vcCfg.enabled) {
+      form.mambo_version_control_enabled = true;
+    } else {
+      form.mambo_version_control_enabled = false;
     }
 
     // 加载 HITL 可审核工具列表
@@ -1174,6 +1206,10 @@ function buildMamboAgentParameters(): MamboAgentParameters | null {
           review_tools: form.mambo_security_review_tools.length > 0 ? [...form.mambo_security_review_tools] : null,
         }
       : null,
+    version_control: form.mambo_version_control_enabled ? {
+      enabled: true,
+      auto_snapshot: true,
+    } : null,
   };
   return params;
 }

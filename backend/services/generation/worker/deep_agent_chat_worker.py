@@ -68,6 +68,14 @@ class DeepAgentChatWorker(UniversalGraphWorker):
         # resume 场景下不设置 checkpoint_id（详见 chat_worker.py 注释）
         if llm_input.run_time_config.branch_checkpoint_id:
             thread_config["configurable"]["checkpoint_id"] = llm_input.run_time_config.branch_checkpoint_id
+        else:
+            _cq_config = {"configurable": {"thread_id": llm_input.run_time_config.chat_id}}
+            try:
+                cp_tuple = await agent.checkpointer.aget_tuple(_cq_config)
+                if cp_tuple and cp_tuple.checkpoint:
+                    thread_config["configurable"]["checkpoint_map"] = {"": cp_tuple.checkpoint["id"]}
+            except Exception:
+                pass
 
         if llm_input.agent_config.recover_from_error:
             input_data = None

@@ -124,10 +124,17 @@ export const prepareGenerate = (chatId: string, data: GenerateRequest): Promise<
 
 /**
  * 准备并开始重新生成AI回复。
+ * @param chatId - 会话ID
+ * @param fromMessageId - 重新生成的起点消息ID
+ * @param versionRollback - 可选，版本回滚配置
  * @returns 返回一个状态为 'generating' 的 assistant 消息对象作为占位符。
  */
-export const prepareRegenerate = (chatId: string, fromMessageId: string): Promise<Message> => {
-  return apiClient.post(`/chats/${chatId}/prepare-regenerate/${fromMessageId}`)
+export const prepareRegenerate = (
+  chatId: string,
+  fromMessageId: string,
+  versionRollback?: { files: string[] },
+): Promise<Message> => {
+  return apiClient.post(`/chats/${chatId}/prepare-regenerate/${fromMessageId}`, versionRollback ? { version_rollback: versionRollback } : {})
 };
 
 /**

@@ -152,6 +152,13 @@
         :title="t('chat.toolbar.chatSettings')"
         @click="$emit('openSettings')"
       />
+      <el-button
+        v-if="showVersionHistoryBtn"
+        :icon="Timer"
+        circle
+        :title="t('chat.toolbar.versionHistory')"
+        @click="$emit('openVersionHistory')"
+      />
     </div>
   </div>
 </template>
@@ -168,7 +175,7 @@ import type { PropType } from 'vue';
 import { ElMessage } from 'element-plus';
 import {
   Cpu, Setting, Files, Tickets, Upload, Collection,
-  QuestionFilled, Search, Suitcase, Refresh, User // [新增 User]
+  QuestionFilled, Search, Suitcase, Refresh, User, Timer // [新增 User, Timer]
 } from '@element-plus/icons-vue';
 
 const props = defineProps({
@@ -193,7 +200,8 @@ defineEmits([
   'openResourceSelector',
   'jumpToMessage',
   'toggleWebSearch',
-  'toggleMcpTool'
+  'toggleMcpTool',
+  'openVersionHistory',
 ]);
 
 const { t } = useI18n();
@@ -262,6 +270,16 @@ const zipHistoryItems = computed(() => {
   });
 
   return items;
+});
+
+/** 仅在 Agent 模式下且 Agent 启用了版本控制时显示 */
+const showVersionHistoryBtn = computed(() => {
+  if (props.currentChat?.chatMode !== 'agent' || !props.currentChat?.agentId) return false;
+  const agent = agentStore.allAgents.find(a => a.id === props.currentChat!.agentId) ||
+                agentStore.agentList.find(a => a.id === props.currentChat!.agentId);
+  if (!agent) return false;
+  const params = (agent as any).agentParameters;
+  return params?.version_control?.enabled === true;
 });
 
 /**

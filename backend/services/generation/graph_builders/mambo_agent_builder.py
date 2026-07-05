@@ -333,6 +333,22 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
                 for name in agent_config.memory_resource_roots
             ]
 
+        # --- Version Control middleware (opt-in) ---
+        _version_control_middleware = None
+        if getattr(agent_config, 'enable_version_control', False):
+            from mambo_agents.middleware.version_control import (
+                VersionStore,
+                VersionControlMiddleware,
+            )
+            vc_cfg = agent_config.version_control_config or {}
+            store = VersionStore(storage_dir="./.mambo_versions")
+            # Monitor /workspace — all backends (SSH/Resource/API) present files under this path
+            _version_control_middleware = VersionControlMiddleware(
+                store=store,
+                backend=backend,
+                whitelist_folders=[VirtualPath("/workspace")],
+            )
+
         # --- Show tool middleware (opt-in, default on) ---
         _show_middleware = None
         if getattr(agent_config, 'enable_show', True):
@@ -346,6 +362,8 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
         _middlewares: list = []
         if _plan_middleware:
             _middlewares.extend(_plan_middleware)
+        if _version_control_middleware:
+            _middlewares.append(_version_control_middleware)
         if _show_middleware:
             _middlewares.append(_show_middleware)
 

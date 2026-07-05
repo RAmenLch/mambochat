@@ -50,6 +50,8 @@ export default {
     webSearchDisabled: 'Web search disabled',
     chatPartition: 'Chat Partitions',
     chatSettings: 'Chat Settings',
+    versionHistory: 'Version History',
+    versionHistoryTip: 'View file version history and changes',
     mcpStatus: {
       healthy: 'Connected',
       unhealthy: 'Connection Error',

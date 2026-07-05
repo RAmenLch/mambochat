@@ -73,6 +73,7 @@
           @jump-to-message="handleJumpToMessage"
           @toggle-web-search="handleToggleWebSearch"
           @toggle-mcp-tool="handleToggleMcpTool"
+          @open-version-history="versionHistoryDrawerVisible = true"
         />
 
         <AttachmentPreview
@@ -117,6 +118,12 @@
       v-model:visible="agentSettingsDrawerVisible"
       :chat-data="currentChat"
       @save="handleSaveAgentSettings"
+    />
+
+    <VersionHistoryDrawer
+      v-model:visible="versionHistoryDrawerVisible"
+      :chat-id="currentChatId"
+      @restore-and-continue="handleRestoreAndContinue"
     />
 
     <ResourceSelectorDialog
@@ -182,6 +189,7 @@ import McpToolDialog from './dialogs/McpToolDialog.vue';
 import AskUserDialog from './dialogs/AskUserDialog.vue';
 import LogViewerDialog from './dialogs/LogViewerDialog.vue';
 import ChatNavigator from './ChatNavigator.vue';
+import VersionHistoryDrawer from './dialogs/VersionHistoryDrawer.vue';
 
 interface GroupedModels { label: string; options: AIModel[]; }
 
@@ -275,6 +283,7 @@ const userHasScrolledUp = ref(false);
 const previousPreviewHeight = ref(0);
 const isDraggingOver = ref(false);
 const isSwitchingBranch = ref(false);
+const versionHistoryDrawerVisible = ref(false);
 
 const currentVisibleMessageId = ref<string | null>(null);
 
@@ -660,6 +669,20 @@ async function handleDuplicateUpTo(messageId: string) {
   } catch (error) {
     console.error('Failed to duplicate chat up to message:', error);
     ElMessage.error(t('common.error.operationFailed'));
+  }
+}
+
+async function handleRestoreAndContinue(checkpointId: string, files: string[]) {
+  if (!currentChatId.value || isGenerating.value) return;
+  try {
+    const { regenerateFromSnapshot } = await import('@/api/versionControlService');
+    await regenerateFromSnapshot(currentChatId.value, checkpointId, files);
+    versionHistoryDrawerVisible.value = false;
+    ElMessage.success(t('agent.versionHistoryRollbackStarted'));
+    // 刷新消息列表以显示新的生成
+    await chatSessionStore.selectChat(currentChatId.value, true);
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || error?.message || t('common.error.operationFailed'));
   }
 }
 

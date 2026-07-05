@@ -17,6 +17,11 @@ export interface SecurityReviewConfig {
   review_tools?: string[] | null
 }
 
+export interface VersionControlConfig {
+  enabled: boolean
+  auto_snapshot: boolean
+}
+
 export interface MamboAgentParameters {
   include_general_purpose: boolean
   enable_planning: boolean
@@ -26,6 +31,7 @@ export interface MamboAgentParameters {
   memory_resource_ids: string[]
   summarization_config?: SummarizationConfig | null
   security_review?: SecurityReviewConfig | null
+  version_control?: VersionControlConfig | null
 }
 
 export interface Agent {
