@@ -89,10 +89,15 @@ class DeepAgentChatWorker(UniversalGraphWorker):
             # from being rescheduled, and can re-trigger the model node
             # via _summarization_event channel version bump.
             if not resume_payload:
-                await agent.aupdate_state(
+                updated_config = await agent.aupdate_state(
                     thread_config,
                     {"_summarization_event": llm_input.context.auto_summarization_event},
                 )
+                # For time-travel: sync the forked checkpoint_id so astream()
+                # continues from the updated state, not the original replay target.
+                updated_cp_id = updated_config["configurable"].get("checkpoint_id")
+                if updated_cp_id:
+                    thread_config["configurable"]["checkpoint_id"] = updated_cp_id
                 messages = self._convert_messages(llm_input.context.messages)
                 input_data = {"messages": Overwrite(value=messages)}
                 if files_to_inject:
