@@ -21,6 +21,7 @@ from backend.crud import backend_crud
 from backend.database import AsyncSessionLocal
 from backend.models import chat_model, agent_model
 from backend.models.checkpoint_map_model import MessageCheckpointMap
+from backend.store import get_store as get_shared_store
 
 from backend.schemas.version_control import (
     VersionHistoryResponse,
@@ -50,7 +51,7 @@ class RestoreResponse(BaseModel):
 
 
 def _get_store() -> VersionStore:
-    return VersionStore(storage_dir="./.mambo_versions")
+    return VersionStore(store=get_shared_store())
 
 
 def _make_session_factory() -> Any:
@@ -273,7 +274,11 @@ async def restore_files(chat_id: str, body: RestoreRequest):
     summary="从快照回滚文件并触发重新生成",
 )
 async def regenerate_from_snapshot(chat_id: str, body: RestoreRequest):
-    """反向查找 checkpoint → message_id，触发 regenerate + version_rollback。"""
+    """反向查找 checkpoint → message_id，恢复文件并触发重新生成。
+
+    新版 mambo_agents 的 VersionControlMiddleware 不再通过 config 自动处理
+    version_rollback，改为在此端点显式恢复文件后再触发生成。
+    """
     # 1. 反向查找 checkpoint_id → message_id
     async with AsyncSessionLocal() as db:
         result = await db.execute(
@@ -288,29 +293,54 @@ async def regenerate_from_snapshot(chat_id: str, body: RestoreRequest):
 
         message_id = row[0]
 
-    # 2. 触发带 version_rollback 的 regenerate
+    # 2. 确定要恢复的文件列表
+    store = _get_store()
     files = body.files
     if not files:
-        store = _get_store()
         files = store.get_changed_files(chat_id, body.checkpoint_id)
 
-    # 3. 准备 regenerate + 存入 version_rollback
+    if not files:
+        raise HTTPException(status_code=400, detail="No files to restore")
+
+    # 3. 显式恢复文件（新版 VersionControlMiddleware 不再自动处理 version_rollback）
+    restored: list[str] = []
+    errors: list[str] = []
+    async with AsyncSessionLocal() as db:
+        backend = await _build_restore_backend(db, chat_id)
+    if backend is not None:
+        for file_path in files:
+            content = store.get_file(chat_id, body.checkpoint_id, file_path)
+            if content is None:
+                errors.append(f"{file_path}: no content found at checkpoint")
+                continue
+            vp = VirtualPath(file_path)
+            try:
+                result = backend.write(vp, content, overwrite=True)
+                if hasattr(result, 'error') and result.error:
+                    errors.append(f"{file_path}: {result.error}")
+                else:
+                    restored.append(file_path)
+            except Exception as e:
+                errors.append(f"{file_path}: {e}")
+    else:
+        errors.append("Cannot build backend for restore")
+
+    # 4. 准备 regenerate
     from backend.services import generation_service as gen_svc
 
     async with AsyncSessionLocal() as db:
         assistant_placeholder = await gen_svc.prepare_for_regeneration(
             db=db, chat_id=chat_id, base_message_id=message_id,
-            version_rollback={"files": files},
         )
 
-    # 4. 启动后台生成任务
+    # 5. 启动后台生成任务
     from backend.services.stream_manager_service import stream_manager as sm
 
     await sm.mark_task_running(assistant_placeholder.id)
     asyncio.create_task(gen_svc._run_managed_generation_task(chat_id, assistant_placeholder.id))
 
     return RestoreResponse(
-        success=True,
-        restored=files,
-        errors=[],
+        success=len(restored) > 0,
+        restored=restored,
+        errors=errors if errors else [],
     )

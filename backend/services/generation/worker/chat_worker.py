@@ -54,7 +54,7 @@ class UniversalGraphWorker(AbstractGenerateWorker):
 
         # 将父 checkpoint 存入自定义字段，避免被 LangGraph per-task config 覆盖
         if vc_parent_cp:
-            thread_config["configurable"]["version_control_parent_cp"] = vc_parent_cp
+            thread_config["configurable"]["version_control_ckpt_id"] = vc_parent_cp
 
         # 版本回滚配置：传递给 VersionControlMiddleware
         if llm_input.run_time_config.version_rollback:

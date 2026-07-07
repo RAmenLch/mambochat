@@ -23,13 +23,14 @@ from mambo_agents import (
     CompiledSubAgent,
     BackendProtocol,
     HybridWorkspaceBackend,
+    StoreBackend,
 )
 from mambo_agents.backends.schemas import VirtualPath
 from mambo_agents.backends.ssh import SshBackend
-from mambo_agents.backends.state import StateBackend
 from mambo_agents.middleware.security_review import SecurityReviewConfig
 
 from backend.checkpointer import get_checkpointer
+from backend.store import get_store
 from backend.database import AsyncSessionLocal
 from backend.services.generation.core.llm_io import AgentConfig, RunTimeConfig
 from backend.services.generation.graph_builders.base_builder import BaseGraphBuilder
@@ -45,7 +46,10 @@ def _make_session_factory() -> Callable[[], AsyncSession]:
     return lambda: AsyncSessionLocal()
 
 
-def _build_mambo_backend(agent_config: AgentConfig) -> BackendProtocol | None:
+def _build_mambo_backend(
+    agent_config: AgentConfig,
+    store: "AsyncSqliteStore | None" = None,
+) -> BackendProtocol | None:
     """构建 Mambo Agent 的完整 Backend 体系。
 
     装配逻辑（所有类型平等，不分优先级）：
@@ -53,8 +57,12 @@ def _build_mambo_backend(agent_config: AgentConfig) -> BackendProtocol | None:
     2. 其余的（任意类型）→ virtual_workspaces[name]，AI 通过 /.mambo/{name}/ 访问
     3. Skills（skill_resource_roots）→ virtual_workspaces["skills"]
 
+    Args:
+        agent_config: Agent 配置。
+        store: 共享的 LangGraph BaseStore 实例，传递给 StoreBackend 以保证持久化。
+
     Returns:
-        HybridWorkspaceBackend 或 None（交给 create_mambo_agent 用默认 StateBackend）
+        HybridWorkspaceBackend 或 None（交给 create_mambo_agent 用默认 StoreBackend）
     """
     session_factory = _make_session_factory()
     virtual_workspaces: Dict[str, BackendProtocol] = {}
@@ -62,7 +70,7 @@ def _build_mambo_backend(agent_config: AgentConfig) -> BackendProtocol | None:
     mounted = agent_config.mounted_backends or []
 
     if not mounted:
-        # 只有 skills 则用 StateBackend 兜底
+        # 只有 skills 则用 StoreBackend 兜底
         if agent_config.skill_resource_roots:
             virtual_workspaces["skills"] = MamboResourceBackend(
                 resource_id=None,
@@ -71,7 +79,7 @@ def _build_mambo_backend(agent_config: AgentConfig) -> BackendProtocol | None:
                 workspace_root=VirtualPath("/workspace"),
             )
             return HybridWorkspaceBackend(
-                real_backend=StateBackend(),
+                real_backend=StoreBackend(store=store),
                 virtual_workspaces=virtual_workspaces,
             )
         return None
@@ -120,7 +128,7 @@ def _build_mambo_backend(agent_config: AgentConfig) -> BackendProtocol | None:
 
     # ---- 5. 组装 ----
     if real_be is None:
-        real_be = StateBackend()
+        real_be = StoreBackend(store=store)
 
     return HybridWorkspaceBackend(
         real_backend=real_be,
@@ -269,7 +277,8 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
                 )
 
         # --- Build backend（统一入口：资源挂载 + SSH/API + Skills shortcuts）---
-        backend = _build_mambo_backend(agent_config)
+        store = get_store()
+        backend = _build_mambo_backend(agent_config, store=store)
 
         # --- Tools ---
         tools = [t for t in agent_config.tools] if agent_config.tools else []
@@ -341,10 +350,10 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
                 VersionControlMiddleware,
             )
             vc_cfg = agent_config.version_control_config or {}
-            store = VersionStore(storage_dir="./.mambo_versions")
+            vc_store = VersionStore(store=store)
             # Monitor /workspace — all backends (SSH/Resource/API) present files under this path
             _version_control_middleware = VersionControlMiddleware(
-                store=store,
+                store=vc_store,
                 backend=backend,
                 whitelist_folders=[VirtualPath("/workspace")],
             )

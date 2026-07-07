@@ -21,6 +21,7 @@ from backend.config.timezone_config import TZ, get_configured_now
 from backend.database import engine, AsyncSessionLocal
 from backend.models.base_model import Base
 from backend.checkpointer import init_checkpointer, close_checkpointer
+from backend.store import init_store, close_store
 from backend.routers import (
     chat_management,
     chat_interaction,
@@ -171,6 +172,9 @@ async def lifespan(app: FastAPI):
     # 初始化底层持久化 Checkpointer
     await init_checkpointer()
 
+    # 初始化共享 LangGraph Store（StoreBackend + VersionStore 共用）
+    await init_store()
+
     async with engine.begin() as conn:
         await ensure_vec_tables(conn, dimensions=SUP_DIM)
         await conn.execute(text("CREATE VIRTUAL TABLE IF NOT EXISTS kb_chunk_fts USING fts5(content_tokens);"))
@@ -184,6 +188,7 @@ async def lifespan(app: FastAPI):
     # --- 应用关闭时执行 ---
     scheduler.shutdown()
     await close_checkpointer()
+    await close_store()
 
 
 app = FastAPI(lifespan=lifespan, version="1.2.5")
