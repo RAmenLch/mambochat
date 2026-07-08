@@ -7,6 +7,12 @@ class ChatMode(str, Enum):
     NORMAL = "normal"
     AGENT = "agent"
 
+
+class WebSearchMode(str, Enum):
+    """联网搜索模式"""
+    DIRECT_READ = "direct_read"          # 仅直接读取网页
+    SEARCH_AND_READ = "search_and_read"  # 检索 + 读取网页
+
 class MessageRole(str, Enum):
     USER = "user"
     ASSISTANT = "assistant"

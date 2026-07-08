@@ -48,6 +48,9 @@ class Chat(Base):
     # 启用的 MCP 服务 ID 列表，存储字符串数组
     enabled_mcp_ids = Column(JSON, nullable=True, default=list)
 
+    # 联网搜索模式: None=关闭, "direct_read"=仅读网页, "search_and_read"=检索+读取
+    web_search_mode = Column(String(20), nullable=True, default=None)
+
     # 关系: 反向引用到 AIModel
     ai_model = relationship("AIModel", back_populates="chats")
     # 关系: 一个 Chat 可以包含多条 Message

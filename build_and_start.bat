@@ -67,9 +67,8 @@ echo [Check] Backend dependencies...
 
 "%PYTHON_EXE%" -c "import uvicorn" >nul 2>&1
 if %errorlevel% neq 0 (
-    echo   Installing backend and MCP dependencies...
+    echo   Installing backend dependencies...
     "%PYTHON_EXE%" -m pip install -e "%ROOT_DIR%backend" -i https://pypi.tuna.tsinghua.edu.cn/simple
-    "%PYTHON_EXE%" -m pip install -e "%ROOT_DIR%MCP_SERVER\ddgs" -i https://pypi.tuna.tsinghua.edu.cn/simple
     echo   [OK] Dependencies installed.
 ) else (
     echo   [OK] Backend dependencies verified.

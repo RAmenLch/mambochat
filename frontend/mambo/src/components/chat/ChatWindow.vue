@@ -538,13 +538,23 @@ function handleOpenSettings() {
 
 async function handleToggleWebSearch() {
   if (!currentChat.value) return;
-  const SEARCH_TOOL_ID = 'system-ddgs-search';
-  const currentIds = currentChat.value.enabled_mcp_ids || [];
-  const newIds = currentIds.includes(SEARCH_TOOL_ID)
-    ? currentIds.filter(id => id !== SEARCH_TOOL_ID)
-    : [...currentIds, SEARCH_TOOL_ID];
-  await chatListStore.updateChatSettings(currentChat.value.id, { enabled_mcp_ids: newIds });
-  ElMessage.success(newIds.includes(SEARCH_TOOL_ID) ? t('chat.toolbar.webSearchEnabled') : t('chat.toolbar.webSearchDisabled'));
+  const currentMode = currentChat.value.web_search_mode;
+  let nextMode: 'direct_read' | 'search_and_read' | null;
+  if (!currentMode) {
+    nextMode = 'direct_read';
+  } else if (currentMode === 'direct_read') {
+    nextMode = 'search_and_read';
+  } else {
+    nextMode = null;
+  }
+  await chatListStore.updateChatSettings(currentChat.value.id, { web_search_mode: nextMode });
+  if (nextMode === 'direct_read') {
+    ElMessage.success(t('chat.toolbar.webSearchEnabled'));
+  } else if (nextMode === 'search_and_read') {
+    ElMessage.success(t('chat.toolbar.webSearchEnabled'));
+  } else {
+    ElMessage.info(t('chat.toolbar.webSearchDisabled'));
+  }
 }
 
 async function handleToggleMcpTool(mcpId: string) {

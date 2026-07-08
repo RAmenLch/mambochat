@@ -24,6 +24,7 @@ class ChatBase(BaseModel):
     resource_prompt_list: Optional[List[str]] = Field(None, description="挂载的资源ID列表")
 
     enabled_mcp_ids: Optional[List[str]] = Field(default_factory=list, description="启用的外部 MCP 服务 ID 列表")
+    web_search_mode: Optional[str] = Field(None, description="联网搜索模式: 'direct_read' 或 'search_and_read'，None 表示关闭")
     chatMode: ChatMode = Field(ChatMode.NORMAL, description="聊天模式: 'normal' 或 'agent'")
     agentId: Optional[str] = Field(None, description="绑定的 Agent ID（当 chatMode 为 'agent' 时有效）")
 
@@ -63,6 +64,8 @@ class ChatUpdate(BaseModel):
     resource_prompt_list: Optional[List[str]] = None
     # 启用的外部 MCP 服务 ID 列表
     enabled_mcp_ids: Optional[List[str]] = None
+    # 联网搜索模式
+    web_search_mode: Optional[str] = None
     chatMode: Optional[ChatMode] = None
     agentId: Optional[str] = None
 

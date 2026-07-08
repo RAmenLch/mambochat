@@ -130,11 +130,10 @@
       </el-popover>
 
       <el-button
-        v-if="currentChat?.chatMode !== 'agent'"
         :icon="Search"
-        :type="isWebSearchEnabled ? 'primary' : ''"
+        :type="webSearchButtonType"
         circle
-        :title="t('chat.toolbar.webSearch')"
+        :title="webSearchTooltip"
         @click="$emit('toggleWebSearch')"
       />
       <el-button
@@ -236,13 +235,27 @@ const displayAgentName = computed(() => {
   return agent ? agent.name : t('common.status.unknownModel');
 });
 /**
- * 检查当前会话是否已启用系统联网搜索工具。
- * 目标 ID: system-ddgs-search
+ * 联网搜索状态：返回当前模式
  */
-const isWebSearchEnabled = computed((): boolean => {
-  const mcpIds = props.currentChat?.enabled_mcp_ids;
-  if (!mcpIds) return false;
-  return mcpIds.includes('system-ddgs-search');
+const webSearchMode = computed((): 'direct_read' | 'search_and_read' | null => {
+  return props.currentChat?.web_search_mode ?? null;
+});
+
+const webSearchButtonType = computed((): '' | 'primary' | 'success' => {
+  if (webSearchMode.value === 'search_and_read') return 'success';
+  if (webSearchMode.value === 'direct_read') return 'primary';
+  return '';
+});
+
+const webSearchTooltip = computed((): string => {
+  switch (webSearchMode.value) {
+    case 'direct_read':
+      return t('chat.toolbar.webSearchDirectRead');
+    case 'search_and_read':
+      return t('chat.toolbar.webSearchSearchAndRead');
+    default:
+      return t('chat.toolbar.webSearchOff');
+  }
 });
 
 /**

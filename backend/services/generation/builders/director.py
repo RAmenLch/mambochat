@@ -24,6 +24,7 @@ from backend.services.generation.builders.initializers.chat_react_initializer im
 from backend.services.generation.builders.initializers.agent_react_initializer import AgentBasedReActInitializer
 from backend.services.generation.builders.initializers.deep_agent_initializer import DeepAgentInitializer
 from backend.services.generation.builders.initializers.mambo_agent_initializer import MamboAgentInitializer
+from backend.schemas.enums import WebSearchMode
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
 
 
@@ -234,6 +235,15 @@ class LLMInputDirector:
 
         resume_payload = self._extract_resume_payload(materials.target_msg)
 
+        # 解析 chat 级别的 web_search_mode
+        ws_mode: Optional[WebSearchMode] = None
+        raw_ws = materials.chat.web_search_mode
+        if raw_ws:
+            try:
+                ws_mode = WebSearchMode(raw_ws)
+            except ValueError:
+                pass
+
         if is_agent_mode:
             agent_type_str = materials.agent.AgentType
             if hasattr(agent_type_str, 'value'):
@@ -246,7 +256,8 @@ class LLMInputDirector:
                     resume_payload=resume_payload,
                     enable_tools=self._enable_tools,
                     enable_resource_merge=self._enable_resource_merge,
-                    external_tools=self._tools
+                    external_tools=self._tools,
+                    web_search_mode=ws_mode,
                 )
             elif agent_type_str == AgentTypeEnum.DEEP.value:
                 initializer = DeepAgentInitializer(
@@ -255,7 +266,8 @@ class LLMInputDirector:
                     resume_payload=resume_payload,
                     enable_tools=self._enable_tools,
                     enable_resource_merge=self._enable_resource_merge,
-                    external_tools=self._tools
+                    external_tools=self._tools,
+                    web_search_mode=ws_mode,
                 )
             else:
                 initializer = AgentBasedReActInitializer(
@@ -264,7 +276,8 @@ class LLMInputDirector:
                     resume_payload=resume_payload,
                     enable_tools=self._enable_tools,
                     enable_resource_merge=self._enable_resource_merge,
-                    external_tools=self._tools
+                    external_tools=self._tools,
+                    web_search_mode=ws_mode,
                 )
             base_system_prompt = materials.agent.systemPrompt or ""
         else:

@@ -17,6 +17,8 @@ from backend.services.generation.tools.mcp_tool_provider import MCPToolProvider
 from backend.services.generation.tools.suggest_tool_provider import SuggestToolProvider
 from backend.services.generation.tools.ask_user_tool_provider import AskUserToolProvider
 from backend.services.generation.tools.kb_tool_provider import KBToolProvider
+from backend.services.generation.tools.web_search_tool_provider import WebSearchToolProvider
+from backend.schemas.enums import WebSearchMode
 
 
 class ChatBasedReActInitializer(AbstractAgentInitializer):
@@ -66,7 +68,7 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
         if knowledge_bases:
             self.providers.append(KBToolProvider(self.db, knowledge_bases))
 
-        # 2. 外部工具挂载 (MCP & Suggest)
+        # 2. 外部工具挂载 (MCP & Suggest & WebSearch)
         if self.enable_tools:
             params = self.chat.parsed_model_parameters
 
@@ -80,6 +82,11 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
                 for tool in mcp_tools:
                     if tool.review_mode == ToolReviewMode.REQUIRE_REVIEW.value:
                         self.hitl_interrupt_on[tool.name] = True
+
+            # WebSearch 内置搜索工具 (从 Chat 表读取 web_search_mode)
+            ws_mode = self._resolve_web_search_mode()
+            if ws_mode is not None:
+                self.providers.append(WebSearchToolProvider(ws_mode))
 
             # Suggest 建议工具 (从 Chat 的 modelParameters 中读取)
             enable_suggest = params.get("enable_suggest", False)
@@ -122,6 +129,15 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
         )
 
         return agent_config, additional_system_prompt
+
+    def _resolve_web_search_mode(self) -> Optional[WebSearchMode]:
+        raw = self.chat.web_search_mode
+        if not raw:
+            return None
+        try:
+            return WebSearchMode(raw)
+        except ValueError:
+            return None
 
     def get_providers(self) -> List[BaseToolProvider]:
         return self.providers

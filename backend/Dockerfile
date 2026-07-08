@@ -13,17 +13,10 @@ RUN pip install --no-cache-dir uv -i ${PYPI_INDEX_URL}
 # 2. 准备环境依赖
 WORKDIR /app
 
-# 2.1 安装 Backend 依赖（mambo-agents 预发布版由 pyproject.toml 的 [tool.uv.sources] 精准指向 PyPI 官方源）
+# 2.1 安装 Backend 依赖（联网搜索所需 trafilatura 已包含在 pyproject.toml 中）
 COPY backend/pyproject.toml /app/backend/pyproject.toml
 RUN uv pip install --system --no-cache -r /app/backend/pyproject.toml \
     -i ${PYPI_INDEX_URL}
-
-# 2.2 安装 ddgs MCP 依赖
-COPY MCP_SERVER/ddgs/pyproject.toml /app/MCP_SERVER/ddgs/pyproject.toml
-RUN uv pip install --system --no-cache -r /app/MCP_SERVER/ddgs/pyproject.toml \
-    -i ${PYPI_INDEX_URL}
-
-
 
 # 3. 复制源代码
 COPY backend /app/backend

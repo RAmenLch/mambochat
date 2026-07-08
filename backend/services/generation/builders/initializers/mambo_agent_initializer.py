@@ -25,6 +25,8 @@ from backend.services.generation.tools.kb_tool_provider import KBToolProvider
 from backend.services.generation.tools.mambo_builtin_tool_provider import (
     MamboAgentBuiltinToolProvider,
 )
+from backend.services.generation.tools.web_search_tool_provider import WebSearchToolProvider
+from backend.schemas.enums import WebSearchMode
 from backend.services.file_service import FileService
 
 
@@ -47,6 +49,7 @@ class MamboAgentInitializer(AbstractAgentInitializer):
         enable_tools: bool = False,
         enable_resource_merge: bool = False,
         external_tools: Optional[List[BaseTool]] = None,
+        web_search_mode: Optional[WebSearchMode] = None,
     ):
         self.db = db
         self.agent = agent
@@ -54,6 +57,7 @@ class MamboAgentInitializer(AbstractAgentInitializer):
         self.enable_tools = enable_tools
         self.enable_resource_merge = enable_resource_merge
         self.external_tools = external_tools or []
+        self.web_search_mode = web_search_mode
 
         self.providers: List[BaseToolProvider] = []
         self.hitl_interrupt_on: Dict[str, bool] = {}
@@ -105,6 +109,10 @@ class MamboAgentInitializer(AbstractAgentInitializer):
                 for tool in mcp_tools:
                     if tool.review_mode == ToolReviewMode.REQUIRE_REVIEW.value:
                         self.hitl_interrupt_on[tool.name] = True
+
+            # WebSearch 内置搜索工具
+            if self.web_search_mode is not None:
+                self.providers.append(WebSearchToolProvider(self.web_search_mode))
 
             enable_suggest = params.get("enable_suggest", False)
             if enable_suggest:
@@ -197,6 +205,7 @@ class MamboAgentInitializer(AbstractAgentInitializer):
                         enable_tools=self.enable_tools,
                         enable_resource_merge=self.enable_resource_merge,
                         external_tools=self.external_tools,
+                        web_search_mode=self.web_search_mode,
                     )
                 elif atype in (AgentTypeEnum.DEEP.value, "DeepAgent"):
                     from backend.services.generation.builders.initializers.deep_agent_initializer import (
@@ -209,6 +218,7 @@ class MamboAgentInitializer(AbstractAgentInitializer):
                         enable_tools=self.enable_tools,
                         enable_resource_merge=self.enable_resource_merge,
                         external_tools=self.external_tools,
+                        web_search_mode=self.web_search_mode,
                     )
                 else:
                     from backend.services.generation.builders.initializers.agent_react_initializer import (
@@ -221,6 +231,7 @@ class MamboAgentInitializer(AbstractAgentInitializer):
                         enable_tools=self.enable_tools,
                         enable_resource_merge=self.enable_resource_merge,
                         external_tools=self.external_tools,
+                        web_search_mode=self.web_search_mode,
                     )
 
                 sub_config, _ = await sub_init.initialize()
