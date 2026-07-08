@@ -10,7 +10,7 @@ from backend.services.generation.tools.base_tool_provider import BaseToolProvide
 from backend.services.kb_service import KnowledgeBaseService
 from backend.schemas import enums as schemas_enums
 from backend.schemas.kb import KBSearchRequest
-from backend.schemas.message import McpToolContent
+from backend.schemas.message import McpToolContent, SubMessageConfig
 from backend.models.base_model import generate_uuid
 from backend.crud import kb_crud, resource_crud
 from backend.services.generation.core.instructions import (
@@ -259,7 +259,7 @@ class KBToolProvider(BaseToolProvider):
             sortOrder=2,
             status=schemas_enums.MessageStatus.GENERATING,
             initial_content=tool_content.to_json_string(),
-            config={"is_minimal": True}
+            config=SubMessageConfig(is_minimal=True)
         )
 
     async def create_result_instruction(

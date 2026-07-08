@@ -55,7 +55,7 @@
             <el-icon><FolderAdd /></el-icon>{{ $t('agent.tree.newFolder') }}
           </el-dropdown-item>
           <template v-if="contextMenuItem">
-            <el-dropdown-item v-if="contextMenuItem.itemType === 'agent'" command="duplicate" :divided="contextMenuItem.itemType === 'folder'">
+            <el-dropdown-item v-if="contextMenuItem.itemType === 'agent'" command="duplicate" divided>
               <el-icon><DocumentCopy /></el-icon>{{ $t('agent.tree.duplicate') }}
             </el-dropdown-item>
             <el-dropdown-item command="rename" divided>

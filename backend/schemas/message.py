@@ -80,8 +80,8 @@ class McpToolContent(BaseModel):
             raise ValueError(f"Invalid JSON for McpToolContent: {e}")
 
 class SubMessageConfig(BaseModel):
-    is_collapsed: bool = Field(False, description="分区是否折叠")
-    is_minimal: bool = Field(False, description="分区是否处于最小化状态")
+    is_collapsed: Optional[bool] = Field(None, description="分区是否折叠")
+    is_minimal: Optional[bool] = Field(None, description="分区是否处于最小化状态")
     context_participation_length: Optional[int] = Field(None,
                                                         description="参加上下文长度: None(默认)-参与; 0-不参与; N>0-在倒数N条内参与")
     zip_enable: Optional[bool] = Field(None, description="【仅用于ZipHistory类型】标记此压缩历史是否已启用")
@@ -296,6 +296,43 @@ class AskUserContent(BaseModel):
             return cls(**data)
         except (json.JSONDecodeError, TypeError) as e:
             raise ValueError(f"Invalid JSON for AskUserContent: {e}")
+
+
+# --- Version Snapshot Schemas ---
+
+class VersionSnapshotFile(BaseModel):
+    """单个被备份的文件"""
+    path: str = Field(..., description="文件虚拟路径，如 /workspace/main.py")
+    sha256: str = Field(..., description="文件内容 SHA256 哈希")
+
+
+class RollbackRecord(BaseModel):
+    """回滚操作记录（附在 VERSION_SNAPSHOT 的 content 中）"""
+    target_checkpoint_id: str = Field(..., description="回滚到的目标 checkpoint ID")
+    timestamp: str = Field(..., description="回滚操作时间（ISO-8601）")
+    restored: list[str] = Field(default_factory=list, description="成功恢复的文件路径列表")
+    errors: list[str] = Field(default_factory=list, description="恢复失败的文件及原因")
+
+
+class VersionSnapshotContent(BaseModel):
+    """VERSION_SNAPSHOT 子消息的 content JSON 结构"""
+    checkpoint_id: str = Field(..., description="LangGraph parent checkpoint ID")
+    timestamp: str = Field(..., description="快照创建时间（ISO-8601）")
+    files: list[VersionSnapshotFile] = Field(default_factory=list, description="该快照中变更的文件列表")
+    rollback: Optional[RollbackRecord] = Field(None, description="回滚记录（仅回滚操作时有值）")
+
+    def to_json_string(self) -> str:
+        return self.model_dump_json(exclude_none=False)
+
+    @classmethod
+    def from_json_string(cls, json_str: str) -> 'VersionSnapshotContent':
+        if not json_str:
+            raise ValueError("Empty content")
+        try:
+            data = json.loads(json_str)
+            return cls(**data)
+        except (json.JSONDecodeError, TypeError) as e:
+            raise ValueError(f"Invalid JSON for VersionSnapshotContent: {e}")
 
 
 class TaskSubStepContent(BaseModel):

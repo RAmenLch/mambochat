@@ -16,7 +16,7 @@ from backend.services.generation.core.instructions import (
     UpdateSubMessageStatus
 )
 from backend.schemas import enums as schemas_enums
-from backend.schemas.message import McpToolContent
+from backend.schemas.message import McpToolContent, SubMessageConfig
 from backend.models.base_model import generate_uuid
 
 logger = logging.getLogger(__name__)
@@ -137,7 +137,7 @@ class MCPToolProvider(BaseToolProvider):
             sortOrder=2,
             status=schemas_enums.MessageStatus.GENERATING,
             initial_content=tool_content.to_json_string(),
-            config={"is_minimal": True}
+            config=SubMessageConfig(is_minimal=True)
         )
 
     async def create_result_instruction(

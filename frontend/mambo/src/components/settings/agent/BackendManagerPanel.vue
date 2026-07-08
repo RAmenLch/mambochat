@@ -369,6 +369,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { storeToRefs } from 'pinia';
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
 import { Plus, Key, Connection, View, Hide, FolderOpened, HomeFilled, Folder, ArrowRight } from '@element-plus/icons-vue';
@@ -379,6 +380,7 @@ import { getClientStatus, sshListDirectory } from '@/api/backendService';
 import type { BackendConfig, BackendCreate, BackendType, SshConfigData, ApiConfigData, ResourceConfigData, SshTestRequest, SshLsEntry } from '@/api/types/backendTypes';
 import { isSshConfig, defaultToolsConfig } from '@/api/types/backendTypes';
 
+const { t } = useI18n();
 const backendStore = useBackendStore();
 const resourceStore = useResourceStore();
 const { backendList, isLoading, systemPublicKey } = storeToRefs(backendStore);

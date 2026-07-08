@@ -36,6 +36,7 @@ from backend.services.generation.managers.stream_handlers.handlers import (
 )
 from backend.services.generation.managers.stream_handlers.finish_reason_classifier import FinishReasonClassifier
 from backend.services.generation.core.llm_io import SummarizationEventInfo
+from backend.schemas.message import VersionSnapshotContent, VersionSnapshotFile, SubMessageConfig
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,8 @@ class DefaultGenerateManager(AbstractGenerateManager):
         self._recover_from_error = recover_from_error
         self._last_finish_reason: Optional[str] = None
         self._last_summarization_event: Optional[SummarizationEventInfo] = None
+
+        self._version_snapshots: Dict[str, "VersionSnapshotContent"] = {}
 
         self._subagent_step_counters: Dict[str, int] = {}
 
@@ -179,6 +182,22 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 if mode == "summarization":
                     self._last_summarization_event = event  # last-wins: cumulative final state
                     continue
+                # ── Version snapshot signal ───────────────────────────────
+                if mode == "version_snapshot" and isinstance(event, dict):
+                    cp_id = event.get("checkpoint_id", "")
+                    if cp_id not in self._version_snapshots:
+                        self._version_snapshots[cp_id] = VersionSnapshotContent(
+                            checkpoint_id=cp_id,
+                            timestamp=event.get("timestamp", ""),
+                            files=[],
+                        )
+                    self._version_snapshots[cp_id].files.append(
+                        VersionSnapshotFile(
+                            path=event.get("file_path", ""),
+                            sha256=event.get("sha256", ""),
+                        )
+                    )
+                    continue
                 # ── Normal handler chain ─────────────────────────────────
                 decoder = worker.resolve_decoder(event)
 
@@ -254,6 +273,16 @@ class DefaultGenerateManager(AbstractGenerateManager):
                             zip_enable=True,
                             auto=True,
                         )
+        #         ── Record version snapshots as submessages ──
+        for snapshot in self._version_snapshots.values():
+            yield CreateSubMessage(
+                sub_message_id=generate_uuid(),
+                type=schemas_enums.SubMessageType.VERSION_SNAPSHOT,
+                sortOrder=50,
+                status=schemas_enums.MessageStatus.COMPLETED,
+                initial_content=snapshot.to_json_string(),
+                config=SubMessageConfig(context_participation_length=0),
+            )
         # ── Record checkpoint_id for branch tracking ──
         saved = await self._get_interrupt_checkpoint(chat_id)
         if saved:
@@ -268,7 +297,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
     async def _finalize_generation(self, is_interrupted: bool = False) -> AsyncGenerator[BaseInstruction, None]:
         for sub_id in list(self._created_stream_ids):
             if sub_id.endswith('-R'):
-                yield UpdateSubMessageConfig(sub_message_id=sub_id, config={"is_minimal": True})
+                yield UpdateSubMessageConfig(sub_message_id=sub_id, config=SubMessageConfig(is_minimal=True))
             yield UpdateSubMessageStatus(sub_message_id=sub_id, status=schemas_enums.MessageStatus.COMPLETED)
         self._created_stream_ids.clear()
 
@@ -276,7 +305,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
             yield CreateSubMessage(
                 sub_message_id=generate_uuid(), type=schemas_enums.SubMessageType.USAGE.value,
                 sortOrder=99, status=schemas_enums.MessageStatus.COMPLETED,
-                initial_content=json.dumps(self._final_usage_data), config={"context_participation_length": 0}
+                initial_content=json.dumps(self._final_usage_data), config=SubMessageConfig(context_participation_length=0)
             )
 
         if not is_interrupted:
@@ -294,7 +323,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
                     sortOrder=97,
                     status=schemas_enums.MessageStatus.COMPLETED,
                     initial_content=error_content.to_json_string(),
-                    config={"context_participation_length": 0}
+                    config=SubMessageConfig(context_participation_length=0)
                 )
             self._last_finish_reason = None
 

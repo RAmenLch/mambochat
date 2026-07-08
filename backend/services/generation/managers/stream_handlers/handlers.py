@@ -5,7 +5,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 
 from backend.models.base_model import generate_uuid
 from backend.schemas import enums as schemas_enums
-from backend.schemas.message import ErrorContent, ReviewToolContent, AskUserContent, TaskSubStepContent, SecurityReviewContent
+from backend.schemas.message import ErrorContent, ReviewToolContent, AskUserContent, TaskSubStepContent, SecurityReviewContent, SubMessageConfig
 from backend.services.generation.core.instructions import (
     BaseInstruction, CreateSubMessage, AppendToSubMessage,
     UpdateSubMessageConfig, UpdateSubMessageStatus, UpdateSubMessageContent,
@@ -82,7 +82,7 @@ class HitlHandler(BaseStreamHandler):
                         sortOrder=2,
                         status=schemas_enums.MessageStatus.PENDING_REVIEW,
                         initial_content=ask_content.to_json_string(),
-                        config={"context_participation_length": 0}
+                        config=SubMessageConfig(context_participation_length=0)
                     )
 
                 # --- HITL 审核中断 ---
@@ -116,7 +116,7 @@ class HitlHandler(BaseStreamHandler):
                             sortOrder=2,
                             status=schemas_enums.MessageStatus.PENDING_REVIEW,
                             initial_content=review_content.to_json_string(),
-                            config={"context_participation_length": 0}
+                            config=SubMessageConfig(context_participation_length=0)
                         )
 
             if has_ask_user:
@@ -166,7 +166,7 @@ class TextAndReasoningHandler(BaseStreamHandler):
                 context.created_stream_ids.add(reasoning_id)
                 yield CreateSubMessage(
                     sub_message_id=reasoning_id, type=schemas_enums.SubMessageType.REASONING.value,
-                    sortOrder=0, config={"is_minimal": True}
+                    sortOrder=0, config=SubMessageConfig(is_minimal=True)
                 )
             yield AppendToSubMessage(sub_message_id=reasoning_id, content=reasoning_content)
 
@@ -179,7 +179,7 @@ class RoundClosureHandler(BaseStreamHandler):
             content_id = f"{context.lc_run_uuid}-N"
 
             if reasoning_id in context.created_stream_ids:
-                yield UpdateSubMessageConfig(sub_message_id=reasoning_id, config={"is_minimal": True})
+                yield UpdateSubMessageConfig(sub_message_id=reasoning_id, config=SubMessageConfig(is_minimal=True))
                 yield UpdateSubMessageStatus(sub_message_id=reasoning_id, status=schemas_enums.MessageStatus.COMPLETED)
                 context.created_stream_ids.discard(reasoning_id)
 
@@ -255,7 +255,7 @@ class ImageAndUsageHandler(BaseStreamHandler):
                 sortOrder=97,
                 status=schemas_enums.MessageStatus.COMPLETED,
                 initial_content=error_content.to_json_string(),
-                config={"context_participation_length": 0}
+                config=SubMessageConfig(context_participation_length=0)
             )
 
 
@@ -301,10 +301,10 @@ class SubAgentEventHandler(BaseStreamHandler):
                 sortOrder=2,
                 status=schemas_enums.MessageStatus.COMPLETED,
                 initial_content=content.to_json_string(),
-                config={
-                    "context_participation_length": 0,
-                    "task_group_id": tool_call_id,
-                },
+                config=SubMessageConfig(
+                    context_participation_length=0,
+                    task_group_id=tool_call_id,
+                ),
             )
             return
 
@@ -442,5 +442,5 @@ class SecurityReviewHandler(BaseStreamHandler):
             sortOrder=2,
             status=schemas_enums.MessageStatus.COMPLETED,
             initial_content=content.to_json_string(),
-            config={"context_participation_length": 0},
+            config=SubMessageConfig(context_participation_length=0),
         )

@@ -122,10 +122,6 @@ class RunTimeConfig(BaseModel):
         None,
         description="分支起点 checkpoint_id。设置后 LangGraph 会进行时间旅行，从该 checkpoint 分叉",
     )
-    version_rollback: Optional[Dict[str, Any]] = Field(
-        None,
-        description="版本回滚配置，传入 VersionControlMiddleware. 例如 {'files': ['/workspace/main.py']}",
-    )
 
 
 class SecurityReviewAgentConfig(BaseModel):

@@ -78,11 +78,12 @@ def _build_mambo_backend(
                 shortcuts=agent_config.skill_resource_roots,
                 workspace_root=VirtualPath("/workspace"),
             )
-            return HybridWorkspaceBackend(
-                real_backend=StoreBackend(store=store),
-                virtual_workspaces=virtual_workspaces,
-            )
-        return None
+        # 始终使用 persisted StoreBackend，避免 create_mambo_agent 内部
+        # 用 store=None 创建无持久化的 StoreBackend 兜底
+        return HybridWorkspaceBackend(
+            real_backend=StoreBackend(store=store),
+            virtual_workspaces=virtual_workspaces if virtual_workspaces else None,
+        )
 
     # ---- 1. 确定 real_backend：default_backend_id > 列表第一位 ----
     real_be: BackendProtocol | None = None
@@ -380,6 +381,7 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
             name=agent_config.name,
             model=model,
             backend=backend,
+            store=store,
             system_prompt=agent_config.system_prompt,
             subagents=compiled_subagents if compiled_subagents else None,
             include_general_purpose=include_general_purpose,

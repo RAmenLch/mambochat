@@ -160,7 +160,10 @@ class DeepAgentChatWorker(UniversalGraphWorker):
                     continue
                 yield mode, msg
             elif mode == "custom":
-                if isinstance(event, dict) and event.get("type") == "subagent_event":
+                # 版本控制备份事件：VersionControlMiddleware 发射的 BackupEvent
+                if isinstance(event, dict) and event.get("type") == "backup":
+                    yield "version_snapshot", event
+                elif isinstance(event, dict) and event.get("type") == "subagent_event":
                     yield "subagent_event", event
                 elif isinstance(event, dict) and event.get("type") in ("security_review_passed", "security_review_failed"):
                     yield "security_review", event

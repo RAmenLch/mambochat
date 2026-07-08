@@ -344,30 +344,18 @@ class LLMInputDirector:
             system_prompt=final_system_prompt
         )
 
-        # 确定分支 checkpoint（用于 LangGraph 时间旅行）
+        # 确定分支 checkpoint（用于 LangGraph 时间旅行，沿 parentId 链查找）
         branch_checkpoint_id: Optional[str] = None
-        if self._cutoff_message_id:
-            from backend.services.generation_service import pop_branch_checkpoint
-            branch_checkpoint_id = pop_branch_checkpoint(self._cutoff_message_id)
-            print(f"[VC DEBUG dir] pop_branch_checkpoint({self._cutoff_message_id}) = {branch_checkpoint_id}")
-        if not branch_checkpoint_id and self._cutoff_message_id and materials.target_msg:
+        if self._cutoff_message_id and materials.target_msg:
             branch_checkpoint_id = await self._resolve_branch_checkpoint(
                 self._cutoff_message_id, materials.history
             )
-            print(f"[VC DEBUG dir] resolve_branch_checkpoint({self._cutoff_message_id}) = {branch_checkpoint_id}")
-
-        # 读取 version_rollback（由 regenerate 端点注入）
-        version_rollback = None
-        if self._cutoff_message_id:
-            from backend.services.generation_service import pop_version_rollback
-            version_rollback = pop_version_rollback(self._cutoff_message_id)
 
         rt_config = RunTimeConfig(
             chat_id=self.chat_id,
             message_id=self._cutoff_message_id,
             manager_name=self._manager_name,
             branch_checkpoint_id=branch_checkpoint_id,
-            version_rollback=version_rollback,
         )
 
         return LLMInput(

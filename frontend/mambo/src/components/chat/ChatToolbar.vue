@@ -62,6 +62,15 @@
           <el-icon class="token-tooltip-icon"><QuestionFilled /></el-icon>
         </el-tooltip>
       </div>
+      <el-button
+        v-if="showVersionHistoryBtn"
+        :icon="Timer"
+        size="small"
+        text
+        bg
+        :title="t('chat.toolbar.versionHistory')"
+        @click="$emit('openVersionHistory')"
+      />
     </div>
 
     <div class="actions">
@@ -151,13 +160,6 @@
         circle
         :title="t('chat.toolbar.chatSettings')"
         @click="$emit('openSettings')"
-      />
-      <el-button
-        v-if="showVersionHistoryBtn"
-        :icon="Timer"
-        circle
-        :title="t('chat.toolbar.versionHistory')"
-        @click="$emit('openVersionHistory')"
       />
     </div>
   </div>

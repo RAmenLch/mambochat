@@ -8,15 +8,7 @@
     @update:model-value="handleUpdateModelValue"
   >
     <div class="version-history-content">
-      <div v-if="isLoading" class="loading-wrapper">
-        <el-skeleton :rows="6" animated />
-      </div>
-
-      <div v-else-if="errorMsg" class="error-wrapper">
-        <el-empty :description="errorMsg" :image-size="60" />
-      </div>
-
-      <div v-else-if="snapshots.length === 0" class="empty-wrapper">
+      <div v-if="snapshots.length === 0" class="empty-wrapper">
         <el-empty :description="$t('agent.versionHistoryNoData')" :image-size="80" />
       </div>
 
@@ -36,6 +28,18 @@
                   {{ $t('agent.versionHistoryFileCount', { count: snap.file_count }) }}
                 </el-tag>
               </div>
+              <el-tooltip
+                :content="snap.messagePreview"
+                placement="top"
+                :show-after="300"
+                effect="dark"
+                popper-class="snapshot-msg-tooltip"
+              >
+                <div class="snapshot-msg-tip">
+                  <el-icon><ChatLineSquare /></el-icon>
+                  <span>{{ $t('agent.versionHistorySnapshotTip', { index: snap.messageIndex }) }}</span>
+                </div>
+              </el-tooltip>
               <div class="snapshot-id">
                 <code>{{ snap.checkpoint_id.substring(0, 16) }}...</code>
               </div>
@@ -70,18 +74,45 @@
                 >
                   {{ $t('agent.versionHistoryRestoreAll') }}
                 </el-button>
-                <el-button
-                  text
-                  size="small"
-                  type="primary"
-                  @click="handleRestoreAndContinue(snap.checkpoint_id)"
-                >
-                  <el-icon style="margin-right: 4px;"><RefreshRight /></el-icon>
-                  {{ $t('agent.versionHistoryRollbackContinue') }}
-                </el-button>
               </div>
               <div v-else class="no-files-hint">
                 {{ $t('agent.versionHistoryFileCount', { count: 0 }) }}
+              </div>
+
+              <!-- 回滚记录（归入快照内部，默认折叠） -->
+              <div v-if="snap.rollbacks.length > 0" class="rollback-section">
+                <div class="rollback-toggle" @click="toggleRollbackExpand(snap.checkpoint_id)">
+                  <el-icon :class="{ 'rotate-arrow': expandedRollbacks.has(snap.checkpoint_id) }"><ArrowRight /></el-icon>
+                  <span>{{ $t('agent.versionHistoryRollbackCount', { count: snap.rollbacks.length }) }}</span>
+                </div>
+                <div v-show="expandedRollbacks.has(snap.checkpoint_id)" class="rollback-detail-body">
+                  <div v-for="(rb, ri) in snap.rollbacks" :key="ri" class="rollback-item">
+                    <div class="rollback-item-header">
+                      <el-tag size="small" :type="rb.errors.length === 0 ? 'success' : 'danger'" effect="plain">
+                        {{ rb.errors.length === 0 ? $t('agent.versionHistoryRollbackSuccess') : $t('agent.versionHistoryRollbackPartial') }}
+                      </el-tag>
+                      <span class="rollback-item-time">{{ formatTimestamp(rb.timestamp) }}</span>
+                    </div>
+                    <div v-if="rb.restored.length > 0" class="rollback-restored">
+                      <p class="rollback-section-title">{{ $t('agent.versionHistoryRestoredFiles') }}:</p>
+                      <ul class="rollback-file-list">
+                        <li v-for="f in rb.restored" :key="f" class="rollback-file-item restored">
+                          <el-icon><CircleCheck /></el-icon>
+                          <code>{{ f }}</code>
+                        </li>
+                      </ul>
+                    </div>
+                    <div v-if="rb.errors.length > 0" class="rollback-errors">
+                      <p class="rollback-section-title error-title">{{ $t('agent.versionHistoryRestoreErrors') }}:</p>
+                      <ul class="rollback-file-list">
+                        <li v-for="e in rb.errors" :key="e" class="rollback-file-item failed">
+                          <el-icon><CircleClose /></el-icon>
+                          <span>{{ e }}</span>
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </el-timeline-item>
@@ -157,28 +188,95 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { ElMessage, ElMessageBox } from 'element-plus';
-import { Document, CopyDocument, RefreshRight } from '@element-plus/icons-vue';
-import { getSnapshots, getFileVersion, restoreFiles } from '@/api/versionControlService';
-import type { VersionSnapshotItem } from '@/api/versionControlService';
+import { ElMessage } from 'element-plus';
+import { Document, CopyDocument, RefreshRight, CircleCheck, CircleClose, ChatLineSquare, ArrowRight } from '@element-plus/icons-vue';
+import { getFileVersion, restoreFiles } from '@/api/versionControlService';
+
+interface RollbackRecord {
+  target_checkpoint_id: string;
+  timestamp: string;
+  restored: string[];
+  errors: string[];
+}
+
+interface VersionSnapshotItem {
+  checkpoint_id: string;
+  timestamp: string;
+  file_count: number;
+  changed_files: string[];
+  messageIndex: number;
+  messagePreview: string;
+  rollbacks: RollbackRecord[];
+}
+
+interface SubMessage {
+  type: string;
+  content: string;
+}
+
+interface Message {
+  id: string;
+  sub_messages?: SubMessage[];
+}
 
 const props = defineProps<{
   visible: boolean;
   chatId: string | null;
+  messages: Message[];
 }>();
 
 const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void;
-  (e: 'restore-and-continue', checkpointId: string, files: string[]): void;
+  (e: 'refreshed'): void;
 }>();
 
 const { t } = useI18n();
 
-const isLoading = ref(false);
-const errorMsg = ref('');
-const snapshots = ref<VersionSnapshotItem[]>([]);
+// 从 messages 中收集快照，并将回滚记录归入目标快照
+const snapshots = computed<VersionSnapshotItem[]>(() => {
+  const snapshotMap = new Map<string, VersionSnapshotItem>();
+  const rollbackRecords: RollbackRecord[] = [];
+
+  props.messages.forEach((msg, msgIndex) => {
+    const previewSub = (msg.sub_messages || []).find(sm => sm.type === 'Normal');
+    const msgPreview = previewSub?.content?.substring(0, 40) || '';
+    for (const sub of (msg.sub_messages || [])) {
+      if (sub.type !== 'VersionSnapshot') continue;
+      try {
+        const content = JSON.parse(sub.content);
+        if (content.rollback) {
+          // 回滚记录：收集后归入目标快照
+          rollbackRecords.push(content.rollback);
+        } else {
+          // 正常快照
+          snapshotMap.set(content.checkpoint_id, {
+            checkpoint_id: content.checkpoint_id,
+            timestamp: content.timestamp,
+            file_count: content.files?.length || 0,
+            changed_files: content.files?.map((f: any) => f.path) || [],
+            messageIndex: msgIndex + 1,
+            messagePreview: msgPreview,
+            rollbacks: [],
+          });
+        }
+      } catch {
+        // ignore parse errors
+      }
+    }
+  });
+
+  // 将回滚记录归入对应的目标快照
+  for (const rb of rollbackRecords) {
+    const target = snapshotMap.get(rb.target_checkpoint_id);
+    if (target) {
+      target.rollbacks.push(rb);
+    }
+  }
+
+  return [...snapshotMap.values()].sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+});
 
 // 文件内容弹窗
 const fileDialogVisible = ref(false);
@@ -194,7 +292,7 @@ const pendingRestoreFiles = ref<string[]>([]);
 const pendingRestoreCpid = ref('');
 const restoringCpid = ref('');
 const restoringFile = ref('');
-const viewingCheckpointId = ref('');
+const expandedRollbacks = ref<Set<string>>(new Set());
 
 function handleUpdateModelValue(value: boolean) {
   emit('update:visible', value);
@@ -213,7 +311,6 @@ function formatTimestamp(ts: string): string {
 async function openFileContent(checkpointId: string, filePath: string) {
   if (!props.chatId) return;
   viewingFilePath.value = filePath;
-  viewingCheckpointId.value = checkpointId;
   viewingFileContent.value = '';
   fileContentError.value = '';
   fileDialogVisible.value = true;
@@ -243,11 +340,20 @@ function confirmRestore(checkpointId: string, file?: string) {
   if (file) {
     pendingRestoreFiles.value = [file];
   } else {
-    // restore all files in the snapshot
     const snap = snapshots.value.find(s => s.checkpoint_id === checkpointId);
     pendingRestoreFiles.value = snap?.changed_files || [];
   }
   restoreDialogVisible.value = true;
+}
+
+function toggleRollbackExpand(checkpointId: string) {
+  const s = new Set(expandedRollbacks.value);
+  if (s.has(checkpointId)) {
+    s.delete(checkpointId);
+  } else {
+    s.add(checkpointId);
+  }
+  expandedRollbacks.value = s;
 }
 
 async function executeRestore() {
@@ -263,6 +369,7 @@ async function executeRestore() {
       pendingRestoreFiles.value,
     );
     restoreDialogVisible.value = false;
+    emit('refreshed');
 
     if (result.errors.length > 0) {
       ElMessage.warning(
@@ -280,47 +387,6 @@ async function executeRestore() {
     pendingRestoreFiles.value = [];
   }
 }
-
-function handleRestoreAndContinue(checkpointId: string) {
-  const snap = snapshots.value.find(s => s.checkpoint_id === checkpointId);
-  const files = snap?.changed_files || [];
-  if (files.length === 0) {
-    ElMessage.warning(t('agent.versionHistoryNoFiles'));
-    return;
-  }
-  emit('restore-and-continue', checkpointId, files);
-}
-
-async function loadSnapshots() {
-  if (!props.chatId) return;
-  isLoading.value = true;
-  errorMsg.value = '';
-  snapshots.value = [];
-
-  try {
-    const result = await getSnapshots(props.chatId);
-    snapshots.value = result.snapshots || [];
-  } catch (err: any) {
-    const status = err?.response?.status;
-    if (status === 404) {
-      errorMsg.value = t('agent.versionHistoryNoData');
-      snapshots.value = [];
-    } else {
-      errorMsg.value = err?.response?.data?.detail || err?.message || 'Failed to load version history';
-    }
-  } finally {
-    isLoading.value = false;
-  }
-}
-
-watch(
-  () => props.visible,
-  (newVal) => {
-    if (newVal) {
-      loadSnapshots();
-    }
-  },
-);
 </script>
 
 <style scoped>
@@ -329,8 +395,6 @@ watch(
   padding-bottom: 24px;
 }
 
-.loading-wrapper,
-.error-wrapper,
 .empty-wrapper {
   padding: 40px 0;
 }
@@ -425,6 +489,132 @@ watch(
   justify-content: flex-end;
 }
 
+.no-files-hint {
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+  padding-left: 8px;
+}
+
+.snapshot-msg-tip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+  margin-bottom: 8px;
+  padding-left: 2px;
+}
+
+.snapshot-msg-tip .el-icon {
+  font-size: 14px;
+}
+
+.rotate-arrow {
+  transition: transform 0.2s;
+  transform: rotate(90deg);
+}
+
+.rollback-detail-body {
+  padding-top: 4px;
+}
+
+/* rollback section (inside snapshot) */
+.rollback-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--el-border-color-light);
+}
+
+.rollback-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  padding: 2px 0;
+  user-select: none;
+}
+
+.rollback-toggle:hover {
+  color: var(--el-color-primary);
+}
+
+.rollback-toggle .el-icon {
+  font-size: 12px;
+  transition: transform 0.2s;
+}
+
+.rollback-detail-body {
+  padding-top: 8px;
+}
+
+.rollback-item {
+  padding: 8px 0 4px;
+  border-top: 1px dashed var(--el-border-color-lighter);
+}
+
+.rollback-item:first-child {
+  border-top: none;
+  padding-top: 4px;
+}
+
+.rollback-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.rollback-item-time {
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+}
+
+.rollback-restored,
+.rollback-errors {
+  margin-bottom: 4px;
+}
+
+.rollback-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 4px 0;
+  color: var(--el-text-color-secondary);
+}
+
+.error-title {
+  color: var(--el-color-danger);
+}
+
+.rollback-file-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.rollback-file-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  font-size: 12px;
+  border-radius: 4px;
+}
+
+.rollback-file-item.restored {
+  color: var(--el-color-success);
+}
+
+.rollback-file-item.failed {
+  color: var(--el-color-danger);
+}
+
+.rollback-file-item code {
+  font-family: monospace;
+  word-break: break-all;
+}
+
 .restore-dialog-body {
   line-height: 1.6;
 }
@@ -448,12 +638,6 @@ watch(
 .restore-file-preview code {
   font-family: 'Consolas', 'Monaco', monospace;
   word-break: break-all;
-}
-
-.no-files-hint {
-  font-size: 12px;
-  color: var(--el-text-color-placeholder);
-  padding-left: 8px;
 }
 
 .file-dialog-header {

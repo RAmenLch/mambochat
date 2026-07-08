@@ -56,10 +56,6 @@ class UniversalGraphWorker(AbstractGenerateWorker):
         if vc_parent_cp:
             thread_config["configurable"]["version_control_ckpt_id"] = vc_parent_cp
 
-        # 版本回滚配置：传递给 VersionControlMiddleware
-        if llm_input.run_time_config.version_rollback:
-            thread_config["configurable"]["version_rollback"] = llm_input.run_time_config.version_rollback
-
         if llm_input.agent_config.recover_from_error:
             input_data = None
         else:
@@ -144,8 +140,11 @@ class UniversalGraphWorker(AbstractGenerateWorker):
                     continue
                 yield mode, msg
             elif mode == "custom":
+                # 版本控制备份事件：VersionControlMiddleware 发射的 BackupEvent
+                if isinstance(event, dict) and event.get("type") == "backup":
+                    yield "version_snapshot", event
                 # 子代理内部事件：mambo_agents SubAgentMiddleware 发射的 custom stream_writer 事件
-                if isinstance(event, dict) and event.get("type") == "subagent_event":
+                elif isinstance(event, dict) and event.get("type") == "subagent_event":
                     yield "subagent_event", event
                 # AI 安全审核事件：AutoSecurityReviewMiddleware 发射的 SecurityReviewPassedEvent / SecurityReviewFailedEvent
                 elif isinstance(event, dict) and event.get("type") in ("security_review_passed", "security_review_failed"):

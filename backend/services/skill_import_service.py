@@ -16,6 +16,7 @@ from backend.crud import resource_crud, setting_crud
 from backend.services.file_service import FileService
 from backend.services.resource_service import validate_name_uniqueness
 from backend.utils.skills_utils import SkillValidator, FileNode, identify_skill_roots
+from backend.utils.path_safe import RESERVED_PATH_NAMES
 from backend.models import resource_model
 
 # ZIP 导入安全限制
@@ -345,8 +346,9 @@ class SkillImportService:
 
             elif os.path.isdir(item_path):
                 # Create sub-folder
+                safe_item_name = self._sanitize_name(item)
                 folder_schema = schemas.ResourceCreate(
-                    name=item,
+                    name=safe_item_name,
                     itemType=ResourceItemType.FOLDER,
                     parentId=resource_parent_id
                 )
@@ -354,8 +356,12 @@ class SkillImportService:
                 await self._create_files_recursive(item_path, sub_folder.id)
 
     def _sanitize_name(self, name: str) -> str:
-        # Remove or replace invalid characters
-        return re.sub(r'[\\/*?:"<>|]', "_", name).strip()
+        """清理非法字符并处理系统保留字冲突。"""
+        safe = re.sub(r'[\\/*?:"<>|]', "_", name).strip()
+        # 如果清理后的名称是系统保留字，追加后缀避免冲突
+        if safe.lower() in RESERVED_PATH_NAMES:
+            safe = f"{safe}_folder"
+        return safe
 
     async def _safe_read_upload(self, file: UploadFile) -> bytes:
         """安全读取上传文件内容，校验大小上限。"""

@@ -34,6 +34,7 @@ class SubMessageType(str, Enum):
     ERROR = "Error"
     TASK_SUBSTEP = "TaskSubStep"
     SECURITY_REVIEW = "SecurityReview"
+    VERSION_SNAPSHOT = "VersionSnapshot"
 
 
 class FileManagementType(str, Enum):

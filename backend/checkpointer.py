@@ -21,6 +21,11 @@ _conn: Optional[aiosqlite.Connection] = None
 _checkpointer_instance: Optional[AsyncSqliteSaver] = None
 
 
+def get_db_connection() -> Optional[aiosqlite.Connection]:
+    """获取共享的 SQLite 连接（供 Store 复用，避免多连接锁冲突）。"""
+    return _conn
+
+
 async def init_checkpointer():
     """
     初始化底层的持久化 Checkpointer。
@@ -29,7 +34,7 @@ async def init_checkpointer():
     global _conn, _checkpointer_instance
     if _conn is None:
         db_path = str(CHECKPOINTER_DB_FILE.resolve())
-        _conn = await aiosqlite.connect(db_path)
+        _conn = await aiosqlite.connect(db_path, isolation_level=None)
         _checkpointer_instance = AsyncSqliteSaver(_conn)
         # 调用原生 setup() 确保表结构 (checkpoints, writes) 被正确创建
         await _checkpointer_instance.setup()

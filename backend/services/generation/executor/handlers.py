@@ -24,7 +24,7 @@ from backend.crud import checkpoint_map_crud
 async def handle_create_sub_message(
     instruction: CreateSubMessage, chat_id: str, assistant_message_id: str, db: AsyncSession
 ) -> None:
-    config_data = schemas.message.SubMessageConfig(**(instruction.config or {}))
+    config_data = instruction.config if instruction.config is not None else schemas.message.SubMessageConfig()
     sub_message_create_schema = schemas.message.SubMessageCreate(
         id=instruction.sub_message_id,
         content=instruction.initial_content,
@@ -117,7 +117,7 @@ async def handle_update_sub_message_config(
             except (json.JSONDecodeError, TypeError):
                 current_config = {}
 
-        merged_config = {**current_config, **instruction.config}
+        merged_config = {**current_config, **instruction.config.model_dump(exclude_none=True)}
         config_obj = schemas.message.SubMessageConfig.model_validate(merged_config)
         update_schema = schemas.message.SubMessageUpdate(config=config_obj)
 

@@ -19,7 +19,7 @@ from backend.services.generation.core.instructions import (
 )
 from backend.schemas import enums as schemas_enums
 from backend.models.base_model import generate_uuid
-from backend.schemas.message import McpToolContent
+from backend.schemas.message import McpToolContent, SubMessageConfig
 
 logger = logging.getLogger(__name__)
 
@@ -249,7 +249,7 @@ class AskUserToolProvider(BaseToolProvider):
             sortOrder=2,
             status=schemas_enums.MessageStatus.GENERATING,
             initial_content=content_obj.to_json_string(),
-            config={"is_minimal": True}
+            config=SubMessageConfig(is_minimal=True)
         )
 
     async def create_result_instruction(

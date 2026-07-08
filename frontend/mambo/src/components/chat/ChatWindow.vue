@@ -123,7 +123,8 @@
     <VersionHistoryDrawer
       v-model:visible="versionHistoryDrawerVisible"
       :chat-id="currentChatId"
-      @restore-and-continue="handleRestoreAndContinue"
+      :messages="currentChatMessages"
+      @refreshed="handleVersionHistoryRefreshed"
     />
 
     <ResourceSelectorDialog
@@ -555,6 +556,12 @@ async function handleToggleMcpTool(mcpId: string) {
   await chatListStore.updateChatSettings(currentChat.value.id, { enabled_mcp_ids: newIds });
 }
 
+function handleVersionHistoryRefreshed() {
+  if (currentChatId.value) {
+    chatSessionStore.selectChat(currentChatId.value, true);
+  }
+}
+
 const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
   const el = scrollbarRef.value?.wrapRef;
   if (!el) return;
@@ -672,19 +679,6 @@ async function handleDuplicateUpTo(messageId: string) {
   }
 }
 
-async function handleRestoreAndContinue(checkpointId: string, files: string[]) {
-  if (!currentChatId.value || isGenerating.value) return;
-  try {
-    const { regenerateFromSnapshot } = await import('@/api/versionControlService');
-    await regenerateFromSnapshot(currentChatId.value, checkpointId, files);
-    versionHistoryDrawerVisible.value = false;
-    ElMessage.success(t('agent.versionHistoryRollbackStarted'));
-    // 刷新消息列表以显示新的生成
-    await chatSessionStore.selectChat(currentChatId.value, true);
-  } catch (error: any) {
-    ElMessage.error(error?.response?.data?.detail || error?.message || t('common.error.operationFailed'));
-  }
-}
 
 async function handleSwitchBranch(currentMessageId: string, targetMessageId: string) {
   if (isGenerating.value) return;

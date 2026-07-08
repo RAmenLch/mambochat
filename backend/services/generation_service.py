@@ -18,28 +18,6 @@ from backend.services.generation.managers.default_manager import DefaultGenerate
 from backend.services.generation.managers.title_manager import TitleGenerateManager
 from backend.services.generation.managers.zip_history_manager import ZipHistoryGenerateManager
 
-# ── 临时存储（keyed by assistant_message_id）──
-_version_rollback_store: Dict[str, dict] = {}
-_branch_checkpoint_store: Dict[str, str] = {}
-
-
-def store_version_rollback(message_id: str, config: dict) -> None:
-    """存入版本回滚配置，由 LLMInputDirector.build() 取出"""
-    _version_rollback_store[message_id] = config
-
-
-def store_branch_checkpoint(message_id: str, checkpoint_id: str) -> None:
-    _branch_checkpoint_store[message_id] = checkpoint_id
-
-
-def pop_branch_checkpoint(message_id: str) -> Optional[str]:
-    return _branch_checkpoint_store.pop(message_id, None)
-
-
-def pop_version_rollback(message_id: str) -> Optional[dict]:
-    """取出并清除版本回滚配置"""
-    return _version_rollback_store.pop(message_id, None)
-
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.worker.chat_worker import UniversalGraphWorker
 from backend.services.generation.worker.deep_agent_chat_worker import DeepAgentChatWorker
@@ -113,11 +91,9 @@ async def prepare_for_regeneration(
         db: AsyncSession,
         chat_id: str,
         base_message_id: str,
-        version_rollback: Optional[dict] = None,
 ) -> chat_model.Message:
     """
     准备重新生成：在指定的层级创建一个新的AI消息占位符分支。
-    可选传入 version_rollback 配置，Agent 启动前自动回滚指定文件。
     """
     db_chat = await chat_crud.get_chat(db, chat_id=chat_id)
     if not db_chat:
@@ -140,10 +116,6 @@ async def prepare_for_regeneration(
         parentId=target_parent_id
     )
     assistant_placeholder = await message_crud.create_message(db, message=assistant_message_create, chat_id=chat_id)
-
-    # 存入 version_rollback，由 LLMInputDirector.build() 取出
-    if version_rollback:
-        store_version_rollback(assistant_placeholder.id, version_rollback)
 
     return assistant_placeholder
 

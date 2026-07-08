@@ -11,6 +11,7 @@ from backend.services.generation.core.instructions import (
     CreateSubMessage, InterruptGeneration
 )
 from backend.schemas import enums as schemas_enums
+from backend.schemas.message import SubMessageConfig
 from backend.models.base_model import generate_uuid
 
 
@@ -80,9 +81,7 @@ class SuggestToolProvider(BaseToolProvider):
             sortOrder=99,
             status=schemas_enums.MessageStatus.COMPLETED,
             initial_content=content_json,
-            config={
-                "context_participation_length": 0
-            }
+            config=SubMessageConfig(context_participation_length=0)
         )
         yield InterruptGeneration()
 
