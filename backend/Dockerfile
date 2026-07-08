@@ -1,4 +1,4 @@
-# backend/Dockerfile (支持 MCP 扩展版)
+# backend/Dockerfile
 
 # 使用清华大学的镜像源，你也可以换成其他的，比如：
 # 阿里云: https://mirrors.aliyun.com/pypi/simple/
@@ -19,6 +19,8 @@ RUN uv pip install --system --no-cache -r /app/backend/pyproject.toml \
     -i ${PYPI_INDEX_URL}
 
 # 3. 复制源代码
+# MCP_SERVER 目录用于用户自行添加 MCP 服务（DDGS 已内化到 backend 中）
+# 仓库中通过 .gitkeep 保留该空目录
 COPY backend /app/backend
 COPY MCP_SERVER /app/MCP_SERVER
 
