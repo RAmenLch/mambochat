@@ -136,7 +136,7 @@
                 :key="'wl-api-' + idx"
                 closable
                 size="small"
-                @close="removeFromWhitelist(idx)"
+                @close="removeFromWhitelist(Number(idx))"
                 class="path-tag"
               >{{ item }}</el-tag>
               <el-input
@@ -161,7 +161,7 @@
                 closable
                 size="small"
                 type="danger"
-                @close="removeFromBlacklist(idx)"
+                @close="removeFromBlacklist(Number(idx))"
                 class="path-tag"
               >{{ item }}</el-tag>
               <el-input
@@ -235,7 +235,7 @@
                 :key="'wl-res-' + idx"
                 closable
                 size="small"
-                @close="removeFromWhitelist(idx)"
+                @close="removeFromWhitelist(Number(idx))"
                 class="path-tag"
               >{{ item }}</el-tag>
               <el-input
@@ -263,7 +263,7 @@
                 closable
                 size="small"
                 type="danger"
-                @close="removeFromBlacklist(idx)"
+                @close="removeFromBlacklist(Number(idx))"
                 class="path-tag"
               >{{ item }}</el-tag>
               <el-input
@@ -323,7 +323,7 @@
                 :key="'wl-local-' + idx"
                 closable
                 size="small"
-                @close="removeFromWhitelist(idx)"
+                @close="removeFromWhitelist(Number(idx))"
                 class="path-tag"
               >{{ item }}</el-tag>
               <el-input
@@ -351,7 +351,7 @@
                 closable
                 size="small"
                 type="danger"
-                @close="removeFromBlacklist(idx)"
+                @close="removeFromBlacklist(Number(idx))"
                 class="path-tag"
               >{{ item }}</el-tag>
               <el-input
