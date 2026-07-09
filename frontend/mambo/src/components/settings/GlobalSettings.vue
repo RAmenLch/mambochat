@@ -381,10 +381,11 @@ const { groupedModels } = storeToRefs(providerStore)
 const { globalSettings } = storeToRefs(settingsStore)
 
 // 表单数据
-// 显式重写 frontend_editor 类型为 string，以解决 el-radio-group 不接受 null 的问题
+// 显式重写 frontend_editor / message_display_mode 类型为 string，以解决 el-radio-group 不接受 null 的问题
 const settingsForm = reactive<
-  Omit<GlobalSettingsUpdate, 'user_avatar_url' | 'ai_avatar_url' | 'frontend_editor'> & {
+  Omit<GlobalSettingsUpdate, 'user_avatar_url' | 'ai_avatar_url' | 'frontend_editor' | 'message_display_mode'> & {
     frontend_editor: string
+    message_display_mode: string
   }
 >({
   default_model_id: null,
