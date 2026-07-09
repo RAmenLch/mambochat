@@ -21,65 +21,141 @@
     <!-- 气泡主体内容 -->
     <div class="bubble-body" v-show="!isBubbleCollapsed">
 
-      <!-- 思考区域 (Reasoning) -->
-      <div class="bubble-section reasoning-section" v-if="reasoningSection">
-        <!-- 最小化态 -->
-        <div v-if="isReasoningMinimized" class="reasoning-minimized-block" @click="toggleReasoningMinimize">
-          <el-icon>
-            <Loading v-if="isGenerating && !hasPendingReviews" class="is-loading" />
-            <Warning v-else-if="hasPendingReviews" />
-            <Check v-else />
-          </el-icon>
-          <span>{{ $t('chat.message.reasoningCollapsed') }}</span>
+      <!-- ========== 堆叠模式 ========== -->
+      <template v-if="messageDisplayMode === 'stacked'">
+        <!-- 思考区域 (Reasoning) -->
+        <div class="bubble-section reasoning-section" v-if="reasoningSection">
+          <!-- 最小化态 -->
+          <div v-if="isReasoningMinimized" class="reasoning-minimized-block" @click="toggleReasoningMinimize">
+            <el-icon>
+              <Loading v-if="isGenerating && !hasPendingReviews" class="is-loading" />
+              <Warning v-else-if="hasPendingReviews" />
+              <Check v-else />
+            </el-icon>
+            <span>{{ $t('chat.message.reasoningCollapsed') }}</span>
+          </div>
+
+          <!-- 展开态 -->
+          <div v-else class="reasoning-expanded">
+            <div class="section-title" @click="toggleReasoningMinimize">
+              {{ $t('chat.message.reasoning') }}
+            </div>
+            <div class="section-content">
+              <BubbleSectionGroup
+                v-for="group in reasoningSection.groups"
+                :key="group.id"
+                :group="group"
+                :parent-message="message"
+                :is-generating="isGenerating"
+                :is-inactive="isInactive(group)"
+                :show-zip-coverage="zipCoverageGroupIds.has(group.id)"
+                is-reasoning
+                @edit="(subMsg, payload) => $emit('edit', subMsg, payload)"
+                @copy="(subMsg) => $emit('copy', subMsg)"
+                @edit-file="(file) => $emit('edit-file', file)"
+                @open-tool-dialog="(toolId) => $emit('open-tool-dialog', toolId)"
+              />
+            </div>
+          </div>
         </div>
 
-        <!-- 展开态 -->
-        <div v-else class="reasoning-expanded">
-          <div class="section-title" @click="toggleReasoningMinimize">
-            {{ $t('chat.message.reasoning') }}
-          </div>
+        <!-- 正文区域 (Normal) -->
+        <div class="bubble-section normal-section" v-if="normalSection || isGenerating">
           <div class="section-content">
             <BubbleSectionGroup
-              v-for="group in reasoningSection.groups"
+              v-if="normalSection"
+              v-for="group in normalSection.groups"
               :key="group.id"
               :group="group"
               :parent-message="message"
               :is-generating="isGenerating"
               :is-inactive="isInactive(group)"
               :show-zip-coverage="zipCoverageGroupIds.has(group.id)"
-              is-reasoning
               @edit="(subMsg, payload) => $emit('edit', subMsg, payload)"
               @copy="(subMsg) => $emit('copy', subMsg)"
               @edit-file="(file) => $emit('edit-file', file)"
               @open-tool-dialog="(toolId) => $emit('open-tool-dialog', toolId)"
             />
+
+            <div v-if="isGenerating && (!normalSection || normalSection.groups.length === 0)" class="typing-indicator">
+              <span></span><span></span><span></span>
+            </div>
           </div>
         </div>
-      </div>
+      </template>
 
-      <!-- 正文区域 (Normal) -->
-      <div class="bubble-section normal-section" v-if="normalSection || isGenerating">
-        <div class="section-content">
-          <BubbleSectionGroup
-            v-if="normalSection"
-            v-for="group in normalSection.groups"
-            :key="group.id"
-            :group="group"
-            :parent-message="message"
-            :is-generating="isGenerating"
-            :is-inactive="isInactive(group)"
-            :show-zip-coverage="zipCoverageGroupIds.has(group.id)"
-            @edit="(subMsg, payload) => $emit('edit', subMsg, payload)"
-            @copy="(subMsg) => $emit('copy', subMsg)"
-            @edit-file="(file) => $emit('edit-file', file)"
-            @open-tool-dialog="(toolId) => $emit('open-tool-dialog', toolId)"
-          />
+      <!-- ========== 交错模式 ========== -->
+      <template v-else>
+        <div
+          v-for="(section, index) in interleavedSections"
+          :key="section.groups[0]?.id || index"
+          :class="[
+            'bubble-section',
+            section.type === 'reasoning' ? 'interleaved-reasoning-section' : 'interleaved-normal-section'
+          ]"
+        >
+          <!-- Reasoning Section (折叠面板) -->
+          <template v-if="section.type === 'reasoning'">
+            <div class="reasoning-collapsible" :class="{ 'is-collapsed': isSectionMinimized(section) }">
+              <div class="reasoning-collapse-header" @click="toggleSectionMinimize(index)">
+                <el-icon class="collapse-arrow">
+                  <ArrowRight v-if="isSectionMinimized(section)" />
+                  <ArrowDown v-else />
+                </el-icon>
+                <span class="collapse-title">{{ $t('chat.message.reasoning') }}</span>
+                <el-icon v-if="isGenerating && !hasPendingReviews" class="collapse-status-icon is-loading">
+                  <Loading />
+                </el-icon>
+                <el-icon v-else-if="hasPendingReviews" class="collapse-status-icon">
+                  <Warning />
+                </el-icon>
+              </div>
+              <div class="reasoning-collapse-body" v-show="!isSectionMinimized(section)">
+                <div class="section-content">
+                  <BubbleSectionGroup
+                    v-for="group in section.groups"
+                    :key="group.id"
+                    :group="group"
+                    :parent-message="message"
+                    :is-generating="isGenerating"
+                    :is-inactive="isInactive(group)"
+                    :show-zip-coverage="zipCoverageGroupIds.has(group.id)"
+                    is-reasoning
+                    @edit="(subMsg, payload) => $emit('edit', subMsg, payload)"
+                    @copy="(subMsg) => $emit('copy', subMsg)"
+                    @edit-file="(file) => $emit('edit-file', file)"
+                    @open-tool-dialog="(toolId) => $emit('open-tool-dialog', toolId)"
+                  />
+                </div>
+              </div>
+            </div>
+          </template>
 
-          <div v-if="isGenerating && (!normalSection || normalSection.groups.length === 0)" class="typing-indicator">
-            <span></span><span></span><span></span>
-          </div>
+          <!-- Normal Section -->
+          <template v-else>
+            <div class="section-content">
+              <BubbleSectionGroup
+                v-for="group in section.groups"
+                :key="group.id"
+                :group="group"
+                :parent-message="message"
+                :is-generating="isGenerating"
+                :is-inactive="isInactive(group)"
+                :show-zip-coverage="zipCoverageGroupIds.has(group.id)"
+                @edit="(subMsg, payload) => $emit('edit', subMsg, payload)"
+                @copy="(subMsg) => $emit('copy', subMsg)"
+                @edit-file="(file) => $emit('edit-file', file)"
+                @open-tool-dialog="(toolId) => $emit('open-tool-dialog', toolId)"
+              />
+            </div>
+          </template>
         </div>
-      </div>
+
+        <!-- 交错模式下的空态打字指示器 -->
+        <div v-if="isGenerating && interleavedSections.length === 0" class="typing-indicator">
+          <span></span><span></span><span></span>
+        </div>
+      </template>
 
       <!-- 错误区域 (Error) -->
       <div class="bubble-section error-section" v-if="errorSubMessages.length > 0 && !isGenerating">
@@ -126,13 +202,15 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { storeToRefs } from 'pinia';
 import type { Message, SubMessage, ErrorContent, FileResponse } from '@/api/types';
 import { useAssistantTimeline, type BubbleSectionGroup } from '@/composables/useAssistantTimeline';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { useChatSessionStore } from '@/stores/chatSessionStore';
 import { useAgentStore } from '@/stores/agentStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import BubbleSectionGroupComponent from './BubbleSectionGroup.vue';
-import { Cpu, Minus, FullScreen, ArrowUpBold, ArrowDownBold, Loading, Warning, Check, Opportunity, View, RefreshRight } from '@element-plus/icons-vue';
+import { Cpu, Minus, FullScreen, ArrowUpBold, ArrowDownBold, ArrowRight, ArrowDown, Loading, Warning, Check, Opportunity, View, RefreshRight } from '@element-plus/icons-vue';
 
 const BubbleSectionGroup = BubbleSectionGroupComponent;
 
@@ -153,17 +231,22 @@ const { t } = useI18n();
 const interactionStore = useChatInteractionStore();
 const sessionStore = useChatSessionStore();
 const agentStore = useAgentStore();
+const settingsStore = useSettingsStore();
+const { globalSettings } = storeToRefs(settingsStore);
 
 const messageRef = computed(() => props.message);
+const messageDisplayMode = computed(() => globalSettings.value.message_display_mode ?? 'interleaved');
 
 const {
   reasoningSection,
   normalSection,
+  interleavedSections,
+  isSectionMinimized,
   isReasoningMinimized,
   hasPendingReviews,
   errorSubMessages,
   zipCoverageGroupIds,
-} = useAssistantTimeline(messageRef);
+} = useAssistantTimeline(messageRef, messageDisplayMode);
 
 const isBubbleCollapsed = ref(false);
 
@@ -181,6 +264,21 @@ const assistantName = computed(() => {
 function toggleReasoningMinimize() {
   const newState = !isReasoningMinimized.value;
   interactionStore.batchUpdateSubMessagesMinimalState(props.message.id, newState);
+}
+
+/**
+ * 交错模式：切换单个 Reasoning section 的最小化状态
+ * 将 section 内所有 Reasoning 子消息统一切换
+ */
+function toggleSectionMinimize(sectionIndex: number) {
+  const section = interleavedSections.value[sectionIndex];
+  if (!section || section.type !== 'reasoning') return;
+  const newState = !isSectionMinimized(section);
+  for (const group of section.groups) {
+    if (group.textSubMessage && group.textSubMessage.type === 'Reasoning') {
+      interactionStore.updateSingleSubMessageMinimalState(props.message.id, group.textSubMessage.id, newState);
+    }
+  }
 }
 
 function isInactive(group: BubbleSectionGroup): boolean {
@@ -367,6 +465,82 @@ function handleRetry() {
 .error-section {
   border-top: 1px solid var(--el-color-error-light-5);
   padding-top: 12px;
+}
+
+/* ========== 交错模式 - 折叠面板样式 ========== */
+.interleaved-reasoning-section {
+  position: relative;
+}
+
+.reasoning-collapsible {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  overflow: hidden;
+  background-color: #fafafa;
+}
+
+.reasoning-collapse-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.15s;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+}
+
+.reasoning-collapse-header:hover {
+  background-color: #f0f0f0;
+}
+
+.reasoning-collapse-header .collapse-arrow {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+
+.reasoning-collapse-header .collapse-status-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+  color: var(--el-text-color-secondary);
+}
+
+.reasoning-collapse-header .collapse-title {
+  font-weight: 600;
+  flex: 1;
+}
+
+.reasoning-collapse-body {
+  border-top: 1px solid var(--el-border-color-lighter);
+  padding: 12px 16px;
+  border-left: 3px solid var(--el-border-color);
+  background-color: #f5f5f5;
+  margin: 0 8px 8px 8px;
+  border-radius: 0 6px 6px 0;
+}
+
+.reasoning-collapsible.is-collapsed .reasoning-collapse-body {
+  display: none;
+}
+
+.interleaved-reasoning-section :deep(.message-content) {
+  color: var(--el-text-color-primary) !important;
+}
+
+.interleaved-reasoning-section :deep(.content-block strong),
+.interleaved-reasoning-section :deep(.content-block b) {
+  color: var(--el-text-color-primary) !important;
+}
+
+.interleaved-normal-section {
+  /* 继承主体的白色背景即可 */
+}
+
+.interleaved-normal-section :deep(.message-content) {
+  color: var(--el-text-color-primary);
 }
 
 .error-block {

@@ -21,8 +21,8 @@
           <div class="card-header">
             <span class="backend-name">{{ b.name }}</span>
             <div class="header-right">
-              <el-tag size="small" :type="b.backendType === 'api' ? 'success' : 'info'">
-                {{ b.backendType === 'api' ? 'API' : 'SSH' }}
+              <el-tag size="small" :type="b.backendType === 'local' ? 'danger' : b.backendType === 'api' ? 'success' : 'info'">
+                {{ b.backendType === 'api' ? 'API' : b.backendType === 'ssh' ? 'SSH' : b.backendType === 'local' ? 'Local' : 'Resource' }}
               </el-tag>
               <el-tag
                 v-if="b.backendType === 'api' && clientStatusMap[b.id]"
@@ -44,6 +44,12 @@
               <div class="info-row">
                 <span class="label">ID:</span>
                 <span class="value api-id">{{ b.id }}</span>
+              </div>
+            </template>
+            <template v-else-if="b.backendType === 'local'">
+              <div class="info-row">
+                <span class="label">路径:</span>
+                <span class="value">{{ b.configData.root_dir || '~' }}</span>
               </div>
             </template>
             <div class="info-row" v-if="b.description">
@@ -82,6 +88,7 @@
           <el-select v-model="form.backendType" :disabled="isEdit" style="width: 100%" @change="handleTypeChange">
             <el-option label="SSH (远程服务器)" value="ssh" />
             <el-option label="API (客户端连接)" value="api" />
+            <el-option label="Local (本地文件系统)" value="local" />
           </el-select>
         </el-form-item>
 
@@ -109,10 +116,12 @@
             <el-input v-model="form.configData.api_key" :type="showApiKey ? 'text' : 'password'" show-password placeholder="客户端连接时使用的密钥" />
           </el-form-item>
           <el-form-item label="Edit Whitelist" prop="configData.edit_whitelist">
-            <el-select v-model="form.configData.edit_whitelist" multiple filterable allow-create default-first-option placeholder="例如: *.py" style="width: 100%" />
+            <el-select v-model="form.configData.edit_whitelist" multiple filterable allow-create default-first-option placeholder="例如: /workspace/src/ (回车添加)" style="width: 100%" />
+            <div class="path-picker-tip">输入虚拟路径前缀，该路径及其子目录将被允许编辑</div>
           </el-form-item>
           <el-form-item label="Edit Blacklist" prop="configData.edit_blacklist">
-            <el-select v-model="form.configData.edit_blacklist" multiple filterable allow-create default-first-option placeholder="例如: .env" style="width: 100%" />
+            <el-select v-model="form.configData.edit_blacklist" multiple filterable allow-create default-first-option placeholder="例如: /workspace/build/ (回车添加)" style="width: 100%" />
+            <div class="path-picker-tip">输入虚拟路径前缀，该路径及其子目录将被禁止编辑</div>
           </el-form-item>
           <div class="api-tip">
             <el-alert type="info" :closable="false" show-icon>
@@ -124,6 +133,32 @@
           </div>
         </template>
 
+        <!-- Local 配置 -->
+        <template v-if="form.backendType === 'local'">
+          <el-alert type="warning" :closable="false" show-icon class="local-warning">
+            <template #title>
+              本地 Backend 直接访问服务器文件系统，错误操作可能导致 MamboChat 平台不可用，请谨慎使用！
+            </template>
+          </el-alert>
+
+          <el-divider content-position="left">本地配置</el-divider>
+
+          <el-form-item label="Root Dir" prop="configData.root_dir">
+            <el-input v-model="form.configData.root_dir" placeholder="默认为当前用户 home 目录" />
+          </el-form-item>
+          <el-form-item label="Edit Whitelist" prop="configData.edit_whitelist">
+            <el-select v-model="form.configData.edit_whitelist" multiple filterable allow-create default-first-option placeholder="例如: /workspace/src/" style="width: 100%" />
+            <div class="path-picker-tip">手动输入虚拟路径前缀</div>
+          </el-form-item>
+          <el-form-item label="Edit Blacklist" prop="configData.edit_blacklist">
+            <el-select v-model="form.configData.edit_blacklist" multiple filterable allow-create default-first-option placeholder="例如: /workspace/build/" style="width: 100%" />
+            <div class="path-picker-tip">手动输入虚拟路径前缀</div>
+          </el-form-item>
+          <el-form-item label="Ignore Dirs" prop="configData.ignore_dirs">
+            <el-select v-model="form.configData.ignore_dirs" multiple filterable allow-create default-first-option placeholder="例如: .git" style="width: 100%" />
+          </el-form-item>
+        </template>
+
         <!-- 通用配置 (仅 SSH) -->
         <template v-if="form.backendType === 'ssh'">
           <el-divider content-position="left">通用配置</el-divider>
@@ -132,10 +167,12 @@
             <el-input v-model="form.configData.root_dir" placeholder="默认: /" />
           </el-form-item>
           <el-form-item label="Edit Whitelist" prop="configData.edit_whitelist">
-            <el-select v-model="form.configData.edit_whitelist" multiple filterable allow-create default-first-option placeholder="例如: *.py" style="width: 100%" />
+            <el-select v-model="form.configData.edit_whitelist" multiple filterable allow-create default-first-option placeholder="例如: /workspace/src/ (回车添加)" style="width: 100%" />
+            <div class="path-picker-tip">输入虚拟路径前缀，该路径及其子目录将被允许编辑</div>
           </el-form-item>
           <el-form-item label="Edit Blacklist" prop="configData.edit_blacklist">
-            <el-select v-model="form.configData.edit_blacklist" multiple filterable allow-create default-first-option placeholder="例如: .env" style="width: 100%" />
+            <el-select v-model="form.configData.edit_blacklist" multiple filterable allow-create default-first-option placeholder="例如: /workspace/build/ (回车添加)" style="width: 100%" />
+            <div class="path-picker-tip">输入虚拟路径前缀，该路径及其子目录将被禁止编辑</div>
           </el-form-item>
           <el-form-item label="Ignore Dirs" prop="configData.ignore_dirs">
             <el-select v-model="form.configData.ignore_dirs" multiple filterable allow-create default-first-option placeholder="例如: .git" style="width: 100%" />
@@ -144,7 +181,10 @@
 
         <!-- 工具配置 -->
         <el-divider content-position="left">{{ $t('backend.toolConfig') }}</el-divider>
-        <el-form-item label="Execute (命令执行)">
+        <el-form-item>
+            <template #label>
+              <span>Execute <span style="font-size: 11px; color: var(--el-text-color-secondary);">命令执行</span></span>
+            </template>
           <div class="tools-config-row">
             <span class="tools-config-label">{{ $t('backend.toolEnabled') }}</span>
             <el-switch v-model="form.tools_config!.execute.enabled" />
@@ -200,7 +240,7 @@ import { Plus, Key, Connection } from '@element-plus/icons-vue';
 import { useBackendStore } from '@/stores/backendStore';
 import { copyToClipboard } from '@/utils/clipboard';
 import { getClientStatus } from '@/api/backendService';
-import type { BackendConfig, BackendCreate, BackendType, SshConfigData, ApiConfigData, SshTestRequest } from '@/api/types/backendTypes';
+import type { BackendConfig, BackendCreate, BackendType, SshConfigData, ApiConfigData, LocalConfigData, SshTestRequest } from '@/api/types/backendTypes';
 import { defaultToolsConfig } from '@/api/types/backendTypes';
 
 const backendStore = useBackendStore();
@@ -235,11 +275,18 @@ const apiDefaultConfig = (): ApiConfigData => ({
   edit_blacklist: [],
 });
 
+const localDefaultConfig = (): LocalConfigData => ({
+  root_dir: '~',
+  edit_whitelist: [],
+  edit_blacklist: [],
+  ignore_dirs: ['.git', 'node_modules', '__pycache__']
+});
+
 const defaultForm = (type: BackendType = 'ssh'): BackendCreate => ({
   name: '',
   description: '',
   backendType: type,
-  configData: type === 'ssh' ? sshDefaultConfig() : apiDefaultConfig(),
+  configData: type === 'ssh' ? sshDefaultConfig() : type === 'api' ? apiDefaultConfig() : localDefaultConfig(),
   tools_config: defaultToolsConfig()
 });
 
@@ -273,7 +320,15 @@ const apiRules: FormRules = {
   'configData.api_key': [{ required: true, message: '请输入 API Key', trigger: 'blur' }]
 };
 
-const currentRules = computed(() => form.backendType === 'ssh' ? sshRules : apiRules);
+const localRules: FormRules = {
+  name: nameRules
+};
+
+const currentRules = computed(() => {
+  if (form.backendType === 'ssh') return sshRules;
+  if (form.backendType === 'api') return apiRules;
+  return localRules;
+});
 
 const handleTypeChange = (type: BackendType) => {
   const newForm = defaultForm(type);
@@ -396,6 +451,11 @@ const submitForm = async () => {
           if (cd.edit_blacklist?.length === 0) cd.edit_blacklist = null;
           if (cd.ignore_dirs?.length === 0) cd.ignore_dirs = null;
           if (!cd.password) cd.password = null;
+        } else if (submitData.backendType === 'local') {
+          if (cd.edit_whitelist?.length === 0) cd.edit_whitelist = null;
+          if (cd.edit_blacklist?.length === 0) cd.edit_blacklist = null;
+          if (cd.ignore_dirs?.length === 0) cd.ignore_dirs = null;
+          if (!cd.root_dir || cd.root_dir === '~') cd.root_dir = '~';
         } else {
           if (cd.edit_whitelist?.length === 0) cd.edit_whitelist = null;
           if (cd.edit_blacklist?.length === 0) cd.edit_blacklist = null;
@@ -517,6 +577,16 @@ const copyPublicKey = async () => {
 
 .api-tip {
   margin-bottom: 16px;
+}
+
+.local-warning {
+  margin-bottom: 16px;
+}
+
+.path-picker-tip {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
 }
 
 .public-key-container {

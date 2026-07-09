@@ -27,6 +27,7 @@ from mambo_agents import (
 )
 from mambo_agents.backends.schemas import VirtualPath
 from mambo_agents.backends.ssh import SshBackend
+from mambo_agents.backends.local import LocalBackend
 from mambo_agents.middleware.security_review import SecurityReviewConfig
 
 from backend.checkpointer import get_checkpointer
@@ -183,6 +184,22 @@ def _build_any_backend(
             edit_whitelist=_to_frozenset(config.get("edit_whitelist")),
             edit_blacklist=_to_frozenset(config.get("edit_blacklist")),
             enable_version_editing=config.get("enable_version_editing", True),
+        )
+
+    elif b_type == BackendType.LOCAL.value:
+        from pathlib import Path
+        tools_config = config.get("tools_config", {})
+        execute_cfg = tools_config.get("execute", {})
+        execute_enabled = execute_cfg.get("enabled", False)
+        root_dir = config.get("root_dir") or str(Path.home())
+        if root_dir == "~":
+            root_dir = str(Path.home())
+        return LocalBackend(
+            root_dir=root_dir,
+            enable_execute=execute_enabled,
+            edit_whitelist=_to_virtual_path_frozenset(config.get("edit_whitelist")),
+            edit_blacklist=_to_virtual_path_frozenset(config.get("edit_blacklist")),
+            ignore_dirs=_to_frozenset(config.get("ignore_dirs")),
         )
 
     return None

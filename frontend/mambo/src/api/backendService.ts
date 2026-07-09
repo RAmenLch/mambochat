@@ -1,5 +1,5 @@
 import apiClient from './index';
-import type { BackendConfig, BackendCreate, BackendUpdate, SshPublicKeyResponse, SshTestRequest, SshTestResponse, SshLsRequest, SshLsResponse } from './types/backendTypes';
+import type { BackendConfig, BackendCreate, BackendUpdate, SshPublicKeyResponse, SshTestRequest, SshTestResponse, UnifiedLsRequest, LocalLsResponse } from './types/backendTypes';
 
 export const getBackends = (skip = 0, limit = 100): Promise<BackendConfig[]> => {
   return apiClient.get('/backends/', { params: { skip, limit } });
@@ -29,8 +29,9 @@ export const testSshConnection = (data: SshTestRequest): Promise<SshTestResponse
   return apiClient.post('/backends/ssh/test', data);
 };
 
-export const sshListDirectory = (data: SshLsRequest): Promise<SshLsResponse> => {
-  return apiClient.post('/backends/ssh/ls', data);
+/** 目录列表 API — 根据 backend_type 自动分发（ssh / local） */
+export const listDirectory = (data: UnifiedLsRequest): Promise<LocalLsResponse> => {
+  return apiClient.post('/backends/ls', data);
 };
 
 export interface ClientStatusResponse {

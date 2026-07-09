@@ -451,6 +451,32 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
   }
 
   /**
+   * 切换单个 Reasoning 子消息的最小化状态
+   * @param messageId - 所属消息ID
+   * @param subMessageId - 子消息ID
+   * @param isMinimal - 是否最小化
+   */
+  async function updateSingleSubMessageMinimalState(messageId: string, subMessageId: string, isMinimal: boolean) {
+    const message = sessionStore.currentChatMessages.find(m => m.id === messageId);
+    if (!message) return;
+
+    const subMessage = message.sub_messages.find(sm => sm.id === subMessageId);
+    if (!subMessage || subMessage.type !== 'Reasoning') return;
+    if (subMessage.config.is_minimal === isMinimal) return;
+
+    subMessage.config = { ...subMessage.config, is_minimal: isMinimal };
+
+    try {
+      await updateSubMessageAPI(subMessageId, { config: { ...subMessage.config, is_minimal: isMinimal } });
+    } catch (error) {
+      console.error(`Failed to update minimal state for subMessage ${subMessageId}:`, error);
+      if (sessionStore.currentChatId) {
+        await sessionStore.selectChat(sessionStore.currentChatId, true);
+      }
+    }
+  }
+
+  /**
    * 激活指定消息分支
    * @param messageId - 目标消息ID
    */
@@ -502,6 +528,7 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     updateZipHistorySubMessage,
     _subscribeToMessageStream,
     batchUpdateSubMessagesMinimalState,
+    updateSingleSubMessageMinimalState,
     submitToolReview,
     submitAskUserAnswer,
     activateBranch,

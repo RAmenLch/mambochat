@@ -44,7 +44,7 @@ function isAskUserAnswered(sm: SubMessage): boolean {
   }
 }
 
-export function useAssistantTimeline(message: Ref<Message>) {
+export function useAssistantTimeline(message: Ref<Message>, messageDisplayMode?: Ref<string>) {
 
   // 1. 过滤掉无需在时间线主轴显示的独立组件，以及已审批的 ReviewTool 和已回答的 AskUser，以及子代理追踪步骤
   const timelineSubMessages = computed(() => {
@@ -135,6 +135,86 @@ export function useAssistantTimeline(message: Ref<Message>) {
       ? { type: 'normal', groups: timeline.value.normalGroups }
       : null;
   });
+
+  // ========== 交错模式：按时间顺序产出 sections ==========
+  /**
+   * 交错模式下的有序 sections 列表。
+   * 与堆叠模式不同，这里 Reasoning 和 Normal 按时间顺序交错排列，
+   * 每个 section 包含一个文本分组 + 跟随的工具调用。
+   */
+  const interleavedSections = computed<BubbleSection[]>(() => {
+    const sections: BubbleSection[] = [];
+    let currentSection: BubbleSection | null = null;
+
+    const finishSection = () => {
+      if (currentSection && currentSection.groups.length > 0) {
+        sections.push(currentSection);
+      }
+      currentSection = null;
+    };
+
+    for (const sm of timelineSubMessages.value) {
+      if (sm.type === 'Reasoning') {
+        // 如果当前 section 已经是 reasoning，追加到其中（合并连续思考）
+        if (currentSection && currentSection.type === 'reasoning') {
+          currentSection.groups.push({ id: sm.id, textSubMessage: sm, toolSubMessages: [] });
+        } else {
+          finishSection();
+          currentSection = {
+            type: 'reasoning',
+            groups: [{ id: sm.id, textSubMessage: sm, toolSubMessages: [] }],
+          };
+        }
+      } else if (sm.type === 'Normal') {
+        finishSection();
+        currentSection = {
+          type: 'normal',
+          groups: [{ id: sm.id, textSubMessage: sm, toolSubMessages: [] }],
+        };
+      } else if (sm.type === 'File') {
+        // File 类型放入 Normal section
+        if (currentSection && currentSection.type === 'normal') {
+          const lastGroup = currentSection.groups[currentSection.groups.length - 1];
+          if (lastGroup.fileSubMessages && lastGroup.fileSubMessages.length > 0) {
+            lastGroup.fileSubMessages.push(sm);
+          } else {
+            currentSection.groups.push({ id: sm.id, textSubMessage: null, toolSubMessages: [], fileSubMessages: [sm] });
+          }
+        } else {
+          finishSection();
+          currentSection = {
+            type: 'normal',
+            groups: [{ id: sm.id, textSubMessage: null, toolSubMessages: [], fileSubMessages: [sm] }],
+          };
+        }
+      } else if (sm.type === 'McpTool' || sm.type === 'ReviewTool' || sm.type === 'AskUser') {
+        if (!currentSection) {
+          currentSection = {
+            type: 'normal',
+            groups: [{ id: `${sm.id}_group`, textSubMessage: null, toolSubMessages: [] }],
+          };
+        }
+        const lastGroup = currentSection.groups[currentSection.groups.length - 1];
+        lastGroup.toolSubMessages.push(sm);
+      }
+    }
+
+    finishSection();
+    return sections;
+  });
+
+  /**
+   * 判断交错模式中某个 Reasoning section 是否处于最小化状态。
+   * 依据：该 section 内所有 Reasoning 类型 textSubMessage 的 is_minimal 均为 true。
+   */
+  function isSectionMinimized(section: BubbleSection): boolean {
+    if (section.type !== 'reasoning') return false;
+    const reasoningTexts = section.groups
+      .map(g => g.textSubMessage)
+      .filter(sm => sm && sm.type === 'Reasoning');
+    if (reasoningTexts.length === 0) return false;
+    return reasoningTexts.every(sm => sm?.config?.is_minimal === true);
+  }
 
   // 4. 导出独立的 SubMessages
   const usageSubMessages = computed(() =>
@@ -270,6 +350,8 @@ export function useAssistantTimeline(message: Ref<Message>) {
   return {
     reasoningSection,
     normalSection,
+    interleavedSections,
+    isSectionMinimized,
     usageSubMessages,
     zipHistorySubMessage,
     zipCoverageGroupIds,

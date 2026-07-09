@@ -14,7 +14,6 @@ Unlike the deepagents version, this returns mambo_agents-style result types
 """
 
 import base64
-import fnmatch
 import logging
 import posixpath
 from typing import Any
@@ -135,19 +134,31 @@ class MamboAPIBackend(BackendProtocol):
         return norm
 
     def _check_edit_permission(self, virtual_path: VirtualPath) -> None:
-        filename = posixpath.basename(str(virtual_path))
-        if self.edit_whitelist and not any(
-            fnmatch.fnmatch(filename, p) for p in self.edit_whitelist
-        ):
-            raise PermissionError(
-                f"Edit denied: File '{filename}' is not in the edit whitelist."
+        """Check if *virtual_path* is allowed for write/edit via path prefix matching.
+
+        Whitelist/blacklist entries are virtual path prefixes (e.g. ``"/workspace/src/"``).
+        A path is allowed if it starts with (or equals) a whitelist prefix,
+        or does NOT start with any blacklist prefix.
+        """
+        path_str = str(virtual_path)
+        if self.edit_whitelist:
+            allowed = any(
+                path_str == p.rstrip("/") or path_str.startswith(p.rstrip("/") + "/")
+                for p in self.edit_whitelist
             )
-        if self.edit_blacklist and any(
-            fnmatch.fnmatch(filename, p) for p in self.edit_blacklist
-        ):
-            raise PermissionError(
-                f"Edit denied: File '{filename}' is in the edit blacklist."
+            if not allowed:
+                raise PermissionError(
+                    f"Edit denied: Path '{path_str}' is not in the edit whitelist."
+                )
+        if self.edit_blacklist:
+            forbidden = any(
+                path_str == p.rstrip("/") or path_str.startswith(p.rstrip("/") + "/")
+                for p in self.edit_blacklist
             )
+            if forbidden:
+                raise PermissionError(
+                    f"Edit denied: Path '{path_str}' is in the edit blacklist."
+                )
 
     async def _run_ws_call(
         self,

@@ -83,6 +83,23 @@
           </el-radio-group>
         </el-form-item>
 
+        <el-form-item>
+          <template #label>
+            <span>{{ t('settings.global.messageDisplay') }}</span>
+            <el-tooltip
+              effect="dark"
+              :content="t('settings.global.messageDisplayTip')"
+              placement="top"
+            >
+              <el-icon class="label-icon"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </template>
+          <el-radio-group v-model="settingsForm.message_display_mode">
+            <el-radio-button label="stacked">{{ t('settings.global.messageDisplayStacked') }}</el-radio-button>
+            <el-radio-button label="interleaved">{{ t('settings.global.messageDisplayInterleaved') }}</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+
         <el-form-item :label="t('settings.global.sendShortcut')">
           <el-select v-model="settingsForm.send_message_shortcut" style="width: 100%">
             <el-option :label="t('settings.global.shortcutEnter')" value="enter" />
@@ -381,6 +398,7 @@ const settingsForm = reactive<
   proxy_url: null,
   zip_history_system_prompt: null,
   frontend_editor: 'simple',
+  message_display_mode: 'interleaved',
   kb_default_chunk_size: 500,
   kb_default_chunk_overlap: 50,
   send_message_shortcut: 'enter',
@@ -442,6 +460,7 @@ watch(
       zip_history_system_prompt: newSettings.zip_history_system_prompt,
       // 确保赋值给 frontend_editor 的值不为 null
       frontend_editor: newSettings.frontend_editor ?? 'simple',
+      message_display_mode: newSettings.message_display_mode ?? 'interleaved',
       kb_default_chunk_size: newSettings.kb_default_chunk_size,
       kb_default_chunk_overlap: newSettings.kb_default_chunk_overlap,
       send_message_shortcut: newSettings.send_message_shortcut,

@@ -22,11 +22,11 @@ class APIConfigData(BaseModel):
     """API Backend 配置结构 - 客户端主动连接模式
 
     仅需 api_key。root_dir / ignore_dirs 由客户端启动时通过 --root-dir / --ignore-dirs 参数指定。
-    edit_whitelist 和 edit_blacklist 由服务端控制，用于限制 LLM 可编辑的文件范围。
+    edit_whitelist 和 edit_blacklist 由服务端控制，使用虚拟路径前缀匹配来限制 LLM 可编辑的路径范围。
     """
     api_key: str = Field(..., description="API 密钥，客户端连接时需要提供此密钥进行认证")
-    edit_whitelist: Optional[List[str]] = Field(None, description="允许编辑的文件通配符列表")
-    edit_blacklist: Optional[List[str]] = Field(None, description="禁止编辑的文件通配符列表")
+    edit_whitelist: Optional[List[str]] = Field(None, description="允许编辑的虚拟路径前缀列表，如 ['/workspace/src/', '/workspace/app/']")
+    edit_blacklist: Optional[List[str]] = Field(None, description="禁止编辑的虚拟路径前缀列表，如 ['/workspace/build/']")
 
 
 class ResourceConfigData(BaseModel):
@@ -36,8 +36,20 @@ class ResourceConfigData(BaseModel):
     其后代子树将被加载为虚拟文件系统供 Agent 读写。
     """
     resource_id: str = Field(..., description="挂载的资源文件夹 ID（FOLDER 类型 Resource）")
-    edit_whitelist: Optional[List[str]] = Field(None, description="允许编辑的文件通配符列表")
-    edit_blacklist: Optional[List[str]] = Field(None, description="禁止编辑的文件通配符列表")
+    edit_whitelist: Optional[List[str]] = Field(None, description="允许编辑的虚拟路径前缀列表，如 ['/workspace/src/', '/workspace/app/']")
+    edit_blacklist: Optional[List[str]] = Field(None, description="禁止编辑的虚拟路径前缀列表，如 ['/workspace/build/']")
+
+
+class LocalConfigData(BaseModel):
+    """Local Backend 配置结构 - 直接访问服务器本地文件系统
+
+    将服务器本机文件系统映射为 Agent 的虚拟文件系统。
+    root_dir 默认为当前用户目录。
+    """
+    root_dir: str = Field("~", description="映射的本地根目录，默认为用户 home 目录")
+    edit_whitelist: Optional[List[str]] = Field(None, description="允许编辑的虚拟路径前缀列表")
+    edit_blacklist: Optional[List[str]] = Field(None, description="禁止编辑的虚拟路径前缀列表")
+    ignore_dirs: Optional[List[str]] = Field(None, description="遍历时忽略的目录，如 ['.git', 'node_modules']")
 
 class BackendConfigBase(BaseModel):
     name: str = Field(..., description="Backend 挂载路由名称 (仅限字母数字下划线)")
@@ -74,6 +86,8 @@ class BackendConfigBase(BaseModel):
                 APIConfigData(**v)
         elif backend_type == BackendType.RESOURCE.value:
             ResourceConfigData(**v)
+        elif backend_type == BackendType.LOCAL.value:
+            LocalConfigData(**v)
         return v
 
     @model_validator(mode='after')
@@ -133,19 +147,39 @@ class SSHLsEntry(BaseModel):
 
 
 class SSHLsRequest(BaseModel):
-    """列出远程 SSH 目录的请求"""
+    """[内部] SSH 目录列表请求 — 由 UnifiedLsRequest 构造"""
+    path: str = Field("/")
+    hostname: str = Field(...)
+    port: int = Field(22)
+    username: str = Field(...)
+    password: Optional[str] = Field(None)
+    root_dir: str = Field("/")
+    backend_id: Optional[str] = Field(None)
+
+
+class LocalLsRequest(BaseModel):
+    """列出本地文件系统目录的请求"""
     path: str = Field("/", description="要列出的路径（相对于 root_dir，如 / 表示 root_dir 本身）")
-    hostname: str = Field(..., description="远程服务器 IP 或域名")
-    port: int = Field(22, description="SSH 端口")
-    username: str = Field(..., description="SSH 登录用户名")
-    password: Optional[str] = Field(None, description="SSH 密码")
-    root_dir: str = Field("/", description="远程根目录（如 /home/user）")
-    backend_id: Optional[str] = Field(None, description="已保存的 Backend ID，用于密码脱敏合并")
+    root_dir: str = Field("~", description="本地根目录（如 /home/user 或 C:\\Users\\xxx）")
 
 
-class SSHLsResponse(BaseModel):
-    """列出远程 SSH 目录的响应"""
+class LocalLsResponse(BaseModel):
+    """列出本地文件系统目录的响应"""
     success: bool = Field(..., description="操作是否成功")
     message: str = Field("", description="成功或失败的详细信息")
     entries: Optional[List[SSHLsEntry]] = Field(None, description="目录条目列表")
     parent_path: Optional[str] = Field(None, description="父目录路径")
+
+
+class UnifiedLsRequest(BaseModel):
+    """统一的目录列表请求，根据 backend_type 分发到不同实现"""
+    backend_type: BackendType = Field(..., description="Backend 类型：ssh / local")
+    path: str = Field("/", description="要列出的路径")
+    root_dir: str = Field("/", description="根目录（SSH: 远程根目录 / Local: 本地根目录）")
+    # SSH 专用（Local 忽略）
+    hostname: Optional[str] = Field(None, description="SSH: 远程服务器 IP 或域名")
+    port: int = Field(22, description="SSH: 端口")
+    username: Optional[str] = Field(None, description="SSH: 登录用户名")
+    password: Optional[str] = Field(None, description="SSH: 密码")
+    # 通用
+    backend_id: Optional[str] = Field(None, description="已保存的 Backend ID，用于 SSH 密码脱敏合并")

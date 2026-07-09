@@ -19,6 +19,7 @@
           <el-tag v-if="row.backendType === 'ssh'" size="small" type="info">SSH</el-tag>
           <el-tag v-else-if="row.backendType === 'api'" size="small" type="success">API</el-tag>
           <el-tag v-else-if="row.backendType === 'resource'" size="small" type="warning">Resource</el-tag>
+          <el-tag v-else-if="row.backendType === 'local'" size="small" type="danger">Local</el-tag>
         </template>
       </el-table-column>
       <el-table-column :label="$t('backend.host')" min-width="220">
@@ -44,6 +45,11 @@
             <div class="api-info">
               <span class="api-label">Resource ID:</span>
               <span class="api-id">{{ row.configData.resource_id }}</span>
+            </div>
+          </template>
+          <template v-else-if="row.backendType === 'local'">
+            <div class="api-info">
+              <span class="api-label">{{ row.configData.root_dir || '~' }}</span>
             </div>
           </template>
         </template>
@@ -81,6 +87,7 @@
             <el-option label="SSH (远程服务器)" value="ssh" />
             <el-option label="API (客户端连接)" value="api" />
             <el-option label="Resource (资源文件夹)" value="resource" />
+            <el-option label="Local (本地文件系统)" value="local" />
           </el-select>
         </el-form-item>
 
@@ -117,16 +124,59 @@
 
           <el-form-item label="编辑模式">
             <el-radio-group v-model="editMode" @change="onEditModeChange">
-              <el-radio value="whitelist">白名单（仅允许匹配文件）</el-radio>
-              <el-radio value="blacklist">黑名单（禁止匹配文件）</el-radio>
+              <el-radio value="whitelist">白名单（仅允许以下路径）</el-radio>
+              <el-radio value="blacklist">黑名单（禁止以下路径）</el-radio>
             </el-radio-group>
           </el-form-item>
 
           <el-form-item v-if="editMode === 'whitelist'" label="Edit Whitelist" prop="configData.edit_whitelist">
-            <el-select v-model="form.configData.edit_whitelist" multiple filterable allow-create default-first-option placeholder="例如: *.py (回车添加)" style="width: 100%" />
+            <div class="path-picker-row">
+              <el-tag
+                v-for="(item, idx) in (form.configData as any).edit_whitelist"
+                :key="'wl-api-' + idx"
+                closable
+                size="small"
+                @close="removeFromWhitelist(idx)"
+                class="path-tag"
+              >{{ item }}</el-tag>
+              <el-input
+                v-if="isWlInputVisible"
+                ref="wlInputRef"
+                v-model="newWlValue"
+                size="small"
+                class="tag-input-inline"
+                placeholder="/workspace/src/  回车添加"
+                @keyup.enter="addWhitelistItem"
+                @blur="addWhitelistItem"
+              />
+              <el-button v-else size="small" @click="openWlInput">+ 添加路径</el-button>
+            </div>
+            <div class="path-picker-tip">输入虚拟路径前缀（如 /workspace/src/），该路径及其子目录将被允许编辑</div>
           </el-form-item>
           <el-form-item v-if="editMode === 'blacklist'" label="Edit Blacklist" prop="configData.edit_blacklist">
-            <el-select v-model="form.configData.edit_blacklist" multiple filterable allow-create default-first-option placeholder="例如: .env (回车添加)" style="width: 100%" />
+            <div class="path-picker-row">
+              <el-tag
+                v-for="(item, idx) in (form.configData as any).edit_blacklist"
+                :key="'bl-api-' + idx"
+                closable
+                size="small"
+                type="danger"
+                @close="removeFromBlacklist(idx)"
+                class="path-tag"
+              >{{ item }}</el-tag>
+              <el-input
+                v-if="isBlInputVisible"
+                ref="blInputRef"
+                v-model="newBlValue"
+                size="small"
+                class="tag-input-inline"
+                placeholder="/workspace/build/  回车添加"
+                @keyup.enter="addBlacklistItem"
+                @blur="addBlacklistItem"
+              />
+              <el-button v-else size="small" type="danger" plain @click="openBlInput">+ 添加路径</el-button>
+            </div>
+            <div class="path-picker-tip">输入虚拟路径前缀（如 /workspace/build/），该路径及其子目录将被禁止编辑</div>
           </el-form-item>
           <div class="api-tip">
             <el-alert type="info" :closable="false" show-icon>
@@ -173,16 +223,65 @@
 
           <el-form-item label="编辑模式">
             <el-radio-group v-model="editMode" @change="onEditModeChange">
-              <el-radio value="whitelist">白名单（仅允许匹配文件）</el-radio>
-              <el-radio value="blacklist">黑名单（禁止匹配文件）</el-radio>
+              <el-radio value="whitelist">白名单（仅允许以下路径）</el-radio>
+              <el-radio value="blacklist">黑名单（禁止以下路径）</el-radio>
             </el-radio-group>
           </el-form-item>
 
           <el-form-item v-if="editMode === 'whitelist'" label="Edit Whitelist" prop="configData.edit_whitelist">
-            <el-select v-model="form.configData.edit_whitelist" multiple filterable allow-create default-first-option placeholder="例如: *.py, *.md (回车添加)" style="width: 100%" />
+            <div class="path-picker-row">
+              <el-tag
+                v-for="(item, idx) in (form.configData as any).edit_whitelist"
+                :key="'wl-res-' + idx"
+                closable
+                size="small"
+                @close="removeFromWhitelist(idx)"
+                class="path-tag"
+              >{{ item }}</el-tag>
+              <el-input
+                v-if="isWlInputVisible"
+                ref="wlInputRef"
+                v-model="newWlValue"
+                size="small"
+                class="tag-input-inline"
+                placeholder="/workspace/src/  回车添加"
+                @keyup.enter="addWhitelistItem"
+                @blur="addWhitelistItem"
+              />
+              <el-button v-else size="small" @click="openWlInput">+ 手动添加</el-button>
+              <el-button size="small" @click="openResPicker('whitelist')">
+                <el-icon><FolderOpened /></el-icon> 浏览资源树
+              </el-button>
+            </div>
+            <div class="path-picker-tip">输入虚拟路径前缀或点击「浏览资源树」选择</div>
           </el-form-item>
           <el-form-item v-if="editMode === 'blacklist'" label="Edit Blacklist" prop="configData.edit_blacklist">
-            <el-select v-model="form.configData.edit_blacklist" multiple filterable allow-create default-first-option placeholder="例如: .env (回车添加)" style="width: 100%" />
+            <div class="path-picker-row">
+              <el-tag
+                v-for="(item, idx) in (form.configData as any).edit_blacklist"
+                :key="'bl-res-' + idx"
+                closable
+                size="small"
+                type="danger"
+                @close="removeFromBlacklist(idx)"
+                class="path-tag"
+              >{{ item }}</el-tag>
+              <el-input
+                v-if="isBlInputVisible"
+                ref="blInputRef"
+                v-model="newBlValue"
+                size="small"
+                class="tag-input-inline"
+                placeholder="/workspace/build/  回车添加"
+                @keyup.enter="addBlacklistItem"
+                @blur="addBlacklistItem"
+              />
+              <el-button v-else size="small" type="danger" plain @click="openBlInput">+ 手动添加</el-button>
+              <el-button size="small" type="danger" plain @click="openResPicker('blacklist')">
+                <el-icon><FolderOpened /></el-icon> 浏览资源树
+              </el-button>
+            </div>
+            <div class="path-picker-tip">输入虚拟路径前缀或点击「浏览资源树」选择</div>
           </el-form-item>
           <div class="api-tip">
             <el-alert type="success" :closable="false" show-icon>
@@ -192,6 +291,90 @@
               </template>
             </el-alert>
           </div>
+        </template>
+
+        <!-- Local 配置 -->
+        <template v-if="form.backendType === 'local'">
+          <el-alert type="warning" :closable="false" show-icon class="local-warning">
+            <template #title>
+              本地 Backend 直接访问服务器文件系统，错误操作可能导致 MamboChat 平台不可用，请谨慎使用！
+            </template>
+          </el-alert>
+
+          <el-divider content-position="left">本地配置</el-divider>
+
+          <el-form-item label="Root Dir" prop="configData.root_dir">
+            <el-input v-model="form.configData.root_dir" placeholder="默认为当前用户 home 目录，'~' 也表示 home 目录" />
+          </el-form-item>
+
+          <el-divider content-position="left">编辑权限控制</el-divider>
+
+          <el-form-item label="编辑模式">
+            <el-radio-group v-model="editMode" @change="onEditModeChange">
+              <el-radio value="whitelist">白名单（仅允许以下目录）</el-radio>
+              <el-radio value="blacklist">黑名单（禁止以下目录）</el-radio>
+            </el-radio-group>
+          </el-form-item>
+
+          <el-form-item v-if="editMode === 'whitelist'" label="Edit Whitelist" prop="configData.edit_whitelist">
+            <div class="path-picker-row">
+              <el-tag
+                v-for="(item, idx) in (form.configData as any).edit_whitelist"
+                :key="'wl-local-' + idx"
+                closable
+                size="small"
+                @close="removeFromWhitelist(idx)"
+                class="path-tag"
+              >{{ item }}</el-tag>
+              <el-input
+                v-if="isWlInputVisible"
+                ref="wlInputRef"
+                v-model="newWlValue"
+                size="small"
+                class="tag-input-inline"
+                placeholder="/workspace/src/  回车添加"
+                @keyup.enter="addWhitelistItem"
+                @blur="addWhitelistItem"
+              />
+              <el-button v-else size="small" @click="openWlInput">+ 手动添加</el-button>
+              <el-button size="small" @click="openDirPicker('whitelist', 'local')">
+                <el-icon><FolderOpened /></el-icon> 浏览选择
+              </el-button>
+            </div>
+            <div class="path-picker-tip">手动输入或点击「浏览选择」从本机文件系统选取目录</div>
+          </el-form-item>
+          <el-form-item v-if="editMode === 'blacklist'" label="Edit Blacklist" prop="configData.edit_blacklist">
+            <div class="path-picker-row">
+              <el-tag
+                v-for="(item, idx) in (form.configData as any).edit_blacklist"
+                :key="'bl-local-' + idx"
+                closable
+                size="small"
+                type="danger"
+                @close="removeFromBlacklist(idx)"
+                class="path-tag"
+              >{{ item }}</el-tag>
+              <el-input
+                v-if="isBlInputVisible"
+                ref="blInputRef"
+                v-model="newBlValue"
+                size="small"
+                class="tag-input-inline"
+                placeholder="/workspace/build/  回车添加"
+                @keyup.enter="addBlacklistItem"
+                @blur="addBlacklistItem"
+              />
+              <el-button v-else size="small" type="danger" plain @click="openBlInput">+ 手动添加</el-button>
+              <el-button size="small" type="danger" plain @click="openDirPicker('blacklist', 'local')">
+                <el-icon><FolderOpened /></el-icon> 浏览选择
+              </el-button>
+            </div>
+            <div class="path-picker-tip">手动输入或点击「浏览选择」从本机文件系统选取目录</div>
+          </el-form-item>
+
+          <el-form-item label="Ignore Dirs" prop="configData.ignore_dirs">
+            <el-select v-model="form.configData.ignore_dirs" multiple filterable allow-create default-first-option placeholder="例如: .git, node_modules (回车添加)" style="width: 100%" />
+          </el-form-item>
         </template>
 
         <!-- 通用配置 (仅 SSH) -->
@@ -220,11 +403,22 @@
                 @close="removeWhitelistItem(idx)"
                 class="path-tag"
               >{{ item }}</el-tag>
+              <el-input
+                v-if="isWlInputVisible"
+                ref="wlInputRef"
+                v-model="newWlValue"
+                size="small"
+                class="tag-input-inline"
+                placeholder="/workspace/src/  回车添加"
+                @keyup.enter="addWhitelistItem"
+                @blur="addWhitelistItem"
+              />
+              <el-button v-else size="small" @click="openWlInput">+ 手动添加</el-button>
               <el-button size="small" @click="openDirPicker('whitelist')" :disabled="!canBrowseSSH">
                 <el-icon><FolderOpened /></el-icon> 浏览选择
               </el-button>
             </div>
-            <div class="path-picker-tip">从远程服务器选取虚拟路径前缀（如 /workspace/src/）</div>
+            <div class="path-picker-tip">手动输入或点击「浏览选择」从远程服务器选取目录</div>
           </el-form-item>
 
           <el-form-item v-if="editMode === 'blacklist'" label="Edit Blacklist" prop="configData.edit_blacklist">
@@ -237,11 +431,22 @@
                 type="danger"
                 class="path-tag"
               >{{ item }}</el-tag>
-              <el-button size="small" @click="openDirPicker('blacklist')" :disabled="!canBrowseSSH" type="danger" plain>
+              <el-input
+                v-if="isBlInputVisible"
+                ref="blInputRef"
+                v-model="newBlValue"
+                size="small"
+                class="tag-input-inline"
+                placeholder="/workspace/build/  回车添加"
+                @keyup.enter="addBlacklistItem"
+                @blur="addBlacklistItem"
+              />
+              <el-button v-else size="small" type="danger" plain @click="openBlInput">+ 手动添加</el-button>
+              <el-button size="small" type="danger" plain @click="openDirPicker('blacklist')" :disabled="!canBrowseSSH">
                 <el-icon><FolderOpened /></el-icon> 浏览选择
               </el-button>
             </div>
-            <div class="path-picker-tip">从远程服务器选取虚拟路径前缀（如 /workspace/build/）</div>
+            <div class="path-picker-tip">手动输入或点击「浏览选择」从远程服务器选取目录</div>
           </el-form-item>
 
           <el-form-item label="Ignore Dirs" prop="configData.ignore_dirs">
@@ -249,10 +454,15 @@
           </el-form-item>
         </template>
 
-        <!-- 工具配置 (仅 SSH / API) -->
-        <template v-if="form.backendType === 'ssh' || form.backendType === 'api'">
+        <!-- 工具配置 (SSH / API / Local) -->
+        <template v-if="form.backendType === 'ssh' || form.backendType === 'api' || form.backendType === 'local'">
           <el-divider content-position="left">{{ $t('backend.toolConfig') }}</el-divider>
-          <el-form-item label="Execute (命令执行)">
+          <el-form-item>
+            <template #label>
+              <el-tooltip content="允许 Agent 在目标机器上执行 Shell 命令" placement="top">
+                <span>Execute <span style="font-size: 11px; color: var(--el-text-color-secondary);">命令执行</span></span>
+              </el-tooltip>
+            </template>
             <div class="tools-config-row">
               <span class="tools-config-label">{{ $t('backend.toolEnabled') }}</span>
               <el-switch v-model="form.tools_config!.execute.enabled" />
@@ -364,11 +574,59 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 资源树目录选择器弹窗（Resource Backend） -->
+    <el-dialog
+      v-model="resPickerVisible"
+      :title="resPickerMode === 'whitelist' ? '选择允许编辑的资源目录（勾选 → 确认）' : '选择禁止编辑的资源目录（勾选 → 确认）'"
+      width="580px"
+      :close-on-click-modal="false"
+      @open="onResPickerOpen"
+    >
+      <div class="dir-picker-container">
+        <div class="dir-picker-hint">
+          已选 {{ resPickerChecked.size }} 个目录
+          <el-button v-if="resPickerChecked.size > 0" link size="small" type="danger" @click="resPickerChecked = new Set()">清空</el-button>
+        </div>
+        <div v-loading="isResTreeLoading" class="dir-picker-list">
+          <div v-if="resFolderEntries.length === 0 && !isResTreeLoading" class="dir-empty">
+            目录为空。请先在「资源管理」中创建 FOLDER 类型的资源。
+          </div>
+          <div
+            v-for="entry in resFolderEntries"
+            :key="entry.vpath"
+            class="dir-entry"
+            :class="{ 'is-checked': resPickerChecked.has(entry.vpath) }"
+            @click="toggleResPicker(entry.vpath)"
+          >
+            <el-checkbox
+              :model-value="resPickerChecked.has(entry.vpath)"
+              class="dir-entry-checkbox"
+              @click.stop
+            />
+            <div class="dir-entry-body">
+              <el-icon class="dir-entry-icon"><Folder /></el-icon>
+              <span class="dir-entry-name">{{ entry.vpath }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="resPickerVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          @click="confirmResPicker"
+          :disabled="resPickerChecked.size === 0"
+        >
+          确认选择 ({{ resPickerChecked.size }})
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { storeToRefs } from 'pinia';
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
@@ -376,8 +634,8 @@ import { Plus, Key, Connection, View, Hide, FolderOpened, HomeFilled, Folder, Ar
 import { useBackendStore } from '@/stores/backendStore';
 import { useResourceStore } from '@/stores/resourceStore';
 import { copyToClipboard } from '@/utils/clipboard';
-import { getClientStatus, sshListDirectory } from '@/api/backendService';
-import type { BackendConfig, BackendCreate, BackendType, SshConfigData, ApiConfigData, ResourceConfigData, SshTestRequest, SshLsEntry } from '@/api/types/backendTypes';
+import { getClientStatus, listDirectory } from '@/api/backendService';
+import type { BackendConfig, BackendCreate, BackendType, SshConfigData, ApiConfigData, ResourceConfigData, LocalConfigData, SshTestRequest, SshLsEntry, UnifiedLsRequest } from '@/api/types/backendTypes';
 import { isSshConfig, defaultToolsConfig } from '@/api/types/backendTypes';
 
 const { t } = useI18n();
@@ -426,11 +684,62 @@ function onEditModeChange() {
   }
 }
 
+// --- 通用 tag 输入状态（API / Resource / Local 黑白名单）---
+const isWlInputVisible = ref(false);
+const newWlValue = ref('');
+const isBlInputVisible = ref(false);
+const newBlValue = ref('');
+const wlInputRef = ref<any>(null);
+const blInputRef = ref<any>(null);
+
+function openWlInput() {
+  isWlInputVisible.value = true;
+  nextTick(() => wlInputRef.value?.focus());
+}
+function openBlInput() {
+  isBlInputVisible.value = true;
+  nextTick(() => blInputRef.value?.focus());
+}
+
+function addWhitelistItem() {
+  const v = newWlValue.value.trim();
+  if (v) {
+    const arr = (form.configData as any).edit_whitelist || [];
+    if (!arr.includes(v)) arr.push(v);
+  }
+  newWlValue.value = '';
+  isWlInputVisible.value = false;
+}
+
+function addBlacklistItem() {
+  const v = newBlValue.value.trim();
+  if (v) {
+    const arr = (form.configData as any).edit_blacklist || [];
+    if (!arr.includes(v)) arr.push(v);
+  }
+  newBlValue.value = '';
+  isBlInputVisible.value = false;
+}
+
+function removeFromWhitelist(idx: number) {
+  (form.configData as any).edit_whitelist?.splice(idx, 1);
+}
+
+function removeFromBlacklist(idx: number) {
+  (form.configData as any).edit_blacklist?.splice(idx, 1);
+}
+
 // 是否可以浏览 SSH 目录 — 需要填好 hostname + username
 const canBrowseSSH = computed(() => {
   const cd = form.configData as SshConfigData;
   return !!(cd.hostname && cd.username);
 });
+
+// Local Backend 也可以浏览目录（本机文件系统）
+const canBrowseLocal = computed(() => true);
+
+// 当前目录选择器对应的 Backend 类型
+const dirPickerBackendType = ref<'ssh' | 'local'>('ssh');
 
 const currentVirtualPath = computed(() => {
   if (!currentRemoteDir.value || currentRemoteDir.value === '/') {
@@ -487,9 +796,10 @@ function clearTempSelection() {
 }
 
 function confirmSelection() {
+  const cd = form.configData as any;
   const list = dirPickerMode.value === 'whitelist'
-    ? (form.configData as SshConfigData).edit_whitelist!
-    : (form.configData as SshConfigData).edit_blacklist!;
+    ? cd.edit_whitelist!
+    : cd.edit_blacklist!;
   if (!list) return;
 
   for (const vp of tempSelectedPaths.value) {
@@ -521,8 +831,9 @@ function removeBlacklistItem(idx: number) {
   arr.splice(idx, 1);
 }
 
-function openDirPicker(mode: 'whitelist' | 'blacklist') {
+function openDirPicker(mode: 'whitelist' | 'blacklist', backendType: 'ssh' | 'local' = 'ssh') {
   dirPickerMode.value = mode;
+  dirPickerBackendType.value = backendType;
   dirPickerVisible.value = true;
 }
 
@@ -530,42 +841,43 @@ async function onDirPickerOpen() {
   dirPickerError.value = '';
   tempSelectedPaths.value = new Set();
   currentRemoteDir.value = '/';
-  await loadRemoteDir('/');
+  await loadDirForPicker('/');
 }
 
 async function navigateDir(remotePath: string) {
   dirPickerError.value = '';
   currentRemoteDir.value = remotePath;
-  await loadRemoteDir(remotePath);
+  await loadDirForPicker(remotePath);
 }
 
-async function loadRemoteDir(remotePath: string) {
+async function loadDirForPicker(remotePath: string) {
   isDirLoading.value = true;
   dirPickerError.value = '';
   try {
-    const cd = form.configData as SshConfigData;
-    const res = await sshListDirectory({
+    const isLocal = dirPickerBackendType.value === 'local';
+    const cd = form.configData as any;
+    const req: UnifiedLsRequest = {
+      backend_type: isLocal ? 'local' : 'ssh',
       path: remotePath,
-      hostname: cd.hostname,
-      port: cd.port || 22,
-      username: cd.username,
-      password: cd.password || null,
-      root_dir: cd.root_dir || '/',
+      root_dir: isLocal ? (cd.root_dir || '~') : (cd.root_dir || '/'),
+      hostname: isLocal ? null : cd.hostname,
+      port: isLocal ? undefined : (cd.port || 22),
+      username: isLocal ? null : cd.username,
+      password: isLocal ? null : (cd.password || null),
       backend_id: isEdit.value ? currentEditId.value : null,
-    });
+    };
+    const res = await listDirectory(req);
     if (res.success && res.entries) {
       dirEntries.value = res.entries
         .filter(e => e.is_dir || e.path.endsWith('/'))
         .map(e => ({ ...e, name: extractName(e.path) }))
-        .sort((a, b) => {
-          return a.name.localeCompare(b.name);
-        });
+        .sort((a, b) => a.name.localeCompare(b.name));
     } else {
       dirPickerError.value = res.message || '加载目录失败';
       dirEntries.value = [];
     }
   } catch (err: any) {
-    dirPickerError.value = err?.message || '连接远程服务器失败';
+    dirPickerError.value = err?.message || '加载目录失败';
     dirEntries.value = [];
   } finally {
     isDirLoading.value = false;
@@ -608,11 +920,18 @@ const resourceDefaultConfig = (): ResourceConfigData => ({
   enable_version_editing: true,
 });
 
+const localDefaultConfig = (): LocalConfigData => ({
+  root_dir: '~',
+  edit_whitelist: [],
+  edit_blacklist: [],
+  ignore_dirs: ['.git', 'node_modules', '__pycache__']
+});
+
 const defaultForm = (type: BackendType = 'ssh'): BackendCreate => ({
   name: '',
   description: '',
   backendType: type,
-  configData: type === 'ssh' ? sshDefaultConfig() : type === 'api' ? apiDefaultConfig() : resourceDefaultConfig(),
+  configData: type === 'ssh' ? sshDefaultConfig() : type === 'api' ? apiDefaultConfig() : type === 'resource' ? resourceDefaultConfig() : localDefaultConfig(),
   tools_config: defaultToolsConfig()
 });
 
@@ -651,10 +970,15 @@ const resourceRules: FormRules = {
   'configData.resource_id': [{ required: true, message: '请选择资源文件夹', trigger: 'change' }]
 };
 
+const localRules: FormRules = {
+  name: nameRules
+};
+
 const currentRules = computed(() => {
   if (form.backendType === 'ssh') return sshRules;
   if (form.backendType === 'api') return apiRules;
-  return resourceRules;
+  if (form.backendType === 'resource') return resourceRules;
+  return localRules;
 });
 
 const handleTypeChange = (type: BackendType) => {
@@ -695,6 +1019,77 @@ async function onResourceFolderDropdownVisible(visible: boolean) {
       isResourceFoldersLoading.value = false;
     }
   }
+}
+
+// --- 资源树目录选择器（Resource Backend 浏览选择）---
+interface ResFolderEntry {
+  vpath: string;
+}
+
+const resPickerVisible = ref(false);
+const resPickerMode = ref<'whitelist' | 'blacklist'>('whitelist');
+const resPickerChecked = ref(new Set<string>());
+const isResTreeLoading = ref(false);
+
+const resFolderEntries = computed<ResFolderEntry[]>(() => {
+  const entries: ResFolderEntry[] = [];
+  const seen = new Set<string>();
+  function walk(nodes: any[], parentVpath: string) {
+    for (const node of nodes) {
+      if (node.itemType === 'folder') {
+        const vpath = parentVpath + node.name + '/';
+        if (!seen.has(vpath)) {
+          seen.add(vpath);
+          entries.push({ vpath });
+        }
+        if (node.children && node.children.length > 0) {
+          walk(node.children, vpath);
+        }
+      }
+    }
+  }
+  walk(resourceTree.value, '/workspace/');
+  return entries;
+});
+
+function openResPicker(mode: 'whitelist' | 'blacklist') {
+  resPickerMode.value = mode;
+  resPickerVisible.value = true;
+}
+
+async function onResPickerOpen() {
+  resPickerChecked.value = new Set();
+  if (resourceTree.value.length === 0) {
+    isResTreeLoading.value = true;
+    try {
+      await resourceStore.initializeList();
+    } finally {
+      isResTreeLoading.value = false;
+    }
+  }
+}
+
+function toggleResPicker(vpath: string) {
+  const next = new Set(resPickerChecked.value);
+  if (next.has(vpath)) {
+    next.delete(vpath);
+  } else {
+    next.add(vpath);
+  }
+  resPickerChecked.value = next;
+}
+
+function confirmResPicker() {
+  const target = resPickerMode.value === 'whitelist'
+    ? (form.configData as any).edit_whitelist
+    : (form.configData as any).edit_blacklist;
+  if (!target) return;
+  for (const vp of resPickerChecked.value) {
+    if (!target.includes(vp)) {
+      target.push(vp);
+    }
+  }
+  resPickerVisible.value = false;
 }
 
 function maskKey(key?: string | null): string {
@@ -841,6 +1236,11 @@ const submitForm = async () => {
         } else if (submitData.backendType === 'resource') {
           if (cd.edit_whitelist?.length === 0) cd.edit_whitelist = null;
           if (cd.edit_blacklist?.length === 0) cd.edit_blacklist = null;
+        } else if (submitData.backendType === 'local') {
+          if (cd.edit_whitelist?.length === 0) cd.edit_whitelist = null;
+          if (cd.edit_blacklist?.length === 0) cd.edit_blacklist = null;
+          if (cd.ignore_dirs?.length === 0) cd.ignore_dirs = null;
+          if (!cd.root_dir || cd.root_dir === '~') cd.root_dir = '~';
         }
 
         if (isEdit.value && currentEditId.value) {
@@ -920,6 +1320,10 @@ const copyPublicKey = async () => {
   margin-bottom: 16px;
 }
 
+.local-warning {
+  margin-bottom: 16px;
+}
+
 .public-key-container {
   min-height: 150px;
 }
@@ -975,6 +1379,11 @@ const copyPublicKey = async () => {
 
 .path-tag {
   margin-bottom: 2px;
+}
+
+.tag-input-inline {
+  width: 220px;
+  min-width: 160px;
 }
 
 .path-picker-tip {

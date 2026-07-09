@@ -33,6 +33,7 @@ class GlobalSettingsUpdate(BaseModel):
 
     # 前端与知识库默认配置
     frontend_editor: Optional[str] = Field("simple", description="前端编辑器类型: simple 或 monaco")
+    message_display_mode: Optional[str] = Field("interleaved", description="消息显示模式: stacked(堆叠) 或 interleaved(交错)")
     kb_default_chunk_size: Optional[int] = Field(500, description="知识库默认切片大小")
     kb_default_chunk_overlap: Optional[int] = Field(50, description="知识库默认切片重叠大小")
     send_message_shortcut: Optional[str] = Field("enter", description="发送消息快捷键: enter 或 ctrl_enter")

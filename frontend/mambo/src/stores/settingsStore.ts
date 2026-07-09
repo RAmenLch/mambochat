@@ -30,6 +30,7 @@ export const useSettingsStore = defineStore('settings', {
       ai_avatar_url: null,
       zip_history_system_prompt: null,
       frontend_editor: 'simple',
+      message_display_mode: 'interleaved',
       kb_default_chunk_size: 500,
       kb_default_chunk_overlap: 50,
       send_message_shortcut: 'enter',

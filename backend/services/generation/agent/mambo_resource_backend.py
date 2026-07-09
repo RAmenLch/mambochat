@@ -45,7 +45,7 @@ Safety invariants
 * Never write content into a FOLDER node
 * Workspace boundary enforced on every path
 * Path traversal (``..``) rejected
-* Edit whitelist/blacklist (fnmatch on filename) gate all writes
+* Edit whitelist/blacklist (path prefix) gate all writes
   (version files inside ``$v/`` bypass the filter)
 * New files are always created as ResourceType.FILE
 * New versions cannot be created via ``write`` in ``$v/`` folders
@@ -295,10 +295,12 @@ class MamboResourceBackend(BackendProtocol):
     workspace_root:
         Virtual root path (default ``"/workspace"``).
     edit_whitelist:
-        ``fnmatch`` patterns for filenames allowed for write/edit.
+        Virtual path prefixes (e.g. ``"/workspace/src/"``) allowed for write/edit.
+        A path is allowed if it starts with (or equals) a whitelist prefix.
         Mutually exclusive with *edit_blacklist*.
     edit_blacklist:
-        ``fnmatch`` patterns for filenames forbidden for write/edit.
+        Virtual path prefixes (e.g. ``"/workspace/build/"``) forbidden for write/edit.
+        A path is denied if it starts with (or equals) a blacklist prefix.
     max_read_chars:
         Character limit before summarization kicks in (inherited).
     summarizer:
@@ -800,15 +802,22 @@ class MamboResourceBackend(BackendProtocol):
         return self._cache.get(norm)
 
     def _check_edit_allowed(self, path: VirtualPath) -> bool:
-        """Gate writes by filename whitelist/blacklist (fnmatch)."""
-        filename = PurePosixPath(str(path)).name
+        """Gate writes by path prefix whitelist/blacklist.
+
+        Whitelist/blacklist entries are virtual path prefixes (e.g. ``"/workspace/src/"``).
+        A path is allowed if it starts with (or equals) a whitelist prefix,
+        or does NOT start with any blacklist prefix.
+        """
+        path_str = str(path)
         if self._edit_whitelist:
             return any(
-                fnmatch.fnmatch(filename, pat) for pat in self._edit_whitelist
+                path_str == prefix.rstrip("/") or path_str.startswith(prefix.rstrip("/") + "/")
+                for prefix in self._edit_whitelist
             )
         if self._edit_blacklist:
             return not any(
-                fnmatch.fnmatch(filename, pat) for pat in self._edit_blacklist
+                path_str == prefix.rstrip("/") or path_str.startswith(prefix.rstrip("/") + "/")
+                for prefix in self._edit_blacklist
             )
         return True
 

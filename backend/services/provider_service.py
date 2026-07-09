@@ -2,12 +2,14 @@
 
 import httpx
 import json
-from typing import List, Optional
+from typing import List, Optional, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
+from urllib.parse import urlparse
 
 from backend import schemas
 from backend.crud import setting_crud
 from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
+from backend.config.model_presets import MODEL_PRESETS, ModelPreset
 
 
 async def _get_http_client_with_proxy(
@@ -97,6 +99,72 @@ async def test_connection_to_provider(
         return schemas.ConnectionTestResponse(status="error", message=f"发生未知错误。")
 
 
+def _extract_host_from_url(url: str) -> str:
+    """从 API Host URL 中提取纯域名，如 'https://api.deepseek.com/v1' → 'api.deepseek.com'"""
+    parsed = urlparse(url)
+    return parsed.hostname or ""
+
+
+def _enrich_with_presets(
+        models: List[schemas.AIModelBase],
+        api_host: str,
+) -> List[schemas.AIModelBase]:
+    """
+    用模型预置注册表补全缺失的元数据。
+
+    匹配策略：
+    1. 从 api_host 提取域名，查 MODEL_PRESETS
+    2. 对每个 API 返回的模型，用 modelId 精确匹配预置
+    3. API 已返回的字段保持不变（API 为权威来源），只补全 None 字段
+    """
+    hostname = _extract_host_from_url(api_host)
+    presets = MODEL_PRESETS.get(hostname)
+    if not presets:
+        return models
+
+    # 构建预置查找表：modelId → ModelPreset
+    preset_map: Dict[str, ModelPreset] = {p.modelId: p for p in presets}
+
+    # 系统支持的参数 key 集合（用于过滤）
+    valid_parameter_keys = {param.key for param in SUPPORTED_LLM_PARAMETERS}
+
+    enriched = []
+    for model in models:
+        preset = preset_map.get(model.modelId)
+        if preset is None:
+            enriched.append(model)
+            continue
+
+        # 合并 meta_config：API 返回值优先，预置兜底补全缺失字段
+        merged_dict: dict = {}
+        if model.meta_config:
+            merged_dict.update(model.meta_config.model_dump(exclude_none=True))
+
+        # 预置字段仅写入 merged_dict 中尚不存在的 key
+        for field_name, field_value in preset.model_dump(exclude={"modelId", "name"}).items():
+            if field_name not in merged_dict and field_value is not None:
+                merged_dict[field_name] = field_value
+
+        # 对 supported_parameters 做系统过滤
+        if "supported_parameters" in merged_dict:
+            merged_dict["supported_parameters"] = [
+                k for k in merged_dict["supported_parameters"] if k in valid_parameter_keys
+            ]
+            if not merged_dict["supported_parameters"]:
+                del merged_dict["supported_parameters"]
+
+        meta_config_obj = schemas.AIModelMetaConfig(**merged_dict) if merged_dict else None
+
+        enriched.append(
+            schemas.AIModelBase(
+                modelId=model.modelId,
+                name=preset.name if not model.name or model.name == model.modelId else model.name,
+                meta_config=meta_config_obj,
+            )
+        )
+    return enriched
+
+
 async def fetch_models_from_provider(
         db: AsyncSession,
         api_host: str,
@@ -105,6 +173,7 @@ async def fetch_models_from_provider(
 ) -> List[schemas.AIModelBase]:
     """
     调用外部LLM服务商的API以获取其提供的模型列表，并解析元数据。
+    解析完成后自动使用预置注册表（MODEL_PRESETS）补全缺失的元数据字段。
     """
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -169,7 +238,9 @@ async def fetch_models_from_provider(
                     meta_config=meta_config_obj
                 )
             )
-        return processed_models
+
+        # 用预置注册表补全缺失的元数据
+        return _enrich_with_presets(processed_models, api_host)
 
 
 async def fetch_models_from_provider_google(

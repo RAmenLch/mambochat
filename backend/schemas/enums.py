@@ -139,6 +139,7 @@ class BackendType(str, Enum):
     SSH = "ssh"
     API = "api"
     RESOURCE = "resource"
+    LOCAL = "local"
 
 
 # --- 业务错误码（前端 i18n 映射用） ---

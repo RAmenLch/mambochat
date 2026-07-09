@@ -236,6 +236,70 @@ SUPPORTED_LLM_PARAMETERS: List[LLMParameter] = [
         default_activate=False
     ),
 
+    # --- GLM / Z.AI / 智谱 特有参数 ---
+    LLMParameter(
+        key="glm::thinking.type",
+        label="Thinking Type (GLM)",
+        path=["thinking", "type"],
+        description="控制 GLM 模型（4.5 及以上）的思维链开关。启用后，GLM-5.x/4.6+ 由模型自行判断是否思考，GLM-4.7/4.5V 则强制思考。",
+        type="string",
+        limit=["enabled", "disabled"],
+        default_value="enabled",
+        default_activate=False
+    ),
+    LLMParameter(
+        key="glm::thinking.clear_thinking",
+        label="Clear Thinking History (GLM)",
+        path=["thinking", "clear_thinking"],
+        description="控制是否清除历史回合中的 reasoning_content（思考内容）。开启可减少上下文长度和成本（推荐），关闭则保留全部历史思考。",
+        type="boolean",
+        limit=[True, False],
+        default_value=True,
+        default_activate=False
+    ),
+    LLMParameter(
+        key="glm::reasoning_effort",
+        label="Reasoning Effort (GLM)",
+        path=["reasoning_effort"],
+        description="控制 GLM-5.2 思考模式的推理深度。仅当 Thinking Type 为 enabled 时生效。max/xhigh=最强，high/medium/low=强推理，minimal/none=跳过思考。",
+        type="string",
+        limit=["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+        default_value="max",
+        default_activate=False
+    ),
+    LLMParameter(
+        key="glm::do_sample",
+        label="Do Sample (GLM)",
+        path=["do_sample"],
+        description="是否启用采样。关闭时 temperature、top_p 等采样参数失效，输出更确定。GLM 默认开启。",
+        type="boolean",
+        limit=[True, False],
+        default_value=True,
+        default_activate=False
+    ),
+    LLMParameter(
+        key="glm::tool_stream",
+        label="Tool Stream (GLM)",
+        path=["tool_stream"],
+        description="是否对 Function Calls 启用流式响应。仅 GLM-4.6 及以上版本支持。",
+        type="boolean",
+        limit=[True, False],
+        default_value=False,
+        default_activate=False
+    ),
+
+    # --- Kimi (Moonshot) 特有参数 ---
+    LLMParameter(
+        key="kimi::thinking.keep",
+        label="Preserved Thinking (Kimi)",
+        path=["thinking", "keep"],
+        description="控制是否将历史轮次的推理内容保留在上下文中。仅 Kimi K2.6 支持可选（设为 'all' 启用），K2.7 Code 始终启用且不可关闭。",
+        type="string",
+        limit=["all"],
+        default_value="all",
+        default_activate=False
+    ),
+
 ]
 
 
@@ -270,6 +334,21 @@ DEFAULT_PROVIDERS: List[dict[str, str]] = [
     {
         "name": "SiliconFlow",
         "apiHost": "https://api.siliconflow.cn/v1/",
+        "worker_type": "openai"
+    },
+    {
+        "name": "Z.AI (GLM)",
+        "apiHost": "https://api.z.ai/api/paas/v4",
+        "worker_type": "openai"
+    },
+    {
+        "name": "智谱 BigModel (GLM)",
+        "apiHost": "https://open.bigmodel.cn/api/paas/v4",
+        "worker_type": "openai"
+    },
+    {
+        "name": "Kimi (Moonshot)",
+        "apiHost": "https://api.moonshot.cn/v1",
         "worker_type": "openai"
     },
     {

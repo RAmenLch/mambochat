@@ -1,6 +1,6 @@
 // frontend/mambo/src/api/types/backendTypes.ts
 
-export type BackendType = 'ssh' | 'api' | 'resource';
+export type BackendType = 'ssh' | 'api' | 'resource' | 'local';
 
 export interface ToolPermission {
   enabled: boolean;
@@ -57,7 +57,21 @@ export interface ResourceConfigData {
   api_key?: string;
 }
 
-export type BackendConfigData = SshConfigData | ApiConfigData | ResourceConfigData;
+export interface LocalConfigData {
+  root_dir: string;
+  edit_whitelist?: string[] | null;
+  edit_blacklist?: string[] | null;
+  ignore_dirs?: string[] | null;
+  hostname?: string;
+  username?: string;
+  port?: number;
+  password?: string | null;
+  api_key?: string;
+  resource_id?: string;
+  enable_version_editing?: boolean;
+}
+
+export type BackendConfigData = SshConfigData | ApiConfigData | ResourceConfigData | LocalConfigData;
 
 export interface BackendConfig {
   id: string;
@@ -101,21 +115,24 @@ export interface SshLsEntry {
   modified_at: string;
 }
 
-export interface SshLsRequest {
-  path: string;
-  hostname: string;
-  port: number;
-  username: string;
-  password?: string | null;
-  root_dir: string;
-  backend_id?: string | null;
-}
-
-export interface SshLsResponse {
+export interface LocalLsResponse {
   success: boolean;
   message: string;
   entries?: SshLsEntry[] | null;
   parent_path?: string | null;
+}
+
+export interface UnifiedLsRequest {
+  backend_type: BackendType;
+  path: string;
+  root_dir: string;
+  /** SSH only */
+  hostname?: string | null;
+  port?: number;
+  username?: string | null;
+  password?: string | null;
+  /** Common */
+  backend_id?: string | null;
 }
 
 export function isSshConfig(data: BackendConfigData): data is SshConfigData {
