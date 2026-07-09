@@ -44,6 +44,7 @@ from backend.routers import (
 from backend.services.cleanup_service import cleanup_zombie_files
 from backend.services.kb_service import SUP_DIM
 from backend.services.vec_migration import ensure_vec_tables
+from backend.exceptions import AppHTTPException, app_http_exception_handler
 
 scheduler = AsyncIOScheduler(timezone=TZ)
 
@@ -192,6 +193,10 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan, version="1.2.5")
+
+# --- 注册自定义异常处理器（必须在路由挂载前注册） ---
+# AppHTTPException 携带 error_code，前端拦截器据此查找 i18n 翻译
+app.add_exception_handler(AppHTTPException, app_http_exception_handler)
 
 app.add_middleware(
     CORSMiddleware,

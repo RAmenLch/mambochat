@@ -158,5 +158,6 @@ export default {
     nameLabel: 'Skill 名称',
     descLabel: 'Skill 描述',
     githubUrl: 'github 仓库 URL',
+    githubRateLimit: '受到 GitHub 网页查询限制的影响，短时间内大量导入可能失败',
   },
 }

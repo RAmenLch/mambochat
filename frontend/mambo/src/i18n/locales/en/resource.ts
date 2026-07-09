@@ -161,5 +161,6 @@ export default {
     nameLabel: 'Skill Name',
     descLabel: 'Skill Description',
     githubUrl: 'github URL',
+    githubRateLimit: 'Subject to GitHub API rate limits; frequent imports in a short time may fail',
   },
 }

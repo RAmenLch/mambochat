@@ -12,9 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend import schemas
 from backend.crud import resource_crud, kb_crud
 from backend.database import get_db, AsyncSessionLocal
+from backend.exceptions import AppHTTPException
 from backend.models import resource_model
 from backend.schemas import kb as kb_schemas
-from backend.schemas.enums import FileManagementType, ResourceType, ResourceItemType, KBFileStatus
+from backend.schemas.enums import FileManagementType, ResourceType, ResourceItemType, KBFileStatus, ErrorCode
 from backend.services import chat_service, resource_service
 from backend.services.resource_service import validate_name_uniqueness
 from backend.services.kb_service import KnowledgeBaseService
@@ -131,9 +132,9 @@ async def create_resource(resource: schemas.ResourceCreate, db: AsyncSession = D
             is_valid_folder = resource.itemType == ResourceItemType.FOLDER and not resource.resourceType
             is_valid_file = resource.itemType == ResourceItemType.RESOURCE and resource.resourceType == ResourceType.FILE
             if not (is_valid_folder or is_valid_file):
-                raise HTTPException(
+                raise AppHTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Only regular folders and files can be created inside a SKILL directory."
+                    error_code=ErrorCode.SKILL_CREATE_RESTRICTION,
                 )
 
         # 预先获取 kb_node
@@ -141,6 +142,16 @@ async def create_resource(resource: schemas.ResourceCreate, db: AsyncSession = D
 
     # 校验同一父文件夹下不允许同名资源
     await validate_name_uniqueness(db, resource.name, resource.parentId)
+
+    # 0.5 右键新建文件类型资源时，自动创建空的数据库文本文件，用户可直接编辑无需上传
+    if resource.resourceType == ResourceType.FILE and not resource.initial_content:
+        file_service = FileService(db)
+        auto_file = await file_service.create_empty_text_file(
+            filename=resource.name,
+            management_type=[FileManagementType.RESOURCE.value],
+            auto_commit=False,  # 交由后续 resource_crud.create_resource 统一提交事务
+        )
+        resource.initial_content = auto_file.id
 
     # 1. 先创建资源
     new_resource = await resource_crud.create_resource(db=db, resource=resource)

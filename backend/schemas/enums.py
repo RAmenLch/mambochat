@@ -139,3 +139,17 @@ class BackendType(str, Enum):
     SSH = "ssh"
     API = "api"
     RESOURCE = "resource"
+
+
+# --- 业务错误码（前端 i18n 映射用） ---
+
+class ErrorCode(str, Enum):
+    """
+    业务错误码枚举，用于前端 i18n 国际化映射。
+    后端抛出 AppHTTPException 时附带此错误码，前端拦截器根据 error_code 查找对应翻译，
+    从而避免在响应中返回硬编码的英文错误信息。
+
+    命名规范: 大写下划线格式，按业务模块前缀分组（如 SKILL_ / KB_ / RESOURCE_ 等）。
+    前端 i18n key 映射规则: backendError.<error_code_lowercase>
+    """
+    SKILL_CREATE_RESTRICTION = "SKILL_CREATE_RESTRICTION"

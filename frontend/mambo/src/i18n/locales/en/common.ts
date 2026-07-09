@@ -71,6 +71,9 @@ export default {
     loadingFailed: 'Loading failed',
     operationFailed: 'Operation failed',
   },
+  backendError: {
+    SKILL_CREATE_RESTRICTION: 'Only plain folders and files can be created inside a SKILL directory.',
+  },
   placeholder: {
     input: 'Please enter content...',
     enter: 'Please enter {label}',

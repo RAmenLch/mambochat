@@ -159,6 +159,13 @@
                 </el-input>
               </el-form-item>
             </el-form>
+            <el-alert
+              :title="t('resource.skill.githubRateLimit')"
+              type="warning"
+              show-icon
+              :closable="false"
+              style="margin-top: 12px"
+            />
           </div>
         </el-tab-pane>
       </el-tabs>

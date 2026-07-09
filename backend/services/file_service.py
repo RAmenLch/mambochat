@@ -151,6 +151,46 @@ class FileService:
             )
             return await self._commit_file_record(db_file, physical_path_to_rollback=storage_path)
 
+    async def create_empty_text_file(
+        self,
+        filename: str,
+        management_type: List[str],
+        auto_commit: bool = True,
+    ) -> File:
+        """
+        在数据库中创建一个空文本文件。
+        用于在右键新建文件类型资源时自动生成可编辑的空文件，无需用户手动上传。
+
+        Args:
+            filename: 文件名，若不含扩展名则自动追加 .txt
+            management_type: 管理类型列表
+            auto_commit: 是否自动提交事务。设为 False 时仅 flush，由调用方统一提交。
+
+        Returns:
+            创建好的 File 模型实例。
+        """
+        if '.' not in filename:
+            filename = filename + '.txt'
+
+        file_id = generate_uuid()
+        db_file = File(
+            id=file_id,
+            filename=filename,
+            storage_path=f"virtual_db_{file_id}",
+            mime_type='text/plain',
+            size=0,
+            storage_type='db',
+            content='',
+            management_type=management_type,
+        )
+
+        if auto_commit:
+            return await self._commit_file_record(db_file)
+        else:
+            self.db.add(db_file)
+            await self.db.flush()
+            return db_file
+
     async def _commit_file_record(self, db_file: File, physical_path_to_rollback: Optional[str] = None) -> File:
         try:
             self.db.add(db_file)

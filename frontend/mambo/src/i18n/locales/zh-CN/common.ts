@@ -71,6 +71,9 @@ export default {
     loadingFailed: '加载失败',
     operationFailed: '操作失败',
   },
+  backendError: {
+    SKILL_CREATE_RESTRICTION: 'SKILL 目录下仅允许创建普通文件夹和文件',
+  },
   placeholder: {
     input: '请输入内容...',
     enter: '请输入{label}',
