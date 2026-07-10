@@ -159,7 +159,7 @@ import MobileKnowledgeBaseSearchDialog from './KnowledgeBaseSearchDialog.vue'
 
 const props = defineProps<{
   visible: boolean;
-  context: 'chat-settings' | 'chat-toolbar' | 'agent-toolbar' | 'agent-react' | 'agent-deep';
+  context: 'chat-settings' | 'chat-toolbar' | 'agent-toolbar' | 'agent-react' | 'agent-deep' | 'agent-memory';
 }>()
 
 const emit = defineEmits<{
@@ -225,6 +225,13 @@ const contextConfig = computed(() => {
         canMount: ['system_prompt', 'submessage_template', 'knowledge_base', 'skill'],
         canAppend: [],
         canMountKb: []
+      };
+    case 'agent-memory':
+      return {
+        allowedTypes: ['system_prompt', 'submessage_template', 'knowledge_base', 'file'],
+        canMount: ['system_prompt', 'submessage_template', 'knowledge_base', 'file'],
+        canAppend: [],
+        canMountKb: ['knowledge_base']
       };
     default:
       return { allowedTypes: [], canMount: [], canAppend: [], canMountKb: [] };

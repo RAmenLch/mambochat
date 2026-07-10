@@ -64,15 +64,16 @@ const editName = ref('')
 const inputRef = ref()
 
 const displayModelName = computed(() => {
-  if (props.currentChat?.chatMode === 'agent') {
-    if (props.currentChat.agentId) {
-      const agent = agentStore.allAgents.find(a => a.id === props.currentChat.agentId)
+  const chat = props.currentChat
+  if (chat?.chatMode === 'agent') {
+    if (chat.agentId) {
+      const agent = agentStore.allAgents.find(a => a.id === chat.agentId)
       if (agent) return agent.name
     }
     return ''
   }
-  if (!props.currentChat?.aiModelId) return ''
-  const model = providerStore.allModels.find((m) => m.id === props.currentChat.aiModelId)
+  if (!chat?.aiModelId) return ''
+  const model = providerStore.allModels.find((m) => m.id === chat.aiModelId)
   return model ? model.name : ''
 })
 

@@ -11,7 +11,7 @@
             <div class="tool-status-icon">
               <el-icon v-if="isReviewType && !currentDecision" color="var(--el-color-warning)" :size="22"><Warning /></el-icon>
               <el-icon v-else-if="isGenerating" class="is-loading" :size="22"><Loading /></el-icon>
-              <el-icon v-else-if="currentTool?.is_error" color="var(--el-color-danger)" :size="22"><CircleClose /></el-icon>
+              <el-icon v-else-if="mcpTool?.is_error" color="var(--el-color-danger)" :size="22"><CircleClose /></el-icon>
               <el-icon v-else color="var(--el-color-success)" :size="22"><CircleCheck /></el-icon>
             </div>
             <div class="tool-title-area">
@@ -92,8 +92,8 @@
             <!-- Result (McpTool only) -->
             <div v-if="activeMsg?.type === 'McpTool'" class="tool-section">
               <div class="section-label">结果</div>
-              <div class="result-box" :class="{ 'is-error': currentTool?.is_error }">
-                {{ currentTool?.result || '无结果' }}
+              <div class="result-box" :class="{ 'is-error': mcpTool?.is_error }">
+                {{ mcpTool?.result || '无结果' }}
               </div>
             </div>
 
@@ -204,6 +204,11 @@ const activeMsg = computed(() => toolMessages.value.find(m => m.id === activeTab
 const currentTool = computed((): McpToolContent | ReviewToolContent | null => {
   if (!activeMsg.value) return null
   try { return JSON.parse(activeMsg.value.content) } catch { return null }
+})
+
+const mcpTool = computed((): McpToolContent | null => {
+  if (activeMsg.value?.type !== 'McpTool') return null
+  return currentTool.value as McpToolContent
 })
 
 const currentArgs = computed(() => {

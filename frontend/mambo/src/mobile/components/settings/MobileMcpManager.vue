@@ -176,8 +176,10 @@ const handleTestConnection = async (row: McpServer) => {
 
 const showErrorDetail = (row: McpServer) => { currentErrorMcp.value = row; errorDialogVisible.value = true; };
 
-const getStatusClass = (s: McpHealthStatus) => ({ healthy: 'status-healthy', unhealthy: 'status-unhealthy' }[s] || 'status-unknown');
-const getStatusText = (s: McpHealthStatus) => ({ healthy: t('chat.toolbar.mcpStatus.healthy'), unhealthy: t('chat.toolbar.mcpStatus.unhealthy') }[s] || t('chat.toolbar.mcpStatus.unknown'));
+const statusClassMap: Record<string, string> = { healthy: 'status-healthy', unhealthy: 'status-unhealthy' };
+const getStatusClass = (s: McpHealthStatus) => (s ? statusClassMap[s] : '') || 'status-unknown';
+const statusTextMap: Record<string, string> = { healthy: t('chat.toolbar.mcpStatus.healthy'), unhealthy: t('chat.toolbar.mcpStatus.unhealthy') };
+const getStatusText = (s: McpHealthStatus) => (s ? statusTextMap[s] : '') || t('chat.toolbar.mcpStatus.unknown');
 
 const formatTime = (iso: string) => {
   if (!iso) return '-';

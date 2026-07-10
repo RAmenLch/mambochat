@@ -481,7 +481,7 @@ const maxContextTokens = computed(() => {
   const chat = sessionStore.currentChat
   if (!chat?.aiModelId) return undefined
   const model = providerStore.allModels.find(m => m.id === chat.aiModelId)
-  return model?.meta_config?.context_length
+  return model?.meta_config?.context_length ?? undefined
 })
 
 const editDialogVisible = ref(false)
