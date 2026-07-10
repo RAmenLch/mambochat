@@ -1,95 +1,108 @@
-<!-- frontend/mambo/src/mobile/components/settings/dialogs/MobileProviderFormDialog.vue -->
+<!-- MobileProviderFormDialog.vue — 服务商表单（Bottom Sheet） -->
 <template>
-  <el-drawer
-    v-model="internalVisible"
-    :title="isEditing ? t('provider.form.editTitle') : t('provider.form.addTitle')"
-    direction="rtl"
-    size="85%"
-    :close-on-click-modal="false"
-  >
-    <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="mobile-form">
-      <el-form-item :label="t('provider.form.name')" prop="name">
-        <!-- 修复 1: 使用 el-autocomplete 提供推荐服务商 -->
-        <el-autocomplete
-          v-model="form.name"
-          :fetch-suggestions="querySearchProviders"
-          :placeholder="t('provider.form.namePlaceholder')"
-          style="width: 100%"
-          @select="handleProviderSelect"
-          :trigger-on-focus="true"
-        />
-      </el-form-item>
+  <Teleport to="body">
+    <Transition name="sheet">
+      <div v-if="internalVisible" class="sheet-overlay" @click="internalVisible = false">
+        <div class="sheet-panel" @click.stop>
+          <div class="sheet-handle"></div>
+          <div class="sheet-header">
+            <span class="sheet-title">{{ isEditing ? t('provider.form.editTitle') : t('provider.form.addTitle') }}</span>
+            <button class="sheet-close" @click="internalVisible = false">
+              <el-icon :size="20"><Close /></el-icon>
+            </button>
+          </div>
 
-      <el-form-item :label="t('provider.form.workerType')" prop="worker_type">
-        <el-select v-model="form.worker_type" style="width: 100%">
-          <el-option label="OpenAI Compatible" value="openai" />
-          <el-option label="Google Gemini" value="google" />
-          <el-option label="DeepSeek" value="deepseek" />
-          <el-option label="Anthropic" value="anthropic" />
-        </el-select>
-      </el-form-item>
+          <div class="sheet-body">
+            <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="sheet-form">
+              <div class="field-item">
+                <label class="field-label">{{ t('provider.form.name') }}</label>
+                <el-autocomplete
+                  v-model="form.name"
+                  :fetch-suggestions="querySearchProviders"
+                  :placeholder="t('provider.form.namePlaceholder')"
+                  style="width: 100%"
+                  @select="handleProviderSelect"
+                  :trigger-on-focus="true"
+                  popper-class="mobile-popper"
+                />
+              </div>
 
-      <el-form-item :label="t('provider.form.apiHost')" prop="apiHost">
-        <el-input v-model="form.apiHost" :placeholder="t('provider.form.apiHostPlaceholder')" />
-      </el-form-item>
+              <div class="field-item">
+                <label class="field-label">{{ t('provider.form.workerType') }}</label>
+                <el-select v-model="form.worker_type" style="width: 100%" popper-class="mobile-popper">
+                  <el-option label="OpenAI Compatible" value="openai" />
+                  <el-option label="Google Gemini" value="google" />
+                  <el-option label="DeepSeek" value="deepseek" />
+                  <el-option label="Anthropic" value="anthropic" />
+                </el-select>
+              </div>
 
-      <el-form-item :label="t('provider.form.apiKey')" prop="apiKey">
-        <el-input
-          v-model="form.apiKey"
-          type="password"
-          show-password
-          :placeholder="t('provider.form.apiKeyPlaceholder')"
-        />
-      </el-form-item>
+              <div class="field-item">
+                <label class="field-label">{{ t('provider.form.apiHost') }}</label>
+                <input v-model="form.apiHost" class="native-input" :placeholder="t('provider.form.apiHostPlaceholder')" />
+              </div>
 
-      <el-form-item :label="t('provider.form.enableProxy')">
-        <div class="switch-row">
-          <el-switch v-model="form.use_proxy" :disabled="!isProxyGloballyEnabled" />
-          <span class="switch-label" v-if="!isProxyGloballyEnabled">
-            <el-icon><Warning /></el-icon> {{ t('provider.form.proxyTip') }}
-          </span>
+              <div class="field-item">
+                <label class="field-label">{{ t('provider.form.apiKey') }}</label>
+                <div class="password-row">
+                  <input
+                    :type="showKey ? 'text' : 'password'"
+                    v-model="form.apiKey"
+                    class="native-input"
+                    :placeholder="t('provider.form.apiKeyPlaceholder')"
+                  />
+                  <button class="toggle-key" @click="showKey = !showKey">
+                    <el-icon :size="16"><View v-if="!showKey" /><Hide v-else /></el-icon>
+                  </button>
+                </div>
+              </div>
+
+              <div class="field-item">
+                <div class="switch-row">
+                  <span class="field-label" style="margin-bottom:0">{{ t('provider.form.enableProxy') }}</span>
+                  <el-switch v-model="form.use_proxy" :disabled="!isProxyGloballyEnabled" size="small" />
+                </div>
+                <div class="hint-text" v-if="!isProxyGloballyEnabled">
+                  <el-icon :size="14"><WarningFilled /></el-icon> {{ t('provider.form.proxyTip') }}
+                </div>
+              </div>
+            </el-form>
+
+            <button class="test-btn" @click="handleTestConnection" :disabled="isTesting">
+              <el-icon v-if="isTesting" class="is-loading"><Loading /></el-icon>
+              <span v-else>{{ t('provider.form.testConnection') }}</span>
+            </button>
+          </div>
+
+          <div class="sheet-footer">
+            <button class="footer-btn footer-btn-cancel" @click="internalVisible = false">
+              {{ t('common.action.cancel') }}
+            </button>
+            <button class="footer-btn footer-btn-confirm" @click="submitForm" :disabled="isSubmitting">
+              {{ t('common.action.confirm') }}
+            </button>
+          </div>
         </div>
-      </el-form-item>
-
-      <el-button
-        type="primary"
-        :loading="isTesting"
-        @click="handleTestConnection"
-        style="width: 100%; margin-bottom: 20px;"
-        plain
-      >
-        {{ t('provider.form.testConnection') }}
-      </el-button>
-    </el-form>
-
-    <template #footer>
-      <el-button @click="internalVisible = false">{{ t('common.action.cancel') }}</el-button>
-      <el-button type="primary" @click="submitForm" :loading="isSubmitting">
-        {{ t('common.action.confirm') }}
-      </el-button>
-    </template>
-  </el-drawer>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, watch, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
-import { Warning } from '@element-plus/icons-vue';
+import { Close, View, Hide, WarningFilled, Loading } from '@element-plus/icons-vue';
 import { useProviderStore } from '@/stores/providerStore';
 import { useSettingsStore } from '@/stores/settingsStore';
-import { useSystemConfigStore } from '@/stores/systemConfigStore'; // 引入 SystemConfigStore
+import { useSystemConfigStore } from '@/stores/systemConfigStore';
 import { storeToRefs } from 'pinia';
 import type { AIProviderWithModels, AIProviderUpdate, ProviderWorkerType, ProviderWithModelsCreate } from '@/api/types';
-import { isAxiosError } from 'axios'; // 引入错误类型判断
+import { isAxiosError } from 'axios';
 
-// 定义常量
 const API_KEY_PLACEHOLDER = '********';
 
-// Autocomplete 建议项类型
-interface AutocompleteSuggestion {
-  value: string;
-}
+interface AutocompleteSuggestion { value: string; }
 
 const props = defineProps<{
   visible: boolean;
@@ -104,14 +117,14 @@ const emit = defineEmits<{
 const { t } = useI18n();
 const providerStore = useProviderStore();
 const settingsStore = useSettingsStore();
-const systemConfigStore = useSystemConfigStore(); // 初始化 Store
+const systemConfigStore = useSystemConfigStore();
 const { globalSettings } = storeToRefs(settingsStore);
 
 const formRef = ref<FormInstance>();
 const isSubmitting = ref(false);
 const isTesting = ref(false);
+const showKey = ref(false);
 
-// 修复核心：使用计算属性代理 v-model
 const internalVisible = computed({
   get: () => props.visible,
   set: (val) => emit('update:visible', val)
@@ -121,114 +134,72 @@ const isEditing = computed(() => !!props.providerData);
 const isProxyGloballyEnabled = computed(() => globalSettings.value.proxy_enabled === true);
 
 const form = reactive({
-  name: '',
-  apiHost: '',
-  apiKey: '',
-  worker_type: 'openai' as ProviderWorkerType,
-  use_proxy: false
+  name: '', apiHost: '', apiKey: '',
+  worker_type: 'openai' as ProviderWorkerType, use_proxy: false
 });
 
 const rules = computed<FormRules>(() => ({
   name: [{ required: true, message: t('provider.form.namePlaceholder'), trigger: 'blur' }],
   apiHost: [{ required: true, message: t('provider.form.apiHostPlaceholder'), trigger: 'blur' }],
   apiKey: [{
-    // 编辑模式下，如果值为占位符，视为有效（未修改密码）
-    validator: (rule: any, value: string, callback: any) => {
-      if (!isEditing.value && !value) {
-        callback(new Error(t('provider.form.apiKeyPlaceholder')));
-      } else if (isEditing.value && value === API_KEY_PLACEHOLDER) {
-        callback();
-      } else if (!value) {
-         callback(new Error(t('provider.form.apiKeyPlaceholder')));
-      } else {
-        callback();
-      }
-    },
-    trigger: 'blur',
+    validator: (_rule: any, value: string, callback: any) => {
+      if (!isEditing.value && !value) callback(new Error(t('provider.form.apiKeyPlaceholder')));
+      else if (isEditing.value && value === API_KEY_PLACEHOLDER) callback();
+      else if (!value) callback(new Error(t('provider.form.apiKeyPlaceholder')));
+      else callback();
+    }, trigger: 'blur',
   }]
 }));
 
 watch(() => props.visible, (val) => {
   if (val) {
+    showKey.value = false;
     if (props.providerData) {
-      // 编辑模式
       form.name = props.providerData.name;
       form.apiHost = props.providerData.apiHost;
-      form.apiKey = API_KEY_PLACEHOLDER; // 使用常量
+      form.apiKey = API_KEY_PLACEHOLDER;
       form.worker_type = props.providerData.worker_type;
       form.use_proxy = props.providerData.use_proxy;
     } else {
-      // 新增模式
       formRef.value?.resetFields();
-      Object.assign(form, {
-        name: '',
-        apiHost: '',
-        apiKey: '',
-        worker_type: 'openai',
-        use_proxy: false
-      });
+      Object.assign(form, { name: '', apiHost: '', apiKey: '', worker_type: 'openai', use_proxy: false });
     }
   }
 });
 
-// 修复 1: 实现服务商推荐逻辑
 const querySearchProviders = (queryString: string, cb: (results: AutocompleteSuggestion[]) => void) => {
   const allProviders = systemConfigStore.defaultProviders;
   const results = queryString
-    ? allProviders.filter(p =>
-        p.name.toLowerCase().includes(queryString.toLowerCase())
-      )
+    ? allProviders.filter(p => p.name.toLowerCase().includes(queryString.toLowerCase()))
     : allProviders;
   cb(results.map(p => ({ value: p.name })));
 };
 
-// --- 修复开始 ---
-// 修改参数类型为 Record<string, any> 以匹配 Element Plus 的类型定义
 const handleProviderSelect = (item: Record<string, any>) => {
-  // 此时 item.value 是安全的，因为我们在 querySearchProviders 中保证了结构
-  const selectedProvider = systemConfigStore.defaultProviders.find(p => p.name === item.value);
-  if (selectedProvider) {
-    form.apiHost = selectedProvider.apiHost;
-    form.worker_type = selectedProvider.worker_type;
+  const selected = systemConfigStore.defaultProviders.find(p => p.name === item.value);
+  if (selected) {
+    form.apiHost = selected.apiHost;
+    form.worker_type = selected.worker_type;
   }
 };
-// --- 修复结束 ---
 
-// 修复 2: 完善测试连接逻辑，解决 401 问题
 const handleTestConnection = async () => {
-  if (!form.apiHost) {
-    ElMessage.warning(t('provider.form.testWarningHost'));
-    return;
-  }
-
+  if (!form.apiHost) { ElMessage.warning(t('provider.form.testWarningHost')); return; }
   isTesting.value = true;
   try {
     let res;
-    // 如果是编辑模式且 API Key 未修改（显示为占位符），则使用 Provider ID 进行测试
     if (isEditing.value && form.apiKey === API_KEY_PLACEHOLDER && props.providerData) {
       res = await providerStore.testConnectionForProvider(props.providerData.id, form.apiHost, form.use_proxy);
     } else {
-      // 否则使用输入的 API Key 进行测试
-      if (!form.apiKey) {
-        ElMessage.warning(t('provider.form.testWarningKey'));
-        isTesting.value = false;
-        return;
-      }
+      if (!form.apiKey) { ElMessage.warning(t('provider.form.testWarningKey')); isTesting.value = false; return; }
       res = await providerStore.testConnection({ apiHost: form.apiHost, apiKey: form.apiKey }, form.use_proxy);
     }
-
     const msg = res.status === 'success' ? t('provider.form.testSuccess') : (res.message || t('provider.form.testFailed'));
     ElMessage({ type: res.status === 'success' ? 'success' : 'error', message: msg });
   } catch (error: unknown) {
-    // 增强错误处理
-    if (isAxiosError(error)) {
-      ElMessage.error(error?.response?.data?.detail || t('provider.form.testFailed'));
-    } else {
-      ElMessage.error(t('provider.form.testFailed'));
-    }
-  } finally {
-    isTesting.value = false;
-  }
+    if (isAxiosError(error)) ElMessage.error(error?.response?.data?.detail || t('provider.form.testFailed'));
+    else ElMessage.error(t('provider.form.testFailed'));
+  } finally { isTesting.value = false; }
 };
 
 const submitForm = async () => {
@@ -237,58 +208,64 @@ const submitForm = async () => {
       isSubmitting.value = true;
       try {
         if (isEditing.value && props.providerData) {
-          // 更新
           const updateData: AIProviderUpdate = {
-            name: form.name,
-            apiHost: form.apiHost,
-            worker_type: form.worker_type,
-            use_proxy: form.use_proxy
+            name: form.name, apiHost: form.apiHost, worker_type: form.worker_type, use_proxy: form.use_proxy
           };
-          // 只有当 API Key 不是占位符时才更新 Key
-          if (form.apiKey !== API_KEY_PLACEHOLDER) {
-            updateData.apiKey = form.apiKey;
-          }
+          if (form.apiKey !== API_KEY_PLACEHOLDER) updateData.apiKey = form.apiKey;
           await providerStore.updateProvider(props.providerData.id, updateData);
           ElMessage.success(t('provider.form.updateSuccess'));
         } else {
-          // 新增
-          const createData: ProviderWithModelsCreate = {
-            name: form.name,
-            apiHost: form.apiHost,
-            apiKey: form.apiKey,
-            worker_type: form.worker_type,
-            use_proxy: form.use_proxy,
-            models: []
-          };
-          await providerStore.addProviderWithModels(createData);
+          await providerStore.addProviderWithModels({
+            name: form.name, apiHost: form.apiHost, apiKey: form.apiKey,
+            worker_type: form.worker_type, use_proxy: form.use_proxy, models: []
+          });
           ElMessage.success(t('provider.form.createSuccess'));
         }
         emit('submitted');
         internalVisible.value = false;
-      } catch (e) {
-        ElMessage.error(t('common.error.operationFailed'));
-      } finally {
-        isSubmitting.value = false;
-      }
+      } catch { ElMessage.error(t('common.error.operationFailed')); }
+      finally { isSubmitting.value = false; }
     }
   });
 };
 </script>
 
 <style scoped>
-.mobile-form {
-  padding: 0 10px;
-}
-.switch-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.switch-label {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  display: flex;
-  align-items: center;
-  gap: 4px;
+.sheet-overlay { position: fixed; inset: 0; z-index: 2100; background: rgba(0,0,0,0.35); display: flex; align-items: flex-end; justify-content: center; }
+.sheet-panel { width: 100%; max-width: 500px; max-height: 85vh; background: var(--el-bg-color); border-radius: 16px 16px 0 0; display: flex; flex-direction: column; overflow: hidden; }
+.sheet-handle { width: 36px; height: 4px; background: rgba(0,0,0,0.15); border-radius: 2px; margin: 10px auto 0; flex-shrink: 0; }
+.sheet-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px 8px; flex-shrink: 0; }
+.sheet-title { font-size: 17px; font-weight: 700; color: var(--el-text-color-primary); }
+.sheet-close { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: none; background: var(--el-fill-color-light); border-radius: 50%; color: var(--el-text-color-secondary); cursor: pointer; }
+.sheet-body { flex: 1; overflow-y: auto; padding: 4px 16px 8px; -webkit-overflow-scrolling: touch; }
+.sheet-form { padding: 0; }
+.field-item { margin-bottom: 12px; }
+.field-label { display: block; font-size: 13px; font-weight: 600; color: var(--el-text-color-primary); margin-bottom: 4px; }
+.native-input { width: 100%; height: 40px; padding: 0 12px; font-size: 15px; font-family: inherit; color: var(--el-text-color-primary); background: var(--el-bg-color); border: none; border-radius: 10px; box-shadow: 0 0 0 1px var(--el-border-color-lighter) inset; outline: none; box-sizing: border-box; transition: box-shadow 0.2s; }
+.native-input:focus { box-shadow: 0 0 0 2px var(--el-color-primary) inset; }
+.password-row { position: relative; display: flex; align-items: center; }
+.password-row .native-input { padding-right: 40px; }
+.toggle-key { position: absolute; right: 8px; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: none; background: transparent; color: var(--el-text-color-secondary); cursor: pointer; border-radius: 6px; }
+.switch-row { display: flex; align-items: center; justify-content: space-between; }
+.hint-text { display: flex; align-items: center; gap: 4px; margin-top: 4px; font-size: 12px; color: var(--el-text-color-secondary); }
+.test-btn { display: flex; align-items: center; justify-content: center; width: 100%; height: 40px; margin-top: 8px; font-size: 14px; font-weight: 500; color: var(--el-color-primary); background: var(--el-color-primary-light-9); border: 1px solid var(--el-color-primary-light-5); border-radius: 10px; cursor: pointer; transition: background 0.15s; }
+.test-btn:active { background: var(--el-color-primary-light-7); }
+.sheet-footer { display: flex; gap: 10px; padding: 10px 16px; padding-bottom: max(10px, env(safe-area-inset-bottom)); border-top: 0.5px solid rgba(0,0,0,0.08); flex-shrink: 0; }
+.footer-btn { flex: 1; height: 44px; font-size: 15px; font-weight: 600; border: none; border-radius: 10px; cursor: pointer; transition: opacity 0.2s, transform 0.1s; }
+.footer-btn-cancel { color: var(--el-text-color-primary); background: var(--el-fill-color-light); }
+.footer-btn-confirm { color: #fff; background: linear-gradient(135deg, var(--el-color-primary), var(--el-color-primary-light-3)); box-shadow: 0 4px 12px rgba(64,158,255,0.3); }
+.footer-btn-confirm:disabled { opacity: 0.5; }
+.footer-btn:active { transform: scale(0.98); }
+
+.sheet-enter-active, .sheet-leave-active { transition: opacity 0.25s ease; }
+.sheet-enter-active .sheet-panel, .sheet-leave-active .sheet-panel { transition: transform 0.25s cubic-bezier(0.32, 0.72, 0, 1); }
+.sheet-enter-from, .sheet-leave-to { opacity: 0; }
+.sheet-enter-from .sheet-panel, .sheet-leave-to .sheet-panel { transform: translateY(100%); }
+
+@media (prefers-color-scheme: dark) {
+  .sheet-handle { background: rgba(255,255,255,0.2); }
+  .sheet-footer { border-top-color: rgba(255,255,255,0.08); }
+  .native-input { box-shadow: 0 0 0 1px rgba(255,255,255,0.1) inset; }
+  .native-input:focus { box-shadow: 0 0 0 2px var(--el-color-primary) inset; }
 }
 </style>

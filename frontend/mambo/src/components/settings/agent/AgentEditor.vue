@@ -103,6 +103,9 @@
                 <el-switch v-model="form.modelParameters.stream" />
               </el-form-item>
             </el-col>
+          </el-row>
+
+          <el-row :gutter="40" v-if="form.aiModelId">
             <el-col :span="12">
               <el-form-item>
                 <template #label>
@@ -114,9 +117,6 @@
                 <el-switch v-model="form.modelParameters.enable_suggest" />
               </el-form-item>
             </el-col>
-          </el-row>
-
-          <el-row :gutter="40" v-if="form.aiModelId">
             <el-col :span="12">
               <el-form-item>
                 <template #label>
@@ -563,14 +563,10 @@
               </el-col>
             </el-row>
           </template>
-        </el-card>
 
-        <!-- AI 安全审核（仅 Mambo） -->
-        <el-card v-if="form.AgentType === 'Mambo'" shadow="never" class="config-card">
-          <template #header>
-            <span class="card-title">{{ $t('agent.versionControl') }}</span>
-          </template>
+          <el-divider />
 
+          <!-- 版本控制 -->
           <el-row :gutter="32" class="settings-row">
             <el-col :span="24">
               <el-form-item>
@@ -584,14 +580,10 @@
               </el-form-item>
             </el-col>
           </el-row>
-        </el-card>
 
-        <!-- AI 安全审核（仅 Mambo） -->
-        <el-card v-if="form.AgentType === 'Mambo'" shadow="never" class="config-card">
-          <template #header>
-            <span class="card-title">{{ $t('agent.securityReview') }}</span>
-          </template>
+          <el-divider />
 
+          <!-- AI 安全审核 -->
           <el-row :gutter="32" class="settings-row">
             <el-col :span="24">
               <el-form-item>
@@ -669,6 +661,7 @@
             </el-row>
           </template>
         </el-card>
+
 
       </el-form>
     </el-scrollbar>

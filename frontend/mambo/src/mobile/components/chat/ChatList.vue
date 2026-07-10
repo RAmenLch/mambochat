@@ -2,16 +2,14 @@
 <template>
   <div class="mobile-chat-list">
     <div class="list-header">
-      <span>{{ $t('chat.sidebar.title') }}</span>
+      <span class="list-title">{{ $t('chat.sidebar.title') }}</span>
       <div class="header-actions">
-        <el-tooltip
-          :content="isManualSort ? $t('chat.sidebar.sortByTime') : $t('chat.sidebar.sortManual')"
-          placement="bottom"
-        >
-          <el-button link :icon="Sort" @click="toggleSortMode" class="icon-btn" />
-        </el-tooltip>
-        <el-button link :icon="FolderAdd" @click="handleNewFolder(null)" class="icon-btn" />
-        <el-button link :icon="Plus" @click="handleNewChat(null)" class="icon-btn" />
+        <button class="icon-btn" @click="toggleSortMode" :aria-label="isManualSort ? $t('chat.sidebar.sortByTime') : $t('chat.sidebar.sortManual')">
+          <el-icon :size="18"><Sort /></el-icon>
+        </button>
+        <button class="icon-btn" @click="handleNewFolder(null)">
+          <el-icon :size="18"><FolderAdd /></el-icon>
+        </button>
       </div>
     </div>
 
@@ -28,105 +26,119 @@
         @node-click="handleNodeClick"
         @node-expand="handleNodeExpand"
       >
-        <!-- 使用 item-icon 插槽 -->
         <template #item-icon="{ data }">
-          <el-icon>
+          <el-icon :size="18">
             <Folder v-if="data.itemType === 'folder'" />
             <ChatDotRound v-else />
           </el-icon>
         </template>
 
-        <!-- 使用 item-suffix 插槽放置菜单按钮 -->
         <template #item-suffix="{ data }">
           <div class="node-actions" @click.stop="openContextMenu(data)">
-            <el-icon><MoreFilled /></el-icon>
+            <el-icon :size="16"><MoreFilled /></el-icon>
           </div>
         </template>
       </ExplorerTree>
     </div>
 
     <div class="mobile-footer">
-      <el-button :icon="Setting" circle @click="goToSettings" size="large" />
+      <button class="footer-btn" @click="goToSettings">
+        <el-icon :size="20"><Setting /></el-icon>
+      </button>
+
+      <div class="fab-area">
+        <Transition name="fab-pop">
+          <div v-if="showFabMenu" class="fab-menu">
+            <button class="fab-menu-btn" @click="handleNewAgent(); showFabMenu = false">
+              <el-icon :size="18"><Service /></el-icon>
+              <span>新建 Agent</span>
+            </button>
+            <button class="fab-menu-btn" @click="handleNewChat(null); showFabMenu = false">
+              <el-icon :size="18"><ChatDotRound /></el-icon>
+              <span>新建聊天</span>
+            </button>
+          </div>
+        </Transition>
+        <button
+          class="fab-btn"
+          :class="{ active: showFabMenu }"
+          @click="showFabMenu = !showFabMenu"
+        >
+          <el-icon :size="24"><Plus /></el-icon>
+        </button>
+      </div>
     </div>
 
-    <!-- 底部动作面板 -->
-    <el-drawer
-      v-model="contextMenuVisible"
-      direction="btt"
-      :show-close="false"
-      :with-header="false"
-      size="auto"
-      class="context-menu-drawer"
-    >
-      <!-- ...原有代码保持不变... -->
-      <div class="context-menu-list" v-if="selectedContextItem">
-        <div class="menu-header">
-          <span class="menu-title">{{ selectedContextItem.name }}</span>
-        </div>
+    <!-- Context Menu Sheet -->
+    <Teleport to="body">
+      <Transition name="sheet">
+        <div v-if="contextMenuVisible" class="sheet-overlay" @click="contextMenuVisible = false">
+          <div class="sheet-panel" @click.stop v-if="selectedContextItem">
+            <div class="sheet-handle"></div>
+            <div class="sheet-panel-title">{{ selectedContextItem.name }}</div>
 
-        <div
-          class="menu-item"
-          v-if="selectedContextItem.itemType === 'folder'"
-          @click="handleExpandFolder"
-        >
-          <el-icon><Expand v-if="!isExpanded(selectedContextItem.id)" /><Fold v-else /></el-icon>
-          <span>{{
-            isExpanded(selectedContextItem.id)
-              ? $t('common.action.collapse')
-              : $t('common.action.expand')
-          }}</span>
-        </div>
+            <div class="sheet-items">
+              <button
+                v-if="selectedContextItem.itemType === 'folder'"
+                class="sheet-item"
+                @click="handleExpandFolder"
+              >
+                <el-icon :size="20"><Expand v-if="!isExpanded(selectedContextItem.id)" /><Fold v-else /></el-icon>
+                <span>{{ isExpanded(selectedContextItem.id) ? $t('common.action.collapse') : $t('common.action.expand') }}</span>
+              </button>
 
-        <div class="menu-item" @click="handleContextAction('rename')">
-          <el-icon><EditPen /></el-icon>
-          <span>{{ $t('chat.sidebar.rename') }}</span>
-        </div>
+              <button class="sheet-item" @click="handleContextAction('rename')">
+                <el-icon :size="20"><EditPen /></el-icon>
+                <span>{{ $t('chat.sidebar.rename') }}</span>
+              </button>
 
-        <div
-          class="menu-item"
-          v-if="selectedContextItem.itemType === 'chat'"
-          @click="handleContextAction('duplicate')"
-        >
-          <el-icon><CopyDocument /></el-icon>
-          <span>{{ $t('chat.sidebar.duplicate') }}</span>
-        </div>
+              <button
+                v-if="selectedContextItem.itemType === 'chat'"
+                class="sheet-item"
+                @click="handleContextAction('duplicate')"
+              >
+                <el-icon :size="20"><CopyDocument /></el-icon>
+                <span>{{ $t('chat.sidebar.duplicate') }}</span>
+              </button>
 
-        <div class="menu-item" @click="handleContextAction('move')">
-          <el-icon><Rank /></el-icon>
-          <span>{{ $t('chat.sidebar.move') }}</span>
-        </div>
+              <button class="sheet-item" @click="handleContextAction('move')">
+                <el-icon :size="20"><Rank /></el-icon>
+                <span>{{ $t('chat.sidebar.move') }}</span>
+              </button>
 
-        <el-divider />
+              <div class="sheet-divider"></div>
 
-        <template v-if="selectedContextItem.itemType === 'folder'">
-          <div class="menu-item" @click="handleNewChat(selectedContextItem.id)">
-            <el-icon><Plus /></el-icon>
-            <span>{{ $t('chat.sidebar.newChat') }}</span>
+              <template v-if="selectedContextItem.itemType === 'folder'">
+                <button class="sheet-item" @click="handleNewChat(selectedContextItem.id)">
+                  <el-icon :size="20"><Plus /></el-icon>
+                  <span>{{ $t('chat.sidebar.newChat') }}</span>
+                </button>
+                <button class="sheet-item" @click="handleNewFolder(selectedContextItem.id)">
+                  <el-icon :size="20"><FolderAdd /></el-icon>
+                  <span>{{ $t('chat.sidebar.newFolder') }}</span>
+                </button>
+                <div class="sheet-divider"></div>
+              </template>
+
+              <button class="sheet-item" @click="handleContextAction('search')">
+                <el-icon :size="20"><Search /></el-icon>
+                <span>{{ $t('chat.sidebar.search') }}</span>
+              </button>
+
+              <button class="sheet-item danger" @click="handleContextAction('delete')">
+                <el-icon :size="20"><Delete /></el-icon>
+                <span>{{ $t('chat.sidebar.delete') }}</span>
+              </button>
+            </div>
+
+            <button class="sheet-cancel-btn" @click="contextMenuVisible = false">
+              {{ $t('common.action.cancel') }}
+            </button>
           </div>
-          <div class="menu-item" @click="handleNewFolder(selectedContextItem.id)">
-            <el-icon><FolderAdd /></el-icon>
-            <span>{{ $t('chat.sidebar.newFolder') }}</span>
-          </div>
-          <el-divider />
-        </template>
-
-        <div class="menu-item" @click="handleContextAction('search')">
-          <el-icon><Search /></el-icon>
-          <span>{{ $t('chat.sidebar.search') }}</span>
         </div>
+      </Transition>
+    </Teleport>
 
-        <div class="menu-item danger" @click="handleContextAction('delete')">
-          <el-icon><Delete /></el-icon>
-          <span>{{ $t('chat.sidebar.delete') }}</span>
-        </div>
-
-        <div class="menu-cancel" @click="contextMenuVisible = false">
-          {{ $t('common.action.cancel') }}
-        </div>
-      </div>
-    </el-drawer>
-
-    <!-- 弹窗组件保持不变 -->
     <EntityFormDialog
       v-model:visible="dialogState.visible.value"
       :title="dialogProps.title"
@@ -169,6 +181,7 @@ import {
   Expand,
   Fold,
   Sort,
+  Service,
 } from '@element-plus/icons-vue'
 import type { AllowDropType } from 'element-plus/es/components/tree/src/tree.type'
 /** Element Plus Tree 内部节点结构（避免依赖内部路径） */
@@ -183,7 +196,8 @@ import EntityFormDialog from '@/components/common/EntityFormDialog.vue'
 import MoveTargetDialog from './dialogs/MoveTargetDialog.vue'
 import SearchDialog from './dialogs/SearchDialog.vue'
 import { useChatListStore } from '@/stores/chatListStore'
-import { useChatSessionStore, LAST_ACTIVE_CHAT_KEY } from '@/stores/chatSessionStore' // [新增] 引入 LAST_ACTIVE_CHAT_KEY
+import { useChatSessionStore, LAST_ACTIVE_CHAT_KEY } from '@/stores/chatSessionStore'
+import { useAgentStore } from '@/stores/agentStore' // [新增] 引入 LAST_ACTIVE_CHAT_KEY
 import { buildChatTree } from '@/utils/treeHelper'
 import type { ChatSortMode } from '@/utils/treeHelper'
 import type { BaseTreeItem, ChatNode, MoveRequest } from '@/api/types'
@@ -198,10 +212,13 @@ const router = useRouter()
 const route = useRoute() // [新增] 获取 route 实例
 const chatListStore = useChatListStore()
 const chatSessionStore = useChatSessionStore()
+const agentStore = useAgentStore()
 const treeRef = ref<InstanceType<typeof ExplorerTree>>()
 
 const { chatList, isChatListLoading, loadingFolders, loadedFolderIds } = storeToRefs(chatListStore)
 const { currentChatId } = storeToRefs(chatSessionStore)
+
+const showFabMenu = ref(false)
 
 // 排序模式
 const SORT_MODE_KEY = 'mambo_chat_sort_mode';
@@ -393,6 +410,21 @@ const handleNewFolder = (parentId: string | null) => {
   contextMenuVisible.value = false
 }
 
+const handleNewAgent = async () => {
+  const firstAgent = agentStore.allAgents[0]
+  const newChat = await chatListStore.createNewItem({
+    name: t('chat.sidebar.initChatName'),
+    itemType: 'chat',
+    chatMode: 'agent',
+    agentId: firstAgent?.id ?? null,
+    parentId: null,
+  })
+  if (newChat) {
+    await handleSelectChat(newChat.id)
+    emit('close-drawer')
+  }
+}
+
 // --- Context Menu Actions ---
 
 const handleContextAction = async (action: string) => {
@@ -492,98 +524,290 @@ const goToSettings = () => {
 </script>
 
 <style scoped>
-/* 样式保持不变 */
 .mobile-chat-list {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background-color: var(--color-background-soft);
+  background: var(--color-background);
 }
 
 .list-header {
-  padding: 15px;
-  font-weight: bold;
-  font-size: 18px;
-  border-bottom: 1px solid var(--color-border);
+  padding: 12px 16px;
+  padding-top: max(12px, env(safe-area-inset-top));
   display: flex;
   justify-content: space-between;
   align-items: center;
+  border-bottom: 0.5px solid var(--el-border-color-lighter);
+}
+
+.list-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--color-heading);
+  letter-spacing: -0.3px;
 }
 
 .header-actions {
   display: flex;
-  gap: 0;
+  gap: 4px;
 }
 
 .icon-btn {
-  margin-left: 5px;
-  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  transition: background-color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.icon-btn:active {
+  background: var(--el-fill-color-light);
 }
 
 .tree-container {
-  flex-grow: 1;
+  flex: 1;
   overflow-y: auto;
-  padding: 10px 0;
+  padding: 8px 0;
 }
 
 :deep(.node-actions) {
-  padding: 10px;
+  padding: 8px;
   color: var(--el-text-color-secondary);
   display: flex;
   align-items: center;
   cursor: pointer;
+  border-radius: 6px;
+  transition: background-color 0.15s;
+}
+
+:deep(.node-actions:active) {
+  background: var(--el-fill-color-light);
 }
 
 .mobile-footer {
-  padding: 15px;
-  border-top: 1px solid var(--color-border);
-  display: flex;
-  justify-content: center;
-  padding-bottom: calc(15px + env(safe-area-inset-bottom));
-}
-
-.context-menu-list {
-  padding: 0 0 20px 0;
-  background: var(--color-background);
-}
-
-.menu-header {
-  padding: 15px;
-  text-align: center;
-  border-bottom: 1px solid var(--color-border);
-  color: var(--el-text-color-secondary);
-  font-size: 14px;
-}
-
-.menu-item {
-  padding: 15px 20px;
   display: flex;
   align-items: center;
-  gap: 12px;
-  font-size: 16px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  justify-content: space-between;
+  padding: 10px 16px;
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
+  border-top: 0.5px solid var(--el-border-color-lighter);
+}
+
+.footer-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 50%;
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-secondary);
   cursor: pointer;
+  transition: all 0.15s;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.menu-item:active {
-  background-color: var(--el-fill-color-light);
+.footer-btn:active {
+  background: var(--el-fill-color);
+  transform: scale(0.94);
 }
 
-.menu-item.danger {
+.fab-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 50%;
+  background: var(--el-color-primary);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(var(--el-color-primary-rgb, 64, 158, 255), 0.4);
+  transition: all 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.fab-btn:active {
+  transform: scale(0.92);
+  box-shadow: 0 2px 8px rgba(var(--el-color-primary-rgb, 64, 158, 255), 0.3);
+}
+
+.fab-btn.active {
+  transform: rotate(45deg);
+  background: var(--el-text-color-secondary);
+}
+
+.fab-area {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.fab-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.fab-menu-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 20px;
+  background: var(--color-background);
+  color: var(--el-text-color-primary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+  font-family: inherit;
+  white-space: nowrap;
+  transition: all 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.fab-menu-btn:active {
+  background: var(--el-fill-color-light);
+  transform: scale(0.96);
+}
+
+.fab-pop-enter-active {
+  transition: all 0.2s ease-out;
+}
+.fab-pop-leave-active {
+  transition: all 0.15s ease-in;
+}
+.fab-pop-enter-from,
+.fab-pop-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+/* Bottom Sheet Styles */
+.sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 2000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.sheet-panel {
+  width: 100%;
+  max-width: 500px;
+  background: var(--color-background);
+  border-radius: 16px 16px 0 0;
+  padding: 8px 16px;
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+}
+
+.sheet-handle {
+  width: 36px;
+  height: 4px;
+  background: var(--el-border-color);
+  border-radius: 2px;
+  margin: 8px auto 12px;
+}
+
+.sheet-panel-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 8px;
+  padding: 0 8px;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sheet-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sheet-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 8px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  font-size: 16px;
+  color: var(--el-text-color-primary);
+  cursor: pointer;
+  transition: background-color 0.15s;
+  font-family: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sheet-item:active {
+  background: var(--el-fill-color-light);
+}
+
+.sheet-item.danger {
   color: var(--el-color-danger);
 }
 
-.el-divider {
-  margin: 5px 0;
+.sheet-divider {
+  height: 1px;
+  background: var(--el-border-color-lighter);
+  margin: 6px 8px;
 }
 
-.menu-cancel {
-  margin-top: 10px;
-  padding: 15px;
-  text-align: center;
-  font-weight: bold;
-  border-top: 5px solid var(--el-fill-color-light);
-  background: var(--color-background-soft);
+.sheet-cancel-btn {
+  width: 100%;
+  padding: 14px;
+  margin-top: 8px;
+  border: none;
+  border-radius: 10px;
+  background: var(--el-fill-color-light);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
   cursor: pointer;
+  font-family: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sheet-cancel-btn:active {
+  background: var(--el-fill-color);
+}
+
+/* Sheet transitions */
+.sheet-enter-active {
+  transition: all 0.25s ease-out;
+}
+.sheet-leave-active {
+  transition: all 0.2s ease-in;
+}
+.sheet-enter-from .sheet-panel,
+.sheet-leave-to .sheet-panel {
+  transform: translateY(100%);
+}
+.sheet-enter-from {
+  opacity: 0;
+}
+.sheet-leave-to {
+  opacity: 0;
 }
 </style>

@@ -429,7 +429,7 @@ class MamboAPIBackend(BackendProtocol):
 
     def grep(
         self, pattern: str, path: VirtualPath = VirtualPath("/workspace"), glob: str | None = None,
-        regex: bool = False,
+        regex: bool = True,
         offset: int = 0,
         limit: int | None = None,
     ) -> GrepResult:
@@ -455,7 +455,7 @@ class MamboAPIBackend(BackendProtocol):
 
     async def agrep(
         self, pattern: str, path: VirtualPath = VirtualPath("/workspace"), glob: str | None = None,
-        regex: bool = False,
+        regex: bool = True,
         offset: int = 0,
         limit: int | None = None,
     ) -> GrepResult:

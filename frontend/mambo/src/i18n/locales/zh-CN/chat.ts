@@ -87,6 +87,8 @@ export default {
     compressHistoryStart: '已开始在后台压缩历史对话，您可以继续聊天。',
     compressStarted: '正在压缩历史对话...',
     regenerate: '重新回答',
+    prevBranch: '上一个分支',
+    nextBranch: '下一个分支',
     expand: '展开',
     collapse: '折叠',
     compressHistory: '压缩以上历史',

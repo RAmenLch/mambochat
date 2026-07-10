@@ -82,6 +82,10 @@
                 <span class="info-label">Temperature:</span>
                 <span class="info-value">{{ selectedAgent.modelParameters.temperature }}</span>
               </div>
+              <div class="info-item" v-if="selectedAgent.modelParameters?.top_p !== undefined">
+                <span class="info-label">Top P:</span>
+                <span class="info-value">{{ selectedAgent.modelParameters.top_p }}</span>
+              </div>
               <div class="info-item" v-if="selectedAgent.modelParameters?.enable_suggest !== undefined">
                 <span class="info-label">{{ $t('chat.settings.enableSuggest') }}:</span>
                 <span class="info-value">{{ selectedAgent.modelParameters.enable_suggest ? t('common.status.enabled') : t('common.status.disabled') }}</span>
@@ -174,6 +178,12 @@
               <div class="info-item">
                 <span class="info-label">{{ $t('agent.mamboPlanning') }}:</span>
                 <span class="info-value">{{ mamboPreview.planningEnabled ? t('common.status.enabled') : t('common.status.disabled') }}</span>
+              </div>
+            </div>
+            <div class="mambo-preview-grid">
+              <div class="info-item">
+                <span class="info-label">{{ $t('agent.mamboShow') }}:</span>
+                <span class="info-value">{{ mamboPreview.showEnabled ? t('common.status.enabled') : t('common.status.disabled') }}</span>
               </div>
             </div>
             <div class="mambo-preview-grid">
@@ -362,6 +372,7 @@ const mamboPreview = computed(() => {
   return {
     generalPurpose: params.include_general_purpose ?? false,
     planningEnabled: params.enable_planning ?? true,
+    showEnabled: params.enable_show ?? true,
     memoryEnabled: params.enable_memory ?? false,
     memoryResourceIds: params.memory_resource_ids ?? [],
     summaryEnabled: params.enable_summarization ?? false,

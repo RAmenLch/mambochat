@@ -1,17 +1,16 @@
 <template>
   <div class="mobile-layout">
-    <!-- 侧边栏抽屉 -->
     <el-drawer
       v-model="drawerVisible"
       direction="ltr"
-      size="80%"
+      size="85%"
       :with-header="false"
+      :close-on-press-escape="true"
       class="mobile-drawer"
     >
       <ChatList @close-drawer="drawerVisible = false" />
     </el-drawer>
 
-    <!-- 主聊天窗口 -->
     <div class="mobile-main">
       <ChatWindow @toggle-drawer="drawerVisible = true" />
     </div>

@@ -429,7 +429,7 @@ async def review_tool_call(
         background_tasks: BackgroundTasks,
         db: AsyncSession = Depends(get_db)
 ):
-    from backend.schemas.message import ReviewToolContent
+    from backend.schemas.message import ReviewToolContent, McpToolContent
 
     db_sub = await message_crud.get_sub_message(db, request.sub_message_id)
     if not db_sub or db_sub.messageId != message_id or db_sub.type != SubMessageType.REVIEW_TOOL.value:
@@ -437,6 +437,24 @@ async def review_tool_call(
 
     review_content = ReviewToolContent.from_json_string(db_sub.content)
     review_content.decision = request.decision
+
+    # 编辑决策时，同步更新 arguments 到 REVIEW_TOOL 和 MCP_TOOL 子消息
+    if request.decision.type == 'edit' and request.decision.edited_action:
+        review_content.arguments = request.decision.edited_action.args
+
+        db_message = await message_crud.get_message(db, message_id=message_id)
+        for sub in db_message.sub_messages:
+            if sub.type == SubMessageType.MCP_TOOL.value:
+                try:
+                    mcp = McpToolContent.from_json_string(sub.content)
+                    if getattr(mcp, 'tool_call_id', None) == review_content.tool_call_id:
+                        mcp.arguments = request.decision.edited_action.args
+                        await message_crud.update_sub_message(
+                            db, sub.id,
+                            schemas.SubMessageUpdate(content=mcp.to_json_string())
+                        )
+                except Exception:
+                    pass
 
     await message_crud.update_sub_message(
         db,

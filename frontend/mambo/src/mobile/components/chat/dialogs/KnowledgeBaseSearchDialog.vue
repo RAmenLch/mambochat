@@ -1,138 +1,113 @@
-<!-- frontend/mambo/src/mobile/components/chat/dialogs/KnowledgeBaseSearchDialog.vue -->
+<!-- KnowledgeBaseSearchDialog.vue — 移动端知识库搜索 -->
 <template>
-  <div class="mobile-kb-search">
-    <!-- 搜索工具栏 -->
-    <div class="search-toolbar">
-      <div class="kb-select-row">
-        <el-select
-          v-model="selectedKbId"
-          :placeholder="$t('kb.search.selectKbPlaceholder')"
-          clearable
-          style="width: 100%"
-        >
-          <template #prefix>
-            <el-icon><Collection /></el-icon>
-          </template>
-          <el-option v-for="kb in kbList" :key="kb.id" :label="kb.name" :value="kb.id" />
-        </el-select>
+  <div class="kb-search">
+    <!-- KB 选择 & 搜索 -->
+    <div class="kb-toolbar">
+      <div class="kb-picker" @click="showKbPicker = !showKbPicker">
+        <el-icon :size="16"><Collection /></el-icon>
+        <span class="kb-picker-label">{{ selectedKbName || '选择知识库' }}</span>
+        <el-icon :size="14" class="picker-arrow"><ArrowDown /></el-icon>
+        <Transition name="fade">
+          <div v-if="showKbPicker" class="kb-picker-list">
+            <button
+              v-for="kb in kbList"
+              :key="kb.id"
+              class="kb-picker-item"
+              :class="{ active: selectedKbId === kb.id }"
+              @click.stop="selectedKbId = kb.id; showKbPicker = false"
+            >{{ kb.name }}</button>
+          </div>
+        </Transition>
       </div>
 
-      <el-input
-        v-model="queryText"
-        :placeholder="$t('kb.search.inputPlaceholder')"
-        clearable
-        @keyup.enter="handleSearch"
-      >
-        <template #append>
-          <el-button :icon="Search" @click="handleSearch" :loading="isSearching" />
-        </template>
-      </el-input>
+      <div class="search-row">
+        <div class="search-input-wrap">
+          <el-icon :size="16" class="search-icon"><Search /></el-icon>
+          <input
+            v-model="queryText"
+            :placeholder="$t('kb.search.inputPlaceholder')"
+            class="search-input"
+            @keyup.enter="handleSearch"
+          />
+        </div>
+        <button class="search-btn" @click="handleSearch" :disabled="isSearching">
+          <el-icon v-if="!isSearching" :size="18"><Search /></el-icon>
+          <el-icon v-else :size="18" class="is-loading"><Loading /></el-icon>
+        </button>
+      </div>
 
-      <div class="settings-row">
-        <span class="label">{{ $t('kb.search.topKLabel') }}</span>
-        <el-input-number
-          v-model="topK"
-          :min="1"
-          :max="20"
-          size="small"
-          controls-position="right"
-          style="width: 80px"
-        />
+      <div class="topk-row">
+        <span class="topk-label">Top-K</span>
+        <button class="topk-btn" @click="topK = Math.max(1, topK - 1)">−</button>
+        <span class="topk-value">{{ topK }}</span>
+        <button class="topk-btn" @click="topK = Math.min(20, topK + 1)">+</button>
       </div>
     </div>
 
-    <!-- 结果列表 -->
-    <div class="results-area" v-loading="isSearching">
-      <el-scrollbar v-if="results.length > 0">
-        <div class="results-list">
-          <div
-            v-for="item in results"
-            :key="item.chunk_id"
-            class="result-card"
-            :class="{ 'is-active': isSelected(item.chunk_id) }"
-          >
-            <!-- 卡片头部：选中状态与元信息 -->
-            <div class="card-header" @click="toggleSelection(item)">
-              <el-checkbox :model-value="isSelected(item.chunk_id)" @click.stop size="large" />
-              <div class="meta-info">
-                <div class="meta-top">
-                  <span class="file-name">{{ item.resource_name }}</span>
-                  <el-tag size="small" type="info" effect="plain">
-                    Score: {{ item.score.toFixed(3) }}
-                  </el-tag>
-                </div>
-                <div class="meta-bottom">
-                  <span class="kb-name">{{ item.kb_name }}</span>
-                  <span class="chunk-badge">#{{ item.chunk_index }}</span>
-                </div>
+    <!-- 结果 -->
+    <div class="kb-results">
+      <div v-if="isSearching" class="kb-searching">
+        <el-icon :size="24" class="is-loading"><Loading /></el-icon>
+        <span>搜索中...</span>
+      </div>
+
+      <div v-else-if="results.length > 0" class="results-list">
+        <div
+          v-for="item in results"
+          :key="item.chunk_id"
+          class="result-card"
+          :class="{ selected: isSelected(item.chunk_id) }"
+        >
+          <div class="card-top">
+            <button class="card-check-btn" @click.stop="toggleSelection(item)">
+              <el-icon v-if="isSelected(item.chunk_id)" color="var(--el-color-primary)" :size="20"><Select /></el-icon>
+              <div v-else class="check-empty"></div>
+            </button>
+            <div class="card-meta">
+              <span class="card-file">{{ item.resource_name }}</span>
+              <div class="card-sub">
+                <span>{{ item.kb_name }}</span>
+                <span class="card-score">Score {{ item.score.toFixed(3) }}</span>
+                <span class="card-chunk">#{{ item.chunk_index }}</span>
               </div>
             </div>
+            <button class="card-expand-btn" @click.stop="toggleExpand(item.chunk_id)">
+              <el-icon :size="16"><ArrowDown v-if="!isExpanded(item.chunk_id)" /><ArrowUp v-else /></el-icon>
+            </button>
+          </div>
 
-            <!-- 卡片内容 -->
-            <div class="card-body" @click="toggleExpand(item.chunk_id)">
-              <div class="content-text" :class="{ 'is-collapsed': !isExpanded(item.chunk_id) }">
-                {{ item.chunk_content }}
-              </div>
-            </div>
+          <div class="card-body" v-if="isExpanded(item.chunk_id)" @click.stop>
+            <p :class="{ clamped: !isExpanded(item.chunk_id) }">{{ item.chunk_content }}</p>
+          </div>
 
-            <!-- 操作区：展开/导航 -->
-            <div class="card-actions">
-              <el-button link type="primary" size="small" @click.stop="toggleExpand(item.chunk_id)">
-                {{ isExpanded(item.chunk_id) ? $t('kb.search.collapse') : $t('kb.search.expand') }}
-                <el-icon class="el-icon--right" v-if="!isExpanded(item.chunk_id)"
-                  ><ArrowDown
-                /></el-icon>
-                <el-icon class="el-icon--right" v-else><ArrowUp /></el-icon>
-              </el-button>
-
-              <!-- 上下文导航：仅展开时显示 -->
-              <div v-if="isExpanded(item.chunk_id)" class="context-nav">
-                <el-button-group size="small">
-                  <el-button
-                    :icon="ArrowLeft"
-                    :loading="isContextLoading(item.chunk_id, 'prev')"
-                    :disabled="item.chunk_index <= 0"
-                    @click.stop="navigateContext(item, 'prev')"
-                  >
-                    Prev
-                  </el-button>
-
-                  <el-button disabled size="small" class="index-display">
-                    #{{ item.chunk_index }}
-                  </el-button>
-
-                  <el-button
-                    :loading="isContextLoading(item.chunk_id, 'next')"
-                    @click.stop="navigateContext(item, 'next')"
-                  >
-                    Next
-                    <el-icon class="el-icon--right"><ArrowRight /></el-icon>
-                  </el-button>
-                </el-button-group>
-
-                <!-- 回跳按钮 -->
-                <el-button
-                  v-if="item.chunk_index !== item.original_index"
-                  size="small"
-                  type="warning"
-                  plain
-                  style="margin-left: 8px"
-                  :loading="isContextLoading(item.chunk_id, 'reset')"
-                  @click.stop="resetToOriginal(item)"
-                >
-                  <el-icon><Aim /></el-icon>
-                  Reset
-                </el-button>
-              </div>
-            </div>
+          <div v-if="isExpanded(item.chunk_id)" class="card-nav">
+            <button class="nav-btn" :disabled="item.chunk_index <= 0" @click="navigateContext(item, 'prev')">
+              <el-icon :size="16"><ArrowLeft /></el-icon>
+            </button>
+            <span class="nav-index">#{{ item.chunk_index }}</span>
+            <button class="nav-btn" @click="navigateContext(item, 'next')">
+              <el-icon :size="16"><ArrowRight /></el-icon>
+            </button>
+            <button
+              v-if="item.chunk_index !== item.original_index"
+              class="nav-btn reset"
+              @click="resetToOriginal(item)"
+            >
+              <el-icon :size="16"><RefreshLeft /></el-icon>
+            </button>
           </div>
         </div>
-      </el-scrollbar>
+      </div>
 
-      <el-empty v-else-if="hasSearched" :description="$t('kb.search.noResult')" :image-size="80" />
-      <div v-else class="placeholder-state">
-        <el-icon :size="48"><Search /></el-icon>
-        <p>{{ $t('kb.search.placeholder') }}</p>
+      <div v-else-if="hasSearched" class="kb-empty">无搜索结果</div>
+      <div v-else class="kb-placeholder">
+        <el-icon :size="40"><Search /></el-icon>
+        <p>输入关键词搜索知识库</p>
+      </div>
+
+      <div v-if="selectedItems.length > 0" class="kb-confirm-bar">
+        <span class="confirm-count">已选 {{ selectedItems.length }} 条</span>
+        <button class="confirm-btn" @click="emitConfirm">确认使用</button>
       </div>
     </div>
   </div>
@@ -147,7 +122,9 @@ import {
   ArrowUp,
   ArrowLeft,
   ArrowRight,
-  Aim,
+  Select,
+  RefreshLeft,
+  Loading,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
@@ -160,6 +137,7 @@ type ExtendedSearchResultItem = KBSearchResultItem & { original_index: number }
 
 const emit = defineEmits<{
   (e: 'selection-change', items: KBSearchResultItem[]): void
+  (e: 'confirm', items: KBSearchResultItem[]): void
 }>()
 
 const resourceStore = useResourceStore()
@@ -175,12 +153,18 @@ const results = ref<ExtendedSearchResultItem[]>([])
 const selectedItems = ref<KBSearchResultItem[]>([])
 const expandedItems = ref<Set<string>>(new Set())
 const contextLoadingMap = ref<Map<string, boolean>>(new Map())
+const showKbPicker = ref(false)
 
 // Computed
 const kbList = computed(() => {
   return resourceStore.resources
     .filter((r) => r.resourceType === 'knowledge_base')
     .sort((a, b) => a.sortOrder - b.sortOrder)
+})
+
+const selectedKbName = computed(() => {
+  const kb = kbList.value.find(k => k.id === selectedKbId.value)
+  return kb?.name ?? null
 })
 
 // Watchers
@@ -326,159 +310,437 @@ onMounted(() => {
     selectedKbId.value = kbList.value[0].id
   }
 })
+
+function emitConfirm() {
+  emit('confirm', selectedItems.value)
+  emit('selection-change', selectedItems.value)
+}
 </script>
 
 <style scoped>
-.mobile-kb-search {
+.kb-search {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background-color: var(--el-bg-color);
 }
 
-.search-toolbar {
-  padding: 10px;
-  background-color: var(--el-bg-color);
-  border-bottom: 1px solid var(--el-border-color-lighter);
+.kb-toolbar {
+  padding: 0 0 10px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.kb-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--el-fill-color-light);
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--el-text-color-primary);
+  -webkit-tap-highlight-color: transparent;
+  position: relative;
+}
+
+.kb-picker:active {
+  background: var(--el-fill-color);
+}
+
+.kb-picker-label {
+  flex: 1;
+}
+
+.picker-arrow {
+  color: var(--el-text-color-placeholder);
+  transition: transform 0.2s;
+}
+
+.search-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.search-input-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--el-fill-color-light);
+  border-radius: 10px;
+}
+
+.search-icon {
+  color: var(--el-text-color-placeholder);
   flex-shrink: 0;
 }
 
-.kb-select-row {
-  margin-bottom: 10px;
+.search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 15px;
+  color: var(--el-text-color-primary);
+  outline: none;
+  font-family: inherit;
 }
 
-.settings-row {
-  margin-top: 10px;
+.search-input::placeholder {
+  color: var(--el-text-color-placeholder);
+}
+
+.search-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: var(--el-color-primary);
+  color: #fff;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  font-size: 13px;
-  color: var(--el-text-color-regular);
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
-.results-area {
+.search-btn:active {
+  transform: scale(0.92);
+}
+
+.search-btn:disabled {
+  opacity: 0.6;
+}
+
+.is-loading {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.topk-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.topk-label {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+
+.topk-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--el-border-color);
+  background: var(--el-fill-color-light);
+  font-size: 18px;
+  color: var(--el-text-color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.topk-btn:active {
+  background: var(--el-fill-color);
+}
+
+.topk-value {
+  font-size: 15px;
+  font-weight: 600;
+  min-width: 20px;
+  text-align: center;
+}
+
+/* KB picker dropdown */
+.kb-picker-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  margin-top: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+  background: var(--color-background);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+.kb-picker-item {
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 14px;
+  color: var(--el-text-color-primary);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+
+.kb-picker-item:active {
+  background: var(--el-fill-color-light);
+}
+
+.kb-picker-item.active {
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+
+/* Results */
+.kb-results {
   flex: 1;
-  overflow: hidden;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+}
+
+.kb-searching {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--el-text-color-placeholder);
+  font-size: 14px;
 }
 
 .results-list {
-  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 12px;
 }
 
 .result-card {
-  background-color: var(--el-fill-color-blank);
+  background: var(--el-fill-color-blank);
   border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
-  margin-bottom: 10px;
+  border-radius: 12px;
   overflow: hidden;
-  transition: all 0.2s;
+  transition: border-color 0.2s;
 }
 
-.result-card.is-active {
+.result-card.selected {
   border-color: var(--el-color-primary);
-  background-color: var(--el-color-primary-light-9);
+  background: var(--el-color-primary-light-9);
 }
 
-.card-header {
+.card-top {
   display: flex;
   align-items: center;
-  padding: 10px;
   gap: 10px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-  cursor: pointer;
+  padding: 10px 12px;
 }
 
-.meta-info {
-  flex: 1;
-  overflow: hidden;
-}
-
-.meta-top {
+.card-check-btn {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 4px;
+  padding: 4px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.file-name {
-  font-weight: 500;
+.check-empty {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--el-border-color);
+}
+
+.card-expand-btn {
+  display: flex;
+  align-items: center;
+  padding: 6px;
+  border: none;
+  background: transparent;
+  color: var(--el-text-color-placeholder);
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.check-empty {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--el-border-color);
+}
+
+.card-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.card-file {
   font-size: 14px;
+  font-weight: 600;
+  display: block;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  margin-right: 8px;
+  margin-bottom: 2px;
 }
 
-.meta-bottom {
+.card-sub {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 12px;
   color: var(--el-text-color-secondary);
 }
 
-.kb-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.card-score {
+  font-family: monospace;
 }
 
-.chunk-badge {
-  background-color: var(--el-fill-color-dark);
-  padding: 0 4px;
-  border-radius: 4px;
+.card-chunk {
+  background: var(--el-fill-color);
+  padding: 0 5px;
+  border-radius: 3px;
   font-family: monospace;
 }
 
 .card-body {
-  padding: 10px;
+  padding: 0 12px 10px;
   cursor: pointer;
 }
 
-.content-text {
+.card-body p {
+  margin: 0;
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.6;
   color: var(--el-text-color-regular);
   white-space: pre-wrap;
-  word-break: break-all;
+  word-break: break-word;
 }
 
-.content-text.is-collapsed {
+.card-body p.clamped {
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 
-.card-actions {
-  padding: 8px 10px;
+.card-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
   border-top: 1px solid var(--el-border-color-lighter);
-  background-color: var(--el-fill-color-lighter);
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+  background: var(--el-fill-color-lighter);
 }
 
-.context-nav {
-  margin-top: 8px;
+.nav-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid var(--el-border-color);
+  background: #fff;
   display: flex;
   align-items: center;
-  width: 100%;
   justify-content: center;
+  cursor: pointer;
+  color: var(--el-text-color-regular);
 }
 
-.index-display {
+.nav-btn:active {
+  background: var(--el-fill-color-light);
+}
+
+.nav-btn:disabled {
+  opacity: 0.3;
+}
+
+.nav-btn.reset {
+  margin-left: 6px;
+}
+
+.nav-index {
   font-family: monospace;
-  pointer-events: none;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  min-width: 30px;
+  text-align: center;
 }
 
-.placeholder-state {
-  height: 100%;
+.kb-empty,
+.kb-placeholder {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  height: 100%;
+  gap: 8px;
   color: var(--el-text-color-placeholder);
+  font-size: 14px;
+}
+
+.kb-confirm-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  margin-top: auto;
+  border-top: 1px solid var(--el-border-color-lighter);
+  background: var(--color-background);
+}
+
+.confirm-count {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+
+.confirm-btn {
+  padding: 10px 24px;
+  border: none;
+  border-radius: 12px;
+  background: var(--el-color-primary);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.confirm-btn:active {
+  transform: scale(0.96);
+}
+
+/* Transitions */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

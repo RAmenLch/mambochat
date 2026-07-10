@@ -296,64 +296,27 @@ async function handleBlockCopy(content: string) {
   display: flex;
   flex-direction: column;
   width: 100%;
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 8px;
-  background-color: var(--color-background-soft);
   overflow: hidden;
-  margin-bottom: 4px;
-  transition: all 0.3s ease;
 }
 
 .sub-message-item.is-inline {
-  border: none;
-  background-color: transparent;
-  margin-bottom: 0;
-  box-shadow: none;
+  background: transparent;
 }
 
 .sub-message-item.is-inactive {
-  opacity: 1;
-  border-style: dashed;
-  border-color: var(--el-border-color);
-  background-color: var(--el-fill-color-lighter);
-}
-
-.sub-message-item.is-inactive:hover {
-  border-style: solid;
-  border-color: var(--el-text-color-placeholder);
+  opacity: 0.6;
 }
 
 .sub-message-item.is-review-pending {
-  border-color: var(--el-color-warning-light-5);
-  background-color: var(--el-color-warning-light-9);
+  border-left: 3px solid var(--el-color-warning);
+  padding-left: 8px;
 }
 
-.is-user .sub-message-item {
-  background-color: var(--el-color-primary-light-9);
-  border-color: var(--el-color-primary-light-8);
-}
-
-.is-user .sub-message-item.is-inactive {
-  opacity: 1;
-  border-style: dashed;
-  border-color: var(--el-color-primary-light-5);
-  background-color: var(--el-color-primary-light-9);
-}
-
-.is-user .sub-message-item.is-inactive:hover {
-  border-style: solid;
-  border-color: var(--el-color-primary-light-5);
-}
-
-.sub-message-item.is-file {
-  background: transparent;
-  border: none;
-  padding: 0;
-}
-
+/* File display */
 .file-image-thumbnail {
   width: 100%;
-  border-radius: 8px;
+  max-width: 240px;
+  border-radius: 14px;
   max-height: 200px;
 }
 
@@ -361,67 +324,83 @@ async function handleBlockCopy(content: string) {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px;
-  border-radius: 8px;
-  background-color: var(--color-background-soft);
-  border: 1px solid var(--el-border-color-light);
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  max-width: 260px;
+}
+
+.is-user .file-card {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
 .file-card-info {
-  flex-grow: 1;
+  flex: 1;
   min-width: 0;
 }
 
 .file-card-name {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  color: inherit;
 }
 
 .file-card-size {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  opacity: 0.7;
 }
 
 .sub-message-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 6px 10px;
-  background-color: rgba(0, 0, 0, 0.03);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  padding: 4px 0 8px;
 }
 
 .partition-title {
-  font-size: 12px;
-  font-weight: bold;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--el-text-color-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.is-user .partition-title {
+  color: rgba(255, 255, 255, 0.7);
 }
 
 .actions {
   display: flex;
-  gap: 16px;
+  gap: 12px;
   align-items: center;
 }
 
 .action-icon {
-  font-size: 16px;
-  color: var(--el-text-color-secondary);
+  font-size: 15px;
+  color: var(--el-text-color-placeholder);
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  padding: 4px;
+}
+
+.is-user .action-icon {
+  color: rgba(255, 255, 255, 0.6);
 }
 
 .message-content {
-  padding: 8px; /* Reduced from 10px */
-  font-size: 14px; /* Reduced from 15px */
-  line-height: 1.5; /* Adjusted for smaller font */
+  font-size: 14px;
+  line-height: 1.5;
   color: var(--color-text);
   overflow-x: auto;
 }
 
-.sub-message-item.is-inline .message-content {
-  padding: 0;
+.is-user .message-content {
+  color: rgba(255, 255, 255, 0.95);
 }
 
 .message-content.collapsed {
@@ -430,13 +409,14 @@ async function handleBlockCopy(content: string) {
 
 .content-block :deep(img) {
   max-width: 100%;
-  border-radius: 4px;
+  border-radius: 8px;
 }
 
 .content-block :deep(pre) {
-  margin: 8px 0; /* Reduced from 10px */
+  margin: 6px 0;
   overflow-x: auto;
-  font-size: 13px; /* Smaller code font */
+  font-size: 13px;
+  border-radius: 8px;
 }
 
 .content-block :deep(table) {
@@ -445,51 +425,49 @@ async function handleBlockCopy(content: string) {
   margin: 0.8em 0;
   display: block;
   overflow-x: auto;
-  border-spacing: 0;
-  font-size: 13px; /* Smaller table font */
+  font-size: 13px;
 }
 
 .content-block :deep(th),
 .content-block :deep(td) {
-  padding: 4px 8px; /* Reduced from 6px 10px */
+  padding: 4px 8px;
   border: 1px solid var(--el-border-color);
   text-align: left;
 }
 
 .content-block :deep(th) {
-  background-color: var(--el-fill-color-light);
+  background: var(--el-fill-color-light);
   font-weight: 600;
-  color: var(--el-text-color-primary);
 }
 
 .content-block :deep(blockquote) {
-  margin: 8px 0; /* Reduced from 10px */
+  margin: 6px 0;
   padding-left: 10px;
   border-left: 3px solid var(--el-border-color);
   color: var(--el-text-color-secondary);
-  font-size: 13px; /* Smaller quote font */
+  font-size: 13px;
 }
 
 .mcp-tool-body {
   display: flex;
   flex-direction: column;
-  gap: 4px; /* Reduced from 5px */
+  gap: 4px;
 }
 
 .mcp-tool-summary {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px; /* Reduced from 13px */
+  font-size: 12px;
   color: var(--el-text-color-secondary);
 }
 
 .mcp-tool-result {
-  background-color: var(--el-fill-color-light);
-  padding: 6px; /* Reduced from 8px */
-  border-radius: 4px;
-  font-size: 12px; /* Reduced from 13px */
-  max-height: 120px; /* Reduced from 150px */
+  background: var(--el-fill-color-light);
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  max-height: 120px;
   overflow-y: auto;
 }
 
@@ -500,13 +478,13 @@ async function handleBlockCopy(content: string) {
 .typing-indicator {
   display: flex;
   gap: 4px;
-  padding: 5px;
+  padding: 4px 0;
 }
 
 .typing-indicator span {
-  width: 6px;
-  height: 6px;
-  background: #999;
+  width: 5px;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.6);
   border-radius: 50%;
   animation: bounce 1.4s infinite;
 }

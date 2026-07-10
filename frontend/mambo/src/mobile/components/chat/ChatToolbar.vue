@@ -2,113 +2,123 @@
 <template>
   <div class="mobile-toolbar">
     <div class="toolbar-left">
-      <div class="model-display">
-        <el-icon><Cpu /></el-icon>
+      <div class="model-chip" @click="$emit('openSettings')">
+        <el-icon :size="14"><User v-if="isAgentMode" /><Cpu v-else /></el-icon>
         <span class="model-name">{{ displayModelName }}</span>
       </div>
 
-      <!-- Zip History Jump Button -->
-      <el-popover
+      <span v-if="estimatedTokens > 0" class="token-badge">
+        <el-icon :size="12"><Coin /></el-icon>
+        <span>{{ estimatedTokens }}</span>
+      </span>
+
+      <button
         v-if="zipHistoryItems.length > 0"
-        placement="top"
-        :width="220"
-        trigger="click"
-        popper-class="zip-history-popover"
+        class="tool-chip zip-chip"
+        @click="showZipPopover = !showZipPopover"
       >
-        <template #reference>
-          <el-button size="small" text class="zip-trigger-btn">
-            <el-icon><Tickets /></el-icon>
-            <span class="zip-count">{{ zipHistoryItems.length }}</span>
-          </el-button>
-        </template>
-
-        <div class="zip-list-container">
-          <div class="zip-list-header">{{ t('chat.toolbar.zipHistoryList') }}</div>
-          <el-scrollbar max-height="250px">
-            <div
-              v-for="item in zipHistoryItems"
-              :key="item.messageId"
-              class="zip-list-item"
-              @click="handleJumpToMessage(item.messageId)"
-            >
-              <div class="zip-item-info">
-                <span class="zip-item-title">{{
-                  t('chat.toolbar.messageIndex', { index: item.index })
-                }}</span>
-                <el-tag
-                  size="small"
-                  :type="item.isEnabled ? 'success' : 'info'"
-                  effect="plain"
-                  class="zip-item-tag"
-                >
-                  {{ item.isEnabled ? t('common.status.enabled') : t('common.status.disabled') }}
-                </el-tag>
-              </div>
-            </div>
-          </el-scrollbar>
-        </div>
-      </el-popover>
-
-      <!-- Token Estimate: Click to Show -->
-      <el-popover placement="top" :width="180" trigger="click" v-if="estimatedTokens > 0">
-        <template #reference>
-          <el-button size="small" text class="token-btn">
-            <el-icon><Coin /></el-icon>
-            <span>{{ estimatedTokens }}</span>
-          </el-button>
-        </template>
-        <div class="token-detail">
-          <span>{{ t('chat.toolbar.estimatedTokens') }} :</span>
-          <strong>{{ estimatedTokens }}</strong>
-        </div>
-      </el-popover>
+        <el-icon :size="14"><Tickets /></el-icon>
+        <span>{{ zipHistoryItems.length }}</span>
+      </button>
     </div>
 
     <div class="toolbar-right">
-      <!-- MCP Tools -->
-      <el-popover placement="top-start" :width="280" trigger="click">
-        <template #reference>
-          <el-button :icon="Suitcase" circle size="small" />
-        </template>
-        <div class="mcp-tool-list">
-          <div class="mcp-header">{{ t('chat.toolbar.availableTools') }}</div>
-          <div v-if="activeUserMcpServices.length === 0" class="mcp-empty">
-            {{ t('chat.toolbar.noTools') }}
-          </div>
-          <div v-else class="mcp-items">
-            <div v-for="tool in activeUserMcpServices" :key="tool.id" class="mcp-item">
-              <el-checkbox
-                :model-value="isMcpToolEnabled(tool.id)"
-                @change="$emit('toggleMcpTool', tool.id)"
-              >
-                {{ tool.name }}
-              </el-checkbox>
+      <button
+        class="tool-btn web-search-btn"
+        :class="{ active: webSearchMode, direct: webSearchMode === 'direct_read', search: webSearchMode === 'search_and_read' }"
+        @click="$emit('toggleWebSearch')"
+      >
+        <el-icon :size="18"><Search /></el-icon>
+      </button>
+      <button class="tool-btn" @click="$emit('openResourceSelector')">
+        <el-icon :size="18"><Collection /></el-icon>
+      </button>
+      <button class="tool-btn" @click="showMorePopover = !showMorePopover">
+        <el-icon :size="18"><MoreFilled /></el-icon>
+      </button>
+    </div>
+
+    <!-- More Popover: MCP tools + Settings -->
+    <Teleport to="body">
+      <Transition name="sheet">
+        <div v-if="showMorePopover" class="popover-overlay" @click="showMorePopover = false">
+          <div class="popover-sheet" @click.stop>
+            <div class="sheet-handle"></div>
+            <div class="sheet-title">更多操作</div>
+            <div class="sheet-items">
+              <button class="sheet-item" @click="showMcpList = true; showMorePopover = false">
+                <el-icon :size="20"><Suitcase /></el-icon>
+                <span>MCP 工具</span>
+              </button>
             </div>
+            <button class="sheet-cancel" @click="showMorePopover = false">{{ t('common.action.cancel') }}</button>
           </div>
         </div>
-      </el-popover>
+      </Transition>
 
-      <!-- Upload File -->
-      <el-button :icon="Upload" circle size="small" @click="$emit('triggerFileUpload')" />
+      <!-- MCP List -->
+      <Transition name="sheet">
+        <div v-if="showMcpList" class="popover-overlay" @click="showMcpList = false">
+          <div class="popover-sheet" @click.stop>
+            <div class="sheet-handle"></div>
+            <div class="sheet-title">可用 MCP 工具</div>
+            <div class="sheet-items">
+              <div v-if="activeUserMcpServices.length === 0" class="sheet-empty">
+                暂无可用工具
+              </div>
+              <label
+                v-for="tool in activeUserMcpServices"
+                :key="tool.id"
+                class="sheet-item checkbox-item"
+              >
+                <input
+                  type="checkbox"
+                  :checked="isMcpToolEnabled(tool.id)"
+                  @change="$emit('toggleMcpTool', tool.id)"
+                />
+                <span>{{ tool.name }}</span>
+              </label>
+            </div>
+            <button class="sheet-cancel" @click="showMcpList = false">{{ t('common.action.cancel') }}</button>
+          </div>
+        </div>
+      </Transition>
 
-      <!-- Resource Selector -->
-      <el-button :icon="Collection" circle size="small" @click="$emit('openResourceSelector')" />
-
-      <!-- Chat Settings -->
-      <el-button :icon="Tools" circle size="small" @click="$emit('openSettings')" />
-    </div>
+      <!-- Zip History List -->
+      <Transition name="sheet">
+        <div v-if="showZipPopover" class="popover-overlay" @click="showZipPopover = false">
+          <div class="popover-sheet" @click.stop>
+            <div class="sheet-handle"></div>
+            <div class="sheet-title">历史压缩记录</div>
+            <div class="sheet-items">
+              <button
+                v-for="item in zipHistoryItems"
+                :key="item.messageId"
+                class="sheet-item"
+                @click="handleJumpToMessage(item.messageId); showZipPopover = false"
+              >
+                <span>第 {{ item.index }} 条消息</span>
+                <span class="zip-status-dot" :class="{ enabled: item.isEnabled }"></span>
+              </button>
+            </div>
+            <button class="sheet-cancel" @click="showZipPopover = false">{{ t('common.action.cancel') }}</button>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useProviderStore } from '@/stores/providerStore'
 import { useMcpStore } from '@/stores/mcpStore'
+import { useAgentStore } from '@/stores/agentStore'
 import type { Chat, Message } from '@/api/types'
 import type { PropType } from 'vue'
-import { Cpu, Upload, Collection, Coin, Suitcase, Tickets, Tools } from '@element-plus/icons-vue'
+import { Cpu, Collection, Coin, Suitcase, Tickets, MoreFilled, User, Search } from '@element-plus/icons-vue'
 
 const props = defineProps({
   currentChat: {
@@ -130,30 +140,44 @@ const emit = defineEmits([
   'openResourceSelector',
   'toggleMcpTool',
   'jumpToMessage',
-  'openSettings',
+  'toggleWebSearch',
 ])
 
 const { t } = useI18n()
 const providerStore = useProviderStore()
 const mcpStore = useMcpStore()
+const agentStore = useAgentStore()
 const { activeUserMcpServices } = storeToRefs(mcpStore)
 
+const showMorePopover = ref(false)
+const showMcpList = ref(false)
+const showZipPopover = ref(false)
+
 const displayModelName = computed(() => {
+  if (props.currentChat?.chatMode === 'agent') {
+    if (props.currentChat.agentId) {
+      const agent = agentStore.allAgents.find(a => a.id === props.currentChat!.agentId)
+      if (agent) return agent.name
+    }
+    return t('common.status.unspecified')
+  }
   if (!props.currentChat?.aiModelId) return t('common.status.unspecified')
   const model = providerStore.allModels.find((m) => m.id === props.currentChat.aiModelId)
   return model ? model.name : t('common.status.unknownModel')
 })
 
+const isAgentMode = computed(() => props.currentChat?.chatMode === 'agent')
+
+const webSearchMode = computed((): 'direct_read' | 'search_and_read' | null => {
+  return props.currentChat?.web_search_mode ?? null
+})
+
 const isMcpToolEnabled = (mcpId: string): boolean => {
-  const mcpIds = props.currentChat?.enabled_mcp_ids
-  if (!mcpIds) return false
-  return mcpIds.includes(mcpId)
+  return props.currentChat?.enabled_mcp_ids?.includes(mcpId) ?? false
 }
 
 const zipHistoryItems = computed(() => {
-  const items: Array<{ messageId: string; index: number; isEnabled: boolean }> = []
-
-  props.messages.forEach((msg, index) => {
+  return props.messages.reduce<Array<{ messageId: string; index: number; isEnabled: boolean }>>((items, msg, index) => {
     const zipSub = msg.sub_messages.find((sm) => sm.type === 'ZipHistory')
     if (zipSub) {
       items.push({
@@ -162,9 +186,8 @@ const zipHistoryItems = computed(() => {
         isEnabled: zipSub.config.zip_enable === true,
       })
     }
-  })
-
-  return items
+    return items
+  }, [])
 })
 
 function handleJumpToMessage(messageId: string) {
@@ -177,120 +200,244 @@ function handleJumpToMessage(messageId: string) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding-top: 8px;
-  padding-bottom: 8px;
-  min-height: 40px;
+  padding: 6px 0;
+  gap: 8px;
+  min-height: 36px;
 }
 
 .toolbar-left {
   display: flex;
   align-items: center;
+  gap: 6px;
   overflow: hidden;
-  gap: 4px;
+  flex: 1;
+  min-width: 0;
 }
 
-.model-display {
+.model-chip {
   display: flex;
   align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  background: var(--el-fill-color-light);
   font-size: 12px;
   color: var(--el-text-color-regular);
-}
-
-.model-display .el-icon {
-  margin-right: 4px;
-  color: var(--el-text-color-secondary);
-}
-
-.model-name {
-  font-weight: 500;
+  cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 130px;
+  transition: background-color 0.15s;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.zip-trigger-btn {
-  padding: 4px 8px;
-  font-size: 13px;
-  color: var(--el-color-primary);
+.model-chip:active {
+  background: var(--el-fill-color);
+}
+
+.model-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.token-badge {
   display: flex;
   align-items: center;
   gap: 2px;
-}
-
-.zip-count {
-  font-weight: 600;
-}
-
-.token-btn {
-  padding: 4px;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--el-text-color-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
-.token-detail {
-  text-align: center;
+.tool-chip {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  border-radius: 10px;
+  border: none;
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-family: inherit;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .toolbar-right {
   display: flex;
-  gap: 4px;
+  gap: 2px;
+  flex-shrink: 0;
 }
 
-/* MCP Popover Styles */
-.mcp-tool-list {
-  max-height: 300px;
+.tool-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tool-btn:active {
+  background: var(--el-fill-color-light);
+  color: var(--el-color-primary);
+}
+
+.web-search-btn.active {
+  color: var(--el-color-primary);
+}
+
+.web-search-btn.direct {
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+
+.web-search-btn.search {
+  color: var(--el-color-success);
+  background: var(--el-color-success-light-9);
+}
+
+/* Popover Sheet (reusable) */
+.popover-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 2000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.popover-sheet {
+  width: 100%;
+  max-width: 500px;
+  background: var(--color-background);
+  border-radius: 16px 16px 0 0;
+  padding: 8px 16px;
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+}
+
+.sheet-handle {
+  width: 36px;
+  height: 4px;
+  background: var(--el-border-color);
+  border-radius: 2px;
+  margin: 8px auto 12px;
+}
+
+.sheet-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 8px;
+  padding: 0 4px;
+}
+
+.sheet-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 50vh;
   overflow-y: auto;
 }
 
-.mcp-header {
-  font-weight: bold;
-  margin-bottom: 8px;
-  font-size: 13px;
-}
-
-.mcp-item {
-  padding: 4px 0;
-}
-
-/* Zip History List Styles */
-.zip-list-container {
+.sheet-item {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 8px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  font-size: 16px;
+  color: var(--el-text-color-primary);
+  cursor: pointer;
+  transition: background-color 0.15s;
+  font-family: inherit;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.zip-list-header {
-  font-size: 12px;
+.sheet-item:active {
+  background: var(--el-fill-color-light);
+}
+
+.sheet-item.checkbox-item {
+  cursor: pointer;
+}
+
+.sheet-item.checkbox-item input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--el-color-primary);
+  flex-shrink: 0;
+}
+
+.sheet-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--el-text-color-placeholder);
+  font-size: 14px;
+}
+
+.zip-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--el-text-color-placeholder);
+  margin-left: auto;
+}
+
+.zip-status-dot.enabled {
+  background: var(--el-color-success);
+}
+
+.sheet-cancel {
+  width: 100%;
+  padding: 14px;
+  margin-top: 8px;
+  border: none;
+  border-radius: 10px;
+  background: var(--el-fill-color-light);
+  font-size: 16px;
   font-weight: 600;
   color: var(--el-text-color-secondary);
-  padding: 0 8px 8px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-  margin-bottom: 4px;
-}
-
-.zip-list-item {
-  padding: 8px;
-  border-radius: 4px;
   cursor: pointer;
-  transition: background-color 0.2s;
+  font-family: inherit;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.zip-list-item:active {
-  background-color: var(--el-fill-color-light);
+.sheet-cancel:active {
+  background: var(--el-fill-color);
 }
 
-.zip-item-info {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+/* Transitions */
+.sheet-enter-active {
+  transition: all 0.25s ease-out;
 }
-
-.zip-item-title {
-  font-size: 13px;
-  color: var(--el-text-color-regular);
+.sheet-leave-active {
+  transition: all 0.2s ease-in;
 }
-
-.zip-item-tag {
-  margin-left: 8px;
+.sheet-enter-from .popover-sheet,
+.sheet-leave-to .popover-sheet {
+  transform: translateY(100%);
+}
+.sheet-enter-from {
+  opacity: 0;
+}
+.sheet-leave-to {
+  opacity: 0;
 }
 </style>

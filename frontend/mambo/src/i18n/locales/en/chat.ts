@@ -87,6 +87,8 @@ export default {
     compressHistoryStart: 'Started compressing chat history in the background. You can continue chatting.',
     compressStarted: 'Compressing history...',
     regenerate: 'Regenerate',
+    prevBranch: 'Previous Branch',
+    nextBranch: 'Next Branch',
     expand: 'Expand',
     collapse: 'Collapse',
     compressHistory: 'Compress History',

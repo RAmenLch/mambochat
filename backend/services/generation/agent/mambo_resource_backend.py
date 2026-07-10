@@ -1624,7 +1624,7 @@ class MamboResourceBackend(BackendProtocol):
         pattern: str,
         path: VirtualPath = VirtualPath("/workspace"),
         glob: str | None = None,
-        regex: bool = False,
+        regex: bool = True,
         offset: int = 0,
         limit: int | None = None,
     ) -> GrepResult:
@@ -1730,7 +1730,7 @@ class MamboResourceBackend(BackendProtocol):
         pattern: str,
         path: VirtualPath = VirtualPath("/workspace"),
         glob: str | None = None,
-        regex: bool = False,
+        regex: bool = True,
         offset: int = 0,
         limit: int | None = None,
     ) -> GrepResult:
@@ -1743,7 +1743,7 @@ class MamboResourceBackend(BackendProtocol):
         pattern: str,
         path: VirtualPath = VirtualPath("/workspace"),
         glob: str | None = None,
-        regex: bool = False,
+        regex: bool = True,
         offset: int = 0,
         limit: int | None = None,
     ) -> GrepResult:

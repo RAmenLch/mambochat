@@ -1,86 +1,73 @@
-<!-- frontend/mambo/src/mobile/components/chat/dialogs/ResourceSelectorDialog.vue -->
+<!-- ResourceSelectorDialog.vue — 移动端资源选择器（底部弹出面板） -->
 <template>
-  <el-drawer
-    :model-value="visible"
-    direction="rtl"
-    size="100%"
-    :before-close="handleDialogClose"
-    class="mobile-resource-drawer"
-  >
-    <template #header>
-      <div class="drawer-header">
-        <span>{{ $t('resource.selector.title') }}</span>
-        <div class="header-actions">
-          <template v-if="selectorMode === 'resource'">
-            <span class="multi-select-label">{{ $t('resource.selector.multiSelect') }}</span>
-            <el-switch v-model="isMultiSelectMode" size="small" />
-          </template>
-        </div>
-      </div>
-    </template>
+  <Teleport to="body">
+    <Transition name="sheet">
+      <div v-if="visible" class="rs-overlay" @click="handleDialogClose">
+        <div class="rs-sheet" @click.stop>
+          <div class="sheet-handle"></div>
 
-    <div class="drawer-content">
-      <el-tabs v-model="selectorMode" class="selector-tabs" @tab-change="handleTabChange">
-        <el-tab-pane :label="$t('resource.selector.modeResource')" name="resource">
-          <div class="resource-section">
-            <div class="search-row">
-              <el-input
-                v-model="searchText"
-                :placeholder="$t('resource.selector.searchPlaceholder')"
-                clearable
-                @input="handleSearchInput"
-              >
-                <template #prefix>
-                  <el-icon><Search /></el-icon>
-                </template>
-              </el-input>
-              <el-button
-                :type="enableRegex ? 'primary' : 'default'"
-                size="small"
-                class="regex-btn"
-                @click="toggleRegex"
-              >
-                .*
-              </el-button>
-            </div>
+          <!-- Header -->
+          <div class="rs-header">
+            <span class="rs-title">{{ $t('resource.selector.title') }}</span>
+            <label class="multi-toggle" v-if="selectorMode === 'resource'">
+              <span>{{ $t('resource.selector.multiSelect') }}</span>
+              <input type="checkbox" v-model="isMultiSelectMode" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
 
-            <el-scrollbar class="tree-scroll-area" v-loading="isResourcesLoading && !searchText">
-              <template v-if="searchText">
-                <div v-if="isSearching" class="loading-placeholder">
-                  <el-skeleton :rows="3" animated />
-                </div>
-                <div v-else-if="searchResult.length === 0" class="empty-box">
-                  <el-empty :description="$t('chat.search.noResult')" :image-size="60" />
-                </div>
-                <div v-else class="search-list">
-                  <div
-                    v-for="item in searchResult"
-                    :key="item.resource_id"
-                    class="m-search-item"
-                    :class="{ active: isResourceSelected(item.resource_id) }"
-                    @click="handleSearchResultClick(item)"
-                  >
-                    <div class="item-info">
-                      <div class="item-name">{{ item.resource_name }}</div>
-                      <div class="item-meta">
-                        <el-tag
-                          size="small"
-                          effect="plain"
-                          :type="getMatchTypeTag(item.match_type)"
-                        >
-                          {{ getMatchTypeLabel(item.match_type) }}
-                        </el-tag>
-                        <span class="item-path">{{ item.resource_path }}</span>
-                      </div>
-                    </div>
-                    <el-icon v-if="isResourceSelected(item.resource_id)" class="check-icon"
-                      ><Check
-                    /></el-icon>
+          <!-- Tab bar -->
+          <div class="rs-tabs">
+            <button
+              class="rs-tab"
+              :class="{ active: selectorMode === 'resource' }"
+              @click="selectorMode = 'resource'; selectedResources = []; selectionType = null"
+            >资源</button>
+            <button
+              class="rs-tab"
+              :class="{ active: selectorMode === 'kb' }"
+              @click="selectorMode = 'kb'; selectedResources = []; selectionType = null"
+            >知识库</button>
+          </div>
+
+          <!-- Search -->
+          <div class="rs-search" v-if="selectorMode === 'resource'">
+            <el-icon :size="16" class="search-icon"><Search /></el-icon>
+            <input
+              v-model="searchText"
+              :placeholder="$t('resource.selector.searchPlaceholder')"
+              class="search-input"
+              @input="handleSearchInput"
+            />
+            <button v-if="searchText" class="search-clear" @click="searchText = ''; searchResult = []">
+              <el-icon :size="14"><Close /></el-icon>
+            </button>
+          </div>
+
+          <!-- Content -->
+          <div class="rs-body">
+            <!-- Resource Tree -->
+            <template v-if="selectorMode === 'resource'">
+              <div class="rs-list" v-if="searchText">
+                <div v-if="isSearching" class="rs-loading">搜索中...</div>
+                <div v-else-if="searchResult.length === 0" class="rs-empty">无结果</div>
+                <button
+                  v-for="item in searchResult"
+                  :key="item.resource_id"
+                  class="rs-item"
+                  :class="{ selected: isResourceSelected(item.resource_id) }"
+                  @click="handleSearchResultClick(item)"
+                >
+                  <el-icon :size="18"><Document /></el-icon>
+                  <div class="rs-item-info">
+                    <span class="rs-item-name">{{ item.resource_name }}</span>
+                    <span class="rs-item-meta">{{ getMatchTypeLabel(item.match_type) }} · {{ item.resource_path }}</span>
                   </div>
-                </div>
-              </template>
+                  <el-icon v-if="isResourceSelected(item.resource_id)" class="rs-check"><Select /></el-icon>
+                </button>
+              </div>
 
-              <template v-else>
+              <div v-else class="rs-tree-wrap" v-loading="isResourcesLoading">
                 <el-tree
                   ref="treeRef"
                   :data="filteredTreeData"
@@ -94,101 +81,69 @@
                 >
                   <template #default="{ data }">
                     <div
-                      class="m-tree-node"
+                      class="rs-tree-node"
                       :class="{
-                        active: isResourceSelected(data.id),
+                        selected: isResourceSelected(data.id),
                         disabled: isNodeDisabled(data),
                       }"
                     >
-                      <div class="node-left">
-                        <el-icon>
-                          <Reading v-if="data.resourceType === 'skill'" />
-                          <Collection v-else-if="data.resourceType === 'knowledge_base'" />
-                          <Folder v-else-if="data.itemType === 'folder'" />
-                          <Memo v-else-if="data.resourceType === 'submessage_template'" />
-                          <Document v-else />
-                        </el-icon>
-                        <span class="label">{{ data.name }}</span>
-                        <el-tag v-if="data.itemType === 'resource' && data.resourceType" size="small" type="info" class="resource-type-tag">
-                          {{ getReadableResourceType(data.resourceType) }}
-                        </el-tag>
-                        <el-tag v-else-if="data.itemType === 'folder' && data.resourceType === 'knowledge_base'" size="small" type="primary" class="resource-type-tag">
-                          {{ $t('resource.types.knowledge_base') }}
-                        </el-tag>
-                        <el-tag v-else-if="data.itemType === 'folder' && data.resourceType === 'skill'" size="small" type="danger" class="resource-type-tag">
-                          {{ $t('resource.types.skill') }}
-                        </el-tag>
-                      </div>
-                      <el-icon v-if="loadingFolders.has(data.id)" class="is-loading"
-                        ><Loading
-                      /></el-icon>
-                      <el-icon v-else-if="isResourceSelected(data.id)" class="check-icon"
-                        ><Check
-                      /></el-icon>
+                      <el-icon :size="18">
+                        <Reading v-if="data.resourceType === 'skill'" />
+                        <Collection v-else-if="data.resourceType === 'knowledge_base'" />
+                        <Folder v-else-if="data.itemType === 'folder'" />
+                        <Memo v-else-if="data.resourceType === 'submessage_template'" />
+                        <Document v-else />
+                      </el-icon>
+                      <span class="rs-node-name">{{ data.name }}</span>
+                      <el-tag v-if="data.itemType === 'resource' && data.resourceType" size="small" type="info" class="rs-type-tag">
+                        {{ getReadableResourceType(data.resourceType) }}
+                      </el-tag>
+                      <el-icon v-if="loadingFolders.has(data.id)" class="is-loading"><Loading /></el-icon>
+                      <el-icon v-else-if="isResourceSelected(data.id)" class="rs-check"><Select /></el-icon>
                     </div>
                   </template>
                 </el-tree>
-              </template>
-            </el-scrollbar>
+              </div>
+            </template>
+
+            <!-- KB Section -->
+            <div class="rs-kb-wrap" v-if="selectorMode === 'kb'">
+              <MobileKnowledgeBaseSearchDialog @selection-change="handleKBSelectionChange" @confirm="handleKBConfirm" />
+            </div>
           </div>
-        </el-tab-pane>
 
-        <el-tab-pane :label="$t('resource.selector.modeKb')" name="kb">
-          <div class="kb-section">
-            <MobileKnowledgeBaseSearchDialog
-              v-if="selectorMode === 'kb'"
-              @selection-change="handleKBSelectionChange"
-            />
+          <!-- Footer -->
+          <div class="rs-footer" v-if="selectedResources.length > 0">
+            <span class="rs-selected-count">已选 {{ selectedResources.length }} 项</span>
+            <div class="rs-footer-actions">
+              <button
+                v-if="showKbSearchButton"
+                class="rs-btn primary"
+                @click="handleMountKnowledgeBase"
+              >挂载知识库检索</button>
+              <button
+                v-if="showAppendButton"
+                class="rs-btn outline"
+                @click="handleAppend"
+              >追加到输入</button>
+              <button
+                v-if="showMountButton"
+                class="rs-btn primary"
+                @click="handleMount"
+              >挂载</button>
+            </div>
           </div>
-        </el-tab-pane>
-      </el-tabs>
-    </div>
-
-    <template #footer>
-      <div class="drawer-footer-actions">
-        <el-button
-          v-if="showKbSearchButton"
-          type="primary"
-          :icon="Search"
-          :disabled="selectedResources.length === 0"
-          @click="handleMountKnowledgeBase"
-          style="width: 100%; margin-bottom: 8px;"
-        >
-          {{ $t('resource.action.mountKbSearch') }}
-        </el-button>
-
-        <div class="action-buttons-row" v-if="showAppendButton || showMountButton">
-          <el-button
-            v-if="showAppendButton"
-            type="primary"
-            plain
-            :disabled="selectedResources.length === 0"
-            @click="handleAppend"
-            :style="{ width: showMountButton ? '50%' : '100%' }"
-          >
-            {{ $t('resource.action.append', { count: selectedResources.length }) }}
-          </el-button>
-
-          <el-button
-            v-if="showMountButton"
-            type="primary"
-            :disabled="selectedResources.length === 0"
-            @click="handleMount"
-            :style="{ width: showAppendButton ? '50%' : '100%' }"
-          >
-            {{ $t('resource.action.mount', { count: selectedResources.length }) }}
-          </el-button>
         </div>
       </div>
-    </template>
-  </el-drawer>
+    </Transition>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { ElTree, ElMessage } from 'element-plus'
 import type { TreeNodeData } from 'element-plus/es/components/tree/src/tree.type'
-import { Folder, Document, Memo, Loading, Search, Check, Collection, Reading } from '@element-plus/icons-vue'
+import { Folder, Document, Memo, Loading, Search, Select, Collection, Reading, Close } from '@element-plus/icons-vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useResourceStore } from '@/stores/resourceStore'
@@ -599,98 +554,275 @@ function handleMountKnowledgeBase() {
   emit('update:visible', false)
 }
 
+function handleKBConfirm(items: KBSearchResultItem[]) {
+  const kbResources: Resource[] = items.map((item) => ({
+    id: item.chunk_id,
+    name: `Chunk: ${item.resource_name}`,
+    description: `From: ${item.kb_name}`,
+    itemType: 'resource',
+    resourceType: 'knowledge_base_chunk',
+    parentId: item.kb_id,
+    sortOrder: 0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    latest_version: {
+      id: item.chunk_id,
+      resourceId: item.chunk_id,
+      name: 'v1',
+      commitMessage: null,
+      content: item.chunk_content,
+      attributes: { score: item.score },
+      sortOrder: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      file_info: null,
+    },
+    kb_id: null,
+    kb_config: null,
+  }))
+  emit('append-resources', kbResources)
+  emit('update:visible', false)
+}
+
 function handleDialogClose() {
   emit('update:visible', false)
 }
 </script>
 
 <style scoped>
+.rs-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 2000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
 
-.resource-type-tag {
+.rs-sheet {
+  width: 100%;
+  max-width: 500px;
+  max-height: 85vh;
+  background: var(--color-background);
+  border-radius: 16px 16px 0 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sheet-handle {
+  width: 36px;
+  height: 4px;
+  background: var(--el-border-color);
+  border-radius: 2px;
+  margin: 8px auto 0;
   flex-shrink: 0;
-  margin-left: 8px;
-  transform: scale(0.9);
 }
 
-.mobile-resource-drawer {
-  background-color: var(--color-background);
-}
-
-.drawer-header {
+.rs-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  width: 100%;
-  padding-right: 10px;
-}
-
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.multi-select-label {
-  font-size: 14px;
-  font-weight: normal;
-  color: var(--el-text-color-regular);
-}
-
-.drawer-content {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  padding: 0 10px;
-}
-
-.selector-tabs {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-}
-
-:deep(.el-tabs__content) {
-  flex: 1;
-  overflow: hidden;
-  padding: 0;
-}
-
-:deep(.el-tab-pane) {
-  height: 100%;
-}
-
-.resource-section,
-.kb-section {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-}
-
-.search-row {
-  display: flex;
-  gap: 10px;
-  padding: 10px 0;
+  padding: 12px 16px 8px;
   flex-shrink: 0;
+}
+
+.rs-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--color-heading);
+}
+
+.multi-toggle {
+  display: flex;
   align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
 }
 
-.regex-btn {
-  font-family: monospace;
-  font-weight: bold;
+.multi-toggle input {
+  display: none;
 }
 
-.tree-scroll-area {
+.toggle-track {
+  width: 40px;
+  height: 22px;
+  border-radius: 11px;
+  background: var(--el-border-color);
+  position: relative;
+  transition: background 0.2s;
+}
+
+.toggle-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+
+.multi-toggle input:checked + .toggle-track {
+  background: var(--el-color-primary);
+}
+
+.multi-toggle input:checked + .toggle-track::after {
+  transform: translateX(18px);
+}
+
+.rs-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0 16px 8px;
+  flex-shrink: 0;
+}
+
+.rs-tab {
   flex: 1;
-  overflow-y: auto;
-}
-
-.loading-placeholder {
-  padding: 20px;
-}
-
-.empty-box {
-  padding: 40px 0;
+  padding: 8px 0;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
   text-align: center;
+}
+
+.rs-tab.active {
+  color: var(--el-color-primary);
+  border-bottom-color: var(--el-color-primary);
+}
+
+.rs-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 16px 8px;
+  padding: 8px 12px;
+  background: var(--el-fill-color-light);
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.search-icon {
+  color: var(--el-text-color-placeholder);
+  flex-shrink: 0;
+}
+
+.search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 15px;
+  color: var(--el-text-color-primary);
+  outline: none;
+  font-family: inherit;
+}
+
+.search-input::placeholder {
+  color: var(--el-text-color-placeholder);
+}
+
+.search-clear {
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  border: none;
+  background: var(--el-text-color-placeholder);
+  color: #fff;
+  border-radius: 50%;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.rs-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.rs-list {
+  padding: 0 16px;
+  overflow-y: auto;
+  max-height: 100%;
+}
+
+.rs-loading,
+.rs-empty {
+  padding: 32px 0;
+  text-align: center;
+  font-size: 14px;
+  color: var(--el-text-color-placeholder);
+}
+
+.rs-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 0;
+  border: none;
+  border-bottom: 0.5px solid var(--el-border-color-lighter);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+
+.rs-item:active {
+  background: var(--el-fill-color-light);
+  margin: 0 -16px;
+  padding: 12px 16px;
+}
+
+.rs-item.selected {
+  color: var(--el-color-primary);
+}
+
+.rs-item-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rs-item-name {
+  font-size: 15px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rs-item-meta {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rs-check {
+  color: var(--el-color-primary);
+  flex-shrink: 0;
+}
+
+.rs-tree-wrap {
+  padding: 0 8px;
 }
 
 :deep(.el-tree-node__content) {
@@ -699,100 +831,101 @@ function handleDialogClose() {
   align-items: stretch;
 }
 
-.m-tree-node {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 15px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-}
-
-.m-tree-node.active {
-  color: var(--el-color-primary);
-}
-
-.m-tree-node.disabled {
-  opacity: 0.5;
-}
-
-.node-left {
+.rs-tree-node {
   display: flex;
   align-items: center;
   gap: 8px;
-  overflow: hidden;
-}
-
-.label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.check-icon {
-  color: var(--el-color-primary);
-  margin-right: 5px;
-}
-
-.m-search-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-}
-
-.m-search-item.active {
-  background-color: var(--el-color-primary-light-9);
-  margin: 0 -10px;
-  padding: 12px 10px;
+  padding: 10px 8px;
   border-radius: 8px;
-  border-bottom: none;
+  font-size: 15px;
+  transition: background 0.15s;
 }
 
-.item-info {
+.rs-tree-node:active {
+  background: var(--el-fill-color-light);
+}
+
+.rs-tree-node.selected {
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+
+.rs-tree-node.disabled {
+  opacity: 0.4;
+}
+
+.rs-node-name {
   flex: 1;
   overflow: hidden;
-}
-
-.item-name {
-  font-size: 15px;
-  font-weight: 500;
-  margin-bottom: 4px;
-  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.item-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.rs-type-tag {
+  flex-shrink: 0;
+  transform: scale(0.85);
 }
 
-.item-path {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.rs-kb-wrap {
+  height: 100%;
+  padding: 0 16px;
+  overflow-y: auto;
 }
 
-.drawer-footer-actions {
+.rs-footer {
+  flex-shrink: 0;
+  padding: 12px 16px;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  border-top: 0.5px solid var(--el-border-color-lighter);
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 10px 0;
-  padding-bottom: calc(10px + env(safe-area-inset-bottom));
-  background: var(--color-background);
+  gap: 8px;
 }
 
-.action-buttons-row {
-  display: flex;
-  gap: 10px;
-  width: 100%;
+.rs-selected-count {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
 }
+
+.rs-footer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.rs-btn {
+  flex: 1;
+  padding: 12px 8px;
+  border: none;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+
+.rs-btn.primary {
+  background: var(--el-color-primary);
+  color: #fff;
+}
+
+.rs-btn.outline {
+  background: transparent;
+  color: var(--el-color-primary);
+  border: 1.5px solid var(--el-color-primary);
+}
+
+.rs-btn:active {
+  transform: scale(0.96);
+}
+
+/* Transitions */
+.sheet-enter-active { transition: all 0.25s ease-out; }
+.sheet-leave-active { transition: all 0.2s ease-in; }
+.sheet-enter-from .rs-sheet,
+.sheet-leave-to .rs-sheet { transform: translateY(100%); }
+.sheet-enter-from { opacity: 0; }
+.sheet-leave-to { opacity: 0; }
 </style>
 <style>
 .is-hidden-node {

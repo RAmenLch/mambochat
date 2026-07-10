@@ -1,14 +1,12 @@
 <!-- frontend/mambo/src/mobile/components/chat/ChatWindow.vue -->
 <template>
-  <div class="mobile-chat-window" :style="containerStyle">
-    <!-- Header -->
+  <div class="mobile-chat-window">
     <ChatHeader
       :current-chat="currentChat"
       @toggle-drawer="$emit('toggle-drawer')"
       @open-settings="handleOpenSettings"
     />
 
-    <!-- Messages Area -->
     <div class="mobile-messages" v-if="currentChat">
       <el-scrollbar ref="scrollbarRef" class="message-scrollbar" @scroll="handleScroll">
         <div class="message-wrapper">
@@ -26,13 +24,21 @@
       </el-scrollbar>
     </div>
 
-    <!-- Empty State -->
     <div class="mobile-empty" v-else>
-      <el-empty :description="$t('chat.window.welcome')" />
+      <div class="welcome-brand">
+        <img src="/logo.svg" alt="Mambo" class="welcome-logo" />
+        <h2 class="welcome-title">Mambo Chat</h2>
+        <p class="welcome-desc">{{ $t('chat.window.welcome') }}</p>
+      </div>
     </div>
 
-    <!-- Input Area -->
     <div class="mobile-input-area" v-if="currentChat">
+      <div v-if="isPendingReview" class="pending-review-bar" @click="handleOpenReviewFromInput">
+        <el-icon :size="18"><Warning /></el-icon>
+        <span>有 {{ pendingReviewSubMessages.length }} 项待审核，点击处理</span>
+        <el-icon :size="14"><ArrowRight /></el-icon>
+      </div>
+
       <input
         type="file"
         ref="fileInputRef"
@@ -41,7 +47,6 @@
         style="display: none"
       />
 
-      <!-- Attachment Preview -->
       <AttachmentPreview
         v-if="hasAttachments"
         :uploaded-files="uploadedFiles"
@@ -52,7 +57,6 @@
         @remove-knowledge-base="handleRemoveKnowledgeBase"
       />
 
-      <!-- Toolbar -->
       <ChatToolbar
         :current-chat="currentChat"
         :messages="currentChatMessages"
@@ -60,11 +64,10 @@
         @trigger-file-upload="handleTriggerFileUpload"
         @open-resource-selector="resourceSelectorVisible = true"
         @toggle-mcp-tool="handleToggleMcpTool"
+        @toggle-web-search="handleToggleWebSearch"
         @jump-to-message="handleJumpToMessage"
-        @open-settings="handleOpenSettings"
       />
 
-      <!-- Input Box -->
       <ChatInputBox
         ref="chatInputBoxRef"
         :is-generating="isGenerating"
@@ -73,10 +76,11 @@
         @send="handleSendMessage"
         @stop-generation="handleStopGeneration"
         @files-pasted="handleFileUploads"
+        @trigger-file-upload="handleTriggerFileUpload"
+        @open-resource-selector="resourceSelectorVisible = true"
       />
     </div>
 
-    <!-- Settings Drawer -->
     <ChatSettingsDrawer
       v-model:visible="settingsDrawerVisible"
       :chat-data="currentChat"
@@ -84,14 +88,25 @@
       @save="handleSaveSettings"
     />
 
-    <!-- Agent Settings Drawer -->
     <MobileChatAgentSettingsDrawer
       v-model:visible="agentSettingsDrawerVisible"
       :chat-data="currentChat"
       @save="handleSaveAgentSettings"
     />
 
-    <!-- Resource Selector Dialog -->
+    <MobileToolDialog
+      v-model:visible="toolDialogVisible"
+      :parent-message-id="toolDialogMessageId"
+      :initial-sub-message-id="toolDialogInitialId"
+      :mode="toolDialogMode"
+    />
+
+    <MobileAskUserDialog
+      v-model:visible="askUserDialogVisible"
+      :parent-message-id="askUserDialogMessageId"
+      :initial-sub-message-id="askUserDialogInitialSubMessageId"
+    />
+
     <ResourceSelectorDialog
       v-model:visible="resourceSelectorVisible"
       :context="currentChat?.chatMode === 'agent' ? 'agent-toolbar' : 'chat-toolbar'"
@@ -110,8 +125,6 @@ import {
   computed,
   onMounted,
   onUnmounted,
-  reactive,
-  type CSSProperties,
 } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElScrollbar, ElMessage } from 'element-plus'
@@ -124,6 +137,8 @@ import AttachmentPreview from '@/mobile/components/chat/AttachmentPreview.vue'
 import ChatInputBox from '@/mobile/components/chat/ChatInputBox.vue'
 import ChatSettingsDrawer from './ChatSettingsDrawer.vue'
 import MobileChatAgentSettingsDrawer from './MobileChatAgentSettingsDrawer.vue'
+import MobileToolDialog from './dialogs/MobileToolDialog.vue'
+import MobileAskUserDialog from './dialogs/MobileAskUserDialog.vue'
 import ResourceSelectorDialog from './dialogs/ResourceSelectorDialog.vue'
 
 import { useChatListStore } from '@/stores/chatListStore'
@@ -134,7 +149,7 @@ import { useAgentStore } from '@/stores/agentStore'
 import { useChatInput } from '@/composables/useChatInput'
 import { useTokenEstimator } from '@/composables/useTokenEstimator'
 import { uploadFile } from '@/api/fileService'
-import type { AIModel, ChatUpdate, Resource, SubMessageCreate, Message } from '@/api/types'
+import type { AIModel, ChatUpdate, Resource, SubMessageCreate, Message, SubMessage } from '@/api/types'
 
 interface GroupedModels {
   label: string
@@ -177,37 +192,18 @@ const agentSettingsDrawerVisible = ref(false)
 const resourceSelectorVisible = ref(false)
 const userHasScrolledUp = ref(false)
 
-const layoutStyle = reactive({
-  top: '0px',
-  height: '100%',
-  width: '100%',
-})
+const toolDialogVisible = ref(false)
+const toolDialogMessageId = ref<string | null>(null)
+const toolDialogInitialId = ref<string | undefined>(undefined)
+const toolDialogMode = ref<'review_all' | 'single'>('single')
 
-const containerStyle = computed<CSSProperties>(() => ({
-  position: 'fixed',
-  top: layoutStyle.top,
-  height: layoutStyle.height,
-  width: layoutStyle.width,
-}))
+const askUserDialogVisible = ref(false)
+const askUserDialogMessageId = ref<string | null>(null)
+const askUserDialogInitialSubMessageId = ref<string | null>(null)
 
-const updateLayout = () => {
-  if (window.visualViewport) {
-    const vv = window.visualViewport
-    const top = vv.offsetTop
-    const height = vv.height
-
-    layoutStyle.top = `${top}px`
-    layoutStyle.height = `${height}px`
-
-    nextTick(() => {
-      const wrap = scrollbarRef.value?.wrapRef
-      if (wrap) wrap.scrollTop = wrap.scrollHeight
-    })
-  } else {
-    layoutStyle.top = '0px'
-    layoutStyle.height = '100dvh'
-  }
-}
+let vvResizeHandler: (() => void) | null = null
+let vvScrollHandler: (() => void) | null = null
+let winResizeHandler: (() => void) | null = null
 
 const isSendButtonDisabled = computed(() => isGenerating.value || !isReadyToSend.value)
 
@@ -241,24 +237,33 @@ const { estimatedTokens } = useTokenEstimator(
 )
 
 onMounted(() => {
-  updateLayout()
-  if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', updateLayout)
-    window.visualViewport.addEventListener('scroll', updateLayout)
-  }
-  window.addEventListener('resize', updateLayout)
-
   if (agentStore.allAgents.length === 0) {
     agentStore.fetchAllAgents()
   }
+
+  const setVH = () => {
+    const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight
+    document.documentElement.style.setProperty('--vv-height', `${vh}px`)
+  }
+  setVH()
+
+  vvResizeHandler = setVH
+  vvScrollHandler = setVH
+  winResizeHandler = setVH
+
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', vvResizeHandler)
+    window.visualViewport.addEventListener('scroll', vvScrollHandler)
+  }
+  window.addEventListener('resize', winResizeHandler)
 })
 
 onUnmounted(() => {
   if (window.visualViewport) {
-    window.visualViewport.removeEventListener('resize', updateLayout)
-    window.visualViewport.removeEventListener('scroll', updateLayout)
+    if (vvResizeHandler) window.visualViewport.removeEventListener('resize', vvResizeHandler)
+    if (vvScrollHandler) window.visualViewport.removeEventListener('scroll', vvScrollHandler)
   }
-  window.removeEventListener('resize', updateLayout)
+  if (winResizeHandler) window.removeEventListener('resize', winResizeHandler)
 })
 
 const handleSendMessage = async () => {
@@ -312,7 +317,43 @@ const handleSwitchBranch = async (targetId: string) => {
 }
 
 const handleOpenToolDialog = (message: Message, subMessageId: string, mode: 'review_all' | 'single') => {
-  // Mobile tool review dialog integration point
+  const sub = message.sub_messages.find(sm => sm.id === subMessageId)
+  if (sub && sub.type === 'AskUser') {
+    askUserDialogMessageId.value = message.id
+    askUserDialogInitialSubMessageId.value = subMessageId
+    askUserDialogVisible.value = true
+    return
+  }
+  toolDialogMessageId.value = message.id
+  toolDialogInitialId.value = subMessageId
+  toolDialogMode.value = mode
+  toolDialogVisible.value = true
+}
+
+const pendingReviewSubMessages = computed(() => {
+  const pendingMsg = currentChatMessages.value.find(msg => msg.status === 'pending_review')
+  if (!pendingMsg) return [] as SubMessage[]
+  return pendingMsg.sub_messages.filter(
+    sm => (sm.type === 'ReviewTool' || sm.type === 'AskUser') && sm.status === 'pending_review'
+  )
+})
+
+const isPendingReview = computed(() => pendingReviewSubMessages.value.length > 0)
+
+function handleOpenReviewFromInput() {
+  if (pendingReviewSubMessages.value.length > 0) {
+    const first = pendingReviewSubMessages.value[0]
+    const parentMsg = currentChatMessages.value.find(m => m.id === first.messageId)
+    if (parentMsg) {
+      if (first.type === 'AskUser') {
+        askUserDialogMessageId.value = parentMsg.id
+        askUserDialogInitialSubMessageId.value = null
+        askUserDialogVisible.value = true
+      } else {
+        handleOpenToolDialog(parentMsg, first.id, 'review_all')
+      }
+    }
+  }
 }
 
 function handleTriggerFileUpload() {
@@ -393,6 +434,27 @@ async function handleToggleMcpTool(mcpId: string) {
   await chatListStore.updateChatSettings(currentChat.value.id, { enabled_mcp_ids: newIds })
 }
 
+async function handleToggleWebSearch() {
+  if (!currentChat.value) return
+  const currentMode = currentChat.value.web_search_mode
+  let nextMode: 'direct_read' | 'search_and_read' | null
+  if (!currentMode) {
+    nextMode = 'direct_read'
+  } else if (currentMode === 'direct_read') {
+    nextMode = 'search_and_read'
+  } else {
+    nextMode = null
+  }
+  await chatListStore.updateChatSettings(currentChat.value.id, { web_search_mode: nextMode })
+  if (nextMode === 'direct_read') {
+    ElMessage.success('联网搜索：直接读取')
+  } else if (nextMode === 'search_and_read') {
+    ElMessage.success('联网搜索：搜索并读取')
+  } else {
+    ElMessage.info('联网搜索已关闭')
+  }
+}
+
 function handleOpenSettings() {
   if (currentChat.value?.chatMode === 'agent') {
     agentSettingsDrawerVisible.value = true
@@ -452,19 +514,18 @@ watch(
 
 <style scoped>
 .mobile-chat-window {
-  left: 0;
-  right: 0;
-  bottom: 0;
   display: flex;
   flex-direction: column;
+  height: var(--vv-height, 100dvh);
+  height: var(--vv-height, 100vh);
   background-color: var(--color-background);
   overflow: hidden;
 }
 
 .mobile-messages {
-  flex-grow: 1;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
-  position: relative;
 }
 
 .message-scrollbar {
@@ -472,24 +533,77 @@ watch(
 }
 
 .message-wrapper {
-  padding: 10px;
-  padding-bottom: 20px;
+  padding: 12px 10px 24px;
 }
 
 .mobile-empty {
-  flex-grow: 1;
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 40px 20px;
+}
+
+.welcome-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+  opacity: 0.7;
+}
+
+.welcome-logo {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+}
+
+.welcome-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--color-heading);
+  letter-spacing: -0.3px;
+}
+
+.welcome-desc {
+  margin: 0;
+  font-size: 14px;
+  color: var(--el-text-color-secondary);
+  max-width: 240px;
+  line-height: 1.5;
 }
 
 .mobile-input-area {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--color-border);
   background: var(--color-background);
+  border-top: 0.5px solid var(--el-border-color-lighter);
   padding-bottom: env(safe-area-inset-bottom);
+}
+
+.pending-review-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  margin: 0 0 0 0;
+  background: var(--el-color-warning-light-9);
+  border-bottom: 1px solid var(--el-color-warning-light-5);
+  font-size: 14px;
+  color: var(--el-color-warning-dark-2);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pending-review-bar span {
+  flex: 1;
+}
+
+.pending-review-bar:active {
+  background: var(--el-color-warning-light-7);
 }
 
 .mobile-input-area > * {
@@ -497,15 +611,10 @@ watch(
   padding-right: 10px;
 }
 
-.mobile-input-area > .mobile-toolbar {
-  padding-left: 5px;
-  padding-right: 5px;
-}
-
 :deep(.jump-highlight) {
   animation: jump-pulse 0.5s ease-in-out 3;
   background-color: var(--el-color-primary-light-9);
-  border-radius: 6px;
+  border-radius: 8px;
 }
 
 @keyframes jump-pulse {
@@ -516,7 +625,7 @@ watch(
   }
   50% {
     background-color: var(--el-color-primary-light-7);
-    box-shadow: 0 0 12px var(--el-color-primary-light-3);
+    box-shadow: 0 0 16px var(--el-color-primary-light-3);
   }
 }
 </style>
