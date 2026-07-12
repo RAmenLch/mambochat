@@ -14,7 +14,9 @@ async def get_backends_by_ids(db: AsyncSession, backend_ids: List[str]) -> List[
     if not backend_ids:
         return []
     result = await db.execute(select(BackendConfig).filter(BackendConfig.id.in_(backend_ids)))
-    return list(result.scalars().all())
+    items_map = {item.id: item for item in result.scalars().all()}
+    # Preserve the caller's order — SQL IN does not guarantee order.
+    return [items_map[bid] for bid in backend_ids if bid in items_map]
 
 
 async def get_all_backends(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[BackendConfig]:

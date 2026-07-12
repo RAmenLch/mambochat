@@ -177,7 +177,7 @@ class APIBackend(SandboxBackendProtocol, TreeBackendProtocol):
         except (ConnectionError, TimeoutError) as e:
             logger.error("API Backend ls failed: %s", e)
             return []
-        data = result if isinstance(result, list) else result.get("items", [])
+        data = result.get("items", [])
         items: list[FileInfo] = []
         for item in data:
             items.append({
@@ -265,7 +265,7 @@ class APIBackend(SandboxBackendProtocol, TreeBackendProtocol):
             })
         except (ConnectionError, TimeoutError):
             return []
-        data = result if isinstance(result, list) else result.get("items", [])
+        data = result.get("items", [])
         items: list[FileInfo] = []
         for item in data:
             items.append({
@@ -277,29 +277,32 @@ class APIBackend(SandboxBackendProtocol, TreeBackendProtocol):
         items.sort(key=lambda x: x.get("path", ""))
         return items
 
-    async def agrep_raw(self, pattern: str, path: str | None = None, glob: str | None = None) -> list[GrepMatch] | str:
+    async def agrep_raw(self, pattern: str, path: str | None = None, glob: str | None = None,
+                        regex: bool = True, offset: int = 0, limit: int | None = None) -> list[GrepMatch] | str:
         search_path = self._normalize_path(path) if path else "/"
         try:
             result = await self._call("grep_files", {
                 "pattern": pattern,
                 "path": search_path,
                 "glob": glob,
+                "regex": regex,
+                "offset": offset,
+                "limit": limit,
             })
         except (ConnectionError, TimeoutError) as e:
             return f"Error: {e}"
 
         if isinstance(result, dict) and result.get("error"):
             return f"Error: {result['error']}"
-        if isinstance(result, list):
-            matches: list[GrepMatch] = []
-            for m in result:
-                matches.append({
-                    "path": m.get("path", ""),
-                    "line": m.get("line", 0),
-                    "text": m.get("text", ""),
-                })
-            return matches
-        return []
+        data = result.get("matches", [])
+        matches: list[GrepMatch] = []
+        for m in data:
+            matches.append({
+                "path": m.get("path", ""),
+                "line": m.get("line", 0),
+                "text": m.get("text", ""),
+            })
+        return matches
 
     async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         responses: list[FileUploadResponse] = []
@@ -316,7 +319,7 @@ class APIBackend(SandboxBackendProtocol, TreeBackendProtocol):
                 responses.append(FileUploadResponse(path=vpath, error=str(e)))
             return responses
 
-        data = result if isinstance(result, list) else result.get("results", [])
+        data = result.get("results", [])
         for item in data:
             responses.append(FileUploadResponse(
                 path=item.get("path", ""),
@@ -331,7 +334,7 @@ class APIBackend(SandboxBackendProtocol, TreeBackendProtocol):
         except (ConnectionError, TimeoutError) as e:
             return [FileDownloadResponse(path=p, error=str(e)) for p in paths]
 
-        data = result if isinstance(result, list) else result.get("results", [])
+        data = result.get("results", [])
         responses: list[FileDownloadResponse] = []
         for item in data:
             content = None

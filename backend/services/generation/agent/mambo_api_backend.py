@@ -19,9 +19,11 @@ import posixpath
 from typing import Any
 
 from langchain_core.tools import StructuredTool
+from pydantic import Field, create_model
 
 from mambo_agents.backends.protocol import (
     BackendProtocol,
+    DeleteResult,
     EditResult,
     GlobResult,
     GrepMatch,
@@ -59,6 +61,8 @@ class MamboAPIBackend(BackendProtocol):
         edit_whitelist: list[str] | None = None,
         edit_blacklist: list[str] | None = None,
         timeout: float = 60.0,
+        enable_execute: bool = False,
+        execute_timeout: int = 180,
     ) -> None:
         super().__init__()
         self.backend_id = backend_id
@@ -66,6 +70,8 @@ class MamboAPIBackend(BackendProtocol):
         self.edit_whitelist = edit_whitelist or []
         self.edit_blacklist = edit_blacklist or []
         self.timeout = timeout
+        self._enable_execute = enable_execute
+        self._execute_timeout = execute_timeout
 
     # ------------------------------------------------------------------
     # Properties
@@ -77,8 +83,65 @@ class MamboAPIBackend(BackendProtocol):
 
     @property
     def tools(self) -> list[StructuredTool]:
-        """Extra tools — API backend has no built-in extras beyond core six."""
-        return []
+        """Extra tools exposed by this backend beyond the core six."""
+        tools: list[StructuredTool] = []
+        tools.append(
+            StructuredTool(
+                name="tree",
+                description=(
+                    "View the directory tree structure. Shows directories and files "
+                    "with their sizes in a tree format.\n\n"
+                    "Args:\n"
+                    "  path: Root directory to display (default: /workspace).\n"
+                    "  depth: Maximum recursion depth (default: 3, must be >= 1)."
+                ),
+                args_schema=create_model(
+                    "TreeSchema",
+                    path=(str, Field(default="/workspace", description="Root directory to display")),
+                    depth=(int, Field(default=3, description="Maximum recursion depth")),
+                ),
+                coroutine=self.atree,
+            )
+        )
+        tools.append(
+            StructuredTool(
+                name="delete",
+                description=(
+                    "Delete a single file. Directories are NOT supported — "
+                    "remove files inside the directory first, then the empty "
+                    "directory disappears naturally."
+                ),
+                args_schema=create_model(
+                    "DeleteSchema",
+                    path=(str, Field(description="Absolute file path to delete")),
+                ),
+                coroutine=self.adelete,
+            )
+        )
+        if self._enable_execute:
+            tools.append(
+                StructuredTool(
+                    name="execute",
+                    description=(
+                        "Execute a shell command on the remote client machine. "
+                        "Returns combined stdout and stderr output.\n\n"
+                        "**CRITICAL — Real vs. virtual path mapping:** "
+                        "File tools (ls/read/write/edit/grep/glob) accept "
+                        "`/workspace/...` virtual paths, but shell commands "
+                        "in **execute** run directly on the client's real "
+                        "filesystem. You MUST use real filesystem paths in "
+                        "commands — virtual paths like `/workspace/src/main.py` "
+                        "do NOT exist on the client filesystem and will fail."
+                    ),
+                    args_schema=create_model(
+                        "ExecuteSchema",
+                        command=(str, Field(description="Shell command to execute")),
+                        timeout=(int | None, Field(default=None, description="Optional timeout in seconds")),
+                    ),
+                    coroutine=self.aexecute,
+                )
+            )
+        return tools
 
     @property
     def description(self) -> str:
@@ -115,9 +178,12 @@ class MamboAPIBackend(BackendProtocol):
 
         from backend.routers.api_client_router import send_command
 
-        return await send_command(
+        logger.info("[API_BACKEND] _call: method=%s params=%s backend_id=%s", method, params, self.backend_id)
+        result = await send_command(
             self.backend_id, method, params, timeout=self.timeout
         )
+        logger.info("[API_BACKEND] _call: method=%s got result keys=%s", method, list(result.keys()) if isinstance(result, dict) else type(result))
+        return result
 
     def _normalize_path(self, virtual_path: VirtualPath) -> str:
         """Normalize a virtual path: ensure leading /, prevent traversal.
@@ -168,35 +234,36 @@ class MamboAPIBackend(BackendProtocol):
         **kwargs,
     ):
         """Shared pattern: run fn(...), catch ConnectionError/TimeoutError."""
+        logger.info("[API_BACKEND] _run_ws_call START operation=%s", operation)
         try:
-            return fn(*args, **kwargs)
+            result = await fn(*args, **kwargs)
+            logger.info("[API_BACKEND] _run_ws_call DONE operation=%s", operation)
+            return result
         except (ConnectionError, TimeoutError) as e:
-            logger.error("API Backend %s failed: %s", operation, e)
+            logger.error("[API_BACKEND] _run_ws_call %s failed: %s (%s)", operation, e, type(e).__name__)
+            return None
+        except Exception as e:
+            logger.error("[API_BACKEND] _run_ws_call %s UNEXPECTED: %s (%s)", operation, e, type(e).__name__)
             return None
 
     # ------------------------------------------------------------------
-    # Core file operations (mambo BackendProtocol)
+    # Sync wrappers — delegate to async via asyncio.run()
     # ------------------------------------------------------------------
 
-    def _ls_sync(self, path: VirtualPath) -> LsResult:
-        """Sync ls via event-loop delegation."""
+    @staticmethod
+    def _run_sync(coro):
+        """Run a coroutine synchronously. Safe to call from any thread
+        that does NOT have a running event loop."""
         import asyncio
-        import concurrent.futures
+        return asyncio.run(coro)
 
+    def _ls_sync(self, path: VirtualPath) -> LsResult:
         try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
+            return self._run_sync(self.als(path))
+        except Exception as e:
             return LsResult(error=BackendError(
-                code=ErrorCode.IO_ERROR, message="No event loop available",
+                code=ErrorCode.IO_ERROR, message=str(e),
             ))
-
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            try:
-                return pool.submit(asyncio.run, self.als(path)).result()
-            except Exception as e:
-                return LsResult(error=BackendError(
-                    code=ErrorCode.IO_ERROR, message=str(e),
-                ))
 
     def ls(self, path: VirtualPath) -> LsResult:
         return self._ls_sync(path)
@@ -209,7 +276,12 @@ class MamboAPIBackend(BackendProtocol):
                 code=ErrorCode.IO_ERROR, message="Connection to API client failed",
             ))
 
-        data = result if isinstance(result, list) else result.get("items", [])
+        if result.get("error"):
+            return LsResult(error=BackendError(
+                code=ErrorCode.IO_ERROR, path=path, message=result["error"],
+            ))
+
+        data = result.get("items", [])
         entries = []
         from mambo_agents.backends.protocol import FileInfo
 
@@ -233,26 +305,12 @@ class MamboAPIBackend(BackendProtocol):
         limit: int = 2000,
         include_line_numbers: bool = False,
     ) -> ReadResult:
-        import asyncio
-        import concurrent.futures
-
         try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
+            return self._run_sync(self.aread_raw(file_path, offset, limit, include_line_numbers))
+        except Exception as e:
             return ReadResult(error=BackendError(
-                code=ErrorCode.IO_ERROR, message="No event loop available",
+                code=ErrorCode.IO_ERROR, message=str(e),
             ))
-
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            try:
-                return pool.submit(
-                    asyncio.run,
-                    self.aread_raw(file_path, offset, limit, include_line_numbers),
-                ).result()
-            except Exception as e:
-                return ReadResult(error=BackendError(
-                    code=ErrorCode.IO_ERROR, message=str(e),
-                ))
 
     def read_raw(
         self,
@@ -287,6 +345,20 @@ class MamboAPIBackend(BackendProtocol):
             ))
 
         content = result.get("content", "")
+        encoding = result.get("encoding", "utf-8")
+        file_type = result.get("file_type", "text")
+        mime_type = result.get("mime_type", "")
+        total_lines = result.get("total_lines", 0)
+
+        if encoding == "base64":
+            return ReadResult(
+                content=content,
+                total_lines=total_lines,
+                encoding="base64",
+                file_type=file_type,
+                mime_type=mime_type,
+            )
+
         lines = result.get("lines")
         if lines is not None:
             content = self._format_with_line_numbers(lines, start=offset + 1)
@@ -307,25 +379,12 @@ class MamboAPIBackend(BackendProtocol):
     def write(
         self, file_path: VirtualPath, content: str, overwrite: bool = False
     ) -> WriteResult:
-        import asyncio
-        import concurrent.futures
-
         try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
+            return self._run_sync(self.awrite(file_path, content, overwrite))
+        except Exception as e:
             return WriteResult(error=BackendError(
-                code=ErrorCode.IO_ERROR, message="No event loop available",
+                code=ErrorCode.IO_ERROR, message=str(e),
             ))
-
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            try:
-                return pool.submit(
-                    asyncio.run, self.awrite(file_path, content, overwrite)
-                ).result()
-            except Exception as e:
-                return WriteResult(error=BackendError(
-                    code=ErrorCode.IO_ERROR, message=str(e),
-                ))
 
     async def awrite(
         self, file_path: VirtualPath, content: str, overwrite: bool = False
@@ -344,7 +403,7 @@ class MamboAPIBackend(BackendProtocol):
             "write",
             self._call,
             "write_file",
-            {"path": norm, "content": content},
+            {"path": norm, "content": content, "overwrite": overwrite},
         )
         if result is None:
             return WriteResult(error=BackendError(
@@ -364,26 +423,12 @@ class MamboAPIBackend(BackendProtocol):
         *,
         replace_all: bool = False,
     ) -> EditResult:
-        import asyncio
-        import concurrent.futures
-
         try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
+            return self._run_sync(self.aedit(file_path, old_str, new_str, replace_all=replace_all))
+        except Exception as e:
             return EditResult(error=BackendError(
-                code=ErrorCode.IO_ERROR, message="No event loop available",
+                code=ErrorCode.IO_ERROR, message=str(e),
             ))
-
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            try:
-                return pool.submit(
-                    asyncio.run,
-                    self.aedit(file_path, old_str, new_str, replace_all=replace_all),
-                ).result()
-            except Exception as e:
-                return EditResult(error=BackendError(
-                    code=ErrorCode.IO_ERROR, message=str(e),
-                ))
 
     async def aedit(
         self,
@@ -433,25 +478,12 @@ class MamboAPIBackend(BackendProtocol):
         offset: int = 0,
         limit: int | None = None,
     ) -> GrepResult:
-        import asyncio
-        import concurrent.futures
-
         try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
+            return self._run_sync(self.agrep(pattern, path, glob, regex, offset, limit))
+        except Exception as e:
             return GrepResult(error=BackendError(
-                code=ErrorCode.IO_ERROR, message="No event loop available",
+                code=ErrorCode.IO_ERROR, message=str(e),
             ))
-
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            try:
-                return pool.submit(
-                    asyncio.run, self.agrep(pattern, path, glob, regex, offset, limit)
-                ).result()
-            except Exception as e:
-                return GrepResult(error=BackendError(
-                    code=ErrorCode.IO_ERROR, message=str(e),
-                ))
 
     async def agrep(
         self, pattern: str, path: VirtualPath = VirtualPath("/workspace"), glob: str | None = None,
@@ -475,39 +507,25 @@ class MamboAPIBackend(BackendProtocol):
             return GrepResult(error=BackendError(
                 code=ErrorCode.IO_ERROR, message=result["error"],
             ))
-        if isinstance(result, list):
-            matches: list[GrepMatch] = []
-            for m in result:
-                matches.append(
-                    GrepMatch(
-                        path=VirtualPath(m.get("path", "/")),
-                        line=m.get("line", 0),
-                        text=m.get("text", ""),
-                    )
+        data = result.get("matches", [])
+        matches: list[GrepMatch] = []
+        for m in data:
+            matches.append(
+                GrepMatch(
+                    path=VirtualPath(m.get("path", "/")),
+                    line=m.get("line", 0),
+                    text=m.get("text", ""),
                 )
-            return GrepResult(matches=matches)
-        return GrepResult(matches=[])
+            )
+        return GrepResult(matches=matches)
 
     def glob(self, pattern: str, path: VirtualPath = VirtualPath("/workspace")) -> GlobResult:
-        import asyncio
-        import concurrent.futures
-
         try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
+            return self._run_sync(self.aglob(pattern, path))
+        except Exception as e:
             return GlobResult(error=BackendError(
-                code=ErrorCode.IO_ERROR, message="No event loop available",
+                code=ErrorCode.IO_ERROR, message=str(e),
             ))
-
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            try:
-                return pool.submit(
-                    asyncio.run, self.aglob(pattern, path)
-                ).result()
-            except Exception as e:
-                return GlobResult(error=BackendError(
-                    code=ErrorCode.IO_ERROR, message=str(e),
-                ))
 
     async def aglob(self, pattern: str, path: VirtualPath = VirtualPath("/workspace")) -> GlobResult:
         norm = self._normalize_path(path)
@@ -521,7 +539,7 @@ class MamboAPIBackend(BackendProtocol):
             return GlobResult(error=BackendError(
                 code=ErrorCode.IO_ERROR, message="Connection to API client failed",
             ))
-        data = result if isinstance(result, list) else result.get("items", [])
+        data = result.get("items", [])
         from mambo_agents.backends.protocol import FileInfo
 
         matches = []
@@ -535,3 +553,134 @@ class MamboAPIBackend(BackendProtocol):
                 )
             )
         return GlobResult(matches=matches)
+
+    # ------------------------------------------------------------------
+    # Extra: execute
+    # ------------------------------------------------------------------
+
+    def execute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+    ) -> str:
+        """Execute a shell command on the remote client (sync wrapper)."""
+        try:
+            return self._run_sync(self.aexecute(command, timeout=timeout))
+        except Exception as e:
+            return f"Error executing command ({type(e).__name__}): {e}"
+
+    async def aexecute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+    ) -> str:
+        """Execute a shell command on the remote client via WebSocket.
+
+        Sends an ``execute`` command to the connected API client, which runs
+        the shell command locally and returns stdout/stderr.
+
+        Args:
+            command: Shell command string to execute.
+            timeout: Optional timeout in seconds (overrides default).
+
+        Returns:
+            Formatted output string with stdout, stderr, and exit code.
+        """
+        if not command or not isinstance(command, str):
+            return "Error: Command must be a non-empty string."
+
+        effective_timeout = timeout if timeout is not None else self._execute_timeout
+
+        result = await self._run_ws_call(
+            "execute",
+            self._call,
+            "execute",
+            {"command": command, "timeout": effective_timeout},
+        )
+        if result is None:
+            return "Error: Connection to API client failed."
+
+        if isinstance(result, dict) and result.get("error"):
+            return f"Error: {result['error']}"
+
+        output = result.get("output", "") if isinstance(result, dict) else str(result)
+        exit_code = result.get("exit_code", 0) if isinstance(result, dict) else 0
+        truncated = result.get("truncated", False) if isinstance(result, dict) else False
+
+        if not output:
+            output = "<no output>"
+
+        if truncated:
+            output += "\n\n... (output truncated by client)"
+
+        if exit_code != 0:
+            output = f"{output.rstrip()}\n\nExit code: {exit_code}"
+
+        return output
+
+    # ------------------------------------------------------------------
+    # Extra: tree
+    # ------------------------------------------------------------------
+
+    def tree(self, path: VirtualPath = VirtualPath("/workspace"), depth: int = 3) -> str:
+        try:
+            return self._run_sync(self.atree(path, depth))
+        except Exception as e:
+            return f"Error building tree: {e}"
+
+    async def atree(self, path: VirtualPath = VirtualPath("/workspace"), depth: int = 3) -> str:
+        norm = self._normalize_path(path)
+        result = await self._run_ws_call(
+            "tree",
+            self._call,
+            "tree",
+            {"path": norm, "depth": depth},
+        )
+        if result is None:
+            return "Error: Connection to API client failed."
+        if isinstance(result, dict) and result.get("error"):
+            return f"Error: {result['error']}"
+        return result.get("tree", "") if isinstance(result, dict) else str(result)
+
+    # ------------------------------------------------------------------
+    # Extra: delete
+    # ------------------------------------------------------------------
+
+    def delete(self, path: VirtualPath) -> DeleteResult:
+        try:
+            return self._run_sync(self.adelete(path))
+        except Exception as e:
+            return DeleteResult(
+                error=BackendError(code=ErrorCode.IO_ERROR, message=str(e)),
+                path=path,
+            )
+
+    async def adelete(self, path: VirtualPath) -> DeleteResult:
+        try:
+            self._check_edit_permission(path)
+        except PermissionError as e:
+            return DeleteResult(
+                error=BackendError(code=ErrorCode.EDIT_NOT_ALLOWED, path=path, message=str(e)),
+                path=path,
+            )
+
+        norm = self._normalize_path(path)
+        result = await self._run_ws_call(
+            "delete",
+            self._call,
+            "delete_file",
+            {"path": norm},
+        )
+        if result is None:
+            return DeleteResult(
+                error=BackendError(code=ErrorCode.IO_ERROR, message="Connection to API client failed"),
+                path=path,
+            )
+        if result.get("error"):
+            return DeleteResult(
+                error=BackendError(code=ErrorCode.IO_ERROR, message=result["error"]),
+                path=path,
+            )
+        return DeleteResult(path=path)

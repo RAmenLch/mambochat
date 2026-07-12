@@ -222,11 +222,14 @@ class DeepAgentInitializer(AbstractAgentInitializer):
         additional_system_prompt = "\n\n".join(extended_prompts) if extended_prompts else ""
         final_system_prompt = f"{base_prompt}\n\n{additional_system_prompt}".strip() if additional_system_prompt else base_prompt
 
-        # HITL: check if default backend requires execute review
-        if self.agent.defaultBackendId and self.agent.backendIds:
+        # HITL: check if the effective default backend requires execute review.
+        # When defaultBackendId is not explicitly set, the builder falls back to
+        # the first backend in backendIds — so we must do the same here.
+        if self.agent.backendIds:
+            effective_default_id: str = self.agent.defaultBackendId or self.agent.backendIds[0]
             backends_db_for_hitl = await backend_crud.get_backends_by_ids(self.db, self.agent.backendIds)
             for b in backends_db_for_hitl:
-                if b.id == self.agent.defaultBackendId and b.tools_config:
+                if b.id == effective_default_id and b.tools_config:
                     exec_cfg = b.tools_config.get("execute", {})
                     if exec_cfg.get("enabled") and exec_cfg.get("require_review"):
                         self.hitl_interrupt_on["execute"] = True

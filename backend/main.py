@@ -192,7 +192,7 @@ async def lifespan(app: FastAPI):
     await close_store()
 
 
-app = FastAPI(lifespan=lifespan, version="1.2.5")
+app = FastAPI(lifespan=lifespan, version="1.3.0")
 
 # --- 注册自定义异常处理器（必须在路由挂载前注册） ---
 # AppHTTPException 携带 error_code，前端拦截器据此查找 i18n 翻译

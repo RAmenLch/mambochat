@@ -200,10 +200,13 @@ async def get_agent_hitl_tools(agent_id: str, db: AsyncSession = Depends(get_db)
                 seen.add(tool.name)
 
     # 来源2: 默认 Backend 的 execute.require_review
-    if db_agent.defaultBackendId and db_agent.backendIds:
+    # 当 defaultBackendId 未显式设置时，builder 会回退到 backendIds 第一个，
+    # 因此这里也必须做同样的回退。
+    if db_agent.backendIds:
+        effective_default_id: str = db_agent.defaultBackendId or db_agent.backendIds[0]
         backends_db = await backend_crud.get_backends_by_ids(db, db_agent.backendIds)
         for b in backends_db:
-            if b.id == db_agent.defaultBackendId and b.tools_config:
+            if b.id == effective_default_id and b.tools_config:
                 exec_cfg = b.tools_config.get("execute", {})
                 if exec_cfg.get("enabled") and exec_cfg.get("require_review"):
                     if "execute" not in seen:

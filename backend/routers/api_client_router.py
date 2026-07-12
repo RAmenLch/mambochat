@@ -9,6 +9,7 @@ since only the client initiates the connection.
 """
 
 import asyncio
+import concurrent.futures
 import logging
 import time
 import uuid
@@ -32,8 +33,8 @@ router = APIRouter(prefix="/api-client", tags=["API Client"])
 # backend_id -> WebSocket
 _connections: Dict[str, WebSocket] = {}
 
-# request_id -> asyncio.Future (for request-response pattern)
-_pending_requests: Dict[str, asyncio.Future] = {}
+# request_id -> concurrent.futures.Future (thread-safe, for request-response pattern)
+_pending_requests: Dict[str, concurrent.futures.Future] = {}
 
 # backend_id -> ClientInfo
 _client_info: Dict[str, Dict[str, Any]] = {}
@@ -69,10 +70,10 @@ async def send_command(backend_id: str, method: str, params: dict, timeout: floa
         raise ConnectionError(f"API client for backend '{backend_id}' is not connected")
 
     request_id = str(uuid.uuid4())
-    loop = asyncio.get_running_loop()
-    future = loop.create_future()
-    _pending_requests[request_id] = future
+    cfuture: concurrent.futures.Future = concurrent.futures.Future()
+    _pending_requests[request_id] = cfuture
 
+    logger.info("[ROUTER] send_command: request_id=%s method=%s params=%s", request_id, method, params)
     try:
         await ws.send_json({
             "type": "command",
@@ -80,10 +81,15 @@ async def send_command(backend_id: str, method: str, params: dict, timeout: floa
             "method": method,
             "params": params,
         })
+        logger.info("[ROUTER] send_command: sent, waiting for response...")
 
-        result = await asyncio.wait_for(future, timeout=timeout)
+        result = await asyncio.wait_for(
+            asyncio.wrap_future(cfuture), timeout=timeout
+        )
+        logger.info("[ROUTER] send_command: got response for %s", request_id)
         return result
     except asyncio.TimeoutError:
+        logger.error("[ROUTER] send_command: TIMEOUT for %s method=%s after %ss", request_id, method, timeout)
         raise TimeoutError(f"API client for backend '{backend_id}' timed out on method '{method}'")
     except WebSocketDisconnect:
         _connections.pop(backend_id, None)
@@ -114,14 +120,17 @@ async def _verify_backend_api_key(backend_id: str, api_key: str) -> bool:
 async def _handle_client_message(backend_id: str, ws: WebSocket, data: dict):
     """Handle incoming messages from the client."""
     msg_type = data.get("type")
+    logger.info("[ROUTER] handle_client_message: backend=%s type=%s", backend_id, msg_type)
 
     if msg_type == "response":
         request_id = data.get("request_id")
+        logger.info("[ROUTER] handle_client_message: response for request_id=%s", request_id)
         future = _pending_requests.get(request_id)
         if future and not future.done():
             future.set_result(data.get("result", {}))
         else:
-            logger.warning("Received response for unknown or already-completed request: %s", request_id)
+            logger.warning("[ROUTER] handle_client_message: no pending future for request_id=%s (done=%s exists=%s)",
+                           request_id, future.done() if future else False, future is not None)
 
     elif msg_type == "error":
         request_id = data.get("request_id")

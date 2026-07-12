@@ -1,6 +1,6 @@
 # ![mambo](img/logo_hajimi.svg) MamboChat
 
-![Version](https://img.shields.io/badge/version-1.2.5-blue)
+![Version](https://img.shields.io/badge/version-1.3.0-blue)
 ![License](https://img.shields.io/badge/license-GPLv3-green)
 ![Vue](https://img.shields.io/badge/frontend-Vue3%20%2B%20ElementPlus-42b883)
 ![FastAPI](https://img.shields.io/badge/backend-FastAPI%20%2B%20Python3.11-009688)
@@ -93,7 +93,7 @@ MamboChat provides a Windows desktop client installer — just install it and yo
    Get the latest version from the [Releases](https://github.com/RAmenLch/mambochat/releases) page (`MamboChat-Setup-x.x.x.exe`).
 
 2. **Run the installer**
-   Double-click `MamboChat-Setup-1.2.5.exe` and follow the wizard (you can choose a custom install directory).
+   Double-click `MamboChat-Setup-1.3.0.exe` and follow the wizard (you can choose a custom install directory).
 
 3. **Launch MamboChat**
    After installation, start MamboChat via the desktop shortcut or Start Menu.

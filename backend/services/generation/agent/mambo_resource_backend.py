@@ -1111,17 +1111,26 @@ class MamboResourceBackend(BackendProtocol):
                 message=f"'{file_path}' is a directory",
             ))
 
-        # ---- fetch text content (binary → base64 fallback) ----
+        # ---- fetch text content ----
         text: str
         encoding: str = "utf-8"
+        file_type = _get_file_type(norm)
         try:
             if _is_file_id_type(node.resource_type):
                 text = await self._read_file_id_content(node)
             else:
                 text = node.content or ""
         except UnicodeDecodeError:
-            # Binary file → base64-encode so download_files can recover the bytes
-            text, encoding = await self._read_file_id_as_base64(node, norm)
+            if file_type != "text":
+                text, encoding = await self._read_file_id_as_base64(node, norm)
+            else:
+                return ReadResult(
+                    error=BackendError(
+                        code=ErrorCode.INVALID,
+                        path=VirtualPath(norm),
+                        message=f"Cannot read '{norm}': not a valid text file",
+                    ),
+                )
         except Exception as e:
             return ReadResult(
                 content="",

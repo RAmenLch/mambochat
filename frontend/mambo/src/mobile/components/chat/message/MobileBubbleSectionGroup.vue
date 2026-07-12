@@ -17,6 +17,65 @@
       />
     </div>
 
+    <!-- 文件/图片分组区域：多张堆叠为轮播 -->
+    <div class="group-files-wrapper" v-if="group.fileSubMessages && group.fileSubMessages.length > 0">
+      <!-- 单张直接展示 -->
+      <template v-if="group.fileSubMessages.length === 1">
+        <SubMessageItem
+          :sub-message="group.fileSubMessages[0]"
+          :parent-message="parentMessage"
+          :show-header="false"
+          :is-inline="false"
+          :preview-src-list="fileGroupPreviewList"
+          :preview-index="0"
+        />
+      </template>
+
+      <!-- 多张：轮播 -->
+      <template v-else>
+        <div class="file-carousel">
+          <div class="carousel-viewport">
+            <div
+              class="carousel-track"
+              :style="{ transform: `translateX(-${carouselIndex * 100}%)` }"
+            >
+              <div
+                v-for="(fileMsg, fileIdx) in group.fileSubMessages"
+                :key="fileMsg.id"
+                class="carousel-slide"
+              >
+                <SubMessageItem
+                  :sub-message="fileMsg"
+                  :parent-message="parentMessage"
+                  :show-header="false"
+                  :is-inline="false"
+                  :preview-src-list="fileGroupPreviewList"
+                  :preview-index="fileGroupPreviewIndex(fileIdx)"
+                />
+              </div>
+            </div>
+          </div>
+
+          <button class="carousel-arrow carousel-prev" @click.stop="carouselPrev" v-if="group.fileSubMessages.length > 1">
+            <el-icon :size="18"><ArrowLeft /></el-icon>
+          </button>
+          <button class="carousel-arrow carousel-next" @click.stop="carouselNext" v-if="group.fileSubMessages.length > 1">
+            <el-icon :size="18"><ArrowRight /></el-icon>
+          </button>
+
+          <div class="carousel-dots" v-if="group.fileSubMessages.length > 1">
+            <span
+              v-for="(_, dotIdx) in group.fileSubMessages"
+              :key="dotIdx"
+              class="carousel-dot"
+              :class="{ 'is-active': dotIdx === carouselIndex }"
+              @click.stop="carouselIndex = dotIdx"
+            ></span>
+          </div>
+        </div>
+      </template>
+    </div>
+
     <!-- 工具调用内联标签区域 -->
     <div class="group-tools-wrapper" v-if="group.toolSubMessages.length > 0">
       <div
@@ -50,11 +109,11 @@
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { Message, SubMessage, McpToolContent, ReviewToolContent, SecurityReviewContent } from '@/api/types'
 import SubMessageItem from '../SubMessageItem.vue'
 import type { BubbleSectionGroup } from '@/composables/useAssistantTimeline'
-import { Warning, Loading, CircleClose, CircleCheck } from '@element-plus/icons-vue'
+import { Warning, Loading, CircleClose, CircleCheck, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
 
@@ -74,6 +133,18 @@ const emit = defineEmits<{
   (e: 'open-tool-dialog', subMessageId: string): void
   (e: 'toggle-actions', subMessageId: string): void
 }>()
+
+const carouselIndex = ref(0)
+
+function carouselPrev() {
+  if (!props.group.fileSubMessages) return
+  carouselIndex.value = (carouselIndex.value - 1 + props.group.fileSubMessages.length) % props.group.fileSubMessages.length
+}
+
+function carouselNext() {
+  if (!props.group.fileSubMessages) return
+  carouselIndex.value = (carouselIndex.value + 1) % props.group.fileSubMessages.length
+}
 
 function getParsedContent(tool: SubMessage): McpToolContent | ReviewToolContent | null {
   try {
@@ -121,6 +192,28 @@ function isToolError(tool: SubMessage): boolean {
   const content = getParsedContent(tool) as McpToolContent | null
   return content?.is_error || false
 }
+
+/** 文件组中所有图片的聚合预览列表（用于键盘导航） */
+const fileGroupPreviewList = computed(() => {
+  if (!props.group.fileSubMessages) return []
+  return props.group.fileSubMessages
+    .filter(sm => sm.type === 'File' && sm.file_info?.mime_type?.startsWith('image/'))
+    .map(sm => sm.file_info!.url)
+})
+
+/** 计算当前图片在聚合预览列表中的索引 */
+function fileGroupPreviewIndex(fileIdx: number): number {
+  if (!props.group.fileSubMessages) return 0
+  let imgIdx = 0
+  for (let i = 0; i <= fileIdx; i++) {
+    const sm = props.group.fileSubMessages[i]
+    if (sm.type === 'File' && sm.file_info?.mime_type?.startsWith('image/')) {
+      if (i === fileIdx) return imgIdx
+      imgIdx++
+    }
+  }
+  return imgIdx
+}
 </script>
 
 <style scoped>
@@ -148,6 +241,88 @@ function isToolError(tool: SubMessage): boolean {
 
 .group-text-wrapper {
   position: relative;
+}
+
+.group-files-wrapper {
+  margin-top: 6px;
+}
+
+/* ========== 轮播 ========== */
+.file-carousel {
+  position: relative;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--el-fill-color-lighter);
+}
+
+.carousel-viewport {
+  overflow: hidden;
+  border-radius: 14px;
+}
+
+.carousel-track {
+  display: flex;
+  transition: transform 0.3s ease;
+}
+
+.carousel-slide {
+  min-width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.carousel-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 5;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.file-carousel:active .carousel-arrow,
+.file-carousel:hover .carousel-arrow {
+  opacity: 1;
+}
+
+.carousel-prev {
+  left: 6px;
+}
+.carousel-next {
+  right: 6px;
+}
+
+.carousel-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 0;
+}
+
+.carousel-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--el-border-color);
+  cursor: pointer;
+  transition: background 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.carousel-dot.is-active {
+  background: var(--el-color-primary);
 }
 
 .group-tools-wrapper {

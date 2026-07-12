@@ -170,11 +170,15 @@ def _build_any_backend(
         )
 
     elif b_type == BackendType.API.value:
+        tools_config = config.get("tools_config", {})
+        execute_cfg = tools_config.get("execute", {})
+        execute_enabled = execute_cfg.get("enabled", False)
         return MamboAPIBackend(
             backend_id=b_id,
             backend_name=b_name,
             edit_whitelist=config.get("edit_whitelist"),
             edit_blacklist=config.get("edit_blacklist"),
+            enable_execute=execute_enabled,
         )
 
     elif b_type == BackendType.RESOURCE.value:

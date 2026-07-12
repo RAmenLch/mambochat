@@ -11,6 +11,7 @@ import type { AppConfig } from './config'
 import { AppConfigManager } from './config'
 import { BackendProcessManager } from './backend'
 import { GatewayServer } from './gateway'
+import { ApiClientManager } from './apiClient'
 import { openDesktopSettings, setupDesktopSettingsIpc } from './desktopSettings'
 import {DesktopLocale, getDesktopLocale, translate} from './i18n'
 import log, { getLogPath } from './log'
@@ -144,6 +145,11 @@ async function bootstrap(): Promise<void> {
   // Start local backend if configured (non-blocking for window display)
   if (config.mode === 'local') {
     startLocalBackend(config)
+  } else if (config.mode === 'remote' && config.remote.apiClient.autoStart && config.remote.apiClient.backendId) {
+    // Start API client in remote mode if auto-start is enabled and registered
+    ApiClientManager.getInstance().start(config).catch(err => {
+      log.warn('[Main] API client auto-start failed:', err)
+    })
   }
 
   // When the backend crashes unexpectedly, open the settings window so the user can see what happened
@@ -326,6 +332,41 @@ function setupIpcHandlers(configManager: AppConfigManager, locale: DesktopLocale
     }
   })
 
+  // API Client control
+  ipcMain.handle('apibackend:start', async () => {
+    const config = configManager.load()
+    try {
+      await ApiClientManager.getInstance().start(config)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('apibackend:stop', async () => {
+    await ApiClientManager.getInstance().stop()
+    return { success: true }
+  })
+
+  ipcMain.handle('apibackend:status', () => {
+    return ApiClientManager.getInstance().getStatus()
+  })
+
+  ipcMain.handle('apibackend:register', async (_event, serverUrl: string, rootDir: string) => {
+    try {
+      const result = await ApiClientManager.getInstance().register(serverUrl, rootDir)
+      // Save credentials to config
+      const config = configManager.load()
+      config.remote.apiClient.backendId = result.backendId
+      config.remote.apiClient.apiKey = result.apiKey
+      config.remote.apiClient.rootDir = rootDir
+      configManager.save(config)
+      return { success: true, backendId: result.backendId, apiKey: result.apiKey }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
   // Window controls
   ipcMain.handle('win:minimize', () => {
     const win = BrowserWindow.getFocusedWindow()
@@ -380,6 +421,7 @@ app.on('activate', async () => {
 
 app.on('before-quit', async () => {
   isQuitting = true
+  await ApiClientManager.getInstance().stop()
   await BackendProcessManager.getInstance().stop()
   GatewayServer.getInstance().stop()
   globalShortcut.unregisterAll()

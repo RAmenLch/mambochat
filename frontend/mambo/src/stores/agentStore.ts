@@ -5,6 +5,39 @@ import { getAgentChildren, createAgent, updateAgent, deleteAgent, moveAgent, get
 import type { Agent, AgentCreate, AgentUpdate, MoveRequest } from '@/api/types';
 import { useTreeStoreActions } from '@/composables/useTreeStoreActions';
 
+/** 将扁平 Agent 列表按树序（DFS）重排 */
+function sortAgentsInTreeOrder(agents: Agent[]): Agent[] {
+  const childrenMap = new Map<string, Agent[]>();
+  const roots: Agent[] = [];
+
+  for (const a of agents) {
+    if (!a.parentId) {
+      roots.push(a);
+    } else {
+      if (!childrenMap.has(a.parentId)) {
+        childrenMap.set(a.parentId, []);
+      }
+      childrenMap.get(a.parentId)!.push(a);
+    }
+  }
+
+  roots.sort((a, b) => a.sortOrder - b.sortOrder);
+  for (const [, children] of childrenMap) {
+    children.sort((a, b) => a.sortOrder - b.sortOrder);
+  }
+
+  const result: Agent[] = [];
+  function dfs(nodes: Agent[]) {
+    for (const node of nodes) {
+      result.push(node);
+      const children = childrenMap.get(node.id);
+      if (children) dfs(children);
+    }
+  }
+  dfs(roots);
+  return result;
+}
+
 export const useAgentStore = defineStore('agent', () => {
   const agentList = ref<Agent[]>([]);
   const currentAgentId = ref<string | null>(null);
@@ -45,7 +78,8 @@ export const useAgentStore = defineStore('agent', () => {
   async function fetchAllAgents() {
     isAllAgentsLoading.value = true;
     try {
-      allAgents.value = await getAgents(0, 1000);
+      const raw = await getAgents(0, 1000);
+      allAgents.value = sortAgentsInTreeOrder(raw);
     } catch (error) {
       console.error('Failed to fetch all agents:', error);
     } finally {
@@ -57,7 +91,7 @@ export const useAgentStore = defineStore('agent', () => {
   async function createNewItemWrapper(data: AgentCreate) {
     const newItem = await createNewItem(data);
     if (newItem) {
-      allAgents.value.push(newItem);
+      allAgents.value = sortAgentsInTreeOrder([...allAgents.value, newItem]);
     }
     return newItem;
   }
@@ -85,7 +119,7 @@ export const useAgentStore = defineStore('agent', () => {
   async function duplicateAgentItem(agentId: string) {
     const newAgent = await duplicateAgent(agentId);
     agentList.value.push(newAgent);
-    allAgents.value.push(newAgent);
+    allAgents.value = sortAgentsInTreeOrder([...allAgents.value, newAgent]);
     return newAgent;
   }
 

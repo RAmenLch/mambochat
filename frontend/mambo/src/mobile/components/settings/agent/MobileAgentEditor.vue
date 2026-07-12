@@ -110,7 +110,8 @@
             <div class="param-control">
               <el-input-number
                 v-if="param.type === 'number'"
-                v-model="form.modelParameters[param.key]"
+                :model-value="form.modelParameters[param.key] as number | undefined"
+                @update:model-value="(val: number | undefined) => form.modelParameters[param.key] = val"
                 :min="!Array.isArray(param.limit) ? param.limit?.min ?? 0 : 0"
                 :max="!Array.isArray(param.limit) ? param.limit?.max ?? 1 : 1"
                 :step="getSliderStep(!Array.isArray(param.limit) ? param.limit?.min ?? 0 : 0, !Array.isArray(param.limit) ? param.limit?.max ?? 1 : 1)"
@@ -120,7 +121,8 @@
               />
               <el-input-number
                 v-else-if="param.type === 'integer'"
-                v-model="form.modelParameters[param.key]"
+                :model-value="form.modelParameters[param.key] as number | undefined"
+                @update:model-value="(val: number | undefined) => form.modelParameters[param.key] = val"
                 :min="!Array.isArray(param.limit) ? param.limit?.min : undefined"
                 :max="!Array.isArray(param.limit) ? param.limit?.max : undefined"
                 :disabled="!param.isEnabled"

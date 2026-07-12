@@ -17,11 +17,8 @@
       <el-image
         v-if="subMessage.file_info.mime_type.startsWith('image/')"
         :src="subMessage.file_info.url"
-        :preview-src-list="[subMessage.file_info.url]"
-        :initial-index="0"
-        fit="cover"
+        fit="contain"
         class="file-image-thumbnail"
-        hide-on-click-modal
       />
       <div v-else class="file-card">
         <div class="file-card-icon">
@@ -150,6 +147,8 @@ const props = withDefaults(
     index?: number
     isInactive?: boolean
     isInline?: boolean
+    previewSrcList?: string[]
+    previewIndex?: number
   }>(),
   {
     id: '',
@@ -157,6 +156,8 @@ const props = withDefaults(
     index: 1,
     isInactive: false,
     isInline: false,
+    previewSrcList: () => [],
+    previewIndex: 0,
   },
 )
 
@@ -172,6 +173,13 @@ const interactionStore = useChatInteractionStore()
 const isCollapsed = ref(props.subMessage.config.is_collapsed || false)
 const isGenerating = computed(() => props.subMessage.status === 'generating')
 const rootRef = ref<HTMLElement | null>(null)
+
+const effectivePreviewSrcList = computed(() => {
+  if (props.previewSrcList && props.previewSrcList.length > 0) {
+    return props.previewSrcList
+  }
+  return props.subMessage.file_info?.url ? [props.subMessage.file_info.url] : []
+})
 
 const isToolType = computed(() => props.subMessage.type === 'McpTool' || props.subMessage.type === 'ReviewTool')
 
@@ -312,12 +320,20 @@ async function handleBlockCopy(content: string) {
   padding-left: 8px;
 }
 
+.sub-message-item.is-file {
+  overflow: visible;
+}
+
 /* File display */
 .file-image-thumbnail {
   width: 100%;
-  max-width: 240px;
+  height: 300px;
   border-radius: 14px;
-  max-height: 200px;
+  display: block;
+}
+
+.file-display-container {
+  width: 100%;
 }
 
 .file-card {
