@@ -132,13 +132,13 @@ class ShowMiddleware(AgentMiddleware):
                     "status": "pending",
                     "path": path,
                     "timeout": wait_timeout,
-                })
-            return json.dumps({"error": f"File not found: {path}"})
+                }, ensure_ascii=False)
+            return json.dumps({"error": f"File not found: {path}"}, ensure_ascii=False)
 
         # 3. 文件存在 → 下载 + 持久化
         content_bytes, error = await _download_safe(self._backend, path)
         if error:
-            return json.dumps({"error": error})
+            return json.dumps({"error": error}, ensure_ascii=False)
 
         filename = PurePosixPath(path).name
         mime = _get_mime_type(path)
@@ -176,7 +176,7 @@ class ShowMiddleware(AgentMiddleware):
             "file_id": db_file.id,
             "filename": filename,
             "mime_type": mime,
-        })
+        }, ensure_ascii=False)
 
     # ------------------------------------------------------------------
     # Middleware hooks (delegate to default — no wrapping needed)
