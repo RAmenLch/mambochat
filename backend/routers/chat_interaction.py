@@ -1,5 +1,10 @@
 # backend/routers/chat_interaction.py
 
+import asyncio
+import json
+import time
+from pathlib import PurePosixPath
+
 from fastapi import APIRouter, Body, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.responses import StreamingResponse
@@ -11,10 +16,14 @@ from backend.services.file_service import FileService
 from backend.crud import chat_crud, message_crud, setting_crud
 from backend import schemas
 from backend.models import chat_model
-from backend.database import get_db
+from backend.database import get_db, AsyncSessionLocal
 from backend.routers.chat_management import _apply_default_model_to_chat_object
 from backend.schemas import SubMessageType, MessageStatus
-from backend.schemas.message import ToolApprovalRequest
+from backend.schemas.message import ToolApprovalRequest, SubMessageConfig, SubMessageUpdate
+from backend.schemas.enums import FileManagementType
+
+from mambo_agents.backends.schemas import VirtualPath
+from mambo_agents.backends.protocol import _get_mime_type
 
 from pydantic import BaseModel
 
@@ -29,6 +38,138 @@ class AskUserAnswerRequest(BaseModel):
     sub_message_id: str
     answers: List[str]
     ask_status: str = "answered"
+
+
+_pending_file_tasks: dict[str, asyncio.Task] = {}
+
+
+async def _poll_and_persist_file(
+    sub_message_id: str,
+    path: str,
+    timeout: int,
+    chat_id: str,
+) -> dict:
+    """轮询等待文件生成，成功后入库并更新子消息。
+
+    返回 {"type": "file_ready", "file_id": "...", "file_info": {...}} 或
+         {"type": "file_timeout", "path": "..."}
+    """
+    from backend.services.generation.agent.backend_factory import (
+        build_backend_from_chat_id,
+    )
+
+    print(f"[PendingFile] Polling started: sub={sub_message_id} path={path} timeout={timeout}s chat={chat_id}")
+
+    backend = None
+    poll_count = 0
+    try:
+        async with AsyncSessionLocal() as db:
+            print(f"[PendingFile] Building backend for chat={chat_id}...")
+            backend = await build_backend_from_chat_id(db, chat_id)
+            print(f"[PendingFile] Backend built: {type(backend).__name__}")
+
+        deadline = time.monotonic() + timeout
+
+        while time.monotonic() < deadline:
+            poll_count += 1
+            remaining = int(deadline - time.monotonic())
+            try:
+                pp = PurePosixPath(path)
+                glob_result = await backend.aglob(pp.name, VirtualPath(str(pp.parent)))
+                file_appeared = glob_result.error is None and bool(glob_result.matches)
+                print(f"[PendingFile] Poll #{poll_count}: aglob({pp.name}, {str(pp.parent)}) -> error={glob_result.error} matches={glob_result.matches} (appeared={file_appeared}) remaining={remaining}s")
+            except Exception as exc:
+                print(f"[PendingFile] Poll #{poll_count}: aglob error: {exc}")
+                file_appeared = False
+
+            if file_appeared:
+                print(f"[PendingFile] File detected, downloading (pass 1)...")
+                r1 = await backend.adownload_files([VirtualPath(path)])
+                size1 = len(r1[0].content) if r1 and r1[0].content else 0
+                print(f"[PendingFile] Download pass 1: size={size1}")
+
+                if size1 == 0:
+                    print(f"[PendingFile] Size=0, waiting 3s before next poll...")
+                    await asyncio.sleep(3)
+                    continue
+
+                await asyncio.sleep(2)
+                print(f"[PendingFile] Stability check: downloading pass 2...")
+                r2 = await backend.adownload_files([VirtualPath(path)])
+                size2 = len(r2[0].content) if r2 and r2[0].content else 0
+                print(f"[PendingFile] Download pass 2: size={size2}")
+
+                if size1 != size2:
+                    print(f"[PendingFile] Sizes differ ({size1} vs {size2}), file still writing, retrying...")
+                    continue
+
+                print(f"[PendingFile] File stable, persisting...")
+                content = r2[0].content
+                filename = PurePosixPath(path).name
+                mime = _get_mime_type(path)
+
+                if content:
+                    sample = content[:8192]
+                    try:
+                        sample.decode("utf-8")
+                        from backend.utils.file_utils import FileUtils
+                        mime = FileUtils.correct_mime_type(filename, mime, sample)
+                    except (UnicodeDecodeError, ValueError, LookupError):
+                        pass
+
+                async with AsyncSessionLocal() as db:
+                    fs = FileService(db)
+                    db_file = await fs.save_file_from_bytes(
+                        data=content or b"",
+                        filename=filename,
+                        mime_type=mime,
+                        management_type=[FileManagementType.SUB_MESSAGE.value],
+                        sub_path="chat_attachments",
+                    )
+                    print(f"[PendingFile] File saved: id={db_file.id} filename={filename} mime={mime}")
+
+                    await message_crud.update_sub_message(
+                        db,
+                        sub_message_id,
+                        SubMessageUpdate(
+                            content=db_file.id,
+                            status=MessageStatus.COMPLETED,
+                            config=SubMessageConfig(
+                                context_participation_length=0,
+                                pending_file_path=None,
+                                pending_file_timeout=None,
+                            ),
+                        ),
+                    )
+                    print(f"[PendingFile] Sub-message updated: {sub_message_id} -> COMPLETED")
+
+                    file_schema = fs.convert_to_schema(db_file)
+                    file_info = file_schema.model_dump(mode='json')
+
+                print(f"[PendingFile] SUCCESS: file_ready file_id={db_file.id}")
+                return {
+                    "type": "file_ready",
+                    "file_id": db_file.id,
+                    "file_info": file_info,
+                }
+
+            await asyncio.sleep(3)
+
+        print(f"[PendingFile] TIMEOUT after {poll_count} polls: path={path} never appeared")
+        async with AsyncSessionLocal() as db:
+            await message_crud.update_sub_message(
+                db,
+                sub_message_id,
+                SubMessageUpdate(status=MessageStatus.FAILED),
+            )
+        return {"type": "file_timeout", "path": path}
+
+    finally:
+        if backend is not None and hasattr(backend, 'aclose'):
+            try:
+                await backend.aclose()
+            except Exception:
+                pass
 
 
 router = APIRouter()
@@ -567,3 +708,68 @@ async def answer_ask_user(
         response_message.status = schemas.MessageStatus.GENERATING
 
     return response_message
+
+
+@router.get(
+    "/sub-messages/{sub_message_id}/wait-for-file",
+    summary="等待待生成文件就绪（SSE）",
+)
+async def wait_for_pending_file(
+    sub_message_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    print(f"[PendingFile SSE] Connection received for sub={sub_message_id}")
+
+    sub = await message_crud.get_sub_message(db, sub_message_id)
+    if not sub or sub.type != SubMessageType.FILE.value:
+        print(f"[PendingFile SSE] ERROR: sub not found or not FILE type")
+        raise HTTPException(404, "Sub-message not found or not a File type")
+
+    raw_config = sub.config
+    if isinstance(raw_config, str):
+        raw_config = json.loads(raw_config)
+    config = SubMessageConfig(**raw_config)
+
+    path = config.pending_file_path
+    timeout = config.pending_file_timeout or 300
+    print(f"[PendingFile SSE] sub={sub_message_id} status={sub.status} content={sub.content!r} path={path} timeout={timeout}")
+
+    if sub.status == MessageStatus.COMPLETED.value and sub.content:
+        print(f"[PendingFile SSE] File already completed, returning immediately: file_id={sub.content}")
+        async def immediate():
+            yield f"data: " + json.dumps({
+                "type": "file_ready",
+                "file_id": sub.content,
+            }) + "\n\n"
+        return StreamingResponse(immediate(), media_type="text/event-stream")
+
+    if not path or sub.status != MessageStatus.WAITING.value:
+        print(f"[PendingFile SSE] ERROR: not in pending state (path={path} status={sub.status})")
+        raise HTTPException(400, "File is not in pending state")
+
+    db_message = await message_crud.get_message(db, sub.messageId)
+    if not db_message:
+        raise HTTPException(404, "Message not found")
+    chat_id = db_message.chatId
+
+    task = _pending_file_tasks.get(sub_message_id)
+    if task is None:
+        print(f"[PendingFile SSE] Creating new poll task for sub={sub_message_id} chat={chat_id}")
+        task = asyncio.create_task(
+            _poll_and_persist_file(sub_message_id, path, timeout, chat_id)
+        )
+        _pending_file_tasks[sub_message_id] = task
+        task.add_done_callback(lambda _: _pending_file_tasks.pop(sub_message_id, None))
+    else:
+        print(f"[PendingFile SSE] Reusing existing poll task for sub={sub_message_id}")
+
+    async def event_stream():
+        try:
+            result = await asyncio.shield(task)
+            print(f"[PendingFile SSE] Task completed for sub={sub_message_id}: {result['type']}")
+            yield f"data: " + json.dumps(result) + "\n\n"
+        except asyncio.CancelledError:
+            print(f"[PendingFile SSE] Client disconnected for sub={sub_message_id}")
+            pass
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")

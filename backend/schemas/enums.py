@@ -24,6 +24,7 @@ class MessageStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     PENDING_REVIEW = "pending_review"
+    WAITING = "waiting"
 
 
 class SubMessageType(str, Enum):

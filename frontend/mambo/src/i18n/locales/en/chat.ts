@@ -73,6 +73,8 @@ export default {
     kbEnabled: 'Knowledge base enabled: {names}',
     kbDisabled: 'Knowledge base retrieval disabled',
     fileUploadFailed: 'File {name} upload failed',
+    waitingForFile: 'Waiting for file...',
+    fileTimeout: 'File generation timed out',
   },
   message: {
     ai_assistant: 'AI Assistant',

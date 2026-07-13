@@ -73,6 +73,8 @@ export default {
     kbEnabled: '已启用知识库: {names}',
     kbDisabled: '已停用知识库检索',
     fileUploadFailed: '文件 {name} 上传失败',
+    waitingForFile: '等待文件生成...',
+    fileTimeout: '文件生成超时',
   },
   message: {
     ai_assistant: 'AI 助手',

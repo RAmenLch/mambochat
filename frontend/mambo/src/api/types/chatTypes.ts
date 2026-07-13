@@ -4,7 +4,7 @@ import type { FileResponse } from './common'
 
 export type MessageRole = 'user' | 'assistant' | 'system'
 export type ChatItemType = 'chat' | 'folder'
-export type MessageStatus = 'generating' | 'completed' | 'failed' | 'pending_review'
+export type MessageStatus = 'generating' | 'completed' | 'failed' | 'pending_review' | 'waiting'
 export type ChatMode = 'normal' | 'agent'
 
 // --- SubMessage Types ---
@@ -30,6 +30,8 @@ export interface SubMessageConfig {
   zip_enable?: boolean | null
   target_sub_msg_id?: string | null
   task_group_id?: string | null
+  pending_file_path?: string | null
+  pending_file_timeout?: number | null
 }
 
 export interface SubMessage {

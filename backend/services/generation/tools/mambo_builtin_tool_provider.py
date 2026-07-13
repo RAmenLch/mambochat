@@ -118,16 +118,31 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
         if cached_content and cached_content.name == "show" and not is_error:
             try:
                 data = json.loads(result_text)
-                file_id = data.get("file_id")
-                if file_id:
+
+                if data.get("status") == "pending":
                     yield CreateSubMessage(
                         sub_message_id=generate_uuid(),
                         type=schemas_enums.SubMessageType.FILE.value,
                         sortOrder=2,
-                        status=schemas_enums.MessageStatus.COMPLETED,
-                        initial_content=file_id,
-                        config=SubMessageConfig(context_participation_length=0),
+                        status=schemas_enums.MessageStatus.WAITING,
+                        initial_content="",
+                        config=SubMessageConfig(
+                            context_participation_length=0,
+                            pending_file_path=data["path"],
+                            pending_file_timeout=data.get("timeout", 300),
+                        ),
                     )
+                else:
+                    file_id = data.get("file_id")
+                    if file_id:
+                        yield CreateSubMessage(
+                            sub_message_id=generate_uuid(),
+                            type=schemas_enums.SubMessageType.FILE.value,
+                            sortOrder=2,
+                            status=schemas_enums.MessageStatus.COMPLETED,
+                            initial_content=file_id,
+                            config=SubMessageConfig(context_participation_length=0),
+                        )
             except (json.JSONDecodeError, KeyError, TypeError):
                 pass
 

@@ -34,6 +34,18 @@
       </div>
     </div>
 
+    <div v-else-if="isPendingFile" class="file-pending-container">
+      <div class="file-pending-card">
+        <div class="file-pending-icon">
+          <el-icon :size="22" class="is-loading"><Loading /></el-icon>
+        </div>
+        <div class="file-pending-info">
+          <div class="file-pending-name">{{ pendingFileName }}</div>
+          <div class="file-pending-status">{{ pendingStatusText }}</div>
+        </div>
+      </div>
+    </div>
+
     <!-- MCP 工具 / Review 工具 或 普通文本 -->
     <template v-else>
       <div v-if="showHeader || isToolType" class="sub-message-header">
@@ -113,10 +125,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { SubMessage, Message, McpToolContent, ReviewToolContent } from '@/api/types'
+import type { SubMessage, Message, McpToolContent, ReviewToolContent, FileResponse } from '@/api/types'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
+import { useChatSessionStore } from '@/stores/chatSessionStore'
+import { subscribeToPendingFile } from '@/services/sseService'
 import { ElMessage } from 'element-plus'
 import {
   Edit,
@@ -170,9 +184,12 @@ const emit = defineEmits<{
 }>()
 
 const interactionStore = useChatInteractionStore()
+const sessionStore = useChatSessionStore()
 const isCollapsed = ref(props.subMessage.config.is_collapsed || false)
 const isGenerating = computed(() => props.subMessage.status === 'generating')
 const rootRef = ref<HTMLElement | null>(null)
+const pendingFileController = ref<AbortController | null>(null)
+const pendingFailed = ref(false)
 
 const effectivePreviewSrcList = computed(() => {
   if (props.previewSrcList && props.previewSrcList.length > 0) {
@@ -237,6 +254,23 @@ const formattedFileSize = computed(() => {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`
 })
 
+const isPendingFile = computed(() =>
+  props.subMessage.type === 'File' &&
+  props.subMessage.status === 'waiting' &&
+  !!props.subMessage.config.pending_file_path
+)
+
+const pendingFileName = computed(() => {
+  if (!isPendingFile.value) return ''
+  const path = props.subMessage.config.pending_file_path || ''
+  return path.split('/').pop() || path
+})
+
+const pendingStatusText = computed(() => {
+  if (pendingFailed.value) return t('chat.attachment.fileTimeout')
+  return t('chat.attachment.waitingForFile')
+})
+
 const contentBlocks = computed(() => {
   if (props.subMessage.type !== 'File' && !isToolType.value) {
     return parseMarkdown(props.subMessage.content)
@@ -297,6 +331,49 @@ async function handleBlockCopy(content: string) {
     ElMessage.error(t('chat.message.copyFailed'))
   }
 }
+
+onMounted(() => {
+  if (isPendingFile.value) {
+    pendingFileController.value = subscribeToPendingFile(props.subMessage.id, {
+      onReady(fileId, fileInfo) {
+        for (const msg of sessionStore.currentChatMessages) {
+          const sm = msg.sub_messages.find(s => s.id === props.subMessage.id)
+          if (sm) {
+            sm.content = fileId
+            sm.status = 'completed'
+            sm.config = {
+              ...sm.config,
+              pending_file_path: undefined,
+              pending_file_timeout: undefined,
+            }
+            sm.file_info = fileInfo as unknown as FileResponse
+            break
+          }
+        }
+      },
+      onTimeout(_path) {
+        pendingFailed.value = true
+        for (const msg of sessionStore.currentChatMessages) {
+          const sm = msg.sub_messages.find(s => s.id === props.subMessage.id)
+          if (sm) {
+            sm.status = 'failed'
+            break
+          }
+        }
+      },
+      onError(_err) {
+        // SSE connection error - keep showing pending state
+      },
+    })
+  }
+})
+
+onBeforeUnmount(() => {
+  if (pendingFileController.value) {
+    pendingFileController.value.abort()
+    pendingFileController.value = null
+  }
+})
 </script>
 
 <style scoped>
@@ -369,6 +446,45 @@ async function handleBlockCopy(content: string) {
 .file-card-size {
   font-size: 11px;
   opacity: 0.7;
+}
+
+.file-pending-container {
+  width: 100%;
+}
+.file-pending-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px dashed rgba(255, 255, 255, 0.4);
+  max-width: 260px;
+}
+.is-user .file-pending-card {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.45);
+}
+.file-pending-icon {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+.file-pending-info {
+  flex: 1;
+  min-width: 0;
+}
+.file-pending-name {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: inherit;
+}
+.file-pending-status {
+  font-size: 11px;
+  opacity: 0.7;
+  margin-top: 2px;
 }
 
 .sub-message-header {

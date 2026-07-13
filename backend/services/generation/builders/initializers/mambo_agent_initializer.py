@@ -84,7 +84,8 @@ class MamboAgentInitializer(AbstractAgentInitializer):
         # ---- 构建 skill_resource_roots（Mambo skills → /.mambo/skills/<name>/）----
         skill_resource_roots: Dict[str, str] = {}
         if skills and self.agent.resourcePromptList:
-            skill_resource_roots = await self._build_skill_roots()
+            from backend.services.generation.agent.backend_factory import build_skill_resource_roots
+            skill_resource_roots = await build_skill_resource_roots(self.db, self.agent)
 
         # DeepAgent 子代理仍然需要 skills 内容用于 VFS 注入
         if skills:
@@ -136,22 +137,9 @@ class MamboAgentInitializer(AbstractAgentInitializer):
             if injection:
                 extended_prompts.append(injection)
 
-        # --- Backend 装配（单 Backend）---
-        mounted_backends = []
-        if self.agent.backendIds:
-            backends_db = await backend_crud.get_backends_by_ids(
-                self.db, self.agent.backendIds
-            )
-            for b in backends_db:
-                config_data = dict(b.configData) if b.configData else {}
-                if b.tools_config:
-                    config_data["tools_config"] = b.tools_config
-                mounted_backends.append({
-                    "id": b.id,
-                    "name": b.name,
-                    "backendType": b.backendType,
-                    "configData": config_data,
-                })
+        # --- Backend 装配 ---
+        from backend.services.generation.agent.backend_factory import build_mounted_backends
+        mounted_backends = await build_mounted_backends(self.db, self.agent)
 
         # --- 子代理初始化 ---
         sub_configs: List[AgentConfig] = []
@@ -435,31 +423,6 @@ class MamboAgentInitializer(AbstractAgentInitializer):
         )
 
         return agent_config, additional_system_prompt
-
-    async def _build_skill_roots(self) -> Dict[str, str]:
-        """从 resourcePromptList 中提取 SKILL 类型资源，构建根挂载映射。
-
-        遍历 resourcePromptList，筛选 resourceType == "skill" 的文件夹资源，
-        构建 {skill_name: root_resource_id} 映射。
-        每个 skill 将被创建为独立的 MamboResourceBackend(resource_id=root_resource_id)，
-        挂载到 HybridWorkspaceBackend.virtual_workspaces["skills/{name}"]。
-
-        Returns:
-            {"skill_name": "res_xxx", ...}
-        """
-        if not self.agent.resourcePromptList:
-            return {}
-
-        roots: Dict[str, str] = {}
-        for rid in self.agent.resourcePromptList:
-            res = await resource_crud.get_resource(self.db, rid)
-            if res is None:
-                continue
-            if res.resourceType != ResourceType.SKILL.value:
-                continue
-            roots[res.name] = res.id
-
-        return roots
 
     async def _build_memory_roots(
         self, resource_ids: List[str]

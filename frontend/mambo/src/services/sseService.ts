@@ -52,7 +52,6 @@ export function subscribeToMessageStream(params: SseSubscriptionParams): AbortCo
   fetchEventSource(url, {
     method: 'GET',
     signal: controller.signal,
-    // 即使浏览器标签页在后台，也保持连接
     openWhenHidden: true,
 
     onmessage(event) {
@@ -61,25 +60,68 @@ export function subscribeToMessageStream(params: SseSubscriptionParams): AbortCo
         onMessage(data);
       } catch (e) {
         console.error('Failed to parse SSE data chunk:', event.data, e);
-        // 出现解析错误时，也通知调用方，以便其可以尝试同步最终状态
         onError(e);
       }
     },
 
     onclose() {
-      // 正常关闭时通知调用方
       onClose();
     },
 
     onerror(err) {
-      // 如果错误不是由 AbortController.abort() 触发的，则视为真实错误并通知调用方
       if (err.name !== 'AbortError') {
         onError(err);
       }
-      // fetchEventSource 在发生错误后会尝试重连，除非我们抛出错误
-      // 这里不抛出，让其内部机制处理，但我们已经通知了调用方
     },
   });
 
   return controller;
+}
+
+/**
+ * 订阅待生成文件的 SSE 流。
+ * 当 show 工具标记文件待生成时，前端通过此函数连接 SSE 等待文件就绪。
+ */
+export function subscribeToPendingFile(
+  subMessageId: string,
+  callbacks: {
+    onReady: (fileId: string, fileInfo: Record<string, unknown>) => void
+    onTimeout: (path: string) => void
+    onError: (error: unknown) => void
+  },
+): AbortController {
+  const controller = new AbortController()
+  const url = resolveApiUrl(`/api/sub-messages/${subMessageId}/wait-for-file`)
+
+  fetchEventSource(url, {
+    method: 'GET',
+    signal: controller.signal,
+    openWhenHidden: true,
+
+    onmessage(event) {
+      try {
+        const data = JSON.parse(event.data)
+        if (data.type === 'file_ready') {
+          callbacks.onReady(data.file_id, data.file_info)
+        } else if (data.type === 'file_timeout') {
+          callbacks.onTimeout(data.path)
+        }
+      } catch (e) {
+        console.error('Failed to parse pending file SSE data:', event.data, e)
+        callbacks.onError(e)
+      }
+    },
+
+    onclose() {
+      // Normal close - no action needed
+    },
+
+    onerror(err) {
+      if (err.name !== 'AbortError') {
+        callbacks.onError(err)
+      }
+    },
+  })
+
+  return controller
 }

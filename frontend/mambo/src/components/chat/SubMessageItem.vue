@@ -56,6 +56,22 @@
       </div>
     </div>
 
+    <div v-else-if="isPendingFile" class="file-pending-container">
+      <div class="file-pending-card">
+        <div class="file-pending-icon">
+          <el-icon :size="28" class="is-loading"><Loading /></el-icon>
+        </div>
+        <div class="file-pending-info">
+          <div class="file-pending-name">
+            {{ pendingFileName }}
+          </div>
+          <div class="file-pending-status">
+            {{ pendingStatusText }}
+          </div>
+        </div>
+      </div>
+    </div>
+
     <template v-else>
       <div v-if="showHeader || subMessage.type === 'McpTool'" class="sub-message-header">
         <div v-if="subMessage.type === 'McpTool' && isCollapsed" class="mcp-collapsed-summary">
@@ -212,6 +228,8 @@ import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SubMessage, Message, SubMessageConfig, McpToolContent, FileResponse } from '@/api/types'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
+import { useChatSessionStore } from '@/stores/chatSessionStore'
+import { subscribeToPendingFile } from '@/services/sseService'
 import { ElMessage } from 'element-plus'
 import {
   Edit,
@@ -271,11 +289,14 @@ const emit = defineEmits<{
 }>()
 
 const interactionStore = useChatInteractionStore()
+const sessionStore = useChatSessionStore()
 const isCollapsed = ref(props.subMessage.config.is_collapsed || false)
 const isGenerating = computed(() => props.subMessage.status === 'generating')
 const rootRef = ref<HTMLElement | null>(null)
 const contentRef = ref<HTMLElement | null>(null)
 const showBackToTop = ref(false)
+const pendingFileController = ref<AbortController | null>(null)
+const pendingFailed = ref(false)
 
 let resizeObserver: ResizeObserver | null = null
 
@@ -288,11 +309,49 @@ onMounted(() => {
     })
     resizeObserver.observe(contentRef.value)
   }
+
+  if (isPendingFile.value) {
+    pendingFileController.value = subscribeToPendingFile(props.subMessage.id, {
+      onReady(fileId, fileInfo) {
+        for (const msg of sessionStore.currentChatMessages) {
+          const sm = msg.sub_messages.find(s => s.id === props.subMessage.id)
+          if (sm) {
+            sm.content = fileId
+            sm.status = 'completed'
+            sm.config = {
+              ...sm.config,
+              pending_file_path: undefined,
+              pending_file_timeout: undefined,
+            }
+            sm.file_info = fileInfo as unknown as FileResponse
+            break
+          }
+        }
+      },
+      onTimeout(_path) {
+        pendingFailed.value = true
+        for (const msg of sessionStore.currentChatMessages) {
+          const sm = msg.sub_messages.find(s => s.id === props.subMessage.id)
+          if (sm) {
+            sm.status = 'failed'
+            break
+          }
+        }
+      },
+      onError(_err) {
+        // SSE connection error - keep showing pending state, will retry on reload
+      },
+    })
+  }
 })
 
 onBeforeUnmount(() => {
   if (resizeObserver) {
     resizeObserver.disconnect()
+  }
+  if (pendingFileController.value) {
+    pendingFileController.value.abort()
+    pendingFileController.value = null
   }
 })
 
@@ -344,6 +403,23 @@ const formattedFileSize = computed(() => {
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
   if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`
   return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`
+})
+
+const isPendingFile = computed(() =>
+  props.subMessage.type === 'File' &&
+  props.subMessage.status === 'waiting' &&
+  !!props.subMessage.config.pending_file_path
+)
+
+const pendingFileName = computed(() => {
+  if (!isPendingFile.value) return ''
+  const path = props.subMessage.config.pending_file_path || ''
+  return path.split('/').pop() || path
+})
+
+const pendingStatusText = computed(() => {
+  if (pendingFailed.value) return t('chat.attachment.fileTimeout')
+  return t('chat.attachment.waitingForFile')
 })
 
 const contentBlocks = computed(() => {
@@ -567,6 +643,44 @@ function scrollToTop() {
 }
 .file-card-download {
   flex-shrink: 0;
+}
+
+.file-pending-container {
+  overflow: visible;
+}
+.file-pending-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 6px;
+  background-color: var(--color-background-soft);
+  border: 1px dashed var(--el-border-color);
+}
+.is-user .file-pending-card {
+  background-color: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary-light-5);
+}
+.file-pending-icon {
+  flex-shrink: 0;
+  color: var(--el-text-color-secondary);
+}
+.file-pending-info {
+  flex-grow: 1;
+  min-width: 0;
+}
+.file-pending-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-pending-status {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-top: 2px;
 }
 
 .mcp-tool-content {
