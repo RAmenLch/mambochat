@@ -162,7 +162,7 @@ const totalLines = computed(() => props.code.split('\n').length)
 const isMermaid = computed(() => ['mermaid'].includes((props.language || '').toLowerCase()))
 const isSvg = computed(() => ['svg'].includes((props.language || '').toLowerCase()))
 
-const isCollapsed = ref(!props.isGenerating && !isSvg.value && !(isMermaid.value && props.closed) && totalLines.value > DEFAULT_COLLAPSE_THRESHOLD)
+const isCollapsed = ref(props.showHeader && !props.isGenerating && !isSvg.value && !(isMermaid.value && props.closed) && totalLines.value > DEFAULT_COLLAPSE_THRESHOLD)
 
 const mermaidSvg = ref<string>('')
 const mermaidError = ref<string>('')
@@ -287,7 +287,7 @@ watch(
     if (generating) {
       isCollapsed.value = false
     } else if (wasGenerating && !generating) {
-      isCollapsed.value = !isSvg.value && !isMermaid.value && totalLines.value > DEFAULT_COLLAPSE_THRESHOLD
+      isCollapsed.value = props.showHeader && !isSvg.value && !isMermaid.value && totalLines.value > DEFAULT_COLLAPSE_THRESHOLD
     }
   },
 )
