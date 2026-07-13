@@ -1,6 +1,6 @@
 <template>
   <div class="code-block-container">
-    <div class="code-block-header">
+    <div v-if="showHeader" class="code-block-header">
       <span class="language-name">{{ language || 'text' }}</span>
       <div class="actions">
         <span class="line-count">{{ t('chat.codeBlock.lines', { count: totalLines }) }}</span>
@@ -138,6 +138,10 @@ const props = defineProps({
     default: '```',
   },
   closed: {
+    type: Boolean,
+    default: true,
+  },
+  showHeader: {
     type: Boolean,
     default: true,
   },
