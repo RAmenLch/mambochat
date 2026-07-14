@@ -13,6 +13,7 @@
         :show-header="false"
         :is-inline="true"
         @edit="(payload) => $emit('edit', group.textSubMessage!, payload)"
+        @edit-file="(file) => $emit('edit-file', file)"
         @copy="$emit('copy', group.textSubMessage)"
       />
     </div>
@@ -28,6 +29,7 @@
           :is-inline="false"
           :preview-src-list="fileGroupPreviewList"
           :preview-index="0"
+          @edit-file="(file) => $emit('edit-file', file)"
         />
       </template>
 
@@ -51,6 +53,7 @@
                   :is-inline="false"
                   :preview-src-list="fileGroupPreviewList"
                   :preview-index="fileGroupPreviewIndex(fileIdx)"
+                  @edit-file="(file) => $emit('edit-file', file)"
                 />
               </div>
             </div>
@@ -110,7 +113,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import { computed, ref } from 'vue'
-import type { Message, SubMessage, McpToolContent, ReviewToolContent, SecurityReviewContent } from '@/api/types'
+import type { Message, SubMessage, McpToolContent, ReviewToolContent, SecurityReviewContent, FileResponse } from '@/api/types'
 import SubMessageItem from '../SubMessageItem.vue'
 import type { BubbleSectionGroup } from '@/composables/useAssistantTimeline'
 import { Warning, Loading, CircleClose, CircleCheck, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
@@ -132,6 +135,7 @@ const emit = defineEmits<{
   (e: 'copy', subMessage: SubMessage): void
   (e: 'open-tool-dialog', subMessageId: string): void
   (e: 'toggle-actions', subMessageId: string): void
+  (e: 'edit-file', file: FileResponse): void
 }>()
 
 const carouselIndex = ref(0)

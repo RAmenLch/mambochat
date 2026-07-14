@@ -39,6 +39,7 @@
                 :is-inactive="isInactive(group)"
                 is-reasoning
                 @edit="(subMsg, payload) => $emit('edit', subMsg, payload)"
+                @edit-file="(file) => $emit('edit-file', file)"
                 @copy="(subMsg) => $emit('copy', subMsg)"
                 @open-tool-dialog="(toolId) => $emit('open-tool-dialog', toolId)"
                 @toggle-actions="(id) => $emit('toggle-actions', id)"
@@ -65,6 +66,7 @@
             :is-generating="isGenerating"
             :is-inactive="isInactive(group)"
             @edit="(subMsg, payload) => $emit('edit', subMsg, payload)"
+            @edit-file="(file) => $emit('edit-file', file)"
             @copy="(subMsg) => $emit('copy', subMsg)"
             @open-tool-dialog="(toolId) => $emit('open-tool-dialog', toolId)"
             @toggle-actions="(id) => $emit('toggle-actions', id)"
@@ -119,6 +121,7 @@
                   :is-inactive="isInactive(group)"
                   is-reasoning
                   @edit="(subMsg, payload) => $emit('edit', subMsg, payload)"
+                  @edit-file="(file) => $emit('edit-file', file)"
                   @copy="(subMsg) => $emit('copy', subMsg)"
                   @open-tool-dialog="(toolId) => $emit('open-tool-dialog', toolId)"
                   @toggle-actions="(id) => $emit('toggle-actions', id)"
@@ -143,6 +146,7 @@
               :is-generating="isGenerating"
               :is-inactive="isInactive(group)"
               @edit="(subMsg, payload) => $emit('edit', subMsg, payload)"
+              @edit-file="(file) => $emit('edit-file', file)"
               @copy="(subMsg) => $emit('copy', subMsg)"
               @open-tool-dialog="(toolId) => $emit('open-tool-dialog', toolId)"
               @toggle-actions="(id) => $emit('toggle-actions', id)"
@@ -167,7 +171,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
-import type { Message, SubMessage } from '@/api/types'
+import type { Message, SubMessage, FileResponse } from '@/api/types'
 import { useAssistantTimeline, type BubbleSectionGroup } from '@/composables/useAssistantTimeline'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -185,6 +189,7 @@ const emit = defineEmits<{
   (e: 'copy', subMessage: SubMessage): void
   (e: 'open-tool-dialog', subMessageId: string): void
   (e: 'toggle-actions', subMessageId: string): void
+  (e: 'edit-file', file: FileResponse): void
 }>()
 
 const { t } = useI18n()

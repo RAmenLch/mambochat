@@ -54,6 +54,7 @@
                 :show-header="normalSubMessages.length > 1 || subMessage.type !== 'Normal'"
                 :is-inactive="isSubMessageInactive(subMessage)"
                 @edit="(payload) => handleEditRequest(subMessage, payload)"
+                @edit-file="handleFileEdit"
                 @copy="handleCopySingle(subMessage)"
               />
             </div>
@@ -76,6 +77,7 @@
           :is-generating="message.status === 'generating'"
           :current-message-rank="currentMessageRank"
           @edit="handleEditRequest"
+          @edit-file="handleFileEdit"
           @copy="handleCopySingle"
           @open-tool-dialog="(toolId) => $emit('open-tool-dialog', message, toolId, 'single')"
           @toggle-actions="toggleActions"
@@ -182,7 +184,7 @@
 import { computed, ref, watch, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
-import type { Message, SubMessage, SubMessageCreate, MessageStatus } from '@/api/types'
+import type { Message, SubMessage, SubMessageCreate, MessageStatus, FileResponse } from '@/api/types'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -198,6 +200,7 @@ import MobileAssistantBubble from './message/MobileAssistantBubble.vue'
 import MobileMessageEditDialog from '@/mobile/components/chat/dialogs/MobileMessageEditDialog.vue'
 import UsageInfo from '@/components/chat/UsageInfo.vue'
 import { copyToClipboard } from '@/utils/clipboard'
+import { getFileContent, updateFileContent } from '@/api/fileService'
 import { type ParsedBlock } from '@/utils/markdownParser'
 import { resolveFileUrl } from '@/services/electronUrl'
 
@@ -486,6 +489,7 @@ const maxContextTokens = computed(() => {
 
 const editDialogVisible = ref(false)
 const editingSubMessage = ref<SubMessage | null>(null)
+const editingFileInfo = ref<FileResponse | null>(null)
 const originalEditingContent = ref('')
 const editingRange = ref<{ start: number; end: number } | null>(null)
 const editingMarkup = ref('```')
@@ -494,6 +498,7 @@ const editingLanguage = ref('')
 watch(editDialogVisible, (newValue) => {
   if (!newValue) {
     editingSubMessage.value = null
+    editingFileInfo.value = null
     originalEditingContent.value = ''
     editingRange.value = null
     editingMarkup.value = '```'
@@ -517,6 +522,19 @@ function handleEditRequest(
     editingLanguage.value = ''
   }
   editDialogVisible.value = true
+}
+
+async function handleFileEdit(file: FileResponse) {
+  try {
+    const response = await getFileContent(file.id)
+    editingFileInfo.value = file
+    editingSubMessage.value = null
+    editingRange.value = null
+    originalEditingContent.value = response.content
+    editDialogVisible.value = true
+  } catch (error) {
+    ElMessage.error(t('chat.message.fileLoadFailed'))
+  }
 }
 
 function handleEditSpecific(id: string) {
@@ -543,7 +561,22 @@ function getUpdatedFullContent(newPartialContent: string): string {
   )
 }
 
-function handleSaveEdit(newContent: string) {
+async function handleSaveEdit(newContent: string) {
+  const currentEditingFile = editingFileInfo.value
+  if (currentEditingFile) {
+    try {
+      const updatedFile = await updateFileContent(currentEditingFile.id, newContent)
+      const msg = sessionStore.currentChatMessages.find(m => m.id === props.message.id)
+      if (msg) {
+        const subMsg = msg.sub_messages.find(sm => sm.file_info?.id === currentEditingFile.id)
+        if (subMsg) subMsg.file_info = updatedFile
+      }
+    } catch (error) {
+      console.error('Failed to save file content:', error)
+    }
+    return
+  }
+
   if (!editingSubMessage.value) return
   const updatedContent = getUpdatedFullContent(newContent)
   interactionStore.updateSubMessage({

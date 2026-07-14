@@ -146,6 +146,8 @@ export default {
   codeBlock: {
     lines: '{count} 行',
     rendering: '渲染中...',
+    wrap: '自动换行',
+    noWrap: '不换行',
   },
   usage: {
     prompt: 'Prompt',

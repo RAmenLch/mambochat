@@ -39,6 +39,22 @@
             @click="toggleCollapse"
           />
         </el-tooltip>
+        <el-tooltip
+          :content="isWrapEnabled ? t('chat.codeBlock.noWrap') : t('chat.codeBlock.wrap')"
+          placement="top"
+          :show-after="500"
+          v-if="!isSvg && !isMermaid"
+        >
+          <el-button
+            :icon="Sort"
+            circle
+            text
+            size="small"
+            :class="{ 'wrap-active': isWrapEnabled }"
+            :disabled="isGenerating"
+            @click="toggleWrap"
+          />
+        </el-tooltip>
       </div>
     </div>
     <div v-if="isMermaid && closed" class="mermaid-container" :class="{ collapsed: isCollapsed }">
@@ -76,7 +92,7 @@
         </template>
       </el-image>
     </div>
-    <div v-else class="code-block-content" :class="{ collapsed: isCollapsed }" ref="contentRef">
+    <div v-else class="code-block-content" :class="{ collapsed: isCollapsed, 'wrap-enabled': isWrapEnabled }" ref="contentRef">
       <pre class="hljs"><code v-html="highlightedCode"></code></pre>
     </div>
     <el-image-viewer
@@ -103,7 +119,7 @@ import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElImageViewer } from 'element-plus'
 import type { PropType } from 'vue'
-import { Edit, CopyDocument, ArrowUpBold, ArrowDownBold } from '@element-plus/icons-vue'
+import { Edit, CopyDocument, ArrowUpBold, ArrowDownBold, Sort } from '@element-plus/icons-vue'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
 import mermaid from 'mermaid'
@@ -163,6 +179,8 @@ const isMermaid = computed(() => ['mermaid'].includes((props.language || '').toL
 const isSvg = computed(() => ['svg'].includes((props.language || '').toLowerCase()))
 
 const isCollapsed = ref(props.showHeader && !props.isGenerating && !isSvg.value && !(isMermaid.value && props.closed) && totalLines.value > DEFAULT_COLLAPSE_THRESHOLD)
+
+const isWrapEnabled = ref(false)
 
 const mermaidSvg = ref<string>('')
 const mermaidError = ref<string>('')
@@ -296,6 +314,10 @@ const toggleCollapse = () => {
   isCollapsed.value = !isCollapsed.value
 }
 
+const toggleWrap = () => {
+  isWrapEnabled.value = !isWrapEnabled.value
+}
+
 const emitEdit = () => {
   emit('edit', {
     code: props.code,
@@ -376,6 +398,11 @@ const closeMermaidPreview = () => {
   background-color: rgba(255, 255, 255, 0.1);
 }
 
+.actions .el-button.wrap-active {
+  color: #61afef;
+  background-color: rgba(97, 175, 239, 0.15);
+}
+
 .code-block-content {
   position: relative;
   max-height: 800px;
@@ -386,6 +413,13 @@ const closeMermaidPreview = () => {
 .code-block-content.collapsed {
   max-height: 6.5em;
   overflow: hidden;
+}
+
+.code-block-content.wrap-enabled pre,
+.code-block-content.wrap-enabled code {
+  white-space: pre-wrap !important;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .code-block-content::after {

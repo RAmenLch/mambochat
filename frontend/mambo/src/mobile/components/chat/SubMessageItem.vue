@@ -20,6 +20,84 @@
         fit="contain"
         class="file-image-thumbnail"
       />
+      <div v-else-if="isEditableFile && !isImageFile" class="editable-file-view">
+        <div class="file-content-header">
+          <div class="file-content-header-left">
+            <el-icon :size="16"><component :is="fileIcon" /></el-icon>
+            <span class="file-content-filename" :title="subMessage.file_info.filename">
+              {{ subMessage.file_info.filename }}
+            </span>
+            <el-tag v-if="!isMarkdownFile" size="small" class="file-content-language-tag">
+              {{ fileLanguage }}
+            </el-tag>
+          </div>
+          <div class="file-content-header-actions">
+            <el-icon
+              class="action-icon"
+              @click="isFileContentCollapsed = !isFileContentCollapsed"
+            >
+              <component :is="isFileContentCollapsed ? ArrowDownBold : ArrowUpBold" />
+            </el-icon>
+            <el-icon
+              class="action-icon"
+              :class="{ 'wrap-active': isFileCodeWrapEnabled }"
+              @click="isFileCodeWrapEnabled = !isFileCodeWrapEnabled"
+            >
+              <Sort />
+            </el-icon>
+            <el-icon class="action-icon" @click="handleFileEdit"><Edit /></el-icon>
+            <el-icon class="action-icon" @click="handleCopyFileContent"><CopyDocument /></el-icon>
+            <a :href="subMessage.file_info.url" download class="file-content-download-link">
+              <el-icon class="action-icon"><Download /></el-icon>
+            </a>
+          </div>
+        </div>
+
+        <div v-if="fileContentLoading" class="file-content-loading">
+          <el-icon class="is-loading"><Loading /></el-icon>
+          <span>{{ t('common.status.loading') }}</span>
+        </div>
+        <div v-else-if="fileContentError" class="file-content-error">
+          <span>{{ t('chat.attachment.fileLoadFailed') }}</span>
+        </div>
+
+        <div v-else-if="isMarkdownFile" class="message-content file-message-content" :class="{ collapsed: isFileContentCollapsed }">
+          <div v-for="(block, idx) in fileContentBlocks" :key="idx" class="content-block">
+            <CodeBlock
+              v-if="block.type === 'code'"
+              :code="block.content"
+              :language="block.language || 'Text'"
+              :is-generating="false"
+              :range="block.range"
+              :markup="block.markup"
+              :closed="block.closed !== false"
+              @edit="handleCodeBlockEdit"
+              @copy="handleBlockCopy"
+            />
+            <img
+              v-else-if="block.type === 'base64_image'"
+              :src="block.content"
+              :alt="block.alt"
+              class="rendered-image"
+            />
+            <div v-else v-html="block.content"></div>
+          </div>
+        </div>
+
+        <div v-else class="file-code-wrapper" :class="{ collapsed: isFileContentCollapsed, 'wrap-enabled': isFileCodeWrapEnabled }">
+          <CodeBlock
+            :code="fileContent || ''"
+            :language="fileLanguage"
+            :is-generating="false"
+            :range="{ start: 0, end: (fileContent || '').length }"
+            :closed="true"
+            :show-header="false"
+            @edit="handleFileEditFromCodeBlock"
+            @copy="handleBlockCopy"
+          />
+        </div>
+      </div>
+
       <div v-else class="file-card">
         <div class="file-card-icon">
           <el-icon :size="24"><component :is="fileIcon" /></el-icon>
@@ -131,6 +209,7 @@ import type { SubMessage, Message, McpToolContent, ReviewToolContent, FileRespon
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { subscribeToPendingFile } from '@/services/sseService'
+import { getFileContent } from '@/api/fileService'
 import { ElMessage } from 'element-plus'
 import {
   Edit,
@@ -143,7 +222,8 @@ import {
   CircleClose,
   CircleCheck,
   Document,
-  Warning
+  Warning,
+  Sort,
 } from '@element-plus/icons-vue'
 import CodeBlock from '@/components/chat/CodeBlock.vue'
 import { copyToClipboard } from '@/utils/clipboard'
@@ -181,6 +261,7 @@ const emit = defineEmits<{
     payload: { content: string; range?: ParsedBlock['range']; language?: string; markup?: string },
   ): void
   (e: 'copy'): void
+  (e: 'edit-file', file: FileResponse): void
 }>()
 
 const interactionStore = useChatInteractionStore()
@@ -190,6 +271,12 @@ const isGenerating = computed(() => props.subMessage.status === 'generating')
 const rootRef = ref<HTMLElement | null>(null)
 const pendingFileController = ref<AbortController | null>(null)
 const pendingFailed = ref(false)
+
+const fileContent = ref<string | null>(null)
+const fileContentLoading = ref(false)
+const fileContentError = ref(false)
+const isFileContentCollapsed = ref(false)
+const isFileCodeWrapEnabled = ref(false)
 
 const effectivePreviewSrcList = computed(() => {
   if (props.previewSrcList && props.previewSrcList.length > 0) {
@@ -260,6 +347,50 @@ const isPendingFile = computed(() =>
   !!props.subMessage.config.pending_file_path
 )
 
+const isEditableFile = computed(() =>
+  props.subMessage.type === 'File' &&
+  !!props.subMessage.file_info?.editable
+)
+
+const isImageFile = computed(() =>
+  props.subMessage.type === 'File' &&
+  !!props.subMessage.file_info?.mime_type?.startsWith('image/')
+)
+
+const isMarkdownFile = computed(() => {
+  if (!isEditableFile.value || !props.subMessage.file_info) return false
+  const filename = props.subMessage.file_info.filename.toLowerCase()
+  return filename.endsWith('.md') || filename.endsWith('.markdown')
+})
+
+function getLanguageFromFilename(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() || ''
+  const map: Record<string, string> = {
+    'py': 'python', 'js': 'javascript', 'ts': 'typescript', 'jsx': 'javascript',
+    'tsx': 'typescript', 'json': 'json', 'html': 'html', 'css': 'css',
+    'scss': 'scss', 'less': 'less', 'xml': 'xml', 'yaml': 'yaml', 'yml': 'yaml',
+    'toml': 'toml', 'ini': 'ini', 'cfg': 'ini', 'sh': 'bash', 'bash': 'bash',
+    'ps1': 'powershell', 'bat': 'batch', 'sql': 'sql',
+    'java': 'java', 'c': 'c', 'cpp': 'cpp', 'h': 'c',
+    'cs': 'csharp', 'go': 'go', 'rs': 'rust', 'rb': 'ruby', 'php': 'php',
+    'swift': 'swift', 'kt': 'kotlin', 'scala': 'scala', 'r': 'r',
+    'vue': 'html', 'svelte': 'html', 'dockerfile': 'dockerfile',
+    'gitignore': 'plaintext', 'env': 'plaintext', 'log': 'plaintext',
+    'txt': 'plaintext', 'md': 'markdown', 'markdown': 'markdown',
+  }
+  return map[ext] || ext || 'plaintext'
+}
+
+const fileLanguage = computed(() => {
+  if (!isEditableFile.value || !props.subMessage.file_info) return ''
+  return getLanguageFromFilename(props.subMessage.file_info.filename)
+})
+
+const fileContentBlocks = computed(() => {
+  if (!isMarkdownFile.value || !fileContent.value) return []
+  return parseMarkdown(fileContent.value)
+})
+
 const pendingFileName = computed(() => {
   if (!isPendingFile.value) return ''
   const path = props.subMessage.config.pending_file_path || ''
@@ -288,6 +419,20 @@ const partitionTitle = computed(() => {
 watch(
   () => props.subMessage.config.is_collapsed,
   (val) => (isCollapsed.value = val || false),
+)
+
+watch(
+  () => props.subMessage.file_info,
+  (newInfo, oldInfo) => {
+    if (newInfo && newInfo !== oldInfo && isEditableFile.value && !isImageFile.value) {
+      fileContentLoading.value = true
+      fileContentError.value = false
+      getFileContent(newInfo.id)
+        .then((res) => { fileContent.value = res.content })
+        .catch(() => { fileContentError.value = true })
+        .finally(() => { fileContentLoading.value = false })
+    }
+  },
 )
 
 function handleHeaderEditClick() {
@@ -332,6 +477,26 @@ async function handleBlockCopy(content: string) {
   }
 }
 
+function handleFileEdit() {
+  if (props.subMessage.file_info) {
+    emit('edit-file', props.subMessage.file_info)
+  }
+}
+
+function handleFileEditFromCodeBlock() {
+  handleFileEdit()
+}
+
+async function handleCopyFileContent() {
+  try {
+    await copyToClipboard(fileContent.value || '')
+    ElMessage.success(t('chat.message.codeCopied'))
+  } catch (err) {
+    ElMessage.error(t('chat.message.copyFailed'))
+    console.error('Could not copy text: ', err)
+  }
+}
+
 onMounted(() => {
   if (isPendingFile.value) {
     pendingFileController.value = subscribeToPendingFile(props.subMessage.id, {
@@ -365,6 +530,14 @@ onMounted(() => {
         // SSE connection error - keep showing pending state
       },
     })
+  }
+
+  if (isEditableFile.value && !isImageFile.value && props.subMessage.file_info) {
+    fileContentLoading.value = true
+    getFileContent(props.subMessage.file_info.id)
+      .then((res) => { fileContent.value = res.content })
+      .catch(() => { fileContentError.value = true })
+      .finally(() => { fileContentLoading.value = false })
   }
 })
 
@@ -447,6 +620,119 @@ onBeforeUnmount(() => {
   font-size: 11px;
   opacity: 0.7;
 }
+
+/* Editable file view */
+.editable-file-view {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+}
+.is-user .editable-file-view {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.file-content-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 10px;
+  background: rgba(0, 0, 0, 0.05);
+  min-height: 32px;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.is-user .file-content-header {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.file-content-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  color: var(--el-text-color-secondary);
+}
+.is-user .file-content-header-left {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.file-content-filename {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.is-user .file-content-filename {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.file-content-language-tag {
+  flex-shrink: 0;
+  font-size: 10px;
+}
+
+.file-content-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.file-content-header-actions .action-icon.wrap-active {
+  color: var(--el-color-primary);
+}
+
+.file-content-download-link {
+  display: inline-flex;
+  text-decoration: none;
+  color: inherit;
+}
+
+.file-content-loading,
+.file-content-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 20px 12px;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+.is-user .file-content-loading,
+.is-user .file-content-error {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.file-message-content {
+  padding: 8px 10px;
+}
+
+.file-code-wrapper {
+  overflow: hidden;
+}
+.file-code-wrapper.collapsed {
+  max-height: 6.5em;
+}
+.file-code-wrapper.wrap-enabled :deep(pre),
+.file-code-wrapper.wrap-enabled :deep(code) {
+  white-space: pre-wrap !important;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+.file-code-wrapper :deep(.code-block-container) {
+  margin: 0;
+  border-radius: 0;
+  border: none;
+}
+
+/* end editable file view */
 
 .file-pending-container {
   width: 100%;

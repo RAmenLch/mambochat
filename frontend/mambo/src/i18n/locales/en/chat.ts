@@ -146,6 +146,8 @@ export default {
   codeBlock: {
     lines: '{count} lines',
     rendering: 'Rendering...',
+    wrap: 'Word Wrap',
+    noWrap: 'No Wrap',
   },
   usage: {
     prompt: 'Prompt',

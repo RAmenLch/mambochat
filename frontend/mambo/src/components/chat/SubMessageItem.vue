@@ -54,6 +54,20 @@
                 @click="isFileContentCollapsed = !isFileContentCollapsed"
               />
             </el-tooltip>
+            <el-tooltip
+              :content="isFileCodeWrapEnabled ? t('chat.codeBlock.noWrap') : t('chat.codeBlock.wrap')"
+              placement="top"
+              :show-after="500"
+            >
+              <el-button
+                :icon="Sort"
+                circle
+                text
+                size="small"
+                :class="{ 'wrap-active': isFileCodeWrapEnabled }"
+                @click="isFileCodeWrapEnabled = !isFileCodeWrapEnabled"
+              />
+            </el-tooltip>
             <el-tooltip :content="t('common.action.edit')" placement="top" :show-after="500">
               <el-button :icon="Edit" circle text size="small" @click="handleFileEdit" />
             </el-tooltip>
@@ -97,7 +111,7 @@
           </div>
         </div>
 
-        <div v-else class="file-code-wrapper" :class="{ collapsed: isFileContentCollapsed }">
+        <div v-else class="file-code-wrapper" :class="{ collapsed: isFileContentCollapsed, 'wrap-enabled': isFileCodeWrapEnabled }">
           <CodeBlock
             :code="fileContent || ''"
             :language="fileLanguage"
@@ -327,6 +341,7 @@ import {
   CircleCheck,
   Top,
   Document,
+  Sort,
 } from '@element-plus/icons-vue'
 import CodeBlock from './CodeBlock.vue'
 import { copyToClipboard } from '@/utils/clipboard'
@@ -385,6 +400,8 @@ const fileContent = ref<string | null>(null)
 const fileContentLoading = ref(false)
 const fileContentError = ref(false)
 const isFileContentCollapsed = ref(false)
+
+const isFileCodeWrapEnabled = ref(false)
 
 let resizeObserver: ResizeObserver | null = null
 
@@ -877,6 +894,10 @@ function scrollToTop() {
   color: var(--el-text-color-primary);
   background-color: rgba(0, 0, 0, 0.05);
 }
+.file-content-header-actions .el-button.wrap-active {
+  color: var(--el-color-primary);
+  background-color: var(--el-color-primary-light-9);
+}
 .file-content-download-link {
   display: inline-flex;
   text-decoration: none;
@@ -903,6 +924,12 @@ function scrollToTop() {
 }
 .file-code-wrapper.collapsed {
   max-height: 6.5em;
+}
+.file-code-wrapper.wrap-enabled :deep(pre),
+.file-code-wrapper.wrap-enabled :deep(code) {
+  white-space: pre-wrap !important;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 .file-code-wrapper :deep(.code-block-container) {
   margin: 0;
