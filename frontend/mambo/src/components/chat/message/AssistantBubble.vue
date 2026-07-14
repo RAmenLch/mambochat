@@ -129,6 +129,17 @@
                 </div>
               </div>
             </div>
+
+            <!-- Zip History 覆盖指示器（仅折叠时显示，展开时 BubbleSectionGroup 内部已渲染） -->
+            <div v-if="sectionHasZipCoverage(section) && isSectionMinimized(section)" class="zip-coverage-indicator">
+              <el-tooltip :content="$t('chat.message.zipCoverageTip')" placement="top" :show-after="300">
+                <div class="zip-coverage-arrow">
+                  <svg width="16" height="10" viewBox="0 0 16 10" fill="none">
+                    <path d="M8 1L14 9H2L8 1Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+                  </svg>
+                </div>
+              </el-tooltip>
+            </div>
           </template>
 
           <!-- Normal Section -->
@@ -288,6 +299,11 @@ function isInactive(group: BubbleSectionGroup): boolean {
   if (cpl === 0) return true;
   if (cpl > 0) return props.currentMessageRank > cpl;
   return false;
+}
+
+/** 交错模式：判断 section 中是否有任何 group 需要显示 Zip 覆盖箭头 */
+function sectionHasZipCoverage(section: { groups: BubbleSectionGroup[] }): boolean {
+  return section.groups.some(g => zipCoverageGroupIds.value.has(g.id));
 }
 
 // --- Error Section Logic ---
@@ -541,6 +557,28 @@ function handleRetry() {
 
 .interleaved-normal-section :deep(.message-content) {
   color: var(--el-text-color-primary);
+}
+
+/* ========== Zip History 覆盖指示器（section 级别） ========== */
+.zip-coverage-indicator {
+  display: flex;
+  justify-content: flex-start;
+  padding-left: 4px;
+  margin-top: -12px;
+}
+
+.zip-coverage-arrow {
+  color: var(--el-color-success-light-3);
+  cursor: help;
+  transition: color 0.2s, transform 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.zip-coverage-arrow:hover {
+  color: var(--el-color-success);
+  transform: translateY(-1px);
 }
 
 .error-block {

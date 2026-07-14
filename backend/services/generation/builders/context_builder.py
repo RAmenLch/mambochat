@@ -110,9 +110,12 @@ class MessageContextBuilder:
         # 4. 构建 Payload（内部完成 auto target 搜索 + merge 追踪 + cutoff 计算）
         messages_payload = await self._build_payload(effective_history)
 
-        # 5. 注入 System Prompt
+        # 5. 注入 System Prompt（插入到 index=0，后续消息整体后移 1 位）
         if system_prompt:
             messages_payload.insert(0, {"role": "system", "content": system_prompt})
+            # cutoff_index 基于注入前的位置计算，需要 +1 补偿 system_prompt 的偏移
+            if self._auto_cutoff_index is not None:
+                self._auto_cutoff_index += 1
 
         # 6. 构造自动摘要事件（供 Worker 同步 LangGraph state）
         auto_event = self._build_auto_summarization_event()
@@ -258,7 +261,9 @@ class MessageContextBuilder:
         target_position: Optional[int] = None
         if self._auto_target_sub_msg_id:
             for idx, m in enumerate(payload):
-                if m.get("id") == self._auto_target_sub_msg_id:
+                # 仅匹配 ToolMessage：AIMessage 可能与 ToolMessage 共享 id
+                # （当 MCP_TOOL 是该轮最后一个子消息时，last_sub_id == sub.id）
+                if m.get("id") == self._auto_target_sub_msg_id and m.get("role") == "tool":
                     target_position = idx
                     break
             if target_position is None:

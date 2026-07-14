@@ -4,7 +4,7 @@
 DeepAgent 需要 VFS files 注入，请使用 deep_agent_chat_worker.DeepAgentChatWorker。
 """
 
-from typing import AsyncGenerator, Tuple, List, Optional
+from typing import AsyncGenerator, Tuple, Optional
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command, Overwrite
@@ -100,13 +100,10 @@ class UniversalGraphWorker(AbstractGenerateWorker):
                         # Extract summarization event (complete cumulative state, last-wins)
                         if "_summarization_event" in model_update:
                             summary = model_update["_summarization_event"]
-                            cutoff_index = summary.get("cutoff_index", 0)
-                            state = await agent.aget_state(thread_config)
-                            state_messages: List = state.values["messages"]
-                            if cutoff_index and state_messages and cutoff_index <= len(state_messages):
-                                last_zip_message = state_messages[cutoff_index - 1]
+                            last_msg = summary.get("last_summarized_message")
+                            if last_msg is not None:
                                 yield "summarization", SummarizationEventInfo(
-                                    last_zip_message=last_zip_message,
+                                    last_zip_message=last_msg,
                                     event=summary,
                                 )
                         if "messages" in model_update:
@@ -118,13 +115,10 @@ class UniversalGraphWorker(AbstractGenerateWorker):
                         # Extract summarization event from compact_conversation tool (complete cumulative state, last-wins)
                         if "_summarization_event" in tools_update:
                             summary = tools_update["_summarization_event"]
-                            cutoff_index = summary.get("cutoff_index", 0)
-                            state = await agent.aget_state(thread_config)
-                            state_messages: List = state.values["messages"]
-                            if cutoff_index and state_messages and cutoff_index <= len(state_messages):
-                                last_zip_message = state_messages[cutoff_index - 1]
+                            last_msg = summary.get("last_summarized_message")
+                            if last_msg is not None:
                                 yield "summarization", SummarizationEventInfo(
-                                    last_zip_message=last_zip_message,
+                                    last_zip_message=last_msg,
                                     event=summary,
                                 )
                         if "messages" in tools_update:

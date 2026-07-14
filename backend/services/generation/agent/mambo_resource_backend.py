@@ -457,6 +457,26 @@ class MamboResourceBackend(BackendProtocol):
             # --- 2. Shortcut mappings ---
             await self._load_shortcuts_into_cache(cache, db)
 
+            # --- 2.5. Ensure workspace_root exists as a dir node ---
+            # When resource_id is None (shortcut-only mode), the cache has no
+            # entry for workspace_root itself, causing ls on the root to fail
+            # with NOT_FOUND.  Inject a synthetic directory node so that
+            # HybridWorkspaceBackend._route() rewrites (e.g.
+            # /.mambo/memory → /workspace) resolve correctly.
+            root_vpath = self.workspace_root.normalized
+            if root_vpath not in cache:
+                cache[root_vpath] = _CachedNode(
+                    id="__ws_root__",
+                    name=self.workspace_root.name or self.workspace_root.normalized.strip("/"),
+                    parent_id=None,
+                    is_dir=True,
+                    resource_type=None,
+                    content=None,
+                    desc="",
+                    size=0,
+                    modified_at="",
+                )
+
             # --- 3. Resolve real file sizes for file-id backed nodes ---
             await self._resolve_file_sizes(cache, db)
 
@@ -781,7 +801,7 @@ class MamboResourceBackend(BackendProtocol):
             raise BackendError(
                 code=ErrorCode.OUTSIDE_WORKSPACE,
                 path=path,
-                message=f"路径在 workspace 外。所有路径必须在 '{wr}' 下。",
+                message="Path is outside the allowed scope.",
             )
 
         if ".." in PurePosixPath(raw).parts:
@@ -855,13 +875,13 @@ class MamboResourceBackend(BackendProtocol):
             return LsResult(error=BackendError(
                 code=ErrorCode.NOT_FOUND,
                 path=path,
-                message=f"Path '{path}' not found",
+                message="Path not found",
             ))
         if not target.is_dir:
             return LsResult(error=BackendError(
                 code=ErrorCode.NOT_DIR,
                 path=path,
-                message=f"'{path}' is not a directory",
+                message="Path is not a directory",
             ))
 
         entries: list[FileInfo] = []
@@ -919,13 +939,13 @@ class MamboResourceBackend(BackendProtocol):
             return str(BackendError(
                 code=ErrorCode.NOT_FOUND,
                 path=path,
-                message=f"Path '{path}' not found",
+                message="Path not found",
             ))
         if not target.is_dir:
             return str(BackendError(
                 code=ErrorCode.NOT_DIR,
                 path=path,
-                message=f"'{path}' is not a directory",
+                message="Path is not a directory",
             ))
 
         prefix = norm.rstrip("/") + "/"
@@ -1102,13 +1122,13 @@ class MamboResourceBackend(BackendProtocol):
             return ReadResult(error=BackendError(
                 code=ErrorCode.NOT_FOUND,
                 path=file_path,
-                message=f"File '{file_path}' not found",
+                message="File not found",
             ))
         if node.is_dir:
             return ReadResult(error=BackendError(
                 code=ErrorCode.IS_DIR,
                 path=file_path,
-                message=f"'{file_path}' is a directory",
+                message="Path is a directory, not a file",
             ))
 
         # ---- fetch text content ----
@@ -1128,7 +1148,7 @@ class MamboResourceBackend(BackendProtocol):
                     error=BackendError(
                         code=ErrorCode.INVALID,
                         path=VirtualPath(norm),
-                        message=f"Cannot read '{norm}': not a valid text file",
+                        message="Cannot read file: not a valid text file",
                     ),
                 )
         except Exception as e:
@@ -1141,7 +1161,7 @@ class MamboResourceBackend(BackendProtocol):
                 error=BackendError(
                     code=ErrorCode.IO_ERROR,
                     path=VirtualPath(norm),
-                    message=f"Error reading '{norm}': {e}",
+                    message=f"Error reading file: {e}",
                 ),
             )
 
@@ -1241,7 +1261,7 @@ class MamboResourceBackend(BackendProtocol):
                     error=BackendError(
                         code=ErrorCode.EDIT_NOT_ALLOWED,
                         path=file_path,
-                        message=f"Path '{file_path}' is not allowed for write. "
+                        message="Path is not allowed for write. "
                                  "Check edit_whitelist / edit_blacklist.",
                     )
                 )
@@ -1252,7 +1272,7 @@ class MamboResourceBackend(BackendProtocol):
                 error=BackendError(
                     code=ErrorCode.INVALID,
                     path=file_path,
-                    message=f"Cannot create new version in '{file_path}'. "
+                    message="Cannot create new version file. "
                              "Version files can only be edited (use edit tool) "
                              "or overwritten (use write with overwrite=True on "
                              "an existing version file).",
@@ -1266,7 +1286,7 @@ class MamboResourceBackend(BackendProtocol):
                     error=BackendError(
                         code=ErrorCode.IS_DIR,
                         path=file_path,
-                        message=f"Cannot write '{file_path}': it is a folder, not a file.",
+                        message="Cannot write to path: it is a folder, not a file.",
                     )
                 )
             if not overwrite:
@@ -1274,7 +1294,7 @@ class MamboResourceBackend(BackendProtocol):
                     error=BackendError(
                         code=ErrorCode.ALREADY_EXISTS,
                         path=file_path,
-                        message=f"Cannot write '{file_path}': file exists. "
+                        message="Cannot write: file exists. "
                                  "Use overwrite=True to replace.",
                     )
                 )
@@ -1569,7 +1589,7 @@ class MamboResourceBackend(BackendProtocol):
                 error=BackendError(
                     code=ErrorCode.EDIT_NOT_ALLOWED,
                     path=file_path,
-                    message=f"Path '{file_path}' is not allowed for edit. "
+                    message="Path is not allowed for edit. "
                              "Check edit_whitelist / edit_blacklist.",
                 )
             )
@@ -1597,7 +1617,7 @@ class MamboResourceBackend(BackendProtocol):
                 error=BackendError(
                     code=ErrorCode.OLD_STR_NOT_FOUND,
                     path=file_path,
-                    message=f"Cannot edit '{file_path}': old_str not found in file. "
+                    message="Cannot edit: old_str not found in file. "
                              "Read the file first to see its exact content.",
                 )
             )
@@ -1607,7 +1627,7 @@ class MamboResourceBackend(BackendProtocol):
                 error=BackendError(
                     code=ErrorCode.MULTI_OCCURRENCES,
                     path=file_path,
-                    message=f"Cannot edit '{file_path}': old_str appears "
+                    message=f"Cannot edit: old_str appears "
                              f"{occurrences} times. Use replace_all=True.",
                 )
             )
@@ -1898,14 +1918,16 @@ class MamboResourceBackend(BackendProtocol):
         if folder_node is None:
             return LsVersionResult(error=BackendError(
                 code=ErrorCode.NOT_FOUND,
-                message=f"Resource version folder '{normalized}' not found. "
-                        f"Use ls to find resources (they end with '$v/').",
+                path=VirtualPath(normalized),
+                message="Resource version folder not found. "
+                        "Use ls to find resources (they end with '$v/').",
             ))
         if not folder_node.is_dir:
             return LsVersionResult(error=BackendError(
                 code=ErrorCode.NOT_DIR,
-                message=f"'{normalized}' is not a version folder. "
-                        f"Version folders end with '$v/'.",
+                path=VirtualPath(normalized),
+                message="Path is not a version folder. "
+                        "Version folders end with '$v/'.",
             ))
 
         # Collect version children from cache

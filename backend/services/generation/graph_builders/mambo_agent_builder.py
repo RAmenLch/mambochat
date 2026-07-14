@@ -71,13 +71,21 @@ def _build_mambo_backend(
     mounted = agent_config.mounted_backends or []
 
     if not mounted:
-        # 只有 skills 则用 StoreBackend 兜底
+        # 只有 skills / memory 则用 StoreBackend 兜底
         if agent_config.skill_resource_roots:
             virtual_workspaces["skills"] = MamboResourceBackend(
                 resource_id=None,
                 session_factory=session_factory,
                 shortcuts=agent_config.skill_resource_roots,
                 workspace_root=VirtualPath("/workspace"),
+            )
+        if agent_config.memory_resource_roots:
+            virtual_workspaces["memory"] = MamboResourceBackend(
+                resource_id=None,
+                session_factory=session_factory,
+                shortcuts=agent_config.memory_resource_roots,
+                workspace_root=VirtualPath("/workspace"),
+                enable_version_editing=False,
             )
         # 始终使用 persisted StoreBackend，避免 create_mambo_agent 内部
         # 用 store=None 创建无持久化的 StoreBackend 兜底
