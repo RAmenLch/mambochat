@@ -124,6 +124,11 @@ class UniversalGraphWorker(AbstractGenerateWorker):
                         if "messages" in tools_update:
                             for message in tools_update["messages"]:
                                 yield mode, message
+                if "MamboPlanMiddleware.after_model" in event:
+                    after_update = event["MamboPlanMiddleware.after_model"]
+                    if isinstance(after_update, dict) and "messages" in after_update:
+                        for message in after_update["messages"]:
+                            yield mode, message
                 if "__interrupt__" in event or "HumanInTheLoopMiddleware.after_model" in event or "AutoSecurityReviewMiddleware.after_model" in event:
                     yield mode, event
             elif mode == "messages" and isinstance(event, (list, tuple)) and len(event) > 0:
