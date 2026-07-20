@@ -236,7 +236,7 @@
           </div>
 
           <!-- Mambo 安全审核预览 -->
-          <div class="preview-section" v-if="selectedAgent.AgentType === 'Mambo' && securityReviewPreview">
+          <div class="preview-section" v-if="selectedAgent.AgentType === 'Mambo'">
             <div class="section-title"><el-icon><WarningFilled /></el-icon> {{ $t('agent.securityReview') }}</div>
             <div class="mambo-preview-grid">
               <div class="info-item">
@@ -384,8 +384,10 @@ const mamboPreview = computed(() => {
 const securityReviewPreview = computed(() => {
   if (!selectedAgent.value || selectedAgent.value.AgentType !== 'Mambo') return null;
   const params = (selectedAgent.value as any).agentParameters;
-  if (!params?.security_review) return null;
-  const sr = params.security_review;
+  const sr = params?.security_review;
+  if (!sr) {
+    return { enabled: false, model_id: null, model_name: '', system_prompt: null, review_tools: null };
+  }
   let modelName = '';
   if (sr.model_id) {
     const model = providerStore.allModels.find(m => m.id === sr.model_id);
