@@ -4,6 +4,8 @@
 DeepAgent 使用 CompositeBackend + TreeStateBackend 架构，
 需要通过 input_data["files"] 将 skills 文件注入到 VFS 中。
 Mambo Agent 不需要此操作（skills 通过 MamboResourceBackend shortcuts 挂载）。
+
+关于Mambo Agent的修改不要修改本文件
 """
 
 from typing import AsyncGenerator, Any, Dict, Tuple, List
@@ -64,18 +66,8 @@ class DeepAgentChatWorker(UniversalGraphWorker):
                 "checkpoint_ns": "",
             }
         }
-        resume_payload = llm_input.agent_config.resume_payload
-        # resume 场景下不设置 checkpoint_id（详见 chat_worker.py 注释）
         if llm_input.run_time_config.branch_checkpoint_id:
             thread_config["configurable"]["checkpoint_id"] = llm_input.run_time_config.branch_checkpoint_id
-        else:
-            _cq_config = {"configurable": {"thread_id": llm_input.run_time_config.chat_id}}
-            try:
-                cp_tuple = await agent.checkpointer.aget_tuple(_cq_config)
-                if cp_tuple and cp_tuple.checkpoint:
-                    thread_config["configurable"]["checkpoint_map"] = {"": cp_tuple.checkpoint["id"]}
-            except Exception:
-                pass
 
         if llm_input.agent_config.recover_from_error:
             input_data = None
@@ -83,27 +75,20 @@ class DeepAgentChatWorker(UniversalGraphWorker):
             # DeepAgent 特有：收集 skills 文件注入 VFS
             files_to_inject = self._collect_vfs_files_recursively(llm_input.agent_config)
 
-            # When resuming from an interrupt (ask_user / HITL), skip
-            # aupdate_state — it creates a new checkpoint that drops the
-            # pending INTERRUPT write, preventing the interrupted task
-            # from being rescheduled, and can re-trigger the model node
-            # via _summarization_event channel version bump.
-            if not resume_payload:
-                updated_config = await agent.aupdate_state(
-                    thread_config,
-                    {"_summarization_event": llm_input.context.auto_summarization_event},
-                )
-                # For time-travel: sync the forked checkpoint_id so astream()
-                # continues from the updated state, not the original replay target.
-                updated_cp_id = updated_config["configurable"].get("checkpoint_id")
-                if updated_cp_id:
-                    thread_config["configurable"]["checkpoint_id"] = updated_cp_id
+            await agent.aupdate_state(thread_config, {"_summarization_event": None})
+            await agent.aupdate_state(
+                thread_config,
+                {"_summarization_event": llm_input.context.auto_summarization_event},
+            )
+
+            resume_payload = llm_input.agent_config.resume_payload
+            if resume_payload:
+                input_data = Command(resume=resume_payload)
+            else:
                 messages = self._convert_messages(llm_input.context.messages)
                 input_data = {"messages": Overwrite(value=messages)}
                 if files_to_inject:
                     input_data["files"] = files_to_inject
-            else:
-                input_data = Command(resume=resume_payload)
 
         async for stream_event in agent.astream(
             input=input_data,
@@ -151,7 +136,7 @@ class DeepAgentChatWorker(UniversalGraphWorker):
                         if "messages" in tools_update:
                             for message in tools_update["messages"]:
                                 yield mode, message
-                if "__interrupt__" in event or "HumanInTheLoopMiddleware.after_model" in event or "AutoSecurityReviewMiddleware.after_model" in event:
+                if "__interrupt__" in event or "HumanInTheLoopMiddleware.after_model" in event:
                     yield mode, event
             elif mode == "messages" and isinstance(event, (list, tuple)) and len(event) > 0:
                 msg = event[0]
@@ -160,12 +145,8 @@ class DeepAgentChatWorker(UniversalGraphWorker):
                     continue
                 yield mode, msg
             elif mode == "custom":
-                # 版本控制备份事件：VersionControlMiddleware 发射的 BackupEvent
-                if isinstance(event, dict) and event.get("type") == "backup":
-                    yield "version_snapshot", event
-                elif isinstance(event, dict) and event.get("type") == "subagent_event":
+                if isinstance(event, dict) and event.get("type") == "subagent_event":
                     yield "subagent_event", event
-                elif isinstance(event, dict) and event.get("type") in ("security_review_passed", "security_review_failed"):
-                    yield "security_review", event
             else:
                 pass
+

@@ -144,6 +144,23 @@ class UniversalGraphWorker(AbstractGenerateWorker):
                     yield "version_snapshot", event
                 # 子代理内部事件：mambo_agents SubAgentMiddleware 发射的 custom stream_writer 事件
                 elif isinstance(event, dict) and event.get("type") == "subagent_event":
+                    chunk = event.get("chunk", {})
+                    if isinstance(chunk, dict):
+                        for key in list(chunk.keys()):
+                            if key.endswith(".after_model"):
+                                after_data = chunk[key]
+                                if isinstance(after_data, dict):
+                                    tool_msgs = [
+                                        m for m in after_data.get("messages", [])
+                                        if hasattr(m, "tool_call_id")
+                                    ]
+                                    if tool_msgs:
+                                        rewritten = dict(chunk)
+                                        del rewritten[key]
+                                        tools_entry: dict = rewritten.setdefault("tools", {})
+                                        existing: list = list(tools_entry.get("messages", []))
+                                        tools_entry["messages"] = [*existing, *tool_msgs]
+                                        event = {**event, "chunk": rewritten}
                     yield "subagent_event", event
                 # AI 安全审核事件：AutoSecurityReviewMiddleware 发射的 SecurityReviewPassedEvent / SecurityReviewFailedEvent
                 elif isinstance(event, dict) and event.get("type") in ("security_review_passed", "security_review_failed"):
