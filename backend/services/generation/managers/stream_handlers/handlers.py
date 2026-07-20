@@ -107,7 +107,8 @@ class HitlHandler(BaseStreamHandler):
                             description=action_req.get("description"),
                             interrupt_index=action_idx,
                             batch_id=current_batch_id,
-                            decision=None
+                            decision=None,
+                            interrupt_id=interrupt_id,
                         )
 
                         yield CreateSubMessage(

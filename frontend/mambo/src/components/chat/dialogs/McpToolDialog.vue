@@ -351,16 +351,22 @@ const securityReviewMap = computed(() => {
   return map;
 });
 
-/** parentMessage 中所有 ReviewTool 子消息的 tool_call_id → content 映射 */
+/** ReviewTool 映射条目：携带真实 sub_message_id 以便子代理面板提交审核 */
+interface ReviewToolMapEntry {
+  content: ReviewToolContent;
+  sub_message_id: string;
+}
+
+/** parentMessage 中所有 ReviewTool 子消息的 tool_call_id → {content, sub_message_id} 映射 */
 const reviewToolMap = computed(() => {
-  const map = new Map<string, ReviewToolContent>();
+  const map = new Map<string, ReviewToolMapEntry>();
   const msg = liveParentMessage.value;
   if (!msg) return map;
   for (const sm of msg.sub_messages) {
     if (sm.type === 'ReviewTool') {
       try {
         const content = JSON.parse(sm.content) as ReviewToolContent;
-        map.set(content.tool_call_id, content);
+        map.set(content.tool_call_id, { content, sub_message_id: sm.id });
       } catch { /* ignore */ }
     }
   }

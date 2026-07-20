@@ -76,8 +76,8 @@ const props = defineProps<{
   steps: SubMessage[];
   /** 子代理工具调用 → SecurityReview 映射，key=sub_tool_call_id */
   securityReviewMap?: Map<string, SecurityReviewContent>;
-  /** 子代理工具调用 → ReviewTool 映射，key=sub_tool_call_id */
-  reviewToolMap?: Map<string, ReviewToolContent>;
+  /** 子代理工具调用 → {content, sub_message_id} 映射，key=sub_tool_call_id */
+  reviewToolMap?: Map<string, { content: ReviewToolContent; sub_message_id: string }>;
 }>();
 
 /** 本地折叠状态：子代理追踪面板内子消息的折叠与展开 */
@@ -195,12 +195,12 @@ const virtualMessage = computed<Message>(() => {
 
         // 绑定人工审核（通过 sub_tool_call_id 匹配 ReviewTool）
         if (stepData.sub_tool_call_id && props.reviewToolMap) {
-          const rtool = props.reviewToolMap.get(stepData.sub_tool_call_id);
-          if (rtool) {
+          const rtoolEntry = props.reviewToolMap.get(stepData.sub_tool_call_id);
+          if (rtoolEntry) {
             subMessages.push({
-              id: crypto.randomUUID(),
+              id: rtoolEntry.sub_message_id,
               type: 'ReviewTool' as SubMessageType,
-              content: JSON.stringify({ ...rtool, tool_call_id: toolCallId }),
+              content: JSON.stringify({ ...rtoolEntry.content, tool_call_id: toolCallId }),
               config: { is_collapsed: false, context_participation_length: 0 },
               createdAt: sm.createdAt,
               messageId: sm.messageId,
@@ -217,7 +217,7 @@ const virtualMessage = computed<Message>(() => {
   }
 
   return {
-    id: props.steps[0]?.id || '',
+    id: props.steps[0]?.messageId || '',
     createdAt: props.steps[0]?.createdAt || new Date().toISOString(),
     role: 'assistant' as MessageRole,
     chatId: '',

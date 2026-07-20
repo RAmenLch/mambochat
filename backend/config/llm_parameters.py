@@ -299,6 +299,16 @@ SUPPORTED_LLM_PARAMETERS: List[LLMParameter] = [
         default_value="all",
         default_activate=False
     ),
+    LLMParameter(
+        key="kimi::reasoning_effort",
+        label="Reasoning Effort (Kimi K3)",
+        path=["reasoning_effort"],
+        description="控制 Kimi K3 模型的思考深度。K3 始终开启思考模式，此参数控制力度：low=快速推理，high=深度推理，max=最强推理（默认）。注意：K3 的 temperature 固定为 1.0、top_p 固定为 0.95，不建议显式传入。",
+        type="string",
+        limit=["low", "high", "max"],
+        default_value="max",
+        default_activate=False
+    ),
 
 ]
 

@@ -475,88 +475,142 @@ class LLMInputDirector:
         if not decided_reviews and not decided_ask_users:
             return None
 
-        # 3. 构建 ReviewTool 恢复载荷
-        resume_decisions = []
+        # 3. 构建 ReviewTool 恢复载荷（优先使用 {interrupt_id: payload} 地图格式）
+        review_payload = None
         if decided_reviews:
             decided_reviews.sort(key=lambda x: x[0], reverse=True)
             latest_review_batch_id = decided_reviews[0][1].batch_id
             latest_batch_decisions = [item[1] for item in decided_reviews if item[1].batch_id == latest_review_batch_id]
             latest_batch_decisions.sort(key=lambda x: x.interrupt_index)
 
+            # 按 interrupt_id 分组，同时检测是否所有项都有 interrupt_id
+            by_interrupt: Dict[str, list] = {}
+            all_have_ids = True
             for item in latest_batch_decisions:
-                decision_dict = {
-                    "type": item.decision.type.value,
-                    "tool_call_id": item.tool_call_id,
-                }
-                if item.decision.type.value == "edit" and item.decision.edited_action:
-                    decision_dict["edited_action"] = item.decision.edited_action.model_dump()
-                if item.decision.type.value == "reject":
-                    raw_reason = item.decision.message or ""
-                    injected_message = f"{item.tool_call_id} 本批次 调用工具:{item.name}拒绝执行; 拒绝理由 {raw_reason}"
-                    decision_dict["message"] = injected_message
-                resume_decisions.append(decision_dict)
+                iid = item.interrupt_id
+                if iid:
+                    by_interrupt.setdefault(iid, []).append(item)
+                else:
+                    all_have_ids = False
+                    break
 
-        # 4. 构建 AskUser 恢复载荷
-        # 先确定当前批次的所有 AskUser 回答
+            if all_have_ids and by_interrupt:
+                review_payload = {}
+                for iid, items in by_interrupt.items():
+                    decisions = []
+                    for item in items:
+                        decision_dict = {
+                            "type": item.decision.type.value,
+                            "tool_call_id": item.tool_call_id,
+                        }
+                        if item.decision.type.value == "edit" and item.decision.edited_action:
+                            decision_dict["edited_action"] = item.decision.edited_action.model_dump()
+                        if item.decision.type.value == "reject":
+                            raw_reason = item.decision.message or ""
+                            injected_message = f"{item.tool_call_id} 本批次 调用工具:{item.name}拒绝执行; 拒绝理由 {raw_reason}"
+                            decision_dict["message"] = injected_message
+                        decisions.append(decision_dict)
+                    review_payload[iid] = {
+                        "source": _SECURITY_REVIEW_SOURCE,
+                        "decisions": decisions,
+                    }
+            else:
+                # 回退：旧数据无 interrupt_id，使用单值格式
+                resume_decisions = []
+                for item in latest_batch_decisions:
+                    decision_dict = {
+                        "type": item.decision.type.value,
+                        "tool_call_id": item.tool_call_id,
+                    }
+                    if item.decision.type.value == "edit" and item.decision.edited_action:
+                        decision_dict["edited_action"] = item.decision.edited_action.model_dump()
+                    if item.decision.type.value == "reject":
+                        raw_reason = item.decision.message or ""
+                        injected_message = f"{item.tool_call_id} 本批次 调用工具:{item.name}拒绝执行; 拒绝理由 {raw_reason}"
+                        decision_dict["message"] = injected_message
+                    resume_decisions.append(decision_dict)
+                review_payload = {
+                    "source": _SECURITY_REVIEW_SOURCE,
+                    "decisions": resume_decisions,
+                }
+
+        # 4. 构建 AskUser 恢复载荷（始终优先使用 {interrupt_id: payload} 地图格式）
+        ask_user_payload = None
         if decided_ask_users:
             decided_ask_users.sort(key=lambda x: x[0], reverse=True)
             latest_ask_user = decided_ask_users[0][1]
             latest_batch_id = latest_ask_user.batch_id
 
-            # 收集同一批次的所有 AskUser（按 interrupt_index 排序）
             same_batch = [
                 item[1] for item in decided_ask_users
                 if item[1].batch_id == latest_batch_id
             ]
             same_batch.sort(key=lambda x: x.interrupt_index)
 
-            # 如果只有一个 ask_user，或无法获取 interrupt_id，使用单值恢复
-            if len(same_batch) == 1:
-                item = same_batch[0]
-                ask_user_payload = {
-                    "status": item.ask_status or "answered",
-                    "answers": item.answers,
-                }
-            else:
-                # 多中断场景：构建 {interrupt_id: payload} 字典
-                ask_user_payload = {}
-                all_have_ids = True
-                for item in same_batch:
-                    if item.interrupt_id:
-                        ask_user_payload[item.interrupt_id] = {
-                            "status": item.ask_status or "answered",
-                            "answers": item.answers,
-                        }
-                    else:
-                        all_have_ids = False
-                        break
-
-                # 如果无法获取所有 interrupt_id（旧数据），回退为只取最新的
-                if not all_have_ids:
-                    ask_user_payload = {
-                        "status": latest_ask_user.ask_status or "answered",
-                        "answers": latest_ask_user.answers,
+            # 尝试构建 {interrupt_id: payload} 地图
+            ask_user_payload = {}
+            all_have_ids = True
+            for item in same_batch:
+                if item.interrupt_id:
+                    ask_user_payload[item.interrupt_id] = {
+                        "status": item.ask_status or "answered",
+                        "answers": item.answers,
                     }
-        else:
-            ask_user_payload = None
+                else:
+                    all_have_ids = False
+                    break
 
-        # 5. 组合恢复载荷
-        # 如果同时存在 ReviewTool 和 AskUser，只返回后触发的那个（按时间排序取最新）
-        if decided_ask_users:
+            if not all_have_ids:
+                # 回退：旧数据无 interrupt_id，使用单值格式
+                ask_user_payload = {
+                    "status": latest_ask_user.ask_status or "answered",
+                    "answers": latest_ask_user.answers,
+                }
+
+        # 5. 合并恢复载荷（同时存在 ReviewTool 和 AskUser 时合并两者的 interrupt 地图）
+        return self._merge_resume_payloads(
+            ask_user_payload, review_payload,
+            decided_ask_users, decided_reviews,
+        )
+
+    @staticmethod
+    def _is_resume_map(payload: Optional[Dict[str, Any]]) -> bool:
+        """Check if payload is a resume map ({interrupt_id: payload}) vs plain dict."""
+        if not isinstance(payload, dict) or not payload:
+            return False
+        return all(
+            isinstance(k, str) and len(k) == 32 and all(c in "0123456789abcdef" for c in k)
+            for k in payload
+        )
+
+    @staticmethod
+    def _merge_resume_payloads(
+        ask_user_payload: Optional[Dict[str, Any]],
+        review_payload: Optional[Dict[str, Any]],
+        decided_ask_users: list,
+        decided_reviews: list,
+    ) -> Optional[Dict[str, Any]]:
+        """Merge ask_user and review_tool resume payloads.
+
+        When both are resume maps ({interrupt_id: ...}), merge them.
+        When only one is a map, return the map.
+        When neither is a map (old data), return the latest by time.
+        """
+        ask_is_map = LLMInputDirector._is_resume_map(ask_user_payload)
+        review_is_map = LLMInputDirector._is_resume_map(review_payload)
+
+        if ask_is_map and review_is_map:
+            return {**review_payload, **ask_user_payload}
+        if ask_is_map:
+            return ask_user_payload
+        if review_is_map:
+            return review_payload
+        if ask_user_payload is not None and review_payload is not None:
             all_decided = decided_reviews + [(item[0], item[1]) for item in decided_ask_users]
             all_decided.sort(key=lambda x: x[0], reverse=True)
             latest_type = all_decided[0][1]
-
             if isinstance(latest_type, AskUserContent):
                 return ask_user_payload
             else:
-                return {
-                    "source": _SECURITY_REVIEW_SOURCE,
-                    "decisions": resume_decisions,
-                }
-        elif decided_reviews:
-            return {
-                "source": _SECURITY_REVIEW_SOURCE,
-                "decisions": resume_decisions,
-            }
-        return None
+                return review_payload
+        return ask_user_payload or review_payload

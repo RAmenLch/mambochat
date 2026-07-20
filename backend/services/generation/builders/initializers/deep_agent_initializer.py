@@ -181,6 +181,7 @@ class DeepAgentInitializer(AbstractAgentInitializer):
                             proxy_url = global_proxy_url
 
                         api_params = map_model_parameters(sub.parsed_model_parameters)
+                        api_params["_worker_type"] = sub_model.provider.worker_type
 
                         sub_model_max_retries = 0
                         sub_model_timeout = None

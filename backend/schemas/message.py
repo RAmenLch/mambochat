@@ -227,6 +227,7 @@ class ReviewToolContent(BaseModel):
     batch_id: str = Field(..., description="中断批次号")
     decision: Optional[ToolDecision] = Field(None, description="用户的决策结果，None 表示尚未做出决策")
     input_schema: Optional[Dict[str, Any]] = None
+    interrupt_id: Optional[str] = Field(None, description="LangGraph 中断 ID，用于多中断恢复场景精确匹配")
 
     def to_json_string(self) -> str:
         """序列化为存储在 DB content 字段的 JSON 字符串"""

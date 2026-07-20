@@ -335,6 +335,18 @@ MODEL_PRESETS: dict[str, list[ModelPreset]] = {
         _GLM_SHARED_CHAT_MODELS + _GLM_BIGMODEL_ONLY_MODELS
     ),
     "api.moonshot.cn": [
+        # === Kimi K3（旗舰，1M 上下文，始终思考，reasoning_effort 控制深度） ===
+        ModelPreset(
+            modelId="kimi-k3",
+            name="Kimi K3",
+            context_length=1_000_000,
+            max_output_tokens=1_048_576,
+            input_modalities=["text", "image", "video"],
+            supported_parameters=[
+                "max_completion_tokens", "stop",
+                "kimi::reasoning_effort",
+            ],
+        ),
         # === Kimi K2.7 Code（始终思考，始终保留上下文） ===
         ModelPreset(
             modelId="kimi-k2.7-code",
