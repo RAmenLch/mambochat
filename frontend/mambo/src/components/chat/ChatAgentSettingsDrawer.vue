@@ -236,7 +236,7 @@
           </div>
 
           <!-- Mambo 安全审核预览 -->
-          <div class="preview-section" v-if="selectedAgent.AgentType === 'Mambo'">
+          <div class="preview-section" v-if="selectedAgent.AgentType === 'Mambo' && securityReviewPreview">
             <div class="section-title"><el-icon><WarningFilled /></el-icon> {{ $t('agent.securityReview') }}</div>
             <div class="mambo-preview-grid">
               <div class="info-item">
