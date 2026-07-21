@@ -11,7 +11,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import * as crypto from 'crypto'
-import { exec as execCb } from 'child_process'
+import { execFile as execFileCb } from 'child_process'
 import { promisify } from 'util'
 import http from 'http'
 import https from 'https'
@@ -19,7 +19,7 @@ import type { AppConfig } from './config'
 import { AppConfigManager } from './config'
 import log from './log'
 
-const execAsync = promisify(execCb)
+const execFileAsync = promisify(execFileCb)
 
 // ---------------------------------------------------------------------------
 // Types
@@ -81,7 +81,7 @@ export class ApiClientManager {
     '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   }
 
-  private readonly ignoreDirs = [
+  private readonly defaultIgnoreDirs = [
     '.git', 'node_modules', '__pycache__', '.venv', 'target', 'build', 'dist'
   ]
 
@@ -339,7 +339,7 @@ export class ApiClientManager {
         case 'download_files':result = this.handleDownloadFiles(params); break
         case 'execute':       result = await this.handleExecute(params); break
         case 'delete_file':   result = this.handleDelete(params); break
-        default:              result = { error: `Unknown method: ${method}` }
+        default:              result = { error: `Unknown method: ${method}`, error_code: 'UNKNOWN_METHOD' }
       }
       log.info(`[ApiClient] Command done: ${method} request_id=${request_id}, sending response`)
       ws.send(JSON.stringify({ type: 'response', request_id, result }))
@@ -360,10 +360,11 @@ export class ApiClientManager {
   private handleTree(params: Record<string, unknown>): { tree: string } {
     const vpath = (params.path as string) || '/'
     const depth = (params.depth as number) ?? 3
+    const ignoreDirs: string[] = (params.ignore_dirs as string[]) ?? this.defaultIgnoreDirs
     const base = this.resolvePath(vpath)
 
     if (!fs.existsSync(base) || !fs.statSync(base).isDirectory()) {
-      return { tree: `Error: Not a directory: ${vpath}` }
+      return { tree: `Error: Not a directory: ${vpath}`, error_code: 'NOT_DIR' }
     }
 
     interface TreeEntry { name: string; depth: number; marker: string }
@@ -382,7 +383,7 @@ export class ApiClientManager {
       })
 
       for (const d of dirents) {
-        if (this.ignoreDirs.includes(d.name)) {
+        if (ignoreDirs.includes(d.name)) {
           entries.push({ name: d.name + '/', depth: currentDepth, marker: 'ignore' })
           continue
         }
@@ -393,7 +394,7 @@ export class ApiClientManager {
             let hasChildren = false
             try {
               const sub = fs.readdirSync(full, { withFileTypes: true })
-              hasChildren = sub.filter(s => !this.ignoreDirs.includes(s.name)).length > 0
+              hasChildren = sub.filter(s => !ignoreDirs.includes(s.name)).length > 0
             } catch { /* ignore */ }
             entries.push({
               name: d.name + '/',
@@ -405,7 +406,7 @@ export class ApiClientManager {
             let hasChildren = false
             try {
               const sub = fs.readdirSync(full, { withFileTypes: true })
-              hasChildren = sub.filter(s => !this.ignoreDirs.includes(s.name)).length > 0
+              hasChildren = sub.filter(s => !ignoreDirs.includes(s.name)).length > 0
             } catch { /* ignore */ }
             if (!hasChildren) {
               entries.push({ name: d.name + '/', depth: currentDepth, marker: 'empty' })
@@ -482,10 +483,10 @@ export class ApiClientManager {
     const physical = this.resolvePath(vpath)
 
     if (!fs.existsSync(physical)) {
-      return { error: `Path not found: ${vpath}` }
+      return { error: `Path not found: ${vpath}`, error_code: 'NOT_FOUND' }
     }
     if (!fs.statSync(physical).isDirectory()) {
-      return { error: `Not a directory: ${vpath}` }
+      return { error: `Not a directory: ${vpath}`, error_code: 'NOT_DIR' }
     }
 
     const results: object[] = []
@@ -512,14 +513,15 @@ export class ApiClientManager {
   private handleReadFile(params: Record<string, unknown>): Record<string, unknown> {
     const vpath = (params.path as string) || '/'
     const offset = (params.offset as number) || 0
-    const limit = (params.limit as number) || 2000
+    const limit = (params.limit as number) ?? 2000
+    const includeLineNumbers = (params.include_line_numbers as boolean) || false
     const physical = this.resolvePath(vpath)
 
     log.info(`[ApiClient] handleReadFile: vpath=${vpath} physical=${physical} offset=${offset} limit=${limit}`)
 
     if (!fs.existsSync(physical) || !fs.statSync(physical).isFile()) {
       log.warn(`[ApiClient] handleReadFile: file not found at ${physical}`)
-      return { error: `File not found: ${vpath}` }
+      return { error: `File not found: ${vpath}`, error_code: 'NOT_FOUND' }
     }
 
     const ext = path.extname(physical).toLowerCase()
@@ -540,7 +542,7 @@ export class ApiClientManager {
           total_lines: 1,
         }
       } catch (e) {
-        return { error: `Failed to read binary file '${vpath}': ${e}` }
+        return { error: `Failed to read binary file '${vpath}': ${e}`, error_code: 'IO_ERROR' }
       }
     }
 
@@ -551,11 +553,7 @@ export class ApiClientManager {
       log.info(`[ApiClient] handleReadFile: read ${content.length} chars`)
     } catch {
       log.warn(`[ApiClient] handleReadFile: not valid UTF-8 at ${physical}`)
-      return { error: `File '${vpath}' is not a valid UTF-8 text file.` }
-    }
-
-    if (!content.trim()) {
-      return { content: '', lines: [], total_lines: 0, encoding: 'utf-8', file_type: 'text', mime_type: '' }
+      return { error: `File '${vpath}' is not a valid UTF-8 text file.`, error_code: 'INVALID' }
     }
 
     const lines = content.split('\n')
@@ -563,15 +561,17 @@ export class ApiClientManager {
     const end = Math.min(start + limit, lines.length)
 
     if (start >= lines.length) {
-      return { error: `Line offset ${offset} exceeds file length (${lines.length} lines)` }
+      return { error: `Line offset ${offset} exceeds file length (${lines.length} lines)`, error_code: 'INVALID' }
     }
 
     const selected = lines.slice(start, end)
-    const numbered = selected.map((line, i) => `${i + start + 1}|${line}`)
+    const resultLines = includeLineNumbers
+      ? selected.map((line, i) => `${i + start + 1}|${line}`)
+      : selected
 
     return {
       content,
-      lines: numbered,
+      lines: resultLines,
       total_lines: lines.length,
       offset: start,
       limit,
@@ -591,11 +591,18 @@ export class ApiClientManager {
       this.checkEditPermission(vpath)
       physical = this.resolvePath(vpath)
     } catch (e) {
-      return { error: String(e) }
+      const msg = String(e)
+      if (msg.includes('Edit denied')) {
+        return { error: msg, error_code: 'EDIT_NOT_ALLOWED' }
+      }
+      if (msg.includes('Path traversal')) {
+        return { error: msg, error_code: 'PATH_TRAVERSAL' }
+      }
+      return { error: msg, error_code: 'IO_ERROR' }
     }
 
     if (!overwrite && fs.existsSync(physical!)) {
-      return { error: `File already exists: ${vpath}` }
+      return { error: `File already exists: ${vpath}`, error_code: 'ALREADY_EXISTS' }
     }
 
     try {
@@ -603,7 +610,7 @@ export class ApiClientManager {
       fs.writeFileSync(physical!, content, 'utf-8')
       return { path: vpath, success: true }
     } catch (e) {
-      return { error: String(e) }
+      return { error: String(e), error_code: 'IO_ERROR' }
     }
   }
 
@@ -618,40 +625,50 @@ export class ApiClientManager {
       this.checkEditPermission(vpath)
       physical = this.resolvePath(vpath)
     } catch (e) {
-      return { error: String(e) }
+      const msg = String(e)
+      if (msg.includes('Edit denied')) {
+        return { error: msg, error_code: 'EDIT_NOT_ALLOWED' }
+      }
+      if (msg.includes('Path traversal')) {
+        return { error: msg, error_code: 'PATH_TRAVERSAL' }
+      }
+      return { error: msg, error_code: 'IO_ERROR' }
     }
 
     if (!fs.existsSync(physical!) || !fs.statSync(physical!).isFile()) {
-      return { error: `File not found: ${vpath}` }
+      return { error: `File not found: ${vpath}`, error_code: 'NOT_FOUND' }
     }
 
     let content: string
     try {
       content = fs.readFileSync(physical!, 'utf-8')
     } catch (e) {
-      return { error: String(e) }
+      return { error: String(e), error_code: 'IO_ERROR' }
     }
 
-    if (!content!.includes(oldStr)) {
-      return { error: 'old_string not found in file' }
+    const normalizedOld = oldStr.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    const normalizedNew = newStr.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    const normalizedContent = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+
+    const occurrences = normalizedContent.split(normalizedOld).length - 1
+
+    if (occurrences === 0) {
+      return { error: 'old_string not found in file', error_code: 'OLD_STR_NOT_FOUND' }
     }
 
-    let occurrences: number
-    let newContent: string
-    if (replaceAll) {
-      occurrences = content!.split(oldStr).length - 1
-      newContent = content!.replaceAll(oldStr, newStr)
-    } else {
-      occurrences = 1
-      const idx = content!.indexOf(oldStr)
-      newContent = content!.slice(0, idx) + newStr + content!.slice(idx + oldStr.length)
+    if (occurrences > 1 && !replaceAll) {
+      return { error: `old_string appears ${occurrences} times. Use replace_all=True to replace all occurrences, or provide more context to match a single one.`, error_code: 'MULTI_OCCURRENCES' }
     }
+
+    const newContent = replaceAll
+      ? normalizedContent.replaceAll(normalizedOld, normalizedNew)
+      : normalizedContent.slice(0, normalizedContent.indexOf(normalizedOld)) + normalizedNew + normalizedContent.slice(normalizedContent.indexOf(normalizedOld) + normalizedOld.length)
 
     try {
       fs.writeFileSync(physical!, newContent, 'utf-8')
       return { path: vpath, occurrences, success: true }
     } catch (e) {
-      return { error: String(e) }
+      return { error: String(e), error_code: 'IO_ERROR' }
     }
   }
 
@@ -662,6 +679,7 @@ export class ApiClientManager {
     const regex = (params.regex as boolean) ?? true
     const offset = (params.offset as number) || 0
     const limit = (params.limit as number) ?? undefined
+    const ignoreDirs: string[] = (params.ignore_dirs as string[]) ?? this.defaultIgnoreDirs
     const base = this.resolvePath(vpath)
 
     let testFn: (line: string) => boolean
@@ -670,7 +688,7 @@ export class ApiClientManager {
         const re = new RegExp(pattern)
         testFn = (line: string) => re.test(line)
       } catch {
-        return { error: `Invalid regex pattern: ${pattern}` }
+        return { error: `Invalid regex pattern: ${pattern}`, error_code: 'INVALID' }
       }
     } else {
       testFn = (line: string) => line.includes(pattern)
@@ -685,8 +703,10 @@ export class ApiClientManager {
     const searchFile = (filePath: string, displayPath: string): void => {
       if (limit !== undefined && matches.length >= limit) return
       if (glob) {
-        const filename = path.basename(filePath)
-        if (!this.fnmatch(filename, glob)) return
+        const relPath = displayPath.startsWith(vpath)
+          ? displayPath.slice(vpath.length).replace(/^\//, '')
+          : displayPath
+        if (!this.fnmatch(relPath, glob)) return
       }
       try {
         const stat = fs.statSync(filePath)
@@ -710,7 +730,7 @@ export class ApiClientManager {
       const displayPath = '/workspace/' + path.relative(this.currentRootDir, base).replace(/\\/g, '/')
       searchFile(base, displayPath)
     } else if (fs.existsSync(base) && fs.statSync(base).isDirectory()) {
-      for (const [fp, isDir] of this.walkDir(base)) {
+      for (const [fp, isDir] of this.walkDir(base, -1, 1, ignoreDirs)) {
         if (isDir) continue
         const relPath = '/workspace/' + path.relative(this.currentRootDir, fp).replace(/\\/g, '/')
         searchFile(fp, relPath)
@@ -724,16 +744,20 @@ export class ApiClientManager {
   private handleGlobFiles(params: Record<string, unknown>): { items: object[] } {
     const pattern = (params.pattern as string) || '*'
     const vpath = (params.path as string) || '/'
+    const ignoreDirs: string[] = (params.ignore_dirs as string[]) ?? this.defaultIgnoreDirs
     const base = this.resolvePath(vpath)
 
-    if (!fs.existsSync(base) || !fs.statSync(base).isDirectory()) {
-      return { items: [] }
+    if (!fs.existsSync(base)) {
+      return { error: `Path not found: ${vpath}`, error_code: 'NOT_FOUND' }
+    }
+    if (!fs.statSync(base).isDirectory()) {
+      return { error: `Not a directory: ${vpath}`, error_code: 'NOT_DIR' }
     }
 
     const results: object[] = []
     const effectivePattern = pattern.replace(/^\//, '')
 
-    for (const [fp, isDir] of this.walkDir(base)) {
+    for (const [fp, isDir] of this.walkDir(base, -1, 1, ignoreDirs)) {
       if (isDir) continue
       const rel = path.relative(base, fp).replace(/\\/g, '/')
       if (!this.fnmatch(rel, effectivePattern)) continue
@@ -801,13 +825,21 @@ export class ApiClientManager {
     const timeout = (params.timeout as number) || undefined
 
     try {
-      const { stdout, stderr } = await execAsync(command, {
+      const shellCmd = process.platform === 'win32' ? 'cmd.exe' : '/bin/sh'
+      const shellArgs = process.platform === 'win32' ? ['/c', command] : ['-c', command]
+      const { stdout, stderr } = await execFileAsync(shellCmd, shellArgs, {
         timeout,
         maxBuffer: 100 * 1024 * 1024,
-        shell: process.platform === 'win32' ? 'cmd.exe' : '/bin/sh',
+        cwd: this.currentRootDir,
       })
-      let output = stdout
-      if (stderr) output = output ? output + stderr : stderr
+      const outputParts: string[] = []
+      if (stdout) outputParts.push(stdout.trimEnd())
+      if (stderr) {
+        for (const line of stderr.trimEnd().split('\n')) {
+          outputParts.push(`[stderr] ${line}`)
+        }
+      }
+      let output = outputParts.join('\n') || '<no output>'
 
       const truncated = output.length > 100000
       if (truncated) output = output.slice(0, 100000) + '\n... (output truncated)'
@@ -833,32 +865,30 @@ export class ApiClientManager {
       this.checkEditPermission(vpath)
       physical = this.resolvePath(vpath)
     } catch (e) {
-      return { error: String(e) }
+      const msg = String(e)
+      if (msg.includes('Edit denied')) {
+        return { error: msg, error_code: 'EDIT_NOT_ALLOWED' }
+      }
+      if (msg.includes('Path traversal')) {
+        return { error: msg, error_code: 'PATH_TRAVERSAL' }
+      }
+      return { error: msg, error_code: 'IO_ERROR' }
     }
 
     if (!fs.existsSync(physical!)) {
-      return { error: `File not found: ${vpath}` }
+      return { error: `File not found: ${vpath}`, error_code: 'NOT_FOUND' }
     }
 
     const stat = fs.statSync(physical!)
     if (stat.isDirectory()) {
-      try {
-        const files = fs.readdirSync(physical!)
-        if (files.length > 0) {
-          return { error: `Directory not empty: ${vpath}. Remove files inside first.` }
-        }
-        fs.rmdirSync(physical!)
-        return { path: vpath, success: true }
-      } catch (e) {
-        return { error: String(e) }
-      }
+      return { error: `Path is a directory, not a file: ${vpath}`, error_code: 'IS_DIR' }
     }
 
     try {
       fs.unlinkSync(physical!)
       return { path: vpath, success: true }
     } catch (e) {
-      return { error: String(e) }
+      return { error: String(e), error_code: 'IO_ERROR' }
     }
   }
 
@@ -895,12 +925,22 @@ export class ApiClientManager {
 
   /** Check if a file path is allowed for write/edit operations. */
   private checkEditPermission(virtualPath: string): void {
-    const filename = path.basename(virtualPath)
-    if (this.editWhitelist.length > 0 && !this.editWhitelist.some(p => this.fnmatch(filename, p))) {
-      throw new Error(`Edit denied: File '${filename}' is not in the edit whitelist.`)
+    const pathStr = virtualPath
+    if (this.editWhitelist.length > 0) {
+      const allowed = this.editWhitelist.some(p =>
+        pathStr === p.replace(/\/+$/, '') || pathStr.startsWith(p.replace(/\/+$/, '') + '/')
+      )
+      if (!allowed) {
+        throw new Error(`Edit denied: Path '${pathStr}' is not in the edit whitelist.`)
+      }
     }
-    if (this.editBlacklist.length > 0 && this.editBlacklist.some(p => this.fnmatch(filename, p))) {
-      throw new Error(`Edit denied: File '${filename}' is in the edit blacklist.`)
+    if (this.editBlacklist.length > 0) {
+      const forbidden = this.editBlacklist.some(p =>
+        pathStr === p.replace(/\/+$/, '') || pathStr.startsWith(p.replace(/\/+$/, '') + '/')
+      )
+      if (forbidden) {
+        throw new Error(`Edit denied: Path '${pathStr}' is in the edit blacklist.`)
+      }
     }
   }
 
@@ -909,7 +949,9 @@ export class ApiClientManager {
     directory: string,
     maxDepth = -1,
     currentDepth = 1,
+    ignoreDirs?: string[],
   ): Generator<[string, boolean, boolean]> {
+    const effectiveIgnore = ignoreDirs ?? this.defaultIgnoreDirs
     let entries: fs.Dirent[]
     try {
       entries = fs.readdirSync(directory, { withFileTypes: true })
@@ -924,7 +966,7 @@ export class ApiClientManager {
 
       let isUnexpanded = false
       if (isDir) {
-        if (this.ignoreDirs.includes(entry.name)) {
+        if (effectiveIgnore.includes(entry.name)) {
           isUnexpanded = true
         } else if (maxDepth !== -1 && currentDepth >= maxDepth) {
           isUnexpanded = true
@@ -934,7 +976,7 @@ export class ApiClientManager {
       yield [fullPath, isDir, isUnexpanded]
 
       if (isDir && !isUnexpanded) {
-        yield* this.walkDir(fullPath, maxDepth, currentDepth + 1)
+        yield* this.walkDir(fullPath, maxDepth, currentDepth + 1, ignoreDirs)
       }
     }
   }

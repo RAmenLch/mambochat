@@ -60,6 +60,7 @@ class MamboAPIBackend(BackendProtocol):
         backend_name: str = "",
         edit_whitelist: list[str] | None = None,
         edit_blacklist: list[str] | None = None,
+        ignore_dirs: list[str] | None = None,
         timeout: float = 60.0,
         enable_execute: bool = False,
         execute_timeout: int = 180,
@@ -69,6 +70,7 @@ class MamboAPIBackend(BackendProtocol):
         self.backend_name = backend_name or backend_id
         self.edit_whitelist = edit_whitelist or []
         self.edit_blacklist = edit_blacklist or []
+        self.ignore_dirs = ignore_dirs or []
         self.timeout = timeout
         self._enable_execute = enable_execute
         self._execute_timeout = execute_timeout
@@ -226,6 +228,33 @@ class MamboAPIBackend(BackendProtocol):
                     f"Edit denied: Path '{path_str}' is in the edit blacklist."
                 )
 
+    # Error code mapping from API client to BackendError
+    _ERROR_CODE_MAP: dict[str, ErrorCode] = {
+        "NOT_FOUND": ErrorCode.NOT_FOUND,
+        "NOT_DIR": ErrorCode.NOT_DIR,
+        "IS_DIR": ErrorCode.IS_DIR,
+        "INVALID": ErrorCode.INVALID,
+        "ALREADY_EXISTS": ErrorCode.ALREADY_EXISTS,
+        "OLD_STR_NOT_FOUND": ErrorCode.OLD_STR_NOT_FOUND,
+        "MULTI_OCCURRENCES": ErrorCode.MULTI_OCCURRENCES,
+        "EDIT_NOT_ALLOWED": ErrorCode.EDIT_NOT_ALLOWED,
+        "PATH_TRAVERSAL": ErrorCode.PATH_TRAVERSAL,
+        "IO_ERROR": ErrorCode.IO_ERROR,
+        "UNKNOWN_METHOD": ErrorCode.INVALID,
+    }
+
+    def _map_error(
+        self,
+        result: dict,
+        path: VirtualPath | None = None,
+        default_code: ErrorCode = ErrorCode.IO_ERROR,
+    ) -> BackendError:
+        """Map an API client error response to a BackendError with correct ErrorCode."""
+        error_code = result.get("error_code", "")
+        message = result.get("error", "Unknown error")
+        code = self._ERROR_CODE_MAP.get(error_code, default_code)
+        return BackendError(code=code, path=path, message=message)
+
     async def _run_ws_call(
         self,
         operation: str,
@@ -277,9 +306,7 @@ class MamboAPIBackend(BackendProtocol):
             ))
 
         if result.get("error"):
-            return LsResult(error=BackendError(
-                code=ErrorCode.IO_ERROR, path=path, message=result["error"],
-            ))
+            return LsResult(error=self._map_error(result, path=path))
 
         data = result.get("items", [])
         entries = []
@@ -330,7 +357,8 @@ class MamboAPIBackend(BackendProtocol):
     ) -> ReadResult:
         norm = self._normalize_path(file_path)
         result = await self._run_ws_call(
-            "read", self._call, "read_file", {"path": norm, "offset": offset, "limit": limit}
+            "read", self._call, "read_file",
+            {"path": norm, "offset": offset, "limit": limit, "include_line_numbers": include_line_numbers},
         )
         if result is None:
             return ReadResult(error=BackendError(
@@ -338,11 +366,7 @@ class MamboAPIBackend(BackendProtocol):
             ))
 
         if result.get("error"):
-            return ReadResult(error=BackendError(
-                code=ErrorCode.IO_ERROR,
-                path=file_path,
-                message=f"Error reading file '{file_path}': {result['error']}",
-            ))
+            return ReadResult(error=self._map_error(result, path=file_path))
 
         content = result.get("content", "")
         encoding = result.get("encoding", "utf-8")
@@ -361,7 +385,10 @@ class MamboAPIBackend(BackendProtocol):
 
         lines = result.get("lines")
         if lines is not None:
-            content = self._format_with_line_numbers(lines, start=offset + 1)
+            if include_line_numbers:
+                content = self._format_with_line_numbers(lines, start=offset + 1)
+            else:
+                content = "\n".join(lines)
 
         total = content.count("\n") + 1 if content else 0
         return ReadResult(content=content, total_lines=total, encoding="utf-8")
@@ -410,9 +437,7 @@ class MamboAPIBackend(BackendProtocol):
                 code=ErrorCode.IO_ERROR, message="Connection to API client failed",
             ))
         if result.get("error"):
-            return WriteResult(error=BackendError(
-                code=ErrorCode.IO_ERROR, message=result["error"],
-            ))
+            return WriteResult(error=self._map_error(result))
         return WriteResult(path=file_path)
 
     def edit(
@@ -464,9 +489,7 @@ class MamboAPIBackend(BackendProtocol):
                 code=ErrorCode.IO_ERROR, message="Connection to API client failed",
             ))
         if result.get("error"):
-            return EditResult(error=BackendError(
-                code=ErrorCode.IO_ERROR, message=result["error"],
-            ))
+            return EditResult(error=self._map_error(result, path=file_path))
         return EditResult(
             path=file_path,
             occurrences=result.get("occurrences", 0),
@@ -497,16 +520,14 @@ class MamboAPIBackend(BackendProtocol):
             self._call,
             "grep_files",
             {"pattern": pattern, "path": search_path, "glob": glob, "regex": regex,
-             "offset": offset, "limit": limit},
+             "offset": offset, "limit": limit, "ignore_dirs": self.ignore_dirs},
         )
         if result is None:
             return GrepResult(error=BackendError(
                 code=ErrorCode.IO_ERROR, message="Connection to API client failed",
             ))
         if isinstance(result, dict) and result.get("error"):
-            return GrepResult(error=BackendError(
-                code=ErrorCode.IO_ERROR, message=result["error"],
-            ))
+            return GrepResult(error=self._map_error(result))
         data = result.get("matches", [])
         matches: list[GrepMatch] = []
         for m in data:
@@ -533,12 +554,14 @@ class MamboAPIBackend(BackendProtocol):
             "glob",
             self._call,
             "glob_files",
-            {"pattern": pattern, "path": norm},
+            {"pattern": pattern, "path": norm, "ignore_dirs": self.ignore_dirs},
         )
         if result is None:
             return GlobResult(error=BackendError(
                 code=ErrorCode.IO_ERROR, message="Connection to API client failed",
             ))
+        if result.get("error"):
+            return GlobResult(error=self._map_error(result, path=path))
         data = result.get("items", [])
         from mambo_agents.backends.protocol import FileInfo
 
@@ -636,7 +659,7 @@ class MamboAPIBackend(BackendProtocol):
             "tree",
             self._call,
             "tree",
-            {"path": norm, "depth": depth},
+            {"path": norm, "depth": depth, "ignore_dirs": self.ignore_dirs},
         )
         if result is None:
             return "Error: Connection to API client failed."
@@ -680,7 +703,7 @@ class MamboAPIBackend(BackendProtocol):
             )
         if result.get("error"):
             return DeleteResult(
-                error=BackendError(code=ErrorCode.IO_ERROR, message=result["error"]),
+                error=self._map_error(result, path=path),
                 path=path,
             )
         return DeleteResult(path=path)

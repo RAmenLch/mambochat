@@ -186,6 +186,7 @@ def _build_any_backend(
             backend_name=b_name,
             edit_whitelist=config.get("edit_whitelist"),
             edit_blacklist=config.get("edit_blacklist"),
+            ignore_dirs=config.get("ignore_dirs"),
             enable_execute=execute_enabled,
         )
 

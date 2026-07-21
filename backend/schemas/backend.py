@@ -21,12 +21,13 @@ class SSHConfigData(BaseModel):
 class APIConfigData(BaseModel):
     """API Backend 配置结构 - 客户端主动连接模式
 
-    仅需 api_key。root_dir / ignore_dirs 由客户端启动时通过 --root-dir / --ignore-dirs 参数指定。
-    edit_whitelist 和 edit_blacklist 由服务端控制，使用虚拟路径前缀匹配来限制 LLM 可编辑的路径范围。
+    仅需 api_key。客户端会自动连接并注册。
+    edit_whitelist / edit_blacklist / ignore_dirs 由服务端控制，通过每次命令下发到客户端。
     """
     api_key: str = Field(..., description="API 密钥，客户端连接时需要提供此密钥进行认证")
     edit_whitelist: Optional[List[str]] = Field(None, description="允许编辑的虚拟路径前缀列表，如 ['/workspace/src/', '/workspace/app/']")
     edit_blacklist: Optional[List[str]] = Field(None, description="禁止编辑的虚拟路径前缀列表，如 ['/workspace/build/']")
+    ignore_dirs: Optional[List[str]] = Field(None, description="遍历时忽略的目录名，如 ['node_modules', '.git']")
 
 
 class ResourceConfigData(BaseModel):
