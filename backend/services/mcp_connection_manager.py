@@ -80,17 +80,27 @@ class McpConnectionManager:
                 if config.env:
                     current_env.update(config.env)
 
-                configs[config.id] = {
+                stdio_config = {
                     "transport": "stdio",
                     "command": config.command,
                     "args": config.args,
                     "env": current_env
                 }
-            elif config.transportType == schemas_enums.McpTransportType.SSE:
-                configs[config.id] = {
-                    "transport": "sse",
+                if config.cwd:
+                    stdio_config["cwd"] = config.cwd
+                configs[config.id] = stdio_config
+            elif config.transportType in (schemas_enums.McpTransportType.SSE, schemas_enums.McpTransportType.STREAMABLE_HTTP):
+                http_config: Dict[str, Any] = {
+                    "transport": config.transportType.value,
                     "url": config.url
                 }
+                if config.headers:
+                    http_config["headers"] = config.headers
+                if config.timeout is not None:
+                    http_config["timeout"] = config.timeout
+                if config.sse_read_timeout is not None:
+                    http_config["sse_read_timeout"] = config.sse_read_timeout
+                configs[config.id] = http_config
 
         if not configs:
             return []

@@ -314,7 +314,7 @@ class MamboAPIBackend(BackendProtocol):
 
         for item in data:
             path_raw = item.get("path", "/")
-            path_clean = path_raw.rstrip("/") if path_raw and path_raw != "/" else path_raw
+            path_clean = path_raw
             entries.append(
                 FileInfo(
                     path=VirtualPath(path_clean),
@@ -355,6 +355,16 @@ class MamboAPIBackend(BackendProtocol):
         limit: int = 2000,
         include_line_numbers: bool = False,
     ) -> ReadResult:
+        if offset < 0:
+            return ReadResult(error=BackendError(
+                code=ErrorCode.INVALID, path=file_path,
+                message=f"offset must be non-negative, got {offset}",
+            ))
+        if limit < 1:
+            return ReadResult(error=BackendError(
+                code=ErrorCode.INVALID, path=file_path,
+                message=f"limit must be >= 1, got {limit}",
+            ))
         norm = self._normalize_path(file_path)
         result = await self._run_ws_call(
             "read", self._call, "read_file",
@@ -385,23 +395,10 @@ class MamboAPIBackend(BackendProtocol):
 
         lines = result.get("lines")
         if lines is not None:
-            if include_line_numbers:
-                content = self._format_with_line_numbers(lines, start=offset + 1)
-            else:
-                content = "\n".join(lines)
+            content = "\n".join(lines)
 
         total = content.count("\n") + 1 if content else 0
         return ReadResult(content=content, total_lines=total, encoding="utf-8")
-
-    @staticmethod
-    def _format_with_line_numbers(
-        lines: list[str], start: int = 1
-    ) -> str:
-        width = max(3, len(str(start + len(lines) - 1)))
-        result = []
-        for i, line in enumerate(lines):
-            result.append(f"{start + i:>{width}}  {line}")
-        return "\n".join(result)
 
     def write(
         self, file_path: VirtualPath, content: str, overwrite: bool = False
@@ -463,6 +460,10 @@ class MamboAPIBackend(BackendProtocol):
         *,
         replace_all: bool = False,
     ) -> EditResult:
+        if not old_str:
+            return EditResult(error=BackendError(
+                code=ErrorCode.INVALID, message="old_str 不能为空",
+            ))
         try:
             self._check_edit_permission(file_path)
         except PermissionError as e:

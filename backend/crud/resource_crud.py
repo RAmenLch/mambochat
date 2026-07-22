@@ -77,6 +77,35 @@ async def get_resources_by_parent_ids(db: AsyncSession, parent_ids: List[str]) -
     return result.scalars().all()
 
 
+async def get_resources_by_parent_ids_with_versions(
+    db: AsyncSession,
+    parent_ids: List[str],
+) -> List[resource_model.Resource]:
+    """同 get_resources_by_parent_ids，但预加载 latest_version。"""
+    if not parent_ids:
+        return []
+
+    conditions = []
+    valid_uuids = [pid for pid in parent_ids if pid != "root"]
+
+    if valid_uuids:
+        conditions.append(resource_model.Resource.parentId.in_(valid_uuids))
+
+    if "root" in parent_ids:
+        conditions.append(resource_model.Resource.parentId.is_(None))
+
+    if not conditions:
+        return []
+
+    result = await db.execute(
+        select(resource_model.Resource)
+        .options(joinedload(resource_model.Resource.latest_version))
+        .filter(or_(*conditions))
+        .order_by(resource_model.Resource.sortOrder.asc())
+    )
+    return result.scalars().all()
+
+
 async def get_resource_by_name_and_parent(
         db: AsyncSession,
         name: str,
@@ -88,6 +117,23 @@ async def get_resource_by_name_and_parent(
         .filter(
             resource_model.Resource.name == name,
             resource_model.Resource.parentId == parent_id
+        )
+    )
+    return result.scalars().first()
+
+
+async def get_resource_by_name_and_parent_with_version(
+    db: AsyncSession,
+    name: str,
+    parent_id: str,
+) -> Optional[resource_model.Resource]:
+    """同 get_resource_by_name_and_parent，但预加载 latest_version。"""
+    result = await db.execute(
+        select(resource_model.Resource)
+        .options(joinedload(resource_model.Resource.latest_version))
+        .filter(
+            resource_model.Resource.name == name,
+            resource_model.Resource.parentId == parent_id,
         )
     )
     return result.scalars().first()
@@ -615,6 +661,43 @@ async def get_skill_descendants_with_versions(db: AsyncSession, skill_ids: List[
         select(resource_model.Resource)
         .options(joinedload(resource_model.Resource.latest_version))
         .where(resource_model.Resource.id.in_(descendant_ids))
+    )
+
+    return list(resources_result.scalars().all())
+
+
+async def get_descendants_with_versions(
+    db: AsyncSession,
+    root_id: str,
+) -> list[resource_model.Resource]:
+    """递归获取指定文件夹下所有子孙节点，预加载 latest_version。
+
+    通用版本（不限制 resourceType），供 workspace backend 等使用。
+    """
+    cte = select(
+        resource_model.Resource.id,
+        resource_model.Resource.parentId,
+    ).where(resource_model.Resource.id == root_id).cte(name="descendants", recursive=True)
+
+    cte = cte.union_all(
+        select(
+            resource_model.Resource.id,
+            resource_model.Resource.parentId,
+        ).join(cte, resource_model.Resource.parentId == cte.c.id)
+    )
+
+    stmt = select(cte.c.id)
+    result = await db.execute(stmt)
+    all_ids = result.scalars().all()
+
+    if not all_ids:
+        return []
+
+    resources_result = await db.execute(
+        select(resource_model.Resource)
+        .options(joinedload(resource_model.Resource.latest_version))
+        .where(resource_model.Resource.id.in_(all_ids))
+        .where(resource_model.Resource.id != root_id)
     )
 
     return list(resources_result.scalars().all())

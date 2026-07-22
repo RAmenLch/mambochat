@@ -39,21 +39,27 @@ async def test_mcp_config(server: McpServerCreate):
         current_env = os.environ.copy()
         if server.env:
             current_env.update(server.env)
-        client_config = {
-            temp_id: {
-                "transport": "stdio",
-                "command": server.command,
-                "args": server.args or [],
-                "env": current_env
-            }
+        stdio_config = {
+            "transport": "stdio",
+            "command": server.command,
+            "args": server.args or [],
+            "env": current_env
         }
+        if server.cwd:
+            stdio_config["cwd"] = server.cwd
+        client_config = {temp_id: stdio_config}
     else:
-        client_config = {
-            temp_id: {
-                "transport": "sse",
-                "url": server.url
-            }
+        http_config = {
+            "transport": server.transportType.value,
+            "url": server.url
         }
+        if server.headers:
+            http_config["headers"] = server.headers
+        if server.timeout is not None:
+            http_config["timeout"] = server.timeout
+        if server.sse_read_timeout is not None:
+            http_config["sse_read_timeout"] = server.sse_read_timeout
+        client_config = {temp_id: http_config}
 
     try:
         tools = await McpConnectionManager.test_config(client_config)

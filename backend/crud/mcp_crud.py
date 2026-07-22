@@ -20,6 +20,10 @@ async def create_mcp_server(db: AsyncSession, server: McpServerCreate) -> McpSer
         args=server.args,
         env=server.env,
         url=str(server.url) if server.url else None,
+        headers=server.headers,
+        timeout=server.timeout,
+        sse_read_timeout=server.sse_read_timeout,
+        cwd=server.cwd,
         isEnabled=server.isEnabled
     )
     db.add(db_server)

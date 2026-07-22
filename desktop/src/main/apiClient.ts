@@ -11,7 +11,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import * as crypto from 'crypto'
-import { execFile as execFileCb } from 'child_process'
+import { execFile as execFileCb, execFileSync } from 'child_process'
 import { promisify } from 'util'
 import http from 'http'
 import https from 'https'
@@ -358,10 +358,14 @@ export class ApiClientManager {
   // ---------------------------------------------------------------------------
 
   private handleTree(params: Record<string, unknown>): { tree: string } {
-    const vpath = (params.path as string) || '/'
+    const vpath = (params.path as string) || '/workspace'
     const depth = (params.depth as number) ?? 3
     const ignoreDirs: string[] = (params.ignore_dirs as string[]) ?? this.defaultIgnoreDirs
     const base = this.resolvePath(vpath)
+
+    if (depth < 1) {
+      return { tree: `Invalid depth value: ${depth}. Depth must be a positive integer (>= 1).` }
+    }
 
     if (!fs.existsSync(base) || !fs.statSync(base).isDirectory()) {
       return { tree: `Error: Not a directory: ${vpath}`, error_code: 'NOT_DIR' }
@@ -479,7 +483,7 @@ export class ApiClientManager {
   }
 
   private handleLs(params: Record<string, unknown>): { items: object[] } | { error: string } {
-    const vpath = (params.path as string) || '/'
+    const vpath = (params.path as string) || '/workspace'
     const physical = this.resolvePath(vpath)
 
     if (!fs.existsSync(physical)) {
@@ -497,8 +501,7 @@ export class ApiClientManager {
         let stat: fs.Stats
         try { stat = fs.statSync(full) } catch { continue }
         const isDir = stat.isDirectory()
-        let vp = (vpath.endsWith('/') ? vpath : vpath + '/') + entry
-        if (isDir) vp += '/'
+        const vp = (vpath.endsWith('/') ? vpath : vpath + '/') + entry
         results.push({
           path: vp,
           is_dir: isDir,
@@ -511,11 +514,18 @@ export class ApiClientManager {
   }
 
   private handleReadFile(params: Record<string, unknown>): Record<string, unknown> {
-    const vpath = (params.path as string) || '/'
+    const vpath = (params.path as string) || '/workspace'
     const offset = (params.offset as number) || 0
     const limit = (params.limit as number) ?? 2000
     const includeLineNumbers = (params.include_line_numbers as boolean) || false
     const physical = this.resolvePath(vpath)
+
+    if (offset < 0) {
+      return { error: `offset must be non-negative, got ${offset}`, error_code: 'INVALID' }
+    }
+    if (limit < 1) {
+      return { error: `limit must be >= 1, got ${limit}`, error_code: 'INVALID' }
+    }
 
     log.info(`[ApiClient] handleReadFile: vpath=${vpath} physical=${physical} offset=${offset} limit=${limit}`)
 
@@ -566,11 +576,17 @@ export class ApiClientManager {
 
     const selected = lines.slice(start, end)
     const resultLines = includeLineNumbers
-      ? selected.map((line, i) => `${i + start + 1}|${line}`)
+      ? (() => {
+          const width = Math.max(3, String(start + selected.length).length)
+          return selected.map((line, i) => {
+            const num = String(i + start + 1).padStart(width)
+            return `${num}  ${line}`
+          })
+        })()
       : selected
 
     return {
-      content,
+      content: selected.join('\n'),
       lines: resultLines,
       total_lines: lines.length,
       offset: start,
@@ -601,6 +617,10 @@ export class ApiClientManager {
       return { error: msg, error_code: 'IO_ERROR' }
     }
 
+    if (fs.existsSync(physical!) && fs.statSync(physical!).isDirectory()) {
+      return { error: `Path is a directory, not a file: ${vpath}`, error_code: 'IS_DIR' }
+    }
+
     if (!overwrite && fs.existsSync(physical!)) {
       return { error: `File already exists: ${vpath}`, error_code: 'ALREADY_EXISTS' }
     }
@@ -620,6 +640,10 @@ export class ApiClientManager {
     const newStr = (params.new_string as string) || ''
     const replaceAll = (params.replace_all as boolean) || false
 
+    if (!oldStr) {
+      return { error: 'old_string cannot be empty', error_code: 'INVALID' }
+    }
+
     let physical: string
     try {
       this.checkEditPermission(vpath)
@@ -636,7 +660,7 @@ export class ApiClientManager {
     }
 
     if (!fs.existsSync(physical!) || !fs.statSync(physical!).isFile()) {
-      return { error: `File not found: ${vpath}`, error_code: 'NOT_FOUND' }
+      return { error: `File not found: ${vpath}. To create a new file, use write().`, error_code: 'NOT_FOUND' }
     }
 
     let content: string
@@ -674,10 +698,10 @@ export class ApiClientManager {
 
   private handleGrepFiles(params: Record<string, unknown>): { matches: object[] } | { error: string } {
     const pattern = (params.pattern as string) || ''
-    const vpath = (params.path as string) || '/'
+    const vpath = (params.path as string) || '/workspace'
     const glob = (params.glob as string) || undefined
     const regex = (params.regex as boolean) ?? true
-    const offset = (params.offset as number) || 0
+    const offset = (params.offset as number) ?? 0
     const limit = (params.limit as number) ?? undefined
     const ignoreDirs: string[] = (params.ignore_dirs as string[]) ?? this.defaultIgnoreDirs
     const base = this.resolvePath(vpath)
@@ -696,6 +720,17 @@ export class ApiClientManager {
 
     log.info(`[ApiClient] handleGrepFiles: vpath=${vpath} physical=${base} pattern=${pattern} regex=${regex} glob=${glob}`)
 
+    const isDir = fs.existsSync(base) && fs.statSync(base).isDirectory()
+
+    // 1) Try ripgrep (fast native search)
+    const rgMatches = this._ripgrepGrep(pattern, base, isDir ? glob : undefined, regex)
+    if (rgMatches !== null) {
+      const sliced = offset > 0 ? rgMatches.slice(offset) : rgMatches
+      const limited = limit !== undefined ? sliced.slice(0, limit) : sliced
+      return { matches: limited }
+    }
+
+    // 2) Node.js fallback
     const matches: object[] = []
     const maxFileSize = 10 * 1024 * 1024
     let skipped = 0
@@ -743,7 +778,7 @@ export class ApiClientManager {
 
   private handleGlobFiles(params: Record<string, unknown>): { items: object[] } {
     const pattern = (params.pattern as string) || '*'
-    const vpath = (params.path as string) || '/'
+    const vpath = (params.path as string) || '/workspace'
     const ignoreDirs: string[] = (params.ignore_dirs as string[]) ?? this.defaultIgnoreDirs
     const base = this.resolvePath(vpath)
 
@@ -978,6 +1013,53 @@ export class ApiClientManager {
       if (isDir && !isUnexpanded) {
         yield* this.walkDir(fullPath, maxDepth, currentDepth + 1, ignoreDirs)
       }
+    }
+  }
+
+  /** Try ripgrep for fast grep. Returns parsed matches or null to fall back. */
+  private _ripgrepGrep(
+    pattern: string,
+    basePath: string,
+    glob: string | undefined,
+    regex: boolean,
+  ): object[] | null {
+    try {
+      const args: string[] = ['--json', '--no-heading']
+      if (!regex) args.push('-F')
+      if (glob) args.push('--glob', glob)
+      args.push('--', pattern, basePath)
+
+      const stdout = execFileSync('rg', args, {
+        timeout: 30000,
+        maxBuffer: 50 * 1024 * 1024,
+        encoding: 'utf-8',
+      })
+
+      const matches: object[] = []
+      for (const line of stdout.split('\n')) {
+        if (!line.trim()) continue
+        try {
+          const data = JSON.parse(line)
+          if (data.type !== 'match') continue
+          const pdata = data.data || {}
+          const ftext = pdata.path?.text
+          if (!ftext) continue
+          const ln = pdata.line_number
+          const lt = (pdata.lines?.text || '').replace(/\n$/, '')
+          if (ln == null) continue
+
+          const relPath = path.relative(this.currentRootDir, ftext).replace(/\\/g, '/')
+          matches.push({
+            path: '/workspace/' + relPath,
+            line: ln,
+            text: lt,
+          })
+        } catch { /* skip malformed JSON */ }
+      }
+      return matches
+    } catch (err: any) {
+      if (err.status === 1) return []  // rg exit 1 = no matches
+      return null  // rg unavailable or error → fall back to Node.js traversal
     }
   }
 

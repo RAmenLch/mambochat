@@ -26,6 +26,7 @@
         <el-radio-group v-model="formData.transportType" @change="handleTransportChange">
           <el-radio-button value="stdio">Stdio</el-radio-button>
           <el-radio-button value="sse">SSE</el-radio-button>
+          <el-radio-button value="streamable_http">Streamable HTTP</el-radio-button>
         </el-radio-group>
       </el-form-item>
 
@@ -61,13 +62,37 @@
             <el-button type="primary" link :icon="Plus" @click="addEnv">+</el-button>
           </div>
         </el-form-item>
+
+        <el-form-item :label="t('settings.mcp.form.cwdLabel')">
+          <el-input v-model="formData.cwd" :placeholder="t('settings.mcp.form.cwdPlaceholder')" />
+        </el-form-item>
       </template>
 
-      <!-- SSE 专属字段 -->
-      <template v-if="formData.transportType === 'sse'">
-        <el-divider content-position="left">SSE</el-divider>
+      <!-- SSE / Streamable HTTP 专属字段 -->
+      <template v-if="formData.transportType === 'sse' || formData.transportType === 'streamable_http'">
+        <el-divider content-position="left">{{ formData.transportType === 'streamable_http' ? 'Streamable HTTP' : 'SSE' }}</el-divider>
         <el-form-item :label="t('settings.mcp.form.urlLabel')" prop="url">
           <el-input v-model="formData.url" :placeholder="t('settings.mcp.form.urlPlaceholder')" />
+        </el-form-item>
+
+        <el-form-item :label="t('settings.mcp.form.headersLabel')">
+          <div class="dynamic-list">
+            <div v-for="(header, index) in formData.headersList" :key="index" class="dynamic-row">
+              <el-input v-model="header.key" :placeholder="t('settings.mcp.form.headerKeyPlaceholder')" style="flex: 1" />
+              <span class="separator">:</span>
+              <el-input v-model="header.value" :placeholder="t('settings.mcp.form.headerValuePlaceholder')" style="flex: 1" />
+              <el-button type="danger" :icon="Minus" circle size="small" @click="removeHeader(index)" />
+            </div>
+            <el-button type="primary" link :icon="Plus" @click="addHeader">+</el-button>
+          </div>
+        </el-form-item>
+
+        <el-form-item :label="t('settings.mcp.form.timeoutLabel')">
+          <el-input-number v-model="formData.timeout" :min="0.1" :step="1" :placeholder="t('settings.mcp.form.timeoutPlaceholder')" style="width: 100%" />
+        </el-form-item>
+
+        <el-form-item :label="t('settings.mcp.form.sseReadTimeoutLabel')">
+          <el-input-number v-model="formData.sse_read_timeout" :min="0.1" :step="1" :placeholder="t('settings.mcp.form.sseReadTimeoutPlaceholder')" style="width: 100%" />
         </el-form-item>
       </template>
     </el-form>
@@ -140,7 +165,11 @@ interface LocalFormData {
   command: string;
   argsList: string[];
   envList: { key: string; value: string }[];
+  cwd: string;
   url: string;
+  headersList: { key: string; value: string }[];
+  timeout: number | null;
+  sse_read_timeout: number | null;
 }
 
 const defaultFormData: LocalFormData = {
@@ -151,7 +180,11 @@ const defaultFormData: LocalFormData = {
   command: '',
   argsList: [],
   envList: [],
+  cwd: '',
   url: '',
+  headersList: [],
+  timeout: null,
+  sse_read_timeout: null,
 };
 
 const formData = reactive<LocalFormData>({ ...defaultFormData });
@@ -195,6 +228,9 @@ watch(
         formData.isEnabled = data.isEnabled;
         formData.command = data.command || '';
         formData.url = data.url || '';
+        formData.cwd = data.cwd || '';
+        formData.timeout = data.timeout ?? null;
+        formData.sse_read_timeout = data.sse_read_timeout ?? null;
 
         // 转换 args
         formData.argsList = data.args ? [...data.args] : [];
@@ -202,6 +238,11 @@ watch(
         // 转换 env
         formData.envList = data.env
           ? Object.entries(data.env).map(([key, value]) => ({ key, value }))
+          : [];
+
+        // 转换 headers
+        formData.headersList = data.headers
+          ? Object.entries(data.headers).map(([key, value]) => ({ key, value }))
           : [];
       } else {
         // 新增模式：重置
@@ -230,6 +271,14 @@ const addEnv = () => {
 
 const removeEnv = (index: number) => {
   formData.envList.splice(index, 1);
+};
+
+const addHeader = () => {
+  formData.headersList.push({ key: '', value: '' });
+};
+
+const removeHeader = (index: number) => {
+  formData.headersList.splice(index, 1);
 };
 
 const handleUpdateVisible = (val: boolean) => {
@@ -273,8 +322,24 @@ const handleSubmit = async () => {
         } else {
           requestData.env = null;
         }
+
+        requestData.cwd = formData.cwd || null;
       } else {
         requestData.url = formData.url;
+
+        // 转换 headers 数组为对象
+        const validHeaders = formData.headersList.filter(h => h.key.trim() !== '');
+        if (validHeaders.length > 0) {
+          requestData.headers = validHeaders.reduce((acc, cur) => {
+            acc[cur.key] = cur.value;
+            return acc;
+          }, {} as Record<string, string>);
+        } else {
+          requestData.headers = null;
+        }
+
+        requestData.timeout = formData.timeout ?? null;
+        requestData.sse_read_timeout = formData.sse_read_timeout ?? null;
       }
 
       emit('save', requestData);
@@ -308,8 +373,20 @@ const handleTestConnection = async () => {
       } else {
         configData.env = null;
       }
+      configData.cwd = formData.cwd || null;
     } else {
       configData.url = formData.url;
+      const validHeaders = formData.headersList.filter(h => h.key.trim() !== '');
+      if (validHeaders.length > 0) {
+        configData.headers = validHeaders.reduce((acc, cur) => {
+          acc[cur.key] = cur.value;
+          return acc;
+        }, {} as Record<string, string>);
+      } else {
+        configData.headers = null;
+      }
+      configData.timeout = formData.timeout ?? null;
+      configData.sse_read_timeout = formData.sse_read_timeout ?? null;
     }
 
     const response = await mcpStore.testConnectionWithConfig(configData);

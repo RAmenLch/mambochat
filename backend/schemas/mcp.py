@@ -19,12 +19,19 @@ class McpServerBase(BaseModel):
 
     # SSE 配置
     url: Optional[str] = None
+    headers: Optional[Dict[str, str]] = Field(default_factory=dict)
+    timeout: Optional[float] = None
+    sse_read_timeout: Optional[float] = None
+
+    # Stdio 配置
+    cwd: Optional[str] = None
 
     @field_validator('url')
-    def validate_url_if_sse(cls, v, values):
-        if values.data.get('transportType') == McpTransportType.SSE:
+    def validate_url_if_http(cls, v, values):
+        transport = values.data.get('transportType')
+        if transport in (McpTransportType.SSE, McpTransportType.STREAMABLE_HTTP):
             if not v:
-                raise ValueError('URL is required for SSE transport')
+                raise ValueError('URL is required for SSE/Streamable HTTP transport')
             # 清理 URL 中的空白字符
             return v.strip()
         return v
@@ -51,6 +58,10 @@ class McpServerUpdate(BaseModel):
     args: Optional[List[str]] = None
     env: Optional[Dict[str, str]] = None
     url: Optional[str] = None
+    headers: Optional[Dict[str, str]] = None
+    timeout: Optional[float] = None
+    sse_read_timeout: Optional[float] = None
+    cwd: Optional[str] = None
     isEnabled: Optional[bool] = None
 
 
