@@ -98,6 +98,7 @@ class MamboMCPToolProvider(BaseToolProvider):
                 url=s.url,
                 headers=s.headers,
                 timeout=s.timeout,
+                sse_read_timeout=s.sse_read_timeout,
             )
             server_configs.append(cfg)
 
