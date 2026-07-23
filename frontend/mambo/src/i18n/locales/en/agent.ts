@@ -109,6 +109,8 @@ export default {
   // Version Control
   versionControl: 'Version Control',
   versionControlDesc: 'Enable file version history. Agent automatically backs up files before write/edit/delete operations, supporting time-travel rollback to any historical version',
+  mcpThreshold: 'MCP Direct Tool Threshold',
+  mcpThresholdDesc: 'When total MCP tool count is below this threshold, tools are directly exposed to the LLM. Above this, a compact meta-tool (mcp_call_tool) wrapper is used to save context. Default: 15',
   versionHistory: 'Version History',
   versionHistoryNoData: 'No version snapshots',
   versionHistorySnapshotLabel: 'Snapshot',

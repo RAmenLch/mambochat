@@ -307,6 +307,16 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
                     )
                 )
 
+        # --- MCP middleware（从 AgentConfig 中的 server configs 构建）---
+        mcp_middleware = None
+        if agent_config.mcp_server_configs:
+            from mambo_agents.middleware.mcp import MCPMiddleware
+            mcp_middleware = MCPMiddleware(
+                servers=agent_config.mcp_server_configs,
+                exclude_tools=agent_config.mcp_exclude_tools,
+                direct_tool_threshold=agent_config.mcp_direct_tool_threshold,
+            )
+
         # --- Build backend（统一入口：资源挂载 + SSH/API + Skills shortcuts）---
         store = get_store()
         backend = _build_mambo_backend(agent_config, store=store)
@@ -358,11 +368,16 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
                 review_tools = frozenset(review_tools)
             else:
                 review_tools = "all"
+            tool_unpackers = None
+            if mcp_middleware is not None:
+                tool_unpackers = [mcp_middleware.tool_unpacker]
+
             security_review = SecurityReviewConfig(
                 model=review_model,
                 system_prompt=sr_config.system_prompt,
                 review_tools=review_tools,
                 review_mode="agent",
+                tool_unpackers=tool_unpackers,
             )
 
         # --- Memory sources（长期记忆） ---
@@ -406,6 +421,10 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
             _middlewares.append(_version_control_middleware)
         if _show_middleware:
             _middlewares.append(_show_middleware)
+
+        # --- MCP middleware（插到最前面，让 system prompt 尽早注入）---
+        if mcp_middleware is not None:
+            _middlewares.insert(0, mcp_middleware)
 
         return create_mambo_agent(
             name=agent_config.name,

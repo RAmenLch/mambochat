@@ -583,6 +583,29 @@
 
           <el-divider />
 
+          <!-- MCP 工具阈值 -->
+          <el-row :gutter="32" class="settings-row">
+            <el-col :span="24">
+              <el-form-item>
+                <template #label>
+                  <span>{{ $t('agent.mcpThreshold') }}</span>
+                  <el-tooltip effect="dark" :content="$t('agent.mcpThresholdDesc')" placement="top">
+                    <el-icon class="label-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-input-number
+                  v-model="form.mambo_mcp_threshold"
+                  :min="1"
+                  :step="1"
+                  controls-position="right"
+                  style="width: 200px;"
+                />
+              </el-form-item>
+            </el-col>
+          </el-row>
+
+          <el-divider />
+
           <!-- AI 安全审核 -->
           <el-row :gutter="32" class="settings-row">
             <el-col :span="24">
@@ -821,6 +844,9 @@ const form = reactive({
 
   // Mambo 版本控制
   mambo_version_control_enabled: false,
+
+  // Mambo MCP 工具阈值
+  mambo_mcp_threshold: 15,
 });
 
 // --- Backend 挂载逻辑 [新增] ---
@@ -970,6 +996,9 @@ watch(agentData, async (newVal) => {
     } else {
       form.mambo_version_control_enabled = false;
     }
+
+    // MCP 工具阈值
+    form.mambo_mcp_threshold = mamboParams.mcp_direct_tool_threshold ?? 15;
 
     // 加载 HITL 可审核工具列表
     fetchHitlTools(newVal.id);
@@ -1203,6 +1232,7 @@ function buildMamboAgentParameters(): MamboAgentParameters | null {
       enabled: true,
       auto_snapshot: true,
     } : null,
+    mcp_direct_tool_threshold: form.mambo_mcp_threshold,
   };
   return params;
 }

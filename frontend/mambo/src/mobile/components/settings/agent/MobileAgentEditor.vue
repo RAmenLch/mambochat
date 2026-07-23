@@ -392,6 +392,22 @@
 
         <div class="field-row">
           <div class="field-label">
+            <span>{{ $t('agent.mcpThreshold') }}</span>
+          </div>
+          <el-input-number
+            v-model="form.mambo_mcp_threshold"
+            :min="1"
+            :step="1"
+            size="small"
+            controls-position="right"
+            style="width: 120px;"
+          />
+        </div>
+
+        <div class="section-divider"></div>
+
+        <div class="field-row">
+          <div class="field-label">
             <span>{{ $t('agent.securityReviewEnable') }}</span>
           </div>
           <el-switch v-model="form.mambo_security_review_enabled" size="small" />
@@ -670,6 +686,7 @@ const form = reactive({
   mambo_security_review_system_prompt: '',
   mambo_security_review_tools: [] as string[],
   mambo_version_control_enabled: false,
+  mambo_mcp_threshold: 15,
 });
 
 const availableBackends = computed(() => backendList.value.filter(b => !form.backendIds.includes(b.id)));
@@ -760,6 +777,7 @@ watch(agentData, async (newVal) => {
     }
     const vcCfg = mamboParams.version_control;
     form.mambo_version_control_enabled = !!(vcCfg && vcCfg.enabled);
+    form.mambo_mcp_threshold = mamboParams.mcp_direct_tool_threshold ?? 15;
 
     fetchHitlTools(newVal.id);
 
@@ -892,6 +910,7 @@ function buildMamboAgentParameters(): MamboAgentParameters | null {
       review_tools: form.mambo_security_review_tools.length > 0 ? [...form.mambo_security_review_tools] : null,
     } : null,
     version_control: form.mambo_version_control_enabled ? { enabled: true, auto_snapshot: true } : null,
+    mcp_direct_tool_threshold: form.mambo_mcp_threshold,
   };
 }
 

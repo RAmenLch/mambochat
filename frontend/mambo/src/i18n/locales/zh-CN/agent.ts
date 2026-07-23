@@ -109,6 +109,8 @@ export default {
   // 版本控制
   versionControl: '版本控制',
   versionControlDesc: '启用文件版本历史管理。Agent 在写入/编辑/删除文件前自动备份，支持时间旅行回滚到任意历史版本',
+  mcpThreshold: 'MCP 直连工具阈值',
+  mcpThresholdDesc: '当 MCP 工具总数低于此阈值时，工具直接暴露给 LLM；超过时使用紧凑的 meta-tool（mcp_call_tool）包装以节省上下文。默认：15',
   versionHistory: '版本历史',
   versionHistoryNoData: '暂无版本快照',
   versionHistorySnapshotLabel: '快照',

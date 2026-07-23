@@ -32,6 +32,7 @@ export interface MamboAgentParameters {
   summarization_config?: SummarizationConfig | null
   security_review?: SecurityReviewConfig | null
   version_control?: VersionControlConfig | null
+  mcp_direct_tool_threshold: number
 }
 
 export interface Agent {

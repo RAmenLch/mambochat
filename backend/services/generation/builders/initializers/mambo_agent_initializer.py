@@ -17,8 +17,10 @@ from backend.services.generation.builders.initializers.base_initializer import (
 from backend.services.generation.builders.resource_dispatcher import ResourceDispatcher
 from backend.services.generation.builders.param_utils import map_model_parameters
 
+from mambo_agents.middleware.mcp import mcp_tool_name
+
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
-from backend.services.generation.tools.mcp_tool_provider import MCPToolProvider
+from backend.services.generation.tools.mambo_mcp_tool_provider import MamboMCPToolProvider
 from backend.services.generation.tools.suggest_tool_provider import SuggestToolProvider
 from backend.services.generation.tools.ask_user_tool_provider import AskUserToolProvider
 from backend.services.generation.tools.kb_tool_provider import KBToolProvider
@@ -87,29 +89,40 @@ class MamboAgentInitializer(AbstractAgentInitializer):
             from backend.services.generation.agent.backend_factory import build_skill_resource_roots
             skill_resource_roots = await build_skill_resource_roots(self.db, self.agent)
 
-        # DeepAgent 子代理仍然需要 skills 内容用于 VFS 注入
-        if skills:
-            for skill in skills:
-                for file_config in skill.files:
-                    try:
-                        file_config.content = await file_service.get_text_content(
-                            file_config.file_id
-                        )
-                    except Exception:
-                        file_config.content = ""
+        # # DeepAgent 子代理仍然需要 skills 内容用于 VFS 注入
+        # if skills:
+        #     for skill in skills:
+        #         for file_config in skill.files:
+        #             try:
+        #                 file_config.content = await file_service.get_text_content(
+        #                     file_config.file_id
+        #                 )
+        #             except Exception:
+        #                 file_config.content = ""
+
+        mcp_server_configs = None
+        mcp_exclude_tools = None
 
         if self.enable_tools:
             params = self.agent.parsed_model_parameters
 
             mcp_ids = self.agent.enabledMcpIds or []
             if mcp_ids:
-                main_mcp_provider = MCPToolProvider(self.db, mcp_ids)
-                self.providers.append(main_mcp_provider)
+                thin_provider = MamboMCPToolProvider(self.db, mcp_ids)
+                loaded = await thin_provider.load_configs()
 
-                mcp_tools = await mcp_crud.get_tools_by_server_ids(self.db, mcp_ids)
-                for tool in mcp_tools:
-                    if tool.review_mode == ToolReviewMode.REQUIRE_REVIEW.value:
-                        self.hitl_interrupt_on[tool.name] = True
+                if loaded:
+                    self.providers.append(thin_provider)
+                    mcp_server_configs = thin_provider.mcp_server_configs
+                    mcp_exclude_tools = thin_provider.mcp_exclude_tools
+
+                    # HITL：DB 审核配置 → mcp_tool_name 格式
+                    mcp_tools_db = await mcp_crud.get_tools_by_server_ids(self.db, mcp_ids)
+                    for tool in mcp_tools_db:
+                        if tool.review_mode == ToolReviewMode.REQUIRE_REVIEW.value:
+                            sname = thin_provider.id_to_name.get(tool.server_id, tool.server_id)
+                            effective_name = mcp_tool_name(sname, tool.name)
+                            self.hitl_interrupt_on[effective_name] = True
 
             # WebSearch 内置搜索工具
             if self.web_search_mode is not None:
@@ -292,7 +305,12 @@ class MamboAgentInitializer(AbstractAgentInitializer):
                         )
 
                 sub_configs.append(sub_config)
-                self.providers.extend(sub_init.get_providers())
+                # 排除子代理的 MamboMCPToolProvider——子代理工具调用走
+                # subagent_event 通道，由 SubAgentEventHandler 处理
+                self.providers.extend([
+                    p for p in sub_init.get_providers()
+                    if not isinstance(p, MamboMCPToolProvider)
+                ])
 
         base_prompt = self.agent.systemPrompt or ""
         additional_system_prompt = (
@@ -421,6 +439,9 @@ class MamboAgentInitializer(AbstractAgentInitializer):
             security_review_llm_config=security_review_llm_config,
             enable_version_control=enable_vc,
             version_control_config=vc_config,
+            mcp_server_configs=mcp_server_configs,
+            mcp_exclude_tools=mcp_exclude_tools,
+            mcp_direct_tool_threshold=mambo_params.mcp_direct_tool_threshold,
         )
 
         return agent_config, additional_system_prompt

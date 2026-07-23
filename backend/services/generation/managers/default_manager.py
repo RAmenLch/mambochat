@@ -164,6 +164,9 @@ class DefaultGenerateManager(AbstractGenerateManager):
             tools = llm_input.agent_config.tools or []
             tool_map: Dict[str, BaseTool] = {t.name: t for t in tools}
 
+        # NOTE: Mambo Agent 使用 MCPMiddleware（graceful degradation），
+        # 不再抛出 McpConnectionError。此 catch 保留作为 DeepAgent / React 等
+        # 仍在使用旧 MCPToolProvider 的 agent 类型的兜底。
         except McpConnectionError as e:
             yield CreateSubMessage(
                 sub_message_id=generate_uuid(), type=schemas_enums.SubMessageType.NORMAL.value,

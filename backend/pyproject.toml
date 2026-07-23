@@ -65,7 +65,7 @@ dependencies = [
     # Production server
     "gunicorn==23.0.0",
 
-    "mambo-agents==0.2.0b10",
+    "mambo-agents==0.2.0b12",
 ]
 
 [dependency-groups]

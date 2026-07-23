@@ -45,6 +45,7 @@ class MamboAgentParametersSchema(BaseModel):
     summarization_config: Optional[SummarizationConfigSchema] = Field(None, description="摘要详细配置")
     security_review: Optional[SecurityReviewConfigSchema] = Field(None, description="AI 安全审核配置")
     version_control: Optional[VersionControlConfigSchema] = Field(None, description="版本控制配置")
+    mcp_direct_tool_threshold: int = Field(15, description="MCP 工具数量阈值：低于此值时直接暴露工具，否则使用 meta-tool 包装模式")
 
 
 class HitlToolInfo(BaseModel):

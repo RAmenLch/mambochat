@@ -218,6 +218,20 @@ class AgentConfig(BaseModel):
         default=True,
         description="是否启用计划任务清单（write_plans 工具，仅 Mambo Agent 有效）"
     )
+
+    # --- MCP 配置（仅 Mambo Agent） ---
+    mcp_server_configs: Optional[List[Any]] = Field(
+        default=None,
+        description="MCPServerConfig 列表。由 initializer 填充，builder 消费以创建 MCPMiddleware。"
+    )
+    mcp_exclude_tools: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="MCP 排除工具映射 {server_name: frozenset[tool_name]}。"
+    )
+    mcp_direct_tool_threshold: int = Field(
+        default=15,
+        description="MCP 工具数量阈值：低于此值时直接暴露工具，否则使用 meta-tool 包装模式。"
+    )
     enable_show: bool = Field(
         default=True,
         description="是否启用 show 工具（展示文件/图片给用户，仅 Mambo Agent 有效）"
