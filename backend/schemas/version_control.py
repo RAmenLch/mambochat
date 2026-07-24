@@ -28,3 +28,13 @@ class VersionFileContentResponse(BaseModel):
     checkpoint_id: str = Field(..., description="所属 checkpoint ID")
     content: Optional[str] = Field(None, description="文件内容（None 表示文件在该版本不存在）")
     sha256: Optional[str] = Field(None, description="内容 SHA256 哈希")
+
+
+class DiffResponse(BaseModel):
+    """文件差异对比响应"""
+    path: str = Field(..., description="文件虚拟路径")
+    checkpoint_id: str = Field(..., description="对比的目标 checkpoint ID")
+    old_content: Optional[str] = Field(None, description="快照中的文件内容")
+    current_content: Optional[str] = Field(None, description="当前文件内容")
+    diff: str = Field(default="", description="unified diff 文本")
+    read_error: Optional[str] = Field(None, description="读取当前文件时的错误信息（调试用）")

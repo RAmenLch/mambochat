@@ -327,6 +327,7 @@ import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { subscribeToPendingFile } from '@/services/sseService'
 import { getFileContent } from '@/api/fileService'
+import { unpackMcpToolCall } from '@/utils/mcpToolUnpack'
 import { ElMessage } from 'element-plus'
 import {
   Edit,
@@ -490,7 +491,8 @@ const mcpArguments = computed((): { query?: string } | null => {
 
 const mcpSummaryText = computed((): string => {
   if (!mcpContent.value) return t('chat.message.mcp.invalidCall')
-  const toolName = mcpContent.value.name || t('chat.message.mcp.unknownTool')
+  const unpacked = unpackMcpToolCall(mcpContent.value)
+  const toolName = unpacked.displayName
   const query = mcpArguments.value?.query || '...'
 
   if (isGenerating.value) {
@@ -588,9 +590,9 @@ const contentBlocks = computed(() => {
 
 const partitionTitle = computed(() => {
   if (props.subMessage.type === 'McpTool') {
-    return t('chat.message.mcp.toolCallTitle', {
-      name: mcpContent.value?.name || t('chat.message.mcp.unknownTool'),
-    })
+    const content = mcpContent.value
+    const name = content ? unpackMcpToolCall(content).displayName : t('chat.message.mcp.unknownTool')
+    return t('chat.message.mcp.toolCallTitle', { name })
   }
   if (props.subMessage.type === 'Reasoning') return t('chat.message.reasoning')
   if (props.subMessage.type === 'Normal') {

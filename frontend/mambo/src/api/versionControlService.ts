@@ -38,3 +38,25 @@ export async function restoreFiles(
     files,
   });
 }
+
+export interface DiffResponse {
+  path: string
+  checkpoint_id: string
+  old_content: string | null
+  current_content: string | null
+  diff: string
+  read_error: string | null
+}
+
+/** 对比历史版本与当前文件的差异 */
+export async function getFileDiff(
+  chatId: string,
+  path: string,
+  checkpointId: string,
+): Promise<DiffResponse> {
+  const cleanPath = path.startsWith('/') ? path.substring(1) : path;
+  return apiClient.get(
+    `/versions/${chatId}/diff/${cleanPath}`,
+    { params: { checkpoint_id: checkpointId } },
+  );
+}

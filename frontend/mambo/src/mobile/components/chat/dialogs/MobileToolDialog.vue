@@ -15,7 +15,7 @@
               <el-icon v-else color="var(--el-color-success)" :size="22"><CircleCheck /></el-icon>
             </div>
             <div class="tool-title-area">
-              <span class="tool-name">{{ currentTool?.name || 'Tool' }}</span>
+              <span class="tool-name">{{ currentUnpacked.displayName }}</span>
               <span class="tool-desc" v-if="currentDescription">{{ currentDescription }}</span>
             </div>
           </div>
@@ -151,6 +151,7 @@ import type { Message, SubMessage, McpToolContent, ReviewToolContent, SecurityRe
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { useMcpStore } from '@/stores/mcpStore'
+import { unpackMcpToolCall } from '@/utils/mcpToolUnpack'
 import { ElMessage } from 'element-plus'
 import { Warning, Loading, CircleClose, CircleCheck, Close, Edit, Select } from '@element-plus/icons-vue'
 
@@ -206,6 +207,11 @@ const currentTool = computed((): McpToolContent | ReviewToolContent | null => {
   try { return JSON.parse(activeMsg.value.content) } catch { return null }
 })
 
+const currentUnpacked = computed(() => {
+  if (!currentTool.value) return { displayName: 'Tool', effectiveName: 'Tool', isMcpWrapped: false, effectiveArgs: {} as Record<string, unknown>, serverName: undefined as string | undefined }
+  return unpackMcpToolCall(currentTool.value)
+})
+
 const mcpTool = computed((): McpToolContent | null => {
   if (activeMsg.value?.type !== 'McpTool') return null
   return currentTool.value as McpToolContent
@@ -213,6 +219,10 @@ const mcpTool = computed((): McpToolContent | null => {
 
 const currentArgs = computed(() => {
   if (!currentTool.value) return null
+  const unpacked = currentUnpacked.value
+  if (unpacked.isMcpWrapped) {
+    return unpacked.effectiveArgs as Record<string, unknown>
+  }
   const args = (currentTool.value as any).arguments
   if (typeof args === 'string') {
     try { return JSON.parse(args) } catch { return { input: args } }
@@ -310,7 +320,8 @@ function initEditForms() {
 function getTabLabel(msg: SubMessage): string {
   try {
     const c = JSON.parse(msg.content)
-    return c.name || 'Tool'
+    const unpacked = unpackMcpToolCall(c)
+    return unpacked.displayName
   } catch { return 'Tool' }
 }
 
@@ -357,7 +368,7 @@ async function confirmReject() {
 
 async function handleEditAndApprove() {
   if (!activeMsg.value || !props.parentMessageId) return
-  const toolName = currentTool.value?.name || 'Unknown'
+  const toolName = currentUnpacked.value.effectiveName
   const editedArgs: Record<string, unknown> = {}
   for (const key of Object.keys(editForms)) {
     const raw = editForms[key]

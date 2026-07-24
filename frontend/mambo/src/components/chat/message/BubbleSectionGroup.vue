@@ -52,7 +52,11 @@
         v-for="tool in group.toolSubMessages"
         :key="tool.id"
         class="minimized-item"
-        :class="{ 'has-review': tool.type === 'ReviewTool', 'has-ask-user': tool.type === 'AskUser' }"
+        :class="{
+          'has-review': tool.type === 'ReviewTool',
+          'has-ask-user': tool.type === 'AskUser',
+          'is-mcp-wrapped': isMcpWrapped(tool),
+        }"
         @click="$emit('open-tool-dialog', tool.id)"
       >
         <el-icon>
@@ -91,6 +95,7 @@ import type { Message, SubMessage, McpToolContent, ReviewToolContent, AskUserCon
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import SubMessageItem from '../SubMessageItem.vue';
 import type { BubbleSectionGroup } from '@/composables/useAssistantTimeline';
+import { unpackMcpToolCall } from '@/utils/mcpToolUnpack';
 import { Edit, CopyDocument, ArrowUpBold, ArrowDownBold, Warning, Loading, CircleClose, CircleCheck, QuestionFilled } from '@element-plus/icons-vue';
 
 const { t } = useI18n();
@@ -186,7 +191,16 @@ function getToolName(tool: SubMessage): string {
     return t('chat.askUser.toolName');
   }
   const content = getParsedContent(tool);
-  return content?.name || t('chat.message.mcp.unknownTool');
+  if (!content) return t('chat.message.mcp.unknownTool');
+  const unpacked = unpackMcpToolCall(content);
+  return unpacked.displayName;
+}
+
+function isMcpWrapped(tool: SubMessage): boolean {
+  if (tool.type === 'AskUser') return false;
+  const content = getParsedContent(tool);
+  if (!content) return false;
+  return unpackMcpToolCall(content).isMcpWrapped;
 }
 
 /** tool_call_id → SecurityReviewContent 映射 */
@@ -342,6 +356,15 @@ function fileGroupPreviewIndex(fileIdx: number): number {
   background-color: var(--el-color-primary-light-9);
 }
 .minimized-item.has-ask-user:hover {
+  border-color: var(--el-color-primary);
+  color: var(--el-color-primary);
+}
+
+.minimized-item.is-mcp-wrapped {
+  border-color: var(--el-color-primary-light-5);
+  background-color: var(--el-color-primary-light-9);
+}
+.minimized-item.is-mcp-wrapped:hover {
   border-color: var(--el-color-primary);
   color: var(--el-color-primary);
 }

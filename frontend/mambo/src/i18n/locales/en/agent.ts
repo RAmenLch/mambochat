@@ -136,4 +136,6 @@ export default {
   versionHistoryRollbackContinue: 'Rollback & Continue',
   versionHistoryRollbackStarted: 'Rollback and regeneration triggered, processing...',
   versionHistoryNoFiles: 'No files to rollback in this snapshot',
+  versionHistoryDiff: 'Diff',
+  versionHistoryDiffTitle: 'Diff',
 }

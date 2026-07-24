@@ -85,7 +85,10 @@
         v-for="tool in group.toolSubMessages"
         :key="tool.id"
         class="tool-chip"
-        :class="{ 'has-review': tool.type === 'ReviewTool' }"
+        :class="{
+          'has-review': tool.type === 'ReviewTool',
+          'is-mcp-wrapped': isMcpWrapped(tool),
+        }"
         @click.stop="$emit('open-tool-dialog', tool.id)"
       >
         <el-icon>
@@ -116,6 +119,7 @@ import { computed, ref } from 'vue'
 import type { Message, SubMessage, McpToolContent, ReviewToolContent, SecurityReviewContent, FileResponse } from '@/api/types'
 import SubMessageItem from '../SubMessageItem.vue'
 import type { BubbleSectionGroup } from '@/composables/useAssistantTimeline'
+import { unpackMcpToolCall } from '@/utils/mcpToolUnpack'
 import { Warning, Loading, CircleClose, CircleCheck, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
@@ -160,7 +164,9 @@ function getParsedContent(tool: SubMessage): McpToolContent | ReviewToolContent 
 
 function getToolName(tool: SubMessage): string {
   const content = getParsedContent(tool)
-  return content?.name || t('chat.message.mcp.unknownTool')
+  if (!content) return t('chat.message.mcp.unknownTool')
+  const unpacked = unpackMcpToolCall(content)
+  return unpacked.displayName
 }
 
 /** tool_call_id → SecurityReviewContent 映射 */
@@ -195,6 +201,12 @@ function isToolError(tool: SubMessage): boolean {
   if (tool.type !== 'McpTool') return false
   const content = getParsedContent(tool) as McpToolContent | null
   return content?.is_error || false
+}
+
+function isMcpWrapped(tool: SubMessage): boolean {
+  const content = getParsedContent(tool)
+  if (!content) return false
+  return unpackMcpToolCall(content).isMcpWrapped
 }
 
 /** 文件组中所有图片的聚合预览列表（用于键盘导航） */
@@ -356,6 +368,11 @@ function fileGroupPreviewIndex(fileIdx: number): number {
 .tool-chip.has-review {
   border-color: var(--el-color-warning-light-3);
   background-color: var(--el-color-warning-light-9);
+}
+
+.tool-chip.is-mcp-wrapped {
+  border-color: var(--el-color-primary-light-5);
+  background-color: var(--el-color-primary-light-9);
 }
 
 .tool-chip-title {

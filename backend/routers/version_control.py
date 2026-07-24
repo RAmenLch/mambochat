@@ -5,26 +5,23 @@
 """
 from __future__ import annotations
 
+import difflib
 import hashlib
 from datetime import datetime, timezone
-from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mambo_agents.backends.schemas import VirtualPath
-from mambo_agents.backends.ssh import SshBackend
 from mambo_agents.middleware.version_control import VersionStore
 
-from backend.crud import backend_crud
 from backend.database import AsyncSessionLocal
-from backend.models import chat_model, agent_model
 from backend.store import get_store as get_shared_store
 
 from backend.schemas.version_control import (
     VersionFileContentResponse,
+    DiffResponse,
 )
 from backend.schemas.message import (
     VersionSnapshotContent,
@@ -61,84 +58,25 @@ def _get_store() -> VersionStore:
     return VersionStore(store=get_shared_store())
 
 
-def _make_session_factory() -> Any:
-    """创建异步 session 工厂，与 builder 中的逻辑一致"""
-    from backend.database import AsyncSessionLocal
-    return lambda: AsyncSessionLocal()
+async def _build_restore_backend(db: AsyncSession, chat_id: str):
+    """获取 chat 关联的 Agent 的 Backend（复用生成任务同一套构建逻辑）。
 
-
-async def _build_restore_backend(db: AsyncSession, chat_id: str) -> Optional[Any]:
-    """获取 chat 关联的 Agent 默认 Backend 并构建实例。
-    
-    仅支持 Resource 和 SSH 类型 backend 的恢复写入。
+    Returns (backend, error_message). 成功时 error_message 为 None。
     """
-    # 1. 查找 chat
-    result = await db.execute(
-        select(chat_model.Chat).filter(chat_model.Chat.id == chat_id)
-    )
-    chat = result.scalars().first()
-    if chat is None:
-        return None
+    from backend.services.generation.agent.backend_factory import build_backend_from_chat_id
+    from mambo_agents.backends.store import StoreBackend
 
-    # 2. 查找 agent
-    if not chat.agentId:
-        return None
-    result = await db.execute(
-        select(agent_model.Agent).filter(agent_model.Agent.id == chat.agentId)
-    )
-    agent = result.scalars().first()
-    if agent is None:
-        return None
+    try:
+        backend = await build_backend_from_chat_id(db, chat_id)
+    except Exception as e:
+        return None, str(e)
 
-    # 3. 获取默认 backend
-    default_bid = agent.defaultBackendId
-    if not default_bid:
-        return None
-    backend_cfg = await backend_crud.get_backend(db, default_bid)
-    if backend_cfg is None:
-        return None
+    # StoreBackend 依赖 graph config 中的 thread_id 做命名空间隔离。
+    # 在 restore 上下文中没有 graph config，需显式注入 chat_id 作为 thread_id。
+    if hasattr(backend, '_real') and isinstance(backend._real, StoreBackend):
+        backend._real._thread_id = chat_id
 
-    # 4. 构建 backend 实例
-    b_type = backend_cfg.backendType
-    config = dict(backend_cfg.configData) if backend_cfg.configData else {}
-
-    if b_type == "resource":
-        from backend.services.generation.agent.mambo_resource_backend import MamboResourceBackend
-
-        resource_id = config.get("resource_id", "")
-        if not resource_id:
-            return None
-        return MamboResourceBackend(
-            resource_id=resource_id,
-            session_factory=_make_session_factory(),
-            workspace_root=VirtualPath("/workspace"),
-        )
-
-    elif b_type == "ssh":
-        from backend.utils.ssh_utils import get_or_create_system_ssh_key
-
-        priv_key_path = None
-        if not config.get("password"):
-            priv_key_path, _ = get_or_create_system_ssh_key()
-
-        return SshBackend(
-            host=config.get("hostname", ""),
-            port=config.get("port", 22),
-            username=config.get("username", ""),
-            password=config.get("password"),
-            key_filename=priv_key_path,
-            remote_root=config.get("root_dir", "~"),
-        )
-
-    elif b_type == "api":
-        from backend.services.generation.agent.mambo_api_backend import MamboAPIBackend
-
-        return MamboAPIBackend(
-            backend_id=backend_cfg.id,
-            backend_name=backend_cfg.name,
-        )
-
-    return None
+    return backend, None
 
 
 # ──────────────────────────── API Endpoints ────────────────────────────
@@ -167,6 +105,61 @@ async def get_file_version(
     )
 
 
+@router.get(
+    "/versions/{chat_id}/diff/{path:path}",
+    response_model=DiffResponse,
+    summary="对比历史版本与当前文件的差异",
+)
+async def get_file_diff(
+    chat_id: str,
+    path: str,
+    checkpoint_id: str = Query(..., description="目标 checkpoint ID"),
+):
+    store = _get_store()
+    old_content = await store.aget_file(chat_id, checkpoint_id, f"/{path}")
+
+    # 读取当前文件内容：先尝试 backend，失败则从 VersionStore 最新快照回退
+    current_content: str | None = None
+    read_error: str | None = None
+    async with AsyncSessionLocal() as db:
+        backend, build_err = await _build_restore_backend(db, chat_id)
+    if backend is not None:
+        try:
+            r = await backend.aread_raw(VirtualPath(f"/{path}"), limit=None)
+            if r.error:
+                read_error = f"aread_raw error: {r.error.code} - {r.error.message}"
+            else:
+                current_content = r.content
+        except Exception as e:
+            read_error = f"aread_raw exception: {e}"
+    else:
+        read_error = f"build backend failed: {build_err}"
+
+    # 回退：从 VersionStore 最新快照读取当前内容（StoreBackend 等场景兼容）
+    if current_content is None:
+        snapshots = await store.alist_snapshots(chat_id)
+        for snap in reversed(snapshots):
+            current_content = await store.aget_file(chat_id, snap.checkpoint_id, f"/{path}")
+            if current_content is not None:
+                break
+
+    old_lines = (old_content or "").splitlines(keepends=True)
+    cur_lines = (current_content or "").splitlines(keepends=True)
+
+    diff_text = "".join(
+        difflib.ndiff(old_lines, cur_lines)
+    )
+
+    return DiffResponse(
+        path=f"/{path}",
+        checkpoint_id=checkpoint_id,
+        old_content=old_content,
+        current_content=current_content,
+        diff=diff_text,
+        read_error=read_error,
+    )
+
+
 @router.post(
     "/versions/{chat_id}/restore",
     response_model=RestoreResponse,
@@ -186,12 +179,12 @@ async def restore_files(chat_id: str, body: RestoreRequest):
 
     # 构建 backend
     async with AsyncSessionLocal() as db:
-        backend = await _build_restore_backend(db, chat_id)
+        backend, err_msg = await _build_restore_backend(db, chat_id)
 
     if backend is None:
         raise HTTPException(
             status_code=400,
-            detail="Cannot build backend for restore. Ensure the Agent has a default backend (Resource/SSH/API).",
+            detail=f"Cannot build backend for restore: {err_msg}",
         )
 
     restored: list[str] = []
@@ -205,7 +198,7 @@ async def restore_files(chat_id: str, body: RestoreRequest):
 
         vp = VirtualPath(file_path)
         try:
-            result = backend.write(vp, content, overwrite=True)
+            result = await backend.awrite(vp, content, overwrite=True)
             if hasattr(result, 'error') and result.error:
                 errors.append(f"{file_path}: {result.error}")
             else:

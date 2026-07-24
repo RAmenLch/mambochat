@@ -19,7 +19,10 @@
       >
         <div class="tool-detail-container" v-if="getParsedContent(msg)">
           <div class="tool-header">
-            <h3>{{ getParsedContent(msg)?.name }}</h3>
+            <h3>
+              <span v-if="getMcpUnpacked(msg).isMcpWrapped" class="mcp-meta-tag">{{ t('chat.message.mcp.mcpTool') }}</span>
+              {{ getMcpUnpacked(msg).displayName }}
+            </h3>
             <p v-if="getToolDescription(msg)" class="tool-desc">
               {{ getToolDescription(msg) }}
             </p>
@@ -185,6 +188,7 @@ import { useMcpStore } from '@/stores/mcpStore';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { useChatSessionStore } from '@/stores/chatSessionStore';
 import type { SubMessage, McpToolContent, ReviewToolContent, ToolDecision, SchemaProperty, TaskSubStepContent, Message, SecurityReviewContent } from '@/api/types';
+import { unpackMcpToolCall } from '@/utils/mcpToolUnpack';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import TaskSubAgentPanel from '../task/TaskSubAgentPanel.vue';
 
@@ -283,11 +287,12 @@ const toolMessages = computed(() => {
   }
 });
 
-/** 从当前 toolMessages 中找到 task 工具的 tool_call_id */
+/** 从当前 toolMessages 中找到 task 工具的 tool_call_id（支持拆包后的内层工具名） */
 const taskToolCallId = computed(() => {
   for (const msg of toolMessages.value) {
     const content = getParsedContent(msg) as McpToolContent | null;
-    if (content?.name === 'task' && content?.tool_call_id) {
+    const effectiveName = content ? unpackMcpToolCall(content).effectiveName : '';
+    if ((content?.name === 'task' || effectiveName === 'task') && content?.tool_call_id) {
       return content.tool_call_id;
     }
   }
@@ -421,6 +426,12 @@ function getParsedContent(msg: SubMessage): McpToolContent | ReviewToolContent |
   }
 }
 
+function getMcpUnpacked(msg: SubMessage) {
+  const content = getParsedContent(msg);
+  if (!content) return { displayName: 'Unknown', effectiveName: 'Unknown', isMcpWrapped: false, effectiveArgs: {} as Record<string, unknown> | string, serverName: undefined as string | undefined };
+  return unpackMcpToolCall(content);
+}
+
 function getToolDescription(msg: SubMessage): string {
   const content = getParsedContent(msg);
   if (!content) return '';
@@ -431,9 +442,9 @@ function getToolDescription(msg: SubMessage): string {
 }
 
 function getTabLabel(msg: SubMessage): string {
-  const content = getParsedContent(msg);
-  const name = content?.name || 'Unknown';
-  const prefix = msg.type === 'ReviewTool' ? '⏳' : '🛠️';
+  const unpacked = getMcpUnpacked(msg);
+  const name = unpacked.displayName;
+  const prefix = msg.type === 'ReviewTool' ? '⏳' : (unpacked.isMcpWrapped ? '🛜' : '🛠️');
   return `${prefix} ${name}`;
 }
 
@@ -524,23 +535,29 @@ function initForms() {
   const forms: Record<string, Record<string, unknown>> = {};
   toolMessages.value.forEach(msg => {
     const content = getParsedContent(msg);
+    const unpacked = content ? unpackMcpToolCall(content) : null;
     let argsObj: Record<string, unknown> = {};
 
     if (content) {
       if (msg.type === 'McpTool') {
-        const mcpContent = content as McpToolContent;
-        if (typeof mcpContent.arguments === 'string') {
+        const rawArgs = unpacked?.isMcpWrapped
+          ? unpacked.effectiveArgs
+          : (content as McpToolContent).arguments;
+        if (typeof rawArgs === 'string') {
           try {
-            argsObj = JSON.parse(mcpContent.arguments);
+            argsObj = JSON.parse(rawArgs);
           } catch {
             argsObj = {};
           }
-        } else if (typeof mcpContent.arguments === 'object') {
-          argsObj = mcpContent.arguments;
+        } else if (typeof rawArgs === 'object') {
+          argsObj = rawArgs as Record<string, unknown>;
         }
       } else if (msg.type === 'ReviewTool') {
-        const reviewContent = content as ReviewToolContent;
-        argsObj = reviewContent.arguments || {};
+        if (unpacked?.isMcpWrapped) {
+          argsObj = unpacked.effectiveArgs as Record<string, unknown>;
+        } else {
+          argsObj = (content as ReviewToolContent).arguments || {};
+        }
       }
     }
 
@@ -600,7 +617,7 @@ async function submitDecision(subMessageId: string, type: 'approve' | 'edit' | '
   if (type === 'edit') {
     const msg = toolMessages.value.find(m => m.id === subMessageId);
     const content = msg ? getParsedContent(msg) : null;
-    const toolName = content?.name || 'Unknown';
+    const toolName = content ? unpackMcpToolCall(content).effectiveName : 'Unknown';
 
     decision.edited_action = {
       name: toolName,
@@ -677,6 +694,16 @@ async function submitDecision(subMessageId: string, type: 'approve' | 'edit' | '
 
 .tool-detail-container {
   padding: 10px;
+}
+.mcp-meta-tag {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background-color: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  font-weight: 500;
+  vertical-align: middle;
+  margin-right: 6px;
 }
 .tool-header h3 {
   margin: 0 0 8px 0;

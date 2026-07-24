@@ -124,6 +124,7 @@ export default {
       executionError: 'Tool execution error.',
       parseError: 'Failed to parse tool call content',
       toolCallTitle: 'Tool Call: {name}',
+      mcpTool: 'MCP',
       batchReview: 'Batch Review Tools',
       arguments: 'Arguments',
       noArguments: 'No arguments',

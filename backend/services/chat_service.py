@@ -9,7 +9,7 @@ import re
 from backend.crud import chat_crud, message_crud, setting_crud
 from backend import schemas
 from backend.models import chat_model
-from backend.schemas.enums import MessageStatus, MoveAction
+from backend.schemas.enums import MessageStatus, SubMessageType, MoveAction
 
 
 async def duplicate_chat_with_messages(
@@ -85,6 +85,8 @@ async def duplicate_chat_with_messages(
 
             new_sub_messages = []
             for sub in msg.sub_messages:
+                if sub.type == SubMessageType.VERSION_SNAPSHOT.value:
+                    continue
                 safe_status = sub.status
                 if safe_status in [MessageStatus.GENERATING.value, MessageStatus.PENDING_REVIEW.value]:
                     safe_status = MessageStatus.FAILED.value

@@ -136,4 +136,6 @@ export default {
   versionHistoryRollbackContinue: '回滚并从此继续',
   versionHistoryRollbackStarted: '已触发回滚并重新生成，正在处理...',
   versionHistoryNoFiles: '该快照没有可回滚的文件',
+  versionHistoryDiff: '差异',
+  versionHistoryDiffTitle: '差异对比',
 }

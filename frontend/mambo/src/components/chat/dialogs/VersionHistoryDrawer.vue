@@ -62,6 +62,14 @@
                   >
                     {{ $t('agent.versionHistoryRestoreFile') }}
                   </el-button>
+                  <el-button
+                    link
+                    size="small"
+                    class="diff-file-btn"
+                    @click.stop="openFileDiff(snap.checkpoint_id, file)"
+                  >
+                    {{ $t('agent.versionHistoryDiff') }}
+                  </el-button>
                 </li>
               </ul>
               <div v-if="snap.file_count > 0" class="snapshot-actions">
@@ -184,6 +192,32 @@
         <pre class="file-content-code"><code>{{ viewingFileContent }}</code></pre>
       </div>
     </el-dialog>
+
+    <!-- 差异对比弹窗 -->
+    <el-dialog
+      v-model="diffDialogVisible"
+      :title="$t('agent.versionHistoryDiffTitle') + ': ' + diffFilePath"
+      width="850px"
+      destroy-on-close
+    >
+      <div v-if="diffDialogLoading" class="file-dialog-loading">
+        <el-skeleton :rows="10" animated />
+      </div>
+      <div v-else-if="diffError" class="file-dialog-error">
+        {{ diffError }}
+      </div>
+      <div v-else-if="diffReadError" class="file-dialog-error" style="color: var(--el-color-warning);">
+        {{ diffReadError }}
+      </div>
+      <div v-else class="diff-content-wrapper">
+        <pre class="diff-content-code"><code><template
+          v-for="(line, i) in diffLines"
+          :key="i"
+        ><span
+          :class="line.type"
+        >{{ line.text }}</span></template></code></pre>
+      </div>
+    </el-dialog>
   </el-drawer>
 </template>
 
@@ -192,7 +226,7 @@ import { ref, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { ElMessage } from 'element-plus';
 import { Document, CopyDocument, RefreshRight, CircleCheck, CircleClose, ChatLineSquare, ArrowRight } from '@element-plus/icons-vue';
-import { getFileVersion, restoreFiles } from '@/api/versionControlService';
+import { getFileVersion, restoreFiles, getFileDiff } from '@/api/versionControlService';
 
 interface RollbackRecord {
   target_checkpoint_id: string;
@@ -275,7 +309,7 @@ const snapshots = computed<VersionSnapshotItem[]>(() => {
     }
   }
 
-  return [...snapshotMap.values()].sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+  return [...snapshotMap.values()].sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
 });
 
 // 文件内容弹窗
@@ -293,6 +327,14 @@ const pendingRestoreCpid = ref('');
 const restoringCpid = ref('');
 const restoringFile = ref('');
 const expandedRollbacks = ref<Set<string>>(new Set());
+
+// diff 弹窗
+const diffDialogVisible = ref(false);
+const diffDialogLoading = ref(false);
+const diffError = ref('');
+const diffReadError = ref('');
+const diffFilePath = ref('');
+const diffLines = ref<{ type: string; text: string }[]>([]);
 
 function handleUpdateModelValue(value: boolean) {
   emit('update:visible', value);
@@ -332,6 +374,47 @@ async function copyFileContent() {
     ElMessage.success(t('agent.versionHistoryContentCopied'));
   } catch {
     ElMessage.error('Copy failed');
+  }
+}
+
+function parseDiff(diffText: string): { type: string; text: string }[] {
+  const lines: { type: string; text: string }[] = [];
+  for (const line of diffText.split('\n')) {
+    if (line.startsWith('+ ')) {
+      lines.push({ type: 'diff-add', text: line });
+    } else if (line.startsWith('- ')) {
+      lines.push({ type: 'diff-del', text: line });
+    } else if (line.startsWith('? ')) {
+      lines.push({ type: 'diff-hint', text: line });
+    } else {
+      lines.push({ type: 'diff-context', text: line });
+    }
+  }
+  return lines;
+}
+
+async function openFileDiff(checkpointId: string, filePath: string) {
+  if (!props.chatId) return;
+  diffFilePath.value = filePath;
+  diffLines.value = [];
+  diffError.value = '';
+  diffReadError.value = '';
+  diffDialogVisible.value = true;
+  diffDialogLoading.value = true;
+
+  try {
+    const result = await getFileDiff(props.chatId, filePath, checkpointId);
+    diffLines.value = parseDiff(result.diff);
+    if (!result.diff) {
+      diffError.value = 'No differences found';
+    }
+    if (result.read_error) {
+      diffReadError.value = result.read_error;
+    }
+  } catch (err: any) {
+    diffError.value = err?.response?.data?.detail || err?.message || 'Failed to load diff';
+  } finally {
+    diffDialogLoading.value = false;
   }
 }
 
@@ -693,5 +776,76 @@ async function executeRestore() {
 
 .file-content-code code {
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+.diff-file-btn {
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+  font-size: 12px;
+  margin-left: 2px;
+}
+
+.changed-file-item:hover .diff-file-btn {
+  opacity: 1;
+}
+
+.diff-content-wrapper {
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.diff-content-code {
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-x: auto;
+  white-space: pre;
+  background: var(--el-fill-color);
+  border-radius: 8px;
+}
+
+.diff-content-code code {
+  display: block;
+  padding: 12px 0;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+.diff-content-code span {
+  display: block;
+  padding: 0 16px;
+}
+
+.diff-add {
+  background: #e6ffec;
+  color: #1a7f37;
+}
+
+.diff-del {
+  background: #ffebe9;
+  color: #cf222e;
+}
+
+.diff-hunk {
+  background: #ddf4ff;
+  color: #0969da;
+  font-weight: 600;
+}
+
+.diff-header {
+  background: #f6f8fa;
+  color: #57606a;
+  font-weight: 600;
+}
+
+.diff-context {
+  background: transparent;
+  color: var(--el-text-color-regular);
+}
+
+.diff-hint {
+  background: #fff8c5;
+  color: #9a6700;
 }
 </style>

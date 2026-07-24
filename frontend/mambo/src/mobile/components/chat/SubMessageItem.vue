@@ -210,6 +210,7 @@ import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { subscribeToPendingFile } from '@/services/sseService'
 import { getFileContent } from '@/api/fileService'
+import { unpackMcpToolCall } from '@/utils/mcpToolUnpack'
 import { ElMessage } from 'element-plus'
 import {
   Edit,
@@ -311,7 +312,8 @@ const isReviewDecided = computed(() => {
 
 const toolSummaryText = computed((): string => {
   if (!toolContent.value) return t('chat.message.mcp.invalidCall')
-  const toolName = toolContent.value.name || t('chat.message.mcp.unknownTool')
+  const unpacked = unpackMcpToolCall(toolContent.value)
+  const toolName = unpacked.displayName
 
   if (props.subMessage.type === 'ReviewTool') {
     if (!isReviewDecided.value) return t('chat.message.pendingReview')
@@ -410,7 +412,10 @@ const contentBlocks = computed(() => {
 })
 
 const partitionTitle = computed(() => {
-  if (isToolType.value) return t('chat.message.mcp.toolCallTitle', { name: toolContent.value?.name || 'Tool' })
+  if (isToolType.value) {
+    const name = toolContent.value ? unpackMcpToolCall(toolContent.value).displayName : 'Tool'
+    return t('chat.message.mcp.toolCallTitle', { name })
+  }
   if (props.subMessage.type === 'Reasoning') return t('chat.message.reasoning')
   if (props.subMessage.type === 'Normal') return t('chat.message.content')
   return `Part ${props.index}`
