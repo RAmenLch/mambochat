@@ -954,6 +954,7 @@ watch(agentData, async (newVal) => {
       memory_resource_ids: [],
       summarization_config: null,
       security_review: null,
+      mcp_direct_tool_threshold: 0,
     };
     form.mambo_general_purpose = mamboParams.include_general_purpose ?? false;
     form.mambo_planning_enabled = mamboParams.enable_planning ?? true;

@@ -46,7 +46,7 @@
       <transition name="gal-fade">
         <div v-if="galAvatarState.visible" class="gal-avatar-panel">
           <transition name="gal-img">
-            <img :key="galAvatarState.imageUrl" :src="galAvatarState.imageUrl!" class="gal-avatar-image" />
+            <img :key="galAvatarState.imageUrl ?? undefined" :src="galAvatarState.imageUrl!" class="gal-avatar-image" />
           </transition>
         </div>
       </transition>
