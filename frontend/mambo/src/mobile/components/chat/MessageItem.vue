@@ -449,6 +449,16 @@ const avatarUrl = computed(() => {
     return resolveFileUrl(globalSettings.value.user_avatar_url)
   }
   if (props.message.role === 'assistant') {
+    // Mini_Avatar 模式：优先使用 show 工具设置的图片作为头像
+    const miniAvatarSub = props.message.sub_messages.find(
+      sm => sm.type === 'File' &&
+        sm.config?.show_tool_mode === 'Mini_Avatar' &&
+        sm.file_info?.mime_type?.startsWith('image/')
+    )
+    if (miniAvatarSub?.file_info?.url) {
+      return miniAvatarSub.file_info.url
+    }
+
     const currentChat = sessionStore.currentChat
     if (currentChat?.chatMode === 'agent' && currentChat.agentId) {
       const agent = agentStore.allAgents.find(a => a.id === currentChat.agentId)

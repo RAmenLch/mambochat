@@ -90,6 +90,7 @@ class SubMessageConfig(BaseModel):
     task_group_id: Optional[str] = Field(None, description="【仅用于TaskSubStep类型】子代理任务分组键（= 主代理 task tool_call_id）")
     pending_file_path: Optional[str] = Field(None, description="【仅用于File类型】标记该分区文件尚待生成，非空时前端应连接 SSE 等待")
     pending_file_timeout: Optional[int] = Field(None, description="【仅用于File类型】最大等待秒数")
+    show_tool_mode: Optional[str] = Field(None, description="【仅用于File类型】show 工具的 mode 参数透传：Normal / Mini_Avatar / Gal_Avatar / Group")
 
 
 class SubMessageBase(BaseModel):

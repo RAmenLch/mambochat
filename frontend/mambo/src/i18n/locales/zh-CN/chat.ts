@@ -83,6 +83,8 @@ export default {
     expandReasoning: '展开思考',
     minimizeReasoning: '最小化思考',
     reasoningCollapsed: '思考',
+    expandSpark: '显示完整内容',
+    collapseSpark: '收起为 Spark 视图',
     content: '正文',
     zipGenerating: '摘要生成中...',
     zipHistory: '历史摘要',
@@ -247,5 +249,8 @@ export default {
     reasoning: '思考',
     toolResult: '工具结果',
     noSteps: '暂无追踪步骤',
+  },
+  file: {
+    groupPinned: '已置顶',
   },
 }

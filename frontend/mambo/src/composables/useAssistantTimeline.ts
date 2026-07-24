@@ -1,6 +1,6 @@
 // frontend/mambo/src/composables/useAssistantTimeline.ts
 
-import { computed, type Ref } from 'vue';
+import { computed, ref, type Ref } from 'vue';
 import type { Message, SubMessage, ReviewToolContent, AskUserContent, TaskSubStepContent } from '@/api/types';
 
 /** 时间线中的一个分组：一段文本 + 跟随的工具调用 */
@@ -65,9 +65,41 @@ export function useAssistantTimeline(message: Ref<Message>, messageDisplayMode?:
       if (sm.type === 'AskUser' && isAskUserAnswered(sm)) {
         return false;
       }
+      // 排除 Mini_Avatar / Gal_Avatar 模式的 File 子消息（它们仅在头像或侧边栏展示，不在消息内容区展示）
+      if (sm.type === 'File' && sm.config?.show_tool_mode && ['Mini_Avatar', 'Gal_Avatar'].includes(sm.config.show_tool_mode)) {
+        return false;
+      }
       return true;
     }).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   });
+
+  // Spark 模式：消息中存在 Spark mode 文件时，默认折叠所有非 Spark/Group 内容
+  const hasSparkMode = computed(() =>
+    message.value.sub_messages.some(
+      sm => sm.type === 'File' && sm.config?.show_tool_mode === 'Spark'
+    )
+  )
+  const isSparkCollapsed = ref(true)
+
+  function toggleSpark() {
+    isSparkCollapsed.value = !isSparkCollapsed.value
+  }
+
+  // 应用 Spark 折叠：仅保留 Spark / Group 模式的 File
+  const sparkFilteredTimeline = computed(() => {
+    if (!hasSparkMode.value || !isSparkCollapsed.value) return timelineSubMessages.value
+    return timelineSubMessages.value.filter(sm => {
+      if (sm.type === 'File') {
+        const mode = sm.config?.show_tool_mode
+        return mode === 'Spark' || mode === 'Group'
+      }
+      return false
+    })
+  })
+
+  const effectiveTimeline = computed(() =>
+    hasSparkMode.value ? sparkFilteredTimeline.value : timelineSubMessages.value
+  )
 
   // 2. 核心分组算法
   const timeline = computed(() => {
@@ -87,7 +119,7 @@ export function useAssistantTimeline(message: Ref<Message>, messageDisplayMode?:
       }
     };
 
-    for (const sm of timelineSubMessages.value) {
+    for (const sm of effectiveTimeline.value) {
       if (sm.type === 'Reasoning') {
         pushCurrentGroup();
         currentSection = 'reasoning';
@@ -99,8 +131,10 @@ export function useAssistantTimeline(message: Ref<Message>, messageDisplayMode?:
         currentGroup = { id: sm.id, textSubMessage: sm, toolSubMessages: [] };
       }
       else if (sm.type === 'File') {
-        // 连续 File 类型合并到同一个分组，以便同行展示多张图片
-        if (currentGroup && currentGroup.fileSubMessages && currentGroup.fileSubMessages.length > 0) {
+        // 连续同 mode 的 File 合并到同一个分组；不同 mode 则分到不同组
+        const smMode = sm.config?.show_tool_mode || 'Normal'
+        const lastGroupMode = currentGroup?.fileSubMessages?.[0]?.config?.show_tool_mode || 'Normal'
+        if (currentGroup && currentGroup.fileSubMessages && currentGroup.fileSubMessages.length > 0 && smMode === lastGroupMode) {
           currentGroup.fileSubMessages.push(sm);
         } else {
           pushCurrentGroup();
@@ -153,7 +187,7 @@ export function useAssistantTimeline(message: Ref<Message>, messageDisplayMode?:
       currentSection = null;
     };
 
-    for (const sm of timelineSubMessages.value) {
+    for (const sm of effectiveTimeline.value) {
       if (sm.type === 'Reasoning') {
         // 如果当前 section 已经是 reasoning，追加到其中（合并连续思考）
         if (currentSection && currentSection.type === 'reasoning') {
@@ -172,10 +206,12 @@ export function useAssistantTimeline(message: Ref<Message>, messageDisplayMode?:
           groups: [{ id: sm.id, textSubMessage: sm, toolSubMessages: [] }],
         };
       } else if (sm.type === 'File') {
-        // File 类型放入 Normal section
+        // File 类型放入 Normal section；同 mode 合并，不同 mode 分到不同组
+        const smMode = sm.config?.show_tool_mode || 'Normal'
         if (currentSection && currentSection.type === 'normal') {
           const lastGroup = currentSection.groups[currentSection.groups.length - 1];
-          if (lastGroup.fileSubMessages && lastGroup.fileSubMessages.length > 0) {
+          const lastGroupMode = lastGroup.fileSubMessages?.[0]?.config?.show_tool_mode || 'Normal'
+          if (lastGroup.fileSubMessages && lastGroup.fileSubMessages.length > 0 && smMode === lastGroupMode) {
             lastGroup.fileSubMessages.push(sm);
           } else {
             currentSection.groups.push({ id: sm.id, textSubMessage: null, toolSubMessages: [], fileSubMessages: [sm] });
@@ -360,5 +396,8 @@ export function useAssistantTimeline(message: Ref<Message>, messageDisplayMode?:
     isReasoningMinimized,
     hasPendingReviews,
     taskSubAgentGroups,
+    hasSparkMode,
+    isSparkCollapsed,
+    toggleSpark,
   };
 }

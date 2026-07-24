@@ -128,6 +128,15 @@ async def _poll_and_persist_file(
                     )
                     print(f"[PendingFile] File saved: id={db_file.id} filename={filename} mime={mime}")
 
+                    # 保留创建时设置的 show_tool_mode（防止轮询完成时被覆盖）
+                    existing_sub = await message_crud.get_sub_message(db, sub_message_id)
+                    show_tool_mode = None
+                    if existing_sub and existing_sub.config:
+                        raw_cfg = existing_sub.config
+                        if isinstance(raw_cfg, str):
+                            raw_cfg = json.loads(raw_cfg)
+                        show_tool_mode = raw_cfg.get("show_tool_mode") if isinstance(raw_cfg, dict) else getattr(raw_cfg, "show_tool_mode", None)
+
                     await message_crud.update_sub_message(
                         db,
                         sub_message_id,
@@ -138,6 +147,7 @@ async def _poll_and_persist_file(
                                 context_participation_length=0,
                                 pending_file_path=None,
                                 pending_file_timeout=None,
+                                show_tool_mode=show_tool_mode,
                             ),
                         ),
                     )
@@ -210,6 +220,11 @@ async def _start_generation_task(
         background_tasks.add_task(generation_service._run_managed_generation_task, chat_id, assistant_message_id)
 
 
+async def _touch_chat_task(chat_id: str):
+    async with AsyncSessionLocal() as db:
+        await chat_crud.touch_chat(db, chat_id)
+
+
 async def _hydrate_and_validate_messages(
         db_messages: List[chat_model.Message],
         db: AsyncSession
@@ -248,10 +263,10 @@ async def _hydrate_and_validate_messages(
     summary="获取单个会话及其消息",
     response_model_exclude_none=True
 )
-async def read_chat_with_messages(chat_id: str, db: AsyncSession = Depends(get_db)):
-    await chat_crud.touch_chat(db, chat_id=chat_id)
+async def read_chat_with_messages(chat_id: str, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+    background_tasks.add_task(_touch_chat_task, chat_id)
 
-    db_chat = await chat_crud.get_chat(db, chat_id=chat_id)
+    db_chat = await chat_crud.get_chat_meta(db, chat_id=chat_id)
     if db_chat is None:
         raise HTTPException(status_code=404, detail="Chat not found")
 
@@ -262,7 +277,8 @@ async def read_chat_with_messages(chat_id: str, db: AsyncSession = Depends(get_d
     default_model_id = default_model_setting.value if default_model_setting else None
     _apply_default_model_to_chat_object(db_chat, default_model_id)
 
-    chat_response = schemas.ChatWithMessages.model_validate(db_chat)
+    chat_data = schemas.Chat.model_validate(db_chat)
+    chat_response = schemas.ChatWithMessages(**chat_data.model_dump())
 
     active_messages = await message_crud.get_messages_by_chat(db, chat_id=chat_id)
     chat_response.messages = await _hydrate_and_validate_messages(active_messages, db)

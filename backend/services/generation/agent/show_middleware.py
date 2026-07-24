@@ -8,7 +8,7 @@ up the result and emits a ``FILE`` sub-message for frontend display.
 
 import json
 from pathlib import PurePosixPath
-from typing import Callable
+from typing import Callable, Literal
 
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.messages import ToolMessage
@@ -28,6 +28,17 @@ class ShowInput(BaseModel):
     """Args schema for the ``show`` tool."""
 
     path: str = Field(description="文件虚拟路径，例如 /workspace/image.png")
+    mode: Literal["Normal", "Mini_Avatar", "Gal_Avatar", "Group", "Spark"] = Field(
+        default="Normal",
+        description=(
+            "Display mode for the file:\n"
+            "- Normal: default inline file display\n"
+            "- Mini_Avatar: use image as conversation AI avatar\n"
+            "- Gal_Avatar: pin image to left side above toolbar, push AI messages right\n"
+            "- Group: group consecutive File images, allow user to pin one to top\n"
+            "- Spark: hide all other content (text/reasoning/tools), only show Spark + Group files"
+        ),
+    )
     wait_timeout: int = Field(
         default=0,
         description=(
@@ -115,7 +126,7 @@ class ShowMiddleware(AgentMiddleware):
     # Tool implementation
     # ------------------------------------------------------------------
 
-    async def _ashow(self, path: str, wait_timeout: int = 0) -> str:
+    async def _ashow(self, path: str, mode: str = "Normal", wait_timeout: int = 0) -> str:
         """Core logic: check existence → download → persist → return metadata."""
         # 1. 先检查文件是否存在
         try:
@@ -132,13 +143,14 @@ class ShowMiddleware(AgentMiddleware):
                     "status": "pending",
                     "path": path,
                     "timeout": wait_timeout,
+                    "mode": mode,
                 }, ensure_ascii=False)
-            return json.dumps({"error": f"File not found: {path}"}, ensure_ascii=False)
+            return json.dumps({"error": f"File not found: {path}", "mode": mode}, ensure_ascii=False)
 
         # 3. 文件存在 → 下载 + 持久化
         content_bytes, error = await _download_safe(self._backend, path)
         if error:
-            return json.dumps({"error": error}, ensure_ascii=False)
+            return json.dumps({"error": error, "mode": mode}, ensure_ascii=False)
 
         filename = PurePosixPath(path).name
         mime = _get_mime_type(path)
@@ -176,6 +188,7 @@ class ShowMiddleware(AgentMiddleware):
             "file_id": db_file.id,
             "filename": filename,
             "mime_type": mime,
+            "mode": mode,
         }, ensure_ascii=False)
 
     # ------------------------------------------------------------------

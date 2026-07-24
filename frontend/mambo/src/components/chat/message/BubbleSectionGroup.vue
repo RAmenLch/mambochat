@@ -33,17 +33,67 @@
 
     <!-- 文件/图片分组区域（连续多图合并同行展示） -->
     <div class="group-files-wrapper" v-if="group.fileSubMessages && group.fileSubMessages.length > 0">
-      <SubMessageItem
-        v-for="(fileMsg, fileIdx) in group.fileSubMessages"
-        :key="fileMsg.id"
-        :sub-message="fileMsg"
-        :parent-message="parentMessage"
-        :show-header="false"
-        :is-inline="false"
-        :preview-src-list="fileGroupPreviewList"
-        :preview-index="fileGroupPreviewIndex(fileIdx)"
-        @edit-file="(file) => $emit('edit-file', file)"
-      />
+      <!-- Group 模式：聚合容器 + 左右箭头切换 + 层叠效果 -->
+      <div v-if="isGroupMode" class="group-mode-container">
+        <div class="group-mode-main" v-if="pinnedFileMsg">
+          <div
+            v-if="group.fileSubMessages && group.fileSubMessages.length > 1"
+            class="group-mode-arrow group-mode-arrow-left"
+            @click="pinPrev"
+          >
+            <el-icon><ArrowLeft /></el-icon>
+          </div>
+          <div class="group-mode-stack-wrapper">
+            <!-- 后面的层（装饰堆叠效果） -->
+            <div
+              v-for="(fileMsg, idx) in group.fileSubMessages"
+              :key="'bg-' + fileMsg.id"
+              class="group-mode-stack-bg"
+              :class="{ 'is-hidden': pinnedFileId === fileMsg.id }"
+              :style="bgLayerStyle(idx)"
+            >
+              <img
+                v-if="fileMsg.file_info?.mime_type?.startsWith('image/')"
+                :src="fileMsg.file_info.url"
+              />
+            </div>
+            <!-- 最前面的大图（SubMessageItem） -->
+            <div class="group-mode-stack-front">
+              <SubMessageItem
+                :sub-message="pinnedFileMsg"
+                :parent-message="parentMessage"
+                :show-header="false"
+                :is-inline="false"
+                :preview-src-list="fileGroupPreviewList"
+                :preview-index="fileGroupPreviewIndex(getPinnedIndex())"
+                @edit-file="(file) => $emit('edit-file', file)"
+              />
+            </div>
+          </div>
+          <div
+            v-if="group.fileSubMessages && group.fileSubMessages.length > 1"
+            class="group-mode-arrow group-mode-arrow-right"
+            @click="pinNext"
+          >
+            <el-icon><ArrowRight /></el-icon>
+          </div>
+        </div>
+      </div>
+
+      <!-- 默认模式：原有平铺展示 -->
+      <template v-else>
+        <SubMessageItem
+          v-for="(fileMsg, fileIdx) in group.fileSubMessages"
+          :key="fileMsg.id"
+          :sub-message="fileMsg"
+          :parent-message="parentMessage"
+          :show-header="false"
+          :is-inline="false"
+          :preview-src-list="fileGroupPreviewList"
+          :preview-index="fileGroupPreviewIndex(fileIdx)"
+          @edit-file="(file) => $emit('edit-file', file)"
+        />
+      </template>
     </div>
 
     <!-- 工具调用小气泡 -->
@@ -96,7 +146,7 @@ import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import SubMessageItem from '../SubMessageItem.vue';
 import type { BubbleSectionGroup } from '@/composables/useAssistantTimeline';
 import { unpackMcpToolCall } from '@/utils/mcpToolUnpack';
-import { Edit, CopyDocument, ArrowUpBold, ArrowDownBold, Warning, Loading, CircleClose, CircleCheck, QuestionFilled } from '@element-plus/icons-vue';
+import { Edit, CopyDocument, ArrowUpBold, ArrowDownBold, Warning, Loading, CircleClose, CircleCheck, QuestionFilled, Document, ArrowLeft, ArrowRight } from '@element-plus/icons-vue';
 
 const { t } = useI18n();
 
@@ -175,6 +225,67 @@ function toggleCollapse() {
         data: { config: { ...props.group.textSubMessage.config, is_collapsed: !isTextCollapsed.value } }
       });
     }
+  }
+}
+
+// --- Group 模式：文件图片聚合 + 置顶 ---
+
+/** 当前 group 中所有 File 子消息是否都是 Group 模式 */
+const isGroupMode = computed(() => {
+  if (!props.group.fileSubMessages || props.group.fileSubMessages.length <= 1) return false
+  return props.group.fileSubMessages.every(
+    sm => sm.type === 'File' && sm.config?.show_tool_mode === 'Group'
+  )
+})
+
+/** 当前置顶的文件 ID（默认第一张） */
+const pinnedFileId = ref<string | null>(null)
+
+/** 置顶的 File 子消息 */
+const pinnedFileMsg = computed(() => {
+  const targetId = pinnedFileId.value || props.group.fileSubMessages?.[0]?.id || null
+  return props.group.fileSubMessages?.find(sm => sm.id === targetId) || null
+})
+
+/** 置顶图片在预览列表中的索引 */
+function getPinnedIndex(): number {
+  if (!props.group.fileSubMessages || !pinnedFileMsg.value) return 0
+  let imgIdx = 0
+  for (const sm of props.group.fileSubMessages) {
+    if (sm.type === 'File' && sm.file_info?.mime_type?.startsWith('image/')) {
+      if (sm.id === pinnedFileMsg.value.id) return imgIdx
+      imgIdx++
+    }
+  }
+  return 0
+}
+
+function pinFile(fileId: string) {
+  pinnedFileId.value = fileId
+}
+
+function pinNext() {
+  if (!props.group.fileSubMessages || props.group.fileSubMessages.length === 0) return
+  const currentId = pinnedFileId.value || props.group.fileSubMessages[0].id
+  const idx = props.group.fileSubMessages.findIndex(sm => sm.id === currentId)
+  const nextIdx = (idx + 1) % props.group.fileSubMessages.length
+  pinnedFileId.value = props.group.fileSubMessages[nextIdx].id
+}
+
+function pinPrev() {
+  if (!props.group.fileSubMessages || props.group.fileSubMessages.length === 0) return
+  const currentId = pinnedFileId.value || props.group.fileSubMessages[0].id
+  const idx = props.group.fileSubMessages.findIndex(sm => sm.id === currentId)
+  const prevIdx = (idx - 1 + props.group.fileSubMessages.length) % props.group.fileSubMessages.length
+  pinnedFileId.value = props.group.fileSubMessages[prevIdx].id
+}
+
+function bgLayerStyle(idx: number) {
+  if (!props.group.fileSubMessages) return {}
+  const total = props.group.fileSubMessages.length
+  const isActive = pinnedFileId.value === props.group.fileSubMessages[idx].id
+  return {
+    zIndex: isActive ? total + 1 : total - idx,
   }
 }
 
@@ -408,5 +519,90 @@ function fileGroupPreviewIndex(fileIdx: number): number {
 .zip-coverage-arrow:hover {
   color: var(--el-color-success);
   transform: translateY(-1px);
+}
+
+/* ========== Group 模式：层叠堆叠效果 + 左右箭头 ========== */
+.group-mode-container {
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 8px;
+  padding: 8px;
+  background-color: var(--el-fill-color-lighter);
+}
+
+.group-mode-main {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.group-mode-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 20;
+  opacity: 0;
+  transition: opacity 0.2s;
+  font-size: 14px;
+}
+.group-mode-main:hover .group-mode-arrow {
+  opacity: 1;
+}
+.group-mode-arrow:hover {
+  background: rgba(0, 0, 0, 0.65);
+}
+.group-mode-arrow-left { left: 4px; }
+.group-mode-arrow-right { right: 4px; }
+
+/* 层叠堆叠容器 */
+.group-mode-stack-wrapper {
+  position: relative;
+}
+
+/* 后面的装饰层 */
+.group-mode-stack-bg {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 100%;
+  height: 100%;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 2px solid var(--el-bg-color);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  background: var(--el-fill-color);
+  opacity: 0.5;
+  transition: transform 0.25s ease;
+}
+.group-mode-stack-bg.is-hidden {
+  opacity: 0;
+}
+.group-mode-stack-bg:nth-of-type(1) {
+  transform: rotate(-2deg);
+}
+.group-mode-stack-bg:nth-of-type(2) {
+  transform: rotate(1.5deg);
+  top: 3px;
+  left: 3px;
+}
+.group-mode-stack-bg img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 最前面的大图 */
+.group-mode-stack-front {
+  position: relative;
+  z-index: 10;
 }
 </style>

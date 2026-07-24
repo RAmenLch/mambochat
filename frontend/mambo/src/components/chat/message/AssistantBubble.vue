@@ -9,6 +9,9 @@
         <span class="bubble-title">{{ assistantName }}</span>
       </div>
       <div class="header-right">
+        <el-tooltip v-if="hasSparkMode" :content="isSparkCollapsed ? $t('chat.message.expandSpark') : $t('chat.message.collapseSpark')" placement="top">
+          <el-button :icon="isSparkCollapsed ? FullScreen : Minus" circle text size="small" @click="toggleSpark" />
+        </el-tooltip>
         <el-tooltip v-if="reasoningSection" :content="isReasoningMinimized ? $t('chat.message.expandReasoning') : $t('chat.message.minimizeReasoning')" placement="top">
           <el-button :icon="isReasoningMinimized ? FullScreen : Minus" circle text size="small" @click="toggleReasoningMinimize" :disabled="isGenerating && !hasPendingReviews" />
         </el-tooltip>
@@ -257,6 +260,9 @@ const {
   hasPendingReviews,
   errorSubMessages,
   zipCoverageGroupIds,
+  hasSparkMode,
+  isSparkCollapsed,
+  toggleSpark,
 } = useAssistantTimeline(messageRef, messageDisplayMode);
 
 const isBubbleCollapsed = ref(false);

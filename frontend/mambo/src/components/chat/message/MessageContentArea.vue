@@ -120,6 +120,11 @@ const groupedSubMessages = computed((): SubMessageGroup[] => {
   let lastGroup: SubMessageGroup | null = null
 
   for (const subMessage of props.normalSubMessages) {
+    // 跳过 Mini_Avatar / Gal_Avatar 模式的 File（仅在头像或侧边栏展示）
+    if (subMessage.type === 'File' && subMessage.config?.show_tool_mode && ['Mini_Avatar', 'Gal_Avatar'].includes(subMessage.config.show_tool_mode)) {
+      continue
+    }
+
     if (subMessage.type === 'File') {
       if (lastGroup && lastGroup.type === 'file') {
         lastGroup.sub_messages.push(subMessage)

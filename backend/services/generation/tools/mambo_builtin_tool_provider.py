@@ -130,6 +130,7 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
                             context_participation_length=0,
                             pending_file_path=data["path"],
                             pending_file_timeout=data.get("timeout", 300),
+                            show_tool_mode=data.get("mode", "Normal"),
                         ),
                     )
                 else:
@@ -141,7 +142,10 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
                             sortOrder=2,
                             status=schemas_enums.MessageStatus.COMPLETED,
                             initial_content=file_id,
-                            config=SubMessageConfig(context_participation_length=0),
+                            config=SubMessageConfig(
+                                context_participation_length=0,
+                                show_tool_mode=data.get("mode", "Normal"),
+                            ),
                         )
             except (json.JSONDecodeError, KeyError, TypeError):
                 pass

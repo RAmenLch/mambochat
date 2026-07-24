@@ -32,6 +32,7 @@ export interface SubMessageConfig {
   task_group_id?: string | null
   pending_file_path?: string | null
   pending_file_timeout?: number | null
+  show_tool_mode?: string | null
 }
 
 export interface SubMessage {

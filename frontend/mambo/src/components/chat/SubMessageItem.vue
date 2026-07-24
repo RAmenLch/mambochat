@@ -8,10 +8,13 @@
       'is-user': parentMessage.role === 'user',
       'is-file': subMessage.type === 'File' && !(isEditableFile && !isImageFile),
       'is-inactive': isInactive,
-      'is-inline': isInline
+      'is-inline': isInline,
+      'show-mode-mini-avatar': showToolMode === 'Mini_Avatar',
+      'show-mode-gal-avatar': showToolMode === 'Gal_Avatar',
+      'show-mode-group': showToolMode === 'Group',
     }"
   >
-    <div v-if="subMessage.type === 'File' && subMessage.file_info" class="file-display-container">
+    <div v-if="subMessage.type === 'File' && subMessage.file_info && showToolMode !== 'Mini_Avatar' && showToolMode !== 'Gal_Avatar'" class="file-display-container">
       <el-image
         v-if="subMessage.file_info.mime_type.startsWith('image/')"
         :src="subMessage.file_info.url"
@@ -152,7 +155,7 @@
       </div>
     </div>
 
-    <div v-else-if="isPendingFile" class="file-pending-container">
+    <div v-else-if="isPendingFile && showToolMode !== 'Mini_Avatar' && showToolMode !== 'Gal_Avatar'" class="file-pending-container">
       <div class="file-pending-card">
         <div class="file-pending-icon">
           <el-icon :size="28" class="is-loading"><Loading /></el-icon>
@@ -541,6 +544,10 @@ const isMarkdownFile = computed(() => {
   const filename = props.subMessage.file_info.filename.toLowerCase()
   return filename.endsWith('.md') || filename.endsWith('.markdown')
 })
+
+const showToolMode = computed(() =>
+  props.subMessage.config.show_tool_mode || 'Normal'
+)
 
 function getLanguageFromFilename(filename: string): string {
   const ext = filename.split('.').pop()?.toLowerCase() || ''

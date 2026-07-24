@@ -19,13 +19,14 @@
 
       <div class="scroll-area-wrapper">
         <el-scrollbar ref="scrollbarRef" class="message-list-scrollbar" v-loading="isChatHistoryLoading" @scroll="handleScroll">
-          <div class="message-list-wrapper">
+          <div class="message-list-wrapper" :class="{ 'gal-shifted': galAvatarState.visible }">
             <MessageItem
               v-for="(message, index) in currentChatMessages"
               :key="message.id"
               :id="'msg-' + message.id"
               :message="message"
               :is-last-message="index === currentChatMessages.length - 1"
+              :hide-avatar="galAvatarState.visible && message.role === 'assistant' && hasGalAvatar(message)"
               @suggestion-click="handleSuggestionClick"
               @open-tool-dialog="handleOpenToolDialog"
               @view-logs="handleViewLogs"
@@ -41,6 +42,14 @@
           @jump="handleJumpToMessage"
         />
       </div>
+
+      <transition name="gal-fade">
+        <div v-if="galAvatarState.visible" class="gal-avatar-panel">
+          <transition name="gal-img">
+            <img :key="galAvatarState.imageUrl" :src="galAvatarState.imageUrl!" class="gal-avatar-image" />
+          </transition>
+        </div>
+      </transition>
 
       <div
         class="input-container-wrapper"
@@ -157,7 +166,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, computed, onMounted } from 'vue';
+import { ref, watch, nextTick, computed, onMounted, onBeforeUnmount } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { storeToRefs } from 'pinia';
@@ -287,6 +296,41 @@ const isSwitchingBranch = ref(false);
 const versionHistoryDrawerVisible = ref(false);
 
 const currentVisibleMessageId = ref<string | null>(null);
+
+/** Gal_Avatar 模式：查找当前活跃的 Gal 头像图片 */
+const galAvatarImageUrl = ref<string | null>(null)
+const galIsScrolledPast = ref(false)
+
+// 所有包含 Gal_Avatar 的消息：messageId → imageUrl
+const galAvatarMap = computed(() => {
+  const map = new Map<string, string>()
+  for (const msg of currentChatMessages.value) {
+    const file = msg.sub_messages.find(
+      sm => sm.type === 'File' &&
+        sm.config?.show_tool_mode === 'Gal_Avatar' &&
+        sm.file_info?.mime_type?.startsWith('image/')
+    )
+    if (file) {
+      map.set(msg.id, file.file_info!.url)
+    }
+  }
+  return map
+})
+
+const galAvatarState = computed(() => ({
+  visible: galAvatarImageUrl.value !== null && !galIsScrolledPast.value,
+  imageUrl: galAvatarImageUrl.value,
+  messageId: null as string | null,
+}))
+
+/** 判断某条消息是否含有 Gal_Avatar（用于隐藏该消息的头像） */
+function hasGalAvatar(msg: Message): boolean {
+  return msg.sub_messages.some(
+    sm => sm.type === 'File' &&
+      sm.config?.show_tool_mode === 'Gal_Avatar' &&
+      sm.file_info?.mime_type?.startsWith('image/')
+  )
+}
 
 const toolDialogVisible = ref(false);
 const toolDialogMessageId = ref<string | null>(null);
@@ -604,6 +648,33 @@ const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
   if (activeUserId) {
     currentVisibleMessageId.value = activeUserId;
   }
+
+  // Gal_Avatar：找到当前视口中最合适的 Gal_Avatar 消息
+  if (galAvatarMap.value.size > 0) {
+    let bestUrl: string | null = null
+
+    for (const [msgId, url] of galAvatarMap.value) {
+      const dom = document.getElementById(`msg-${msgId}`)
+      if (!dom) continue
+      const rect = dom.getBoundingClientRect()
+
+      // 消息在滚动容器内（至少部分可见）→ 显示它的 Gal_Avatar
+      if (rect.bottom > containerRect.top && rect.top < containerRect.bottom) {
+        bestUrl = url
+        break // 优先第一个可见的（从前往后遍历，即最早的消息）
+      }
+    }
+
+    if (bestUrl) {
+      galAvatarImageUrl.value = bestUrl
+      galIsScrolledPast.value = false
+    } else {
+      galIsScrolledPast.value = true
+    }
+  } else {
+    galAvatarImageUrl.value = null
+    galIsScrolledPast.value = true
+  }
 };
 
 const scrollToBottom = (force = false) => {
@@ -787,6 +858,9 @@ watch(currentChatId, (newId) => {
 
 .message-list-scrollbar { width: 100%; height: 100%; }
 .message-list-wrapper { padding: 20px; }
+.message-list-wrapper.gal-shifted {
+  padding-left: 240px;
+}
 .input-container-wrapper { flex-shrink: 0; position: relative; display: flex; flex-direction: column; border-top: 1px solid var(--color-border); }
 .resize-handle { position: absolute; top: -3px; left: 0; width: 100%; height: 6px; cursor: ns-resize; z-index: 10; }
 
@@ -848,5 +922,53 @@ watch(currentChatId, (newId) => {
 .message-list-scrollbar :deep(.el-scrollbar__bar.is-vertical:hover .el-scrollbar__thumb),
 .message-list-scrollbar :deep(.el-scrollbar__bar.is-vertical:active .el-scrollbar__thumb) {
   width: 14px;
+}
+
+/* ========== Gal_Avatar 模式：左侧固定头像面板 ========== */
+.gal-avatar-panel {
+  position: relative;
+  left: 8px;
+  z-index: 15;
+  height: 0;
+}
+
+.gal-avatar-image {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 210px;
+  height: 285px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 2px solid var(--el-border-color-light);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.gal-fade-enter-active,
+.gal-fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.gal-fade-enter-from {
+  opacity: 0;
+  transform: translateX(-20px);
+}
+
+.gal-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-20px);
+}
+
+/* 相邻 Gal_Avatar 切换：淡入淡出同时进行 */
+.gal-img-enter-active,
+.gal-img-leave-active {
+  transition: opacity 0.15s ease;
+}
+.gal-img-leave-active {
+  position: absolute;
+}
+.gal-img-enter-from,
+.gal-img-leave-to {
+  opacity: 0;
 }
 </style>

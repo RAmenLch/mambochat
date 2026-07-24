@@ -83,6 +83,8 @@ export default {
     expandReasoning: 'Expand Reasoning',
     minimizeReasoning: 'Minimize Reasoning',
     reasoningCollapsed: 'Reasoning',
+    expandSpark: 'Show all content',
+    collapseSpark: 'Collapse to Spark view',
     content: 'Content',
     zipGenerating: 'Generating summary...',
     zipHistory: 'History Summary',
@@ -250,5 +252,8 @@ export default {
     reasoning: 'Reasoning',
     toolResult: 'Tool Result',
     noSteps: 'No tracking steps',
+  },
+  file: {
+    groupPinned: 'Pinned',
   },
 }
