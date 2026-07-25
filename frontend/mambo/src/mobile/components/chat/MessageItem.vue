@@ -61,6 +61,22 @@
           </template>
         </div>
       </div>
+
+      <div
+        v-if="activeSubMessageId && message.status !== 'generating'"
+        class="inline-actions user-inline-actions"
+        @click.stop
+      >
+        <button class="action-btn" @click="handleEditSpecific(activeSubMessageId)">
+          <el-icon :size="16"><Edit /></el-icon>
+        </button>
+        <button class="action-btn" @click="handleCopySpecific(activeSubMessageId)">
+          <el-icon :size="16"><CopyDocument /></el-icon>
+        </button>
+        <button class="action-btn danger" @click="handleDeleteMessage">
+          <el-icon :size="16"><Delete /></el-icon>
+        </button>
+      </div>
     </template>
 
     <!-- AI 消息：左侧气泡 -->
@@ -269,6 +285,21 @@ function handleTouchEnd() {
 
 function showActionSheet() {
   const actions: ActionItem[] = []
+
+  if (props.message.role === 'user') {
+    actions.push({
+      key: 'edit',
+      label: t('common.action.edit'),
+      icon: Edit,
+      handler: () => {
+        if (normalSubMessages.value.length > 0) {
+          const firstNormal = normalSubMessages.value[0]
+          handleEditRequest(firstNormal, { content: firstNormal.content })
+        }
+        closeActionSheet()
+      }
+    })
+  }
 
   if (props.message.role === 'assistant') {
     if (hasSiblings.value) {
@@ -822,6 +853,10 @@ async function handleDeleteMessage() {
   padding: 4px 8px;
   margin-top: 6px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+}
+
+.user-inline-actions {
+  align-self: flex-end;
 }
 
 .branch-switcher {

@@ -419,9 +419,6 @@ const displayMemoryResources = ref<Resource[]>([]);
 // --- Lifecycle ---
 
 onMounted(() => {
-  if (agentStore.allAgents.length === 0) {
-    agentStore.fetchAllAgents();
-  }
   if (backendStore.backendList.length === 0) {
     backendStore.fetchBackends();
   }

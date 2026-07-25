@@ -145,7 +145,6 @@ import { useChatListStore } from '@/stores/chatListStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useProviderStore } from '@/stores/providerStore'
-import { useAgentStore } from '@/stores/agentStore'
 import { useChatInput } from '@/composables/useChatInput'
 import { useTokenEstimator } from '@/composables/useTokenEstimator'
 import { uploadFile } from '@/api/fileService'
@@ -165,7 +164,6 @@ const chatListStore = useChatListStore()
 const chatSessionStore = useChatSessionStore()
 const chatInteractionStore = useChatInteractionStore()
 const providerStore = useProviderStore()
-const agentStore = useAgentStore()
 
 const { currentChat, currentChatMessages, isGenerating, currentChatId, contextForTokenEstimation, systemPromptResources } =
   storeToRefs(chatSessionStore)
@@ -237,10 +235,6 @@ const { estimatedTokens } = useTokenEstimator(
 )
 
 onMounted(() => {
-  if (agentStore.allAgents.length === 0) {
-    agentStore.fetchAllAgents()
-  }
-
   const setVH = () => {
     const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight
     document.documentElement.style.setProperty('--vv-height', `${vh}px`)

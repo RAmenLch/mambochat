@@ -275,6 +275,7 @@ const searchRootId = ref<string | null>(null)
 // --- Lifecycle & Initialization [修改] ---
 
 onMounted(async () => {
+  await agentStore.fetchAllAgents();
   await chatListStore.initializeList()
   await router.isReady()
 
