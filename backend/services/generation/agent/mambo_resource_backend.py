@@ -581,9 +581,27 @@ class MamboResourceBackend(BackendProtocol):
                 ))
 
             if target.id == "__ws_root__":
-                # workspace root without root_resource_id
                 if self._root_resource_id:
                     parent_id = self._root_resource_id
+                elif self._shortcuts:
+                    entries: list[FileInfo] = []
+                    for name, rid in self._shortcuts.items():
+                        try:
+                            child_res = await resource_crud.get_resource(db, rid)
+                        except Exception:
+                            continue
+                        if child_res is None:
+                            continue
+                        is_dir = child_res.itemType == ResourceItemType.FOLDER.value
+                        entries.append(FileInfo(
+                            path=VirtualPath(f"{norm.rstrip('/')}/{name}"),
+                            is_dir=is_dir,
+                            size=0,
+                            modified_at="",
+                            desc=getattr(child_res, "description", None) or "",
+                        ))
+                    entries.sort(key=lambda fi: (not fi.is_dir, fi.path))
+                    return LsResult(entries=entries) if entries else LsResult(entries=[])
                 else:
                     parent_id = None
             else:
@@ -663,13 +681,34 @@ class MamboResourceBackend(BackendProtocol):
 
             if target.id == "__ws_root__":
                 if not self._root_resource_id:
-                    return format_tree_entries([TreeEntry(name=norm.rstrip("/") + "/", depth=0)])
-                root_id = self._root_resource_id
+                    if not self._shortcuts:
+                        return format_tree_entries([TreeEntry(name=norm.rstrip("/") + "/", depth=0)])
+                    all_pairs: list[tuple[str, resource_model.Resource]] = []
+                    for name, rid in self._shortcuts.items():
+                        try:
+                            child_res = await resource_crud.get_resource(db, rid)
+                        except Exception:
+                            continue
+                        if child_res is None:
+                            continue
+                        shortcut_vpath = f"{norm.rstrip('/')}/{name}"
+                        if child_res.itemType == ResourceItemType.FOLDER.value:
+                            sub_pairs = await self._load_subtree_with_paths(db, rid, shortcut_vpath)
+                            all_pairs.extend(sub_pairs)
+                        else:
+                            all_pairs.append((shortcut_vpath, child_res))
+                    pairs = all_pairs
+                    size_map = await self._resolve_file_sizes_batch(db, pairs)
+                else:
+                    root_id = self._root_resource_id
             else:
                 root_id = target.id
 
-            pairs = await self._load_subtree_with_paths(db, root_id, norm)
-            size_map = await self._resolve_file_sizes_batch(db, pairs)
+            if target.id == "__ws_root__" and not self._root_resource_id and self._shortcuts:
+                pass  # pairs already built above
+            else:
+                pairs = await self._load_subtree_with_paths(db, root_id, norm)
+                size_map = await self._resolve_file_sizes_batch(db, pairs)
 
             # Build entries by relative path
             prefix = norm.rstrip("/") + "/"
