@@ -329,7 +329,7 @@ class MamboAPIBackend(BackendProtocol):
         self,
         file_path: VirtualPath,
         offset: int = 0,
-        limit: int = 2000,
+        limit: int | None = 2000,
         include_line_numbers: bool = False,
     ) -> ReadResult:
         try:
@@ -343,7 +343,7 @@ class MamboAPIBackend(BackendProtocol):
         self,
         file_path: VirtualPath,
         offset: int = 0,
-        limit: int = 2000,
+        limit: int | None = 2000,
         include_line_numbers: bool = False,
     ) -> ReadResult:
         return self._read_sync(file_path, offset, limit, include_line_numbers)
@@ -352,7 +352,7 @@ class MamboAPIBackend(BackendProtocol):
         self,
         file_path: VirtualPath,
         offset: int = 0,
-        limit: int = 2000,
+        limit: int | None = 2000,
         include_line_numbers: bool = False,
     ) -> ReadResult:
         if offset < 0:
@@ -360,7 +360,7 @@ class MamboAPIBackend(BackendProtocol):
                 code=ErrorCode.INVALID, path=file_path,
                 message=f"offset must be non-negative, got {offset}",
             ))
-        if limit < 1:
+        if limit is not None and limit < 1:
             return ReadResult(error=BackendError(
                 code=ErrorCode.INVALID, path=file_path,
                 message=f"limit must be >= 1, got {limit}",

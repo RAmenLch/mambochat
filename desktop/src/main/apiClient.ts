@@ -375,7 +375,7 @@ export class ApiClientManager {
     const entries: TreeEntry[] = []
 
     const walk = (dir: string, currentDepth: number): void => {
-      if (currentDepth >= depth) return
+      if (currentDepth > depth) return
       let dirents: fs.Dirent[]
       try { dirents = fs.readdirSync(dir, { withFileTypes: true }) }
       catch { return }
@@ -392,7 +392,7 @@ export class ApiClientManager {
           continue
         }
         if (d.isDirectory()) {
-          if (currentDepth + 1 >= depth) {
+          if (currentDepth + 1 > depth) {
             // At depth limit: check if non-empty
             const full = path.join(dir, d.name)
             let hasChildren = false
@@ -516,14 +516,14 @@ export class ApiClientManager {
   private handleReadFile(params: Record<string, unknown>): Record<string, unknown> {
     const vpath = (params.path as string) || '/workspace'
     const offset = (params.offset as number) || 0
-    const limit = (params.limit as number) ?? 2000
+    const limit = (params.limit != null) ? (params.limit as number) : null
     const includeLineNumbers = (params.include_line_numbers as boolean) || false
     const physical = this.resolvePath(vpath)
 
     if (offset < 0) {
       return { error: `offset must be non-negative, got ${offset}`, error_code: 'INVALID' }
     }
-    if (limit < 1) {
+    if (limit != null && limit < 1) {
       return { error: `limit must be >= 1, got ${limit}`, error_code: 'INVALID' }
     }
 
@@ -568,7 +568,7 @@ export class ApiClientManager {
 
     const lines = content.split('\n')
     const start = offset
-    const end = Math.min(start + limit, lines.length)
+    const end = (limit != null) ? Math.min(start + limit, lines.length) : lines.length
 
     if (start >= lines.length) {
       return { error: `Line offset ${offset} exceeds file length (${lines.length} lines)`, error_code: 'INVALID' }
