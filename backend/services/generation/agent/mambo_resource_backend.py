@@ -224,7 +224,7 @@ def _orm_to_resolved(
 
     size = 0
     if content and _is_direct_text_type(res.resourceType):
-        size = len(content)
+        size = len(content.encode('utf-8'))
 
     modified = ""
     updated = res.updatedAt
@@ -632,7 +632,7 @@ class MamboResourceBackend(BackendProtocol):
                     lv = child.latest_version
                     if lv:
                         if _is_direct_text_type(child.resourceType):
-                            size = len(lv.content or "")
+                            size = len((lv.content or "").encode('utf-8'))
                         else:
                             size = size_map.get(child_vpath_str, 0)
                         if lv.updatedAt:
@@ -724,7 +724,7 @@ class MamboResourceBackend(BackendProtocol):
                 sz = 0
                 if not is_dir:
                     if _is_direct_text_type(res.resourceType):
-                        sz = len(lv.content) if lv and lv.content else 0
+                        sz = len(lv.content.encode('utf-8')) if lv and lv.content else 0
                     else:
                         sz = size_map.get(vpath, 0)
                 entries_map[rel] = _Resolved(
@@ -1348,7 +1348,7 @@ class MamboResourceBackend(BackendProtocol):
                     lv = res.latest_version
                     if lv:
                         if _is_direct_text_type(res.resourceType):
-                            sz = len(lv.content or "")
+                            sz = len((lv.content or "").encode('utf-8'))
                         else:
                             sz = size_map.get(vpath, 0)
                         if lv.updatedAt:
@@ -1383,37 +1383,37 @@ class MamboResourceBackend(BackendProtocol):
             raw = str(path)
 
         normalized = raw.rstrip("/")
-        if not normalized.endswith(_VERSION_FOLDER_SUFFIX):
-            normalized = normalized + _VERSION_FOLDER_SUFFIX
+        if normalized.endswith(_VERSION_FOLDER_SUFFIX):
+            resource_path = normalized[:-len(_VERSION_FOLDER_SUFFIX)]
+        else:
+            resource_path = normalized
 
         try:
-            norm = self._normalize_path(VirtualPath(normalized))
+            resource_norm = self._normalize_path(VirtualPath(resource_path))
         except BackendError as e:
             return LsVersionResult(error=e)
 
-        # Resolve the resource that owns the $v folder
-        # Strip $v suffix to get the flat file path, then resolve
-        flat_norm = norm
-        if flat_norm.endswith(_VERSION_FOLDER_SUFFIX):
-            flat_norm = flat_norm[:-len(_VERSION_FOLDER_SUFFIX)]
-        if flat_norm.endswith("/"):
-            flat_norm = flat_norm[:-1]
-
         async with self._session_factory() as db:
-            resolved = await self._resolve_resource(db, flat_norm)
+            resolved = await self._resolve_resource(db, resource_norm)
             if resolved is None:
                 return LsVersionResult(error=BackendError(
-                    code=ErrorCode.NOT_FOUND, path=VirtualPath(normalized),
-                    message="未找到资源版本文件夹。请使用 ls 查找资源（版本文件夹以 '$v/' 结尾）。",
+                    code=ErrorCode.NOT_FOUND, path=VirtualPath(resource_norm),
+                    message="未找到资源。请使用 ls 查找资源（版本文件夹以 '$v/' 结尾）。",
+                ))
+            if resolved.is_dir:
+                return LsVersionResult(error=BackendError(
+                    code=ErrorCode.IS_DIR, path=VirtualPath(resource_norm),
+                    message="目标是目录，请传入具体文件路径",
                 ))
 
             res = await resource_crud.get_resource_with_versions(db, resolved.id)
             if res is None or not res.versions:
                 return LsVersionResult(versions=[])
 
+            version_norm = resource_norm + _VERSION_FOLDER_SUFFIX
             active_version_id = res.latestVersionId
             version_infos: list[VersionInfo] = []
-            folder_prefix = norm.rstrip("/") + "/"
+            folder_prefix = version_norm.rstrip("/") + "/"
 
             for ver in res.versions:
                 is_active = (ver.id == active_version_id)

@@ -193,7 +193,21 @@ const isEditMode = computed(() => !!props.initialData);
 
 const rules = computed<FormRules>(() => {
   const commonRules = {
-    name: [{ required: true, message: () => t('settings.mcp.form.nameRequired'), trigger: 'blur' }],
+    name: [
+      { required: true, message: () => t('settings.mcp.form.nameRequired'), trigger: 'blur' },
+      { max: 64, message: () => t('settings.mcp.form.nameMaxLength'), trigger: 'blur' },
+      { pattern: /^[a-zA-Z][a-zA-Z0-9_-]*$/, message: () => t('settings.mcp.form.namePattern'), trigger: 'blur' },
+      {
+        validator: (_rule: any, value: any, callback: any) => {
+          if (value && value.includes('__')) {
+            callback(new Error(t('settings.mcp.form.nameNoDoubleUnderscore')));
+          } else {
+            callback();
+          }
+        },
+        trigger: 'blur',
+      },
+    ],
   };
 
   if (formData.transportType === 'stdio') {

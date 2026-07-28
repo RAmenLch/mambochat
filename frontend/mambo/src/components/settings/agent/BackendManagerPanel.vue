@@ -927,7 +927,7 @@ const localDefaultConfig = (): LocalConfigData => ({
   ignore_dirs: ['.git', 'node_modules', '__pycache__']
 });
 
-const defaultForm = (type: BackendType = 'ssh'): BackendCreate => ({
+const defaultForm = (type: BackendType = 'resource'): BackendCreate => ({
   name: '',
   description: '',
   backendType: type,
@@ -952,7 +952,7 @@ const nameRules = [
   { validator: validateName, trigger: 'blur' },
 ];
 
-const form = reactive<BackendCreate>(defaultForm('ssh'));
+const form = reactive<BackendCreate>(defaultForm('resource'));
 
 const sshRules: FormRules = {
   name: nameRules,
@@ -1124,7 +1124,7 @@ const handleCreate = () => {
   isEdit.value = false;
   currentEditId.value = null;
   showApiKey.value = false;
-  Object.assign(form, defaultForm('ssh'));
+  Object.assign(form, defaultForm('resource'));
   editMode.value = 'whitelist';
   dialogVisible.value = true;
   formRef.value?.clearValidate();

@@ -1,13 +1,18 @@
 # backend/schemas/mcp.py
 
+import re
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 from backend.schemas.enums import McpTransportType,ToolReviewMode,ToolStatus
 
+MCP_SERVER_NAME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*$")
+MCP_SERVER_NAME_MAX_LEN = 64
+
+
 class McpServerBase(BaseModel):
-    name: str = Field(..., min_length=1, max_length=100)
+    name: str = Field(..., min_length=1, max_length=MCP_SERVER_NAME_MAX_LEN)
     description: Optional[str] = None
     transportType: McpTransportType
     isEnabled: bool = True
@@ -45,6 +50,22 @@ class McpServerBase(BaseModel):
             return v.strip()
         return v
 
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Name must not be empty')
+        v = v.strip()
+        if len(v) > MCP_SERVER_NAME_MAX_LEN:
+            raise ValueError(f'Name must not exceed {MCP_SERVER_NAME_MAX_LEN} characters')
+        if '__' in v:
+            raise ValueError('Name must not contain "__"')
+        if not MCP_SERVER_NAME_RE.match(v):
+            raise ValueError(
+                'Name must start with a letter and contain only letters, digits, underscores, and hyphens'
+            )
+        return v
+
 
 class McpServerCreate(McpServerBase):
     pass
@@ -63,6 +84,24 @@ class McpServerUpdate(BaseModel):
     sse_read_timeout: Optional[float] = None
     cwd: Optional[str] = None
     isEnabled: Optional[bool] = None
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        if v is None:
+            return v
+        if not v.strip():
+            raise ValueError('Name must not be empty')
+        v = v.strip()
+        if len(v) > MCP_SERVER_NAME_MAX_LEN:
+            raise ValueError(f'Name must not exceed {MCP_SERVER_NAME_MAX_LEN} characters')
+        if '__' in v:
+            raise ValueError('Name must not contain "__"')
+        if not MCP_SERVER_NAME_RE.match(v):
+            raise ValueError(
+                'Name must start with a letter and contain only letters, digits, underscores, and hyphens'
+            )
+        return v
 
 
 class McpServerResponse(McpServerBase):

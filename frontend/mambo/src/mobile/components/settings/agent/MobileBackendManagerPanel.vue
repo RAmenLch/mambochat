@@ -249,13 +249,13 @@ const apiDefault = (): ApiConfigData => ({ api_key: '', edit_whitelist: [], edit
 const localDefault = (): LocalConfigData => ({ root_dir: '~', edit_whitelist: [], edit_blacklist: [], ignore_dirs: ['.git', 'node_modules', '__pycache__'] });
 const resourceDefault = (): ResourceConfigData => ({ resource_id: '', edit_whitelist: [], edit_blacklist: [], ignore_dirs: [], enable_version_editing: false });
 
-const defaultForm = (type: BackendType = 'ssh'): BackendCreate => ({
+const defaultForm = (type: BackendType = 'resource'): BackendCreate => ({
   name: '', description: '', backendType: type,
   configData: type === 'ssh' ? sshDefault() : type === 'api' ? apiDefault() : type === 'local' ? localDefault() : resourceDefault(),
   tools_config: defaultToolsConfig()
 });
 
-const form = reactive<BackendCreate>(defaultForm('ssh'));
+const form = reactive<BackendCreate>(defaultForm('resource'));
 
 const resourceFolderOptions = computed(() => resources.value.filter(r => r.itemType === 'resource' && r.resourceType === 'folder'));
 
@@ -313,7 +313,7 @@ onUnmounted(() => { if (statusPollTimer) clearInterval(statusPollTimer); });
 
 const handleCreate = () => {
   isEdit.value = false; currentEditId.value = null; showPwd.value = false;
-  Object.assign(form, defaultForm('ssh')); editMode.value = 'whitelist';
+  Object.assign(form, defaultForm('resource')); editMode.value = 'whitelist';
   whitelistProxy.value = []; blacklistProxy.value = [];
   dialogVisible.value = true; formRef.value?.clearValidate();
 };

@@ -152,7 +152,23 @@ const formData = reactive<LocalFormData>({ ...defaultFormData });
 const isEditMode = computed(() => !!props.initialData);
 
 const rules = computed<FormRules>(() => {
-  const base = { name: [{ required: true, message: 'Name is required', trigger: 'blur' }] };
+  const base = {
+    name: [
+      { required: true, message: 'Name is required', trigger: 'blur' },
+      { max: 64, message: 'Name must not exceed 64 characters', trigger: 'blur' },
+      { pattern: /^[a-zA-Z][a-zA-Z0-9_-]*$/, message: 'Name must start with a letter and contain only letters, digits, underscores, and hyphens', trigger: 'blur' },
+      {
+        validator: (_rule: any, value: string, callback: any) => {
+          if (value && value.includes('__')) {
+            callback(new Error('Name must not contain "__"'));
+          } else {
+            callback();
+          }
+        },
+        trigger: 'blur',
+      },
+    ],
+  };
   if (formData.transportType === 'stdio') return { ...base, command: [{ required: true, message: 'Command is required', trigger: 'blur' }] };
   return { ...base, url: [{ required: true, message: 'URL is required', trigger: 'blur' }] };
 });
