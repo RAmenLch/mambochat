@@ -757,6 +757,8 @@ async function handleDeleteMessage() {
   background: linear-gradient(135deg, var(--el-color-primary, #409EFF), var(--el-color-primary-light-1, #66b1ff)) !important;
   color: #fff !important;
   border-bottom-right-radius: 4px;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .user-bubble :deep(.message-content),

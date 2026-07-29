@@ -826,7 +826,9 @@ onBeforeUnmount(() => {
   font-size: 14px;
   line-height: 1.5;
   color: var(--color-text);
-  overflow-x: auto;
+  overflow: hidden;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .is-user .message-content {

@@ -116,9 +116,7 @@
           <CircleClose v-else-if="isToolError(tool)" style="color: var(--el-color-error)" />
           <CircleCheck v-else style="color: var(--el-color-success)" />
         </el-icon>
-        <span class="minimized-item-title">
-          {{ getToolName(tool) }}
-        </span>
+        <span class="minimized-item-title">{{ getToolBubbleText(tool) }}</span>
         <span v-if="getSecurityReviewForTool(tool)" class="security-review-badge" :class="{ 'is-failed': !getSecurityReviewForTool(tool)!.passed }">
           🛡️ {{ getSecurityReviewForTool(tool)!.passed ? t('agent.securityReviewPassed') : t('agent.securityReviewFailed') }}
         </span>
@@ -145,7 +143,7 @@ import type { Message, SubMessage, McpToolContent, ReviewToolContent, AskUserCon
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import SubMessageItem from '../SubMessageItem.vue';
 import type { BubbleSectionGroup } from '@/composables/useAssistantTimeline';
-import { unpackMcpToolCall } from '@/utils/mcpToolUnpack';
+import { unpackMcpToolCall, getToolArgsSummary } from '@/utils/mcpToolUnpack';
 import { Edit, CopyDocument, ArrowUpBold, ArrowDownBold, Warning, Loading, CircleClose, CircleCheck, QuestionFilled, Document, ArrowLeft, ArrowRight } from '@element-plus/icons-vue';
 
 const { t } = useI18n();
@@ -305,6 +303,18 @@ function getToolName(tool: SubMessage): string {
   if (!content) return t('chat.message.mcp.unknownTool');
   const unpacked = unpackMcpToolCall(content);
   return unpacked.displayName;
+}
+
+function getToolArgsSummaryText(tool: SubMessage): string {
+  const content = getParsedContent(tool);
+  if (!content) return '';
+  return getToolArgsSummary(content);
+}
+
+function getToolBubbleText(tool: SubMessage): string {
+  const name = getToolName(tool);
+  const args = getToolArgsSummaryText(tool);
+  return args ? `${name} ${args}` : name;
 }
 
 function isMcpWrapped(tool: SubMessage): boolean {
@@ -496,6 +506,9 @@ function fileGroupPreviewIndex(fileIdx: number): number {
 
 .minimized-item-title {
   white-space: nowrap;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ========== Zip History 覆盖指示器 ========== */

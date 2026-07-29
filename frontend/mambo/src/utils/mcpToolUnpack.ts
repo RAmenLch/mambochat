@@ -52,3 +52,62 @@ export function unpackMcpToolCall(
     isMcpWrapped: false,
   }
 }
+
+function basename(p: string): string {
+  const segs = p.replace(/\\/g, '/').split('/').filter(Boolean)
+  return segs.length ? segs[segs.length - 1] : p
+}
+
+/**
+ * 提取工具参数摘要，用于在工具气泡上直接展示关键参数。
+ * 仅对 read / edit / write / ls / grep / glob / delete 返回有效摘要，其余返回空字符串。
+ */
+export function getToolArgsSummary(content: McpToolContent | ReviewToolContent): string {
+  const unpacked = unpackMcpToolCall(content)
+  const name = unpacked.effectiveName
+
+  let args: Record<string, unknown> = {}
+  if (typeof unpacked.effectiveArgs === 'string') {
+    try {
+      args = JSON.parse(unpacked.effectiveArgs)
+    } catch {
+      /* keep empty */
+    }
+  } else {
+    args = unpacked.effectiveArgs as Record<string, unknown>
+  }
+
+  switch (name) {
+    case 'read': {
+      const fp = args?.file_path
+      if (fp == null) return ''
+      const base = basename(String(fp))
+      const off = args?.offset != null ? Number(args.offset) : 0
+      const lim = args?.limit != null ? Number(args.limit) : 2000
+      if (off !== 0 || lim !== 2000) {
+        return `${base} L${off}-${off + lim}`
+      }
+      return base
+    }
+    case 'edit':
+    case 'write': {
+      const fp = args?.file_path
+      return fp != null ? basename(String(fp)) : ''
+    }
+    case 'ls':
+    case 'delete': {
+      const p = args?.path
+      return p != null ? basename(String(p)) : ''
+    }
+    case 'grep': {
+      const p = args?.pattern
+      return p != null ? `"${String(p)}"` : ''
+    }
+    case 'glob': {
+      const p = args?.pattern
+      return p != null ? String(p) : ''
+    }
+    default:
+      return ''
+  }
+}

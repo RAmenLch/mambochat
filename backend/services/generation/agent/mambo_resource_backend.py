@@ -47,7 +47,6 @@ Safety invariants
 from __future__ import annotations
 
 import asyncio
-import fnmatch
 import logging
 import posixpath
 import re
@@ -1224,8 +1223,10 @@ class MamboResourceBackend(BackendProtocol):
             for vpath, res in pairs:
                 if res.itemType != ResourceItemType.RESOURCE.value:
                     continue
-                if glob is not None and not fnmatch.fnmatch(res.name, glob):
-                    continue
+                if glob is not None:
+                    rel_path = vpath[len(norm.rstrip("/") + "/"):] if vpath != norm else ""
+                    if not fnmatch_path(rel_path, glob):
+                        continue
 
                 if _is_direct_text_type(res.resourceType):
                     lv = res.latest_version
@@ -1266,9 +1267,6 @@ class MamboResourceBackend(BackendProtocol):
     ) -> GrepResult:
         matches: list[GrepMatch] = []
         if not target.resource_type:
-            return self._apply_grep_limit(matches, offset, limit)
-
-        if glob is not None and not fnmatch.fnmatch(target.name, glob):
             return self._apply_grep_limit(matches, offset, limit)
 
         if _is_direct_text_type(target.resource_type):

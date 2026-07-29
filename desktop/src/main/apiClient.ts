@@ -529,9 +529,12 @@ export class ApiClientManager {
 
     log.info(`[ApiClient] handleReadFile: vpath=${vpath} physical=${physical} offset=${offset} limit=${limit}`)
 
-    if (!fs.existsSync(physical) || !fs.statSync(physical).isFile()) {
+    if (!fs.existsSync(physical)) {
       log.warn(`[ApiClient] handleReadFile: file not found at ${physical}`)
       return { error: `File not found: ${vpath}`, error_code: 'NOT_FOUND' }
+    }
+    if (fs.statSync(physical).isDirectory()) {
+      return { error: `Path is a directory, not a file: ${vpath}`, error_code: 'IS_DIR' }
     }
 
     const ext = path.extname(physical).toLowerCase()
