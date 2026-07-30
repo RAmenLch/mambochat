@@ -74,6 +74,7 @@ from mambo_agents.backends.protocol import (
     WriteResult,
     _get_file_type,
     _get_mime_type,
+    validate_multimodal_content,
 )
 from mambo_agents.backends.schemas import BackendError, ErrorCode, human_size
 from mambo_agents.backends.utils import (
@@ -762,6 +763,7 @@ class MamboResourceBackend(BackendProtocol):
             result = await self._aread_raw_impl(file_path, offset, limit, include_line_numbers)
         if _apply_max_chars:
             result = self._apply_read_limit(result, file_path)
+        result = validate_multimodal_content(result, file_path)
         return result
 
     async def _aread_raw_impl(
@@ -883,6 +885,12 @@ class MamboResourceBackend(BackendProtocol):
             norm = self._normalize_path(file_path)
         except BackendError as e:
             return WriteResult(error=e)
+
+        if _get_file_type(file_path) != "text":
+            return WriteResult(error=BackendError(
+                code=ErrorCode.INVALID, path=file_path,
+                message="无法写入该文件，非文本文件仅支持读取",
+            ))
 
         async with self._session_factory() as db:
             existing = await self._resolve_resource(db, norm)
@@ -1121,6 +1129,12 @@ class MamboResourceBackend(BackendProtocol):
             norm = self._normalize_path(file_path)
         except BackendError as e:
             return EditResult(error=e)
+
+        if _get_file_type(file_path) != "text":
+            return EditResult(error=BackendError(
+                code=ErrorCode.INVALID, path=file_path,
+                message="无法编辑该文件，非文本文件仅支持读取",
+            ))
 
         if not self._check_edit_allowed(norm):
             return EditResult(error=BackendError(

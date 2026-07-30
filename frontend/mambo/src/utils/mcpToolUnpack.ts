@@ -58,6 +58,21 @@ function basename(p: string): string {
   return segs.length ? segs[segs.length - 1] : p
 }
 
+/** VirtualPath 可能被序列化为 { value: "..." } 对象，取实际字符串值 */
+function extractPath(raw: unknown): string | null {
+  if (raw == null) return null
+  if (typeof raw === 'string') return raw
+  if (typeof raw === 'object' && (raw as Record<string, unknown>).value != null) {
+    return String((raw as Record<string, unknown>).value)
+  }
+  return String(raw)
+}
+
+function extractString(raw: unknown): string | null {
+  if (raw == null) return null
+  return String(raw)
+}
+
 /**
  * 提取工具参数摘要，用于在工具气泡上直接展示关键参数。
  * 仅对 read / edit / write / ls / grep / glob / delete 返回有效摘要，其余返回空字符串。
@@ -79,9 +94,9 @@ export function getToolArgsSummary(content: McpToolContent | ReviewToolContent):
 
   switch (name) {
     case 'read': {
-      const fp = args?.file_path
+      const fp = extractPath(args?.file_path)
       if (fp == null) return ''
-      const base = basename(String(fp))
+      const base = basename(fp)
       const off = args?.offset != null ? Number(args.offset) : 0
       const lim = args?.limit != null ? Number(args.limit) : 2000
       if (off !== 0 || lim !== 2000) {
@@ -91,21 +106,21 @@ export function getToolArgsSummary(content: McpToolContent | ReviewToolContent):
     }
     case 'edit':
     case 'write': {
-      const fp = args?.file_path
-      return fp != null ? basename(String(fp)) : ''
+      const fp = extractPath(args?.file_path)
+      return fp != null ? basename(fp) : ''
     }
     case 'ls':
     case 'delete': {
-      const p = args?.path
-      return p != null ? basename(String(p)) : ''
+      const p = extractPath(args?.path)
+      return p != null ? basename(p) : ''
     }
     case 'grep': {
-      const p = args?.pattern
-      return p != null ? `"${String(p)}"` : ''
+      const p = extractString(args?.pattern)
+      return p != null ? `"${p}"` : ''
     }
     case 'glob': {
-      const p = args?.pattern
-      return p != null ? String(p) : ''
+      const p = extractString(args?.pattern)
+      return p != null ? p : ''
     }
     default:
       return ''

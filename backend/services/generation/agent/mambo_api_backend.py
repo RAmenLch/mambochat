@@ -11,6 +11,9 @@ for the client to execute them and return results.
 
 Unlike the deepagents version, this returns mambo_agents-style result types
 (LsResult, ReadResult, WriteResult, etc.) instead of deepagents-style types.
+
+The WebSocket client implementation lives at:
+    desktop/src/main/apiClient.ts
 """
 
 import base64
@@ -34,6 +37,7 @@ from mambo_agents.backends.protocol import (
     WriteResult,
 )
 from mambo_agents.backends.schemas import BackendError, ErrorCode
+from mambo_agents.backends.utils.multimodal import get_file_type, get_mime_type
 
 logger = logging.getLogger(__name__)
 
@@ -380,8 +384,8 @@ class MamboAPIBackend(BackendProtocol):
 
         content = result.get("content", "")
         encoding = result.get("encoding", "utf-8")
-        file_type = result.get("file_type", "text")
-        mime_type = result.get("mime_type", "")
+        file_type = get_file_type(norm)
+        mime_type = result.get("mime_type", "") or get_mime_type(norm)
         total_lines = result.get("total_lines", 0)
 
         if encoding == "base64":
@@ -420,6 +424,11 @@ class MamboAPIBackend(BackendProtocol):
                 code=ErrorCode.EDIT_NOT_ALLOWED,
                 path=file_path,
                 message=str(e),
+            ))
+        if get_file_type(file_path) != "text":
+            return WriteResult(error=BackendError(
+                code=ErrorCode.INVALID, path=file_path,
+                message="无法写入该文件，非文本文件仅支持读取",
             ))
 
         norm = self._normalize_path(file_path)
@@ -471,6 +480,11 @@ class MamboAPIBackend(BackendProtocol):
                 code=ErrorCode.EDIT_NOT_ALLOWED,
                 path=file_path,
                 message=str(e),
+            ))
+        if get_file_type(file_path) != "text":
+            return EditResult(error=BackendError(
+                code=ErrorCode.INVALID, path=file_path,
+                message="无法编辑该文件，非文本文件仅支持读取",
             ))
 
         norm = self._normalize_path(file_path)
