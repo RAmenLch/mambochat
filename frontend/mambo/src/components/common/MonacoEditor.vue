@@ -56,6 +56,7 @@ const { t } = useI18n()
 const editorContainer = ref<HTMLElement | null>(null)
 let editorInstance: editor.IStandaloneCodeEditor | null = null
 let resizeObserver: ResizeObserver | null = null
+let contextViewObserver: MutationObserver | null = null
 
 // --- 自定义菜单状态 ---
 const menuVisible = ref(false)
@@ -244,6 +245,16 @@ onMounted(async () => {
     })
     resizeObserver.observe(editorContainer.value)
 
+    contextViewObserver = new MutationObserver(() => {
+      const findWidget = editorContainer.value?.querySelector('.find-widget') as HTMLElement | null
+      if (!findWidget || findWidget.offsetParent === null) return
+      const contextView = editorContainer.value?.querySelector(':scope > .context-view') as HTMLElement | null
+      if (contextView) {
+        contextView.style.display = 'none'
+      }
+    })
+    contextViewObserver.observe(editorContainer.value, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] })
+
     emit('editor-mounted', instance)
   } catch (error) {
     console.error('Failed to initialize Monaco Editor:', error)
@@ -256,6 +267,7 @@ onBeforeUnmount(() => {
     editorContainer.value.removeEventListener('paste', handleDomPaste, true)
   }
   if (resizeObserver) resizeObserver.disconnect()
+  if (contextViewObserver) contextViewObserver.disconnect()
   if (editorInstance) editorInstance.dispose()
 })
 

@@ -170,6 +170,7 @@ const handleTextareaKeydown = (evt: Event) => {
 const handleTextareaPaste = (e: ClipboardEvent) => {
   if (e.clipboardData && e.clipboardData.files.length > 0) {
     e.preventDefault()
+    e.stopPropagation()
     emit('paste-file', e.clipboardData.files)
   }
 }
