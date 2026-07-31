@@ -54,6 +54,7 @@ dependencies = [
 
     # Config / Scheduler / IO
     "PyYAML>=6.0.3",
+    "python-dotenv>=1.0.0",
     "apscheduler==3.11.1",
     "aiofiles==23.2.1",
     "pytz",
