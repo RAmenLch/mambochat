@@ -8,7 +8,7 @@ Backend 装配策略：
 
 所有 Backend 统一通过 HybridWorkspaceBackend 路由：
   - /workspace/          → MamboResourceBackend 或 SSH/API Backend
-  - /.mambo/             → 默认 StateBackend（中间件暂存）
+  - /.mambo/             → 默认 StoreBackend
   - /.mambo/skills/      → MamboResourceBackend（shortcuts: {name: resource_id}）
 """
 

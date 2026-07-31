@@ -27,12 +27,14 @@ from pydantic import Field, create_model
 from mambo_agents.backends.protocol import (
     BackendProtocol,
     DeleteResult,
+    DownloadFileResult,
     EditResult,
     GlobResult,
     GrepMatch,
     GrepResult,
     LsResult,
     ReadResult,
+    UploadFileResult,
     VirtualPath,
     WriteResult,
 )
@@ -591,6 +593,106 @@ class MamboAPIBackend(BackendProtocol):
                 )
             )
         return GlobResult(matches=matches)
+
+    # ------------------------------------------------------------------
+    # download / upload — raw bytes (bypass text-only read path)
+    # ------------------------------------------------------------------
+
+    def download_files(
+        self, paths: list[VirtualPath],
+    ) -> list[DownloadFileResult]:
+        try:
+            return self._run_sync(self.adownload_files(paths))
+        except Exception as e:
+            return [DownloadFileResult(
+                path=paths[0] if paths else VirtualPath("/"),
+                content=None,
+                error=BackendError(code=ErrorCode.IO_ERROR, message=str(e)),
+            )]
+
+    async def adownload_files(
+        self, paths: list[VirtualPath],
+    ) -> list[DownloadFileResult]:
+        norms = [self._normalize_path(p) for p in paths]
+        result = await self._run_ws_call(
+            "download_files",
+            self._call,
+            "download_files",
+            {"paths": norms},
+        )
+        if result is None:
+            return [DownloadFileResult(
+                path=p, content=None,
+                error=BackendError(code=ErrorCode.IO_ERROR, message="Connection to API client failed"),
+            ) for p in paths]
+
+        if isinstance(result, dict) and result.get("error"):
+            return [DownloadFileResult(
+                path=p, content=None,
+                error=self._map_error(result),
+            ) for p in paths]
+
+        raw_results: list[dict] = result.get("results", []) if isinstance(result, dict) else []
+        out: list[DownloadFileResult] = []
+        for i, item in enumerate(raw_results):
+            item_path = item.get("path", str(paths[i]) if i < len(paths) else "/")
+            if item.get("error"):
+                out.append(DownloadFileResult(
+                    path=item_path, content=None,
+                    error=BackendError(code=ErrorCode.IO_ERROR, message=str(item["error"])),
+                ))
+            else:
+                content_b64 = item.get("content_b64", "")
+                content_bytes = base64.b64decode(content_b64) if content_b64 else None
+                out.append(DownloadFileResult(path=item_path, content=content_bytes))
+        return out
+
+    def upload_files(
+        self, files: list[tuple[VirtualPath, bytes]],
+    ) -> list[UploadFileResult]:
+        try:
+            return self._run_sync(self.aupload_files(files))
+        except Exception as e:
+            return [UploadFileResult(
+                path=files[0][0] if files else VirtualPath("/"),
+                error=BackendError(code=ErrorCode.IO_ERROR, message=str(e)),
+            )]
+
+    async def aupload_files(
+        self, files: list[tuple[VirtualPath, bytes]],
+    ) -> list[UploadFileResult]:
+        payload_files = [
+            {"path": self._normalize_path(p), "content_b64": base64.b64encode(data).decode("ascii")}
+            for p, data in files
+        ]
+        result = await self._run_ws_call(
+            "upload_files",
+            self._call,
+            "upload_files",
+            {"files": payload_files},
+        )
+        if result is None:
+            return [UploadFileResult(
+                path=p, error=BackendError(code=ErrorCode.IO_ERROR, message="Connection to API client failed"),
+            ) for p, _ in files]
+
+        if isinstance(result, dict) and result.get("error"):
+            return [UploadFileResult(
+                path=p, error=self._map_error(result),
+            ) for p, _ in files]
+
+        raw_results: list[dict] = result.get("results", []) if isinstance(result, dict) else []
+        out: list[UploadFileResult] = []
+        for i, item in enumerate(raw_results):
+            item_path = item.get("path", str(files[i][0]) if i < len(files) else "/")
+            if item.get("error"):
+                out.append(UploadFileResult(
+                    path=item_path,
+                    error=BackendError(code=ErrorCode.IO_ERROR, message=str(item["error"])),
+                ))
+            else:
+                out.append(UploadFileResult(path=item_path))
+        return out
 
     # ------------------------------------------------------------------
     # Extra: execute

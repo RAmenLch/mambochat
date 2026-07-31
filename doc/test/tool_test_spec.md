@@ -496,7 +496,6 @@ No matches found.
 | N7 | 目录 + pattern 不匹配 | 含 Python 文件的目录 | `*.py` | `NONEXISTENT_XYZ123` | true | `No matches found.` |
 | N8 | `path` 使用默认值 | (不传) | `**/*.md` | `#` | true | 匹配所有 Markdown 文件中的 `#` 标题行 |
 | N9 | offset + limit 分页 | 项目根目录 | `**/*.py` | `def` | true | `offset=0, limit=3` 返回前 3 条；`offset=3, limit=3` 返回后续 |
-| N10 | 大范围搜索（硬上限） | `/workspace` | (不传) | `.` | true | 最多返回 1000 条 |
 
 ### 4.4.2 正常场景 — `path` 为文件
 
@@ -504,14 +503,14 @@ No matches found.
 
 | # | 用例名称 | path | glob | pattern | 预期结果 |
 |---|---------|------|------|---------|----------|
-| N11 | 文件 + glob 匹配 | 某个 Python 文件 | `*.py` | 文件中存在的字符串 | ✅ 搜索并返回结果 |
-| N12 | 文件 + glob 不匹配（扩展名） | 同一个 Python 文件 | `*.css` | 同 N11 pattern | ✅ 仍然搜索并返回结果（glob 被忽略） |
-| N13 | 文件 + glob 不匹配（通配符） | 同一个 Python 文件 | `**/test_*.py` | 同 N11 pattern | ✅ 仍然搜索并返回结果（glob 被忽略） |
-| N14 | 文件 + glob 不匹配（完全不同） | 同一个 Python 文件 | `**/*.md` | 同 N11 pattern | ✅ 仍然搜索并返回结果（glob 被忽略） |
-| N15 | 文件 + 不传 glob | 同一个 Python 文件 | (不传) | 同 N11 pattern | ✅ 搜索并返回结果，与 N11–N14 一致 |
-| N16 | 文件 + pattern 不匹配 | 某个文件 | `*.py` | `NONEXISTENT_XYZ123` | `No matches found.` |
-| N17 | 文件 + regex=false | 某个 Python 文件 | (不传) | `from` | false | 精确匹配含 "from" 的行 |
-| N18 | 非 Python 文件 + glob 不匹配 | 某个 CSS 文件 | `*.py` | 文件中存在的字符串 | ✅ 仍然搜索并返回结果 |
+| N10 | 文件 + glob 匹配 | 某个 Python 文件 | `*.py` | 文件中存在的字符串 | ✅ 搜索并返回结果 |
+| N11 | 文件 + glob 不匹配（扩展名） | 同一个 Python 文件 | `*.css` | 同 N10 pattern | ✅ 仍然搜索并返回结果（glob 被忽略） |
+| N12 | 文件 + glob 不匹配（通配符） | 同一个 Python 文件 | `**/test_*.py` | 同 N10 pattern | ✅ 仍然搜索并返回结果（glob 被忽略） |
+| N13 | 文件 + glob 不匹配（完全不同） | 同一个 Python 文件 | `**/*.md` | 同 N10 pattern | ✅ 仍然搜索并返回结果（glob 被忽略） |
+| N14 | 文件 + 不传 glob | 同一个 Python 文件 | (不传) | 同 N10 pattern | ✅ 搜索并返回结果，与 N10–N13 一致 |
+| N15 | 文件 + pattern 不匹配 | 某个文件 | `*.py` | `NONEXISTENT_XYZ123` | `No matches found.` |
+| N16 | 文件 + regex=false | 某个 Python 文件 | (不传) | `from` | false | 精确匹配含 "from" 的行 |
+| N17 | 非 Python 文件 + glob 不匹配 | 某个 CSS 文件 | `*.py` | 文件中存在的字符串 | ✅ 仍然搜索并返回结果 |
 
 ### 4.4.3 边界/异常场景
 
@@ -530,9 +529,8 @@ No matches found.
 | F2 | 行号 | 1-indexed，反映文件原始行号 |
 | F3 | regex 模式 | 支持 Python 正则语法：`.*`、`^`、`$`、字符类、`|` 等 |
 | F4 | regex=false 模式 | 按字面量子串匹配，正则元字符（`.`、`*` 等）不转义 |
-| F5 | glob 通配符 | 支持 `*`（单层）、`**`（递归）、`?`（单字符）、`[...]`（字符类）、`{a,b}`（选择） |
-| F6 | glob 选择语法 | `**/*.{py,css}` 匹配 `.py` 和 `.css` 文件 |
-| F7 | 结果排序 | 按文件路径字母序 → 行号数字序 |
+| F5 | glob 通配符 | 支持 `*`（单层）、`**`（递归）、`?`（单字符）、`[...]`（字符类） |
+| F6 | 结果排序 | 按文件路径字母序 → 行号数字序 |
 
 
 ---

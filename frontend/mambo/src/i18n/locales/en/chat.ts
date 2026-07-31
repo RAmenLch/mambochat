@@ -144,6 +144,8 @@ export default {
       rejectReasonPlaceholder: 'If not provided, default reason will be used...',
       reviewSubmitted: 'Review submitted',
       reviewFailed: 'Review submission failed',
+      expandFullContent: 'Expand full content ({count} chars)',
+      collapseContent: 'Collapse',
     },
   },
   codeBlock: {

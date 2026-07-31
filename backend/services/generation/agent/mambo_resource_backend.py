@@ -61,6 +61,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from mambo_agents.backends.protocol import (
     BackendProtocol,
+    DownloadFileResult,
     EditResult,
     FileInfo,
     GlobResult,
@@ -70,6 +71,7 @@ from mambo_agents.backends.protocol import (
     ReadResult,
     ReadSummarizer,
     Result,
+    UploadFileResult,
     VirtualPath,
     WriteResult,
     _get_file_type,
@@ -800,28 +802,28 @@ class MamboResourceBackend(BackendProtocol):
             encoding: str = "utf-8"
             file_type = _get_file_type(norm)
 
-            try:
-                if _is_file_id_type(resolved.resource_type):
-                    text = await self._read_file_id_content(resolved.content)
-                else:
-                    text = resolved.content or ""
-            except UnicodeDecodeError:
-                if file_type != "text":
-                    text, encoding = await self._read_file_id_as_base64(resolved.content, norm)
-                else:
+            if file_type != "text" and _is_file_id_type(resolved.resource_type):
+                text, encoding = await self._read_file_id_as_base64(resolved.content, norm)
+            else:
+                try:
+                    if _is_file_id_type(resolved.resource_type):
+                        text = await self._read_file_id_content(resolved.content)
+                    else:
+                        text = resolved.content or ""
+                except UnicodeDecodeError:
                     return ReadResult(error=BackendError(
                         code=ErrorCode.INVALID, path=VirtualPath(norm),
                         message="无法读取，不是可识别的文本或多媒体格式",
                     ))
-            except Exception as e:
-                return ReadResult(
-                    content="", total_lines=0, encoding="utf-8",
-                    file_type=file_type, mime_type=_get_mime_type(norm),
-                    error=BackendError(
-                        code=ErrorCode.IO_ERROR, path=VirtualPath(norm),
-                        message=f"Error reading file: {e}",
-                    ),
-                )
+                except Exception as e:
+                    return ReadResult(
+                        content="", total_lines=0, encoding="utf-8",
+                        file_type=file_type, mime_type=_get_mime_type(norm),
+                        error=BackendError(
+                            code=ErrorCode.IO_ERROR, path=VirtualPath(norm),
+                            message=f"Error reading file: {e}",
+                        ),
+                    )
 
         if encoding == "base64":
             return ReadResult(content=text, total_lines=1, encoding="base64",
@@ -923,6 +925,14 @@ class MamboResourceBackend(BackendProtocol):
                         code=ErrorCode.ALREADY_EXISTS, path=file_path,
                         message="文件已存在，请用 edit() 修改或用 overwrite=True 覆盖",
                     ))
+                if _is_file_id_type(existing.resource_type) and existing.content:
+                    try:
+                        await self._read_file_id_content(existing.content)
+                    except UnicodeDecodeError:
+                        return WriteResult(error=BackendError(
+                            code=ErrorCode.INVALID, path=file_path,
+                            message="无法写入该文件，非文本文件仅支持读取",
+                        ))
 
             parent_path2, filename = self._split_parent_and_name(norm, self.workspace_root.value)
 
@@ -943,7 +953,8 @@ class MamboResourceBackend(BackendProtocol):
         return WriteResult(path=file_path)
 
     async def _update_existing(
-        self, db: AsyncSession, node: _Resolved, content: str,
+        self, db: AsyncSession, node: _Resolved,
+        content: str | None = None, raw_content: bytes | None = None,
     ) -> None:
         res = await resource_crud.get_resource_with_versions(db, node.id)
         if res is None:
@@ -955,16 +966,20 @@ class MamboResourceBackend(BackendProtocol):
 
         if _is_direct_text_type(node.resource_type):
             existing_text = latest.content if latest else ""
-            if content == existing_text:
+            if content is not None and content == existing_text:
                 return
 
         new_content_val: str
         if _is_file_id_type(node.resource_type):
             fs = FileService(db)
+            if raw_content is not None:
+                data, mime_type = raw_content, _get_mime_type(VirtualPath("/" + node.name))
+            else:
+                data, mime_type = (content or "").encode("utf-8"), "text/plain"
             db_file = await fs.save_file_from_bytes(
-                data=content.encode("utf-8"),
+                data=data,
                 filename=node.name,
-                mime_type="text/plain",
+                mime_type=mime_type,
                 management_type=["resource"],
                 sub_path="resources",
             )
@@ -1012,7 +1027,8 @@ class MamboResourceBackend(BackendProtocol):
         )
 
     async def _create_new_file(
-        self, db: AsyncSession, parent_path: str, filename: str, content: str,
+        self, db: AsyncSession, parent_path: str, filename: str,
+        content: str | None = None, raw_content: bytes | None = None,
     ) -> None:
         parent_id, new_folders = await self._ensure_parent_chain(db, parent_path)
 
@@ -1025,10 +1041,14 @@ class MamboResourceBackend(BackendProtocol):
                 await db.refresh(skill_folder)
 
         fs = FileService(db)
+        if raw_content is not None:
+            data, mime_type = raw_content, _get_mime_type(VirtualPath("/" + filename))
+        else:
+            data, mime_type = (content or "").encode("utf-8"), "text/plain"
         db_file = await fs.save_file_from_bytes(
-            data=content.encode("utf-8"),
+            data=data,
             filename=filename,
-            mime_type="text/plain",
+            mime_type=mime_type,
             management_type=["resource"],
             sub_path="resources",
         )
@@ -1096,6 +1116,161 @@ class MamboResourceBackend(BackendProtocol):
             new_ids.append(new_folder.id)
 
         return current_id, new_ids
+
+    # ==================================================================
+    # Bulk upload / download (raw bytes)
+    # ==================================================================
+
+    def download_files(
+        self, paths: list[VirtualPath],
+    ) -> list[DownloadFileResult]:
+        return asyncio.run(self._adownload_files_impl(paths))
+
+    async def adownload_files(
+        self, paths: list[VirtualPath],
+    ) -> list[DownloadFileResult]:
+        return await self._adownload_files_impl(paths)
+
+    async def _adownload_files_impl(
+        self, paths: list[VirtualPath],
+    ) -> list[DownloadFileResult]:
+        results: list[DownloadFileResult] = []
+        async with self._session_factory() as db:
+            for path in paths:
+                try:
+                    norm = self._normalize_path(path)
+                except BackendError as e:
+                    results.append(DownloadFileResult(path=path, content=None, error=e))
+                    continue
+
+                resolved = await self._resolve_resource(db, norm)
+                if resolved is None:
+                    results.append(DownloadFileResult(
+                        path=path, content=None,
+                        error=BackendError(
+                            code=ErrorCode.NOT_FOUND, path=path, message="文件不存在",
+                        ),
+                    ))
+                    continue
+                if resolved.is_version_node or resolved.is_version_dir:
+                    results.append(DownloadFileResult(
+                        path=path, content=None,
+                        error=BackendError(
+                            code=ErrorCode.INVALID, path=path,
+                            message="版本文件/版本文件夹不支持 download",
+                        ),
+                    ))
+                    continue
+                if resolved.is_dir:
+                    results.append(DownloadFileResult(
+                        path=path, content=None,
+                        error=BackendError(
+                            code=ErrorCode.IS_DIR, path=path, message="目标是目录",
+                        ),
+                    ))
+                    continue
+
+                if _is_file_id_type(resolved.resource_type):
+                    try:
+                        fs = FileService(db)
+                        raw = await fs.get_file_content(resolved.content or "")
+                        results.append(DownloadFileResult(path=path, content=raw))
+                    except Exception as e:
+                        results.append(DownloadFileResult(
+                            path=path, content=None,
+                            error=BackendError(
+                                code=ErrorCode.IO_ERROR, path=path,
+                                message=f"Error reading file: {e}",
+                            ),
+                        ))
+                else:
+                    results.append(DownloadFileResult(
+                        path=path,
+                        content=(resolved.content or "").encode("utf-8"),
+                    ))
+        return results
+
+    def upload_files(
+        self, files: list[tuple[VirtualPath, bytes]],
+    ) -> list[UploadFileResult]:
+        return asyncio.run(self._aupload_files_impl(files))
+
+    async def aupload_files(
+        self, files: list[tuple[VirtualPath, bytes]],
+    ) -> list[UploadFileResult]:
+        return await self._aupload_files_impl(files)
+
+    async def _aupload_files_impl(
+        self, files: list[tuple[VirtualPath, bytes]],
+    ) -> list[UploadFileResult]:
+        results: list[UploadFileResult] = []
+        for path, raw_content in files:
+            try:
+                text = raw_content.decode("utf-8")
+            except UnicodeDecodeError:
+                text = None
+            results.append(await self._upload_raw(path, raw_content, text))
+        return results
+
+    async def _upload_raw(
+        self, path: VirtualPath, raw_content: bytes, text: str | None,
+    ) -> UploadFileResult:
+        try:
+            norm = self._normalize_path(path)
+        except BackendError as e:
+            return UploadFileResult(path=path, error=e)
+
+        async with self._session_factory() as db:
+            existing = await self._resolve_resource(db, norm)
+            if existing is not None and (existing.is_version_node or existing.is_version_dir):
+                return UploadFileResult(path=path, error=BackendError(
+                    code=ErrorCode.INVALID, path=path,
+                    message="版本文件/版本文件夹不支持上传",
+                ))
+
+            parent_path, filename = self._split_parent_and_name(norm, self.workspace_root.value)
+            parent_node = await self._resolve_resource(db, parent_path)
+            if parent_node is not None and parent_node.is_version_dir:
+                return UploadFileResult(path=path, error=BackendError(
+                    code=ErrorCode.INVALID, path=path,
+                    message="版本文件夹不支持上传",
+                ))
+
+            if not self._check_edit_allowed(norm):
+                return UploadFileResult(path=path, error=BackendError(
+                    code=ErrorCode.EDIT_NOT_ALLOWED, path=path, message="路径不允许写入",
+                ))
+
+            if existing is not None:
+                if existing.is_dir:
+                    return UploadFileResult(path=path, error=BackendError(
+                        code=ErrorCode.IS_DIR, path=path, message="目标是目录，无法写入",
+                    ))
+                try:
+                    if _is_direct_text_type(existing.resource_type):
+                        if text is None:
+                            return UploadFileResult(path=path, error=BackendError(
+                                code=ErrorCode.INVALID, path=path,
+                                message="该资源类型不支持二进制内容",
+                            ))
+                        await self._update_existing(db, existing, content=text)
+                    else:
+                        await self._update_existing(db, existing, raw_content=raw_content)
+                except Exception as e:
+                    logger.exception("Upload failed for '%s'", path)
+                    return UploadFileResult(path=path, error=BackendError(
+                        code=ErrorCode.IO_ERROR, path=path, message=f"Upload failed: {e}",
+                    ))
+                return UploadFileResult(path=path)
+
+            try:
+                await self._create_new_file(db, parent_path, filename, raw_content=raw_content)
+            except Exception as e:
+                logger.exception("Upload failed for '%s'", path)
+                return UploadFileResult(path=path, error=BackendError(
+                    code=ErrorCode.IO_ERROR, path=path, message=f"Upload failed: {e}",
+                ))
+            return UploadFileResult(path=path)
 
     # ==================================================================
     # Core: edit

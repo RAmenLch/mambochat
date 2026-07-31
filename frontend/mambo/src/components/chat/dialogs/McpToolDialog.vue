@@ -34,10 +34,30 @@
             <!-- Read-only view for completed McpTool -->
             <div v-if="msg.type === 'McpTool'">
               <div v-if="Object.keys(editForms[msg.id] || {}).length > 0" class="readonly-args-box">
-                <div v-for="(val, key) in editForms[msg.id]" :key="key" class="arg-row" :class="{ 'is-multiline': isMultilineValue(val) }">
-                  <span class="arg-key">{{ key }}</span>
-                  <pre class="arg-val" v-if="isMultilineValue(val)">{{ typeof val === 'object' ? JSON.stringify(val, null, 2) : val }}</pre>
-                  <span class="arg-val arg-val-inline" v-else>{{ typeof val === 'object' ? JSON.stringify(val) : val }}</span>
+                <div v-for="entry in getArgEntries(msg.id)" :key="entry.key" class="arg-row" :class="{ 'is-multiline': entry.multiline }">
+                  <span class="arg-key">{{ entry.key }}</span>
+                  <pre class="arg-val" v-if="entry.multiline">{{ entry.displayText }}</pre>
+                  <span class="arg-val arg-val-inline" v-else>{{ entry.displayText }}</span>
+                  <el-button
+                    v-if="entry.truncated"
+                    type="primary"
+                    link
+                    size="small"
+                    class="arg-expand-btn"
+                    @click="toggleArgExpand(msg.id, entry.key)"
+                  >
+                    {{ t('chat.message.mcp.expandFullContent', { count: entry.fullLength }) }}
+                  </el-button>
+                  <el-button
+                    v-else-if="entry.expanded"
+                    type="primary"
+                    link
+                    size="small"
+                    class="arg-expand-btn"
+                    @click="toggleArgExpand(msg.id, entry.key)"
+                  >
+                    {{ t('chat.message.mcp.collapseContent') }}
+                  </el-button>
                 </div>
               </div>
               <div v-else class="no-args">{{ t('chat.message.mcp.noArguments') }}</div>
@@ -64,7 +84,7 @@
                     v-else
                     v-model="(editForms[msg.id][String(propName)] as string)"
                     type="textarea"
-                    autosize
+                    :autosize="{ minRows: 4, maxRows: 20 }"
                   />
                   <div class="prop-desc" v-if="getSchemaProperty(msg, String(propName))?.description">
                     {{ getSchemaProperty(msg, String(propName))?.description }}
@@ -80,8 +100,28 @@
           <div v-if="msg.type === 'McpTool'" class="tool-result">
             <h4>{{ t('chat.message.mcp.result') }}</h4>
             <div class="result-box" :class="{ 'is-error': (getParsedContent(msg) as McpToolContent).is_error }">
-              {{ (getParsedContent(msg) as McpToolContent).result || t('chat.message.mcp.noResult') }}
+              {{ (getParsedContent(msg) as McpToolContent).result ? getResultDisplayText(msg.id, (getParsedContent(msg) as McpToolContent).result || '') : t('chat.message.mcp.noResult') }}
             </div>
+            <el-button
+              v-if="isResultTruncated(msg.id, (getParsedContent(msg) as McpToolContent).result || '')"
+              type="primary"
+              link
+              size="small"
+              class="arg-expand-btn"
+              @click="toggleResultExpand(msg.id)"
+            >
+              {{ t('chat.message.mcp.expandFullContent', { count: getResultFullLength(msg.id, (getParsedContent(msg) as McpToolContent).result || '') }) }}
+            </el-button>
+            <el-button
+              v-else-if="isResultExpanded(msg.id)"
+              type="primary"
+              link
+              size="small"
+              class="arg-expand-btn"
+              @click="toggleResultExpand(msg.id)"
+            >
+              {{ t('chat.message.mcp.collapseContent') }}
+            </el-button>
           </div>
 
           <div v-if="msg.type === 'ReviewTool'" class="tool-actions-wrapper">
@@ -599,6 +639,77 @@ function isMultilineValue(val: unknown): boolean {
   return false;
 }
 
+/** 只读大文本的预览阈值（字符数），超过则截断展示，可手动展开全文 */
+const ARG_TEXT_PREVIEW_LIMIT = 5000;
+
+/** 参数展开状态：msg.id -> 参数名 -> 是否展开 */
+const expandedArgs = ref<Record<string, Record<string, boolean>>>({});
+/** 结果展开状态：msg.id -> 是否展开 */
+const expandedResults = ref<Record<string, boolean>>({});
+
+interface ArgDisplayEntry {
+  key: string;
+  displayText: string;
+  fullLength: number;
+  truncated: boolean;
+  expanded: boolean;
+  multiline: boolean;
+}
+
+function isArgExpanded(msgId: string, key: string): boolean {
+  return !!expandedArgs.value[msgId]?.[key];
+}
+
+function toggleArgExpand(msgId: string, key: string) {
+  if (!expandedArgs.value[msgId]) expandedArgs.value[msgId] = {};
+  expandedArgs.value[msgId][key] = !expandedArgs.value[msgId][key];
+}
+
+function isResultExpanded(msgId: string): boolean {
+  return !!expandedResults.value[msgId];
+}
+
+function toggleResultExpand(msgId: string) {
+  expandedResults.value[msgId] = !expandedResults.value[msgId];
+}
+
+/** 将参数值转为展示文本：对象转 JSON，超长则截断（展开时返回全文） */
+function toDisplayText(val: unknown): string {
+  return typeof val === 'object' && val !== null ? JSON.stringify(val, null, 2) : String(val);
+}
+
+function getArgEntries(msgId: string): ArgDisplayEntry[] {
+  const args = editForms.value[msgId] || {};
+  return Object.keys(args).map(key => {
+    const full = toDisplayText(args[key]);
+    const expanded = isArgExpanded(msgId, key);
+    const truncated = !expanded && full.length > ARG_TEXT_PREVIEW_LIMIT;
+    return {
+      key,
+      displayText: truncated ? full.slice(0, ARG_TEXT_PREVIEW_LIMIT) + '…' : full,
+      fullLength: full.length,
+      truncated,
+      expanded,
+      multiline: isMultilineValue(args[key]),
+    };
+  });
+}
+
+function getResultDisplayText(msgId: string, result: string): string {
+  const full = String(result ?? '');
+  if (isResultExpanded(msgId) || full.length <= ARG_TEXT_PREVIEW_LIMIT) return full;
+  return full.slice(0, ARG_TEXT_PREVIEW_LIMIT) + '…';
+}
+
+function isResultTruncated(msgId: string, result: string): boolean {
+  if (isResultExpanded(msgId)) return false;
+  return String(result ?? '').length > ARG_TEXT_PREVIEW_LIMIT;
+}
+
+function getResultFullLength(msgId: string, result: string): number {
+  return String(result ?? '').length;
+}
+
 function getDecisionText(decision: ToolDecision | null): string {
   if (!decision) return '';
   switch (decision.type) {
@@ -768,6 +879,9 @@ h4 {
   padding: 2px 6px;
   background: var(--el-fill-color-light);
   border-radius: 3px;
+}
+.arg-expand-btn {
+  margin-top: 4px;
 }
 .arg-val:not(.arg-val-inline) {
   background: var(--el-fill-color);

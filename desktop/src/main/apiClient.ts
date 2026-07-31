@@ -357,7 +357,7 @@ export class ApiClientManager {
   // File operation handlers
   // ---------------------------------------------------------------------------
 
-  private handleTree(params: Record<string, unknown>): { tree: string } {
+  private handleTree(params: Record<string, unknown>): Record<string, unknown> {
     const vpath = (params.path as string) || '/workspace'
     const depth = (params.depth as number) ?? 3
     const ignoreDirs: string[] = (params.ignore_dirs as string[]) ?? this.defaultIgnoreDirs
@@ -482,7 +482,7 @@ export class ApiClientManager {
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
   }
 
-  private handleLs(params: Record<string, unknown>): { items: object[] } | { error: string } {
+  private handleLs(params: Record<string, unknown>): Record<string, unknown> {
     const vpath = (params.path as string) || '/workspace'
     const physical = this.resolvePath(vpath)
 
@@ -559,15 +559,33 @@ export class ApiClientManager {
       }
     }
 
-    // Text file
+    // Text file — probe before decoding
     let content: string
+    let buf: Buffer
     try {
-      content = fs.readFileSync(physical, 'utf-8')
-      log.info(`[ApiClient] handleReadFile: read ${content.length} chars`)
+      buf = fs.readFileSync(physical)
     } catch {
-      log.warn(`[ApiClient] handleReadFile: not valid UTF-8 at ${physical}`)
+      log.warn(`[ApiClient] handleReadFile: failed to read ${physical}`)
+      return { error: `Failed to read file '${vpath}'`, error_code: 'IO_ERROR' }
+    }
+
+    // Null-byte probe: text files virtually never contain \x00
+    const probeEnd = Math.min(buf.length, 4096)
+    for (let i = 0; i < probeEnd; i++) {
+      if (buf[i] === 0) {
+        log.info(`[ApiClient] handleReadFile: null byte detected, not a text file`)
+        return { error: `File '${vpath}' is not a valid UTF-8 text file.`, error_code: 'INVALID' }
+      }
+    }
+
+    // Strict UTF-8 decode — fail on first invalid byte
+    try {
+      content = new TextDecoder('utf-8', { fatal: true }).decode(buf)
+    } catch {
+      log.info(`[ApiClient] handleReadFile: invalid UTF-8, not a text file`)
       return { error: `File '${vpath}' is not a valid UTF-8 text file.`, error_code: 'INVALID' }
     }
+    log.info(`[ApiClient] handleReadFile: read ${content.length} chars`)
 
     const lines = content.split('\n')
     const start = offset
@@ -628,6 +646,21 @@ export class ApiClientManager {
       return { error: `File already exists: ${vpath}`, error_code: 'ALREADY_EXISTS' }
     }
 
+    if (overwrite && fs.existsSync(physical!) && fs.statSync(physical!).isFile()) {
+      try {
+        const existingBuf = fs.readFileSync(physical!)
+        const existingProbeEnd = Math.min(existingBuf.length, 4096)
+        for (let i = 0; i < existingProbeEnd; i++) {
+          if (existingBuf[i] === 0) {
+            return { error: `Cannot write to binary file: ${vpath}`, error_code: 'INVALID' }
+          }
+        }
+        new TextDecoder('utf-8', { fatal: true }).decode(existingBuf)
+      } catch {
+        return { error: `Cannot write to binary file: ${vpath}`, error_code: 'INVALID' }
+      }
+    }
+
     try {
       fs.mkdirSync(path.dirname(physical!), { recursive: true })
       fs.writeFileSync(physical!, content, 'utf-8')
@@ -666,11 +699,25 @@ export class ApiClientManager {
       return { error: `File not found: ${vpath}. To create a new file, use write().`, error_code: 'NOT_FOUND' }
     }
 
-    let content: string
+    let editBuf: Buffer
     try {
-      content = fs.readFileSync(physical!, 'utf-8')
+      editBuf = fs.readFileSync(physical!)
     } catch (e) {
       return { error: String(e), error_code: 'IO_ERROR' }
+    }
+
+    const editProbeEnd = Math.min(editBuf.length, 4096)
+    for (let i = 0; i < editProbeEnd; i++) {
+      if (editBuf[i] === 0) {
+        return { error: `Cannot edit binary file: ${vpath}`, error_code: 'INVALID' }
+      }
+    }
+
+    let content: string
+    try {
+      content = new TextDecoder('utf-8', { fatal: true }).decode(editBuf)
+    } catch {
+      return { error: `Cannot edit binary file: ${vpath}`, error_code: 'INVALID' }
     }
 
     const normalizedOld = oldStr.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
@@ -699,7 +746,7 @@ export class ApiClientManager {
     }
   }
 
-  private handleGrepFiles(params: Record<string, unknown>): { matches: object[] } | { error: string } {
+  private handleGrepFiles(params: Record<string, unknown>): Record<string, unknown> {
     const pattern = (params.pattern as string) || ''
     const vpath = (params.path as string) || '/workspace'
     const glob = (params.glob as string) || undefined
@@ -779,7 +826,7 @@ export class ApiClientManager {
     return { matches }
   }
 
-  private handleGlobFiles(params: Record<string, unknown>): { items: object[] } {
+  private handleGlobFiles(params: Record<string, unknown>): Record<string, unknown> {
     const pattern = (params.pattern as string) || '*'
     const vpath = (params.path as string) || '/workspace'
     const ignoreDirs: string[] = (params.ignore_dirs as string[]) ?? this.defaultIgnoreDirs

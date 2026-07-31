@@ -144,6 +144,8 @@ export default {
       rejectReasonPlaceholder: '若不提供，将使用默认理由...',
       reviewSubmitted: '审核已提交',
       reviewFailed: '审核提交失败',
+      expandFullContent: '展开完整内容（共 {count} 字符）',
+      collapseContent: '收起内容',
     },
   },
   codeBlock: {

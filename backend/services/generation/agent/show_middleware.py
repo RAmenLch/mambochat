@@ -10,6 +10,7 @@ import json
 from pathlib import PurePosixPath
 from typing import Callable, Literal
 
+from fastapi import HTTPException
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import StructuredTool
@@ -176,13 +177,18 @@ class ShowMiddleware(AgentMiddleware):
 
         async with self._session_factory() as db:
             fs = FileService(db)
-            db_file = await fs.save_file_from_bytes(
-                data=content_bytes or b"",
-                filename=filename,
-                mime_type=mime,
-                management_type=[FileManagementType.SUB_MESSAGE.value],
-                sub_path="chat_attachments",
-            )
+            try:
+                db_file = await fs.save_file_from_bytes(
+                    data=content_bytes or b"",
+                    filename=filename,
+                    mime_type=mime,
+                    management_type=[FileManagementType.SUB_MESSAGE.value],
+                    sub_path="chat_attachments",
+                )
+            except HTTPException as exc:
+                return json.dumps({"error": exc.detail, "mode": mode}, ensure_ascii=False)
+            except Exception as exc:
+                return json.dumps({"error": str(exc), "mode": mode}, ensure_ascii=False)
 
         return json.dumps({
             "file_id": db_file.id,
