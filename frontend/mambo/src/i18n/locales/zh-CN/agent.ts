@@ -106,6 +106,8 @@ export default {
   securityReviewRiskLevel: '风险等级',
   securityReviewReason: '审核理由',
   subAgentDeleted: '[已删除] {id}',
+  duplicateSubAgentName: '子 Agent 名称重复："{name}"。挂载的子 Agent 不允许同名。',
+  duplicateMountResource: '挂载资源名称重复："{name}"。同名资源不能同时挂载。',
   // 版本控制
   versionControl: '版本控制',
   versionControlDesc: '启用文件版本历史管理。Agent 在写入/编辑/删除文件前自动备份，支持时间旅行回滚到任意历史版本',

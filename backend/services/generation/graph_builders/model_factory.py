@@ -86,11 +86,13 @@ class ModelFactory:
             )
 
         else:
+            extra_body = params_copy.pop("extra_body", None)
             model = ExtendedChatOpenAI(
                 model=model_config.model_id,
                 api_key=model_config.api_key,
                 base_url=model_config.api_host.rstrip("/"),
                 model_kwargs=params_copy,
+                extra_body=extra_body,
                 openai_proxy=model_config.proxy_url,
                 timeout=model_config.timeout,
                 streaming=stream,

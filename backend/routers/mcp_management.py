@@ -1,6 +1,7 @@
 # backend/routers/mcp_management.py
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
@@ -94,6 +95,9 @@ async def create_mcp_server(
     """
     创建自定义 MCP 服务器配置。
     """
+    existing = await db.execute(select(mcp_crud.McpServer).filter_by(name=server.name))
+    if existing.scalars().first():
+        raise HTTPException(status_code=400, detail="MCP server name already exists")
     return await mcp_crud.create_mcp_server(db, server)
 
 
@@ -121,6 +125,17 @@ async def update_mcp_server(
     # 检查是否为系统内置 ID
     if server_id.startswith("system-"):
         raise HTTPException(status_code=403, detail="Cannot modify system built-in tools.")
+
+    # 名称查重（排除自身）
+    if server_update.name is not None:
+        existing = await db.execute(
+            select(mcp_crud.McpServer).filter(
+                mcp_crud.McpServer.name == server_update.name,
+                mcp_crud.McpServer.id != server_id
+            )
+        )
+        if existing.scalars().first():
+            raise HTTPException(status_code=400, detail="MCP server name already exists")
 
     updated_server = await mcp_crud.update_mcp_server(db, server_id, server_update)
     if not updated_server:

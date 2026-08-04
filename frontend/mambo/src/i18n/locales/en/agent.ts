@@ -106,6 +106,8 @@ export default {
   securityReviewRiskLevel: 'Risk Level',
   securityReviewReason: 'Review Reason',
   subAgentDeleted: '[Deleted] {id}',
+  duplicateSubAgentName: 'Duplicate sub-agent name: "{name}". Sub-agents must have unique names.',
+  duplicateMountResource: 'Duplicate mounted resource name: "{name}". Resources with the same name cannot be mounted together.',
   // Version Control
   versionControl: 'Version Control',
   versionControlDesc: 'Enable file version history. Agent automatically backs up files before write/edit/delete operations, supporting time-travel rollback to any historical version',

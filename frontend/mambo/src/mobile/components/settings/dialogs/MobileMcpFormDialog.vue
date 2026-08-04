@@ -167,6 +167,24 @@ const rules = computed<FormRules>(() => {
         },
         trigger: 'blur',
       },
+      {
+        validator: (_rule: any, value: string, callback: any) => {
+          if (!value) {
+            callback();
+            return;
+          }
+          const name = value.trim();
+          const duplicate = mcpStore.availableServices.some(
+            s => !s.isSystem && s.name === name && (!isEditMode.value || s.id !== props.initialData?.id)
+          );
+          if (duplicate) {
+            callback(new Error(t('settings.mcp.form.nameDuplicate')));
+          } else {
+            callback();
+          }
+        },
+        trigger: 'blur',
+      },
     ],
   };
   if (formData.transportType === 'stdio') return { ...base, command: [{ required: true, message: 'Command is required', trigger: 'blur' }] };

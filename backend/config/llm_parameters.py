@@ -11,7 +11,7 @@ class LLMParameter(BaseModel):
     """
     key: str = Field(..., description="唯一的参数标识符，用于数据库存储和内部引用。例如：'temperature' 或 'openai::tool_choice'。")
     label: str = Field(..., description="在前端UI中展示给用户的名称。例如：'Temperature'。")
-    path: List[str] = Field(..., description="用于构建最终API请求体的路径。例如：['temperature'] 或 ['tool_config', 'tool_choice']。")
+    path: List[str] = Field(..., description="用于构建最终API请求体的路径。例如：['temperature'] 或 ['tool_config', 'tool_choice']。若以 'extra_body' 开头（如 ['extra_body', 'thinking', 'type']），该参数经请求体的 extra_body 字段传递，用于非 OpenAI 标准扩展参数。")
     description: str = Field(..., description="参数功能的详细描述，供前端UI展示。")
     type: Literal['integer', 'number', 'string', 'boolean'] = Field(..., description="参数值的数据类型。")
     limit: Optional[Union[List[Any], dict[str, float]]] = Field(None, description="值的约束。对于string类型，是枚举值列表；对于number/integer类型，是包含 'min' 和 'max' 的字典。")
@@ -290,9 +290,19 @@ SUPPORTED_LLM_PARAMETERS: List[LLMParameter] = [
 
     # --- Kimi (Moonshot) 特有参数 ---
     LLMParameter(
+        key="kimi::thinking.type",
+        label="Thinking Type (Kimi)",
+        path=["extra_body", "thinking", "type"],
+        description="控制 Kimi K2.5/K2.6 可选思考模式开关。enabled 开启，disabled 关闭。",
+        type="string",
+        limit=["enabled", "disabled"],
+        default_value="enabled",
+        default_activate=False
+    ),
+    LLMParameter(
         key="kimi::thinking.keep",
         label="Preserved Thinking (Kimi)",
-        path=["thinking", "keep"],
+        path=["extra_body", "thinking", "keep"],
         description="控制是否将历史轮次的推理内容保留在上下文中。仅 Kimi K2.6 支持可选（设为 'all' 启用），K2.7 Code 始终启用且不可关闭。",
         type="string",
         limit=["all"],

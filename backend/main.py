@@ -39,7 +39,8 @@ from backend.routers import (
     backend_management,
     api_client_router,
     version_control,
-    system_log  # <-- 新增：导入系统日志路由
+    system_log,  # <-- 新增：导入系统日志路由
+    agent_package,  # <-- 新增：Agent 导出包路由
 )
 from backend.services.cleanup_service import cleanup_zombie_files
 from backend.services.kb_service import SUP_DIM
@@ -236,6 +237,9 @@ app.include_router(notifications.router, prefix="/api", tags=["Notifications"])
 app.include_router(mcp_management.router, prefix="/api/mcp", tags=["MCP Management"])
 app.include_router(kb_management.router, prefix="/api/resources/kb", tags=["Knowledge Base Management"])
 app.include_router(skill_management.router, prefix="/api/resources/skills", tags=["Skills Management"])
+# Agent 导出包路由必须先于 agent_management 注册：
+# 否则 GET /agents/export 会被 GET /agents/{agent_id} 抢占（"export" 被当作 agent_id 解析）
+app.include_router(agent_package.router, prefix="/api", tags=["Agent Package"])
 app.include_router(agent_management.router, prefix="/api", tags=["Agent Management"])
 app.include_router(system_log.router, prefix="/api/logs", tags=["System Logs"])
 app.include_router(file_management.router)

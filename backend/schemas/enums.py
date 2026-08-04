@@ -87,7 +87,7 @@ class ResourceType(str, Enum):
     KNOWLEDGE_BASE = "knowledge_base"
     SYSTEM_PROMPT = "system_prompt"
     SUBMESSAGE_TEMPLATE = "submessage_template"
-    KB_FILE = "kb_file"  # 旧版知识库文件类型（保留用于兼容）
+    KB_FILE = "kb_file"  # 已弃用：无创建入口，仅兼容存量旧数据（读取/清理时按文件类型处理）
     FILE = "file"        # 通用文件资源类型，支持向量化
     SKILL = "skill"
 

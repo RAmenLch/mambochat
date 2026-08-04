@@ -188,6 +188,7 @@ export default {
       nameMaxLength: 'Name must not exceed 64 characters',
       namePattern: 'Name must start with a letter and contain only letters, digits, underscores, and hyphens',
       nameNoDoubleUnderscore: 'Name must not contain "__"',
+      nameDuplicate: 'This name already exists, please use another name',
       commandRequired: 'Please enter command',
       urlRequired: 'Please enter SSE URL',
     },

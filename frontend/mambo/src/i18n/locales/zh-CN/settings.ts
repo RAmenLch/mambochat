@@ -186,6 +186,7 @@ export default {
       nameMaxLength: '名称不能超过 64 个字符',
       namePattern: '名称必须以字母开头，只包含字母、数字、下划线和连字符',
       nameNoDoubleUnderscore: '名称不能包含 "__"',
+      nameDuplicate: '该名称已存在，请更换名称',
       commandRequired: '请输入执行命令',
       urlRequired: '请输入 SSE URL',
     },

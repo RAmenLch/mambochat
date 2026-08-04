@@ -1,0 +1,154 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "./agent_package_schema_v1.json",
+  "title": "MamboChat Agent Package",
+  "description": "MamboChat Agent 导出包（.mamboagent）格式校验 Schema v1。仅用于校验/IDE 提示，导入逻辑不依赖本文件（以 format + formatVersion 为准）。",
+  "type": "object",
+  "required": ["format", "formatVersion", "mambochatVersion", "exportedAt", "agents", "providers", "resources", "mcpServers", "backends", "blobs"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "format": { "const": "mambochat.agent-package" },
+    "formatVersion": { "type": "string" },
+    "mambochatVersion": { "type": "string" },
+    "exportedAt": { "type": "string", "format": "date-time" },
+    "description": { "type": ["string", "null"] },
+    "agents": { "type": "array", "items": { "$ref": "#/definitions/agent" } },
+    "providers": { "type": "array", "items": { "$ref": "#/definitions/provider" } },
+    "resources": { "type": "array", "items": { "$ref": "#/definitions/resource" } },
+    "mcpServers": { "type": "array", "items": { "$ref": "#/definitions/mcpServer" } },
+    "backends": { "type": "array", "items": { "$ref": "#/definitions/backend" } },
+    "blobs": { "type": "array", "items": { "$ref": "#/definitions/blob" } }
+  },
+  "definitions": {
+    "agent": {
+      "type": "object",
+      "required": ["sourceId", "name", "itemType"],
+      "properties": {
+        "sourceId": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": ["string", "null"] },
+        "itemType": { "const": "agent" },
+        "AgentType": { "type": "string" },
+        "systemPrompt": { "type": ["string", "null"] },
+        "modelParameters": { "type": ["object", "null"] },
+        "agentParameters": { "type": ["object", "null"] },
+        "aiModelId": { "type": ["string", "null"] },
+        "agentAvatarId": { "type": ["string", "null"] },
+        "resourcePromptList": { "type": "array", "items": { "type": "string" } },
+        "enabledMcpIds": { "type": "array", "items": { "type": "string" } },
+        "subAgents": { "type": "array", "items": { "type": "string" } },
+        "backendIds": { "type": "array", "items": { "type": "string" } },
+        "defaultBackendId": { "type": ["string", "null"] }
+      }
+    },
+    "provider": {
+      "type": "object",
+      "required": ["sourceId", "name", "apiHost", "models"],
+      "properties": {
+        "sourceId": { "type": "string" },
+        "name": { "type": "string" },
+        "apiHost": { "type": "string" },
+        "use_proxy": { "type": "boolean" },
+        "worker_type": { "type": "string" },
+        "apiKeyMissing": { "type": "boolean" },
+        "models": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["sourceId", "modelId", "name"],
+            "properties": {
+              "sourceId": { "type": "string" },
+              "modelId": { "type": "string" },
+              "name": { "type": "string" },
+              "meta_config": { "type": ["object", "null"] },
+              "model_type": { "type": "string" },
+              "starred": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "resource": {
+      "type": "object",
+      "required": ["sourceId", "name", "itemType"],
+      "properties": {
+        "sourceId": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": ["string", "null"] },
+        "itemType": { "type": "string" },
+        "resourceType": { "type": ["string", "null"] },
+        "parentId": { "type": ["string", "null"] },
+        "sortOrder": { "type": "integer" },
+        "kb_id": { "type": ["string", "null"] },
+        "kb_config": { "type": ["object", "null"] },
+        "latestVersionId": { "type": ["string", "null"] },
+        "versions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["sourceId", "name", "contentType"],
+            "properties": {
+              "sourceId": { "type": "string" },
+              "name": { "type": "string" },
+              "sortOrder": { "type": "integer" },
+              "commitMessage": { "type": ["string", "null"] },
+              "contentType": { "enum": ["text", "file"] },
+              "content": { "type": ["string", "null"] },
+              "file": {
+                "type": ["object", "null"],
+                "properties": {
+                  "filename": { "type": "string" },
+                  "mimeType": { "type": "string" },
+                  "size": { "type": "integer" },
+                  "blobId": { "type": "string" }
+                }
+              },
+              "attributes": { "type": ["object", "null"] }
+            }
+          }
+        }
+      }
+    },
+    "mcpServer": {
+      "type": "object",
+      "required": ["sourceId", "name", "transportType"],
+      "properties": {
+        "sourceId": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": ["string", "null"] },
+        "transportType": { "type": "string" },
+        "command": { "type": ["string", "null"] },
+        "args": { "type": ["array", "null"], "items": { "type": "string" } },
+        "cwd": { "type": ["string", "null"] },
+        "url": { "type": ["string", "null"] },
+        "timeout": { "type": ["number", "null"] },
+        "sse_read_timeout": { "type": ["number", "null"] },
+        "isEnabled": { "type": "boolean" }
+      }
+    },
+    "backend": {
+      "type": "object",
+      "required": ["sourceId", "name", "backendType", "configData"],
+      "properties": {
+        "sourceId": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": ["string", "null"] },
+        "backendType": { "const": "resource" },
+        "configData": { "type": "object" },
+        "tools_config": { "type": ["object", "null"] }
+      }
+    },
+    "blob": {
+      "type": "object",
+      "required": ["blobId", "filename", "mimeType", "size", "encoding", "data"],
+      "properties": {
+        "blobId": { "type": "string" },
+        "filename": { "type": "string" },
+        "mimeType": { "type": "string" },
+        "size": { "type": "integer" },
+        "encoding": { "const": "base64" },
+        "data": { "type": "string" }
+      }
+    }
+  }
+}

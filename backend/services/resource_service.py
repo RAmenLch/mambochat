@@ -312,6 +312,7 @@ async def validate_mounted_resources(db: AsyncSession, resource_ids: List[str]):
     2. 是否为有效的可挂载资源（不能是纯文件夹）
     3. 多个 KB 的情况下，名称是否相同
     4. 多个 SKILL 的情况下，名称是否相同
+    5. file / system_prompt / submessage_template 共享同名池子，跨类型也不得重名
     """
     if not resource_ids:
         return
@@ -321,6 +322,13 @@ async def validate_mounted_resources(db: AsyncSession, resource_ids: List[str]):
 
     kb_names = set()
     skill_names = set()
+    leaf_names = set()
+
+    LEAF_TYPES = frozenset({
+        ResourceType.FILE.value,
+        ResourceType.SYSTEM_PROMPT.value,
+        ResourceType.SUBMESSAGE_TEMPLATE.value,
+    })
 
     for rid in resource_ids:
         res = resources_map.get(rid)
@@ -349,6 +357,14 @@ async def validate_mounted_resources(db: AsyncSession, resource_ids: List[str]):
                     detail=f"Duplicate Skill name detected: '{res.name}'. Multiple Skills must have unique names."
                 )
             skill_names.add(res.name)
+
+        elif res.resourceType in LEAF_TYPES:
+            if res.name in leaf_names:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Duplicate resource name detected: '{res.name}'. file/system_prompt/submessage_template resources must have unique names."
+                )
+            leaf_names.add(res.name)
 
 
 async def validate_memory_resources(db: AsyncSession, resource_ids: List[str]):

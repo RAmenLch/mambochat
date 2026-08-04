@@ -40,139 +40,203 @@ class AskUserAnswerRequest(BaseModel):
     ask_status: str = "answered"
 
 
-_pending_file_tasks: dict[str, asyncio.Task] = {}
+# ----------------------------------------------------------------------
+# Pending file (show wait) — 按会话聚合
+# 同一会话的所有待生成文件共享一个轮询任务与一个 backend 实例。
+# 任务生命周期：由首个 wait-for-files 连接启动，所有 pending 文件达到
+# 终态（成功入库 / 超时失败）后结束；客户端断开不影响任务继续运行。
+# ----------------------------------------------------------------------
+
+_chat_pending_tasks: dict[str, asyncio.Task] = {}
+_chat_subscribers: dict[str, set[asyncio.Queue]] = {}
 
 
-async def _poll_and_persist_file(
+async def _broadcast_chat_event(chat_id: str, event: dict) -> None:
+    queues = _chat_subscribers.get(chat_id)
+    if not queues:
+        return
+    for queue in list(queues):
+        try:
+            queue.put_nowait(event)
+        except Exception:
+            pass
+
+
+async def _process_pending_file(
+    backend,
     sub_message_id: str,
     path: str,
-    timeout: int,
-    chat_id: str,
 ) -> dict:
-    """轮询等待文件生成，成功后入库并更新子消息。
+    """下载 → 稳定性校验 → 入库 → 更新子消息。
 
-    返回 {"type": "file_ready", "file_id": "...", "file_info": {...}} 或
-         {"type": "file_timeout", "path": "..."}
+    返回 {"type": "file_ready", "file_id", "file_info"} 或
+         {"type": "still_writing"}（文件未写完，等待下一轮）。
     """
+    r1 = await backend.adownload_files([VirtualPath(path)])
+    size1 = len(r1[0].content) if r1 and r1[0].content else 0
+    if size1 == 0:
+        return {"type": "still_writing"}
+
+    await asyncio.sleep(2)
+    r2 = await backend.adownload_files([VirtualPath(path)])
+    size2 = len(r2[0].content) if r2 and r2[0].content else 0
+    if size1 != size2:
+        return {"type": "still_writing"}
+
+    content = r2[0].content
+    filename = PurePosixPath(path).name
+    mime = _get_mime_type(path)
+
+    if content:
+        sample = content[:8192]
+        try:
+            sample.decode("utf-8")
+            from backend.utils.file_utils import FileUtils
+            mime = FileUtils.correct_mime_type(filename, mime, sample)
+        except (UnicodeDecodeError, ValueError, LookupError):
+            pass
+
+    async with AsyncSessionLocal() as db:
+        fs = FileService(db)
+        db_file = await fs.save_file_from_bytes(
+            data=content or b"",
+            filename=filename,
+            mime_type=mime,
+            management_type=[FileManagementType.SUB_MESSAGE.value],
+            sub_path="chat_attachments",
+        )
+
+        # 保留创建时设置的 show_tool_mode（防止轮询完成时被覆盖）
+        existing_sub = await message_crud.get_sub_message(db, sub_message_id)
+        show_tool_mode = None
+        if existing_sub and existing_sub.config:
+            raw_cfg = existing_sub.config
+            if isinstance(raw_cfg, str):
+                raw_cfg = json.loads(raw_cfg)
+            show_tool_mode = raw_cfg.get("show_tool_mode") if isinstance(raw_cfg, dict) else getattr(raw_cfg, "show_tool_mode", None)
+
+        await message_crud.update_sub_message(
+            db,
+            sub_message_id,
+            SubMessageUpdate(
+                content=db_file.id,
+                status=MessageStatus.COMPLETED,
+                config=SubMessageConfig(
+                    context_participation_length=0,
+                    pending_file_path=None,
+                    pending_file_timeout=None,
+                    show_tool_mode=show_tool_mode,
+                ),
+            ),
+        )
+
+        file_schema = fs.convert_to_schema(db_file)
+        file_info = file_schema.model_dump(mode='json')
+
+    return {
+        "type": "file_ready",
+        "file_id": db_file.id,
+        "file_info": file_info,
+    }
+
+
+async def _scan_chat_pending_sub_messages(
+    db: AsyncSession, chat_id: str,
+) -> dict[str, tuple[str, int]]:
+    """扫描会话下所有等待中的文件子消息，返回 {sub_message_id: (path, timeout)}。"""
+    pending: dict[str, tuple[str, int]] = {}
+    msgs = await message_crud.get_messages_by_chat(db, chat_id=chat_id)
+    for msg in msgs:
+        for sub in msg.sub_messages:
+            if sub.type != SubMessageType.FILE.value or sub.status != MessageStatus.WAITING.value:
+                continue
+            raw_cfg = sub.config
+            if isinstance(raw_cfg, str):
+                try:
+                    raw_cfg = json.loads(raw_cfg)
+                except json.JSONDecodeError:
+                    continue
+            if not isinstance(raw_cfg, dict):
+                continue
+            path = raw_cfg.get("pending_file_path")
+            if not path:
+                continue
+            timeout = raw_cfg.get("pending_file_timeout") or 300
+            pending[sub.id] = (path, int(timeout))
+    return pending
+
+
+async def _poll_chat_pending_files(chat_id: str) -> None:
+    """轮询会话下所有待生成文件，就绪/超时后入库并广播事件。"""
     from backend.services.generation.agent.backend_factory import (
         build_backend_from_chat_id,
     )
 
-    print(f"[PendingFile] Polling started: sub={sub_message_id} path={path} timeout={timeout}s chat={chat_id}")
-
     backend = None
-    poll_count = 0
     try:
         async with AsyncSessionLocal() as db:
-            print(f"[PendingFile] Building backend for chat={chat_id}...")
             backend = await build_backend_from_chat_id(db, chat_id)
-            print(f"[PendingFile] Backend built: {type(backend).__name__}")
 
-        deadline = time.monotonic() + timeout
+        # sub_message_id -> (path, timeout, deadline)
+        pending: dict[str, tuple[str, int, float]] = {}
 
-        while time.monotonic() < deadline:
-            poll_count += 1
-            remaining = int(deadline - time.monotonic())
-            try:
-                pp = PurePosixPath(path)
-                glob_result = await backend.aglob(pp.name, VirtualPath(str(pp.parent)))
-                file_appeared = glob_result.error is None and bool(glob_result.matches)
-                print(f"[PendingFile] Poll #{poll_count}: aglob({pp.name}, {str(pp.parent)}) -> error={glob_result.error} matches={glob_result.matches} (appeared={file_appeared}) remaining={remaining}s")
-            except Exception as exc:
-                print(f"[PendingFile] Poll #{poll_count}: aglob error: {exc}")
-                file_appeared = False
+        while True:
+            # 1. 与 DB 同步 pending 集合（新文件自动纳入，已终态移除）
+            async with AsyncSessionLocal() as db:
+                db_pending = await _scan_chat_pending_sub_messages(db, chat_id)
 
-            if file_appeared:
-                print(f"[PendingFile] File detected, downloading (pass 1)...")
-                r1 = await backend.adownload_files([VirtualPath(path)])
-                size1 = len(r1[0].content) if r1 and r1[0].content else 0
-                print(f"[PendingFile] Download pass 1: size={size1}")
+            now = time.monotonic()
+            for sub_id in list(pending.keys()):
+                if sub_id not in db_pending:
+                    del pending[sub_id]
+            for sub_id, (path, timeout) in db_pending.items():
+                if sub_id not in pending:
+                    pending[sub_id] = (path, timeout, now + timeout)
 
-                if size1 == 0:
-                    print(f"[PendingFile] Size=0, waiting 3s before next poll...")
-                    await asyncio.sleep(3)
+            if not pending:
+                break
+
+            # 2. 逐个处理：超时 → failed；就绪 → 入库 + completed
+            for sub_id, (path, timeout, deadline) in list(pending.items()):
+                if time.monotonic() >= deadline:
+                    async with AsyncSessionLocal() as db:
+                        await message_crud.update_sub_message(
+                            db,
+                            sub_id,
+                            SubMessageUpdate(status=MessageStatus.FAILED),
+                        )
+                    await _broadcast_chat_event(chat_id, {
+                        "type": "file_timeout",
+                        "sub_message_id": sub_id,
+                        "path": path,
+                    })
+                    del pending[sub_id]
                     continue
 
-                await asyncio.sleep(2)
-                print(f"[PendingFile] Stability check: downloading pass 2...")
-                r2 = await backend.adownload_files([VirtualPath(path)])
-                size2 = len(r2[0].content) if r2 and r2[0].content else 0
-                print(f"[PendingFile] Download pass 2: size={size2}")
+                try:
+                    pp = PurePosixPath(path)
+                    glob_result = await backend.aglob(pp.name, VirtualPath(str(pp.parent)))
+                    file_appeared = glob_result.error is None and bool(glob_result.matches)
+                except Exception:
+                    file_appeared = False
 
-                if size1 != size2:
-                    print(f"[PendingFile] Sizes differ ({size1} vs {size2}), file still writing, retrying...")
+                if not file_appeared:
                     continue
 
-                print(f"[PendingFile] File stable, persisting...")
-                content = r2[0].content
-                filename = PurePosixPath(path).name
-                mime = _get_mime_type(path)
-
-                if content:
-                    sample = content[:8192]
-                    try:
-                        sample.decode("utf-8")
-                        from backend.utils.file_utils import FileUtils
-                        mime = FileUtils.correct_mime_type(filename, mime, sample)
-                    except (UnicodeDecodeError, ValueError, LookupError):
-                        pass
-
-                async with AsyncSessionLocal() as db:
-                    fs = FileService(db)
-                    db_file = await fs.save_file_from_bytes(
-                        data=content or b"",
-                        filename=filename,
-                        mime_type=mime,
-                        management_type=[FileManagementType.SUB_MESSAGE.value],
-                        sub_path="chat_attachments",
-                    )
-                    print(f"[PendingFile] File saved: id={db_file.id} filename={filename} mime={mime}")
-
-                    # 保留创建时设置的 show_tool_mode（防止轮询完成时被覆盖）
-                    existing_sub = await message_crud.get_sub_message(db, sub_message_id)
-                    show_tool_mode = None
-                    if existing_sub and existing_sub.config:
-                        raw_cfg = existing_sub.config
-                        if isinstance(raw_cfg, str):
-                            raw_cfg = json.loads(raw_cfg)
-                        show_tool_mode = raw_cfg.get("show_tool_mode") if isinstance(raw_cfg, dict) else getattr(raw_cfg, "show_tool_mode", None)
-
-                    await message_crud.update_sub_message(
-                        db,
-                        sub_message_id,
-                        SubMessageUpdate(
-                            content=db_file.id,
-                            status=MessageStatus.COMPLETED,
-                            config=SubMessageConfig(
-                                context_participation_length=0,
-                                pending_file_path=None,
-                                pending_file_timeout=None,
-                                show_tool_mode=show_tool_mode,
-                            ),
-                        ),
-                    )
-                    print(f"[PendingFile] Sub-message updated: {sub_message_id} -> COMPLETED")
-
-                    file_schema = fs.convert_to_schema(db_file)
-                    file_info = file_schema.model_dump(mode='json')
-
-                print(f"[PendingFile] SUCCESS: file_ready file_id={db_file.id}")
-                return {
-                    "type": "file_ready",
-                    "file_id": db_file.id,
-                    "file_info": file_info,
-                }
+                result = await _process_pending_file(backend, sub_id, path)
+                if result["type"] == "file_ready":
+                    await _broadcast_chat_event(chat_id, {
+                        "type": "file_ready",
+                        "sub_message_id": sub_id,
+                        "file_id": result["file_id"],
+                        "file_info": result["file_info"],
+                    })
+                    del pending[sub_id]
 
             await asyncio.sleep(3)
 
-        print(f"[PendingFile] TIMEOUT after {poll_count} polls: path={path} never appeared")
-        async with AsyncSessionLocal() as db:
-            await message_crud.update_sub_message(
-                db,
-                sub_message_id,
-                SubMessageUpdate(status=MessageStatus.FAILED),
-            )
-        return {"type": "file_timeout", "path": path}
+        # 3. 所有 pending 终态 → 通知订阅连接正常关闭
+        await _broadcast_chat_event(chat_id, {"type": "__done__"})
 
     finally:
         if backend is not None and hasattr(backend, 'aclose'):
@@ -727,65 +791,93 @@ async def answer_ask_user(
 
 
 @router.get(
-    "/sub-messages/{sub_message_id}/wait-for-file",
-    summary="等待待生成文件就绪（SSE）",
+    "/chats/{chat_id}/wait-for-files",
+    summary="等待会话中待生成文件就绪（SSE，按会话聚合）",
 )
-async def wait_for_pending_file(
-    sub_message_id: str,
-    db: AsyncSession = Depends(get_db),
-):
-    print(f"[PendingFile SSE] Connection received for sub={sub_message_id}")
+async def wait_for_pending_files(chat_id: str, db: AsyncSession = Depends(get_db)):
+    """前端进入会话时建立一条聚合 SSE 连接，等待该会话所有 pending 文件。
 
-    sub = await message_crud.get_sub_message(db, sub_message_id)
-    if not sub or sub.type != SubMessageType.FILE.value:
-        print(f"[PendingFile SSE] ERROR: sub not found or not FILE type")
-        raise HTTPException(404, "Sub-message not found or not a File type")
+    连接建立时先推送已终态（completed/failed）文件的事件；仍有 waiting 文件
+    则启动/复用本会话的轮询任务（共享 backend），全部终态后服务端正常关闭连接。
+    """
+    db_chat = await chat_crud.get_chat_meta(db, chat_id=chat_id)
+    if db_chat is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
 
-    raw_config = sub.config
-    if isinstance(raw_config, str):
-        raw_config = json.loads(raw_config)
-    config = SubMessageConfig(**raw_config)
+    msgs = await message_crud.get_messages_by_chat(db, chat_id=chat_id)
 
-    path = config.pending_file_path
-    timeout = config.pending_file_timeout or 300
-    print(f"[PendingFile SSE] sub={sub_message_id} status={sub.status} content={sub.content!r} path={path} timeout={timeout}")
+    # 1. 状态对齐扫描：已终态立即推送，waiting 纳入轮询
+    file_ids_to_hydrate = {
+        sub.content for m in msgs for sub in m.sub_messages
+        if sub.type == SubMessageType.FILE.value and sub.status == MessageStatus.COMPLETED.value and sub.content
+    }
+    file_info_map = {}
+    if file_ids_to_hydrate:
+        fs = FileService(db)
+        file_records = await fs.batch_get_files(list(file_ids_to_hydrate))
+        for record in file_records:
+            file_info_map[record.id] = fs.convert_to_schema(record).model_dump(mode='json')
 
-    if sub.status == MessageStatus.COMPLETED.value and sub.content:
-        print(f"[PendingFile SSE] File already completed, returning immediately: file_id={sub.content}")
-        async def immediate():
-            yield f"data: " + json.dumps({
-                "type": "file_ready",
-                "file_id": sub.content,
-            }) + "\n\n"
-        return StreamingResponse(immediate(), media_type="text/event-stream")
+    initial_events: list[dict] = []
+    has_pending = False
+    for m in msgs:
+        for sub in m.sub_messages:
+            if sub.type != SubMessageType.FILE.value:
+                continue
+            if sub.status == MessageStatus.COMPLETED.value and sub.content:
+                initial_events.append({
+                    "type": "file_ready",
+                    "sub_message_id": sub.id,
+                    "file_id": sub.content,
+                    "file_info": file_info_map.get(sub.content),
+                })
+            elif sub.status == MessageStatus.FAILED.value:
+                raw_cfg = sub.config
+                if isinstance(raw_cfg, str):
+                    try:
+                        raw_cfg = json.loads(raw_cfg)
+                    except json.JSONDecodeError:
+                        raw_cfg = {}
+                path = raw_cfg.get("pending_file_path") if isinstance(raw_cfg, dict) else None
+                initial_events.append({
+                    "type": "file_timeout",
+                    "sub_message_id": sub.id,
+                    "path": path or "",
+                })
+            elif sub.status == MessageStatus.WAITING.value:
+                raw_cfg = sub.config
+                if isinstance(raw_cfg, str):
+                    try:
+                        raw_cfg = json.loads(raw_cfg)
+                    except json.JSONDecodeError:
+                        raw_cfg = {}
+                path = raw_cfg.get("pending_file_path") if isinstance(raw_cfg, dict) else None
+                if path:
+                    has_pending = True
 
-    if not path or sub.status != MessageStatus.WAITING.value:
-        print(f"[PendingFile SSE] ERROR: not in pending state (path={path} status={sub.status})")
-        raise HTTPException(400, "File is not in pending state")
+    # 2. 订阅队列 + 启动/复用轮询任务
+    queue: asyncio.Queue = asyncio.Queue()
+    _chat_subscribers.setdefault(chat_id, set()).add(queue)
+    for event in initial_events:
+        queue.put_nowait(event)
 
-    db_message = await message_crud.get_message(db, sub.messageId)
-    if not db_message:
-        raise HTTPException(404, "Message not found")
-    chat_id = db_message.chatId
-
-    task = _pending_file_tasks.get(sub_message_id)
-    if task is None:
-        print(f"[PendingFile SSE] Creating new poll task for sub={sub_message_id} chat={chat_id}")
-        task = asyncio.create_task(
-            _poll_and_persist_file(sub_message_id, path, timeout, chat_id)
-        )
-        _pending_file_tasks[sub_message_id] = task
-        task.add_done_callback(lambda _: _pending_file_tasks.pop(sub_message_id, None))
+    if has_pending:
+        task = _chat_pending_tasks.get(chat_id)
+        if task is None:
+            task = asyncio.create_task(_poll_chat_pending_files(chat_id))
+            _chat_pending_tasks[chat_id] = task
+            task.add_done_callback(lambda _: _chat_pending_tasks.pop(chat_id, None))
     else:
-        print(f"[PendingFile SSE] Reusing existing poll task for sub={sub_message_id}")
+        queue.put_nowait({"type": "__done__"})
 
     async def event_stream():
         try:
-            result = await asyncio.shield(task)
-            print(f"[PendingFile SSE] Task completed for sub={sub_message_id}: {result['type']}")
-            yield f"data: " + json.dumps(result) + "\n\n"
-        except asyncio.CancelledError:
-            print(f"[PendingFile SSE] Client disconnected for sub={sub_message_id}")
-            pass
+            while True:
+                event = await queue.get()
+                if isinstance(event, dict) and event.get("type") == "__done__":
+                    break
+                yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
+        finally:
+            _chat_subscribers.get(chat_id, set()).discard(queue)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

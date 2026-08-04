@@ -382,7 +382,7 @@ MODEL_PRESETS: dict[str, list[ModelPreset]] = {
             supported_parameters=[
                 "temperature", "top_p", "max_tokens", "max_completion_tokens",
                 "frequency_penalty", "presence_penalty", "stop",
-                "deepseek::thinking.type",
+                "kimi::thinking.type",
                 "kimi::thinking.keep",
             ],
         ),
@@ -396,7 +396,7 @@ MODEL_PRESETS: dict[str, list[ModelPreset]] = {
             supported_parameters=[
                 "temperature", "top_p", "max_tokens", "max_completion_tokens",
                 "frequency_penalty", "presence_penalty", "stop",
-                "deepseek::thinking.type",
+                "kimi::thinking.type",
             ],
         ),
 

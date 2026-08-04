@@ -840,17 +840,56 @@ function handleToggleParameter(param: { key: string; definition: { default_value
   form.modelParameters = newParams;
 }
 
+// 与后端 validate_mounted_resources 保持一致的同名池：
+// knowledge_base / skill 各自独立池；file / system_prompt / submessage_template 共享池；kb_file 等不参与检查
+function getMountPoolKey(resourceType: string | null | undefined): string | null {
+  if (resourceType === 'knowledge_base') return 'kb';
+  if (resourceType === 'skill') return 'skill';
+  if (resourceType === 'file' || resourceType === 'system_prompt' || resourceType === 'submessage_template') return 'leaf';
+  return null;
+}
+
+function findDuplicateMountName(list: Resource[]): string | null {
+  const pools: Record<string, Set<string>> = {};
+  for (const r of list) {
+    if ((r as any)._deleted) continue;
+    const pool = getMountPoolKey(r.resourceType);
+    if (!pool) continue;
+    if (!pools[pool]) pools[pool] = new Set();
+    if (pools[pool].has(r.name)) return r.name;
+    pools[pool].add(r.name);
+  }
+  return null;
+}
+
 function handleMountResources(resources: Resource[]) {
   if (resources.length === 0) return;
   const existingIds = new Set(mountedResources.value.map(r => r.id));
   const newResources = resources.filter(r => !existingIds.has(r.id));
-  if (newResources.length > 0) {
-    mountedResources.value = [...mountedResources.value, ...newResources];
-    ElMessage.success(t('common.msg.updateSuccess'));
+  if (newResources.length === 0) return;
+
+  const combined = [...mountedResources.value.filter(r => !(r as any)._deleted), ...newResources];
+  const duplicate = findDuplicateMountName(combined);
+  if (duplicate) {
+    ElMessage.error(t('agent.duplicateMountResource', { name: duplicate }));
+    return;
   }
+
+  mountedResources.value = [...mountedResources.value, ...newResources];
+  ElMessage.success(t('common.msg.updateSuccess'));
 }
 
 function handleMountSubAgents(agents: Agent[]) {
+  const seen = new Set<string>();
+  const duplicate = agents.find(a => {
+    if (seen.has(a.name)) return true;
+    seen.add(a.name);
+    return false;
+  });
+  if (duplicate) {
+    ElMessage.error(t('agent.duplicateSubAgentName', { name: duplicate.name }));
+    return;
+  }
   mountedSubAgents.value = agents;
   form.subAgents = agents.map(a => a.id);
 }
@@ -864,10 +903,22 @@ function handleMountMemory(resources: Resource[]) {
   if (resources.length === 0) return;
   const existingIds = new Set(mountedMemoryResources.value.map(r => r.id));
   const newResources = resources.filter(r => !existingIds.has(r.id));
-  if (newResources.length > 0) {
-    mountedMemoryResources.value = [...mountedMemoryResources.value, ...newResources];
-    form.mambo_memory_resource_ids = mountedMemoryResources.value.map(r => r.id);
+  if (newResources.length === 0) return;
+
+  const combined = [...mountedMemoryResources.value.filter(r => !(r as any)._deleted), ...newResources];
+  const names = new Set<string>();
+  const duplicate = combined.find(r => {
+    if (names.has(r.name)) return true;
+    names.add(r.name);
+    return false;
+  });
+  if (duplicate) {
+    ElMessage.error(t('agent.duplicateMountResource', { name: duplicate.name }));
+    return;
   }
+
+  mountedMemoryResources.value = [...mountedMemoryResources.value, ...newResources];
+  form.mambo_memory_resource_ids = mountedMemoryResources.value.map(r => r.id);
 }
 
 function handleRemoveMemory(id: string) {

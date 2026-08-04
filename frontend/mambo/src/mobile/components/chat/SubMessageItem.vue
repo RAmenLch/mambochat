@@ -211,7 +211,7 @@ import { useI18n } from 'vue-i18n'
 import type { SubMessage, Message, McpToolContent, ReviewToolContent, FileResponse } from '@/api/types'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
-import { subscribeToPendingFile } from '@/services/sseService'
+import { usePendingFileStore } from '@/stores/pendingFileStore'
 import { getFileContent } from '@/api/fileService'
 import { unpackMcpToolCall } from '@/utils/mcpToolUnpack'
 import { ElMessage } from 'element-plus'
@@ -270,10 +270,10 @@ const emit = defineEmits<{
 
 const interactionStore = useChatInteractionStore()
 const sessionStore = useChatSessionStore()
+const pendingFileStore = usePendingFileStore()
 const isCollapsed = ref(props.subMessage.config.is_collapsed || false)
 const isGenerating = computed(() => props.subMessage.status === 'generating')
 const rootRef = ref<HTMLElement | null>(null)
-const pendingFileController = ref<AbortController | null>(null)
 const pendingFailed = ref(false)
 
 const fileContent = ref<string | null>(null)
@@ -511,35 +511,12 @@ async function handleCopyFileContent() {
 
 onMounted(() => {
   if (isPendingFile.value) {
-    pendingFileController.value = subscribeToPendingFile(props.subMessage.id, {
-      onReady(fileId, fileInfo) {
-        for (const msg of sessionStore.currentChatMessages) {
-          const sm = msg.sub_messages.find(s => s.id === props.subMessage.id)
-          if (sm) {
-            sm.content = fileId
-            sm.status = 'completed'
-            sm.config = {
-              ...sm.config,
-              pending_file_path: undefined,
-              pending_file_timeout: undefined,
-            }
-            sm.file_info = fileInfo as unknown as FileResponse
-            break
-          }
-        }
+    pendingFileStore.register(props.subMessage.id, {
+      onReady() {
+        // 子消息数据已由 pendingFileStore 在 store 层更新，组件自动重渲染
       },
-      onTimeout(_path) {
+      onTimeout() {
         pendingFailed.value = true
-        for (const msg of sessionStore.currentChatMessages) {
-          const sm = msg.sub_messages.find(s => s.id === props.subMessage.id)
-          if (sm) {
-            sm.status = 'failed'
-            break
-          }
-        }
-      },
-      onError(_err) {
-        // SSE connection error - keep showing pending state
       },
     })
   }
@@ -554,10 +531,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  if (pendingFileController.value) {
-    pendingFileController.value.abort()
-    pendingFileController.value = null
-  }
+  pendingFileStore.unregister(props.subMessage.id)
 })
 </script>
 

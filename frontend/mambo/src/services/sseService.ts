@@ -79,19 +79,27 @@ export function subscribeToMessageStream(params: SseSubscriptionParams): AbortCo
 }
 
 /**
- * 订阅待生成文件的 SSE 流。
- * 当 show 工具标记文件待生成时，前端通过此函数连接 SSE 等待文件就绪。
+ * 待生成文件聚合 SSE 流的事件类型。
  */
-export function subscribeToPendingFile(
-  subMessageId: string,
+export type PendingFileEvent =
+  | { type: 'file_ready'; sub_message_id: string; file_id: string; file_info?: Record<string, unknown> }
+  | { type: 'file_timeout'; sub_message_id: string; path: string };
+
+/**
+ * 订阅待生成文件的聚合 SSE 流。
+ * 按会话聚合：进入会话时建立一条连接，等待该会话所有 pending 文件；
+ * 全部文件就绪/超时后服务端正常关闭连接。
+ */
+export function subscribeToPendingFiles(
+  chatId: string,
   callbacks: {
-    onReady: (fileId: string, fileInfo: Record<string, unknown>) => void
-    onTimeout: (path: string) => void
+    onMessage: (data: PendingFileEvent) => void
+    onClose: () => void
     onError: (error: unknown) => void
   },
 ): AbortController {
   const controller = new AbortController()
-  const url = resolveApiUrl(`/api/sub-messages/${subMessageId}/wait-for-file`)
+  const url = resolveApiUrl(`/api/chats/${chatId}/wait-for-files`)
 
   fetchEventSource(url, {
     method: 'GET',
@@ -101,19 +109,17 @@ export function subscribeToPendingFile(
     onmessage(event) {
       try {
         const data = JSON.parse(event.data)
-        if (data.type === 'file_ready') {
-          callbacks.onReady(data.file_id, data.file_info)
-        } else if (data.type === 'file_timeout') {
-          callbacks.onTimeout(data.path)
+        if (data.type === 'file_ready' || data.type === 'file_timeout') {
+          callbacks.onMessage(data)
         }
       } catch (e) {
-        console.error('Failed to parse pending file SSE data:', event.data, e)
+        console.error('Failed to parse pending files SSE data:', event.data, e)
         callbacks.onError(e)
       }
     },
 
     onclose() {
-      // Normal close - no action needed
+      callbacks.onClose()
     },
 
     onerror(err) {

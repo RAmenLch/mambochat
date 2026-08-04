@@ -546,6 +546,7 @@ class MamboAPIBackend(BackendProtocol):
         if isinstance(result, dict) and result.get("error"):
             return GrepResult(error=self._map_error(result))
         data = result.get("matches", [])
+        truncated = result.get("truncated", False) if isinstance(result, dict) else False
         matches: list[GrepMatch] = []
         for m in data:
             matches.append(
@@ -555,7 +556,7 @@ class MamboAPIBackend(BackendProtocol):
                     text=m.get("text", ""),
                 )
             )
-        return GrepResult(matches=matches)
+        return GrepResult(matches=matches, truncated=truncated)
 
     def glob(self, pattern: str, path: VirtualPath = VirtualPath("/workspace")) -> GlobResult:
         try:
@@ -571,7 +572,7 @@ class MamboAPIBackend(BackendProtocol):
             "glob",
             self._call,
             "glob_files",
-            {"pattern": pattern, "path": norm, "ignore_dirs": self.ignore_dirs},
+            {"pattern": pattern, "path": norm},
         )
         if result is None:
             return GlobResult(error=BackendError(

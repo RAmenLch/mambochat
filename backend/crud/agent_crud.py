@@ -131,6 +131,17 @@ async def update_agent(db: AsyncSession, agent_id: str, agent_update: schemas.Ag
             if atype not in (AgentTypeEnum.DEEP.value, AgentTypeEnum.MAMBO.value):
                 raise ValueError("ReActAgent does not support sub-agents. Only DeepAgent or Mambo can mount sub-agents.")
 
+            # 同名检查：所有子 Agent 共享同名池子
+            sub_agents = await get_agents_by_ids(db, update_data["subAgents"])
+            seen_names: dict[str, str] = {}
+            for sub in sub_agents:
+                if sub.name in seen_names:
+                    raise ValueError(
+                        f"Duplicate sub-agent name detected: '{sub.name}'. "
+                        f"Sub-agents must have unique names."
+                    )
+                seen_names[sub.name] = sub.id
+
     # 仅更新实际 ORM 列，自动过滤掉 memoryResourceIds / securityReviewConfig 等转运字段
     for key in _AGENT_COLUMNS & update_data.keys():
         setattr(db_agent, key, update_data[key])

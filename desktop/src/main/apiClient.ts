@@ -81,10 +81,6 @@ export class ApiClientManager {
     '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   }
 
-  private readonly defaultIgnoreDirs = [
-    '.git', 'node_modules', '__pycache__', '.venv', 'target', 'build', 'dist'
-  ]
-
   private constructor() {}
 
   static getInstance(): ApiClientManager {
@@ -360,7 +356,7 @@ export class ApiClientManager {
   private handleTree(params: Record<string, unknown>): Record<string, unknown> {
     const vpath = (params.path as string) || '/workspace'
     const depth = (params.depth as number) ?? 3
-    const ignoreDirs: string[] = (params.ignore_dirs as string[]) ?? this.defaultIgnoreDirs
+    const ignoreDirs: string[] = (params.ignore_dirs as string[]) ?? []
     const base = this.resolvePath(vpath)
 
     if (depth < 1) {
@@ -398,7 +394,7 @@ export class ApiClientManager {
             let hasChildren = false
             try {
               const sub = fs.readdirSync(full, { withFileTypes: true })
-              hasChildren = sub.filter(s => !ignoreDirs.includes(s.name)).length > 0
+              hasChildren = sub.length > 0
             } catch { /* ignore */ }
             entries.push({
               name: d.name + '/',
@@ -410,7 +406,7 @@ export class ApiClientManager {
             let hasChildren = false
             try {
               const sub = fs.readdirSync(full, { withFileTypes: true })
-              hasChildren = sub.filter(s => !ignoreDirs.includes(s.name)).length > 0
+              hasChildren = sub.length > 0
             } catch { /* ignore */ }
             if (!hasChildren) {
               entries.push({ name: d.name + '/', depth: currentDepth, marker: 'empty' })
@@ -753,7 +749,7 @@ export class ApiClientManager {
     const regex = (params.regex as boolean) ?? true
     const offset = (params.offset as number) ?? 0
     const limit = (params.limit as number) ?? undefined
-    const ignoreDirs: string[] = (params.ignore_dirs as string[]) ?? this.defaultIgnoreDirs
+    const ignoreDirs: string[] = (params.ignore_dirs as string[]) ?? []
     const base = this.resolvePath(vpath)
 
     let testFn: (line: string) => boolean
@@ -771,13 +767,37 @@ export class ApiClientManager {
     log.info(`[ApiClient] handleGrepFiles: vpath=${vpath} physical=${base} pattern=${pattern} regex=${regex} glob=${glob}`)
 
     const isDir = fs.existsSync(base) && fs.statSync(base).isDirectory()
+    const MAX_GREP_MATCHES = 1000
 
     // 1) Try ripgrep (fast native search)
     const rgMatches = this._ripgrepGrep(pattern, base, isDir ? glob : undefined, regex)
     if (rgMatches !== null) {
-      const sliced = offset > 0 ? rgMatches.slice(offset) : rgMatches
+      // Post-filter rg output: --glob uses gitignore semantics (not POSIX),
+      // and ignore_dirs must be applied uniformly across both search paths.
+      const filtered: object[] = []
+      for (const m of rgMatches) {
+        if (filtered.length >= MAX_GREP_MATCHES) break
+        const mpath = (m as { path: string }).path
+        // ignore_dirs: parent-segment check (mirrors the backends' _in_ignored_dir)
+        if (ignoreDirs.length > 0) {
+          const rel = mpath.startsWith('/workspace/')
+            ? mpath.slice('/workspace/'.length)
+            : mpath.replace(/^\//, '')
+          const parentSegs = rel.split('/').slice(0, -1)
+          if (parentSegs.some(seg => ignoreDirs.includes(seg))) continue
+        }
+        // POSIX glob post-filter
+        if (glob && isDir) {
+          const relPath = mpath.startsWith(vpath)
+            ? mpath.slice(vpath.length).replace(/^\//, '')
+            : mpath
+          if (!this.fnmatch(relPath, glob)) continue
+        }
+        filtered.push(m)
+      }
+      const sliced = offset > 0 ? filtered.slice(offset) : filtered
       const limited = limit !== undefined ? sliced.slice(0, limit) : sliced
-      return { matches: limited }
+      return { matches: limited, truncated: limited.length < filtered.length }
     }
 
     // 2) Node.js fallback
@@ -786,6 +806,7 @@ export class ApiClientManager {
     let skipped = 0
 
     const searchFile = (filePath: string, displayPath: string): void => {
+      if (matches.length >= MAX_GREP_MATCHES) return
       if (limit !== undefined && matches.length >= limit) return
       if (glob) {
         const relPath = displayPath.startsWith(vpath)
@@ -799,6 +820,7 @@ export class ApiClientManager {
         const content = fs.readFileSync(filePath, 'utf-8')
         const lines = content.split('\n')
         for (let i = 0; i < lines.length; i++) {
+          if (matches.length >= MAX_GREP_MATCHES) break
           if (limit !== undefined && matches.length >= limit) break
           if (!testFn(lines[i])) continue
           if (skipped < offset) { skipped++; continue }
@@ -823,13 +845,13 @@ export class ApiClientManager {
     }
 
     log.info(`[ApiClient] handleGrepFiles: found ${matches.length} matches`)
-    return { matches }
+    const truncated = (limit !== undefined && limit > 0 && matches.length >= limit) || matches.length >= MAX_GREP_MATCHES
+    return { matches, truncated }
   }
 
   private handleGlobFiles(params: Record<string, unknown>): Record<string, unknown> {
     const pattern = (params.pattern as string) || '*'
     const vpath = (params.path as string) || '/workspace'
-    const ignoreDirs: string[] = (params.ignore_dirs as string[]) ?? this.defaultIgnoreDirs
     const base = this.resolvePath(vpath)
 
     if (!fs.existsSync(base)) {
@@ -842,7 +864,8 @@ export class ApiClientManager {
     const results: object[] = []
     const effectivePattern = pattern.replace(/^\//, '')
 
-    for (const [fp, isDir] of this.walkDir(base, -1, 1, ignoreDirs)) {
+    // Align with local/ssh backends: glob does not filter ignore_dirs.
+    for (const [fp, isDir] of this.walkDir(base, -1, 1, [])) {
       if (isDir) continue
       const rel = path.relative(base, fp).replace(/\\/g, '/')
       if (!this.fnmatch(rel, effectivePattern)) continue
@@ -1036,7 +1059,7 @@ export class ApiClientManager {
     currentDepth = 1,
     ignoreDirs?: string[],
   ): Generator<[string, boolean, boolean]> {
-    const effectiveIgnore = ignoreDirs ?? this.defaultIgnoreDirs
+    const effectiveIgnore = ignoreDirs ?? []
     let entries: fs.Dirent[]
     try {
       entries = fs.readdirSync(directory, { withFileTypes: true })
@@ -1074,7 +1097,7 @@ export class ApiClientManager {
     regex: boolean,
   ): object[] | null {
     try {
-      const args: string[] = ['--json', '--no-heading']
+      const args: string[] = ['--json', '--no-heading', '--hidden', '--no-ignore']
       if (!regex) args.push('-F')
       if (glob) args.push('--glob', glob)
       args.push('--', pattern, basePath)
