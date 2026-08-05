@@ -76,7 +76,7 @@ export const usePendingFileStore = defineStore('pendingFile', () => {
           pending_file_timeout: undefined,
         }
         if (data.file_info) {
-          sm.file_info = data.file_info as SubMessage['file_info']
+          sm.file_info = data.file_info as unknown as SubMessage['file_info']
         }
       })
       const cb = registry.get(data.sub_message_id)
