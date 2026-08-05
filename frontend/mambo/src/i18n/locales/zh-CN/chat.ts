@@ -32,6 +32,8 @@ export default {
     exportJson: '导出 JSON',
     exportMd: '导出 Markdown',
     exportHtml: '导出 HTML',
+    importJson: '导入 JSON',
+    importSuccess: '导入成功：{name}',
     exportFailed: '导出失败',
     exportResourceError: '资源导出失败',
     inputPlaceholder: '输入新标题',

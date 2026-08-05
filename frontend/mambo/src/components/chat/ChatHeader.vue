@@ -51,8 +51,15 @@
       </template>
     </div>
 
-    <!-- 横向模式：右侧操作区 (导出按钮) -->
+    <!-- 横向模式：右侧操作区 (导出/导入按钮) -->
     <div v-if="mode === 'horizontal'" class="header-right-actions">
+      <input
+        ref="importInputRef"
+        type="file"
+        accept=".json,application/json"
+        style="display: none"
+        @change="handleImportFile"
+      />
       <el-dropdown trigger="click" @command="handleExport">
         <el-button :icon="Download" circle text :title="$t('chat.header.export')" />
         <template #dropdown>
@@ -60,6 +67,7 @@
             <el-dropdown-item command="json">{{ $t('chat.header.exportJson') }}</el-dropdown-item>
             <el-dropdown-item command="markdown">{{ $t('chat.header.exportMd') }}</el-dropdown-item>
             <el-dropdown-item command="html">{{ $t('chat.header.exportHtml') }}</el-dropdown-item>
+            <el-dropdown-item command="importJson" divided>{{ $t('chat.header.importJson') }}</el-dropdown-item>
           </el-dropdown-menu>
         </template>
       </el-dropdown>
@@ -113,6 +121,7 @@ import { ElMessage } from 'element-plus';
 import { Edit, Refresh, Expand, Download } from '@element-plus/icons-vue';
 import type { Chat, Message } from '@/api/types';
 import { getResourceDetails } from '@/api/resourceService';
+import { exportChatJson, importChat } from '@/api/chatService';
 
 const { t } = useI18n();
 
@@ -130,6 +139,7 @@ const emit = defineEmits<{
   (e: 'save-title', newTitle: string): void;
   (e: 'refresh-title'): void;
   (e: 'expand'): void;
+  (e: 'imported', chatId: string): void;
 }>();
 
 // --- State ---
@@ -141,6 +151,7 @@ const isExporting = ref(false);
 // Refs
 const titleInputRef = ref<InstanceType<typeof ElInput>>();
 const popoverInputRef = ref<InstanceType<typeof ElInput>>();
+const importInputRef = ref<HTMLInputElement>();
 
 // --- Actions ---
 
@@ -200,7 +211,7 @@ async function getFullSystemPrompt(): Promise<string> {
   }
 }
 
-function triggerDownload(content: string, filename: string, mimeType: string) {
+function triggerDownload(content: string | Blob, filename: string, mimeType: string) {
   const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -212,32 +223,31 @@ function triggerDownload(content: string, filename: string, mimeType: string) {
   URL.revokeObjectURL(url);
 }
 
-async function handleExport(format: 'json' | 'markdown' | 'html') {
+async function handleExport(format: 'json' | 'markdown' | 'html' | 'importJson') {
   if (!props.currentChat) return;
+
+  if (format === 'importJson') {
+    importInputRef.value?.click();
+    return;
+  }
   if (isExporting.value) return;
 
   isExporting.value = true;
   try {
-    const fullPrompt = await getFullSystemPrompt();
     const chatName = props.currentChat.name || 'chat';
     const timestamp = new Date().toISOString().slice(0, 10);
-    const msgs = props.messages || [];
 
     if (format === 'json') {
-      const data = {
-        system_prompt: fullPrompt,
-        messages: msgs.map(msg => ({
-          role: msg.role,
-          content: msg.sub_messages
-            .filter(sm => sm.type === 'Normal' || sm.type === 'File')
-            .map(sm => sm.content)
-            .join('\n'),
-          created_at: msg.createdAt
-        }))
-      };
-      triggerDownload(JSON.stringify(data, null, 2), `${chatName}_${timestamp}.json`, 'application/json');
+      // JSON 由后端按可导入格式生成（mambochat.chat-export）
+      const blob = await exportChatJson(props.currentChat.id);
+      triggerDownload(blob, `${chatName}_${timestamp}.json`, 'application/json');
+      return;
     }
-    else if (format === 'markdown') {
+
+    const fullPrompt = await getFullSystemPrompt();
+    const msgs = props.messages || [];
+
+    if (format === 'markdown') {
       let md = `# System Prompt\n\n${fullPrompt}\n\n---\n\n# Chat History\n\n`;
 
       msgs.forEach(msg => {
@@ -301,6 +311,24 @@ async function handleExport(format: 'json' | 'markdown' | 'html') {
   } catch (error) {
     console.error('Export failed:', error);
     ElMessage.error(t('chat.header.exportFailed'));
+  } finally {
+    isExporting.value = false;
+  }
+}
+
+async function handleImportFile(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file || !props.currentChat) return;
+
+  isExporting.value = true;
+  try {
+    const report = await importChat(file);
+    ElMessage.success(t('chat.header.importSuccess', { name: report.name }));
+    emit('imported', report.chat_id);
+  } catch (error) {
+    console.error('Chat import failed:', error);
   } finally {
     isExporting.value = false;
   }

@@ -152,6 +152,13 @@ export interface ChatWithMessages extends Chat {
   messages: Message[]
 }
 
+export interface ImportChatReport {
+  chat_id: string
+  name: string
+  message_count: number
+  file_count: number
+}
+
 export interface ChatReorderItem {
   id: string
   parentId: string | null

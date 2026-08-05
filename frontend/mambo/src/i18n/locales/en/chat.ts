@@ -32,6 +32,8 @@ export default {
     exportJson: 'Export JSON',
     exportMd: 'Export Markdown',
     exportHtml: 'Export HTML',
+    importJson: 'Import JSON',
+    importSuccess: 'Imported: {name}',
     exportFailed: 'Export failed',
     exportResourceError: 'Resource export failed',
     inputPlaceholder: 'Enter new title',

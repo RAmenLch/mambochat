@@ -1,6 +1,9 @@
 # backend/routers/chat_management.py
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
+from datetime import datetime
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Body, Response, UploadFile, File as FastAPIFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Optional, Dict, Any
@@ -8,6 +11,9 @@ from typing import List, Optional, Dict, Any
 from backend.crud import chat_crud, setting_crud, provider_crud, resource_crud, agent_crud
 from backend.services import chat_service
 from backend.services.resource_service import validate_mounted_resources
+from backend.services.chat_export_service import ChatExporter
+from backend.services.chat_import_service import ChatImporter, MAX_PACKAGE_SIZE
+from backend.schemas.chat_export import ChatExportPackage, ImportReport
 from backend import schemas
 from backend.models import chat_model
 from backend.database import get_db
@@ -378,3 +384,44 @@ async def archive_chats_endpoint(
     if not new_folder:
         raise HTTPException(status_code=400, detail="Failed to archive chats. Ensure requested items exist.")
     return new_folder
+
+
+@router.get(
+    "/chats/{chat_id}/export",
+    summary="导出会话为 JSON（mambochat.chat-export 可导入格式）"
+)
+async def export_chat_json(chat_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    按 doc/chat-export-spec.md 导出单个会话：活跃线性路径消息 + 文件 blob。
+    导出的文件可被 /chats/import 重新导入为新会话。
+    """
+    exporter = ChatExporter(db)
+    pkg = await exporter.export(chat_id)
+    data = pkg.model_dump_json(indent=2)
+    filename = f"{pkg.chat.name}_{datetime.now().strftime('%Y-%m-%d')}.json"
+    return Response(
+        content=data,
+        media_type="application/json; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename*=utf-8''{quote(filename)}"},
+    )
+
+
+@router.post(
+    "/chats/import",
+    response_model=ImportReport,
+    summary="导入会话 JSON 文件（mambochat.chat-export）"
+)
+async def import_chat_json(file: UploadFile = FastAPIFile(...), db: AsyncSession = Depends(get_db)):
+    """
+    解析会话导出包并导入为新会话（放入根目录；名称冲突自动加后缀）。
+    """
+    raw = await file.read()
+    if len(raw) > MAX_PACKAGE_SIZE:
+        raise HTTPException(status_code=400, detail="导入文件超过大小上限（100 MB）")
+    try:
+        pkg = ChatExportPackage.model_validate_json(raw)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"JSON 解析失败: {e}")
+
+    importer = ChatImporter(db)
+    return await importer.do_import(pkg)

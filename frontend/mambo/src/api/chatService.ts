@@ -20,6 +20,7 @@ import type {
   AskUserAnswerRequest,
   ChatDuplicateRequest,
   ChatArchiveRequest,
+  ImportChatReport,
 } from './types';
 
 /**
@@ -86,6 +87,26 @@ export const duplicateChat = (chatId: string, payload?: ChatDuplicateRequest): P
  */
 export const archiveChats = (data: ChatArchiveRequest): Promise<Chat> => {
   return apiClient.post('/archive', data);
+};
+
+/**
+ * 导出会话为 JSON（mambochat.chat-export 可导入格式，由后端生成）
+ */
+export const exportChatJson = (chatId: string): Promise<Blob> => {
+  return apiClient.get(`/chats/${chatId}/export`, { responseType: 'blob' });
+};
+
+/**
+ * 导入会话 JSON 文件，创建为新会话（放入根目录）
+ */
+export const importChat = (file: File): Promise<ImportChatReport> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  // 必须显式声明 multipart：apiClient 全局默认 Content-Type 为 application/json，
+  // axios 会把 FormData 序列化为 JSON 导致后端收不到 file 字段（422）
+  return apiClient.post('/chats/import', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
 };
 
 

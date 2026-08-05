@@ -15,6 +15,7 @@
         :messages="currentChatMessages"
         @save-title="(newTitle) => chatListStore.updateChatSettings(currentChat!.id, { name: newTitle })"
         @refresh-title="handleRefreshTitle"
+        @imported="handleChatImported"
       />
 
       <div class="scroll-area-wrapper">
@@ -550,6 +551,12 @@ function handleRefreshTitle() {
   if (currentChat.value) {
     chatListStore.refreshChatTitle(currentChat.value.id);
   }
+}
+
+async function handleChatImported(chatId: string) {
+  // 刷新会话树并跳转到新导入的会话
+  await chatListStore.initializeList();
+  await chatSessionStore.selectChat(chatId);
 }
 
 async function handleSaveSettings(settings: ChatUpdate) {

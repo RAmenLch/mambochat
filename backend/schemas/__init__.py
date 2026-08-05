@@ -32,3 +32,5 @@ from .resource import (Resource, ResourceVersion,
                        )
 
 from .agent import (AgentBase,AgentCreate,AgentUpdate,AgentResponse,AgentMoveRequest,SecurityReviewConfigSchema,HitlToolInfo,SummarizationConfigSchema,MamboAgentParametersSchema)
+
+from .chat_export import (ChatExportPackage, ExportChat, ExportMessage, ExportSubMessage, ExportFileRef, ExportBlob, ImportReport)

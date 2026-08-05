@@ -1374,6 +1374,10 @@ class MamboResourceBackend(BackendProtocol):
         self, pattern: str, path: VirtualPath, glob: str | None, regex: bool,
         offset: int, limit: int | None,
     ) -> GrepResult:
+        if not pattern:
+            return GrepResult(error=BackendError(
+                code=ErrorCode.INVALID, message="搜索模式不能为空",
+            ))
         try:
             norm = self._normalize_path(path)
         except BackendError as e:
