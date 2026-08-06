@@ -48,6 +48,16 @@ def get_client_connection(backend_id: str) -> Optional[WebSocket]:
     return ws
 
 
+def get_client_info(backend_id: str) -> Dict[str, Any]:
+    """Return the client info dict reported by the connected API client.
+
+    Contains keys like ``platform`` / ``root_dir`` / ``hostname`` / ``pid``
+    (from the client's ``register_info`` message).  Returns ``{}`` when
+    the client is not connected or has not reported info yet.
+    """
+    return _client_info.get(backend_id, {})
+
+
 async def send_command(backend_id: str, method: str, params: dict, timeout: float = 60.0) -> dict:
     """Send a command through WebSocket and wait for the client's response.
 

@@ -127,19 +127,29 @@ class MamboAPIBackend(BackendProtocol):
             )
         )
         if self._enable_execute:
+            info = self._client_env()
+            platform = info.get("platform", "")
+            root_dir = info.get("root_dir", "")
+            root_display = root_dir or "(real root directory)"
+            wr = self.workspace_root.value
             tools.append(
                 StructuredTool(
                     name="execute",
                     description=(
                         "Execute a shell command on the remote client machine. "
+                        f"On Windows, commands run via cmd /c. "
+                        f"On Linux/macOS, commands run via sh -c. "
                         "Returns combined stdout and stderr output.\n\n"
-                        "**CRITICAL — Real vs. virtual path mapping:** "
-                        "File tools (ls/read/write/edit/grep/glob) accept "
-                        "`/workspace/...` virtual paths, but shell commands "
-                        "in **execute** run directly on the client's real "
-                        "filesystem. You MUST use real filesystem paths in "
-                        "commands — virtual paths like `/workspace/src/main.py` "
-                        "do NOT exist on the client filesystem and will fail."
+                        f"**CRITICAL — Real vs. virtual path mapping:** "
+                        f"The workspace root `{wr}` is a virtual path that maps "
+                        f"to the real directory `{root_display}`. "
+                        f"File tools (ls/read/write/edit/grep/glob) accept "
+                        f"`{wr}/...` virtual paths, but shell commands "
+                        f"in **execute** run directly on the client's real "
+                        f"filesystem. You MUST use real filesystem paths (e.g. "
+                        f"`{root_display}/src/main.py`) in commands — "
+                        f"virtual paths like `{wr}/src/main.py` do NOT exist "
+                        f"on the client filesystem and will fail."
                     ),
                     args_schema=create_model(
                         "ExecuteSchema",
@@ -152,17 +162,82 @@ class MamboAPIBackend(BackendProtocol):
         return tools
 
     @property
+    def path_mapping_info(self) -> dict[str, str]:
+        """Virtual ↔ real path mapping for the review agent's system prompt."""
+        info = self._client_env()
+        root = info.get("root_dir") or "(未知)"
+        wr = self.workspace_root.value
+        return {
+            "workspace_root": wr,
+            "real_root": root,
+            "virtual_prefixes": "",
+            "path_mapping": (
+                f"\n- 虚拟路径 `{wr}/` → 真实路径 `{root}/`"
+                if info.get("root_dir") else ""
+            ),
+        }
+
+    @property
     def description(self) -> str:
-        return (
-            f"API-connected remote filesystem '{self.backend_name}'. "
-            "Works with files on a remote client machine. "
-            "The read tool defaults to no line numbers. "
+        info = self._client_env()
+        platform = info.get("platform", "")
+        root_dir = info.get("root_dir", "")
+        hostname = info.get("hostname", "")
+        os_label = {"win32": "Windows", "darwin": "macOS"}.get(platform, platform or "")
+        shell = "cmd /c" if platform == "win32" else ("sh -c" if platform else "platform-dependent")
+        wr = self.workspace_root.value
+
+        env_desc = (
+            f"API-connected remote {os_label} filesystem"
+            if os_label else "API-connected remote filesystem"
+        )
+        desc = (
+            f"**Environment:** {env_desc} "
+            f"(backend: '{self.backend_name}'"
+            + (f", hostname: {hostname}" if hostname else "")
+            + (f", working directory: {root_dir}" if root_dir else "")
+            + f", shell: {shell}).\n"
+            f"**Path mapping:** the workspace root `{wr}` maps to the real "
+            f"directory `{root_dir or '(未知)'}` — all file tools must use paths under "
+            f"`{wr}`. Paths outside `{wr}` (including `/`) are rejected."
+        )
+        if self._enable_execute:
+            desc += (
+                f"\n**execute tool:** shell commands run in `{root_dir or '(real root)'}`. "
+                f"Use real filesystem paths in commands, NOT `{wr}` paths — "
+                f"the virtual workspace path does not exist on the real filesystem."
+            )
+            if platform == "win32":
+                desc += (
+                    "\n**Windows quoting rules:** cmd.exe has no single-quote "
+                    "support and no backslash escaping (unlike bash). "
+                    "``python -c \"print('x')\"`` works — double quotes outside, "
+                    "single quotes inside the code. But "
+                    "``python -c 'print(\"x\")'`` (single-quoted delimiter) "
+                    "fails silently (exit 0, no output). For anything non-trivial, "
+                    "prefer writing a temporary script file with the write tool, "
+                    "then executing it."
+                )
+        else:
+            desc += " [shell execution disabled]"
+        desc += (
+            "\nThe read tool defaults to no line numbers. "
             "Set include_line_numbers=True when you need to reference specific lines."
         )
+        return desc
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _client_env(self) -> dict:
+        """Environment info reported by the connected API client ({} if unknown)."""
+        try:
+            from backend.routers.api_client_router import get_client_info
+
+            return get_client_info(self.backend_id)
+        except Exception:
+            return {}
 
     def _check_online(self) -> str | None:
         """Check if the API client is currently connected.
@@ -178,8 +253,15 @@ class MamboAPIBackend(BackendProtocol):
             )
         return None
 
-    async def _call(self, method: str, params: dict) -> dict:
-        """Send a command to the client via WebSocket and wait for response."""
+    async def _call(self, method: str, params: dict, timeout: float | None = None) -> dict:
+        """Send a command to the client via WebSocket and wait for response.
+
+        Args:
+            method: Command method name.
+            params: Command parameters.
+            timeout: Optional override for the WebSocket round-trip timeout.
+                If None, falls back to ``self.timeout``.
+        """
         offline_msg = self._check_online()
         if offline_msg:
             raise ConnectionError(offline_msg)
@@ -188,7 +270,7 @@ class MamboAPIBackend(BackendProtocol):
 
         logger.info("[API_BACKEND] _call: method=%s params=%s backend_id=%s", method, params, self.backend_id)
         result = await send_command(
-            self.backend_id, method, params, timeout=self.timeout
+            self.backend_id, method, params, timeout=timeout if timeout is not None else self.timeout
         )
         logger.info("[API_BACKEND] _call: method=%s got result keys=%s", method, list(result.keys()) if isinstance(result, dict) else type(result))
         return result
@@ -547,6 +629,7 @@ class MamboAPIBackend(BackendProtocol):
             return GrepResult(error=self._map_error(result))
         data = result.get("matches", [])
         truncated = result.get("truncated", False) if isinstance(result, dict) else False
+        total_matches = result.get("total", len(data)) if isinstance(result, dict) else 0
         matches: list[GrepMatch] = []
         for m in data:
             matches.append(
@@ -556,7 +639,7 @@ class MamboAPIBackend(BackendProtocol):
                     text=m.get("text", ""),
                 )
             )
-        return GrepResult(matches=matches, truncated=truncated)
+        return GrepResult(matches=matches, truncated=truncated, total_matches=total_matches)
 
     def glob(self, pattern: str, path: VirtualPath = VirtualPath("/workspace")) -> GlobResult:
         try:
@@ -734,11 +817,17 @@ class MamboAPIBackend(BackendProtocol):
 
         effective_timeout = timeout if timeout is not None else self._execute_timeout
 
+        # The WS round-trip timeout must be at least as long as the command's
+        # own timeout, otherwise the server aborts waiting (default 60s) while
+        # the client is still executing a long command (up to 180s+).
+        ws_timeout = max(self.timeout, effective_timeout + 10)
+
         result = await self._run_ws_call(
             "execute",
             self._call,
             "execute",
             {"command": command, "timeout": effective_timeout},
+            timeout=ws_timeout,
         )
         if result is None:
             return "Error: Connection to API client failed."
@@ -782,7 +871,7 @@ class MamboAPIBackend(BackendProtocol):
         if result is None:
             return "Error: Connection to API client failed."
         if isinstance(result, dict) and result.get("error"):
-            return f"Error: {result['error']}"
+            return result["error"]
         return result.get("tree", "") if isinstance(result, dict) else str(result)
 
     # ------------------------------------------------------------------

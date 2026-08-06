@@ -11,8 +11,8 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import * as crypto from 'crypto'
-import { execFile as execFileCb, execFileSync } from 'child_process'
-import { promisify } from 'util'
+import { exec as execCb, execFile as execFileCb, execFileSync } from 'child_process'
+import { promisify, TextDecoder } from 'util'
 import http from 'http'
 import https from 'https'
 import type { AppConfig } from './config'
@@ -20,6 +20,7 @@ import { AppConfigManager } from './config'
 import log from './log'
 
 const execFileAsync = promisify(execFileCb)
+const execAsync = promisify(execCb)
 
 // ---------------------------------------------------------------------------
 // Types
@@ -357,14 +358,30 @@ export class ApiClientManager {
     const vpath = (params.path as string) || '/workspace'
     const depth = (params.depth as number) ?? 3
     const ignoreDirs: string[] = (params.ignore_dirs as string[]) ?? []
-    const base = this.resolvePath(vpath)
 
     if (depth < 1) {
       return { tree: `Invalid depth value: ${depth}. Depth must be a positive integer (>= 1).` }
     }
 
-    if (!fs.existsSync(base) || !fs.statSync(base).isDirectory()) {
-      return { tree: `Error: Not a directory: ${vpath}`, error_code: 'NOT_DIR' }
+    // Root path "/" (or any all-slash path) — aligned with VirtualPath's rstrip('/') == '' check
+    if (vpath.replace(/\/+$/, '') === '') {
+      return { tree: `[PATH_IS_ROOT] 路径不能是根目录 '/'；请使用子目录如 '/workspace'`, error_code: 'PATH_IS_ROOT' }
+    }
+
+    // Outside workspace
+    if (vpath !== '/workspace' && !vpath.startsWith('/workspace/')) {
+      return { tree: `[OUTSIDE_WORKSPACE] 路径超出工作区，所有文件操作必须在 '/workspace/' 下进行`, error_code: 'OUTSIDE_WORKSPACE' }
+    }
+
+    const base = this.resolvePath(vpath)
+
+    // Path does not exist
+    if (!fs.existsSync(base)) {
+      return { tree: `Path '${vpath}' not found.`, error_code: 'NOT_FOUND' }
+    }
+    // Path is a file, not a directory
+    if (!fs.statSync(base).isDirectory()) {
+      return { tree: `Path '${vpath}' is not a directory.`, error_code: 'NOT_DIR' }
     }
 
     interface TreeEntry { name: string; depth: number; marker: string }
@@ -442,7 +459,8 @@ export class ApiClientManager {
     const lines = [vpath]
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i]
-      let display = entry.name + (markerSuffix[entry.marker] || '')
+      const suffix = markerSuffix[entry.marker] || ''
+      let display = suffix ? entry.name.replace(/\/+$/, '') + suffix : entry.name
 
       // Determine connector: look ahead for more siblings at same depth
       let hasMoreSiblings = false
@@ -527,10 +545,10 @@ export class ApiClientManager {
 
     if (!fs.existsSync(physical)) {
       log.warn(`[ApiClient] handleReadFile: file not found at ${physical}`)
-      return { error: `File not found: ${vpath}`, error_code: 'NOT_FOUND' }
+      return { error: `文件不存在`, error_code: 'NOT_FOUND' }
     }
     if (fs.statSync(physical).isDirectory()) {
-      return { error: `Path is a directory, not a file: ${vpath}`, error_code: 'IS_DIR' }
+      return { error: `目标是目录`, error_code: 'IS_DIR' }
     }
 
     const ext = path.extname(physical).toLowerCase()
@@ -583,23 +601,17 @@ export class ApiClientManager {
     }
     log.info(`[ApiClient] handleReadFile: read ${content.length} chars`)
 
-    const lines = content.split('\n')
+    const lines = this.splitLines(content)
     const start = offset
     const end = (limit != null) ? Math.min(start + limit, lines.length) : lines.length
 
-    if (start >= lines.length) {
-      return { error: `Line offset ${offset} exceeds file length (${lines.length} lines)`, error_code: 'INVALID' }
+    if (lines.length > 0 && start >= lines.length) {
+      return { error: `偏移量 ${offset} 超过文件长度 (${lines.length} 行)`, error_code: 'INVALID' }
     }
 
     const selected = lines.slice(start, end)
     const resultLines = includeLineNumbers
-      ? (() => {
-          const width = Math.max(3, String(start + selected.length).length)
-          return selected.map((line, i) => {
-            const num = String(i + start + 1).padStart(width)
-            return `${num}  ${line}`
-          })
-        })()
+      ? this.formatNumberedLines(selected, start + 1)
       : selected
 
     return {
@@ -691,8 +703,11 @@ export class ApiClientManager {
       return { error: msg, error_code: 'IO_ERROR' }
     }
 
-    if (!fs.existsSync(physical!) || !fs.statSync(physical!).isFile()) {
+    if (!fs.existsSync(physical!)) {
       return { error: `File not found: ${vpath}. To create a new file, use write().`, error_code: 'NOT_FOUND' }
+    }
+    if (!fs.statSync(physical!).isFile()) {
+      return { error: `目标是目录，无法编辑`, error_code: 'IS_DIR' }
     }
 
     let editBuf: Buffer
@@ -750,7 +765,23 @@ export class ApiClientManager {
     const offset = (params.offset as number) ?? 0
     const limit = (params.limit as number) ?? undefined
     const ignoreDirs: string[] = (params.ignore_dirs as string[]) ?? []
+
+    // Empty pattern is invalid
+    if (!pattern) {
+      return { error: `搜索模式不能为空`, error_code: 'INVALID' }
+    }
+
+    // Root path "/" (or any all-slash path) — aligned with VirtualPath's rstrip('/') == '' check
+    if (vpath.replace(/\/+$/, '') === '') {
+      return { error: `路径不能是根目录 '/'；请使用子目录如 '/workspace'`, error_code: 'PATH_IS_ROOT' }
+    }
+
     const base = this.resolvePath(vpath)
+
+    // Path does not exist
+    if (!fs.existsSync(base)) {
+      return { error: `路径不存在`, error_code: 'NOT_FOUND' }
+    }
 
     let testFn: (line: string) => boolean
     if (regex) {
@@ -776,7 +807,6 @@ export class ApiClientManager {
       // and ignore_dirs must be applied uniformly across both search paths.
       const filtered: object[] = []
       for (const m of rgMatches) {
-        if (filtered.length >= MAX_GREP_MATCHES) break
         const mpath = (m as { path: string }).path
         // ignore_dirs: parent-segment check (mirrors the backends' _in_ignored_dir)
         if (ignoreDirs.length > 0) {
@@ -795,19 +825,30 @@ export class ApiClientManager {
         }
         filtered.push(m)
       }
+      // Sort by (path, line) — mirrors local.py's
+      // matches.sort(key=lambda m: (str(m.path), m.line))
+      filtered.sort((a, b) => {
+        const pa = (a as { path: string }).path
+        const pb = (b as { path: string }).path
+        if (pa !== pb) return pa < pb ? -1 : 1
+        return (a as { line: number }).line - (b as { line: number }).line
+      })
+      const effectiveLimit = limit !== undefined ? Math.min(limit, MAX_GREP_MATCHES) : MAX_GREP_MATCHES
       const sliced = offset > 0 ? filtered.slice(offset) : filtered
       const limited = limit !== undefined ? sliced.slice(0, limit) : sliced
-      return { matches: limited, truncated: limited.length < filtered.length }
+      return {
+        matches: limited,
+        truncated: (offset + effectiveLimit) < filtered.length,
+        total: filtered.length,
+      }
     }
 
     // 2) Node.js fallback
     const matches: object[] = []
     const maxFileSize = 10 * 1024 * 1024
-    let skipped = 0
 
     const searchFile = (filePath: string, displayPath: string): void => {
       if (matches.length >= MAX_GREP_MATCHES) return
-      if (limit !== undefined && matches.length >= limit) return
       if (glob) {
         const relPath = displayPath.startsWith(vpath)
           ? displayPath.slice(vpath.length).replace(/^\//, '')
@@ -821,9 +862,7 @@ export class ApiClientManager {
         const lines = content.split('\n')
         for (let i = 0; i < lines.length; i++) {
           if (matches.length >= MAX_GREP_MATCHES) break
-          if (limit !== undefined && matches.length >= limit) break
           if (!testFn(lines[i])) continue
-          if (skipped < offset) { skipped++; continue }
           matches.push({
             path: displayPath,
             line: i + 1,
@@ -845,8 +884,12 @@ export class ApiClientManager {
     }
 
     log.info(`[ApiClient] handleGrepFiles: found ${matches.length} matches`)
-    const truncated = (limit !== undefined && limit > 0 && matches.length >= limit) || matches.length >= MAX_GREP_MATCHES
-    return { matches, truncated }
+    const total = matches.length
+    const effectiveLimit = limit !== undefined ? Math.min(limit, MAX_GREP_MATCHES) : MAX_GREP_MATCHES
+    const sliced = offset > 0 ? matches.slice(offset) : matches
+    const limited = limit !== undefined ? sliced.slice(0, limit) : sliced
+    const truncated = (offset + effectiveLimit) < total || total >= MAX_GREP_MATCHES
+    return { matches: limited, truncated, total }
   }
 
   private handleGlobFiles(params: Record<string, unknown>): Record<string, unknown> {
@@ -930,20 +973,47 @@ export class ApiClientManager {
 
   private async handleExecute(params: Record<string, unknown>): Promise<Record<string, unknown>> {
     const command = (params.command as string) || ''
-    const timeout = (params.timeout as number) || undefined
+    // The server sends the timeout in SECONDS (aligned with the Python backends'
+    // subprocess.run semantics), but Node's child_process timeout option is in
+    // MILLISECONDS — convert, otherwise a 150s timeout becomes 150ms and fast
+    // commands are killed randomly.
+    const timeout = (params.timeout as number) || 120
+    const timeoutMs = timeout * 1000
+
+    // Decode raw bytes with the platform's default encoding (GBK/cp936 on
+    // Windows, UTF-8 elsewhere) — mirrors LocalBackend.execute which uses
+    // locale.getpreferredencoding(). TextDecoder('gbk') requires full-icu,
+    // which Electron ships with; on failure we fall back to UTF-8.
+    const decoder = new TextDecoder(process.platform === 'win32' ? 'gbk' : 'utf-8')
+    const decode = (buf: Buffer): string => {
+      try {
+        return decoder.decode(buf).replace(/\r\n/g, '\n')
+      } catch {
+        return buf.toString('utf-8').replace(/\r\n/g, '\n')
+      }
+    }
 
     try {
-      const shellCmd = process.platform === 'win32' ? 'cmd.exe' : '/bin/sh'
-      const shellArgs = process.platform === 'win32' ? ['/c', command] : ['-c', command]
-      const { stdout, stderr } = await execFileAsync(shellCmd, shellArgs, {
-        timeout,
+      // On Windows, use exec() — it runs `cmd.exe /d /s /c "<command>"` and the
+      // /s flag strips only the outermost quotes, so the command string reaches
+      // cmd.exe verbatim (inner quotes survive, mirrors LocalBackend's
+      // shell=True). execFile(['/c', command]) would rebuild the command line
+      // via libuv argv quoting, escaping " as \" — cmd.exe has no backslash
+      // escaping, so quoted arguments (e.g. findstr "a b c") get mangled.
+      // POSIX keeps the list form: execve passes argv directly, no escaping.
+      const execOpts = {
+        timeout: timeoutMs,
         maxBuffer: 100 * 1024 * 1024,
         cwd: this.currentRootDir,
-      })
+        encoding: 'buffer' as const,
+      }
+      const { stdout, stderr } = process.platform === 'win32'
+        ? await execAsync(command, execOpts)
+        : await execFileAsync('/bin/sh', ['-c', command], execOpts)
       const outputParts: string[] = []
-      if (stdout) outputParts.push(stdout.trimEnd())
-      if (stderr) {
-        for (const line of stderr.trimEnd().split('\n')) {
+      if (stdout && stdout.length > 0) outputParts.push(decode(stdout).trimEnd())
+      if (stderr && stderr.length > 0) {
+        for (const line of decode(stderr).trimEnd().split('\n')) {
           outputParts.push(`[stderr] ${line}`)
         }
       }
@@ -957,8 +1027,12 @@ export class ApiClientManager {
       if (e.killed) {
         return { output: `Command timed out after ${timeout} seconds`, exit_code: -1, truncated: false }
       }
+      const errOut: Buffer | undefined =
+        (e.stdout && e.stdout.length > 0) ? e.stdout
+        : (e.stderr && e.stderr.length > 0) ? e.stderr
+        : undefined
       return {
-        output: e.stdout || e.stderr || `Error executing command: ${e.message}`,
+        output: errOut ? decode(errOut) : `Error executing command: ${e.message}`,
         exit_code: e.code ?? -1,
         truncated: false,
       }
@@ -1003,6 +1077,44 @@ export class ApiClientManager {
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
+
+  /** Split text into lines with Python str.splitlines() semantics:
+   *  - splits on \n, \r\n, \r and other Unicode line breaks
+   *  - a trailing line break does NOT produce an empty last line
+   *  - empty content yields zero lines
+   */
+  private splitLines(content: string): string[] {
+    if (content === '') return []
+    const parts = content.split(/\r\n|[\n\v\f\r\x85\u2028\u2029]/)
+    if (parts.length > 0 && parts[parts.length - 1] === '') {
+      parts.pop()
+    }
+    return parts
+  }
+
+  /** Format lines with 6-char right-aligned line numbers + Tab (cat -n style).
+   *  Lines longer than 5000 chars are split into numbered chunks (42.1, 42.2).
+   */
+  private formatNumberedLines(lines: string[], startLine: number): string[] {
+    const width = 6
+    const maxLineLength = 5000
+    const out: string[] = []
+    for (let i = 0; i < lines.length; i++) {
+      const num = i + startLine
+      const line = lines[i]
+      if (line.length <= maxLineLength) {
+        out.push(String(num).padStart(width) + '\t' + line)
+      } else {
+        const chunkCount = Math.ceil(line.length / maxLineLength)
+        for (let ci = 0; ci < chunkCount; ci++) {
+          const chunk = line.slice(ci * maxLineLength, (ci + 1) * maxLineLength)
+          const marker = ci > 0 ? `${num}.${ci}` : String(num)
+          out.push(marker.padStart(width) + '\t' + chunk)
+        }
+      }
+    }
+    return out
+  }
 
   /** Resolve a virtual path to a physical path within rootDir. */
   private resolvePath(requestedPath: string): string {

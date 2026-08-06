@@ -395,6 +395,6 @@ class APIBackend(SandboxBackendProtocol, TreeBackendProtocol):
         if not tree_str:
             return f"No files found in {path}"
         lines = tree_str.splitlines()
-        if lines:
+        if lines and len(lines) >= 2:
             lines[0] = path
         return "\n".join(lines)
