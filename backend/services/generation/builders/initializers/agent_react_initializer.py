@@ -31,6 +31,7 @@ class AgentBasedReActInitializer(AbstractAgentInitializer):
             enable_resource_merge: bool = False,
             external_tools: Optional[List[BaseTool]] = None,
             web_search_mode: Optional[WebSearchMode] = None,
+            web_search_proxy_url: Optional[str] = None,
     ):
         self.db = db
         self.agent = agent
@@ -39,6 +40,7 @@ class AgentBasedReActInitializer(AbstractAgentInitializer):
         self.enable_resource_merge = enable_resource_merge
         self.external_tools = external_tools or []
         self.web_search_mode = web_search_mode
+        self.web_search_proxy_url = web_search_proxy_url
 
         self.providers: List[BaseToolProvider] = []
         self.hitl_interrupt_on: Dict[str, bool] = {}
@@ -74,7 +76,7 @@ class AgentBasedReActInitializer(AbstractAgentInitializer):
 
             # WebSearch 内置搜索工具
             if self.web_search_mode is not None:
-                self.providers.append(WebSearchToolProvider(self.web_search_mode))
+                self.providers.append(WebSearchToolProvider(self.web_search_mode, proxy_url=self.web_search_proxy_url))
 
             enable_suggest = params.get("enable_suggest", False)
             if enable_suggest:

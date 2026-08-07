@@ -10,6 +10,7 @@ class ChatMode(str, Enum):
 
 class WebSearchMode(str, Enum):
     """联网搜索模式"""
+    DISABLE = "disable"                  # 显式关闭
     DIRECT_READ = "direct_read"          # 仅直接读取网页
     SEARCH_AND_READ = "search_and_read"  # 检索 + 读取网页
 

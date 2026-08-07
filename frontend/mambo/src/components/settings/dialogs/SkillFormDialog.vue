@@ -187,7 +187,7 @@
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage, type FormInstance } from 'element-plus'
+import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
 import {
   Edit,
   Files,
@@ -327,28 +327,53 @@ const handleConfirm = async () => {
   }
 }
 
-const performFileImport = async () => {
+const performFileImport = async (onConflict = 'error') => {
   isSubmitting.value = true
   try {
-    const res = await importSkillFromFile(pendingFiles.value[0], props.parentId)
+    const res = await importSkillFromFile(pendingFiles.value[0], props.parentId, onConflict)
     handleImportResponse(res)
   } catch (err: any) {
+    if (err.response?.status === 409) {
+      const choice = await promptConflict(err.response?.data?.detail || '')
+      if (choice === 'cancel') return
+      return performFileImport(choice)
+    }
     ElMessage.error(err.response?.data?.detail || t('common.error.general'))
   } finally {
     isSubmitting.value = false
   }
 }
 
-const performGithubImport = async () => {
+const performGithubImport = async (onConflict = 'error') => {
   isSubmitting.value = true
   try {
-    const res = await importSkillFromGithub(githubForm.url, props.parentId)
+    const res = await importSkillFromGithub(githubForm.url, props.parentId, onConflict)
     handleImportResponse(res)
   } catch (err: any) {
+    if (err.response?.status === 409) {
+      const choice = await promptConflict(err.response?.data?.detail || '')
+      if (choice === 'cancel') return
+      return performGithubImport(choice)
+    }
     ElMessage.error(err.response?.data?.detail || t('common.error.general'))
   } finally {
     isSubmitting.value = false
   }
+}
+
+const promptConflict = (detail: string): Promise<'overwrite' | 'skip' | 'cancel'> => {
+  return ElMessageBox.confirm(
+    t('resource.skill.conflictMessage', { names: detail }),
+    t('resource.skill.conflictTitle'),
+    {
+      confirmButtonText: t('resource.skill.conflictOverwrite'),
+      cancelButtonText: t('resource.skill.conflictSkip'),
+      distinguishCancelAndClose: true,
+      type: 'warning',
+    }
+  )
+    .then(() => 'overwrite' as const)
+    .catch((action: string) => (action === 'cancel' ? ('skip' as const) : ('cancel' as const)))
 }
 
 const handleImportResponse = (res: SkillImportResponse) => {

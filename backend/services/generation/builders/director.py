@@ -235,14 +235,29 @@ class LLMInputDirector:
 
         resume_payload = self._extract_resume_payload(materials.target_msg)
 
-        # 解析 chat 级别的 web_search_mode
+        # 解析 chat 级别的 web_search_mode（未设置时回退到全局默认）
         ws_mode: Optional[WebSearchMode] = None
         raw_ws = materials.chat.web_search_mode
         if raw_ws:
             try:
                 ws_mode = WebSearchMode(raw_ws)
             except ValueError:
-                pass
+                ws_mode = None
+        else:
+            raw_default_ws = materials.settings.get("web_search_default_mode")
+            if raw_default_ws:
+                try:
+                    ws_mode = WebSearchMode(raw_default_ws)
+                except ValueError:
+                    ws_mode = None
+
+        # 网页搜索是否走全局代理
+        ws_proxy_url = None
+        if (
+            materials.settings.get("web_search_use_proxy") == "True"
+            and materials.settings.get("proxy_enabled") == "True"
+        ):
+            ws_proxy_url = materials.settings.get("proxy_url")
 
         if is_agent_mode:
             agent_type_str = materials.agent.AgentType
@@ -258,6 +273,7 @@ class LLMInputDirector:
                     enable_resource_merge=self._enable_resource_merge,
                     external_tools=self._tools,
                     web_search_mode=ws_mode,
+                    web_search_proxy_url=ws_proxy_url,
                 )
             elif agent_type_str == AgentTypeEnum.DEEP.value:
                 initializer = DeepAgentInitializer(
@@ -268,6 +284,7 @@ class LLMInputDirector:
                     enable_resource_merge=self._enable_resource_merge,
                     external_tools=self._tools,
                     web_search_mode=ws_mode,
+                    web_search_proxy_url=ws_proxy_url,
                 )
             else:
                 initializer = AgentBasedReActInitializer(
@@ -278,6 +295,7 @@ class LLMInputDirector:
                     enable_resource_merge=self._enable_resource_merge,
                     external_tools=self._tools,
                     web_search_mode=ws_mode,
+                    web_search_proxy_url=ws_proxy_url,
                 )
             base_system_prompt = materials.agent.systemPrompt or ""
         else:
@@ -287,7 +305,9 @@ class LLMInputDirector:
                 resume_payload=resume_payload,
                 enable_tools=self._enable_tools,
                 enable_resource_merge=self._enable_resource_merge,
-                external_tools=self._tools
+                external_tools=self._tools,
+                web_search_mode=ws_mode,
+                web_search_proxy_url=ws_proxy_url,
             )
             base_system_prompt = materials.chat.systemPrompt or ""
 

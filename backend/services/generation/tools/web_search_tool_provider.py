@@ -130,7 +130,7 @@ def _parse_ddg_html(html: str) -> list[dict[str, str]]:
     return results
 
 
-async def _ddg_search(query: str, max_results: int = 10) -> list[dict[str, str]]:
+async def _ddg_search(query: str, max_results: int = 10, proxy_url: Optional[str] = None) -> list[dict[str, str]]:
     """原生 DDG HTML 搜索。"""
     params: dict[str, str] = {
         "q": query,
@@ -141,7 +141,7 @@ async def _ddg_search(query: str, max_results: int = 10) -> list[dict[str, str]]
         "Accept": "text/html,application/xhtml+xml",
     }
 
-    async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+    async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, proxy=proxy_url) as client:
         resp = await client.post(
             DDG_HTML_ENDPOINT,
             data=params,
@@ -180,8 +180,11 @@ class WebSearchToolProvider(BaseToolProvider):
     TOOL_NAME_READ_WEBPAGE = "read_webpage"
     TOOL_NAME_DDGS_SEARCH = "ddgs_search"
 
-    def __init__(self, web_search_mode: Optional[WebSearchMode]) -> None:
+    def __init__(self, web_search_mode: Optional[WebSearchMode], proxy_url: Optional[str] = None) -> None:
+        if web_search_mode == WebSearchMode.DISABLE:
+            web_search_mode = None
         self._web_search_mode = web_search_mode
+        self._proxy_url = proxy_url
 
         # 状态映射
         self._tool_sub_msg_map: Dict[str, str] = {}
@@ -207,7 +210,7 @@ class WebSearchToolProvider(BaseToolProvider):
             Args:
                 url: 目标网页链接。
             """
-            return await read_webpage(url)
+            return await read_webpage(url, proxy_url=self._proxy_url)
 
         tools.append(_read_webpage_tool)
 
@@ -229,7 +232,7 @@ class WebSearchToolProvider(BaseToolProvider):
                 print(f"[DDG] 搜索: {query}", file=os.sys.stderr)
 
                 try:
-                    results = await _ddg_search(query, max_results=max_results)
+                    results = await _ddg_search(query, max_results=max_results, proxy_url=self._proxy_url)
                     if not results:
                         return json.dumps(
                             {"message": f"未找到关于 '{query}' 的结果"},

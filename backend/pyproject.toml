@@ -11,6 +11,7 @@ name = "mambo-chat-backend"
 version = "1.3.0"
 description = "The backend service for the LLM-API Client project."
 requires-python = ">=3.11"
+
 dependencies = [
     # Web
     "fastapi==0.119.0",
@@ -66,8 +67,11 @@ dependencies = [
     # Production server
     "gunicorn==23.0.0",
 
-    "mambo-agents==0.2.0b33",
+    "mambo-agents==0.2.0b34",
 ]
+
+[project.scripts]
+mambo = "backend.mambo_cli.main:main"
 
 [dependency-groups]
 dev = [

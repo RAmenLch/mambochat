@@ -27,6 +27,9 @@ class GlobalSettingsUpdate(BaseModel):
     # 全局代理配置
     proxy_enabled: Optional[bool] = Field(None, description="是否全局启用代理")
     proxy_url: Optional[str] = Field(None, description="代理服务器的URL, 例如: http://127.0.0.1:7890")
+    # 网页搜索配置
+    web_search_default_mode: Optional[str] = Field(None, description="默认网页搜索模式: null/disable 不启用, direct_read 仅读取网页, search_and_read 搜索并读取")
+    web_search_use_proxy: Optional[bool] = Field(None, description="网页搜索是否启用全局代理")
     # 全局头像配置 (仅用于API响应)
     user_avatar_url: Optional[str] = Field(None, description="当前用户头像的访问URL")
     ai_avatar_url: Optional[str] = Field(None, description="当前AI助手头像的访问URL")

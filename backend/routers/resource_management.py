@@ -335,39 +335,7 @@ async def delete_resource(resource_id: str, db: AsyncSession = Depends(get_db)):
     删除指定的资源或文件夹及其所有子内容。
     会自动清理关联的向量数据和知识库切片。
     """
-    # 1. 查找所有需要删除的资源ID（包括子孙节点）
-    cte = select(resource_model.Resource.id, resource_model.Resource.kb_id).where(
-        resource_model.Resource.id == resource_id).cte(name="hierarchy", recursive=True)
-    child = resource_model.Resource
-    cte = cte.union_all(select(child.id, child.kb_id).join(cte, child.parentId == cte.c.id))
-
-    stmt = select(cte.c.id, cte.c.kb_id)
-    result = await db.execute(stmt)
-    rows = result.all()
-
-    # 2. 遍历并清理向量
-    kb_service = KnowledgeBaseService(db)
-
-    for row in rows:
-        target_id = row[0]
-        target_kb_id = row[1]
-
-        if target_kb_id:
-            # 尝试获取 KB 的维度信息以清理向量
-            try:
-                kb_res = await resource_crud.get_resource_with_versions(db, target_kb_id)
-                if kb_res and kb_res.latest_version and kb_res.latest_version.attributes:
-                    dim = kb_res.latest_version.attributes.get("dimension")
-                    if dim:
-                        await kb_service._cleanup_vectors(target_id, dim)
-            except Exception:
-                pass
-
-        # 清理 Chunk 表 (无论是否成功清理向量，都应清理 Chunk)
-        await kb_crud.delete_chunks_by_resource(db, target_id)
-
-    # 3. 执行级联删除
-    deleted_resource = await resource_crud.delete_resource(db, resource_id=resource_id)
+    deleted_resource = await resource_service.delete_resource_tree(db, resource_id)
     if not deleted_resource:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found")
     return deleted_resource

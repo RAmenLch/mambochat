@@ -201,12 +201,13 @@ class GithubImportRequest(BaseModel):
     """GitHub 仓库导入请求"""
     repo_url: str = Field(..., description="GitHub 仓库地址")
     parent_id: Optional[str] = Field(None, description="目标父文件夹ID")
+    on_conflict: str = Field("error", description="同名冲突处理策略: error / overwrite / skip")
 
 
 class SkillImportResultItem(BaseModel):
     """单个 Skill 导入结果"""
     name: str = Field(..., description="Skill 名称")
-    status: str = Field(..., description="导入状态: success 或 failed")
+    status: str = Field(..., description="导入状态: success / failed / skipped")
     resource_id: Optional[str] = Field(None, description="成功时返回的资源ID")
     error: Optional[str] = Field(None, description="失败原因")
 
@@ -216,4 +217,5 @@ class SkillImportResponse(BaseModel):
     total_detected: int = Field(..., description="识别出的 Skill 总数")
     success_count: int = Field(..., description="成功导入数量")
     failed_count: int = Field(..., description="失败数量")
+    skipped_count: int = Field(0, description="跳过数量（同名冲突且策略为 skip 时）")
     details: List[SkillImportResultItem] = Field(default_factory=list, description="详细结果列表")

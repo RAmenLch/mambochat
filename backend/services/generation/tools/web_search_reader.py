@@ -76,7 +76,7 @@ class BaseWebReader(ABC):
     name: str = "base"
 
     @abstractmethod
-    async def read(self, url: str) -> str:
+    async def read(self, url: str, proxy_url: Optional[str] = None) -> str:
         """读取并提取网页内容，返回 Markdown 文本。"""
         ...
 
@@ -91,20 +91,30 @@ class TrafilaturaReader(BaseWebReader):
 
     name = "trafilatura"
 
-    async def read(self, url: str) -> str:
+    async def read(self, url: str, proxy_url: Optional[str] = None) -> str:
         if not url:
             return "错误: URL 参数不能为空"
 
         print(f"[WEB|trafilatura] 读取: {url}", file=os.sys.stderr)
 
         try:
+            # trafilatura.fetch_url 不支持代理，改为 httpx 拉取后交给 extract
+            async with httpx.AsyncClient(
+                timeout=DEFAULT_TIMEOUT,
+                follow_redirects=True,
+                proxy=proxy_url,
+                headers={"User-Agent": USER_AGENT},
+            ) as client:
+                resp = await client.get(url)
+                if resp.status_code != 200:
+                    return f"HTTP {resp.status_code}: 无法访问 {url}"
+                downloaded = resp.text
 
-            def _sync_fetch() -> Optional[str]:
-                downloaded = trafilatura.fetch_url(url)
-                if downloaded is None:
-                    return None
-                if len(downloaded) > MAX_HTML_BYTES:
-                    return "__OVERSIZE__"
+            if len(downloaded) > MAX_HTML_BYTES:
+                size_mb = MAX_HTML_BYTES / (1024 * 1024)
+                return f"网页内容过大（超过 {size_mb:.0f}MB），无法读取"
+
+            def _sync_extract() -> Optional[str]:
                 return trafilatura.extract(
                     downloaded,
                     output_format="markdown",
@@ -114,11 +124,7 @@ class TrafilaturaReader(BaseWebReader):
                     include_formatting=True,
                 )
 
-            content = await asyncio.to_thread(_sync_fetch)
-
-            if content == "__OVERSIZE__":
-                size_mb = MAX_HTML_BYTES / (1024 * 1024)
-                return f"网页内容过大（超过 {size_mb:.0f}MB），无法读取"
+            content = await asyncio.to_thread(_sync_extract)
 
             if not content:
                 return f"无法从 {url} 提取有效内容"
@@ -150,7 +156,7 @@ class Html2TextReader(BaseWebReader):
         self._converter.protect_links = True
         self._converter.mark_code = True
 
-    async def read(self, url: str) -> str:
+    async def read(self, url: str, proxy_url: Optional[str] = None) -> str:
         if not url:
             return "错误: URL 参数不能为空"
 
@@ -162,7 +168,11 @@ class Html2TextReader(BaseWebReader):
                 "User-Agent": USER_AGENT,
                 "Accept": "text/html,application/xhtml+xml",
             }
-            async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=True) as client:
+            async with httpx.AsyncClient(
+                timeout=DEFAULT_TIMEOUT,
+                follow_redirects=True,
+                proxy=proxy_url,
+            ) as client:
                 resp = await client.get(url, headers=headers)
                 if resp.status_code != 200:
                     return f"HTTP {resp.status_code}: 无法访问 {url}"
@@ -240,7 +250,7 @@ def get_reader() -> BaseWebReader:
     return _HTML2TEXT
 
 
-async def read_webpage(url: str) -> str:
+async def read_webpage(url: str, proxy_url: Optional[str] = None) -> str:
     """读取网页内容（通过当前路由策略）。"""
     reader = get_reader()
-    return await reader.read(url)
+    return await reader.read(url, proxy_url=proxy_url)

@@ -106,6 +106,13 @@ export default {
     proxyTest: 'Proxy Test',
     testUrlPlaceholder: 'Test URL, e.g., https://www.google.com',
     testProxyBtn: 'Test Proxy',
+    webSearchConfig: 'Web Search',
+    webSearchDefaultMode: 'Default Web Search Mode',
+    webSearchModeDisabled: 'Disabled',
+    webSearchModeDirectRead: 'Read Web Pages Only',
+    webSearchModeSearchAndRead: 'Search & Read',
+    webSearchUseProxy: 'Use Global Proxy',
+    webSearchUseProxyTip: 'When enabled, web search and page reading requests go through the global proxy',
     historyCompression: 'Chat History Compression',
     compressionPrompt: 'Compression System Prompt',
     compressionPromptTip:

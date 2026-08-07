@@ -237,7 +237,7 @@ const displayAgentName = computed(() => {
 /**
  * 联网搜索状态：返回当前模式
  */
-const webSearchMode = computed((): 'direct_read' | 'search_and_read' | null => {
+const webSearchMode = computed((): 'direct_read' | 'search_and_read' | 'disable' | null => {
   return props.currentChat?.web_search_mode ?? null;
 });
 

@@ -25,7 +25,7 @@
     <div class="toolbar-right">
       <button
         class="tool-btn web-search-btn"
-        :class="{ active: webSearchMode, direct: webSearchMode === 'direct_read', search: webSearchMode === 'search_and_read' }"
+        :class="{ active: !!webSearchMode && webSearchMode !== 'disable', direct: webSearchMode === 'direct_read', search: webSearchMode === 'search_and_read' }"
         @click="$emit('toggleWebSearch')"
       >
         <el-icon :size="18"><Search /></el-icon>
@@ -169,7 +169,7 @@ const displayModelName = computed(() => {
 
 const isAgentMode = computed(() => props.currentChat?.chatMode === 'agent')
 
-const webSearchMode = computed((): 'direct_read' | 'search_and_read' | null => {
+const webSearchMode = computed((): 'direct_read' | 'search_and_read' | 'disable' | null => {
   return props.currentChat?.web_search_mode ?? null
 })
 

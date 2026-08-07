@@ -145,13 +145,15 @@ async def validate_skill(resource_id: str, db: AsyncSession = Depends(get_db)):
 async def import_skill_file(
     file: UploadFile = File(...),
     parent_id: Optional[str] = Form(None),
+    on_conflict: str = Form("error"),
     db: AsyncSession = Depends(get_db)
 ):
     """
     上传单个 SKILL.md 或包含 Skills 的 ZIP 包进行导入。
+    on_conflict: 同名冲突处理策略 error / overwrite / skip
     """
     import_service = SkillImportService(db)
-    return await import_service.import_from_file(file, parent_id)
+    return await import_service.import_from_file(file, parent_id, on_conflict)
 
 
 @router.post("/import/github", response_model=schemas.SkillImportResponse, summary="从 GitHub 导入 Skill")
@@ -161,6 +163,7 @@ async def import_skill_github(
 ):
     """
     从指定的 GitHub 仓库 URL 导入符合规范的 Skills。
+    on_conflict: 同名冲突处理策略 error / overwrite / skip
     """
     import_service = SkillImportService(db)
-    return await import_service.import_from_github(request.repo_url, request.parent_id)
+    return await import_service.import_from_github(request.repo_url, request.parent_id, request.on_conflict)

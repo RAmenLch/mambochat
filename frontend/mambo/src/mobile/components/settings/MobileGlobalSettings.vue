@@ -129,6 +129,23 @@
         </template>
       </div>
 
+      <!-- 网页搜索 -->
+      <div class="section-card">
+        <div class="section-title">{{ t('settings.global.webSearchConfig') }}</div>
+        <div class="field-item">
+          <label class="field-label">{{ t('settings.global.webSearchDefaultMode') }}</label>
+          <el-radio-group v-model="settingsForm.web_search_default_mode" size="small">
+            <el-radio value="disable">{{ t('settings.global.webSearchModeDisabled') }}</el-radio>
+            <el-radio value="direct_read">{{ t('settings.global.webSearchModeDirectRead') }}</el-radio>
+            <el-radio value="search_and_read">{{ t('settings.global.webSearchModeSearchAndRead') }}</el-radio>
+          </el-radio-group>
+        </div>
+        <div class="field-row">
+          <span class="field-label" style="margin-bottom:0">{{ t('settings.global.webSearchUseProxy') }}</span>
+          <el-switch :model-value="settingsForm.web_search_use_proxy ?? false" @update:model-value="(v: string | number | boolean) => (settingsForm.web_search_use_proxy = v as boolean)" size="small" />
+        </div>
+      </div>
+
       <!-- 历史压缩 -->
       <div class="section-card">
         <div class="section-title">{{ t('settings.global.historyCompression') }}</div>
@@ -226,7 +243,9 @@ const { globalSettings } = storeToRefs(settingsStore)
 const settingsForm = reactive<Omit<GlobalSettingsUpdate, 'user_avatar_url' | 'ai_avatar_url' | 'frontend_editor' | 'message_display_mode'> & { frontend_editor: string; message_display_mode: string }>({
   default_model_id: null, title_generation_model_id: null, last_selected_provider_id: null,
   default_max_context_messages: 0, default_temperature: 1.0, default_top_p: 1.0,
-  default_stream: true, proxy_enabled: false, proxy_url: null, zip_history_system_prompt: null,
+  default_stream: true, proxy_enabled: false, proxy_url: null,
+  web_search_default_mode: 'disable', web_search_use_proxy: false,
+  zip_history_system_prompt: null,
   frontend_editor: 'simple', message_display_mode: 'interleaved',
   kb_default_chunk_size: 500, kb_default_chunk_overlap: 50, send_message_shortcut: 'enter',
   language: 'zh-CN', default_enable_suggest: false, default_enable_ask_user: false,
@@ -257,6 +276,7 @@ watch(globalSettings, (s) => {
     default_max_context_messages: s.default_max_context_messages,
     default_temperature: s.default_temperature, default_top_p: s.default_top_p,
     default_stream: s.default_stream, proxy_enabled: s.proxy_enabled, proxy_url: s.proxy_url,
+    web_search_default_mode: s.web_search_default_mode ?? 'disable', web_search_use_proxy: s.web_search_use_proxy ?? false,
     zip_history_system_prompt: s.zip_history_system_prompt,
     frontend_editor: s.frontend_editor ?? 'simple', message_display_mode: s.message_display_mode ?? 'interleaved',
     kb_default_chunk_size: s.kb_default_chunk_size, kb_default_chunk_overlap: s.kb_default_chunk_overlap,

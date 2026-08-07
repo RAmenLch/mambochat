@@ -45,6 +45,7 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
         "default_max_retries",
         "default_timeout",
         "proxy_enabled", "proxy_url",
+        "web_search_default_mode", "web_search_use_proxy",
         "user_avatar_file_id", "ai_avatar_file_id",
         "frontend_editor", "kb_default_chunk_size", "kb_default_chunk_overlap", "send_message_shortcut",
         "language"
@@ -88,6 +89,9 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
     proxy_enabled = _get_typed_setting(settings_map.get("proxy_enabled"), False, bool)
     proxy_url = _get_typed_setting(settings_map.get("proxy_url"), None, str)
 
+    web_search_default_mode = _get_typed_setting(settings_map.get("web_search_default_mode"), None, str)
+    web_search_use_proxy = _get_typed_setting(settings_map.get("web_search_use_proxy"), False, bool)
+
     frontend_editor = _get_typed_setting(settings_map.get("frontend_editor"), "simple", str)
     kb_default_chunk_size = _get_typed_setting(settings_map.get("kb_default_chunk_size"), 500, int)
     kb_default_chunk_overlap = _get_typed_setting(settings_map.get("kb_default_chunk_overlap"), 50, int)
@@ -109,6 +113,8 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
         default_timeout=default_timeout,
         proxy_enabled=proxy_enabled,
         proxy_url=proxy_url,
+        web_search_default_mode=web_search_default_mode,
+        web_search_use_proxy=web_search_use_proxy,
         user_avatar_url=user_avatar_url,
         ai_avatar_url=ai_avatar_url,
         frontend_editor=frontend_editor,
@@ -173,6 +179,7 @@ async def update_global_settings(
         "default_max_retries",
         "default_timeout",
         "proxy_enabled", "proxy_url",
+        "web_search_default_mode", "web_search_use_proxy",
         "zip_history_system_prompt",
         "frontend_editor", "kb_default_chunk_size", "kb_default_chunk_overlap", "send_message_shortcut",
         "language"

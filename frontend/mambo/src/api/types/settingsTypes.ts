@@ -10,6 +10,8 @@ export interface GlobalSettingsUpdate {
   default_stream: boolean | null
   proxy_enabled: boolean | null
   proxy_url: string | null
+  web_search_default_mode: string | null
+  web_search_use_proxy: boolean | null
   user_avatar_url: string | null
   ai_avatar_url: string | null
   zip_history_system_prompt?: string | null

@@ -104,6 +104,13 @@ export default {
     proxyTest: '代理测试',
     testUrlPlaceholder: '测试链接, 如 https://www.google.com',
     testProxyBtn: '测试代理',
+    webSearchConfig: '网页搜索',
+    webSearchDefaultMode: '默认网页搜索模式',
+    webSearchModeDisabled: '不启用',
+    webSearchModeDirectRead: '仅读取网页',
+    webSearchModeSearchAndRead: '搜索并读取',
+    webSearchUseProxy: '使用全局代理',
+    webSearchUseProxyTip: '启用后，网页搜索与网页读取请求将通过全局代理发送',
     historyCompression: '对话历史压缩',
     compressionPrompt: '生成压缩历史 System Prompt',
     compressionPromptTip:

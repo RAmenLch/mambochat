@@ -138,13 +138,15 @@ export const validateSkill = (resourceId: string): Promise<SkillValidationResult
  */
 export const importSkillFromFile = (
   file: File,
-  parentId: string | null = null
+  parentId: string | null = null,
+  onConflict: string = 'error'
 ): Promise<SkillImportResponse> => {
   const formData = new FormData()
   formData.append('file', file)
   if (parentId) {
     formData.append('parent_id', parentId)
   }
+  formData.append('on_conflict', onConflict)
   return apiClient.post('/resources/skills/import/file', formData, {
     headers: {
       'Content-Type': 'multipart/form-data'
@@ -156,13 +158,16 @@ export const importSkillFromFile = (
  * 通过 GitHub 仓库导入 Skill
  * @param repoUrl 仓库地址
  * @param parentId 目标父文件夹 ID
+ * @param onConflict 同名冲突处理策略: error / overwrite / skip
  */
 export const importSkillFromGithub = (
   repoUrl: string,
-  parentId: string | null = null
+  parentId: string | null = null,
+  onConflict: string = 'error'
 ): Promise<SkillImportResponse> => {
   return apiClient.post('/resources/skills/import/github', {
     repo_url: repoUrl,
-    parent_id: parentId
+    parent_id: parentId,
+    on_conflict: onConflict
   })
 }

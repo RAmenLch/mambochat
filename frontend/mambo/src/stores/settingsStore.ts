@@ -26,6 +26,8 @@ export const useSettingsStore = defineStore('settings', {
       default_stream: true,
       proxy_enabled: false,
       proxy_url: null,
+      web_search_default_mode: null,
+      web_search_use_proxy: false,
       user_avatar_url: null,
       ai_avatar_url: null,
       zip_history_system_prompt: null,

@@ -34,7 +34,9 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
             resume_payload: Optional[Dict[str, Any]] = None,
             enable_tools: bool = False,
             enable_resource_merge: bool = False,
-            external_tools: Optional[List[BaseTool]] = None
+            external_tools: Optional[List[BaseTool]] = None,
+            web_search_mode: Optional[WebSearchMode] = None,
+            web_search_proxy_url: Optional[str] = None
     ):
         self.db = db
         self.chat = chat
@@ -42,6 +44,8 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
         self.enable_tools = enable_tools
         self.enable_resource_merge = enable_resource_merge
         self.external_tools = external_tools or []
+        self.web_search_mode = web_search_mode
+        self.web_search_proxy_url = web_search_proxy_url
 
         self.providers: List[BaseToolProvider] = []
         self.hitl_interrupt_on: Dict[str, bool] = {}
@@ -84,9 +88,9 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
                         self.hitl_interrupt_on[tool.name] = True
 
             # WebSearch 内置搜索工具 (从 Chat 表读取 web_search_mode)
-            ws_mode = self._resolve_web_search_mode()
+            ws_mode = self.web_search_mode if self.web_search_mode is not None else self._resolve_web_search_mode()
             if ws_mode is not None:
-                self.providers.append(WebSearchToolProvider(ws_mode))
+                self.providers.append(WebSearchToolProvider(ws_mode, proxy_url=self.web_search_proxy_url))
 
             # Suggest 建议工具 (从 Chat 的 modelParameters 中读取)
             enable_suggest = params.get("enable_suggest", False)

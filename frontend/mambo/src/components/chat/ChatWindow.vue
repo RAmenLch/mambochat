@@ -590,13 +590,13 @@ function handleOpenSettings() {
 async function handleToggleWebSearch() {
   if (!currentChat.value) return;
   const currentMode = currentChat.value.web_search_mode;
-  let nextMode: 'direct_read' | 'search_and_read' | null;
-  if (!currentMode) {
+  let nextMode: 'direct_read' | 'search_and_read' | 'disable';
+  if (!currentMode || currentMode === 'disable') {
     nextMode = 'direct_read';
   } else if (currentMode === 'direct_read') {
     nextMode = 'search_and_read';
   } else {
-    nextMode = null;
+    nextMode = 'disable';
   }
   await chatListStore.updateChatSettings(currentChat.value.id, { web_search_mode: nextMode });
   if (nextMode === 'direct_read') {

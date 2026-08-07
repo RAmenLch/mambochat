@@ -980,16 +980,17 @@ export class ApiClientManager {
     const timeout = (params.timeout as number) || 120
     const timeoutMs = timeout * 1000
 
-    // Decode raw bytes with the platform's default encoding (GBK/cp936 on
-    // Windows, UTF-8 elsewhere) — mirrors LocalBackend.execute which uses
-    // locale.getpreferredencoding(). TextDecoder('gbk') requires full-icu,
-    // which Electron ships with; on failure we fall back to UTF-8.
-    const decoder = new TextDecoder(process.platform === 'win32' ? 'gbk' : 'utf-8')
+    // Decode raw bytes with UTF-8 first: modern CLIs emit UTF-8 by default,
+    // and UTF-8 strict decoding rejects most non-UTF-8 byte streams.  GBK
+    // must not be tried first — it leniently "decodes" most UTF-8 bytes into
+    // mojibake without raising, so the UTF-8 fallback would never trigger.
+    // TextDecoder('gbk') requires full-icu, which Electron ships with.
     const decode = (buf: Buffer): string => {
       try {
-        return decoder.decode(buf).replace(/\r\n/g, '\n')
+        return new TextDecoder('utf-8', { fatal: true }).decode(buf).replace(/\r\n/g, '\n')
       } catch {
-        return buf.toString('utf-8').replace(/\r\n/g, '\n')
+        return new TextDecoder(process.platform === 'win32' ? 'gbk' : 'utf-8')
+          .decode(buf).replace(/\r\n/g, '\n')
       }
     }
 

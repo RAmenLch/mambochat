@@ -196,6 +196,28 @@
           </div>
         </el-form-item>
 
+        <el-divider>{{ t('settings.global.webSearchConfig') }}</el-divider>
+        <el-form-item :label="t('settings.global.webSearchDefaultMode')">
+          <el-radio-group v-model="settingsForm.web_search_default_mode">
+            <el-radio value="disable">{{ t('settings.global.webSearchModeDisabled') }}</el-radio>
+            <el-radio value="direct_read">{{ t('settings.global.webSearchModeDirectRead') }}</el-radio>
+            <el-radio value="search_and_read">{{ t('settings.global.webSearchModeSearchAndRead') }}</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item :label="t('settings.global.webSearchUseProxy')">
+          <el-switch
+            :model-value="settingsForm.web_search_use_proxy ?? false"
+            @update:model-value="(val: string | number | boolean) => (settingsForm.web_search_use_proxy = val as boolean)"
+          />
+          <el-tooltip
+            effect="dark"
+            :content="t('settings.global.webSearchUseProxyTip')"
+            placement="top"
+          >
+            <el-icon class="label-icon"><QuestionFilled /></el-icon>
+          </el-tooltip>
+        </el-form-item>
+
         <el-divider>{{ t('settings.global.historyCompression') }}</el-divider>
         <el-form-item>
           <template #label>
@@ -397,6 +419,8 @@ const settingsForm = reactive<
   default_stream: true,
   proxy_enabled: false,
   proxy_url: null,
+  web_search_default_mode: 'disable',
+  web_search_use_proxy: false,
   zip_history_system_prompt: null,
   frontend_editor: 'simple',
   message_display_mode: 'interleaved',
@@ -458,6 +482,8 @@ watch(
       default_stream: newSettings.default_stream,
       proxy_enabled: newSettings.proxy_enabled,
       proxy_url: newSettings.proxy_url,
+      web_search_default_mode: newSettings.web_search_default_mode ?? 'disable',
+      web_search_use_proxy: newSettings.web_search_use_proxy ?? false,
       zip_history_system_prompt: newSettings.zip_history_system_prompt,
       // 确保赋值给 frontend_editor 的值不为 null
       frontend_editor: newSettings.frontend_editor ?? 'simple',

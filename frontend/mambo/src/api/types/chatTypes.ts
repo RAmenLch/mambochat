@@ -113,7 +113,7 @@ export interface Chat {
   isLoaded?: boolean
   resource_prompt_list?: string[] | null
   enabled_mcp_ids?: string[] | null
-  web_search_mode?: 'direct_read' | 'search_and_read' | null
+  web_search_mode?: 'direct_read' | 'search_and_read' | 'disable' | null
   chatMode?: ChatMode
   agentId?: string | null
 }
@@ -129,7 +129,7 @@ export interface ChatCreate {
   parentId?: string | null
   sortOrder?: number
   enabled_mcp_ids?: string[] | null
-  web_search_mode?: 'direct_read' | 'search_and_read' | null
+  web_search_mode?: 'direct_read' | 'search_and_read' | 'disable' | null
   chatMode?: ChatMode
   agentId?: string | null
 }
@@ -143,7 +143,7 @@ export interface ChatUpdate {
   sortOrder?: number
   resource_prompt_list?: string[] | null
   enabled_mcp_ids?: string[] | null
-  web_search_mode?: 'direct_read' | 'search_and_read' | null
+  web_search_mode?: 'direct_read' | 'search_and_read' | 'disable' | null
   chatMode?: ChatMode
   agentId?: string | null
 }
