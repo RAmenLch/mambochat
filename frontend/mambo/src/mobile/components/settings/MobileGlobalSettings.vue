@@ -240,7 +240,7 @@ const settingsStore = useSettingsStore()
 const { groupedModels } = storeToRefs(providerStore)
 const { globalSettings } = storeToRefs(settingsStore)
 
-const settingsForm = reactive<Omit<GlobalSettingsUpdate, 'user_avatar_url' | 'ai_avatar_url' | 'frontend_editor' | 'message_display_mode'> & { frontend_editor: string; message_display_mode: string }>({
+const settingsForm = reactive<Omit<GlobalSettingsUpdate, 'user_avatar_url' | 'ai_avatar_url' | 'frontend_editor' | 'message_display_mode' | 'web_search_default_mode'> & { frontend_editor: string; message_display_mode: string; web_search_default_mode: string }>({
   default_model_id: null, title_generation_model_id: null, last_selected_provider_id: null,
   default_max_context_messages: 0, default_temperature: 1.0, default_top_p: 1.0,
   default_stream: true, proxy_enabled: false, proxy_url: null,
