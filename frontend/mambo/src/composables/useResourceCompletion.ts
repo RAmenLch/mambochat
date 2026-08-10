@@ -5,7 +5,7 @@
 // 未挂载 ResourceBackend 时后端返回 enabled=false，前端自然无候选。
 
 import loader from '@monaco-editor/loader'
-import type { editor, languages } from 'monaco-editor'
+import type { editor, languages, IDisposable } from 'monaco-editor'
 import i18n from '@/i18n'
 import {
   completeResourcePath,
@@ -20,7 +20,7 @@ import type {
 
 let monacoInstance: any = null
 let providerRegistered = false
-let providerDisposable: languages.IDisposable | null = null
+let providerDisposable: IDisposable | null = null
 
 /** editor 实例 → 绑定的 agentId（未绑定的编辑器不触发补全） */
 const agentByEditor = new WeakMap<editor.IStandaloneCodeEditor, string>()
