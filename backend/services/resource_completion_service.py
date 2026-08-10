@@ -93,6 +93,68 @@ def _build_children_map(
     return children
 
 
+def _fuzzy_match_path(
+    nodes: List[resource_model.Resource],
+    segments: List[str],
+    trailing_slash: bool,
+    children: Dict[str, List[resource_model.Resource]],
+) -> List[resource_model.Resource]:
+    """从根目录导航失败时的回退：在整个子树中按名称模糊匹配路径分段。"""
+    if not segments:
+        return []
+
+    *parent_segs, last = segments
+
+    if not parent_segs:
+        if trailing_slash:
+            matching = [
+                n for n in nodes
+                if n.itemType == ResourceItemType.FOLDER.value and n.name == last
+            ]
+            result: List[resource_model.Resource] = []
+            for m in matching:
+                result.extend(children.get(m.id, []))
+            return result
+        else:
+            return [n for n in nodes if n.name.startswith(last)]
+
+    level = [
+        n for n in nodes
+        if n.itemType == ResourceItemType.FOLDER.value and n.name == parent_segs[0]
+    ]
+
+    for seg in parent_segs[1:]:
+        next_lvl: List[resource_model.Resource] = []
+        for r in level:
+            next_lvl.extend([
+                c for c in children.get(r.id, [])
+                if c.itemType == ResourceItemType.FOLDER.value and c.name == seg
+            ])
+        level = next_lvl
+        if not level:
+            return []
+
+    if trailing_slash:
+        matching: List[resource_model.Resource] = []
+        for r in level:
+            matching.extend([
+                c for c in children.get(r.id, [])
+                if c.itemType == ResourceItemType.FOLDER.value and c.name == last
+            ])
+        result: List[resource_model.Resource] = []
+        for m in matching:
+            result.extend(children.get(m.id, []))
+        return result
+    else:
+        result: List[resource_model.Resource] = []
+        for r in level:
+            result.extend([
+                c for c in children.get(r.id, [])
+                if c.name.startswith(last)
+            ])
+        return result
+
+
 async def complete_path(
     db: AsyncSession,
     agent_id: str,
@@ -109,7 +171,6 @@ async def complete_path(
         return False, []
 
     root_id_set = set(roots)
-    # 仅保留指向文件夹的根节点（resource_id 语义为 FOLDER）
     valid_roots = [n for n in nodes if n.id in root_id_set and n.itemType == ResourceItemType.FOLDER.value]
     if not valid_roots:
         return False, []
@@ -120,6 +181,7 @@ async def complete_path(
     trailing_slash = prefix.endswith("/")
 
     level = valid_roots
+    candidates: List[resource_model.Resource] = []
 
     if segments:
         for seg in segments[:-1]:
@@ -128,20 +190,24 @@ async def complete_path(
                 if c.itemType == ResourceItemType.FOLDER.value and c.name == seg
             ]
             if not level:
-                return True, []
+                break
 
-        last = segments[-1]
-        if trailing_slash:
-            level = [
-                c for r in level for c in children[r.id]
-                if c.itemType == ResourceItemType.FOLDER.value and c.name == last
-            ]
-            candidates = [c for r in level for c in children[r.id]]
-        else:
-            candidates = [
-                c for r in level for c in children[r.id]
-                if c.name.startswith(last)
-            ]
+        if level:
+            last = segments[-1]
+            if trailing_slash:
+                level = [
+                    c for r in level for c in children[r.id]
+                    if c.itemType == ResourceItemType.FOLDER.value and c.name == last
+                ]
+                candidates = [c for r in level for c in children[r.id]]
+            else:
+                candidates = [
+                    c for r in level for c in children[r.id]
+                    if c.name.startswith(last)
+                ]
+
+        if not candidates:
+            candidates = _fuzzy_match_path(nodes, segments, trailing_slash, children)
     else:
         candidates = [c for r in level for c in children[r.id]]
 
@@ -151,7 +217,6 @@ async def complete_path(
     if not candidates:
         return True, []
 
-    # 目录路径（不含候选自身）
     paths = await resource_service.build_resource_paths(db, [c.id for c in candidates])
 
     items = [
