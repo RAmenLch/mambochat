@@ -96,6 +96,39 @@ async function fetchContent(agentId: string, prefix: string): Promise<ResourceCo
   }
 }
 
+// --- 候选前缀生成 ---
+
+function generatePrefixCandidates(lineText: string): string[] {
+  const candidates: string[] = [lineText]
+
+  // 含 '/' 时：从每个 '/' 位置截取子串（如 '1. /a/b' → ['1. /a/b', '/a/b', '/b']）
+  if (lineText.includes('/')) {
+    for (let i = 1; i < lineText.length; i++) {
+      if (lineText[i] === '/') {
+        candidates.push(lineText.slice(i))
+      }
+    }
+  }
+
+  // 从词边界（空白、常见标点）截取子串
+  const boundaryRe = /[\s.,;:!?()[\]{}'"<>]/g
+  let match: RegExpExecArray | null
+  while ((match = boundaryRe.exec(lineText)) !== null) {
+    const idx = match.index + 1
+    if (idx < lineText.length) {
+      candidates.push(lineText.slice(idx))
+    }
+  }
+
+  // 去重，保持从长到短的顺序
+  const seen = new Set<string>()
+  return candidates.filter((c) => {
+    if (seen.has(c)) return false
+    seen.add(c)
+    return true
+  })
+}
+
 // --- Completion Provider ---
 
 const provider: languages.CompletionItemProvider = {
@@ -109,32 +142,53 @@ const provider: languages.CompletionItemProvider = {
     const agentId = editor ? agentByEditor.get(editor) : undefined
     if (!agentId) return { suggestions: [] }
 
-    // 光标前的整行文本作为前缀（路径补全 / 内容续写共用）
     const lineText = model.getValueInRange({
       startLineNumber: position.lineNumber,
       startColumn: 1,
       endLineNumber: position.lineNumber,
       endColumn: position.column,
     })
-    const prefix =
+    const fullPrefix =
       lineText.length > MAX_PREFIX_LEN ? lineText.slice(lineText.length - MAX_PREFIX_LEN) : lineText
 
     const seq = ++requestSeq
     await debounce(DEBOUNCE_MS)
     if (seq !== requestSeq) return { suggestions: [] }
 
-    // 含 '/' 时按路径补全（此时内容续写无意义）
-    const isPathInput = prefix.includes('/')
-    const [pathResp, contentResp] = await Promise.all([
-      fetchPath(agentId, prefix),
-      isPathInput ? Promise.resolve(null) : fetchContent(agentId, prefix),
-    ])
-    if (seq !== requestSeq) return { suggestions: [] }
+    const candidates = generatePrefixCandidates(fullPrefix)
+
+    let pathResp: ResourceCompletePathResponse | null = null
+    let contentResp: ResourceContentCompleteResponse | null = null
+    let matchedPrefix = fullPrefix
+
+    for (const cand of candidates) {
+      const isPath = cand.includes('/')
+      const [pResp, cResp] = await Promise.all([
+        fetchPath(agentId, cand),
+        isPath ? Promise.resolve(null) : fetchContent(agentId, cand),
+      ])
+      if (seq !== requestSeq) return { suggestions: [] }
+
+      if ((pResp?.items?.length ?? 0) > 0 || (cResp?.items?.length ?? 0) > 0) {
+        pathResp = pResp
+        contentResp = cResp
+        matchedPrefix = cand
+        break
+      }
+    }
 
     const suggestions: languages.CompletionItem[] = []
 
     if (pathResp?.enabled) {
       const kind = monaco.languages.CompletionItemKind
+      const lastSlashIdx = matchedPrefix.lastIndexOf('/')
+      const rangeStartCol =
+        lastSlashIdx === matchedPrefix.length - 1
+          ? position.column // trailing slash: 在光标处追加
+          : lastSlashIdx >= 0
+            ? position.column - (matchedPrefix.length - lastSlashIdx - 1) // 替换最后一段
+            : position.column - matchedPrefix.length // 无 '/' 兜底
+
       pathResp.items.forEach((item) => {
         const insertText = item.is_dir ? `${item.name}/` : item.name
         suggestions.push({
@@ -142,12 +196,10 @@ const provider: languages.CompletionItemProvider = {
           kind: item.is_dir ? kind.Folder : kind.File,
           detail: item.path ? `${item.path} / ${item.name}` : item.name,
           insertText,
-          // 过滤交给后端：filterText 设为输入前缀，避免被 Monaco 本地过滤误杀
-          filterText: prefix,
-          // 替换光标前的输入段
+          filterText: matchedPrefix,
           range: {
             startLineNumber: position.lineNumber,
-            startColumn: position.column - prefix.length,
+            startColumn: rangeStartCol,
             endLineNumber: position.lineNumber,
             endColumn: position.column,
           },
@@ -164,13 +216,11 @@ const provider: languages.CompletionItemProvider = {
           label,
           kind: monaco.languages.CompletionItemKind.Snippet,
           detail: item.resource_path ? `${item.resource_path} · ${contentLabel}` : contentLabel,
-          // 整段替换：前缀 + 续写片段，与下方 range 保持一致
-          insertText: prefix + item.snippet,
-          filterText: prefix,
-          // 替换光标前的输入段（保留用户输入的前缀）
+          insertText: matchedPrefix + item.snippet,
+          filterText: matchedPrefix,
           range: {
             startLineNumber: position.lineNumber,
-            startColumn: position.column - prefix.length,
+            startColumn: position.column - matchedPrefix.length,
             endLineNumber: position.lineNumber,
             endColumn: position.column,
           },
