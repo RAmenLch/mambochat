@@ -41,6 +41,7 @@ from backend.routers import (
     version_control,
     system_log,  # <-- 新增：导入系统日志路由
     agent_package,  # <-- 新增：Agent 导出包路由
+    resource_completion,  # <-- 新增：资源补全路由
 )
 from backend.services.cleanup_service import cleanup_zombie_files
 from backend.services.kb_service import SUP_DIM
@@ -80,6 +81,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger("alembic")
 logger.setLevel(_log_level)
+
+# 延迟导入的重依赖模块（后台线程预热，避免首次请求卡顿）
+# DEPRECATED: "deepagents" 与 backend...ssh_backend 为 DeepAgent 专用，DeepAgent 已淘汰，
+# 保留仅用于兼容存量数据；后续移除 DeepAgent 时一并删除。
+_PRELOAD_MODULES = [
+    "langchain_openai",
+    "langchain_anthropic",
+    "langchain_google_genai",
+    "deepagents",
+    "mambo_agents.backends.ssh",
+    "backend.services.generation.agent.ssh_backend",
+    "jieba",
+]
+
+
+def _preload_heavy_modules():
+    import importlib
+    for name in _PRELOAD_MODULES:
+        try:
+            importlib.import_module(name)
+            logging.getLogger("preload").info(f"预热完成: {name}")
+        except Exception as e:
+            logging.getLogger("preload").warning(f"预热模块 {name} 失败: {e}")
 
 def _get_db_head_revision(alembic_config):
     """获取 Alembic head 版本号"""
@@ -185,6 +209,9 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(cleanup_zombie_files, 'interval', hours=1)
     scheduler.start()
 
+    # 后台线程预热延迟导入的重依赖，不阻塞启动
+    asyncio.create_task(asyncio.to_thread(_preload_heavy_modules))
+
     yield
 
     # --- 应用关闭时执行 ---
@@ -228,6 +255,7 @@ async def log_unhandled_exceptions(request: Request, call_next):
 # --- 挂载路由 ---
 app.include_router(chat_management.router, prefix="/api", tags=["Chat Management"])
 app.include_router(resource_management.router, prefix="/api", tags=["Resource Management"])
+app.include_router(resource_completion.router, prefix="/api", tags=["Resource Completion"])
 app.include_router(chat_interaction.router, prefix="/api", tags=["Chat Interaction"])
 app.include_router(provider_management.router, prefix="/api", tags=["Provider & Model Management"])
 app.include_router(provider_actions.router, prefix="/api", tags=["Provider Actions"])

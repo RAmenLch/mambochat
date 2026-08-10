@@ -84,10 +84,21 @@ class MamboMCPToolProvider(BaseToolProvider):
         id_to_name: dict[str, str] = {}
         server_configs: list[MCPServerConfig] = []
 
+        # 读取全局代理配置（仅 http 传输的 useProxy 服务器使用）
+        from backend.crud import setting_crud
+
+        proxy_setting = await setting_crud.get_setting(self._db, "proxy_enabled")
+        proxy_url_setting = await setting_crud.get_setting(self._db, "proxy_url")
+        proxy_enabled = proxy_setting.value == "True" if proxy_setting else False
+        global_proxy_url = proxy_url_setting.value if proxy_url_setting else None
+
         for s in servers_db:
             if not s.isEnabled:
                 continue
             id_to_name[s.id] = s.name
+            # enable_proxy=False 时 mambo_agents 直连并屏蔽环境变量代理；
+            # useProxy=True 且全局代理开启时显式走 proxy_url，行为可控。
+            enable_proxy = bool(s.useProxy) and proxy_enabled and bool(global_proxy_url)
             cfg = MCPServerConfig(
                 name=s.name,
                 transport=s.transportType,
@@ -99,6 +110,8 @@ class MamboMCPToolProvider(BaseToolProvider):
                 headers=s.headers,
                 timeout=s.timeout,
                 sse_read_timeout=s.sse_read_timeout,
+                proxy=global_proxy_url if enable_proxy else None,
+                enable_proxy=enable_proxy,
             )
             server_configs.append(cfg)
 

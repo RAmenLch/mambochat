@@ -30,6 +30,9 @@ export interface McpServer {
   headers: Record<string, string> | null;
   timeout: number | null;
   sse_read_timeout: number | null;
+
+  // 是否启用全局代理（仅 http 传输生效）
+  useProxy: boolean;
 }
 
 export interface McpCreateRequest {
@@ -49,6 +52,9 @@ export interface McpCreateRequest {
   headers?: Record<string, string> | null;
   timeout?: number | null;
   sse_read_timeout?: number | null;
+
+  // 是否启用全局代理（仅 http 传输生效）
+  useProxy?: boolean;
 }
 
 export interface McpUpdateRequest {
@@ -68,6 +74,9 @@ export interface McpUpdateRequest {
   headers?: Record<string, string> | null;
   timeout?: number | null;
   sse_read_timeout?: number | null;
+
+  // 是否启用全局代理（仅 http 传输生效）
+  useProxy?: boolean;
 }
 
 export interface McpTestResponse {

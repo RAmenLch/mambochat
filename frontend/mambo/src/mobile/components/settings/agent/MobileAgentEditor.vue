@@ -36,7 +36,6 @@
               <label class="field-label">{{ $t('agent.type') }}</label>
               <el-select v-model="form.AgentType" style="width: 100%" popper-class="mobile-popper">
                 <el-option label="Mambo Agent" value="Mambo" />
-                <el-option label="Deep Agent" value="DeepAgent" />
                 <el-option label="ReAct Agent" value="ReActAgent" />
               </el-select>
             </div>

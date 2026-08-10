@@ -38,6 +38,8 @@ dependencies = [
     "langgraph>=1.1.2,<1.2",
     "langgraph-prebuilt>=1.0.8,<1.0.11",
     "langgraph-checkpoint-sqlite>=3.0.3,<4",
+    # DEPRECATED: deepagents 为 DeepAgent 专用依赖，DeepAgent 已淘汰，不再维护，
+    # 保留仅用于兼容存量数据；后续移除 DeepAgent 时一并删除。
     "deepagents>=0.4.12",
     "mcp>=1.2,<1.25",
 
@@ -67,7 +69,7 @@ dependencies = [
     # Production server
     "gunicorn==23.0.0",
 
-    "mambo-agents==0.2.0b34",
+    "mambo-agents==0.2.0b35",
 ]
 
 [project.scripts]

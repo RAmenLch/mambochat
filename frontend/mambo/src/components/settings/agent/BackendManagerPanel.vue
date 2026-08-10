@@ -43,8 +43,10 @@
           </template>
           <template v-else-if="row.backendType === 'resource'">
             <div class="api-info">
-              <span class="api-label">Resource ID:</span>
-              <span class="api-id">{{ row.configData.resource_id }}</span>
+              <span class="api-label">Resource:</span>
+              <el-tooltip :content="'Resource ID: ' + row.configData.resource_id" placement="top">
+                <span class="api-id resource-path">{{ resolveResourcePath(row.configData.resource_id) || row.configData.resource_id }}</span>
+              </el-tooltip>
             </div>
           </template>
           <template v-else-if="row.backendType === 'local'">
@@ -993,11 +995,28 @@ const handleTypeChange = (type: BackendType) => {
 // --- 资源文件夹选择器逻辑 ---
 const isResourceFoldersLoading = ref(false);
 
+// 通过资源 id 解析出虚拟路径（如 /目录1/目录2），基于已加载的资源列表向上回溯
+function resolveResourcePath(resourceId: string): string {
+  if (!resourceId) return '';
+  const itemMap = new Map(resourceStore.resources.map(r => [r.id, r]));
+  const names: string[] = [];
+  const seen = new Set<string>();
+  let current = itemMap.get(resourceId);
+  while (current) {
+    if (seen.has(current.id)) break;
+    seen.add(current.id);
+    names.unshift(current.name);
+    if (!current.parentId || current.parentId === 'root') break;
+    current = itemMap.get(current.parentId);
+  }
+  return names.length > 0 ? '/' + names.join('/') : '';
+}
+
 function collectFolders(nodes: any[]): { id: string; name: string; path: string }[] {
   const folders: { id: string; name: string; path: string }[] = [];
   for (const node of nodes) {
     if (node.itemType === 'folder') {
-      folders.push({ id: node.id, name: node.name, path: '' });
+      folders.push({ id: node.id, name: node.name, path: resolveResourcePath(node.id) });
     }
     if (node.children && node.children.length > 0) {
       folders.push(...collectFolders(node.children));
@@ -1113,6 +1132,7 @@ async function fetchClientStatuses() {
 
 onMounted(() => {
   backendStore.fetchBackends();
+  resourceStore.initializeList();
   statusPollTimer = setInterval(fetchClientStatuses, 15000);
 });
 

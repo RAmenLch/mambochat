@@ -1,4 +1,9 @@
 # backend/services/generation/agent/api_backend.py
+#
+# 【DEPRECATED - 已弃用，不再维护】
+# 本文件为 DeepAgent（deepagents 库）专用 API Backend。
+# DeepAgent 已被淘汰，前端已无创建入口，本文件仅保留用于兼容存量数据。
+# 新功能请使用 Mambo Agent 的 mambo_api_backend.MamboAPIBackend。
 
 """API Backend for DeepAgents.
 

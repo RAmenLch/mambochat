@@ -1,4 +1,8 @@
 # backend/services/generation/tools/deep_builtin_tool_provider.py
+#
+# 【DEPRECATED - 已弃用，不再维护】
+# 本文件为 DeepAgent（deepagents 库）专用内置工具提供者（UI 兼容层）。
+# DeepAgent 已被淘汰，前端已无创建入口，本文件仅保留用于兼容存量数据。
 
 from typing import List, Optional, Dict, Any, AsyncGenerator
 
@@ -18,7 +22,7 @@ from backend.models.base_model import generate_uuid
 
 class DeepAgentBuiltinToolProvider(BaseToolProvider):
     """
-    DeepAgent 内置工具提供者 (UI 兼容层)。
+    【DEPRECATED - 已弃用，不再维护】DeepAgent 内置工具提供者 (UI 兼容层)。
     拦截 DeepAgent 底层隐式注入的内置系统工具调用，并将其转换为前端可渲染的 UI 消息指令。
     复用现有的 MCP_TOOL 子消息类型，使前端能够无缝展示文件操作、终端执行等进度。
     """

@@ -103,6 +103,7 @@
           :is-generating="isGenerating"
           :is-send-button-disabled="isSendButtonDisabled"
           :is-pending-review="isPendingReview"
+          :agent-id="resourceCompletionAgentId"
           v-model:singlePartDraft="singlePartDraft"
           v-model:multiPartDraft="multiPartDraft"
           :active-partition-index="activePartitionIndex"
@@ -184,6 +185,7 @@ import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { useProviderStore } from '@/stores/providerStore';
 import { useSystemConfigStore } from '@/stores/systemConfigStore';
 import { useAgentStore } from '@/stores/agentStore';
+import { useBackendStore } from '@/stores/backendStore';
 import { useChatInput } from '@/composables/useChatInput';
 import { useResizablePanels } from '@/composables/useResizablePanels';
 import { useTokenEstimator } from '@/composables/useTokenEstimator';
@@ -217,6 +219,7 @@ const chatInteractionStore = useChatInteractionStore();
 const providerStore = useProviderStore();
 const systemConfigStore = useSystemConfigStore();
 const agentStore = useAgentStore();
+const backendStore = useBackendStore();
 
 const { refreshingTitleChatId } = storeToRefs(chatListStore);
 const {
@@ -351,6 +354,27 @@ onMounted(() => {
   if (agentStore.allAgents.length === 0) {
     agentStore.fetchAllAgents();
   }
+  if (backendStore.backendList.length === 0) {
+    backendStore.fetchBackends();
+  }
+});
+
+// 仅当当前会话 Agent 挂载了 ResourceBackend 时才启用资源补全，
+// 避免未挂载的 Agent 触发补全接口
+const resourceCompletionAgentId = computed(() => {
+  const chat = currentChat.value;
+  if (!chat?.agentId) return null;
+
+  const agent =
+    agentStore.allAgents.find((a) => a.id === chat.agentId) ||
+    agentStore.agentList.find((a) => a.id === chat.agentId);
+  if (!agent?.backendIds || agent.backendIds.length === 0) return null;
+
+  const mountedIds = new Set(agent.backendIds);
+  const hasResourceBackend = backendStore.backendList.some(
+    (b) => b.backendType === 'resource' && mountedIds.has(b.id),
+  );
+  return hasResourceBackend ? chat.agentId : null;
 });
 
 const isTitleRefreshing = computed(() => refreshingTitleChatId.value === currentChat.value?.id);

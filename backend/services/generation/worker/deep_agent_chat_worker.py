@@ -1,6 +1,12 @@
 # backend/services/generation/worker/deep_agent_chat_worker.py
-"""DeepAgent 专用 ChatWorker —— 继承通用 Worker，增加 VFS files 注入。
-
+#
+# 【DEPRECATED - 已弃用，不再维护】
+# 本文件为 DeepAgent（deepagents 库）专用 ChatWorker。
+# DeepAgent 已被淘汰，前端已无创建入口，本文件仅保留用于兼容存量数据。
+# 新功能请基于 Mambo Agent（UniversalGraphWorker / MamboAgentGraphBuilder）实现。
+#
+# DeepAgent 专用 ChatWorker —— 继承通用 Worker，增加 VFS files 注入。
+"""
 DeepAgent 使用 CompositeBackend + TreeStateBackend 架构，
 需要通过 input_data["files"] 将 skills 文件注入到 VFS 中。
 Mambo Agent 不需要此操作（skills 通过 MamboResourceBackend shortcuts 挂载）。
@@ -20,7 +26,7 @@ from backend.services.generation.worker.chat_worker import UniversalGraphWorker
 
 
 class DeepAgentChatWorker(UniversalGraphWorker):
-    """DeepAgent 专用 Worker：在通用流程基础上注入 VFS files。
+    """【DEPRECATED - 已弃用，不再维护】DeepAgent 专用 Worker：在通用流程基础上注入 VFS files。
 
     仅需覆盖 generate() 方法，在构建 input_data 时附加
     _collect_vfs_files_recursively 收集的 skills 文件内容。

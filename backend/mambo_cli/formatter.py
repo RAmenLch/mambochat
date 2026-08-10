@@ -29,13 +29,16 @@ class LeveledHelpFormatter(argparse.HelpFormatter):
         return text
 
     def _count_advanced(self, parser) -> int:
-        count = sum(1 for a in parser._actions if getattr(a, "advanced", False))
+        # 仅统计本层在常用模式中实际被隐藏的 advanced 参数；
+        # 高级子命令始终在列表中显示（仅加 [高级] 前缀），不属于隐藏项。
+        return sum(1 for a in parser._actions if getattr(a, "advanced", False))
+
+    def _has_advanced_subcommands(self, parser) -> bool:
         for action in parser._actions:
             if isinstance(action, argparse._SubParsersAction):
-                count += sum(
-                    1 for sp in action._name_parser_map.values() if getattr(sp, "advanced", False)
-                )
-        return count
+                if any(getattr(sp, "advanced", False) for sp in action._name_parser_map.values()):
+                    return True
+        return False
 
     def format_help(self):
         text = super().format_help()
@@ -47,8 +50,8 @@ class LeveledHelpFormatter(argparse.HelpFormatter):
             count = self._count_advanced(self.parser)
             if not self.show_advanced:
                 if count:
-                    text += f"\n提示: 还有 {count} 个高级参数/命令未显示，使用 --help-all 查看全部。\n"
-            elif count == 0:
+                    text += f"\n提示: 还有 {count} 个高级参数未显示，使用 --help-all 查看全部。\n"
+            elif count == 0 and not self._has_advanced_subcommands(self.parser):
                 text += "\n（该命令没有高级参数/命令，--help-all 与 -h 显示相同）\n"
         return text
 

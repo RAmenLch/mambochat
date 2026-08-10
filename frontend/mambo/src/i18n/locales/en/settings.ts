@@ -189,6 +189,8 @@ export default {
       timeoutPlaceholder: '5',
       sseReadTimeoutLabel: 'SSE Read Timeout (s)',
       sseReadTimeoutPlaceholder: '300',
+      useProxyLabel: 'Enable Global Proxy',
+      useProxyTip: 'Use the global proxy when enabled; direct connection (ignoring env proxies) when disabled',
       cwdLabel: 'Working Dir',
       cwdPlaceholder: '/path/to/project',
       nameRequired: 'Please enter service name',

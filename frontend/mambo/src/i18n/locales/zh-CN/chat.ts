@@ -198,6 +198,7 @@ export default {
     send: '发送',
     tokenEstimate: '预估消耗: {count} tokens',
     addPartition: '添加分区',
+    completionContent: '内容续写',
   },
   edit: {
     title: '编辑分区内容',

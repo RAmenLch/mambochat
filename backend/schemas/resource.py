@@ -129,6 +129,7 @@ class Resource(ResourceSimple):
     完整资源模型，包含 latest_version 信息。
     """
     latest_version: Optional[ResourceVersion] = None
+    latestVersionId: Optional[str] = None
 
 
 class ResourceWithVersions(Resource):

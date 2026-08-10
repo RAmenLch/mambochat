@@ -72,8 +72,10 @@ async def _validate_avatar_file(file: UploadFile):
 async def create_agent(agent: schemas.AgentCreate, db: AsyncSession = Depends(get_db)):
     if agent.resourcePromptList is not None:
         await validate_mounted_resources(db, agent.resourcePromptList)
-
-    db_agent = await agent_crud.create_agent(db=db, agent=agent)
+    try:
+        db_agent = await agent_crud.create_agent(db=db, agent=agent)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     return await _attach_avatar_url(db, db_agent)
 
 
@@ -163,7 +165,10 @@ async def delete_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
     summary="移动 Agent 或文件夹"
 )
 async def move_agents(move_request: schemas.AgentMoveRequest, db: AsyncSession = Depends(get_db)):
-    success = await agent_crud.move_agents(db, move_request=move_request)
+    try:
+        success = await agent_crud.move_agents(db, move_request=move_request)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not success:
         raise HTTPException(status_code=400, detail="Move operation failed")
     return {"message": "Move successful"}

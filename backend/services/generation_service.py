@@ -196,14 +196,14 @@ def _create_worker_instance(worker_type: str) -> AbstractGenerateWorker:
 async def _get_worker_for_chat(db: AsyncSession, chat_id: str) -> AbstractGenerateWorker:
     """根据 Chat 绑定的 Agent 类型选择对应的 Worker。
 
-    - DeepAgent → DeepAgentChatWorker（需要 VFS files 注入）
+    - DeepAgent → DeepAgentChatWorker（需要 VFS files 注入）【DEPRECATED：DeepAgent 已淘汰，仅兼容存量】
     - 其他（ReAct / Mambo / 无 Agent）→ UniversalGraphWorker
     """
     from backend.crud import agent_crud
 
     db_chat = await chat_crud.get_chat(db, chat_id=chat_id)
 
-    # DeepAgent 需要 VFS 注入，使用专用 Worker
+    # DEPRECATED: DeepAgent 已淘汰，不再维护，此分支仅用于兼容存量数据
     if db_chat and db_chat.chatMode == ChatMode.AGENT.value and db_chat.agentId:
         agent = await agent_crud.get_agent(db, db_chat.agentId)
         if agent:

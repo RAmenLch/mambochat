@@ -4,12 +4,18 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
+import traceback
 
 from backend.database import get_db
 from backend.schemas.mcp import McpServerCreate, McpServerUpdate, McpServerResponse, McpToolResponse, McpToolUpdate
 from backend.crud import mcp_crud, mcp_tool_crud
 from backend.services import mcp_service
-from backend.services.mcp_connection_manager import McpConnectionManager, McpConnectionError
+from backend.services.mcp_connection_manager import (
+    McpConnectionManager,
+    McpConnectionError,
+    _apply_http_proxy,
+)
+from backend.crud import setting_crud
 
 router = APIRouter()
 
@@ -24,7 +30,7 @@ async def list_mcp_servers(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/test-config", summary="测试 MCP 配置（无需保存）")
-async def test_mcp_config(server: McpServerCreate):
+async def test_mcp_config(server: McpServerCreate, db: AsyncSession = Depends(get_db)):
     """
     使用传入的配置直接测试 MCP 连接，不写入数据库。
     适用于新建或编辑时在保存前验证配置是否正确。
@@ -60,6 +66,14 @@ async def test_mcp_config(server: McpServerCreate):
             http_config["timeout"] = server.timeout
         if server.sse_read_timeout is not None:
             http_config["sse_read_timeout"] = server.sse_read_timeout
+        proxy_setting = await setting_crud.get_setting(db, "proxy_enabled")
+        proxy_url_setting = await setting_crud.get_setting(db, "proxy_url")
+        _apply_http_proxy(
+            http_config,
+            use_proxy=bool(server.useProxy),
+            proxy_enabled=proxy_setting.value == "True" if proxy_setting else False,
+            proxy_url=proxy_url_setting.value if proxy_url_setting else None,
+        )
         client_config = {temp_id: http_config}
 
     try:
@@ -78,11 +92,12 @@ async def test_mcp_config(server: McpServerCreate):
             "error": e.error_message
         }
     except Exception as e:
+        # 返回完整 traceback，供调用方提取根因（仅 str(e) 会丢失异常组细节）
         return {
             "status": "unhealthy",
             "tools_count": 0,
             "message": "Unexpected error occurred.",
-            "error": str(e)
+            "error": "".join(traceback.format_exception(type(e), e, e.__traceback__))
         }
 
 

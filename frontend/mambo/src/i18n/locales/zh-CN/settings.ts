@@ -187,6 +187,8 @@ export default {
       timeoutPlaceholder: '5',
       sseReadTimeoutLabel: 'SSE 读取超时 (秒)',
       sseReadTimeoutPlaceholder: '300',
+      useProxyLabel: '启用全局代理',
+      useProxyTip: '开启后经全局代理访问；关闭则直连并忽略环境变量代理',
       cwdLabel: '工作目录',
       cwdPlaceholder: '/path/to/project',
       nameRequired: '请输入服务名称',

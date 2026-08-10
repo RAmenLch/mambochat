@@ -1,5 +1,6 @@
 // frontend/mambo/src/api/types/agentTypes.ts
 export type AgentItemType = 'agent' | 'folder';
+// DeepAgent 已淘汰（不再维护）：类型保留仅用于兼容存量数据，前端已无创建入口
 export type AgentType = 'ReActAgent' | 'DeepAgent' | 'Mambo';
 
 export interface SummarizationConfig {

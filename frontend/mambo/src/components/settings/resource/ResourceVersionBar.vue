@@ -4,7 +4,7 @@
     <div class="version-bar-header">
       <span class="version-bar-title">{{ t('resource.version.history') }}</span>
     </div>
-    <el-scrollbar>
+    <el-scrollbar ref="scrollbarRef">
       <transition-group name="version-drag" tag="div" class="version-list-horizontal">
         <!-- Special KB Config Card -->
         <div
@@ -91,8 +91,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, watch, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ElScrollbar } from 'element-plus'
 import { Setting, Delete } from '@element-plus/icons-vue'
 import type { ResourceVersion } from '@/api/types'
 
@@ -113,6 +114,8 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+const scrollbarRef = ref<InstanceType<typeof ElScrollbar>>()
 
 const draggedVersionId = ref<string | null>(null)
 let lastSwapTime = 0
@@ -199,7 +202,62 @@ const handleDragOver = (event: DragEvent) => {
 const handleDragEnd = () => {
   draggedVersionId.value = null
   lastSwapTime = 0
+  scheduleScrollToActive()
 }
+
+/**
+ * 将 active 版本卡片滚动到可视区域内：
+ * - 已完整可见则不滚动；
+ * - 不可见时以居中为目标，但 clamp 到有效滚动范围，
+ *   避免居中导致视口两侧出现空白区域（靠边缘的版本贴边显示）。
+ */
+function scrollActiveIntoView() {
+  const wrap = scrollbarRef.value?.wrapRef
+  const activeId = props.activeVersionId
+  if (!wrap || !activeId) return
+
+  const card = wrap.querySelector<HTMLElement>(`[data-version-id="${activeId}"]`)
+  if (!card) return
+
+  const wrapRect = wrap.getBoundingClientRect()
+  const cardRect = card.getBoundingClientRect()
+
+  if (cardRect.left >= wrapRect.left && cardRect.right <= wrapRect.right) return
+
+  const cardLeftInContent = cardRect.left - wrapRect.left + wrap.scrollLeft
+  const target = cardLeftInContent - (wrap.clientWidth - card.clientWidth) / 2
+  const maxScroll = Math.max(0, wrap.scrollWidth - wrap.clientWidth)
+  const clamped = Math.max(0, Math.min(target, maxScroll))
+
+  if (Math.abs(clamped - wrap.scrollLeft) < 1) return
+  wrap.scrollTo({ left: clamped, behavior: 'smooth' })
+}
+
+function scheduleScrollToActive() {
+  if (draggedVersionId.value) return
+  nextTick(() => {
+    requestAnimationFrame(() => scrollActiveIntoView())
+  })
+}
+
+/**
+ * 鼠标悬停时滚轮横向滚动版本列表。
+ * 列表未溢出时不拦截滚轮，保持页面正常纵向滚动。
+ */
+function handleWheel(event: WheelEvent) {
+  const wrap = scrollbarRef.value?.wrapRef
+  if (!wrap) return
+  if (wrap.scrollWidth - wrap.clientWidth <= 0) return
+  event.preventDefault()
+  wrap.scrollLeft += event.deltaY + event.deltaX
+}
+
+onMounted(() => {
+  scheduleScrollToActive()
+  scrollbarRef.value?.wrapRef?.addEventListener('wheel', handleWheel, { passive: false })
+})
+watch(() => props.activeVersionId, scheduleScrollToActive)
+watch(() => props.versions, scheduleScrollToActive)
 </script>
 
 <style scoped>

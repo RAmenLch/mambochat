@@ -92,6 +92,14 @@ async def get_agents_by_parent_ids(db: AsyncSession, parent_ids: List[str]) -> L
 async def create_agent(db: AsyncSession, agent: schemas.AgentCreate) -> agent_model.Agent:
     """创建一个新的 Agent 或文件夹"""
 
+    # 同父目录下名称唯一（folder/agent 共享同名池子，保证路径寻址无歧义）
+    existing = await _find_sibling_by_name(db, agent.parentId, agent.name)
+    if existing:
+        raise ValueError(
+            f"同目录下已存在同名节点: '{agent.name}'（{existing.id[:8]}）。"
+            "同一文件夹下名称必须唯一。"
+        )
+
     # 如果未传 sortOrder，则计算追加到末尾的顺序值
     if "sortOrder" not in agent.model_fields_set:
         stmt = select(func.max(agent_model.Agent.sortOrder)).filter(
@@ -112,6 +120,16 @@ async def create_agent(db: AsyncSession, agent: schemas.AgentCreate) -> agent_mo
     return db_agent
 
 
+async def _find_sibling_by_name(db: AsyncSession, parent_id, name: str) -> Optional[agent_model.Agent]:
+    """在同父目录下按名称查找节点（folder/agent 共享同名池子）。"""
+    result = await db.execute(
+        select(agent_model.Agent)
+        .filter(agent_model.Agent.parentId == parent_id, agent_model.Agent.name == name)
+        .limit(1)
+    )
+    return result.scalars().first()
+
+
 async def update_agent(db: AsyncSession, agent_id: str, agent_update: schemas.AgentUpdate) -> Optional[
     agent_model.Agent]:
     """更新 Agent 或文件夹的配置信息"""
@@ -120,6 +138,16 @@ async def update_agent(db: AsyncSession, agent_id: str, agent_update: schemas.Ag
         return None
 
     update_data = agent_update.model_dump(exclude_unset=True)
+
+    # 改名时检查：同父目录下其他节点不允许同名
+    if "name" in update_data and update_data["name"] is not None \
+            and update_data["name"] != db_agent.name:
+        sibling = await _find_sibling_by_name(db, db_agent.parentId, update_data["name"])
+        if sibling:
+            raise ValueError(
+                f"同目录下已存在同名节点: '{update_data['name']}'（{sibling.id[:8]}）。"
+                "同一文件夹下名称必须唯一。"
+            )
 
     if "subAgents" in update_data and update_data["subAgents"] is not None:
         has_cycle = await check_subagent_cycle(db, target_agent_id=agent_id, new_subagents=update_data["subAgents"])
@@ -209,6 +237,9 @@ async def move_agents(db: AsyncSession, move_request: schemas.AgentMoveRequest) 
         )
         await db.execute(shift_stmt)
 
+    # 2.5 目标目录同名检查（与挤占位移同事务，冲突时回滚）
+    await _check_move_name_conflict(db, move_request, target_parent_id)
+
     # 3. 更新被移动的节点
     # 保持 item_ids 原有的相对顺序
     for index, item_id in enumerate(move_request.item_ids):
@@ -224,6 +255,29 @@ async def move_agents(db: AsyncSession, move_request: schemas.AgentMoveRequest) 
 
     await db.commit()
     return True
+
+
+async def _check_move_name_conflict(db: AsyncSession, move_request: schemas.AgentMoveRequest,
+                                    target_parent_id) -> None:
+    """移动前检查：目标目录内不允许出现同名节点（含被移动节点之间互查）。"""
+    moving_ids = set(move_request.item_ids)
+    result = await db.execute(
+        select(agent_model.Agent.name)
+        .filter(
+            agent_model.Agent.parentId == target_parent_id,
+            ~agent_model.Agent.id.in_(moving_ids),
+        )
+    )
+    existing_names = set(result.scalars().all())
+    for item_id in move_request.item_ids:
+        item = await db.get(agent_model.Agent, item_id)
+        if item is None:
+            continue
+        if item.name in existing_names:
+            raise ValueError(
+                f"目标目录已存在同名节点: '{item.name}'。同一文件夹下名称必须唯一。"
+            )
+        existing_names.add(item.name)
 
 
 async def get_agents_by_ids(db: AsyncSession, agent_ids: List[str]) -> List[agent_model.Agent]:

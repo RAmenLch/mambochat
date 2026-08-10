@@ -94,6 +94,11 @@
         <el-form-item :label="t('settings.mcp.form.sseReadTimeoutLabel')">
           <el-input-number v-model="formData.sse_read_timeout" :min="0.1" :step="1" :placeholder="t('settings.mcp.form.sseReadTimeoutPlaceholder')" style="width: 100%" />
         </el-form-item>
+
+        <el-form-item :label="t('settings.mcp.form.useProxyLabel')">
+          <el-switch v-model="formData.useProxy" />
+          <span class="form-tip">{{ t('settings.mcp.form.useProxyTip') }}</span>
+        </el-form-item>
       </template>
     </el-form>
 
@@ -170,6 +175,7 @@ interface LocalFormData {
   headersList: { key: string; value: string }[];
   timeout: number | null;
   sse_read_timeout: number | null;
+  useProxy: boolean;
 }
 
 const defaultFormData: LocalFormData = {
@@ -185,6 +191,7 @@ const defaultFormData: LocalFormData = {
   headersList: [],
   timeout: null,
   sse_read_timeout: null,
+  useProxy: false,
 };
 
 const formData = reactive<LocalFormData>({ ...defaultFormData });
@@ -263,6 +270,7 @@ watch(
         formData.cwd = data.cwd || '';
         formData.timeout = data.timeout ?? null;
         formData.sse_read_timeout = data.sse_read_timeout ?? null;
+        formData.useProxy = data.useProxy ?? false;
 
         // 转换 args
         formData.argsList = data.args ? [...data.args] : [];
@@ -372,6 +380,7 @@ const handleSubmit = async () => {
 
         requestData.timeout = formData.timeout ?? null;
         requestData.sse_read_timeout = formData.sse_read_timeout ?? null;
+        requestData.useProxy = formData.useProxy;
       }
 
       emit('save', requestData);
@@ -419,6 +428,7 @@ const handleTestConnection = async () => {
       }
       configData.timeout = formData.timeout ?? null;
       configData.sse_read_timeout = formData.sse_read_timeout ?? null;
+      configData.useProxy = formData.useProxy;
     }
 
     const response = await mcpStore.testConnectionWithConfig(configData);
@@ -458,6 +468,12 @@ const handleTestConnection = async () => {
 
 .separator {
   font-weight: bold;
+  color: var(--el-text-color-secondary);
+}
+
+.form-tip {
+  margin-left: 8px;
+  font-size: 12px;
   color: var(--el-text-color-secondary);
 }
 

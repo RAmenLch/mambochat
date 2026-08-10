@@ -18,7 +18,7 @@ class ApiError(Exception):
         if self.status_code == 0:
             return f"无法连接后端: {self.detail}"
         if isinstance(self.detail, str):
-            return f"API 错误 {self.status_code}: {self.detail}"
+            return f"API 错误 {self.status_code}: {self.detail or '(无响应详情)'}"
         if isinstance(self.detail, list):
             parts = []
             for item in self.detail:
@@ -49,6 +49,8 @@ class ApiClient:
                 detail = resp.json().get("detail", resp.text)
             except Exception:
                 detail = resp.text
+            if not detail:
+                detail = f"HTTP {resp.status_code}（响应体为空）"
             raise ApiError(resp.status_code, detail, method, url)
         if resp.status_code == 204 or not resp.content:
             return None
@@ -187,6 +189,109 @@ class ApiClient:
         if parent_id:
             data["parent_id"] = parent_id
         return self._request("POST", "/api/resources/skills/import/github", json=data)
+
+    # ---- MCP Servers ----
+    def list_mcp_servers(self):
+        return self._request("GET", "/api/mcp/")
+
+    def get_mcp_server(self, server_id: str):
+        return self._request("GET", f"/api/mcp/{server_id}")
+
+    def create_mcp_server(self, data: dict):
+        return self._request("POST", "/api/mcp/", json=data)
+
+    def update_mcp_server(self, server_id: str, data: dict):
+        return self._request("PUT", f"/api/mcp/{server_id}", json=data)
+
+    def delete_mcp_server(self, server_id: str):
+        return self._request("DELETE", f"/api/mcp/{server_id}")
+
+    def test_mcp_server(self, server_id: str):
+        return self._request("POST", f"/api/mcp/{server_id}/test")
+
+    def test_mcp_config(self, data: dict):
+        return self._request("POST", "/api/mcp/test-config", json=data)
+
+    def sync_mcp_tools(self, server_id: str):
+        return self._request("POST", f"/api/mcp/{server_id}/sync")
+
+    def list_mcp_tools(self, server_id: str):
+        return self._request("GET", f"/api/mcp/{server_id}/tools")
+
+    # ---- MCP Tools ----
+    def update_mcp_tool(self, tool_id: str, data: dict):
+        return self._request("PATCH", f"/api/mcp/tools/{tool_id}", json=data)
+
+    def delete_mcp_tool(self, tool_id: str):
+        return self._request("DELETE", f"/api/mcp/tools/{tool_id}")
+
+    # ---- Agents ----
+    def list_agents(self):
+        return self._request("GET", "/api/agents/")
+
+    def get_agent(self, agent_id: str):
+        return self._request("GET", f"/api/agents/{agent_id}")
+
+    def create_agent(self, data: dict):
+        return self._request("POST", "/api/agents/", json=data)
+
+    def update_agent(self, agent_id: str, data: dict):
+        return self._request("PUT", f"/api/agents/{agent_id}", json=data)
+
+    def delete_agent(self, agent_id: str):
+        return self._request("DELETE", f"/api/agents/{agent_id}")
+
+    def move_agents(self, item_ids: list[str], reference_id: str, action: str = "inside"):
+        return self._request("POST", "/api/agents/move", json={
+            "item_ids": item_ids,
+            "reference_id": reference_id,
+            "action": action,
+        })
+
+    def duplicate_agent(self, agent_id: str):
+        return self._request("POST", f"/api/agents/{agent_id}/duplicate")
+
+    def get_agent_hitl_tools(self, agent_id: str):
+        return self._request("GET", f"/api/agents/{agent_id}/hitl-tools")
+
+    # ---- Backends ----
+    def list_backends(self):
+        return self._request("GET", "/api/backends/")
+
+    def get_backend(self, backend_id: str):
+        return self._request("GET", f"/api/backends/{backend_id}")
+
+    def create_backend(self, data: dict):
+        return self._request("POST", "/api/backends/", json=data)
+
+    def update_backend(self, backend_id: str, data: dict):
+        return self._request("PUT", f"/api/backends/{backend_id}", json=data)
+
+    def delete_backend(self, backend_id: str):
+        return self._request("DELETE", f"/api/backends/{backend_id}")
+
+    def duplicate_backend(self, backend_id: str):
+        return self._request("POST", f"/api/backends/{backend_id}/duplicate")
+
+    def test_ssh_backend(self, config_data: dict, backend_id: str | None = None):
+        data = {"configData": config_data}
+        if backend_id:
+            data["backend_id"] = backend_id
+        return self._request("POST", "/api/backends/ssh/test", json=data)
+
+    def ls_backend_dir(self, backend_type: str, path: str, root_dir: str = "/",
+                       backend_id: str | None = None):
+        data = {"backend_type": backend_type, "path": path, "root_dir": root_dir}
+        if backend_id:
+            data["backend_id"] = backend_id
+        return self._request("POST", "/api/backends/ls", json=data)
+
+    def get_ssh_public_key(self):
+        return self._request("GET", "/api/backends/ssh/public-key")
+
+    # ---- System Config ----
+    def get_system_config(self):
+        return self._request("GET", "/api/system-config")
 
 
 def with_api(func):

@@ -71,7 +71,8 @@ def add_parser(subparsers, common):
     wp.add_argument("--type", dest="write_type", choices=list(WRITE_TYPES), default="file",
                     help="文件类型（默认 file；prompt=system_prompt, template=submessage_template）")
     add_arg(wp, "--attr", metavar="JSON", advanced=True,
-            help="template 类型的属性配置（JSON 字符串，如 '{\"show_tool_mode\": true}'）")
+            help="template 类型的属性配置（JSON 字符串；Windows: \"{\\\"show_tool_mode\\\": true}\"，"
+                 "Linux/Mac: '{\"show_tool_mode\": true}'）")
     wp.set_defaults(func=cmd_write)
 
     rp = cmd("rm", "删除资源（目录需 -R 递归）")
@@ -481,7 +482,7 @@ def cmd_version_list(args, api):
     versions = detail.get("versions") or []
     active_id = detail.get("latestVersionId")
     if args.json:
-        output.print_json(versions)
+        output.print_json([{**v, "active": v["id"] == active_id} for v in versions])
         return 0
     if not versions:
         print("（无版本）")

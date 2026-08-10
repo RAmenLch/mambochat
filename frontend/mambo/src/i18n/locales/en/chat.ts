@@ -201,6 +201,7 @@ export default {
     send: 'Send',
     tokenEstimate: 'Estimate: {count} tokens',
     addPartition: 'Add Partition',
+    completionContent: 'Content Continuation',
   },
   edit: {
     title: 'Edit Partition Content',

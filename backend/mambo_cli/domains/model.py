@@ -9,6 +9,7 @@ from backend.mambo_cli.formatter import LeveledHelpFormatter, add_leveled_help, 
 from backend.mambo_cli import output
 from backend.mambo_cli.resolver import resolve_model, resolve_provider
 from backend.mambo_cli.util import UsageError, parse_bool
+from backend.mambo_cli.llm_params import build_definition_map
 
 MODEL_TYPES = ["chat", "embedding"]
 
@@ -128,6 +129,21 @@ def _build_meta_config(args) -> dict:
     return meta
 
 
+def _validate_supported_parameters(meta: dict, api) -> None:
+    """校验 meta_config.supported_parameters 的 key 均为系统定义的合法参数。"""
+    keys = meta.get("supported_parameters")
+    if not keys:
+        return
+    definitions = api.get_system_config().get("llm_parameters") or []
+    valid = set(build_definition_map(definitions).keys())
+    invalid = [k for k in keys if k not in valid]
+    if invalid:
+        raise UsageError(
+            f"不支持的参数 key: {', '.join(invalid)}"
+            "（合法 key 见系统配置 SUPPORTED_LLM_PARAMETERS）"
+        )
+
+
 @with_api
 def cmd_list(args, api):
     providers = api.list_providers()
@@ -201,6 +217,7 @@ def cmd_add(args, api):
     # 预设 meta_config 为基底，用户显式传入的高级参数优先覆盖
     meta = dict(preset.get("meta_config") or {}) if preset else {}
     meta.update(_build_meta_config(args))
+    _validate_supported_parameters(meta, api)
     if meta:
         data["meta_config"] = meta
 
@@ -230,6 +247,7 @@ def cmd_update(args, api):
         except argparse.ArgumentTypeError as exc:
             raise UsageError(f"{exc}")
     meta = _build_meta_config(args)
+    _validate_supported_parameters(meta, api)
     if meta:
         data["meta_config"] = meta
     if not data:

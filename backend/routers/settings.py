@@ -89,7 +89,7 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
     proxy_enabled = _get_typed_setting(settings_map.get("proxy_enabled"), False, bool)
     proxy_url = _get_typed_setting(settings_map.get("proxy_url"), None, str)
 
-    web_search_default_mode = _get_typed_setting(settings_map.get("web_search_default_mode"), None, str)
+    web_search_default_mode = _get_typed_setting(settings_map.get("web_search_default_mode"), "disable", str)
     web_search_use_proxy = _get_typed_setting(settings_map.get("web_search_use_proxy"), False, bool)
 
     frontend_editor = _get_typed_setting(settings_map.get("frontend_editor"), "simple", str)

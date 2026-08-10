@@ -140,7 +140,6 @@ const {
           label: t('agent.type'),
             options: [
             { label: 'Mambo Agent', value: 'Mambo' },
-            { label: 'Deep Agent', value: 'DeepAgent' },
             { label: 'ReAct Agent', value: 'ReActAgent' }
           ],
           initialValue: 'Mambo'

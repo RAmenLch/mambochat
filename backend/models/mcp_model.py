@@ -29,6 +29,9 @@ class McpServer(Base):
     # STDIO 专属配置
     cwd = Column(String(500), nullable=True)  # 工作目录
 
+    # 是否使用全局代理（仅 sse/streamable_http 生效；False=直连并屏蔽环境变量代理）
+    useProxy = Column(Boolean, default=False)
+
     isEnabled = Column(Boolean, default=True)
 
     # 状态监控字段

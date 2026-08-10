@@ -26,7 +26,6 @@ from mambo_agents import (
     StoreBackend,
 )
 from mambo_agents.backends.schemas import VirtualPath
-from mambo_agents.backends.ssh import SshBackend
 from mambo_agents.backends.local import LocalBackend
 from mambo_agents.middleware.security_review import SecurityReviewConfig
 
@@ -38,7 +37,6 @@ from backend.services.generation.graph_builders.base_builder import BaseGraphBui
 from backend.services.generation.graph_builders.model_factory import ModelFactory
 from backend.services.generation.agent.mambo_api_backend import MamboAPIBackend
 from backend.services.generation.agent.mambo_resource_backend import MamboResourceBackend
-from backend.utils.ssh_utils import get_or_create_system_ssh_key
 from backend.schemas.enums import BackendType
 
 
@@ -157,6 +155,8 @@ def _build_any_backend(
     config = mb.get("configData", {})
 
     if b_type == BackendType.SSH.value:
+        from mambo_agents.backends.ssh import SshBackend
+        from backend.utils.ssh_utils import get_or_create_system_ssh_key
         priv_key_path = None
         if not config.get("password"):
             priv_key_path, _ = get_or_create_system_ssh_key()

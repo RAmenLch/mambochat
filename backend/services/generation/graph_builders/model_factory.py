@@ -1,14 +1,10 @@
 # backend/services/generation/graph_builders/model_factory.py
 
 from langchain_core.language_models import BaseChatModel
-from langchain_anthropic import ChatAnthropic
-from langchain_google_genai import ChatGoogleGenerativeAI
 
 from backend.schemas.enums import ProviderWorkerType
 from backend.services.generation.core.llm_io import ModelConfig, RunTimeConfig
 from backend.services.generation.agent.log_callback import RawPayloadLoggingCallback
-from backend.services.generation.worker.extended_chat_openai_model import ExtendedChatOpenAI
-from backend.services.generation.worker.deepseek_chat_model import ChatDeepSeek
 
 
 class ModelFactory:
@@ -33,6 +29,7 @@ class ModelFactory:
         callbacks = [RawPayloadLoggingCallback(run_time_config)]
 
         if worker_type == ProviderWorkerType.ANTHROPIC.value:
+            from langchain_anthropic import ChatAnthropic
             thinking = params_copy.pop("thinking", {"type": "enabled", "budget_tokens": 32000})
             model = ChatAnthropic(
                 model_name=model_config.model_id,
@@ -49,6 +46,7 @@ class ModelFactory:
             )
 
         elif worker_type == ProviderWorkerType.GOOGLE.value:
+            from langchain_google_genai import ChatGoogleGenerativeAI
             include_thoughts = params_copy.pop("include_thoughts", True)
             model = ChatGoogleGenerativeAI(
                 model=model_config.model_id,
@@ -64,6 +62,7 @@ class ModelFactory:
             )
 
         elif worker_type == ProviderWorkerType.DEEPSEEK.value:
+            from backend.services.generation.worker.deepseek_chat_model import ChatDeepSeek
             thinking = params_copy.pop("thinking", None)
             reasoning_effort = params_copy.pop("reasoning_effort", None)
             model = ChatDeepSeek(
@@ -86,6 +85,7 @@ class ModelFactory:
             )
 
         else:
+            from backend.services.generation.worker.extended_chat_openai_model import ExtendedChatOpenAI
             extra_body = params_copy.pop("extra_body", None)
             model = ExtendedChatOpenAI(
                 model=model_config.model_id,

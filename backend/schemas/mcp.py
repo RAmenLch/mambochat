@@ -31,6 +31,9 @@ class McpServerBase(BaseModel):
     # Stdio 配置
     cwd: Optional[str] = None
 
+    # 是否使用全局代理（仅 sse/streamable_http 生效；False=直连并屏蔽环境变量代理）
+    useProxy: bool = False
+
     @field_validator('url')
     def validate_url_if_http(cls, v, values):
         transport = values.data.get('transportType')
@@ -83,6 +86,7 @@ class McpServerUpdate(BaseModel):
     timeout: Optional[float] = None
     sse_read_timeout: Optional[float] = None
     cwd: Optional[str] = None
+    useProxy: Optional[bool] = None
     isEnabled: Optional[bool] = None
 
     @field_validator('name')
@@ -107,6 +111,8 @@ class McpServerUpdate(BaseModel):
 class McpServerResponse(McpServerBase):
     id: str
     isSystem: bool = False  # 标记是否为系统内置工具
+    # 兼容旧数据 NULL：前端/CLI 均按 False 处理
+    useProxy: Optional[bool] = False
 
     # 状态监控字段
     last_status: Optional[str] = None

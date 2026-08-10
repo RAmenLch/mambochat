@@ -1,4 +1,9 @@
 # backend/services/generation/agent/tree_extension.py
+#
+# 【DEPRECATED - 已弃用，不再维护】
+# 本文件为 DeepAgent（deepagents 库）专用 Tree Backend 扩展。
+# DeepAgent 已被淘汰，前端已无创建入口，本文件仅保留用于兼容存量数据。
+# 新功能请基于 Mambo Agent（mambo_agents）实现。
 
 from abc import abstractmethod
 import asyncio

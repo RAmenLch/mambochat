@@ -39,7 +39,6 @@
                   <el-form-item :label="$t('agent.type')">
                     <el-select v-model="form.AgentType" style="width: 100%">
                       <el-option label="Mambo Agent" value="Mambo" />
-                      <el-option label="Deep Agent" value="DeepAgent" />
                       <el-option label="ReAct Agent" value="ReActAgent" />
                     </el-select>
                   </el-form-item>

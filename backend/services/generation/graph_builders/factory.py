@@ -11,6 +11,7 @@ class GraphBuilderFactory:
     """
     _registry = {
         AgentTypeEnum.REACT: ReactGraphBuilder,
+        # DEPRECATED: DeepAgent 已淘汰，不再维护，保留仅用于兼容存量数据
         AgentTypeEnum.DEEP: DeepAgentGraphBuilder,
         AgentTypeEnum.MAMBO: MamboAgentGraphBuilder,
     }

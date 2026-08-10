@@ -132,6 +132,15 @@ def _key_hint(key: str) -> str:
     return f"{key} {hint}"
 
 
+def _model_display(providers: list[dict], model_id: str) -> str | None:
+    """模型 UUID -> 可读引用（provider短ID:modelId (provider名:modelId)）；找不到返回 None。"""
+    for p in providers:
+        for m in p.get("models", []):
+            if m["id"] == model_id:
+                return f"{p['id'][:8]}:{m['modelId']} ({p['name']}:{m['modelId']})"
+    return None
+
+
 @with_api
 def cmd_get(args, api):
     settings = api.get_global_settings()
@@ -149,21 +158,26 @@ def cmd_get(args, api):
             meta = SETTING_KEYS.get(args.key)
             value = settings.get(args.key)
             if meta and meta["type"] == "model" and value:
-                providers = api.list_providers()
-                for p in providers:
-                    for m in p.get("models", []):
-                        if m["id"] == value:
-                            print(f"  ↳ {p['id'][:8]}:{m['modelId']} "
-                                  f"({p['name']}:{m['modelId']})")
-                            break
+                display = _model_display(api.list_providers(), value)
+                if display:
+                    print(f"  ↳ {display}")
         return 0
     if args.json:
         output.print_json(settings)
         return 0
     rows = []
+    providers = None
     for key in SETTING_KEYS:
-        if key in settings:
-            rows.append({"key": _key_hint(key), "value": settings.get(key)})
+        if key not in settings:
+            continue
+        value = settings.get(key)
+        if value and SETTING_KEYS[key]["type"] == "model":
+            if providers is None:
+                providers = api.list_providers()
+            display = _model_display(providers, value)
+            if display:
+                value = display
+        rows.append({"key": _key_hint(key), "value": value})
     for key in READONLY_KEYS:
         if key in settings:
             rows.append({"key": f"{key} (只读)", "value": settings.get(key)})

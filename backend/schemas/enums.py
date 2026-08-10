@@ -134,7 +134,7 @@ class AgentItemType(str, Enum):
 class AgentTypeEnum(str, Enum):
     """定义 Agent 初始化的类型标识符"""
     REACT = "ReActAgent"
-    DEEP = "DeepAgent"
+    DEEP = "DeepAgent"  # 已弃用（DEPRECATED）：DeepAgent 已淘汰，不再维护，仅保留兼容存量数据
     MAMBO = "Mambo"
 
 class BackendType(str, Enum):

@@ -31,12 +31,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/settingsStore'
 import MonacoEditor from '@/components/common/MonacoEditor.vue'
 import loader from '@monaco-editor/loader'
 import type { editor } from 'monaco-editor'
+import {
+  registerResourceCompletion,
+  unregisterResourceCompletion,
+} from '@/composables/useResourceCompletion'
 
 const props = withDefaults(
   defineProps<{
@@ -46,6 +50,7 @@ const props = withDefaults(
     maxRows?: number
     monacoOptions?: editor.IStandaloneEditorConstructionOptions
     enableShortcuts?: boolean
+    completionAgentId?: string | null
   }>(),
   {
     language: 'markdown',
@@ -53,6 +58,7 @@ const props = withDefaults(
     maxRows: 10,
     monacoOptions: () => ({}),
     enableShortcuts: true,
+    completionAgentId: null,
   },
 )
 
@@ -99,10 +105,33 @@ const handleMonacoMounted = async (instance: editor.IStandaloneCodeEditor) => {
   monacoInstance = instance
   emit('editor-mounted', instance)
 
+  if (props.completionAgentId) {
+    registerResourceCompletion(instance, props.completionAgentId)
+  }
+
   if (props.enableShortcuts) {
     await setupMonacoShortcuts(instance)
   }
 }
+
+// 会话切换时同步更新补全绑定的 agentId
+watch(
+  () => props.completionAgentId,
+  (newAgentId) => {
+    if (!monacoInstance) return
+    if (newAgentId) {
+      registerResourceCompletion(monacoInstance, newAgentId)
+    } else {
+      unregisterResourceCompletion(monacoInstance)
+    }
+  },
+)
+
+onBeforeUnmount(() => {
+  if (monacoInstance) {
+    unregisterResourceCompletion(monacoInstance)
+  }
+})
 
 /**
  * 配置 Monaco 的快捷键

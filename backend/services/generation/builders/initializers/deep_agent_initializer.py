@@ -1,4 +1,9 @@
 # backend/services/generation/builders/initializers/deep_agent_initializer.py
+#
+# 【DEPRECATED - 已弃用，不再维护】
+# 本文件为 DeepAgent（deepagents 库）专用初始化器。
+# DeepAgent 已被淘汰，前端已无创建入口，本文件仅保留用于兼容存量数据。
+# 新功能请基于 Mambo Agent（MamboAgentInitializer）实现。
 
 import asyncio
 import json
@@ -27,6 +32,8 @@ from backend.services.file_service import FileService
 
 
 class DeepAgentInitializer(AbstractAgentInitializer):
+    """【DEPRECATED - 已弃用，不再维护】DeepAgent 初始化器。请使用 MamboAgentInitializer 替代。"""
+
     def __init__(
             self,
             db: AsyncSession,
