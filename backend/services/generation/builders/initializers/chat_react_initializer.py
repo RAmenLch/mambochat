@@ -121,7 +121,7 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
         # 5. 构建 AgentConfig
         # Chat 模式默认固定使用 REACT 类型的 Agent，且没有子代理
         agent_config = AgentConfig(
-            name=self.chat.name,
+            name="chat_agent",
             description=f"Chat mode agent for {self.chat.name}",
             system_prompt=final_system_prompt,
             agent_type=AgentTypeEnum.REACT,
