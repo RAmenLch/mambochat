@@ -358,6 +358,48 @@
           </el-tooltip>
         </el-form-item>
 
+        <el-divider>{{ t('settings.global.dbMaintenance') }}</el-divider>
+        <el-form-item>
+          <template #label>
+            <span>{{ t('settings.global.checkpointCleanup') }}</span>
+            <el-tooltip
+              effect="dark"
+              :content="t('settings.global.cleanupTip')"
+              placement="top"
+            >
+              <el-icon class="label-icon"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </template>
+          <div class="cleanup-section">
+            <div class="cleanup-row">
+              <el-button
+                type="primary"
+                :loading="cleanupStatus === 'running'"
+                :disabled="cleanupStatus === 'running'"
+                @click="handleTriggerCleanup"
+              >
+                {{ t('settings.global.cleanupBtn') }}
+              </el-button>
+              <span v-if="reclaimableBytes > 0 && cleanupStatus === 'idle'" class="cleanup-reclaimable">
+                {{ t('settings.global.cleanupReclaimable', { size: formatBytes(reclaimableBytes) }) }}
+              </span>
+            </div>
+            <el-progress
+              v-if="cleanupStatus === 'running'"
+              :percentage="cleanupProgress"
+              :stroke-width="12"
+              style="width: 100%"
+            />
+            <div v-else-if="cleanupStatus === 'done'" class="cleanup-done">
+              <el-icon><Check /></el-icon>
+              <span>{{ t('settings.global.cleanupDone', { size: formatBytes(cleanupFreedBytes) }) }}</span>
+            </div>
+            <div v-else-if="cleanupStatus === 'skipped' || cleanupStatus === 'failed'" class="cleanup-message">
+              {{ cleanupMessage }}
+            </div>
+          </div>
+        </el-form-item>
+
         <!-- 状态栏替代了保存按钮 -->
         <div class="status-bar">
           <transition name="fade" mode="out-in">
@@ -381,7 +423,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch, nextTick } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useProviderStore } from '@/stores/providerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -389,6 +431,7 @@ import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
 import { QuestionFilled, User, Cpu, Loading, Check, Warning } from '@element-plus/icons-vue'
 import type { GlobalSettingsUpdate } from '@/api/types'
+import { triggerCheckpointCleanup, getCheckpointCleanupStatus } from '@/api/settingsService'
 import AvatarUploader from './AvatarUploader.vue'
 import { useModelSelectScroll } from '@/composables/useModelSelectScroll'
 
@@ -451,6 +494,68 @@ const defaultModelSelectRef = ref()
 const titleModelSelectRef = ref()
 const { scrollToTopIfStarred } = useModelSelectScroll()
 
+// checkpoints 清理状态
+const cleanupStatus = ref<'idle' | 'running' | 'done' | 'failed' | 'skipped'>('idle')
+const cleanupProgress = ref(0)
+const cleanupMessage = ref('')
+const reclaimableBytes = ref(0)
+const cleanupFreedBytes = ref(0)
+let cleanupPollTimer: ReturnType<typeof setInterval> | null = null
+
+const formatBytes = (bytes: number) => {
+  if (bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const idx = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+  return `${(bytes / 1024 ** idx).toFixed(1)} ${units[idx]}`
+}
+
+const stopCleanupPolling = () => {
+  if (cleanupPollTimer) {
+    clearInterval(cleanupPollTimer)
+    cleanupPollTimer = null
+  }
+}
+
+const startCleanupPolling = () => {
+  stopCleanupPolling()
+  cleanupPollTimer = setInterval(async () => {
+    try {
+      const status = await getCheckpointCleanupStatus()
+      cleanupStatus.value = status.status
+      cleanupProgress.value = Math.round(status.progress)
+      cleanupMessage.value = status.message
+      cleanupFreedBytes.value = status.freed_bytes
+      if (status.status !== 'running') {
+        stopCleanupPolling()
+        if (status.status === 'done') {
+          ElMessage.success(t('settings.global.cleanupDone', { size: formatBytes(status.freed_bytes) }))
+        } else if (status.status === 'failed') {
+          ElMessage.error(status.message || t('settings.global.cleanupFailed'))
+        }
+      }
+    } catch (error) {
+      stopCleanupPolling()
+    }
+  }, 2000)
+}
+
+const handleTriggerCleanup = async () => {
+  try {
+    const status = await triggerCheckpointCleanup()
+    cleanupStatus.value = status.status
+    cleanupProgress.value = Math.round(status.progress)
+    cleanupMessage.value = status.message
+    cleanupFreedBytes.value = status.freed_bytes
+    if (status.status === 'running') {
+      startCleanupPolling()
+    } else if (status.status === 'skipped') {
+      ElMessage.warning(status.message || t('settings.global.cleanupSkipped'))
+    }
+  } catch (error) {
+    ElMessage.error(t('settings.global.cleanupTriggerFailed'))
+  }
+}
+
 // 同步锁：防止 Store -> Form -> Watch -> API -> Store 的死循环
 const isSyncingFromStore = ref(false)
 
@@ -467,6 +572,24 @@ function debounce<T extends (...args: any[]) => any>(fn: T, delay: number) {
 
 onMounted(async () => {
   await settingsStore.fetchGlobalSettings()
+  // 初始化 checkpoints 清理状态（显示可回收量；若后端清理进行中则恢复轮询）
+  try {
+    const status = await getCheckpointCleanupStatus()
+    cleanupStatus.value = status.status
+    cleanupProgress.value = Math.round(status.progress)
+    cleanupMessage.value = status.message
+    reclaimableBytes.value = status.reclaimable_bytes
+    cleanupFreedBytes.value = status.freed_bytes
+    if (status.status === 'running') {
+      startCleanupPolling()
+    }
+  } catch (error) {
+    // 忽略：状态查询失败不影响设置页
+  }
+})
+
+onUnmounted(() => {
+  stopCleanupPolling()
 })
 
 // 1. 监听 Store 变化，同步到 Form
@@ -648,6 +771,37 @@ const handleTestProxy = async () => {
   justify-content: flex-start;
   gap: 20px;
   margin-bottom: 22px;
+}
+
+.cleanup-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.cleanup-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cleanup-reclaimable {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+.cleanup-done {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--el-color-success);
+  font-size: 13px;
+}
+
+.cleanup-message {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
 }
 
 /* 状态栏样式 */

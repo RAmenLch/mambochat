@@ -13,6 +13,7 @@ from typing import List, Optional
 from backend.services import generation_service
 from backend.services.stream_manager_service import stream_manager
 from backend.services.file_service import FileService
+from backend.services import maintenance
 from backend.crud import chat_crud, message_crud, setting_crud
 from backend import schemas
 from backend.models import chat_model
@@ -474,6 +475,8 @@ async def compress_history_above_message(
         background_tasks: BackgroundTasks,
         db: AsyncSession = Depends(get_db)
 ):
+    if not await maintenance.wait_vacuum_finished(timeout=60):
+        raise HTTPException(status_code=503, detail="数据库维护中（VACUUM），请稍后重试。")
     db_message = await message_crud.get_message(db, message_id=message_id)
     if not db_message:
         raise HTTPException(status_code=404, detail="Message not found")
@@ -504,6 +507,8 @@ async def prepare_to_generate(
         background_tasks: BackgroundTasks,
         db: AsyncSession = Depends(get_db)
 ):
+    if not await maintenance.wait_vacuum_finished(timeout=60):
+        raise HTTPException(status_code=503, detail="数据库维护中（VACUUM），请稍后重试。")
     if not await stream_manager.try_acquire_generation_lock(chat_id):
         raise HTTPException(status_code=409, detail="该会话已有正在进行的生成任务，请等待完成后再试。")
 
@@ -541,6 +546,8 @@ async def prepare_to_regenerate(
         background_tasks: BackgroundTasks,
         db: AsyncSession = Depends(get_db),
 ):
+    if not await maintenance.wait_vacuum_finished(timeout=60):
+        raise HTTPException(status_code=503, detail="数据库维护中（VACUUM），请稍后重试。")
     if not await stream_manager.try_acquire_generation_lock(chat_id):
         raise HTTPException(status_code=409, detail="该会话已有正在进行的生成任务，请等待完成后再试。")
 
@@ -573,6 +580,8 @@ async def retry_failed_generation(
         background_tasks: BackgroundTasks,
         db: AsyncSession = Depends(get_db)
 ):
+    if not await maintenance.wait_vacuum_finished(timeout=60):
+        raise HTTPException(status_code=503, detail="数据库维护中（VACUUM），请稍后重试。")
     db_message = await message_crud.get_message(db, message_id=message_id)
     if not db_message:
         raise HTTPException(status_code=404, detail="Message not found")

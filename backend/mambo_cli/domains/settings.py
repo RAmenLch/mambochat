@@ -37,7 +37,7 @@ SETTING_KEYS = {
 }
 
 # 只读（可查不可改）
-READONLY_KEYS = ["user_avatar_url", "ai_avatar_url"]
+READONLY_KEYS = ["user_avatar_url", "ai_avatar_url", "last_selected_provider_id"]
 
 COMMON_KEYS = [
     "default_model_id", "title_generation_model_id", "default_temperature",
@@ -73,7 +73,8 @@ def build_settings_epilogs() -> tuple[str, str]:
     common_text = ("可配置项（常用）:\n" + "\n".join(common_lines)
                    + "\n完整列表见 --help-all\n\n" + REFERENCE_RULES)
     all_text = ("可配置项（全部）:\n" + "\n".join(all_lines)
-                + "\n只读项（可查不可改）: user_avatar_url / ai_avatar_url\n\n" + REFERENCE_RULES)
+                + "\n只读项（可查不可改）: user_avatar_url / ai_avatar_url / last_selected_provider_id\n\n"
+                + REFERENCE_RULES)
     return common_text, all_text
 
 

@@ -88,6 +88,9 @@ Agent agent（树形目录，路径寻址）:
   delete <agent> -R --yes      删除（文件夹需 -R 递归）
   mv <agent> <目标目录>        移动 Agent 或文件夹（/ 或 root 表示根）
   duplicate <agent>            复制 Agent（名称自动加 -副本）
+  export <agent> [--output PATH]   导出为 .mamboagent 包（含子 Agent/挂载依赖）
+  import --file PATH [--into 目录] [--preview] [--name-override K=V]... [--yes]
+      （同名冲突自动改名；存在改名建议时需 --yes 确认；--preview 仅预检不写入）
   mount <agent> [--resource R]... [--mcp S]... [--backend B]... [--memory-resource R]...
   unmount <agent> ...          移除挂载（参数同 mount）
   subagent add|remove <agent> <子Agent>...   管理子 Agent
@@ -133,6 +136,9 @@ Backend backend（SSH/API/Resource/Local 文件后端）:
   mambo agent mkdir /团队
   mambo agent create /团队/数据分析师 --model openai:gpt-4o --system-prompt-filepath ./prompt.md
   mambo agent mount /团队/数据分析师 --resource /知识库/产品文档 --backend ssh-prod --mcp filesystem
+  mambo agent export /团队/数据分析师 --output ./backup
+  mambo agent import --file ./backup/数据分析师.mamboagent --into /团队 --preview
+  mambo agent import --file ./backup/数据分析师.mamboagent --into /团队 --yes
   mambo backend add --name ssh-prod --type ssh --hostname 10.0.0.5 --username root
   mambo backend test ssh-prod
 """
@@ -160,6 +166,7 @@ FULL_HELP = COMMON_HELP + """
         --summary-offload；模型参数: --param KEY=VALUE（可重复）
   agent hitl-tools <agent>        查看可纳入 AI 安全审核的工具列表
   agent params <agent>            查看该 Agent 的建议模型参数（key/类型/范围/默认值/当前值）
+  agent import-cleanup <会话ID> --yes   清理一次导入会话创建的实体（导入失败后回滚）
   backend tool set <backend> <工具名> --enabled true|false --review-mode none|require_review
   backend 密码语义: update 传 "********" 保持原密码，传 "" 清空为免密
   各命令完整参数: mambo <domain> <action> --help-all

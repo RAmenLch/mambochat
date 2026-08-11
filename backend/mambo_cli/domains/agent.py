@@ -120,6 +120,25 @@ def add_parser(subparsers, common):
     dup.add_argument("agent", help="Agent 引用")
     dup.set_defaults(func=cmd_duplicate)
 
+    ex = cmd("export", "导出 Agent 为 .mamboagent 包（含子 Agent/挂载依赖）")
+    ex.add_argument("agent", help="Agent 引用（仅 Agent，不支持文件夹）")
+    ex.add_argument("--output", metavar="PATH", help="输出路径（目录或文件；缺省当前目录）")
+    ex.set_defaults(func=cmd_export)
+
+    imp = cmd("import", "导入 .mamboagent 包（同名冲突自动改名，改名需 --yes 确认）")
+    imp.add_argument("--file", required=True, metavar="PATH", help="本地 .mamboagent 包路径")
+    imp.add_argument("--into", metavar="DIR", help="导入到哪个 Agent 文件夹（缺省根目录）")
+    imp.add_argument("--preview", action="store_true", help="仅预检（dry-run），不写入任何数据")
+    imp.add_argument("--name-override", dest="name_overrides", action="append", metavar="K=V",
+                     help="覆盖自动改名结果（sourceId=新名称，如 a1b2c3=我的Agent），可重复")
+    imp.add_argument("--yes", action="store_true", help="确认导入（存在改名建议时必填）")
+    imp.set_defaults(func=cmd_import)
+
+    ic = cmd("import-cleanup", "清理一次导入会话创建的实体（导入失败后回滚用）", advanced=True)
+    ic.add_argument("session_id", help="导入会话 ID（导入报告返回）")
+    ic.add_argument("--yes", action="store_true", help="确认清理（必填，防误删）")
+    ic.set_defaults(func=cmd_import_cleanup)
+
     mo = cmd("mount", "挂载资源/MCP/Backend/记忆资源（增量追加）")
     _add_mount_args(mo)
     mo.set_defaults(func=cmd_mount)
@@ -556,6 +575,185 @@ def cmd_duplicate(args, api):
         output.print_json(created)
     else:
         print(f"已复制: {created['id']} ({created['name']})")
+    return 0
+
+
+@with_api
+def cmd_export(args, api):
+    agents = api.list_agents()
+    agent = resolve_agent(agents, args.agent)
+    if agent.get("itemType") != "agent":
+        raise UsageError(f"'{args.agent}' 是文件夹，仅 Agent 可导出（含其子 Agent）。")
+    content, suggested = api.export_agent(agent["id"])
+    filename = suggested or f"{agent['name']}.mamboagent"
+    if args.output and os.path.isdir(args.output):
+        out_path = os.path.join(args.output, filename)
+    else:
+        out_path = args.output or filename
+    with open(out_path, "wb") as f:
+        f.write(content)
+    if args.json:
+        output.print_json({"exported": agent["id"], "file": out_path, "size": len(content)})
+    else:
+        print(f"已导出 Agent '{agent['name']}' → {out_path}（{len(content)} 字节）")
+    return 0
+
+
+def _parse_name_overrides(args) -> dict | None:
+    if not args.name_overrides:
+        return None
+    overrides = {}
+    for item in args.name_overrides:
+        if "=" not in item:
+            raise UsageError(f"--name-override 需要 sourceId=新名称 形式: '{item}'")
+        key, _, value = item.partition("=")
+        key, value = key.strip(), value.strip()
+        if not key or not value:
+            raise UsageError(f"--name-override 需要 sourceId=新名称 形式: '{item}'")
+        overrides[key] = value
+    return overrides
+
+
+def _read_package(pkg_path: str) -> dict:
+    """读取 .mamboagent 包（gzip JSON），用于解析包内 sourceId。"""
+    import gzip
+    try:
+        with gzip.open(pkg_path, "rb") as f:
+            data = json.loads(f.read().decode("utf-8"))
+    except Exception as exc:
+        raise UsageError(f"不是有效的 .mamboagent 包: {pkg_path}（{exc}）")
+    return data
+
+
+def _resolve_name_overrides(args, pkg: dict) -> dict | None:
+    """将 --name-override 的短前缀 sourceId 归一化为包内完整 ID。"""
+    raw = _parse_name_overrides(args)
+    if not raw:
+        return None
+    source_ids = [e.get("sourceId") for e in
+                  pkg.get("agents", []) + pkg.get("providers", []) + pkg.get("backends", [])]
+    source_ids = [s for s in source_ids if s]
+    resolved = {}
+    for key, value in raw.items():
+        if key in source_ids:
+            resolved[key] = value
+            continue
+        matches = [s for s in source_ids if s.startswith(key)]
+        if len(matches) == 1:
+            resolved[matches[0]] = value
+        elif not matches:
+            raise UsageError(f"--name-override 的 sourceId '{key}' 在包中未找到"
+                             f"（可用 mambo agent import --preview 查看实体 sourceId）")
+        else:
+            raise UsageError(f"--name-override 的 sourceId '{key}' 匹配到多个实体: "
+                             + ", ".join(m[:8] for m in matches) + "。请使用更长前缀。")
+    return resolved
+
+
+def _print_import_preview(preview: dict) -> None:
+    print(f"预检结果: {'✅ 可导入' if preview.get('importable') else '❌ 不可导入'}")
+    print(f"包格式: v{preview.get('format_version')}（导出端 MamboChat {preview.get('mambochat_version')}，"
+          f"导出于 {preview.get('exported_at')}）")
+    if preview.get("description"):
+        print(f"描述: {preview['description']}")
+    for warn in preview.get("warnings") or []:
+        print(f"  [警告] {warn}")
+    suggestions = preview.get("rename_suggestions") or []
+    if suggestions:
+        print("改名建议（同名冲突自动改名）:")
+        for s in suggestions:
+            print(f"  {s.get('entity_type')} '{s.get('original_name')}' → '{s.get('new_name')}'"
+                  f"（sourceId: {s.get('source_id')}）")
+    missing = preview.get("providers_missing_api_key") or []
+    if missing:
+        print("以下服务商缺少 API Key，导入后需手动补充:")
+        for p in missing:
+            print(f"  {p.get('name')}（源 ID {p.get('source_id', '?')[:8]}）")
+    tree = preview.get("resource_tree") or []
+    if tree:
+        print("将导入的资源树:")
+        def print_tree(nodes, indent):
+            for n in nodes:
+                print(f"{indent}{n.get('name')} [{n.get('itemType')}]")
+                print_tree(n.get("children") or [], indent + "  ")
+        print_tree(tree, "  ")
+
+
+@with_api
+def cmd_import(args, api):
+    if not os.path.isfile(args.file):
+        raise UsageError(f"文件不存在: {args.file}")
+    with open(args.file, "rb") as f:
+        data = f.read()
+
+    target_id = None
+    if args.into and args.into not in ("/", "root"):
+        agents = api.list_agents()
+        dest = resolve_agent(agents, args.into)
+        if dest.get("itemType") != "folder":
+            raise UsageError(f"--into '{args.into}' 不是文件夹。")
+        target_id = dest["id"]
+
+    overrides = _resolve_name_overrides(args, _read_package(args.file))
+    filename = os.path.basename(args.file)
+
+    if args.preview:
+        preview = api.import_agent(data, filename, target_id, overrides, preview=True)
+        if args.json:
+            output.print_json(preview)
+            return 0
+        _print_import_preview(preview)
+        return 0
+
+    # 正式导入：先预检拿改名建议，有冲突时需 --yes 确认
+    preview = api.import_agent(data, filename, target_id, overrides, preview=True)
+    suggestions = preview.get("rename_suggestions") or []
+    if suggestions and not args.yes:
+        lines = [f"  {s.get('entity_type')} '{s.get('original_name')}' → '{s.get('new_name')}'"
+                 for s in suggestions]
+        raise UsageError(
+            "导入将发生同名冲突自动改名:\n" + "\n".join(lines) +
+            "\n接受改名请加 --yes（或先 --preview 查看，用 --name-override 指定名称）"
+        )
+
+    report = api.import_agent(data, filename, target_id, overrides, preview=False)
+    if args.json:
+        output.print_json(report)
+        return 0 if report.get("success") else 1
+    if report.get("success"):
+        print(f"✅ 导入成功: 会话 {report.get('import_session_id')}")
+        main_id = report.get("main_agent_id")
+        if main_id:
+            agents = api.list_agents()
+            by_id = {a["id"]: a for a in agents}
+            print(f"主 Agent: {resource_path_of(main_id, by_id, agents)}")
+        for ent in report.get("created") or []:
+            print(f"  [{ent.get('entity_type')}] {ent.get('new_id')}（源 {ent.get('source_id', '?')[:8]}）")
+        for s in suggestions:
+            print(f"  （改名: {s.get('original_name')} → {s.get('new_name')}）")
+        missing = report.get("providers_missing_api_key") or []
+        if missing:
+            print("⚠️ 以下服务商缺少 API Key，需手动补充:")
+            for p in missing:
+                print(f"  {p.get('name')}")
+        return 0
+    print(f"❌ 导入失败（阶段 {report.get('failed_phase')}）: {report.get('error')}")
+    print(f"已创建的实体可用以下命令清理: mambo agent import-cleanup "
+          f"{report.get('import_session_id')} --yes")
+    return 1
+
+
+@with_api
+def cmd_import_cleanup(args, api):
+    if not args.yes:
+        raise UsageError("清理操作需要 --yes 确认（防止误删）")
+    report = api.cleanup_import(args.session_id)
+    if args.json:
+        output.print_json(report)
+    else:
+        cleaned = report.get("cleaned") or []
+        print(f"已清理 {len(cleaned)} 个实体"
+              + ("" if not cleaned else ": " + ", ".join(cleaned)))
     return 0
 
 

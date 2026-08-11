@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 import aiosqlite
+from langgraph.store.base import PutOp
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 
 from backend._cli_args import DATA_DIR as _CLI_DATA_DIR
@@ -66,3 +67,33 @@ def get_store() -> AsyncSqliteStore:
     if _store_instance is None:
         raise RuntimeError("Store has not been initialized. Call init_store() first.")
     return _store_instance
+
+
+async def adelete_thread_store(thread_id: str) -> None:
+    """清理 LangGraph Store 中指定 thread 的全部数据。
+
+    覆盖 StoreBackend 的 ``(thread_id, "mambo_fs")`` 会话工作区数据，以及
+    VersionStore 的 ``(thread_id, "mambo_vc_blobs")`` / ``(thread_id, "mambo_vc_index")``
+    版本控制数据。
+
+    使用官方 BaseStore API：``alist_namespaces`` 枚举该 thread 的命名空间，
+    ``asearch`` 分页枚举 key，``abatch(PutOp value=None)`` 批量删除。
+
+    幂等：thread 无数据时静默返回；store 未初始化时静默返回。
+    """
+    if _store_instance is None:
+        return
+
+    namespaces = await _store_instance.alist_namespaces(prefix=(thread_id,), limit=1000)
+    for ns in namespaces:
+        keys: list[str] = []
+        offset = 0
+        while True:
+            items = await _store_instance.asearch(ns, limit=100, offset=offset)
+            if not items:
+                break
+            keys.extend(item.key for item in items)
+            offset += len(items)
+        # 分块删除，避免单条 SQL 参数数量超限
+        for i in range(0, len(keys), 200):
+            await _store_instance.abatch([PutOp(ns, k, None) for k in keys[i:i + 200]])

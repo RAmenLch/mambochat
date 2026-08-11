@@ -67,7 +67,9 @@
           "**/*",
           "!__pycache__/**",
           "!*.pyc",
-          "!*.egg-info/**"
+          "!*.egg-info/**",
+          "!data/**",
+          "!uploads/**"
         ]
       },
       {

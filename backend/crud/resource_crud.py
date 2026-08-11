@@ -7,8 +7,8 @@ from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy import func, or_, update, literal, null, case, union_all
 from typing import List, Optional, Tuple, Any
 
-from backend.models import resource_model
-from backend.schemas.enums import MoveAction, ResourceItemType
+from backend.models import file_model, resource_model
+from backend.schemas.enums import MoveAction, ResourceItemType, ResourceType
 from backend import schemas
 
 
@@ -489,7 +489,7 @@ async def search_resources_and_versions(
         limit: int
 ) -> Tuple[list[Row], int]:
     """
-    全局搜索资源名称、描述以及最新版本的内容。
+    全局搜索资源名称、描述、最新版本的内容以及可写文件（数据库直存）的文本内容。
     返回: (结果列表, 总数)
     结果列表中的每一项包含: resource_id, resource_name, version_id, raw_content, match_type, updated_at
     """
@@ -522,6 +522,7 @@ async def search_resources_and_versions(
 
     # 3. 构建 ResourceVersion 内容搜索查询 (仅搜索最新版本)
     # Join Resource 表以获取 latestVersionId，并确保只搜索当前活跃的版本
+    # 排除 FILE 类型：其 content 存的是文件 ID（真实文本在 File 表，由第 4.5 步单独检索）
     q_content = select(
         resource_model.Resource.id.label("resource_id"),
         resource_model.Resource.name.label("resource_name"),
@@ -535,6 +536,7 @@ async def search_resources_and_versions(
     ).where(
         # 使用枚举值进行判断
         resource_model.Resource.itemType == ResourceItemType.RESOURCE.value,
+        resource_model.Resource.resourceType != ResourceType.FILE.value,
         match_op(resource_model.ResourceVersion.content)
     )
 
@@ -567,8 +569,35 @@ async def search_resources_and_versions(
     if target_resource_ids_query is not None:
         q_meta = q_meta.where(resource_model.Resource.id.in_(target_resource_ids_query))
 
+    # 4.5 构建可写文件（数据库直存）内容搜索查询
+    # 仅检索 storage_type == 'db' 的文本文件（File.content 为真实文本），
+    # local 磁盘文件不参与检索（与资源补全的可写判定约定一致）。
+    q_file_content = select(
+        resource_model.Resource.id.label("resource_id"),
+        resource_model.Resource.name.label("resource_name"),
+        null().label("version_id"),
+        file_model.File.content.label("raw_content"),
+        literal("content").label("match_type"),
+        resource_model.Resource.updatedAt.label("updated_at")
+    ).join(
+        resource_model.ResourceVersion,
+        resource_model.Resource.latestVersionId == resource_model.ResourceVersion.id
+    ).join(
+        file_model.File,
+        resource_model.ResourceVersion.content == file_model.File.id
+    ).where(
+        resource_model.Resource.itemType == ResourceItemType.RESOURCE.value,
+        resource_model.Resource.resourceType == ResourceType.FILE.value,
+        file_model.File.storage_type == 'db',
+        file_model.File.content.isnot(None),
+        match_op(file_model.File.content)
+    )
+
+    if target_resource_ids_query is not None:
+        q_file_content = q_file_content.where(resource_model.Resource.id.in_(target_resource_ids_query))
+
     # 5. 合并查询
-    union_query = union_all(q_content, q_meta).subquery()
+    union_query = union_all(q_content, q_meta, q_file_content).subquery()
 
     # 6. 获取总数
     count_stmt = select(func.count()).select_from(union_query)

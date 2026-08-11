@@ -34,7 +34,7 @@ async def init_checkpointer():
     global _conn, _checkpointer_instance
     if _conn is None:
         db_path = str(CHECKPOINTER_DB_FILE.resolve())
-        _conn = await aiosqlite.connect(db_path, isolation_level=None)
+        _conn = await aiosqlite.connect(db_path, isolation_level=None, timeout=60)
         _checkpointer_instance = AsyncSqliteSaver(_conn)
         # 调用原生 setup() 确保表结构 (checkpoints, writes) 被正确创建
         await _checkpointer_instance.setup()

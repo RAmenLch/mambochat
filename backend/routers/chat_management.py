@@ -1,5 +1,6 @@
 # backend/routers/chat_management.py
 
+import logging
 from datetime import datetime
 from urllib.parse import quote
 
@@ -8,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Optional, Dict, Any
 
-from backend.crud import chat_crud, setting_crud, provider_crud, resource_crud, agent_crud
+from backend.crud import chat_crud, setting_crud, provider_crud, resource_crud, agent_crud, checkpoint_map_crud
 from backend.services import chat_service
 from backend.services.resource_service import validate_mounted_resources
 from backend.services.chat_export_service import ChatExporter
@@ -21,6 +22,9 @@ from backend.routers.settings import get_global_settings
 from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 from backend.schemas.enums import ResourceItemType, ResourceType
 from backend.checkpointer import adelete_thread
+from backend.store import adelete_thread_store
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -339,9 +343,21 @@ async def delete_chat(chat_id: str, db: AsyncSession = Depends(get_db)):
     db_chat = await chat_crud.delete_chat(db, chat_id=chat_id)
     if db_chat is None:
         raise HTTPException(status_code=404, detail="Item not found")
-    # 清理所有相关会话的 LangGraph checkpoint 数据
+    # 清理所有相关会话的 LangGraph checkpoint 与 Store 数据
     for cid in chat_ids_to_cleanup:
-        await adelete_thread(cid)
+        try:
+            await adelete_thread(cid)
+        except Exception:
+            logger.exception("清理会话 %s 的 Checkpoint 数据失败", cid)
+        try:
+            await adelete_thread_store(cid)
+        except Exception:
+            logger.exception("清理会话 %s 的 Store 数据失败", cid)
+    # 清理所有相关会话的 message→checkpoint 映射，避免悬空
+    try:
+        await checkpoint_map_crud.delete_by_chat_ids(db, chat_ids_to_cleanup)
+    except Exception:
+        logger.exception("清理会话的 message_checkpoints_map 数据失败")
     return db_chat
 
 

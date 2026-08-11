@@ -86,7 +86,7 @@ def add_parser(subparsers, common):
     vp.add_argument("target", help="目标目录路径（/ 表示资源根）")
     vp.set_defaults(func=cmd_mv)
 
-    fp = cmd("find", "搜索资源名称/描述/内容（文本型资源如 prompt/template 可搜内容；文件型资源按名称/描述匹配）")
+    fp = cmd("find", "搜索资源名称/描述/内容（文本型资源与数据库直存的可写文件可搜内容；本地磁盘文件按名称/描述匹配）")
     fp.add_argument("keyword", help="关键词或正则")
     fp.add_argument("--path", dest="root", metavar="P", help="搜索范围根目录（绝对路径或短ID，缺省全局）")
     fp.add_argument("--regex", action="store_true", help="按正则匹配")
@@ -393,7 +393,7 @@ def cmd_find(args, api):
         return 0
     if not items:
         print(f"未找到匹配 '{args.keyword}' 的资源。")
-        print("提示: 文件型资源（file）的内容存储于独立文件，不参与内容检索；"
+        print("提示: 本地磁盘存储的文件型资源内容不参与检索；"
               "可改用 mambo resource ls / cat 逐项查看。", file=sys.stderr)
         return 0
     resources = api.list_resources()

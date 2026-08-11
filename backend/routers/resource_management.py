@@ -424,7 +424,7 @@ async def delete_version(version_id: str, db: AsyncSession = Depends(get_db)):
 )
 async def search_resources(request: schemas.ResourceSearchRequest, db: AsyncSession = Depends(get_db)):
     """
-    在资源标题、描述和最新版本内容中进行全局搜索。
+    在资源标题、描述、最新版本内容以及可写文件（数据库直存）的文本内容中进行全局搜索。
     """
     skip = (request.page_num - 1) * request.page_size
 

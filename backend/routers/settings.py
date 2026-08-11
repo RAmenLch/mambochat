@@ -6,7 +6,7 @@ from sqlalchemy.future import select
 from typing import Any, Optional
 
 from backend.crud import setting_crud, provider_crud
-from backend.services import provider_service
+from backend.services import provider_service, cleanup_service
 from backend.services.file_service import FileService
 from backend.models import setting_model
 from backend import schemas
@@ -303,3 +303,24 @@ async def test_proxy(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Test URL cannot be empty.")
 
     return await provider_service.test_proxy_connection(proxy_url, test_url)
+
+
+@router.post(
+    "/settings/checkpoints/cleanup",
+    summary="主动清理 checkpoints 数据库"
+)
+async def trigger_checkpoint_cleanup():
+    """
+    触发 checkpoints.db 的 VACUUM（后台执行），立即返回当前状态。
+    可通过 /settings/checkpoints/cleanup/status 轮询进度。
+    """
+    return await cleanup_service.run_checkpoint_vacuum()
+
+
+@router.get(
+    "/settings/checkpoints/cleanup/status",
+    summary="查询 checkpoints 清理状态"
+)
+async def get_checkpoint_cleanup_status():
+    """返回 checkpoints.db 清理状态（含进度与可回收量）。"""
+    return cleanup_service.get_checkpoint_cleanup_status()

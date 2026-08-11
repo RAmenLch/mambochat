@@ -24,6 +24,11 @@ RUN uv pip install --system --no-cache -r /app/backend/pyproject.toml \
 COPY backend /app/backend
 COPY MCP_SERVER /app/MCP_SERVER
 
+# 3.1 注册 mambo CLI 命令（editable 安装项目包自身，生成 mambo 入口；
+#     --no-deps 不重复安装依赖；--no-build-isolation 复用下方 pip 安装的 setuptools）
+RUN pip install --no-cache-dir "setuptools>=68.0" wheel -i ${PYPI_INDEX_URL} \
+    && uv pip install --system --no-cache -e /app/backend --no-deps --no-build-isolation
+
 # 4. 设置 PYTHONPATH
 ENV PYTHONPATH=/app
 

@@ -1,6 +1,9 @@
 """HTTP API 客户端：薄封装 httpx，只关心 mambo 后端 REST API。"""
 from __future__ import annotations
 
+import json
+from urllib.parse import unquote
+
 import httpx
 
 
@@ -38,7 +41,7 @@ class ApiClient:
         self._http.close()
 
     # ---- 底层请求 ----
-    def _request(self, method: str, path: str, **kwargs):
+    def _request(self, method: str, path: str, raw: bool = False, **kwargs):
         url = f"{self.base_url}{path}"
         try:
             resp = self._http.request(method, url, **kwargs)
@@ -52,6 +55,8 @@ class ApiClient:
             if not detail:
                 detail = f"HTTP {resp.status_code}（响应体为空）"
             raise ApiError(resp.status_code, detail, method, url)
+        if raw:
+            return resp.content, dict(resp.headers)
         if resp.status_code == 204 or not resp.content:
             return None
         return resp.json()
@@ -253,6 +258,37 @@ class ApiClient:
 
     def get_agent_hitl_tools(self, agent_id: str):
         return self._request("GET", f"/api/agents/{agent_id}/hitl-tools")
+
+    # ---- Agent Package (.mamboagent) ----
+    def export_agent(self, agent_id: str):
+        """导出 Agent 为 .mamboagent 包，返回 (gzip 字节, 建议文件名)。"""
+        content, headers = self._request(
+            "GET", "/api/agents/export", raw=True, params={"agentId": agent_id})
+        filename = None
+        disposition = headers.get("content-disposition", "")
+        marker = "filename*=utf-8''"
+        if marker in disposition:
+            filename = unquote(disposition.split(marker, 1)[1].split(";")[0].strip())
+        return content, filename
+
+    def import_agent(self, file_bytes: bytes, filename: str,
+                     target_folder_id: str | None = None,
+                     name_overrides: dict | None = None,
+                     preview: bool = False):
+        data = {}
+        if target_folder_id:
+            data["targetFolderId"] = target_folder_id
+        if name_overrides:
+            data["nameOverrides"] = json.dumps(name_overrides)
+        return self._request(
+            "POST", "/api/agents/import",
+            params={"preview": "true" if preview else "false"},
+            files={"file": (filename, file_bytes, "application/gzip")},
+            data=data,
+        )
+
+    def cleanup_import(self, session_id: str):
+        return self._request("POST", f"/api/agents/import/{session_id}/cleanup")
 
     # ---- Backends ----
     def list_backends(self):

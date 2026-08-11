@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from backend.models import chat_model
 from backend import schemas
 from backend.models.chat_model import SubMessage
+from backend.models.checkpoint_map_model import MessageCheckpointMap
 from backend.schemas.enums import MessageStatus, SubMessageType
 from backend.config.timezone_config import get_configured_now, TZ
 
@@ -287,6 +288,11 @@ async def delete_message(db: AsyncSession, message_id: str) -> Optional[chat_mod
             .where(chat_model.Message.id.in_(descendant_ids))
             .values(sortOrder=chat_model.Message.sortOrder - 1)
         )
+
+    # 同事务清理该消息的 message→checkpoint 映射，避免悬空
+    await db.execute(
+        sa_delete(MessageCheckpointMap).where(MessageCheckpointMap.message_id == message_id)
+    )
 
     await db.delete(db_message)
     await db.commit()

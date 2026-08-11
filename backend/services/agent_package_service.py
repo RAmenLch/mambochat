@@ -1492,12 +1492,13 @@ class AgentPackageImporter:
             agent_map[a.sourceId] = new_agent.id
             session.add("agent", a.sourceId, new_agent.id)
 
-        # 3. 主 Agent
+        # 3. 主 Agent（应用改名计划，§5.2/§7.1 步 5.6）
         main_avatar_id = await self._ensure_avatar(main, blob_index, session)
         main_create = self._agent_create(
             main, target_folder_id, res_id_map, model_id_map,
             mcp_id_map, backend_id_map, main_avatar_id,
         )
+        main_create.name = plan.main_agent_name
         # 重写 subAgents 引用
         main_create.subAgents = [agent_map[sid] for sid in (main.subAgents or []) if sid in agent_map]
         main_new = await agent_crud.create_agent(self.db, main_create)

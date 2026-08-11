@@ -51,6 +51,15 @@ FileBufSize 128
       DetailPrint "Python 运行时解压失败（错误码: $1），将在首次启动时自动解压"
     ${EndIf}
   extractSkip:
+
+  ; ============================================
+  ; 创建 mambo 命令快捷入口（自包含：直接调用随包 Python，
+  ; 不依赖 console-script launcher，规避 shebang 失效问题）
+  ; 用户可将安装目录加入 PATH 后直接使用 mambo 命令
+  ; ============================================
+  FileOpen $0 "$INSTDIR\mambo.cmd" w
+  FileWrite $0 '@echo off$\r$\nset "PYTHONPATH=%~dp0resources;%PYTHONPATH%"$\r$\n"%~dp0resources\runtime\python\python.exe" -m backend.mambo_cli %*$\r$\n'
+  FileClose $0
 !macroend
 
 ; ============================================
@@ -133,6 +142,7 @@ FunctionEnd
   ${If} $MamboDeleteData == "1"
     RMDir /r "$APPDATA\mambochat-desktop"
   ${EndIf}
+  Delete "$INSTDIR\mambo.cmd"
 !macroend
 
 !endif ; BUILD_UNINSTALLER
