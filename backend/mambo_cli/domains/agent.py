@@ -194,16 +194,20 @@ def _add_system_prompt_args(parser, allow_clear: bool) -> None:
                             action="store_true", help="清空系统提示词")
 
 
-def _read_system_prompt(args) -> str | None:
-    """返回 None=未传；str=提示词内容。"""
-    if args.system_prompt_content is not None:
-        return args.system_prompt_content
-    if args.system_prompt_filepath is not None:
-        if not os.path.isfile(args.system_prompt_filepath):
-            raise UsageError(f"文件不存在: {args.system_prompt_filepath}")
-        with open(args.system_prompt_filepath, "r", encoding="utf-8") as f:
+def _read_text_option(content: str | None, filepath: str | None, label: str = "提示词") -> str | None:
+    """返回 None=未传；str=文本内容。"""
+    if content is not None:
+        return content
+    if filepath is not None:
+        if not os.path.isfile(filepath):
+            raise UsageError(f"文件不存在: {filepath}")
+        with open(filepath, "r", encoding="utf-8") as f:
             return f.read()
     return None
+
+
+def _read_system_prompt(args) -> str | None:
+    return _read_text_option(args.system_prompt_content, args.system_prompt_filepath)
 
 
 def _add_agent_parameter_args(parser) -> None:
@@ -218,6 +222,13 @@ def _add_agent_parameter_args(parser) -> None:
             help="AI 安全审核: 审核模型（模型引用，解析为 model_id）")
     add_arg(parser, "--review-tools", dest="review_tools", action="append", metavar="T",
             help="AI 安全审核: 审核工具列表 security_review.review_tools（可重复，整体替换）")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--review-system-prompt", dest="review_system_prompt", metavar="TEXT",
+                       help="AI 安全审核: 审核系统提示词（与 --review-system-prompt-file 互斥）")
+    group.add_argument("--review-system-prompt-file", dest="review_system_prompt_file", metavar="PATH",
+                       help="从本地文件读取审核系统提示词")
+    add_arg(parser, "--version-control-enabled", dest="version_control_enabled", metavar="true|false",
+            help="版本控制: version_control.enabled 是否启用")
     for flag, field, choices in _SUMMARY_PARAMS:
         kwargs = dict(dest=field, metavar=field.upper(),
                       help=f"摘要配置 summarization_config.{field}")
@@ -272,8 +283,18 @@ def _build_agent_parameters(args) -> dict:
         review["model_id"] = args.review_model  # 占位，由调用方解析为模型 ID
     if args.review_tools is not None:
         review["review_tools"] = args.review_tools
+    review_prompt = _read_text_option(getattr(args, "review_system_prompt", None),
+                                      getattr(args, "review_system_prompt_file", None),
+                                      "审核系统提示词")
+    if review_prompt is not None:
+        review["system_prompt"] = review_prompt
     if review:
         params["security_review"] = review
+    vc = {}
+    if getattr(args, "version_control_enabled", None) is not None:
+        vc["enabled"] = _parse_bool_flag("--version-control-enabled", args.version_control_enabled)
+    if vc:
+        params["version_control"] = vc
     return params
 
 
