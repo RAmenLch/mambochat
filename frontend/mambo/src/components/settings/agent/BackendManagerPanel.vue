@@ -29,7 +29,7 @@
           </template>
           <template v-else-if="row.backendType === 'api'">
             <div class="api-info">
-              <span class="api-label">ID:</span>
+              <span class="api-label">{{ $t('backend.id') }}:</span>
               <span class="api-id">{{ row.id }}</span>
               <el-tag
                 v-if="clientStatusMap[row.id]"
@@ -37,14 +37,14 @@
                 size="small"
                 class="status-tag"
               >
-                {{ clientStatusMap[row.id]?.connected ? 'Connected' : 'Offline' }}
+                {{ clientStatusMap[row.id]?.connected ? $t('backend.connected') : $t('backend.offline') }}
               </el-tag>
             </div>
           </template>
           <template v-else-if="row.backendType === 'resource'">
             <div class="api-info">
-              <span class="api-label">Resource:</span>
-              <el-tooltip :content="'Resource ID: ' + row.configData.resource_id" placement="top">
+              <span class="api-label">{{ $t('backend.resource') }}</span>
+              <el-tooltip :content="$t('backend.resourceIdTooltip', { id: row.configData.resource_id })" placement="top">
                 <span class="api-id resource-path">{{ resolveResourcePath(row.configData.resource_id) || row.configData.resource_id }}</span>
               </el-tooltip>
             </div>
@@ -79,25 +79,25 @@
     >
       <el-form ref="formRef" :model="form" :rules="currentRules" label-width="120px" v-loading="isSaving">
         <el-form-item :label="$t('backend.name')" prop="name">
-          <el-input v-model="form.name" placeholder="支持中文，禁止 / \ 和控制字符" />
+          <el-input v-model="form.name" :placeholder="$t('backend.namePlaceholder')" />
         </el-form-item>
         <el-form-item :label="$t('backend.description')" prop="description">
           <el-input v-model="form.description" type="textarea" :rows="2" />
         </el-form-item>
         <el-form-item :label="$t('backend.type')" prop="backendType">
           <el-select v-model="form.backendType" :disabled="isEdit" style="width: 100%" @change="handleTypeChange">
-            <el-option label="SSH (远程服务器)" value="ssh" />
-            <el-option label="API (客户端连接)" value="api" />
-            <el-option label="Resource (资源文件夹)" value="resource" />
-            <el-option label="Local (本地文件系统)" value="local" />
+            <el-option :label="$t('backend.typeSsh')" value="ssh" />
+            <el-option :label="$t('backend.typeApi')" value="api" />
+            <el-option :label="$t('backend.typeResource')" value="resource" />
+            <el-option :label="$t('backend.typeLocal')" value="local" />
           </el-select>
         </el-form-item>
 
         <!-- SSH 配置 -->
         <template v-if="form.backendType === 'ssh'">
-          <el-divider content-position="left">SSH 配置</el-divider>
+          <el-divider content-position="left">{{ $t('backend.sshConfig') }}</el-divider>
           <el-form-item label="Hostname" prop="configData.hostname">
-            <el-input v-model="form.configData.hostname" placeholder="192.168.1.100 或 example.com" />
+            <el-input v-model="form.configData.hostname" :placeholder="$t('backend.hostPlaceholder')" />
           </el-form-item>
           <el-form-item label="Username" prop="configData.username">
             <el-input v-model="form.configData.username" placeholder="root" />
@@ -106,15 +106,15 @@
             <el-input-number v-model="form.configData.port" :min="1" :max="65535" controls-position="right" />
           </el-form-item>
           <el-form-item label="Password" prop="configData.password">
-            <el-input v-model="form.configData.password" type="password" show-password placeholder="不填则使用系统公钥免密登录" />
+            <el-input v-model="form.configData.password" type="password" show-password :placeholder="$t('backend.passwordPlaceholder')" />
           </el-form-item>
         </template>
 
         <!-- API 配置 -->
         <template v-if="form.backendType === 'api'">
-          <el-divider content-position="left">API 客户端配置</el-divider>
+          <el-divider content-position="left">{{ $t('backend.apiConfig') }}</el-divider>
           <el-form-item label="API Key" prop="configData.api_key">
-            <el-input v-model="form.configData.api_key" :type="showApiKey ? 'text' : 'password'" show-password placeholder="客户端连接时使用的密钥">
+            <el-input v-model="form.configData.api_key" :type="showApiKey ? 'text' : 'password'" show-password :placeholder="$t('backend.apiKeyPlaceholder')">
               <template #append>
                 <el-button @click="showApiKey = !showApiKey">
                   <el-icon><View v-if="!showApiKey" /><Hide v-else /></el-icon>
@@ -122,16 +122,16 @@
               </template>
             </el-input>
           </el-form-item>
-          <el-divider content-position="left">编辑权限控制</el-divider>
+          <el-divider content-position="left">{{ $t('backend.editPermission') }}</el-divider>
 
-          <el-form-item label="编辑模式">
+          <el-form-item :label="$t('backend.editMode')">
             <el-radio-group v-model="editMode" @change="onEditModeChange">
-              <el-radio value="whitelist">白名单（仅允许以下路径）</el-radio>
-              <el-radio value="blacklist">黑名单（禁止以下路径）</el-radio>
+              <el-radio value="whitelist">{{ $t('backend.whitelistModePath') }}</el-radio>
+              <el-radio value="blacklist">{{ $t('backend.blacklistModePath') }}</el-radio>
             </el-radio-group>
           </el-form-item>
 
-          <el-form-item v-if="editMode === 'whitelist'" label="Edit Whitelist" prop="configData.edit_whitelist">
+          <el-form-item v-if="editMode === 'whitelist'" :label="$t('backend.whitelistLabel')" prop="configData.edit_whitelist">
             <div class="path-picker-row">
               <el-tag
                 v-for="(item, idx) in (form.configData as any).edit_whitelist"
@@ -147,15 +147,15 @@
                 v-model="newWlValue"
                 size="small"
                 class="tag-input-inline"
-                placeholder="/workspace/src/  回车添加"
+                :placeholder="$t('backend.wlInputPlaceholder')"
                 @keyup.enter="addWhitelistItem"
                 @blur="addWhitelistItem"
               />
-              <el-button v-else size="small" @click="openWlInput">+ 添加路径</el-button>
+              <el-button v-else size="small" @click="openWlInput">{{ $t('backend.addPath') }}</el-button>
             </div>
-            <div class="path-picker-tip">输入虚拟路径前缀（如 /workspace/src/），该路径及其子目录将被允许编辑</div>
+            <div class="path-picker-tip">{{ $t('backend.wlPathTip') }}</div>
           </el-form-item>
-          <el-form-item v-if="editMode === 'blacklist'" label="Edit Blacklist" prop="configData.edit_blacklist">
+          <el-form-item v-if="editMode === 'blacklist'" :label="$t('backend.blacklistLabel')" prop="configData.edit_blacklist">
             <div class="path-picker-row">
               <el-tag
                 v-for="(item, idx) in (form.configData as any).edit_blacklist"
@@ -172,19 +172,19 @@
                 v-model="newBlValue"
                 size="small"
                 class="tag-input-inline"
-                placeholder="/workspace/build/  回车添加"
+                :placeholder="$t('backend.blInputPlaceholder')"
                 @keyup.enter="addBlacklistItem"
                 @blur="addBlacklistItem"
               />
-              <el-button v-else size="small" type="danger" plain @click="openBlInput">+ 添加路径</el-button>
+              <el-button v-else size="small" type="danger" plain @click="openBlInput">{{ $t('backend.addPath') }}</el-button>
             </div>
-            <div class="path-picker-tip">输入虚拟路径前缀（如 /workspace/build/），该路径及其子目录将被禁止编辑</div>
+            <div class="path-picker-tip">{{ $t('backend.blPathTip') }}</div>
           </el-form-item>
           <div class="api-tip">
             <el-alert type="info" :closable="false" show-icon>
               <template #title>
-                创建成功后，将显示的 <b>Backend ID</b> 和 <b>API Key</b> 填入客户端启动命令中：<br/>
-                <code>python main.py --server-url ws://服务器地址 --backend-id &lt;ID&gt; --api-key &lt;KEY&gt; --root-dir /你的项目</code>
+                <span v-html="$t('backend.apiTipTitle')"></span><br/>
+                <code>{{ $t('backend.apiTipCommand', { id: '<ID>', key: '<KEY>' }) }}</code>
               </template>
             </el-alert>
           </div>
@@ -192,11 +192,11 @@
 
         <!-- Resource 配置 -->
         <template v-if="form.backendType === 'resource'">
-          <el-divider content-position="left">资源文件夹配置</el-divider>
+          <el-divider content-position="left">{{ $t('backend.resourceConfig') }}</el-divider>
           <el-form-item label="Resource ID" prop="configData.resource_id">
             <el-select
               v-model="form.configData.resource_id"
-              placeholder="选择 FOLDER 类型资源作为 workspace root"
+              :placeholder="$t('backend.resourceIdPlaceholder')"
               filterable
               clearable
               style="width: 100%"
@@ -221,16 +221,16 @@
             </div>
             <div class="tools-config-tip">{{ $t('backend.versionEditingTip') }}</div>
           </el-form-item>
-          <el-divider content-position="left">编辑权限控制</el-divider>
+          <el-divider content-position="left">{{ $t('backend.editPermission') }}</el-divider>
 
-          <el-form-item label="编辑模式">
+          <el-form-item :label="$t('backend.editMode')">
             <el-radio-group v-model="editMode" @change="onEditModeChange">
-              <el-radio value="whitelist">白名单（仅允许以下路径）</el-radio>
-              <el-radio value="blacklist">黑名单（禁止以下路径）</el-radio>
+              <el-radio value="whitelist">{{ $t('backend.whitelistModePath') }}</el-radio>
+              <el-radio value="blacklist">{{ $t('backend.blacklistModePath') }}</el-radio>
             </el-radio-group>
           </el-form-item>
 
-          <el-form-item v-if="editMode === 'whitelist'" label="Edit Whitelist" prop="configData.edit_whitelist">
+          <el-form-item v-if="editMode === 'whitelist'" :label="$t('backend.whitelistLabel')" prop="configData.edit_whitelist">
             <div class="path-picker-row">
               <el-tag
                 v-for="(item, idx) in (form.configData as any).edit_whitelist"
@@ -246,18 +246,18 @@
                 v-model="newWlValue"
                 size="small"
                 class="tag-input-inline"
-                placeholder="/workspace/src/  回车添加"
+                :placeholder="$t('backend.wlInputPlaceholder')"
                 @keyup.enter="addWhitelistItem"
                 @blur="addWhitelistItem"
               />
-              <el-button v-else size="small" @click="openWlInput">+ 手动添加</el-button>
+              <el-button v-else size="small" @click="openWlInput">{{ $t('backend.addManual') }}</el-button>
               <el-button size="small" @click="openResPicker('whitelist')">
-                <el-icon><FolderOpened /></el-icon> 浏览资源树
+                <el-icon><FolderOpened /></el-icon> {{ $t('backend.browseResourceTree') }}
               </el-button>
             </div>
-            <div class="path-picker-tip">输入虚拟路径前缀或点击「浏览资源树」选择</div>
+            <div class="path-picker-tip">{{ $t('backend.resourcePickerTip') }}</div>
           </el-form-item>
-          <el-form-item v-if="editMode === 'blacklist'" label="Edit Blacklist" prop="configData.edit_blacklist">
+          <el-form-item v-if="editMode === 'blacklist'" :label="$t('backend.blacklistLabel')" prop="configData.edit_blacklist">
             <div class="path-picker-row">
               <el-tag
                 v-for="(item, idx) in (form.configData as any).edit_blacklist"
@@ -274,22 +274,22 @@
                 v-model="newBlValue"
                 size="small"
                 class="tag-input-inline"
-                placeholder="/workspace/build/  回车添加"
+                :placeholder="$t('backend.blInputPlaceholder')"
                 @keyup.enter="addBlacklistItem"
                 @blur="addBlacklistItem"
               />
-              <el-button v-else size="small" type="danger" plain @click="openBlInput">+ 手动添加</el-button>
+              <el-button v-else size="small" type="danger" plain @click="openBlInput">{{ $t('backend.addManual') }}</el-button>
               <el-button size="small" type="danger" plain @click="openResPicker('blacklist')">
-                <el-icon><FolderOpened /></el-icon> 浏览资源树
+                <el-icon><FolderOpened /></el-icon> {{ $t('backend.browseResourceTree') }}
               </el-button>
             </div>
-            <div class="path-picker-tip">输入虚拟路径前缀或点击「浏览资源树」选择</div>
+            <div class="path-picker-tip">{{ $t('backend.resourcePickerTip') }}</div>
           </el-form-item>
           <div class="api-tip">
             <el-alert type="success" :closable="false" show-icon>
               <template #title>
-                将资源文件夹映射为 Agent 的虚拟文件系统（workspace root）。<br/>
-                仅 <b>Mambo Agent</b> 可挂载 Resource 类型 Backend，DeepAgent 不可用。
+                {{ $t('backend.resourceTipTitle') }}<br/>
+                <span v-html="$t('backend.resourceTipNote')"></span>
               </template>
             </el-alert>
           </div>
@@ -299,26 +299,26 @@
         <template v-if="form.backendType === 'local'">
           <el-alert type="warning" :closable="false" show-icon class="local-warning">
             <template #title>
-              本地 Backend 直接访问服务器文件系统，错误操作可能导致 MamboChat 平台不可用，请谨慎使用！
+              {{ $t('backend.localWarning') }}
             </template>
           </el-alert>
 
-          <el-divider content-position="left">本地配置</el-divider>
+          <el-divider content-position="left">{{ $t('backend.localConfig') }}</el-divider>
 
           <el-form-item label="Root Dir" prop="configData.root_dir">
-            <el-input v-model="form.configData.root_dir" placeholder="默认为当前用户 home 目录，'~' 也表示 home 目录" />
+            <el-input v-model="form.configData.root_dir" :placeholder="$t('backend.rootDirPlaceholder')" />
           </el-form-item>
 
-          <el-divider content-position="left">编辑权限控制</el-divider>
+          <el-divider content-position="left">{{ $t('backend.editPermission') }}</el-divider>
 
-          <el-form-item label="编辑模式">
+          <el-form-item :label="$t('backend.editMode')">
             <el-radio-group v-model="editMode" @change="onEditModeChange">
-              <el-radio value="whitelist">白名单（仅允许以下目录）</el-radio>
-              <el-radio value="blacklist">黑名单（禁止以下目录）</el-radio>
+              <el-radio value="whitelist">{{ $t('backend.whitelistModeDir') }}</el-radio>
+              <el-radio value="blacklist">{{ $t('backend.blacklistModeDir') }}</el-radio>
             </el-radio-group>
           </el-form-item>
 
-          <el-form-item v-if="editMode === 'whitelist'" label="Edit Whitelist" prop="configData.edit_whitelist">
+          <el-form-item v-if="editMode === 'whitelist'" :label="$t('backend.whitelistLabel')" prop="configData.edit_whitelist">
             <div class="path-picker-row">
               <el-tag
                 v-for="(item, idx) in (form.configData as any).edit_whitelist"
@@ -334,18 +334,18 @@
                 v-model="newWlValue"
                 size="small"
                 class="tag-input-inline"
-                placeholder="/workspace/src/  回车添加"
+                :placeholder="$t('backend.wlInputPlaceholder')"
                 @keyup.enter="addWhitelistItem"
                 @blur="addWhitelistItem"
               />
-              <el-button v-else size="small" @click="openWlInput">+ 手动添加</el-button>
+              <el-button v-else size="small" @click="openWlInput">{{ $t('backend.addManual') }}</el-button>
               <el-button size="small" @click="openDirPicker('whitelist', 'local')">
-                <el-icon><FolderOpened /></el-icon> 浏览选择
+                <el-icon><FolderOpened /></el-icon> {{ $t('backend.browseSelect') }}
               </el-button>
             </div>
-            <div class="path-picker-tip">手动输入或点击「浏览选择」从本机文件系统选取目录</div>
+            <div class="path-picker-tip">{{ $t('backend.localPickerTip') }}</div>
           </el-form-item>
-          <el-form-item v-if="editMode === 'blacklist'" label="Edit Blacklist" prop="configData.edit_blacklist">
+          <el-form-item v-if="editMode === 'blacklist'" :label="$t('backend.blacklistLabel')" prop="configData.edit_blacklist">
             <div class="path-picker-row">
               <el-tag
                 v-for="(item, idx) in (form.configData as any).edit_blacklist"
@@ -362,41 +362,41 @@
                 v-model="newBlValue"
                 size="small"
                 class="tag-input-inline"
-                placeholder="/workspace/build/  回车添加"
+                :placeholder="$t('backend.blInputPlaceholder')"
                 @keyup.enter="addBlacklistItem"
                 @blur="addBlacklistItem"
               />
-              <el-button v-else size="small" type="danger" plain @click="openBlInput">+ 手动添加</el-button>
+              <el-button v-else size="small" type="danger" plain @click="openBlInput">{{ $t('backend.addManual') }}</el-button>
               <el-button size="small" type="danger" plain @click="openDirPicker('blacklist', 'local')">
-                <el-icon><FolderOpened /></el-icon> 浏览选择
+                <el-icon><FolderOpened /></el-icon> {{ $t('backend.browseSelect') }}
               </el-button>
             </div>
-            <div class="path-picker-tip">手动输入或点击「浏览选择」从本机文件系统选取目录</div>
+            <div class="path-picker-tip">{{ $t('backend.localPickerTip') }}</div>
           </el-form-item>
 
           <el-form-item label="Ignore Dirs" prop="configData.ignore_dirs">
-            <el-select v-model="form.configData.ignore_dirs" multiple filterable allow-create default-first-option placeholder="例如: .git, node_modules (回车添加)" style="width: 100%" />
+            <el-select v-model="form.configData.ignore_dirs" multiple filterable allow-create default-first-option :placeholder="$t('backend.ignoreDirsPlaceholder')" style="width: 100%" />
           </el-form-item>
         </template>
 
         <!-- 通用配置 (仅 SSH) -->
         <template v-if="form.backendType === 'ssh'">
-          <el-divider content-position="left">通用配置</el-divider>
+          <el-divider content-position="left">{{ $t('backend.commonConfig') }}</el-divider>
 
           <el-form-item label="Root Dir" prop="configData.root_dir">
-            <el-input v-model="form.configData.root_dir" placeholder="默认: /" />
+            <el-input v-model="form.configData.root_dir" :placeholder="$t('backend.rootDirSshPlaceholder')" />
           </el-form-item>
 
-          <el-divider content-position="left">编辑权限控制</el-divider>
+          <el-divider content-position="left">{{ $t('backend.editPermission') }}</el-divider>
 
-          <el-form-item label="编辑模式">
+          <el-form-item :label="$t('backend.editMode')">
             <el-radio-group v-model="editMode" @change="onEditModeChange">
-              <el-radio value="whitelist">白名单（仅允许以下目录）</el-radio>
-              <el-radio value="blacklist">黑名单（禁止以下目录）</el-radio>
+              <el-radio value="whitelist">{{ $t('backend.whitelistModeDir') }}</el-radio>
+              <el-radio value="blacklist">{{ $t('backend.blacklistModeDir') }}</el-radio>
             </el-radio-group>
           </el-form-item>
 
-          <el-form-item v-if="editMode === 'whitelist'" label="Edit Whitelist" prop="configData.edit_whitelist">
+          <el-form-item v-if="editMode === 'whitelist'" :label="$t('backend.whitelistLabel')" prop="configData.edit_whitelist">
             <div class="path-picker-row">
               <el-tag
                 v-for="(item, idx) in (form.configData as SshConfigData).edit_whitelist"
@@ -411,19 +411,19 @@
                 v-model="newWlValue"
                 size="small"
                 class="tag-input-inline"
-                placeholder="/workspace/src/  回车添加"
+                :placeholder="$t('backend.wlInputPlaceholder')"
                 @keyup.enter="addWhitelistItem"
                 @blur="addWhitelistItem"
               />
-              <el-button v-else size="small" @click="openWlInput">+ 手动添加</el-button>
+              <el-button v-else size="small" @click="openWlInput">{{ $t('backend.addManual') }}</el-button>
               <el-button size="small" @click="openDirPicker('whitelist')" :disabled="!canBrowseSSH">
-                <el-icon><FolderOpened /></el-icon> 浏览选择
+                <el-icon><FolderOpened /></el-icon> {{ $t('backend.browseSelect') }}
               </el-button>
             </div>
-            <div class="path-picker-tip">手动输入或点击「浏览选择」从远程服务器选取目录</div>
+            <div class="path-picker-tip">{{ $t('backend.sshPickerTip') }}</div>
           </el-form-item>
 
-          <el-form-item v-if="editMode === 'blacklist'" label="Edit Blacklist" prop="configData.edit_blacklist">
+          <el-form-item v-if="editMode === 'blacklist'" :label="$t('backend.blacklistLabel')" prop="configData.edit_blacklist">
             <div class="path-picker-row">
               <el-tag
                 v-for="(item, idx) in (form.configData as SshConfigData).edit_blacklist"
@@ -439,20 +439,20 @@
                 v-model="newBlValue"
                 size="small"
                 class="tag-input-inline"
-                placeholder="/workspace/build/  回车添加"
+                :placeholder="$t('backend.blInputPlaceholder')"
                 @keyup.enter="addBlacklistItem"
                 @blur="addBlacklistItem"
               />
-              <el-button v-else size="small" type="danger" plain @click="openBlInput">+ 手动添加</el-button>
+              <el-button v-else size="small" type="danger" plain @click="openBlInput">{{ $t('backend.addManual') }}</el-button>
               <el-button size="small" type="danger" plain @click="openDirPicker('blacklist')" :disabled="!canBrowseSSH">
-                <el-icon><FolderOpened /></el-icon> 浏览选择
+                <el-icon><FolderOpened /></el-icon> {{ $t('backend.browseSelect') }}
               </el-button>
             </div>
-            <div class="path-picker-tip">手动输入或点击「浏览选择」从远程服务器选取目录</div>
+            <div class="path-picker-tip">{{ $t('backend.sshPickerTip') }}</div>
           </el-form-item>
 
           <el-form-item label="Ignore Dirs" prop="configData.ignore_dirs">
-            <el-select v-model="form.configData.ignore_dirs" multiple filterable allow-create default-first-option placeholder="例如: .git, node_modules (回车添加)" style="width: 100%" />
+            <el-select v-model="form.configData.ignore_dirs" multiple filterable allow-create default-first-option :placeholder="$t('backend.ignoreDirsPlaceholder')" style="width: 100%" />
           </el-form-item>
         </template>
 
@@ -461,8 +461,8 @@
           <el-divider content-position="left">{{ $t('backend.toolConfig') }}</el-divider>
           <el-form-item>
             <template #label>
-              <el-tooltip content="允许 Agent 在目标机器上执行 Shell 命令" placement="top">
-                <span>Execute <span style="font-size: 11px; color: var(--el-text-color-secondary);">命令执行</span></span>
+              <el-tooltip :content="$t('backend.executeTooltip')" placement="top">
+                <span>{{ $t('backend.executeLabel') }} <span style="font-size: 11px; color: var(--el-text-color-secondary);">{{ $t('backend.executeSubLabel') }}</span></span>
               </el-tooltip>
             </template>
             <div class="tools-config-row">
@@ -499,7 +499,7 @@
     <!-- 公钥展示弹窗 -->
     <el-dialog v-model="keyDialogVisible" :title="$t('backend.systemPublicKey')" width="500px">
       <div v-loading="!systemPublicKey" class="public-key-container">
-        <p class="key-tip">请将以下公钥添加到目标服务器的 <code>~/.ssh/authorized_keys</code> 文件中，以实现免密登录。</p>
+        <p class="key-tip" v-html="$t('backend.publicKeyTip')"></p>
         <el-input v-model="systemPublicKey" type="textarea" :rows="6" readonly class="key-textarea" />
       </div>
       <template #footer>
@@ -513,7 +513,7 @@
     <!-- 远程目录选择器弹窗 -->
     <el-dialog
       v-model="dirPickerVisible"
-      :title="dirPickerMode === 'whitelist' ? '选择允许编辑的目录（勾选 → 确认）' : '选择禁止编辑的目录（勾选 → 确认）'"
+      :title="dirPickerMode === 'whitelist' ? $t('backend.dirPickerTitleWhitelist') : $t('backend.dirPickerTitleBlacklist')"
       width="580px"
       :close-on-click-modal="false"
       @open="onDirPickerOpen"
@@ -539,12 +539,12 @@
         </div>
         <!-- 提示 -->
         <div class="dir-picker-hint">
-          已选 {{ tempSelectedPaths.size }} 个目录
-          <el-button v-if="tempSelectedPaths.size > 0" link size="small" type="danger" @click="clearTempSelection">清空</el-button>
+          {{ $t('backend.selectedCount', { count: tempSelectedPaths.size }) }}
+          <el-button v-if="tempSelectedPaths.size > 0" link size="small" type="danger" @click="clearTempSelection">{{ $t('backend.clear') }}</el-button>
         </div>
         <!-- 目录列表 -->
         <div v-loading="isDirLoading" class="dir-picker-list">
-          <div v-if="!isDirLoading && dirEntries.length === 0 && !dirPickerError" class="dir-empty">目录为空</div>
+          <div v-if="!isDirLoading && dirEntries.length === 0 && !dirPickerError" class="dir-empty">{{ $t('backend.dirEmpty') }}</div>
           <div
             v-for="entry in dirEntries"
             :key="entry.path"
@@ -566,13 +566,13 @@
         </div>
       </div>
       <template #footer>
-        <el-button @click="dirPickerVisible = false">取消</el-button>
+        <el-button @click="dirPickerVisible = false">{{ $t('common.action.cancel') }}</el-button>
         <el-button
           type="primary"
           @click="confirmSelection"
           :disabled="tempSelectedPaths.size === 0"
         >
-          确认选择 ({{ tempSelectedPaths.size }})
+          {{ $t('backend.confirmSelection', { count: tempSelectedPaths.size }) }}
         </el-button>
       </template>
     </el-dialog>
@@ -580,19 +580,19 @@
     <!-- 资源树目录选择器弹窗（Resource Backend） -->
     <el-dialog
       v-model="resPickerVisible"
-      :title="resPickerMode === 'whitelist' ? '选择允许编辑的资源目录（勾选 → 确认）' : '选择禁止编辑的资源目录（勾选 → 确认）'"
+      :title="resPickerMode === 'whitelist' ? $t('backend.resPickerTitleWhitelist') : $t('backend.resPickerTitleBlacklist')"
       width="580px"
       :close-on-click-modal="false"
       @open="onResPickerOpen"
     >
       <div class="dir-picker-container">
         <div class="dir-picker-hint">
-          已选 {{ resPickerChecked.size }} 个目录
-          <el-button v-if="resPickerChecked.size > 0" link size="small" type="danger" @click="resPickerChecked = new Set()">清空</el-button>
+          {{ $t('backend.selectedCount', { count: resPickerChecked.size }) }}
+          <el-button v-if="resPickerChecked.size > 0" link size="small" type="danger" @click="resPickerChecked = new Set()">{{ $t('backend.clear') }}</el-button>
         </div>
         <div v-loading="isResTreeLoading" class="dir-picker-list">
           <div v-if="resFolderEntries.length === 0 && !isResTreeLoading" class="dir-empty">
-            目录为空。请先在「资源管理」中创建 FOLDER 类型的资源。
+            {{ $t('backend.resEmptyTip') }}
           </div>
           <div
             v-for="entry in resFolderEntries"
@@ -614,13 +614,13 @@
         </div>
       </div>
       <template #footer>
-        <el-button @click="resPickerVisible = false">取消</el-button>
+        <el-button @click="resPickerVisible = false">{{ $t('common.action.cancel') }}</el-button>
         <el-button
           type="primary"
           @click="confirmResPicker"
           :disabled="resPickerChecked.size === 0"
         >
-          确认选择 ({{ resPickerChecked.size }})
+          {{ $t('backend.confirmSelection', { count: resPickerChecked.size }) }}
         </el-button>
       </template>
     </el-dialog>
@@ -875,11 +875,11 @@ async function loadDirForPicker(remotePath: string) {
         .map(e => ({ ...e, name: extractName(e.path) }))
         .sort((a, b) => a.name.localeCompare(b.name));
     } else {
-      dirPickerError.value = res.message || '加载目录失败';
+      dirPickerError.value = res.message || t('backend.loadDirFailed');
       dirEntries.value = [];
     }
   } catch (err: any) {
-    dirPickerError.value = err?.message || '加载目录失败';
+    dirPickerError.value = err?.message || t('backend.loadDirFailed');
     dirEntries.value = [];
   } finally {
     isDirLoading.value = false;
@@ -942,45 +942,45 @@ const NAME_UNSAFE_RE = /[\/\\\x00-\x1f\x7f]/;
 const RESERVED_NAMES = new Set(['skills', 'memories', 'state', 'root', 'tmp', 'temp', 'workspace', 'this_chat_tmp', '.mambo']);
 
 function validateName(_rule: any, value: string, callback: (error?: Error) => void) {
-  if (!value) return callback(new Error('请输入名称'));
-  if (NAME_UNSAFE_RE.test(value)) return callback(new Error('名称不能包含 / \\ 或控制字符'));
-  if (value === '.' || value === '..') return callback(new Error('名称不能为 "." 或 ".."'));
-  if (RESERVED_NAMES.has(value.toLowerCase())) return callback(new Error(`"${value}" 是系统保留名称，请换一个`));
+  if (!value) return callback(new Error(t('backend.nameRequired')));
+  if (NAME_UNSAFE_RE.test(value)) return callback(new Error(t('backend.nameUnsafe')));
+  if (value === '.' || value === '..') return callback(new Error(t('backend.nameDot')));
+  if (RESERVED_NAMES.has(value.toLowerCase())) return callback(new Error(t('backend.nameReserved', { name: value })));
   callback();
 }
 
-const nameRules = [
-  { required: true, message: '请输入名称', trigger: 'blur' },
+const nameRules = computed(() => [
+  { required: true, message: t('backend.nameRequired'), trigger: 'blur' },
   { validator: validateName, trigger: 'blur' },
-];
+]);
 
 const form = reactive<BackendCreate>(defaultForm('resource'));
 
-const sshRules: FormRules = {
-  name: nameRules,
-  'configData.hostname': [{ required: true, message: '请输入主机地址', trigger: 'blur' }],
-  'configData.username': [{ required: true, message: '请输入用户名', trigger: 'blur' }]
-};
+const sshRules = computed<FormRules>(() => ({
+  name: nameRules.value,
+  'configData.hostname': [{ required: true, message: t('backend.hostRequired'), trigger: 'blur' }],
+  'configData.username': [{ required: true, message: t('backend.usernameRequired'), trigger: 'blur' }]
+}));
 
-const apiRules: FormRules = {
-  name: nameRules,
-  'configData.api_key': [{ required: true, message: '请输入 API Key', trigger: 'blur' }]
-};
+const apiRules = computed<FormRules>(() => ({
+  name: nameRules.value,
+  'configData.api_key': [{ required: true, message: t('backend.apiKeyRequired'), trigger: 'blur' }]
+}));
 
-const resourceRules: FormRules = {
-  name: nameRules,
-  'configData.resource_id': [{ required: true, message: '请选择资源文件夹', trigger: 'change' }]
-};
+const resourceRules = computed<FormRules>(() => ({
+  name: nameRules.value,
+  'configData.resource_id': [{ required: true, message: t('backend.resourceIdRequired'), trigger: 'change' }]
+}));
 
-const localRules: FormRules = {
-  name: nameRules
-};
+const localRules = computed<FormRules>(() => ({
+  name: nameRules.value
+}));
 
 const currentRules = computed(() => {
-  if (form.backendType === 'ssh') return sshRules;
-  if (form.backendType === 'api') return apiRules;
-  if (form.backendType === 'resource') return resourceRules;
-  return localRules;
+  if (form.backendType === 'ssh') return sshRules.value;
+  if (form.backendType === 'api') return apiRules.value;
+  if (form.backendType === 'resource') return resourceRules.value;
+  return localRules.value;
 });
 
 const handleTypeChange = (type: BackendType) => {
@@ -1189,9 +1189,9 @@ const handleEdit = (row: BackendConfig) => {
 const handleDelete = async (id: string) => {
   try {
     await backendStore.removeBackend(id);
-    ElMessage.success('删除成功');
+    ElMessage.success(t('common.msg.deleteSuccess'));
   } catch (error) {
-    ElMessage.error('删除失败');
+    ElMessage.error(t('backend.deleteFailed'));
   }
 };
 
@@ -1222,12 +1222,12 @@ const handleTestConnection = async () => {
         };
         const res = await backendStore.testConnection(testData);
         if (res.success) {
-          ElMessage.success(res.message || '连接成功');
+          ElMessage.success(res.message || t('backend.connectionSuccess'));
         } else {
-          ElMessage.error(res.message || '连接失败');
+          ElMessage.error(res.message || t('backend.connectionFailed'));
         }
       } catch (error: any) {
-        ElMessage.error(error.message || '测试连接发生异常');
+        ElMessage.error(error.message || t('backend.connectionError'));
       } finally {
         isTesting.value = false;
       }
@@ -1265,14 +1265,14 @@ const submitForm = async () => {
 
         if (isEdit.value && currentEditId.value) {
           await backendStore.updateExistingBackend(currentEditId.value, submitData);
-          ElMessage.success('更新成功');
+          ElMessage.success(t('common.msg.updateSuccess'));
         } else {
           await backendStore.createNewBackend(submitData);
-          ElMessage.success('创建成功');
+          ElMessage.success(t('common.msg.createSuccess'));
         }
         dialogVisible.value = false;
       } catch (error) {
-        ElMessage.error(isEdit.value ? '更新失败' : '创建失败');
+        ElMessage.error(isEdit.value ? t('backend.updateFailed') : t('common.msg.createFailed'));
       } finally {
         isSaving.value = false;
       }
@@ -1290,7 +1290,7 @@ const handleShowPublicKey = async () => {
 const copyPublicKey = async () => {
   if (systemPublicKey.value) {
     await copyToClipboard(systemPublicKey.value);
-    ElMessage.success('公钥已复制到剪贴板');
+    ElMessage.success(t('common.msg.copySuccess'));
   }
 };
 </script>

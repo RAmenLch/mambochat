@@ -3,7 +3,7 @@
 ### Configuring Providers and Models
 (1) **Enter Settings**
 
-Click the gear icon (configuration button) in the bottom-left corner to enter the system settings page.  
+Click the gear icon (configuration button) in the bottom-left corner to enter the system settings page.
 
 ![Settings button and settings page](img_en/Settings_button_and_settings_page.png)
 
@@ -16,6 +16,10 @@ In the "Provider Management" section, click "Add Provider", then fill in the pro
 (3) **Configure Model Parameters** (Optional)
 
 After creating a provider, you can further configure model parameters. OpenRouter's models API typically returns detailed information, so manual configuration is often unnecessary; for other platforms, it is recommended to configure parameters here or enable multimodal image input.
+
+> **Automatic Model Capability Detection**: When connecting providers such as GLM (`api.z.ai` / `open.bigmodel.cn`), DeepSeek (`api.deepseek.com`), or Kimi (`api.moonshot.cn`), the system automatically detects model capabilities (context length, image support, thinking mode) based on the API Host domain — manual configuration is usually unnecessary; for other platforms, manual configuration is still recommended.
+
+You can also click the "Fetch Models" button to pull the model list from the provider and batch-import it. The list shows "Context" and "Modality" columns for easy verification. Special parameters like thinking mode have no standalone toggle — they are configured via "Dynamic Parameters" (e.g., DeepSeek Thinking Type), which can be enabled in chat settings or in the model configuration of the Agent editor.
 
 ![Model_parameter_configuration_panel](img_en/Model_parameter_configuration_panel.png)
 
@@ -33,7 +37,7 @@ Right-click in the left chat list and select "New Chat".
 
 (2) **Chat Settings**
 
-Click the settings icon next to the chat title. Here you can modify the model, configure the System Prompt, set LLM API parameters, and more.
+In the Web interface (desktop layout), click the "Settings" icon in the toolbar above the input area (on mobile, the settings button at the right of the title bar). Here you can modify the model, configure the System Prompt, set the number of context messages, enable streaming, reply suggestions, allow the AI to ask questions, and configure model-supported extended parameters via the "Dynamic Parameters" area (e.g., DeepSeek thinking mode).
 
 ![Chat_settings_panel](img_en/Chat_settings_panel.png)
 
@@ -83,10 +87,30 @@ When a conversation becomes too long, causing increased Token consumption or att
 - **Copy Conversation**: Duplicate the current conversation up to a specified message, allowing new exploration based on existing dialogue.
 - **Batch Archive**: Select multiple conversations and move them into a folder at once.
 
-<!-- TODO: 需要英文截图 → 参考中文图片：img/会话复制.png -->
 ![Conversation_copy](img_en/Conversation_copy.png)
-<!-- TODO: 需要英文截图 → 参考中文图片：img/批量归档.png -->
 ![Batch_archive](img_en/Batch_archive.png)
+
+(9) **Web Search**
+
+Click the "Web Search" button in the toolbar to cycle through three modes: Off / Read web pages only / Search + read. When enabled, the AI can search the web and read page content to answer. Session-level settings take priority; when unset, the global default mode is used (see [Global Settings](#3-global-settings)). Network requests can go through a proxy to access restricted sites.
+- Read web pages only  
+![Web_search_1](img_en/Web_search_1.png)
+- Search via DGGS + read web pages  
+![Web_search_2](img_en/Web_search_2.png)
+
+(10) **Chat Import/Export**
+
+Click the download icon at the right of the title bar to:
+- **Export JSON**: export the chat as a JSON file (including file attachments) for backup and migration
+- **Export Markdown / HTML**: export as readable document formats
+- **Import JSON**: import a previously exported JSON file; the import creates a new chat at the root directory (duplicate names automatically get a suffix)
+![Chat_import_export](img_en/Chat_import_export.png)
+
+(11) **Message Log Viewing**
+
+Click the "View Logs" button in an AI message's action bar to view the underlying message logs, including the raw request payload sent to the LLM and runtime metadata (MetaData), for a deeper understanding of the Agent's logic.  
+![Message_log_1](img_en/Message_log_1.png)
+![Message_log_2](img_en/Message_log_2.png)
 
 ---
 
@@ -96,13 +120,16 @@ The global settings page manages system-level default parameters, including:
 
 - Default model / Title generation model
 - Default temperature, Top P, max retries, and other LLM parameters
-- Global proxy address
+- New chat defaults (context message count, streaming, reply suggestions, allow AI questions, etc.)
+- Web search: default mode (disabled / read pages only / search and read) and whether to use a global proxy
+- Conversation history compression: custom "Compression System Prompt" (leave empty for the default prompt)
+- Global proxy address (enable proxy / proxy URL / test connection)
 - User avatar & AI avatar
-- Editor preferences (Monaco Editor, etc.)
+- Editor preferences (plain text box / Monaco Editor), message display mode (stacked / interleaved)
 - Send message shortcut (Enter / Ctrl+Enter)
 - Interface language (Chinese / English)
+- Database maintenance: clean the Checkpoints database
 
-<!-- TODO: 需要英文截图 → 参考中文图片：img/全局配置页面.png -->
 ![Global_Settings](img_en/Global_Settings.png)
 
 ---
@@ -131,11 +158,13 @@ Resources support version management and rollback. You can actively save new ver
 
 ### Message Templates
 
-A Message Template is a highly efficient, special type of System Prompt — it gets inserted into the latest user message, ensuring the model's attention is tightly focused on the template's content.
+A Message Template is a highly efficient, special type of System Prompt — it gets inserted into the latest user message, focusing the model's attention tightly on the template's content. This is especially effective for models with scattered attention, such as GEMINI.
 
 (1) **How It Works**
 
-LLMs naturally focus on the beginning and end of context, while the middle tends to be overlooked. MamboChat's Message Templates place key settings in the latest message, and by setting "Participation Length" to 1, the template only takes effect for the current turn — avoiding history bloat while reinforcing specific settings.
+LLMs naturally focus on the beginning and end of context, while the middle tends to be overlooked. MamboChat's Message Templates place key settings in the latest message, and the "Participation Length" controls how many turns it stays effective (set to 1 for the current turn only) — reinforcing specific settings without adding history bloat.
+
+> Note: For long-running continuous generation tasks, this feature significantly reduces cache hit rates, because the KV cache of the latest Q&A pair is broken by this feature.
 
 (2) **Create & Mount**
 
@@ -158,27 +187,22 @@ Skills are packages used to extend [Agent](#7-agent-configuration--usage) capabi
 Create a new Skill-type resource in the Resource Center, and write a Markdown configuration file defining the skill's behavior following the [specification](https://agentskills.io/what-are-skills).
 
 ![Creating_a_new_Skill](img_en/Creating_a_new_Skill.png)
-
 ![Skill_preview_page](img_en/Skill_preview_page.png)
 
 (2) **Import Skill**
 
-Besides manual creation, Skills can be imported from:
-- Local `.md` files or folders
-
-<!-- TODO: 需要英文截图 → 参考中文图片：img/导入Skill-文件.png -->
+The "New Skill" dialog provides three tabs: Manual creation / File & folder import / GitHub import.
+- **File/folder import**: upload local `.md` / `.zip` files or select a folder; supports import preview and name-conflict handling (overwrite / skip), and batch import (multiple Skills at once)
 ![Importing_Skill_from_file](img_en/Importing_Skill_from_file.png)
-- GitHub repository URLs
-
-<!-- TODO: 需要英文截图 → 参考中文图片：img/导入Skill-GitHub.png -->
+- **GitHub import**: import from a GitHub repository URL (supports `owner/repo` or `npx skills add owner/repo` forms)
 ![Importing_Skill_from_GitHub](img_en/Importing_Skill_from_GitHub.png)
 
-> Note: This feature depends on the `github` API stability. Verification may occasionally fail.
+Imported Skills support "Validate Spec" checking and SKILL.md content preview/editing.
 
 (3) **Mount to Agent**
 
-Once created, attach the Skill in the DeepAgent settings to let the Agent use it.
-<!-- TODO: 需要英文截图 → 参考中文图片：img/Agent中挂载Skill.png -->
+Once created, attach the Skill in the Agent settings to let the Agent use it.
+
 ![Mounting_Skill_to_an_Agent](img_en/Mounting_Skill_to_an_Agent.png)
 
 ---
@@ -216,7 +240,6 @@ Go to the chat session page -> Select from Resources -> KB Search.
 No need to manually search — simply mount the Knowledge Base to your chat session. The AI assistant will automatically call the Knowledge Base when needed and generate answers. Multiple Knowledge Bases can be mounted simultaneously.
 
 ![Mounting_Knowledge_Base_in_a_chat](img_en/Mounting_Knowledge_Base_in_a_chat.png)
-
 ![AI_auto-retrieving_from_Knowledge_Base_and_responding](img_en/AI_auto-retrieving_from_Knowledge_Base_and_responding.png)
 
 ---
@@ -235,15 +258,16 @@ In the system settings page, click the "Add" button in the "MCP Management" sect
 
 (2) **Select Transport Type & Fill in Configuration**
 
-MCP supports two transport types:
+MCP supports three transport types:
 
 | Transport Type | Description | Use Cases |
 |---|---|---|
-| **Stdio** | Communication via local command subprocess | Locally running MCP services (e.g., Python/Node scripts) |
+| **Stdio** | Communication via a local command subprocess | Locally running MCP services (e.g., Python/Node scripts) |
 | **SSE** | Communication via HTTP Server-Sent Events | Remote or service-mode MCP servers |
+| **Streamable HTTP** | Communication via the HTTP streaming interface | MCP servers supporting the Streamable HTTP protocol |
 
-- **Stdio type**: Fill in `Command` (execution command, e.g., `python`, `node`, `uvx`), `Args` (command arguments), and `Env` (environment variables, e.g., API Key)
-- **SSE type**: Fill in the service `URL`
+- **Stdio type**: fill in `Command` (execution command, e.g., `python`, `node`, `uvx`), `Args` (command arguments), `Env` (environment variables, e.g., API Key), and `Cwd` (working directory)
+- **SSE / Streamable HTTP type**: fill in the service `URL`; optionally configure `Headers` (request headers), `Timeout` / `SSE Read Timeout`, and "Enable Global Proxy"
 
 (3) **Test Connection**
 
@@ -256,12 +280,10 @@ After filling in the configuration, click the "Test Connection" button to verify
 The MCP server list displays all configured server information, including:
 
 - **Name & Description**
-- **Transport Type** (STDIO / SSE)
+- **Transport Type** (STDIO / SSE / HTTP)
 - **Enabled Status** (ON / OFF)
 - **Health Status**: Green indicates healthy, red indicates abnormal. Use the refresh button to re-check.
 - **Last Test Time & Error Details**: When connection fails, view the specific error stack trace.
-
-> Some system built-in MCP servers are marked as "System" type and cannot be edited or deleted.
 
 ### Manage Tools
 
@@ -278,11 +300,14 @@ Each MCP server can expose multiple tools. Click "View Tools" to open the tool m
   - `require_review`: The Agent requires user confirmation before calling the tool (Human-in-the-Loop)
 - **Delete Tool**: Remove unnecessary tools (only offline tools can be deleted)
 
+> **MCP Smart Access**: After an Agent mounts an MCP server, how tools are exposed is determined by the "MCP Direct Tool Threshold" in the Agent configuration (default 15) — when the tool count is below the threshold, tools are exposed directly to the AI; above the threshold, it automatically switches to on-demand query mode to avoid blowing up the prompt.
+
 ### Using in Agent
 
 After creating an MCP server and ensuring its health status is normal, mount the MCP server in the [Agent](#7-agent-configuration--usage) configuration. Once mounted, the Agent will automatically acquire all enabled tools under that server and call them as needed during conversations.
 
 ### Using in Chat
+
 In a chat session under Normal Mode, click the "View Tools" button to select and use tools.
 
 ![Using_tools_in_Chat](img_en/Using_tools_in_Chat.png)
@@ -291,92 +316,91 @@ In a chat session under Normal Mode, click the "View Tools" button to select and
 
 ## 7. Agent Configuration & Usage
 
-Agent is a core capability introduced in MamboChat v1.2.0, providing two types of intelligent agents:
+Agent is a core capability of MamboChat, providing two types of intelligent agents:
 
 | Type | Description | Use Cases |
 |---|---|---|
-| **ReAct Agent** | Reasoning agent based on tool calls. Regular chats also use this Agent, but it can be configured on the Agent page as a sub-Agent for DeepAgent | Tasks requiring search, knowledge base queries, MCP tool calls, etc. |
-| **Deep Agent** | Complex functional agent based on the [deepagents](https://github.com/langchain-ai/deepagents) project, capable of file read/write and command execution | Code development, remote server operations |
+| **Mambo Agent** | A complex functional agent with file read/write, command execution, nested sub-agent calls, real-time file display, AI safety pre-review, long-term memory, automatic conversation compression, resource version snapshots, etc. | Code development, remote server operations, complex task execution |
+| **ReAct Agent** | A reasoning agent based on tool calls; can mount Knowledge Bases, MCP tools, Skills, and other extensions | Tasks requiring search, knowledge base queries, MCP tool calls, etc. |
 
 ### Create an Agent
 
-(1) Go to "Agent Management" in the settings page, and click "New Agent".
-
+(1) Go to "Agent Management" in the settings page — Agents are organized in a tree structure (folders supported). Click "New Agent" to create one.
 
 ![New_Agent_entry_point](img_en/New_Agent_entry_point.png)
 
-(2) Select Agent type:
-   - **ReAct Agent**: Configure system prompts, choose available tools (MCP, Knowledge Base, ask_user, etc.)
-   - **Deep Agent**: Configure remote Backend connection info, choosing SSH or API Client mode to connect to the target environment
-
+(2) Select the Agent type and complete the basic configuration: bind a model, configure the System Prompt, and mount resources / MCP tools and other extensions.
 
 ![Agent_type_selection_and_basic_configuration](img_en/Agent_type_selection_and_basic_configuration.png)
-
-(3) Configure resources for the Agent: mount Knowledge Bases, Skill Packs, MCP servers, and other extensions.
-
-
 ![Agent_resource_mounting_panel](img_en/Agent_resource_mounting_panel.png)
 
 ### Use an Agent
 
-Associate an Agent directly when creating a new chat. Once enabled, all conversations in that session will be driven by the Agent, automatically calling tools to complete complex tasks.
+Associate an Agent directly when creating a new chat. Once enabled, all conversations in that session will be driven by the Agent, automatically calling tools to complete complex tasks; tool calls are displayed as bubbles.
 
 ![Enabling_Agent_in_a_chat](img_en/Enabling_Agent_in_a_chat.png)
-
-
 ![Tool_calling_process_during_Agent_execution](img_en/Tool_calling_process_during_Agent_execution.png)
 
-
-![Agent_calling_subAgent](img_en/Agent_calling_subAgent.png)
+> **Mambo Agent's exclusive capabilities** (real-time file display, AI safety pre-review, long-term memory, automatic conversation compression, resource version snapshots, MCP smart access, etc.), importing/exporting `.mamboagent` packages, and Backend (SSH / API / Resource / Local) configuration, see the [Mambo Agent Guide](MamboAgent_EN.md).
 
 ---
 
-## 8. Remote Backend Configuration
-
-Remote Backends allow Deep Agents to access external environments (such as Linux servers or your local machine), performing file read/write and command execution.
-
-### SSH Backend — Connect to Remote Server
-
-(1) In the settings page under "Backend Management", create a new SSH-type Backend. Fill in connection details: host address, port, username, and authentication method (password or key).
-
-![SSH_connection_details_form](img_en/SSH_connection_details_form.png)
-
-(3) After testing the connection successfully, associate this Backend with a Deep Agent. The Agent will then remotely read/write files, execute commands, and browse directory structures via SFTP/SSH.
-
-> **Note**: You can configure edit allowlists/denylists to restrict which directories the Agent can operate on for security purposes.
-
-### API Client — Local Reverse Connection
-
-If you want the Agent to operate on your local machine's files (rather than a remote server), or if your machine lacks a public IP address, use API Client mode:
-
-(1) In the server-side settings, create an API-type Backend and note the generated `backend-id` and `api-key`.
-
-<!-- TODO: 需要英文截图 → 参考中文图片：img/新增APIClient类型Backend.png -->
-![Adding_API_Client_type_Backend](img_en/Adding_API_Client_type_Backend.png)
-
-(2) Run the client program on your local machine (located in `client/apibackend/`):
-
-```bash
-cd client/apibackend
-pip install -r requirements.txt
-python main.py --server-url ws://<your-server>:24911 --backend-id <backend-id> --api-key <key> --root-dir <directory-to-expose>
-```
-
-![Running_APIClient](img_en/Running_APIClient.png)
-
-(3) Once the client connects successfully, the Deep Agent can operate your local file system just like a remote server.
-
-![API_Client_running_status_and_connection_success](img_en/API_Client_running_status_and_connection_success.png)
-
-
-## 9. Conversation Interruption — Human Intervention
-- **Human-in-the-Loop (HITL)**: A review request pops up before tool execution, allowing the user to approve or reject before proceeding.
+## 8. Conversation Interruption — Human Intervention
+- **Human-in-the-Loop (HITL)**: A review request pops up before tool execution, allowing the user to approve or reject before proceeding ("Approve / Modify and approve / Reject"; multiple tools can be batch-reviewed).
 
 ![Tool_review_configuration](img_en/Tool_review_configuration.png)
-<!-- TODO: 需要英文截图 → 参考中文图片：img/HITL工具审核弹窗.png -->
 ![HITL_tool_review_popup](img_en/HITL_tool_review_popup.png)
-- **Ask User**: The Agent can actively ask questions to gather information (text response or multiple choice).
-<!-- TODO: 需要英文截图 → 参考中文图片：img/AskUser提问交互.png -->
+- **AI Safety Pre-review**: Mambo Agent can be configured with AI safety review (see the [Mambo Agent Guide](MamboAgent_EN.md)); the AI pre-reviews tool calls first, and dangerous operations are flagged with a 🛡️ badge showing the review result (passed / failed) before requiring your confirmation.
+- **Ask User**: The Agent can actively ask the user for information (text response or multiple choice).
+
 ![AskUser_interaction](img_en/AskUser_interaction.png)
-<!-- TODO: 需要英文截图 → 参考中文图片：img/AskUser提问交互2.png -->
 ![AskUser_interaction_2](img_en/AskUser_interaction_2.png)
+
+---
+
+## 9. mambo Command-Line Tool
+
+`mambo` is the command-line tool bundled with MamboChat. It lets you manage providers/models, resources, Skills, MCP, and Agent configurations like operating a file system — ideal for quick terminal configuration, and it can also be handed directly to an LLM.
+
+### Startup & Connection
+
+- The desktop client has a built-in `mambo` command; in a source environment, use `python -m backend.mambo_cli`
+- Defaults to `http://127.0.0.1:8000`; specify another address via the `--base-url` argument or the `MAMBO_BASE_URL` environment variable
+
+```bash
+mambo --base-url http://<server>:8000 <domain> <action> [options]
+```
+
+### Subcommand Overview
+
+| Domain | Common Operations |
+|---|---|
+| `provider` | list / add / update / delete / test (test connectivity) |
+| `model` | list / add / update / delete / set-default (set the default model, auto-completes capability info) |
+| `settings` | get / set / unset (global settings) |
+| `resource` | ls / cat / write / mkdir / mv / rm / find (manage resources like a file system) |
+| `skill` | list / create / validate / import / delete |
+| `mcp` | list / add / update / delete / test / sync / tools (sync and toggle tools) |
+| `agent` | list / create / update / mount / export / import (`.mamboagent` packages) / subagent |
+| `backend` | list / add / update / delete / test / ssh-key (view the system SSH public key) |
+
+### Common Examples
+
+```bash
+# List all resources
+mambo resource ls /
+
+# Export an Agent as a .mamboagent package
+mambo agent export myAgent --output ./my-agent.mamboagent
+
+# Import an Agent package
+mambo agent import --file ./my-agent.mamboagent
+
+# View the system SSH public key (for passwordless login)
+mambo backend ssh-key
+
+# Sync an MCP server's tool list
+mambo mcp sync my-mcp-server
+```
+
+> Reference rules: name/path takes priority, UUID as fallback; `resource` and `agent` support `/directory/name` path addressing.

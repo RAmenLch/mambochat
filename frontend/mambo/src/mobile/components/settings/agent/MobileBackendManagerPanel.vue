@@ -26,7 +26,7 @@
             </span>
             <span v-if="b.backendType === 'api' && clientStatusMap[b.id]" class="status-tag" :class="clientStatusMap[b.id]?.connected ? 'tag-online' : 'tag-offline'">
               <span class="status-dot"></span>
-              {{ clientStatusMap[b.id]?.connected ? 'Online' : 'Offline' }}
+              {{ clientStatusMap[b.id]?.connected ? $t('backend.connected') : $t('backend.offline') }}
             </span>
           </div>
         </div>
@@ -42,7 +42,7 @@
             <div class="info-row">{{ b.configData.root_dir || '~' }}</div>
           </template>
           <template v-else-if="b.backendType === 'resource'">
-            <div class="info-row">Resource: {{ b.configData.resource_id }}</div>
+            <div class="info-row">{{ $t('backend.resource') }} {{ b.configData.resource_id }}</div>
           </template>
           <div class="info-row info-desc" v-if="b.description">{{ b.description }}</div>
         </div>
@@ -75,7 +75,7 @@
               <el-form ref="formRef" :model="form" :rules="currentRules" label-position="top">
                 <div class="field-item">
                   <label class="field-label">{{ $t('backend.name') }}</label>
-                  <input v-model="form.name" class="native-input" placeholder="支持中文，禁止 / \ 和控制字符" />
+                  <input v-model="form.name" class="native-input" :placeholder="$t('backend.namePlaceholder')" />
                 </div>
                 <div class="field-item">
                   <label class="field-label">{{ $t('backend.description') }}</label>
@@ -84,23 +84,23 @@
                 <div class="field-item">
                   <label class="field-label">{{ $t('backend.type') }}</label>
                   <el-select v-model="form.backendType" :disabled="isEdit" style="width: 100%" @change="handleTypeChange" popper-class="mobile-popper">
-                    <el-option label="SSH (远程服务器)" value="ssh" />
-                    <el-option label="API (客户端连接)" value="api" />
-                    <el-option label="Resource (资源文件夹)" value="resource" />
-                    <el-option label="Local (本地文件系统)" value="local" />
+                    <el-option :label="$t('backend.typeSsh')" value="ssh" />
+                    <el-option :label="$t('backend.typeApi')" value="api" />
+                    <el-option :label="$t('backend.typeResource')" value="resource" />
+                    <el-option :label="$t('backend.typeLocal')" value="local" />
                   </el-select>
                 </div>
 
                 <!-- SSH -->
                 <template v-if="form.backendType === 'ssh'">
-                  <div class="sheet-divider">SSH 配置</div>
-                  <div class="field-item"><label class="field-label">Hostname</label><input v-model="form.configData.hostname" class="native-input" placeholder="192.168.1.100" /></div>
+                  <div class="sheet-divider">{{ $t('backend.sshConfig') }}</div>
+                  <div class="field-item"><label class="field-label">Hostname</label><input v-model="form.configData.hostname" class="native-input" :placeholder="$t('backend.hostPlaceholder')" /></div>
                   <div class="field-item"><label class="field-label">Username</label><input v-model="form.configData.username" class="native-input" placeholder="root" /></div>
                   <div class="field-item"><label class="field-label">Port</label><el-input-number v-model="form.configData.port" :min="1" :max="65535" controls-position="right" style="width: 100%" /></div>
                   <div class="field-item">
                     <label class="field-label">Password</label>
                     <div class="password-row">
-                      <input :type="showPwd ? 'text' : 'password'" v-model="form.configData.password" class="native-input" placeholder="不填则使用系统公钥免密登录" />
+                      <input :type="showPwd ? 'text' : 'password'" v-model="form.configData.password" class="native-input" :placeholder="$t('backend.passwordPlaceholder')" />
                       <button class="toggle-key" @click="showPwd = !showPwd"><el-icon :size="16"><View v-if="!showPwd" /><Hide v-else /></el-icon></button>
                     </div>
                   </div>
@@ -108,21 +108,21 @@
 
                 <!-- API -->
                 <template v-if="form.backendType === 'api'">
-                  <div class="sheet-divider">API 客户端配置</div>
-                  <div class="field-item"><label class="field-label">API Key</label><input v-model="form.configData.api_key" class="native-input" placeholder="客户端连接时使用的密钥" /></div>
+                  <div class="sheet-divider">{{ $t('backend.apiConfig') }}</div>
+                  <div class="field-item"><label class="field-label">API Key</label><input v-model="form.configData.api_key" class="native-input" :placeholder="$t('backend.apiKeyPlaceholder')" /></div>
                   <div class="api-hint">
                     <el-alert type="info" :closable="false" show-icon>
-                      <template #title>创建后将 Backend ID 和 API Key 填入客户端命令</template>
+                      <template #title>{{ $t('backend.apiClientHint') }}</template>
                     </el-alert>
                   </div>
                 </template>
 
                 <!-- Resource -->
                 <template v-if="form.backendType === 'resource'">
-                  <div class="sheet-divider">资源文件夹配置</div>
+                  <div class="sheet-divider">{{ $t('backend.resourceConfig') }}</div>
                   <div class="field-item">
                     <label class="field-label">Resource ID</label>
-                    <el-select v-model="form.configData.resource_id" placeholder="选择 FOLDER 类型资源" filterable clearable style="width: 100%" popper-class="mobile-popper">
+                    <el-select v-model="form.configData.resource_id" :placeholder="$t('backend.resourceIdPlaceholder')" filterable clearable style="width: 100%" popper-class="mobile-popper">
                       <el-option v-for="f in resourceFolderOptions" :key="f.id" :label="f.name" :value="f.id" />
                     </el-select>
                   </div>
@@ -131,36 +131,36 @@
                 <!-- Local -->
                 <template v-if="form.backendType === 'local'">
                   <el-alert type="warning" :closable="false" show-icon style="margin-bottom:12px">
-                    <template #title>本地 Backend 直接访问服务器文件系统，请谨慎使用！</template>
+                    <template #title>{{ $t('backend.localWarning') }}</template>
                   </el-alert>
-                  <div class="sheet-divider">本地配置</div>
-                  <div class="field-item"><label class="field-label">Root Dir</label><input v-model="form.configData.root_dir" class="native-input" placeholder="默认: ~" /></div>
+                  <div class="sheet-divider">{{ $t('backend.localConfig') }}</div>
+                  <div class="field-item"><label class="field-label">Root Dir</label><input v-model="form.configData.root_dir" class="native-input" :placeholder="$t('backend.rootDirPlaceholder')" /></div>
                 </template>
 
                 <!-- 通用编辑权限 (SSH / Local / Resource) -->
                 <template v-if="form.backendType !== 'api'">
-                  <div class="sheet-divider">编辑权限控制</div>
+                  <div class="sheet-divider">{{ $t('backend.editPermission') }}</div>
                   <div class="field-item">
-                    <label class="field-label">编辑模式</label>
+                    <label class="field-label">{{ $t('backend.editMode') }}</label>
                     <el-radio-group v-model="editMode" size="small">
-                      <el-radio-button value="whitelist">白名单</el-radio-button>
-                      <el-radio-button value="blacklist">黑名单</el-radio-button>
+                      <el-radio-button value="whitelist">{{ $t('backend.whitelist') }}</el-radio-button>
+                      <el-radio-button value="blacklist">{{ $t('backend.blacklist') }}</el-radio-button>
                     </el-radio-group>
                   </div>
                   <div class="field-item" v-if="editMode === 'whitelist'">
-                    <label class="field-label">Edit Whitelist</label>
-                    <el-select v-model="whitelistProxy" multiple filterable allow-create default-first-option placeholder="输入路径，回车添加" style="width: 100%" popper-class="mobile-popper" />
+                    <label class="field-label">{{ $t('backend.whitelistLabel') }}</label>
+                    <el-select v-model="whitelistProxy" multiple filterable allow-create default-first-option :placeholder="$t('backend.pathInputPlaceholder')" style="width: 100%" popper-class="mobile-popper" />
                   </div>
                   <div class="field-item" v-if="editMode === 'blacklist'">
-                    <label class="field-label">Edit Blacklist</label>
-                    <el-select v-model="blacklistProxy" multiple filterable allow-create default-first-option placeholder="输入路径，回车添加" style="width: 100%" popper-class="mobile-popper" />
+                    <label class="field-label">{{ $t('backend.blacklistLabel') }}</label>
+                    <el-select v-model="blacklistProxy" multiple filterable allow-create default-first-option :placeholder="$t('backend.pathInputPlaceholder')" style="width: 100%" popper-class="mobile-popper" />
                   </div>
                 </template>
 
                 <!-- 工具配置 -->
                 <div class="sheet-divider">{{ $t('backend.toolConfig') }}</div>
                 <div class="field-row">
-                  <span class="field-label" style="margin-bottom:0">Execute 命令执行</span>
+                  <span class="field-label" style="margin-bottom:0">{{ $t('backend.executeLabel') }} {{ $t('backend.executeSubLabel') }}</span>
                   <el-switch v-model="form.tools_config!.execute.enabled" size="small" />
                 </div>
                 <div class="field-row" v-if="form.tools_config!.execute.enabled">
@@ -172,7 +172,7 @@
               <button v-if="form.backendType === 'ssh'" class="test-btn" @click="handleTestConnection" :disabled="isTesting">
                 <el-icon v-if="isTesting" class="is-loading"><Loading /></el-icon>
                 <el-icon v-else><Connection /></el-icon>
-                <span>测试连接</span>
+                <span>{{ $t('backend.testConnection') }}</span>
               </button>
             </div>
 
@@ -198,7 +198,7 @@
               </button>
             </div>
             <div class="sheet-body">
-              <p class="key-hint">将以下公钥添加到目标服务器的 <code>~/.ssh/authorized_keys</code></p>
+              <p class="key-hint" v-html="$t('backend.publicKeyTip')"></p>
               <textarea v-model="systemPublicKey" class="native-textarea key-text" :rows="6" readonly></textarea>
             </div>
             <div class="sheet-footer">
@@ -214,6 +214,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { storeToRefs } from 'pinia';
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
 import { Plus, Key, Connection, Loading, Close, View, Hide } from '@element-plus/icons-vue';
@@ -224,6 +225,7 @@ import { getClientStatus } from '@/api/backendService';
 import type { BackendConfig, BackendCreate, BackendType, SshConfigData, ApiConfigData, LocalConfigData, ResourceConfigData, SshTestRequest } from '@/api/types/backendTypes';
 import { defaultToolsConfig } from '@/api/types/backendTypes';
 
+const { t } = useI18n();
 const backendStore = useBackendStore();
 const resourceStore = useResourceStore();
 const { backendList, isLoading, systemPublicKey } = storeToRefs(backendStore);
@@ -259,30 +261,30 @@ const form = reactive<BackendCreate>(defaultForm('resource'));
 
 const resourceFolderOptions = computed(() => resources.value.filter(r => r.itemType === 'resource' && r.resourceType === 'folder'));
 
-const typeLabel = (t: string) => ({ ssh: 'SSH', api: 'API', local: 'Local', resource: 'Resource' }[t] || t);
+const typeLabel = (type: string) => ({ ssh: 'SSH', api: 'API', local: 'Local', resource: 'Resource' }[type] || type);
 
 const NAME_UNSAFE_RE = /[\/\\\x00-\x1f\x7f]/;
 const RESERVED_NAMES = new Set(['skills', 'memories', 'state', 'root', 'tmp', 'temp', 'workspace', 'this_chat_tmp', '.mambo']);
 
 function validateName(_: any, value: string, cb: (e?: Error) => void) {
-  if (!value) return cb(new Error('请输入名称'));
-  if (NAME_UNSAFE_RE.test(value)) return cb(new Error('名称不能包含 / \\ 或控制字符'));
-  if (value === '.' || value === '..') return cb(new Error('名称不能为 "." 或 ".."'));
-  if (RESERVED_NAMES.has(value.toLowerCase())) return cb(new Error(`"${value}" 是系统保留名称`));
+  if (!value) return cb(new Error(t('backend.nameRequired')));
+  if (NAME_UNSAFE_RE.test(value)) return cb(new Error(t('backend.nameUnsafe')));
+  if (value === '.' || value === '..') return cb(new Error(t('backend.nameDot')));
+  if (RESERVED_NAMES.has(value.toLowerCase())) return cb(new Error(t('backend.nameReserved', { name: value })));
   cb();
 }
 
-const nameRules = [{ required: true, message: '请输入名称', trigger: 'blur' }, { validator: validateName, trigger: 'blur' }];
-const sshRules: FormRules = { name: nameRules, 'configData.hostname': [{ required: true, message: '请输入主机地址', trigger: 'blur' }], 'configData.username': [{ required: true, message: '请输入用户名', trigger: 'blur' }] };
-const apiRules: FormRules = { name: nameRules, 'configData.api_key': [{ required: true, message: '请输入 API Key', trigger: 'blur' }] };
-const localRules: FormRules = { name: nameRules };
-const resourceRules: FormRules = { name: nameRules, 'configData.resource_id': [{ required: true, message: '请选择资源文件夹', trigger: 'change' }] };
+const nameRules = computed(() => [{ required: true, message: t('backend.nameRequired'), trigger: 'blur' }, { validator: validateName, trigger: 'blur' }]);
+const sshRules = computed<FormRules>(() => ({ name: nameRules.value, 'configData.hostname': [{ required: true, message: t('backend.hostRequired'), trigger: 'blur' }], 'configData.username': [{ required: true, message: t('backend.usernameRequired'), trigger: 'blur' }] }));
+const apiRules = computed<FormRules>(() => ({ name: nameRules.value, 'configData.api_key': [{ required: true, message: t('backend.apiKeyRequired'), trigger: 'blur' }] }));
+const localRules = computed<FormRules>(() => ({ name: nameRules.value }));
+const resourceRules = computed<FormRules>(() => ({ name: nameRules.value, 'configData.resource_id': [{ required: true, message: t('backend.resourceIdRequired'), trigger: 'change' }] }));
 
 const currentRules = computed(() => {
-  if (form.backendType === 'ssh') return sshRules;
-  if (form.backendType === 'api') return apiRules;
-  if (form.backendType === 'resource') return resourceRules;
-  return localRules;
+  if (form.backendType === 'ssh') return sshRules.value;
+  if (form.backendType === 'api') return apiRules.value;
+  if (form.backendType === 'resource') return resourceRules.value;
+  return localRules.value;
 });
 
 // sync whitelist/blacklist proxies
@@ -336,13 +338,13 @@ const handleEdit = (row: BackendConfig) => {
 const handleDuplicate = async (id: string) => {
   try {
     await backendStore.duplicateBackendItem(id);
-    ElMessage.success('复制成功');
-  } catch { ElMessage.error('复制失败'); }
+    ElMessage.success(t('common.msg.duplicateSuccess'));
+  } catch { ElMessage.error(t('backend.duplicateFailed')); }
 };
 
 const handleDelete = async (id: string) => {
-  try { await backendStore.removeBackend(id); ElMessage.success('删除成功'); }
-  catch { ElMessage.error('删除失败'); }
+  try { await backendStore.removeBackend(id); ElMessage.success(t('common.msg.deleteSuccess')); }
+  catch { ElMessage.error(t('backend.deleteFailed')); }
 };
 
 const handleTestConnection = async () => {
@@ -356,8 +358,8 @@ const handleTestConnection = async () => {
           configData: { ...form.configData, password: form.configData.password || null }
         };
         const res = await backendStore.testConnection(testData);
-        ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? '连接成功' : '连接失败'));
-      } catch (e: any) { ElMessage.error(e.message || '测试连接发生异常'); }
+        ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? t('backend.connectionSuccess') : t('backend.connectionFailed')));
+      } catch (e: any) { ElMessage.error(e.message || t('backend.connectionError')); }
       finally { isTesting.value = false; }
     }
   });
@@ -380,13 +382,13 @@ const submitForm = async () => {
 
         if (isEdit.value && currentEditId.value) {
           await backendStore.updateExistingBackend(currentEditId.value, submitData);
-          ElMessage.success('更新成功');
+          ElMessage.success(t('common.msg.updateSuccess'));
         } else {
           await backendStore.createNewBackend(submitData);
-          ElMessage.success('创建成功');
+          ElMessage.success(t('common.msg.createSuccess'));
         }
         dialogVisible.value = false;
-      } catch { ElMessage.error(isEdit.value ? '更新失败' : '创建失败'); }
+      } catch { ElMessage.error(isEdit.value ? t('backend.updateFailed') : t('common.msg.createFailed')); }
       finally { isSaving.value = false; }
     }
   });
@@ -398,7 +400,7 @@ const handleShowPublicKey = async () => {
 };
 
 const copyPublicKey = async () => {
-  if (systemPublicKey.value) { await copyToClipboard(systemPublicKey.value); ElMessage.success('公钥已复制到剪贴板'); }
+  if (systemPublicKey.value) { await copyToClipboard(systemPublicKey.value); ElMessage.success(t('common.msg.copySuccess')); }
 };
 </script>
 

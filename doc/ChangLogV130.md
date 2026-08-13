@@ -16,8 +16,8 @@
 - 稳定性:悬空工具调用自动修补、多模态模型工具消息自动重排
 
 #### Mambo-Agents 具有更强的扩展性和安全性
-提供 SshBackend / LocalBackend / ResourceBackend/ ApiBackend / StoreBackend
-具有会话专属空间 /.mambo,避免污染工作区
+提供 SshBackend / LocalBackend / ResourceBackend/ ApiBackend 多样的操作环境
+具有会话专属虚拟空间 /.mambo,避免污染工作区
 工作区 挂载至 /workspace,并严格限制对 / 操作 避免模型幻觉触发危险操作
 
 
@@ -52,6 +52,5 @@
 - **多模态**:强化生成时图片显示,图片/音频回复展示更流畅
 - **Skills**:文件/GitHub 导入增强、批量导入、新增预览与保存
 - **工具调用展示**:增强工具气泡、子智能体执行面板(实时查看子智能体步骤)
-- **性能**:启动更快、Docker 部署优化、清理孤儿文件减少磁盘占用
 - **编码体验大幅优化** 当前 MamboChat 是一个合格的vite code 编码工具, 实践上起码比 CodeB*ddy 强
 - **角色扮演体验大幅优化** 当前 MamboAgent 支持多种设定读取能力,扮演skills以及远程/本地图片展示能力,同时支持外挂生图MCP

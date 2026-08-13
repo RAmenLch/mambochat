@@ -336,6 +336,50 @@ function hasGalAvatar(msg: Message): boolean {
   )
 }
 
+/** 根据当前视口内容更新 Gal_Avatar 显隐状态（无滚动事件时也需主动调用） */
+function updateGalAvatarState(): void {
+  const el = scrollbarRef.value?.wrapRef;
+  if (!el) return;
+
+  const containerRect = el.getBoundingClientRect();
+
+  if (galAvatarMap.value.size > 0) {
+    let bestUrl: string | null = null
+
+    for (const [msgId, url] of galAvatarMap.value) {
+      const dom = document.getElementById(`msg-${msgId}`)
+      if (!dom) continue
+      const rect = dom.getBoundingClientRect()
+
+      // 消息在滚动容器内（至少部分可见）→ 显示它的 Gal_Avatar
+      if (rect.bottom > containerRect.top && rect.top < containerRect.bottom) {
+        bestUrl = url
+        break // 优先第一个可见的（从前往后遍历，即最早的消息）
+      }
+    }
+
+    if (bestUrl) {
+      galAvatarImageUrl.value = bestUrl
+      galIsScrolledPast.value = false
+    } else {
+      galIsScrolledPast.value = true
+    }
+  } else {
+    galAvatarImageUrl.value = null
+    galIsScrolledPast.value = true
+  }
+}
+
+// Gal_Avatar 消息集合变化（增删 / 图片就绪）时主动重新检测，
+// 避免内容不足无滚动事件导致立绘不显示或残留
+watch(galAvatarMap, () => {
+  nextTick(() => updateGalAvatarState());
+});
+
+function onWindowResize() {
+  nextTick(() => updateGalAvatarState());
+}
+
 const toolDialogVisible = ref(false);
 const toolDialogMessageId = ref<string | null>(null);
 const toolDialogInitialId = ref<string | undefined>(undefined);
@@ -357,6 +401,12 @@ onMounted(() => {
   if (backendStore.backendList.length === 0) {
     backendStore.fetchBackends();
   }
+  nextTick(() => updateGalAvatarState());
+  window.addEventListener('resize', onWindowResize);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onWindowResize);
 });
 
 // 仅当当前会话 Agent 挂载了 ResourceBackend 时才启用资源补全，
@@ -680,32 +730,7 @@ const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
     currentVisibleMessageId.value = activeUserId;
   }
 
-  // Gal_Avatar：找到当前视口中最合适的 Gal_Avatar 消息
-  if (galAvatarMap.value.size > 0) {
-    let bestUrl: string | null = null
-
-    for (const [msgId, url] of galAvatarMap.value) {
-      const dom = document.getElementById(`msg-${msgId}`)
-      if (!dom) continue
-      const rect = dom.getBoundingClientRect()
-
-      // 消息在滚动容器内（至少部分可见）→ 显示它的 Gal_Avatar
-      if (rect.bottom > containerRect.top && rect.top < containerRect.bottom) {
-        bestUrl = url
-        break // 优先第一个可见的（从前往后遍历，即最早的消息）
-      }
-    }
-
-    if (bestUrl) {
-      galAvatarImageUrl.value = bestUrl
-      galIsScrolledPast.value = false
-    } else {
-      galIsScrolledPast.value = true
-    }
-  } else {
-    galAvatarImageUrl.value = null
-    galIsScrolledPast.value = true
-  }
+  updateGalAvatarState();
 };
 
 const scrollToBottom = (force = false) => {
@@ -853,6 +878,8 @@ watch(
 );
 
 watch(currentChatId, (newId) => {
+  galAvatarImageUrl.value = null;
+  galIsScrolledPast.value = true;
   if (newId) {
     userHasScrolledUp.value = false;
     previousPreviewHeight.value = 0;
@@ -868,6 +895,7 @@ watch(currentChatId, (newId) => {
         }
         nextTick(() => {
             chatInputBoxRef.value?.focus();
+            updateGalAvatarState();
         });
         stopWatch();
       }

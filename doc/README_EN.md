@@ -6,7 +6,7 @@
 ![FastAPI](https://img.shields.io/badge/backend-FastAPI%20%2B%20Python3.11-009688)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue?logo=docker)](../docker-compose.yml)
 
-**MamboChat** is a web-based chat platform that integrates multiple service provider APIs, supporting Linux/Windows deployment with seamless access via desktop and mobile browsers. Data is stored on the server, enabling synchronized configuration and conversation history across all devices, while also featuring knowledge base and MCP integration capabilities.
+**MamboChat** is an open-source web harness platform supporting Linux/Windows deployment. It integrates multiple service provider APIs for synchronized access from desktop and mobile browsers, stores data on the server so that configuration and conversation history are shared across devices, while also featuring vite coding and role-play capabilities.
 
 [中文文档](../README.md) | [English Documentation](./README_EN.md)
 
@@ -17,23 +17,34 @@
 *   **🤖 Multi-Model Aggregation**
     *   Support for multiple providers including OpenAI, Google, DeepSeek, etc. See [Verification Records](./CheckRecord_EN.md) for model compatibility.
     *   Custom API Host and proxy configuration.
+    *   Automatic model capability detection (context length, vision, thinking mode) for hassle-free integration of Chinese models.
     *   Unified management for chat and embedding models.
     *   Model favorites and grouping.
+*   **🤖 Mambo Agent**
+    *   **Complex Task Execution**: Capable of reading/writing files, executing commands, nested sub-agent invocation, and performing remote server operations.
+    *   **Real-time File Preview**: Files and images are displayed in real time as the AI reads them, with GalGame mode for image display.
+    *   **AI Safety Pre-review**: Optionally designate a review model — only risky operations require manual confirmation. Review conditions are customizable.
+    *   **Resource Version Snapshots**: Automatic versioning on file writes/edits/deletes, with rollback at any time.
+    *   **Long-term Memory**: Mount a dedicated memory resource so the AI remembers long-term preferences and writes back newly learned content.
+    *   **Auto Conversation Compression**: Chain summaries compress conversation history without losing in-progress plans.
+    *   **Smart MCP Integration**: Tools are exposed directly when few; automatically switches to on-demand query mode when many.
+    *   Agents can be equipped with resources, MCP tools, Skill packs, and collaborate with SSH / Local / Resource / API Backends.
+*   **🔧 LLM Runtime Environments (Backend)**
+    *   **SSH Backend**: Connect to remote Linux servers via SSH/SFTP, enabling the Agent to directly operate remote files and execute commands.
+    *   **API Client/Backend**: Run a Windows client locally that connects back to the server via WebSocket, allowing a public Agent to operate your local machine from behind a NAT network.
+    *   **Resource Backend**: Provides a virtual file system backed by the resource management page — intuitive and absolutely safe.
+    *   **Local Backend**: Directly operate the target file directory where the deployment lives, with command execution and the built-in Mambo CLI.
 *   **📚 Local Knowledge Base (RAG)**
     *   Upload documents in Markdown, TXT, PDF, Word, and other formats.
     *   Built-in file chunking, vector embedding, and semantic search (BM25 + vector retrieval + RRF).
     *   Dynamically mount knowledge bases during conversations. Multiple knowledge bases can be mounted simultaneously.
 *   **🔌 MCP (Model Context Protocol) Support**
-    *   Native implementation of MCP to extend AI capabilities.
     *   Supports custom MCP servers (Stdio/SSE connections).
     *   Supports MCP tool review mode (Human-in-the-Loop), allowing manual confirmation before tool execution.
-*   **🤖 Intelligent Agents**
-    *   **Conversational Agent (ReAct)**: Reasoning through tool calls, with support for knowledge bases, MCP tools, and Skill packs.
-    *   **Advanced Agent (Deep)**: Based on the [deepagents](https://github.com/langchain-ai/deepagents) project, capable of reading/writing files, executing commands, nested sub-agent invocation, and performing remote server operations.
-    *   Agents can be equipped with resources, MCP tools, Skill packs, and can collaborate with remote Backends.
-*   **🔧 Remote Backend**
-    *   **SSH Backend**: Connect to remote Linux servers via SSH/SFTP, enabling the Agent to directly operate remote files and execute commands.
-    *   **API Client**: Run a client locally that connects to the server via WebSocket — no public IP required to expose your local files to the Agent.
+    *   Automatically switches tool exposure based on tool count thresholds (direct exposure when few, on-demand query when many).
+*   **🛠️ Resource & Prompt Management**
+    *   Unified management for System Prompts, Message Templates, and Skill packs.
+    *   Version control and rollback for resources.
 *   **📦 Skill Packs**
     *   Create and import Skills to extend Agent capabilities.
     *   Import from local files, ZIP archives, or GitHub repositories.
@@ -44,10 +55,13 @@
     *   **Editor Mode**: Integrated Monaco Editor.
     *   **Message Branching**: Edit and regenerate messages while preserving the full edit history — conversations are never lost.
     *   **Conversation Copying**: Duplicate conversations (with optional truncation) to explore new directions from existing dialogues.
+    *   **Session Import/Export**: Export conversations as JSON for backup, and re-import them anytime.
     *   **Context Compression**: Compresses conversation history to save tokens.
-*   **🛠️ Resource & Prompt Management**
-    *   Unified management for System Prompts, Message Templates, and Skill packs.
-    *   Version control and rollback for resources.
+    *   **Web Search**: Toggle web search per session ("read-only" and "search + read" modes); network requests can go through a proxy.
+    *   **Tab Completion**: Tab completion powered by the Resource Backend.
+    *   **Message Log Viewer**: Intuitive request/response log viewer for a deeper understanding of Agent logic.
+*   **⌨️ mambo CLI**
+    *   The `mambo` CLI enables the LLM to manage providers/models, resources, Skills, MCP, and Agent configuration.
 *   **⚙️ Global Personalization**
     *   Custom avatars for users and AI.
     *   Global proxy configuration.
@@ -119,9 +133,6 @@ If you need to do secondary development, you can start the frontend and backend 
 2.  Install dependencies:
     ```bash
     uv pip install -r pyproject.toml
-    # Install MCP Server dependencies
-    uv pip install -r ../MCP_SERVER/ddgs/pyproject.toml
-    uv pip install -r ../MCP_SERVER/knowledge_base/pyproject.toml
     ```
 3.  Set environment variables and start:
     ```bash
