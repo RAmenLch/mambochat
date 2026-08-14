@@ -13,6 +13,7 @@ from backend.schemas import kb as kb_schemas
 from backend.schemas.enums import ResourceType, MoveAction, ResourceItemType, FileManagementType
 from backend.services.chat_service import extract_context_snippet
 from backend.services.kb_service import KnowledgeBaseService
+from backend.exceptions import AppHTTPException
 
 logger = logging.getLogger(__name__)
 
@@ -190,8 +191,9 @@ async def move_resources(db: AsyncSession, move_request: schemas.ResourceMoveReq
             "移动资源失败: item_ids=%s, reference_id=%s, action=%s",
             move_request.item_ids, move_request.reference_id, move_request.action
         )
-        raise HTTPException(
+        raise AppHTTPException(
             status_code=500,
+            error_code="RESOURCE_MOVE_FAILED",
             detail=f"移动操作失败: item_ids={move_request.item_ids}"
         )
 

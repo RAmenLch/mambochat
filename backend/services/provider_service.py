@@ -39,24 +39,27 @@ async def test_proxy_connection(proxy_url: str, test_url: str) -> schemas.Connec
         async with httpx.AsyncClient(proxy=proxy_url, timeout=15) as client:
             response = await client.get(test_url, follow_redirects=True)
             response.raise_for_status()
-        return schemas.ConnectionTestResponse(status="success", message="代理连接成功！")
+        return schemas.ConnectionTestResponse(status="success", message="代理连接成功！", code="CONNECTION_OK")
     except httpx.HTTPStatusError as e:
         return schemas.ConnectionTestResponse(
             status="error",
+            code="CONNECTION_PROXY_ERROR",
             message=f"代理连接失败: 目标服务器返回错误码 {e.response.status_code}。"
         )
     except httpx.ProxyError as e:
         return schemas.ConnectionTestResponse(
             status="error",
+            code="CONNECTION_PROXY_ERROR",
             message=f"代理服务器错误: {e.__class__.__name__}。请检查代理地址和端口是否正确，以及代理服务是否正在运行。"
         )
     except httpx.RequestError as e:
         return schemas.ConnectionTestResponse(
             status="error",
+            code="CONNECTION_REQUEST_ERROR",
             message=f"请求失败: 无法通过代理访问目标地址。请检查网络和目标地址。 ({type(e).__name__})"
         )
     except Exception as e:
-        return schemas.ConnectionTestResponse(status="error", message=f"发生未知错误: {e}")
+        return schemas.ConnectionTestResponse(status="error", message=f"发生未知错误: {e}", code="CONNECTION_UNKNOWN")
 
 
 async def test_connection_to_provider(
@@ -75,10 +78,11 @@ async def test_connection_to_provider(
             func1 = fetch_models_from_provider
 
         await func1(db, api_host, api_key, use_proxy)
-        return schemas.ConnectionTestResponse(status="success", message="连接成功！")
+        return schemas.ConnectionTestResponse(status="success", message="连接成功！", code="CONNECTION_OK")
     except json.JSONDecodeError:
         return schemas.ConnectionTestResponse(
             status="error",
+            code="CONNECTION_INVALID_JSON",
             message="连接失败: 服务器返回的不是有效的JSON格式。请确认 API Host 是 API 的基础地址 (例如 https://api.openai.com/v1)，而不是一个网页地址。"
         )
     except httpx.HTTPStatusError as e:
@@ -88,15 +92,16 @@ async def test_connection_to_provider(
             error_message += " API Key 无效或权限不足，请检查您的 API Key。"
         elif status_code == 404:
             error_message += " 无法找到模型接口。请确认 API Host 是正确的 API 基础地址。"
-        return schemas.ConnectionTestResponse(status="error", message=error_message)
+        return schemas.ConnectionTestResponse(status="error", message=error_message, code="CONNECTION_HTTP_ERROR")
     except httpx.RequestError as e:
         return schemas.ConnectionTestResponse(
             status="error",
+            code="CONNECTION_REQUEST_ERROR",
             message=f"连接失败: 无法访问 API Host。请检查网络连接或地址拼写是否正确。({type(e).__name__})"
         )
     except Exception as e:
         print(f"Unhandled exception during connection test: {e}")
-        return schemas.ConnectionTestResponse(status="error", message=f"发生未知错误。")
+        return schemas.ConnectionTestResponse(status="error", message=f"发生未知错误。", code="CONNECTION_UNKNOWN")
 
 
 def _extract_host_from_url(url: str) -> str:

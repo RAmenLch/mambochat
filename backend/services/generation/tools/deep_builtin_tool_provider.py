@@ -63,7 +63,8 @@ class DeepAgentBuiltinToolProvider(BaseToolProvider):
             tool_call_id: str,
             name: str,
             arguments: Dict[str, Any],
-            tool_def: Optional[BaseTool] = None
+            tool_def: Optional[BaseTool] = None,
+            run_uuid: Optional[str] = None
     ) -> AsyncGenerator[BaseInstruction, None]:
 
         # 提取 Schema (由于是内置工具，tool_def 可能为空，前端组件会自动降级渲染 arguments)
@@ -74,7 +75,8 @@ class DeepAgentBuiltinToolProvider(BaseToolProvider):
             tool_call_id=tool_call_id,
             name=name,
             arguments=arguments,
-            input_schema=input_schema
+            input_schema=input_schema,
+            run_uuid=run_uuid,
         )
 
         # 缓存状态，建立 ID 映射

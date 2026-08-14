@@ -15,6 +15,7 @@ from fastapi import HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend import schemas
+from backend.exceptions import AppHTTPException
 from backend.schemas.enums import ResourceItemType, ResourceType, FileManagementType
 from backend.crud import resource_crud, setting_crud
 from backend.services.file_service import FileService
@@ -162,8 +163,9 @@ class SkillImportService:
         if match:
             return match.group(1), match.group(2).removesuffix(".git")
 
-        raise HTTPException(
+        raise AppHTTPException(
             status_code=400,
+            error_code="SKILL_IMPORT_UNRECOGNIZED_GITHUB",
             detail="无法识别的 GitHub 来源，支持：仓库 URL、owner/repo、npx skills add owner/repo"
         )
 
@@ -250,7 +252,7 @@ class SkillImportService:
             *errors,
             "建议：检查网络连接，或在设置中开启代理后重试。",
         ])
-        raise HTTPException(status_code=400, detail=detail)
+        raise AppHTTPException(status_code=400, error_code="SKILL_IMPORT_DOWNLOAD_FAILED", detail=detail)
 
     def _cache_zip_path(self, owner: str, repo: str) -> str:
         return os.path.join(SKILL_CACHE_DIR, f"{owner}_{repo}.zip")
@@ -377,8 +379,9 @@ class SkillImportService:
                 conflict_names.append(safe_name)
 
         if conflict_names and on_conflict == "error":
-            raise HTTPException(
+            raise AppHTTPException(
                 status_code=409,
+                error_code="SKILL_IMPORT_DUPLICATE_NAME",
                 detail=f"检测到同名 Skill: {', '.join(conflict_names)}。请选择覆盖或跳过。"
             )
 
@@ -538,8 +541,9 @@ class SkillImportService:
                 break
             content += chunk
             if len(content) > MAX_ZIP_FILE_SIZE:
-                raise HTTPException(
+                raise AppHTTPException(
                     status_code=413,
+                    error_code="SKILL_IMPORT_FILE_TOO_LARGE",
                     detail=f"文件过大（{len(content) // 1024 // 1024} MB），上限为 {MAX_ZIP_FILE_SIZE // 1024 // 1024} MB。"
                 )
         return content
@@ -551,24 +555,27 @@ class SkillImportService:
 
             # 检查文件数量
             if len(infos) > MAX_ZIP_FILE_COUNT:
-                raise HTTPException(
+                raise AppHTTPException(
                     status_code=413,
+                    error_code="SKILL_IMPORT_TOO_MANY_ENTRIES",
                     detail=f"ZIP 文件包含过多条目（{len(infos)}），上限为 {MAX_ZIP_FILE_COUNT}。"
                 )
 
             # 检查总解压大小
             total_uncompressed = sum(info.file_size for info in infos if not info.is_dir())
             if total_uncompressed > MAX_TOTAL_UNCOMPRESSED_SIZE:
-                raise HTTPException(
+                raise AppHTTPException(
                     status_code=413,
+                    error_code="SKILL_IMPORT_UNCOMPRESSED_TOO_LARGE",
                     detail=f"ZIP 解压后总大小过大（{total_uncompressed // 1024 // 1024} MB），上限为 {MAX_TOTAL_UNCOMPRESSED_SIZE // 1024 // 1024} MB。"
                 )
 
             # 压缩比检测：高膨胀比是 ZIP 炸弹的典型特征
             zip_size = os.path.getsize(zip_path)
             if zip_size > 0 and total_uncompressed / zip_size > MAX_ZIP_COMPRESSION_RATIO:
-                raise HTTPException(
+                raise AppHTTPException(
                     status_code=413,
+                    error_code="SKILL_IMPORT_COMPRESSION_RATIO_ABNORMAL",
                     detail=f"ZIP 压缩比异常（{total_uncompressed // zip_size}:1），疑似 ZIP 炸弹，已拒绝解压。"
                            f"可通过环境变量 SKILL_MAX_COMPRESSION_RATIO 调整。"
                 )
@@ -576,16 +583,18 @@ class SkillImportService:
             # 检查单个文件大小与路径安全
             for info in infos:
                 if not info.is_dir() and info.file_size > MAX_ZIP_SINGLE_FILE_SIZE:
-                    raise HTTPException(
+                    raise AppHTTPException(
                         status_code=413,
+                        error_code="SKILL_IMPORT_SINGLE_FILE_TOO_LARGE",
                         detail=f"ZIP 内单个文件过大: {info.filename}（{info.file_size // 1024 // 1024} MB），"
                                f"上限为 {MAX_ZIP_SINGLE_FILE_SIZE // 1024 // 1024} MB。"
                     )
                 normalized = info.filename.replace("\\", "/")
                 if normalized.startswith("/") or re.match(r"^[a-zA-Z]:/", normalized) \
                         or ".." in normalized.split("/"):
-                    raise HTTPException(
+                    raise AppHTTPException(
                         status_code=400,
+                        error_code="SKILL_IMPORT_UNSAFE_PATH",
                         detail=f"ZIP 包含不安全路径: {info.filename}"
                     )
 

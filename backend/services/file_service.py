@@ -10,6 +10,7 @@ from sqlalchemy.future import select
 from backend.models.file_model import File
 from backend.models.base_model import generate_uuid
 from backend.crud import file_crud
+from backend.exceptions import AppHTTPException
 from backend.services.storage_service import storage_service, LocalStorageService
 from backend.utils.file_utils import FileUtils
 from backend import schemas
@@ -51,14 +52,15 @@ class FileService:
 
         mime_type = FileUtils.correct_mime_type(file.filename, file.content_type, sample)
         if not FileUtils.is_allowed_mime_type(mime_type):
-            raise HTTPException(status_code=400, detail=f"不支持的文件类型: {mime_type}。")
+            raise AppHTTPException(status_code=400, error_code="FILE_UNSUPPORTED_TYPE", detail=f"不支持的文件类型: {mime_type}。")
 
         data = await file.read()
 
         # 二次大小校验：基于实际读取的字节数，而非客户端 Content-Length
         if max_size is not None and len(data) > max_size:
-            raise HTTPException(
+            raise AppHTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                error_code="FILE_TOO_LARGE",
                 detail=f"文件过大。最大允许 {max_size // 1024 // 1024} MB。"
             )
 
@@ -86,7 +88,7 @@ class FileService:
             try:
                 storage_path = await storage_service.save_from_bytes(data, file.filename, sub_path)
             except Exception as e:
-                raise HTTPException(status_code=500, detail=f"文件存储失败: {e}")
+                raise AppHTTPException(status_code=500, error_code="FILE_STORE_FAILED", detail=f"文件存储失败: {e}")
 
             db_file = File(
                 id=file_id,
@@ -112,7 +114,7 @@ class FileService:
         final_mime_type = FileUtils.correct_mime_type(filename, mime_type, sample)
 
         if not FileUtils.is_allowed_mime_type(final_mime_type):
-            raise HTTPException(status_code=400, detail=f"不支持的文件类型: {final_mime_type}。")
+            raise AppHTTPException(status_code=400, error_code="FILE_UNSUPPORTED_TYPE", detail=f"不支持的文件类型: {final_mime_type}。")
 
         final_id = file_id or generate_uuid()
         file_size = len(data)
@@ -138,7 +140,7 @@ class FileService:
             try:
                 storage_path = await storage_service.save_from_bytes(data, filename, sub_path)
             except Exception as e:
-                raise HTTPException(status_code=500, detail=f"文件存储失败: {e}")
+                raise AppHTTPException(status_code=500, error_code="FILE_STORE_FAILED", detail=f"文件存储失败: {e}")
 
             db_file = File(
                 id=final_id,
@@ -201,7 +203,7 @@ class FileService:
             await self.db.rollback()
             if physical_path_to_rollback:
                 await storage_service.delete(physical_path_to_rollback)
-            raise HTTPException(status_code=500, detail=f"数据库保存失败: {e}")
+            raise AppHTTPException(status_code=500, error_code="FILE_DB_SAVE_FAILED", detail=f"数据库保存失败: {e}")
 
     async def get_file_content(self, file_id: str) -> bytes:
         file = await self.get_file(file_id)
@@ -269,11 +271,11 @@ class FileService:
             raise HTTPException(status_code=404, detail="File not found")
 
         if file.storage_type == 'local':
-            raise HTTPException(status_code=400, detail="本地文件不支持直接编辑")
+            raise AppHTTPException(status_code=400, error_code="FILE_LOCAL_EDIT_NOT_SUPPORTED", detail="本地文件不支持直接编辑")
 
         content_bytes = new_content.encode('utf-8')
         if len(content_bytes) > 262144:
-            raise HTTPException(status_code=400, detail="编辑后的文本超出大小限制")
+            raise AppHTTPException(status_code=400, error_code="FILE_EDIT_TOO_LARGE", detail="编辑后的文本超出大小限制")
 
         file.content = new_content
         file.size = len(content_bytes)

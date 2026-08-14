@@ -62,7 +62,7 @@ class HitlHandler(BaseStreamHandler):
                             if provider.matches_tool_name("ask_user"):
                                 async for inst in provider.create_call_instruction(
                                     tool_call_id, "ask_user", pending_call.get("args") or {},
-                                    context.tool_map.get("ask_user")
+                                    context.tool_map.get("ask_user"), context.lc_run_uuid
                                 ):
                                     yield inst
                                 break
@@ -203,7 +203,7 @@ class ToolExecutionHandler(BaseStreamHandler):
                 name = tc.get("name")
                 for provider in context.providers:
                     if provider.matches_tool_name(name):
-                        async for inst in provider.create_call_instruction(tc.get("id"), name, tc.get("args") or {}, context.tool_map.get(name)):
+                        async for inst in provider.create_call_instruction(tc.get("id"), name, tc.get("args") or {}, context.tool_map.get(name), context.lc_run_uuid):
                             yield inst
                         break
 

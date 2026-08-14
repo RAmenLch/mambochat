@@ -112,7 +112,8 @@ class MCPToolProvider(BaseToolProvider):
             tool_call_id: str,
             name: str,
             arguments: Dict[str, Any],
-            tool_def: Optional[BaseTool] = None
+            tool_def: Optional[BaseTool] = None,
+            run_uuid: Optional[str] = None
     ) -> AsyncGenerator[BaseInstruction, None]:
         # 1. 提取工具定义中的 JSON Schema
         input_schema = tool_def.args if tool_def else None
@@ -122,7 +123,8 @@ class MCPToolProvider(BaseToolProvider):
             tool_call_id=tool_call_id,
             name=name,
             arguments=arguments,
-            input_schema=input_schema  # 注入 Schema
+            input_schema=input_schema,  # 注入 Schema
+            run_uuid=run_uuid,
         )
 
         # 3. 缓存状态，建立 ID 映射

@@ -234,7 +234,8 @@ class KBToolProvider(BaseToolProvider):
             tool_call_id: str,
             name: str,
             arguments: Dict[str, Any],
-            tool_def: Optional[BaseTool] = None  # 适配新签名
+            tool_def: Optional[BaseTool] = None,  # 适配新签名
+            run_uuid: Optional[str] = None
     ) -> AsyncGenerator[BaseInstruction, None]:
         # 1. 提取原生工具定义中的 Schema
         input_schema = tool_def.args if tool_def else None
@@ -244,7 +245,8 @@ class KBToolProvider(BaseToolProvider):
             tool_call_id=tool_call_id,
             name=name,
             arguments=arguments,
-            input_schema=input_schema  # 注入 Schema
+            input_schema=input_schema,  # 注入 Schema
+            run_uuid=run_uuid,
         )
 
         # 3. 缓存状态

@@ -42,7 +42,8 @@ class BaseToolProvider(ABC):
         tool_call_id: str,
         name: str,
         arguments: Dict[str, Any],
-        tool_def: Optional[BaseTool] = None
+        tool_def: Optional[BaseTool] = None,
+        run_uuid: Optional[str] = None
     ) -> AsyncGenerator[BaseInstruction, None]:
         """
         当 LLM 发起工具调用时，生成对应的 UI 创建指令。

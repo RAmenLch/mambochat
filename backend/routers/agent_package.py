@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.crud import agent_crud
 from backend.database import get_db
+from backend.exceptions import AppHTTPException
 from backend.schemas.agent_package import (
     CleanupReport,
     ImportPreviewResponse,
@@ -61,7 +62,7 @@ async def import_agent(
     if target_id:
         folder = await agent_crud.get_agent(db, target_id)
         if folder is None or folder.itemType != AgentItemType.FOLDER.value:
-            raise HTTPException(status_code=400, detail="目标文件夹不存在或不是文件夹")
+            raise AppHTTPException(status_code=400, error_code="AGENT_PACKAGE_TARGET_NOT_FOLDER", detail="目标文件夹不存在或不是文件夹")
 
     # nameOverrides 解析
     overrides: Optional[dict] = None
@@ -71,7 +72,7 @@ async def import_agent(
             if not isinstance(overrides, dict):
                 raise ValueError
         except Exception:
-            raise HTTPException(status_code=400, detail="nameOverrides 必须是 JSON 对象")
+            raise AppHTTPException(status_code=400, error_code="AGENT_PACKAGE_NAME_OVERRIDES_INVALID", detail="nameOverrides 必须是 JSON 对象")
 
     raw = await file.read()
 
@@ -84,8 +85,9 @@ async def import_agent(
     # §7.1 步 4：引用完整性检查 + 名称校验 + 冲突预扫描
     errors = importer.check_references(pkg)
     if errors:
-        raise HTTPException(
+        raise AppHTTPException(
             status_code=400,
+            error_code="AGENT_PACKAGE_INTEGRITY_FAILED",
             detail="引用完整性检查失败: " + "; ".join(errors[:20]),
         )
     importer.validate_all_names(pkg)

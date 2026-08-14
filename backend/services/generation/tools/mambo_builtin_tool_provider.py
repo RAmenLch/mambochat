@@ -80,6 +80,7 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
         name: str,
         arguments: Dict[str, Any],
         tool_def: Optional[BaseTool] = None,
+        run_uuid: Optional[str] = None,
     ) -> AsyncGenerator[BaseInstruction, None]:
 
         input_schema = tool_def.args if tool_def else None
@@ -89,6 +90,7 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
             name=name,
             arguments=arguments,
             input_schema=input_schema,
+            run_uuid=run_uuid,
         )
 
         self._tool_info_cache[tool_call_id] = tool_content

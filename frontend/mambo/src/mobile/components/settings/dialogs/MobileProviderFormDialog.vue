@@ -99,6 +99,7 @@ import { useSystemConfigStore } from '@/stores/systemConfigStore';
 import { storeToRefs } from 'pinia';
 import type { AIProviderWithModels, AIProviderUpdate, ProviderWorkerType, ProviderWithModelsCreate } from '@/api/types';
 import { isAxiosError } from 'axios';
+import { localizeProviderTestMessage } from '@/utils/providerTestMessage';
 
 const API_KEY_PLACEHOLDER = '********';
 
@@ -194,7 +195,9 @@ const handleTestConnection = async () => {
       if (!form.apiKey) { ElMessage.warning(t('provider.form.testWarningKey')); isTesting.value = false; return; }
       res = await providerStore.testConnection({ apiHost: form.apiHost, apiKey: form.apiKey }, form.use_proxy);
     }
-    const msg = res.status === 'success' ? t('provider.form.testSuccess') : (res.message || t('provider.form.testFailed'));
+    const msg = res.status === 'success'
+      ? t('provider.form.testSuccess')
+      : (localizeProviderTestMessage(res.code) || res.message || t('provider.form.testFailed'));
     ElMessage({ type: res.status === 'success' ? 'success' : 'error', message: msg });
   } catch (error: unknown) {
     if (isAxiosError(error)) ElMessage.error(error?.response?.data?.detail || t('provider.form.testFailed'));

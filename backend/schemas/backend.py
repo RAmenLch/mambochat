@@ -137,6 +137,7 @@ class SSHTestRequest(BaseModel):
 class SSHTestResponse(BaseModel):
     success: bool = Field(..., description="测试是否成功")
     message: str = Field(..., description="成功或失败的详细信息")
+    code: Optional[str] = Field(None, description="稳定的结果码，供前端 i18n 映射")
 
 
 class SSHLsEntry(BaseModel):

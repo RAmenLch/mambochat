@@ -79,9 +79,9 @@ async def _test_ssh_connection(config_dict: Dict[str, Any]) -> SSHTestResponse:
         backend._connect()
         backend.close()
 
-        return SSHTestResponse(success=True, message="连接成功")
+        return SSHTestResponse(success=True, message="连接成功", code="BACKEND_CONNECTION_OK")
     except Exception as e:
-        return SSHTestResponse(success=False, message=f"连接失败: {str(e)}")
+        return SSHTestResponse(success=False, message=f"连接失败: {str(e)}", code="BACKEND_CONNECTION_FAILED")
 
 
 @router.post("/ssh/test", response_model=SSHTestResponse, summary="测试 SSH 连接")

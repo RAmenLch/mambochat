@@ -310,6 +310,26 @@ class MessageContextBuilder:
 
         return payload
 
+    @staticmethod
+    def _extract_run_uuid(sub: SubMessageSchema) -> Optional[str]:
+        """解析子消息所属的模型调用轮次（run_uuid）。
+
+        - MCP_TOOL：从 content 的 run_uuid 字段取（落库时由 create_call_instruction 写入）；
+        - NORMAL / REASONING：从 id 派生（<run_uuid>-N / <run_uuid>-R）。
+
+        旧数据（未记录 run_uuid）返回 None，由调用方走原有间隔切分逻辑兜底。
+        """
+        if sub.type == schemas_enums.SubMessageType.MCP_TOOL.value:
+            try:
+                content_obj = McpToolContent.from_json_string(sub.content)
+                return content_obj.run_uuid
+            except (ValueError, TypeError):
+                return None
+        sid = sub.id or ""
+        if len(sid) > 2 and (sid.endswith("-N") or sid.endswith("-R")):
+            return sid[:-2]
+        return None
+
     async def _convert_assistant_to_rounds(self, msg: MessageSchema, recency_rank: int) -> List[Dict[str, Any]]:
         # 按 createdAt 排序，保证时间顺序
         sorted_subs = sorted(
@@ -318,13 +338,27 @@ class MessageContextBuilder:
         )
 
         rounds: List[Dict[str, List]] = []
-        current_round: Dict[str, List] = {"content_parts": [], "tool_calls": [], "tool_results": [], "last_sub_id": None}
+        current_round: Dict[str, List] = {"content_parts": [], "tool_calls": [], "tool_results": [], "last_sub_id": None, "run_uuid": None}
         seen_tool_in_round = False
 
         for sub in sorted_subs:
             is_mcp_tool = (sub.type == schemas_enums.SubMessageType.MCP_TOOL.value)
 
             if is_mcp_tool:
+                sub_run_uuid = self._extract_run_uuid(sub)
+                # run_uuid 变化（顺序调用而非并行）→ 先闭合当前 round，精准还原独立 AI 轮次。
+                # 仅当新 MCP_TOOL 与当前 round 归属不同轮次时切分；run_uuid 缺失（旧数据）走原有逻辑。
+                if (
+                    seen_tool_in_round
+                    and sub_run_uuid
+                    and current_round.get("run_uuid")
+                    and sub_run_uuid != current_round["run_uuid"]
+                ):
+                    if current_round["content_parts"] or current_round["tool_calls"]:
+                        rounds.append(current_round)
+                    current_round = {"content_parts": [], "tool_calls": [], "tool_results": [], "last_sub_id": None, "run_uuid": None}
+                    seen_tool_in_round = False
+
                 seen_tool_in_round = True
                 if self._should_include_sub_message(sub, recency_rank):
                     try:
@@ -335,13 +369,15 @@ class MessageContextBuilder:
                             result_msg["id"] = sub.id
                             current_round["tool_results"].append(result_msg)
                         current_round["last_sub_id"] = sub.id
+                        if not current_round["run_uuid"] and sub_run_uuid:
+                            current_round["run_uuid"] = sub_run_uuid
                     except (ValueError, TypeError):
                         continue
             else:
                 if seen_tool_in_round:
                     if current_round["content_parts"] or current_round["tool_calls"]:
                         rounds.append(current_round)
-                    current_round = {"content_parts": [], "tool_calls": [], "tool_results": [], "last_sub_id": None}
+                    current_round = {"content_parts": [], "tool_calls": [], "tool_results": [], "last_sub_id": None, "run_uuid": None}
                     seen_tool_in_round = False
 
                 if self._should_include_sub_message(sub, recency_rank):

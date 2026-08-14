@@ -220,7 +220,8 @@ class AskUserToolProvider(BaseToolProvider):
             tool_call_id: str,
             name: str,
             arguments: Dict[str, Any],
-            tool_def: Optional[BaseTool] = None
+            tool_def: Optional[BaseTool] = None,
+            run_uuid: Optional[str] = None
     ) -> AsyncGenerator[BaseInstruction, None]:
         """
         创建 McpTool 类型的子消息，展示 ask_user 工具调用。
@@ -237,6 +238,7 @@ class AskUserToolProvider(BaseToolProvider):
             name=name,
             arguments=json.dumps(arguments, ensure_ascii=False) if isinstance(arguments, dict) else str(arguments or ""),
             input_schema=input_schema,
+            run_uuid=run_uuid,
         )
 
         self._tool_info_cache[tool_call_id] = content_obj

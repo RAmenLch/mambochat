@@ -125,3 +125,4 @@ class ConnectionTestResponse(BaseModel):
     """连接测试的响应体"""
     status: str
     message: str
+    code: Optional[str] = None

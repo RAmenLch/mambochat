@@ -1,7 +1,7 @@
-"""v_1_2_0_12_mcp_server_extend
+"""v_130_1_mcp_server_extend
 
 Revision ID: b3c4d5e6f7a8
-Revises: a2b3c4d5e6f7
+Revises: b2f1e4d6a8c0
 Create Date: 2026-07-10 12:00:00.000000
 
 """

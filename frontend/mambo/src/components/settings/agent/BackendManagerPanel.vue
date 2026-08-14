@@ -1222,9 +1222,9 @@ const handleTestConnection = async () => {
         };
         const res = await backendStore.testConnection(testData);
         if (res.success) {
-          ElMessage.success(res.message || t('backend.connectionSuccess'));
+          ElMessage.success(t('backend.connectionSuccess'));
         } else {
-          ElMessage.error(res.message || t('backend.connectionFailed'));
+          ElMessage.error(t('backend.connectionFailed'));
         }
       } catch (error: any) {
         ElMessage.error(error.message || t('backend.connectionError'));

@@ -21,6 +21,8 @@ class McpToolContent(BaseModel):
     # 执行结果，None 表示尚未执行
     result: Optional[str] = None
     is_error: bool = False
+    # 所属模型调用轮次（流式 run_id 去掉 "lc_run--" 前缀），用于跨轮次重建时精确还原工具调用归属
+    run_uuid: Optional[str] = None
 
     @property
     def is_executed(self) -> bool:

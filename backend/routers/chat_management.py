@@ -18,6 +18,7 @@ from backend.schemas.chat_export import ChatExportPackage, ImportReport
 from backend import schemas
 from backend.models import chat_model
 from backend.database import get_db
+from backend.exceptions import AppHTTPException
 from backend.routers.settings import get_global_settings
 from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 from backend.schemas.enums import ResourceItemType, ResourceType
@@ -433,11 +434,11 @@ async def import_chat_json(file: UploadFile = FastAPIFile(...), db: AsyncSession
     """
     raw = await file.read()
     if len(raw) > MAX_PACKAGE_SIZE:
-        raise HTTPException(status_code=400, detail="导入文件超过大小上限（100 MB）")
+        raise AppHTTPException(status_code=400, error_code="IMPORT_FILE_TOO_LARGE", detail="导入文件超过大小上限（100 MB）")
     try:
         pkg = ChatExportPackage.model_validate_json(raw)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"JSON 解析失败: {e}")
+        raise AppHTTPException(status_code=400, error_code="CHAT_IMPORT_PARSE_ERROR", detail=f"JSON 解析失败: {e}")
 
     importer = ChatImporter(db)
     return await importer.do_import(pkg)

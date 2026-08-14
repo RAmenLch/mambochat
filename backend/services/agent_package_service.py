@@ -23,6 +23,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from backend.config.timezone_config import get_configured_now
 from backend.crud import agent_crud, backend_crud, mcp_crud, provider_crud, resource_crud
 from backend.crud import file_crud
+from backend.exceptions import AppHTTPException
 from backend.models import agent_model, backend_model, provider_model, resource_model
 from backend.models.base_model import generate_uuid
 from backend.schemas import agent as agent_schemas
@@ -108,11 +109,11 @@ def _version_tuple(v: str) -> Tuple[int, ...]:
 def _check_illegal_chars(name: str, label: str):
     """仅校验非法字符（不查保留字），用于规范常量容器名与 RB_ 前缀名（§6.4 前缀隔离）。"""
     if not name or not name.strip():
-        raise HTTPException(status_code=400, detail=f"{label} 不能为空")
+        raise AppHTTPException(status_code=400, error_code="AGENT_PACKAGE_NAME_EMPTY", detail=f"{label} 不能为空")
     if re.search(r"[/\\\x00-\x1f\x7f]", name):
-        raise HTTPException(status_code=400, detail=f"{label} '{name}' 包含非法字符")
+        raise AppHTTPException(status_code=400, error_code="AGENT_PACKAGE_NAME_ILLEGAL_CHARS", detail=f"{label} '{name}' 包含非法字符")
     if name in (".", ".."):
-        raise HTTPException(status_code=400, detail=f'{label} 不能为 "." 或 ".."')
+        raise AppHTTPException(status_code=400, error_code="AGENT_PACKAGE_NAME_DOT", detail=f'{label} 不能为 "." 或 ".."')
 
 
 # ─────────────────────────── 内部数据结构 ───────────────────────────
@@ -200,7 +201,7 @@ class AgentPackageExporter:
         if main_agent is None:
             raise HTTPException(status_code=404, detail="Agent not found")
         if main_agent.itemType != AgentItemType.AGENT.value:
-            raise HTTPException(status_code=400, detail="只能导出 Agent，不能导出文件夹")
+            raise AppHTTPException(status_code=400, error_code="AGENT_PACKAGE_EXPORT_NOT_AGENT", detail="只能导出 Agent，不能导出文件夹")
 
         agent_closure = await self._agent_closure(main_agent)
 
@@ -368,7 +369,7 @@ class AgentPackageExporter:
         res_map = await self._load_resources_with_versions(explicit_ids)
         for m in mounts:
             if m[2] not in res_map:
-                raise HTTPException(status_code=400, detail=f"资源 {m[2]} 不存在，无法导出")
+                raise AppHTTPException(status_code=400, error_code="AGENT_PACKAGE_RESOURCE_NOT_FOUND", detail=f"资源 {m[2]} 不存在，无法导出")
 
         # 5. 两阶段认领（§6.3/§6.4）：目录型挂载按 DB 树深度外层优先，整体认领完整子树；
         #    叶子挂载仅认领未被任何树包含的资源。同节点多挂载按认领顺序固定归属，
@@ -419,7 +420,7 @@ class AgentPackageExporter:
             if p.kind == _KIND_MEMBER:
                 parent_res = all_res_map.get(p.resource.parentId)
                 if parent_res is None or parent_res.id not in placements:
-                    raise HTTPException(status_code=400, detail=f"资源 '{p.resource.name}' 的父节点不在闭包内")
+                    raise AppHTTPException(status_code=400, error_code="AGENT_PACKAGE_RESOURCE_PARENT_NOT_IN_CLOSURE", detail=f"资源 '{p.resource.name}' 的父节点不在闭包内")
                 p.package_parent = placements[parent_res.id].package_id
             # 根级 placement 的 package_parent 在虚拟容器生成后回填
 
@@ -513,22 +514,25 @@ class AgentPackageExporter:
                 return _KIND_SKILL_ROOT, "skill"
             if rt in _LEAF_TYPES:
                 return _KIND_LEAF, "prompt"
-            raise HTTPException(
+            raise AppHTTPException(
                 status_code=400,
+                error_code="AGENT_PACKAGE_INVALID_PROMPT_MOUNT",
                 detail=f"资源 '{res.name}'（类型 {rt}）不能作为 prompt 资源挂载",
             )
         if source == "memory":
             if rt in _LEAF_TYPES:
                 return _KIND_LEAF, "memory"
-            raise HTTPException(
+            raise AppHTTPException(
                 status_code=400,
+                error_code="AGENT_PACKAGE_INVALID_MEMORY_MOUNT",
                 detail=f"资源 '{res.name}'（类型 {rt}）不能作为 memory 资源挂载",
             )
         # backend
         if rt is None or rt in (ResourceType.KNOWLEDGE_BASE.value, ResourceType.SKILL.value):
             return _KIND_BACKEND_FOLDER, f"RB_{bname}"
-        raise HTTPException(
+        raise AppHTTPException(
             status_code=400,
+            error_code="AGENT_PACKAGE_INVALID_BACKEND_MOUNT",
             detail=f"资源 '{res.name}'（类型 {rt}）不能作为 backend 挂载的 folder",
         )
 
@@ -545,12 +549,12 @@ class AgentPackageExporter:
             seen: set = set()
             while cur in parent_map and parent_map[cur] is not None:
                 if cur in seen:
-                    raise HTTPException(status_code=400, detail=f"资源树存在环（节点 {cur}），无法导出")
+                    raise AppHTTPException(status_code=400, error_code="AGENT_PACKAGE_RESOURCE_TREE_CYCLE", detail=f"资源树存在环（节点 {cur}），无法导出")
                 seen.add(cur)
                 cur = parent_map[cur]
                 depth += 1
                 if depth > 1000:
-                    raise HTTPException(status_code=400, detail=f"资源树深度异常（节点 {rid}），无法导出")
+                    raise AppHTTPException(status_code=400, error_code="AGENT_PACKAGE_RESOURCE_TREE_DEPTH", detail=f"资源树深度异常（节点 {rid}），无法导出")
             depths[rid] = depth
         return depths
 
@@ -581,8 +585,9 @@ class AgentPackageExporter:
             names.append((p.resource.name, "资源名"))
 
         if len(main_agent.name) > 91:
-            raise HTTPException(
+            raise AppHTTPException(
                 status_code=400,
+                error_code="AGENT_PACKAGE_MAIN_AGENT_NAME_TOO_LONG",
                 detail=f"主 Agent 名 '{main_agent.name}' 超过 91 字符，导入端无法构造 subagent 文件夹名，拒绝导出",
             )
 
@@ -605,8 +610,9 @@ class AgentPackageExporter:
             by_name: Dict[str, str] = {}
             for name, node_id in items:
                 if name in by_name and by_name[name] != node_id:
-                    raise HTTPException(
+                    raise AppHTTPException(
                         status_code=400,
+                        error_code="AGENT_PACKAGE_DUPLICATE_SIBLING_NAME",
                         detail=f"目标结构中存在同级重名资源 '{name}'，拒绝导出",
                     )
                 by_name[name] = node_id
@@ -659,12 +665,13 @@ class AgentPackageExporter:
         for fid in file_ids:
             f = file_map.get(fid)
             if f is None:
-                raise HTTPException(status_code=400, detail=f"文件记录 {fid} 不存在，无法导出")
+                raise AppHTTPException(status_code=400, error_code="AGENT_PACKAGE_FILE_RECORD_NOT_FOUND", detail=f"文件记录 {fid} 不存在，无法导出")
             try:
                 data[fid] = await self.file_service.get_file_content(fid)
             except HTTPException as e:
-                raise HTTPException(
+                raise AppHTTPException(
                     status_code=400,
+                    error_code="AGENT_PACKAGE_FILE_CONTENT_MISSING",
                     detail=f"文件 '{f.filename}' 内容缺失（{e.detail}），无法导出",
                 )
         return _BlobClosureResult(data=data, file_map=file_map)
@@ -699,8 +706,9 @@ class AgentPackageExporter:
                 attrs = v.attributes or {}
                 emb_id = attrs.get("embedding_model_id")
                 if emb_id and emb_id not in model_map:
-                    raise HTTPException(
+                    raise AppHTTPException(
                         status_code=400,
+                        error_code="AGENT_PACKAGE_EMBEDDING_MODEL_DANGLING",
                         detail=f"知识库 '{kb_root.name}' 的 embedding 模型引用悬空（{emb_id}），拒绝导出",
                     )
 
@@ -832,14 +840,16 @@ class AgentPackageExporter:
             for i, v in enumerate(sorted_versions):
                 fid = v.content
                 if not fid:
-                    raise HTTPException(
+                    raise AppHTTPException(
                         status_code=400,
+                        error_code="AGENT_PACKAGE_VERSION_FILE_REF_MISSING",
                         detail=f"资源 '{res.name}' 的版本 '{v.name}' 缺少文件内容引用，无法导出",
                     )
                 data = blob_ctx.data.get(fid)
                 if data is None:
-                    raise HTTPException(
+                    raise AppHTTPException(
                         status_code=400,
+                        error_code="AGENT_PACKAGE_VERSION_CONTENT_MISSING",
                         detail=f"资源 '{res.name}' 的版本 '{v.name}' 文件内容缺失，无法导出",
                     )
                 f = blob_ctx.file_map[fid]
@@ -904,30 +914,32 @@ class AgentPackageImporter:
     # ── 解析与基础校验（§7.1 步 1-3 / §7.3）──
     def load_package(self, raw: bytes) -> AgentPackage:
         if len(raw) > MAX_PACKAGE_FILE_SIZE:
-            raise HTTPException(
+            raise AppHTTPException(
                 status_code=413,
+                error_code="AGENT_PACKAGE_TOO_LARGE",
                 detail=f"包文件过大（{len(raw) // 1024 // 1024} MB），上限为 {MAX_PACKAGE_FILE_SIZE // 1024 // 1024} MB",
             )
         try:
             data = gzip.decompress(raw)
         except Exception:
-            raise HTTPException(status_code=400, detail="不是有效的 gzip 文件，格式错误")
+            raise AppHTTPException(status_code=400, error_code="AGENT_PACKAGE_INVALID_GZIP", detail="不是有效的 gzip 文件，格式错误")
         if len(data) > MAX_TOTAL_DECODED_SIZE:
-            raise HTTPException(status_code=413, detail="解码后内容超过 500 MB 上限")
+            raise AppHTTPException(status_code=413, error_code="AGENT_PACKAGE_TOO_LARGE", detail="解码后内容超过 500 MB 上限")
         try:
             obj = json.loads(data)
         except Exception:
-            raise HTTPException(status_code=400, detail="gzip 内容不是有效 JSON，格式错误")
+            raise AppHTTPException(status_code=400, error_code="AGENT_PACKAGE_INVALID_JSON", detail="gzip 内容不是有效 JSON，格式错误")
         try:
             pkg = AgentPackage.model_validate(obj)
         except ValidationError as e:
-            raise HTTPException(status_code=400, detail=f"包格式错误: {e.errors()[0].get('msg', '') if e.errors() else e}")
+            raise AppHTTPException(status_code=400, error_code="AGENT_PACKAGE_SCHEMA_INVALID", detail=f"包格式错误: {e.errors()[0].get('msg', '') if e.errors() else e}")
 
         if pkg.format != FORMAT:
-            raise HTTPException(status_code=400, detail=f"不是 MamboChat Agent 包（format={pkg.format}）")
+            raise AppHTTPException(status_code=400, error_code="AGENT_PACKAGE_FORMAT_MISMATCH", detail=f"不是 MamboChat Agent 包（format={pkg.format}）")
         if _version_tuple(pkg.formatVersion) > _version_tuple(SUPPORTED_FORMAT_VERSION):
-            raise HTTPException(
+            raise AppHTTPException(
                 status_code=400,
+                error_code="AGENT_PACKAGE_FORMAT_VERSION_UNSUPPORTED",
                 detail=f"包格式版本 {pkg.formatVersion} 高于当前支持的 {SUPPORTED_FORMAT_VERSION}，请升级平台后再导入",
             )
         return pkg
@@ -940,17 +952,18 @@ class AgentPackageImporter:
             try:
                 raw = base64.b64decode(b.data, validate=True)
             except Exception:
-                raise HTTPException(status_code=400, detail=f"blob {b.blobId} 不是合法 base64")
+                raise AppHTTPException(status_code=400, error_code="AGENT_PACKAGE_INVALID_BASE64", detail=f"blob {b.blobId} 不是合法 base64")
             if len(raw) != b.size:
-                raise HTTPException(
+                raise AppHTTPException(
                     status_code=400,
+                    error_code="AGENT_PACKAGE_BLOB_SIZE_MISMATCH",
                     detail=f"blob {b.blobId} 解码后字节数（{len(raw)}）与 size（{b.size}）不一致",
                 )
             if len(raw) > MAX_SINGLE_BLOB_SIZE:
-                raise HTTPException(status_code=413, detail=f"单个 blob 超过 20 MB 上限: {b.blobId}")
+                raise AppHTTPException(status_code=413, error_code="AGENT_PACKAGE_TOO_LARGE", detail=f"单个 blob 超过 20 MB 上限: {b.blobId}")
             total += len(raw)
             if total > MAX_TOTAL_DECODED_SIZE:
-                raise HTTPException(status_code=413, detail="解码后总内容超过 500 MB 上限")
+                raise AppHTTPException(status_code=413, error_code="AGENT_PACKAGE_TOO_LARGE", detail="解码后总内容超过 500 MB 上限")
             index[b.blobId] = (raw, b.filename, b.mimeType)
         return index
 
@@ -1043,7 +1056,7 @@ class AgentPackageImporter:
         referenced = {sid for a in pkg.agents for sid in (a.subAgents or [])}
         mains = [a for a in pkg.agents if a.sourceId not in referenced]
         if len(mains) != 1:
-            raise HTTPException(status_code=400, detail="无法确定包内主 Agent")
+            raise AppHTTPException(status_code=400, error_code="AGENT_PACKAGE_MAIN_AGENT_AMBIGUOUS", detail="无法确定包内主 Agent")
         main = mains[0]
         plan.main_source_id = main.sourceId
 
@@ -1107,8 +1120,9 @@ class AgentPackageImporter:
             if not name:
                 continue
             if len(name) > MAX_NAME_LEN:
-                raise HTTPException(
+                raise AppHTTPException(
                     status_code=400,
+                    error_code="AGENT_PACKAGE_RENAME_TOO_LONG",
                     detail=f"改名结果 '{name}' 超过 {MAX_NAME_LEN} 字符上限，导入失败",
                 )
             if name in (main_new, plan.namespace_name, plan.subagent_folder_name):
@@ -1346,8 +1360,9 @@ class AgentPackageImporter:
         attrs = dict(r.versions[0].attributes) if r.versions and r.versions[0].attributes else {}
         emb_source = attrs.get("embedding_model_id")
         if not emb_source or emb_source not in model_id_map:
-            raise HTTPException(
+            raise AppHTTPException(
                 status_code=400,
+                error_code="AGENT_PACKAGE_EMBEDDING_MODEL_MISSING",
                 detail=f"知识库 '{r.name}' 缺少有效的 embedding_model_id 引用",
             )
         new_model_id = model_id_map[emb_source]
@@ -1369,7 +1384,7 @@ class AgentPackageImporter:
                 await self.db.delete(v)
                 await self.db.flush()
         if latest_ver is None:
-            raise HTTPException(status_code=400, detail=f"知识库 '{r.name}' 创建后缺少初始版本")
+            raise AppHTTPException(status_code=400, error_code="AGENT_PACKAGE_KB_INITIAL_VERSION_MISSING", detail=f"知识库 '{r.name}' 创建后缺少初始版本")
 
         new_attrs = dict(attrs)
         new_attrs["embedding_model_id"] = new_model_id
@@ -1446,7 +1461,7 @@ class AgentPackageImporter:
         cd = dict(b.configData or {})
         rid = cd.get("resource_id")
         if rid not in res_id_map:
-            raise HTTPException(status_code=400, detail=f"Backend '{b.name}' 的 resource_id 引用无效")
+            raise AppHTTPException(status_code=400, error_code="AGENT_PACKAGE_BACKEND_RESOURCE_REF_INVALID", detail=f"Backend '{b.name}' 的 resource_id 引用无效")
         cd["resource_id"] = res_id_map[rid]
         # ORM 直建：绕过 BackendConfigCreate 的 path_safe 保留字校验
         # （backend 名由 RB_ 前缀隔离保留字，DB 允许保留字名，见 _check_illegal_chars 注释）
@@ -1555,7 +1570,7 @@ class AgentPackageImporter:
     async def cleanup_import_session(self, session_id: str) -> CleanupReport:
         session = _IMPORT_SESSIONS.pop(session_id, None)
         if session is None:
-            raise HTTPException(status_code=404, detail="导入会话不存在")
+            raise AppHTTPException(status_code=404, error_code="AGENT_PACKAGE_IMPORT_SESSION_NOT_FOUND", detail="导入会话不存在")
         cleaned: List[str] = []
         for ent in reversed(session.created):
             try:

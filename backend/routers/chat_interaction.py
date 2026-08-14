@@ -19,6 +19,7 @@ from backend import schemas
 from backend.models import chat_model
 from backend.database import get_db, AsyncSessionLocal
 from backend.routers.chat_management import _apply_default_model_to_chat_object
+from backend.exceptions import AppHTTPException
 from backend.schemas import SubMessageType, MessageStatus
 from backend.schemas.message import ToolApprovalRequest, SubMessageConfig, SubMessageUpdate
 from backend.schemas.enums import FileManagementType
@@ -495,7 +496,7 @@ async def compress_history_above_message(
         db: AsyncSession = Depends(get_db)
 ):
     if not await maintenance.wait_vacuum_finished(timeout=60):
-        raise HTTPException(status_code=503, detail="数据库维护中（VACUUM），请稍后重试。")
+        raise AppHTTPException(status_code=503, error_code="DB_MAINTENANCE", detail="数据库维护中（VACUUM），请稍后重试。")
     db_message = await message_crud.get_message(db, message_id=message_id)
     if not db_message:
         raise HTTPException(status_code=404, detail="Message not found")
@@ -527,9 +528,9 @@ async def prepare_to_generate(
         db: AsyncSession = Depends(get_db)
 ):
     if not await maintenance.wait_vacuum_finished(timeout=60):
-        raise HTTPException(status_code=503, detail="数据库维护中（VACUUM），请稍后重试。")
+        raise AppHTTPException(status_code=503, error_code="DB_MAINTENANCE", detail="数据库维护中（VACUUM），请稍后重试。")
     if not await stream_manager.try_acquire_generation_lock(chat_id):
-        raise HTTPException(status_code=409, detail="该会话已有正在进行的生成任务，请等待完成后再试。")
+        raise AppHTTPException(status_code=409, error_code="GENERATION_IN_PROGRESS", detail="该会话已有正在进行的生成任务，请等待完成后再试。")
 
     try:
         user_message, assistant_placeholder = await generation_service.create_user_message_and_prepare_generation(
@@ -566,9 +567,9 @@ async def prepare_to_regenerate(
         db: AsyncSession = Depends(get_db),
 ):
     if not await maintenance.wait_vacuum_finished(timeout=60):
-        raise HTTPException(status_code=503, detail="数据库维护中（VACUUM），请稍后重试。")
+        raise AppHTTPException(status_code=503, error_code="DB_MAINTENANCE", detail="数据库维护中（VACUUM），请稍后重试。")
     if not await stream_manager.try_acquire_generation_lock(chat_id):
-        raise HTTPException(status_code=409, detail="该会话已有正在进行的生成任务，请等待完成后再试。")
+        raise AppHTTPException(status_code=409, error_code="GENERATION_IN_PROGRESS", detail="该会话已有正在进行的生成任务，请等待完成后再试。")
 
     try:
         assistant_placeholder = await generation_service.prepare_for_regeneration(
@@ -600,7 +601,7 @@ async def retry_failed_generation(
         db: AsyncSession = Depends(get_db)
 ):
     if not await maintenance.wait_vacuum_finished(timeout=60):
-        raise HTTPException(status_code=503, detail="数据库维护中（VACUUM），请稍后重试。")
+        raise AppHTTPException(status_code=503, error_code="DB_MAINTENANCE", detail="数据库维护中（VACUUM），请稍后重试。")
     db_message = await message_crud.get_message(db, message_id=message_id)
     if not db_message:
         raise HTTPException(status_code=404, detail="Message not found")
@@ -613,7 +614,7 @@ async def retry_failed_generation(
         raise HTTPException(status_code=400, detail="Retry is only applicable to failed messages.")
 
     if not await stream_manager.try_acquire_generation_lock(db_message.chatId):
-        raise HTTPException(status_code=409, detail="该会话已有正在进行的生成任务，请等待完成后再试。")
+        raise AppHTTPException(status_code=409, error_code="GENERATION_IN_PROGRESS", detail="该会话已有正在进行的生成任务，请等待完成后再试。")
 
     try:
         await _start_generation_task(background_tasks, db_message.chatId, message_id, is_retry=True)

@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.exceptions import AppHTTPException
 from backend.models import chat_model
 from backend.models.base_model import generate_uuid
 from backend.models.file_model import File
@@ -117,10 +118,11 @@ class ChatImporter:
 
     def _validate_package(self, pkg: ChatExportPackage):
         if pkg.format != EXPORT_FORMAT:
-            raise HTTPException(status_code=400, detail=f"格式错误：期望 {EXPORT_FORMAT}，实际 {pkg.format}")
+            raise AppHTTPException(status_code=400, error_code="CHAT_IMPORT_FORMAT_MISMATCH", detail=f"格式错误：期望 {EXPORT_FORMAT}，实际 {pkg.format}")
         if _version_tuple(pkg.formatVersion) > _version_tuple(EXPORT_FORMAT_VERSION):
-            raise HTTPException(
+            raise AppHTTPException(
                 status_code=400,
+                error_code="CHAT_IMPORT_VERSION_UNSUPPORTED",
                 detail=f"包格式版本 {pkg.formatVersion} 高于当前支持的 {EXPORT_FORMAT_VERSION}，请升级平台后再导入",
             )
         # mambochatVersion 低于当前版本仅警告，不阻断（规范 §7.1 步 2）
@@ -133,11 +135,11 @@ class ChatImporter:
             try:
                 data = base64.b64decode(blob.data, validate=True)
             except (ValueError, TypeError):
-                raise HTTPException(status_code=400, detail=f"Blob {blob.blobId} 不是合法 base64")
+                raise AppHTTPException(status_code=400, error_code="CHAT_IMPORT_INVALID_BASE64", detail=f"Blob {blob.blobId} 不是合法 base64")
             if len(data) > MAX_BLOB_SIZE:
-                raise HTTPException(status_code=400, detail=f"Blob {blob.blobId} 超过单文件大小上限")
+                raise AppHTTPException(status_code=400, error_code="CHAT_IMPORT_BLOB_TOO_LARGE", detail=f"Blob {blob.blobId} 超过单文件大小上限")
             if blob.size != len(data):
-                raise HTTPException(status_code=400, detail=f"Blob {blob.blobId} 大小校验失败")
+                raise AppHTTPException(status_code=400, error_code="CHAT_IMPORT_BLOB_SIZE_MISMATCH", detail=f"Blob {blob.blobId} 大小校验失败")
             index[blob.blobId] = data
         return index
 
@@ -175,7 +177,7 @@ class ChatImporter:
         sample = data[:8192]
         final_mime = FileUtils.correct_mime_type(filename, mime_type, sample)
         if not FileUtils.is_allowed_mime_type(final_mime):
-            raise HTTPException(status_code=400, detail=f"不支持的文件类型: {final_mime}")
+            raise AppHTTPException(status_code=400, error_code="CHAT_IMPORT_UNSUPPORTED_FILE_TYPE", detail=f"不支持的文件类型: {final_mime}")
 
         size = len(data)
         if FileUtils.is_small_text_file(size, final_mime):
@@ -197,7 +199,7 @@ class ChatImporter:
             try:
                 storage_path = await storage_service.save_from_bytes(data, filename, "chat_attachments")
             except Exception as e:
-                raise HTTPException(status_code=500, detail=f"文件存储失败: {e}")
+                raise AppHTTPException(status_code=500, error_code="CHAT_IMPORT_STORE_FAILED", detail=f"文件存储失败: {e}")
             self._written_physical_paths.append(storage_path)
             self.db.add(File(
                 id=file_id,

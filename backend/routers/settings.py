@@ -11,6 +11,7 @@ from backend.services.file_service import FileService
 from backend.models import setting_model
 from backend import schemas
 from backend.database import get_db
+from backend.exceptions import AppHTTPException
 from backend.schemas.enums import FileManagementType
 
 router = APIRouter()
@@ -145,8 +146,9 @@ async def update_global_settings(
         if model_id:
             db_model = await provider_crud.get_model(db, model_id=model_id)
             if not db_model:
-                raise HTTPException(
+                raise AppHTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
+                    error_code="SETTINGS_MODEL_NOT_FOUND",
                     detail=f"模型ID '{model_id}' 不存在。"
                 )
         settings_to_update.append(schemas.GlobalSetting(key="default_model_id", value=model_id))
@@ -156,8 +158,9 @@ async def update_global_settings(
         if model_id:
             db_model = await provider_crud.get_model(db, model_id=model_id)
             if not db_model:
-                raise HTTPException(
+                raise AppHTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
+                    error_code="SETTINGS_TITLE_MODEL_NOT_FOUND",
                     detail=f"标题生成模型ID '{model_id}' 不存在。"
                 )
         settings_to_update.append(schemas.GlobalSetting(key="title_generation_model_id", value=model_id))
@@ -167,8 +170,9 @@ async def update_global_settings(
         if provider_id:
             db_provider = await provider_crud.get_provider(db, provider_id=provider_id)
             if not db_provider:
-                raise HTTPException(
+                raise AppHTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
+                    error_code="SETTINGS_PROVIDER_NOT_FOUND",
                     detail=f"服务商ID '{provider_id}' 不存在。"
                 )
         settings_to_update.append(schemas.GlobalSetting(key="last_selected_provider_id", value=provider_id))
@@ -188,8 +192,9 @@ async def update_global_settings(
         if key in update_data:
             value = update_data[key]
             if key == "default_max_retries" and value is not None and int(value) < 1:
-                raise HTTPException(
+                raise AppHTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
+                    error_code="INVALID_MAX_RETRIES",
                     detail="default_max_retries 必须 >= 1"
                 )
             settings_to_update.append(schemas.GlobalSetting(key=key, value=str(value) if value is not None else None))

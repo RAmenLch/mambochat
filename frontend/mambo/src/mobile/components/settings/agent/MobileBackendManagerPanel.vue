@@ -358,7 +358,7 @@ const handleTestConnection = async () => {
           configData: { ...form.configData, password: form.configData.password || null }
         };
         const res = await backendStore.testConnection(testData);
-        ElMessage[res.success ? 'success' : 'error'](res.message || (res.success ? t('backend.connectionSuccess') : t('backend.connectionFailed')));
+        ElMessage[res.success ? 'success' : 'error'](res.success ? t('backend.connectionSuccess') : t('backend.connectionFailed'));
       } catch (e: any) { ElMessage.error(e.message || t('backend.connectionError')); }
       finally { isTesting.value = false; }
     }
