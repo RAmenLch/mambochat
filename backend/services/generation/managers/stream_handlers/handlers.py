@@ -1,6 +1,6 @@
 import json
 import traceback
-from typing import AsyncGenerator, List, Dict, Any
+from typing import AsyncGenerator, List, Dict, Any, Optional
 from langchain_core.messages import AIMessage, ToolMessage
 
 from backend.models.base_model import generate_uuid
@@ -216,7 +216,17 @@ class ToolExecutionHandler(BaseStreamHandler):
 
 
 class ImageAndUsageHandler(BaseStreamHandler):
-    """处理图片生成和用量统计"""
+    """处理图片生成和用量统计。
+
+    用量统计按"轮"（一次模型 API 调用）收集与保存：
+    - messages 模式 chunk 流中出现的 usage 按 run_id 切分轮次，同一轮只取最后一个；
+    - updates 模式完整 AIMessage 到达（= 该轮模型调用结束，RoundClosureHandler 同款判定）
+      时，把该轮 usage 保存为一个 USAGE 子消息。
+    """
+    def __init__(self):
+        self._pending_usage: Optional[Dict[str, Any]] = None
+        self._usage_sort_order = 99
+
     async def handle(self, context: StreamContext) -> AsyncGenerator[BaseInstruction, None]:
         # 1. 图片
         image_data = context.decode.get_image_url(context.mode, context.event)
@@ -226,10 +236,35 @@ class ImageAndUsageHandler(BaseStreamHandler):
                 async for inst in self._handle_image(url):
                     yield inst
 
-        # 2. 用量统计
+        # 2. 用量收集（chunk 流中同 run_id 只保留最后一个）
         usage_data = context.decode.get_usage(context.mode, context.event)
         if usage_data:
-            context.final_usage_data.update(usage_data)
+            raw_data = context.decode.get_raw_usage(context.mode, context.event)
+            self._pending_usage = {
+                "run_id": context.lc_run_uuid,
+                "usage": usage_data,
+                "raw": raw_data,
+            }
+
+        # 3. 轮次闭合：updates 模式的完整 AIMessage 到达 = 该轮模型调用结束
+        if (
+            context.mode == "updates"
+            and isinstance(context.event, AIMessage)
+            and self._pending_usage
+            and self._pending_usage["run_id"] == context.lc_run_uuid
+        ):
+            content = {**self._pending_usage["usage"], "raw": self._pending_usage["raw"]}
+            self._pending_usage = None
+            sort_order = self._usage_sort_order
+            self._usage_sort_order += 1
+            yield CreateSubMessage(
+                sub_message_id=generate_uuid(),
+                type=schemas_enums.SubMessageType.USAGE.value,
+                sortOrder=sort_order,
+                status=schemas_enums.MessageStatus.COMPLETED,
+                initial_content=json.dumps(content),
+                config=SubMessageConfig(context_participation_length=0)
+            )
 
     async def _handle_image(self, base64_url: str) -> AsyncGenerator[BaseInstruction, None]:
         try:

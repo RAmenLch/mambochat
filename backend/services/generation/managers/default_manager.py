@@ -1,7 +1,6 @@
 # backend/services/generation/managers/default_manager.py
 
 import asyncio
-import json
 import logging
 import traceback
 from typing import AsyncGenerator, Optional, Dict, List, Set, Tuple, Any
@@ -50,7 +49,6 @@ class DefaultGenerateManager(AbstractGenerateManager):
     def __init__(self, db_session: AsyncSession, recover_from_error: bool = False):
         super().__init__(db_session)
 
-        self._final_usage_data: Dict = {}
         self._created_stream_ids: Set[str] = set()
         self._pending_hitl_tool_calls = []
         self._recover_from_error = recover_from_error
@@ -213,7 +211,6 @@ class DefaultGenerateManager(AbstractGenerateManager):
                     providers=providers, tool_map=tool_map, hitl_config=hitl_config,
                     created_stream_ids=self._created_stream_ids,
                     pending_hitl_tool_calls=self._pending_hitl_tool_calls,
-                    final_usage_data=self._final_usage_data,
                     subagent_step_counters=self._subagent_step_counters,
                     hitl_batch_id=self._hitl_batch_id,
                     hitl_interrupt_counter=self._hitl_interrupt_counter,
@@ -303,13 +300,6 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 yield UpdateSubMessageConfig(sub_message_id=sub_id, config=SubMessageConfig(is_minimal=True))
             yield UpdateSubMessageStatus(sub_message_id=sub_id, status=schemas_enums.MessageStatus.COMPLETED)
         self._created_stream_ids.clear()
-
-        if self._final_usage_data:
-            yield CreateSubMessage(
-                sub_message_id=generate_uuid(), type=schemas_enums.SubMessageType.USAGE.value,
-                sortOrder=99, status=schemas_enums.MessageStatus.COMPLETED,
-                initial_content=json.dumps(self._final_usage_data), config=SubMessageConfig(context_participation_length=0)
-            )
 
         if not is_interrupted:
             yield SetFinalStatus(status=schemas_enums.MessageStatus.COMPLETED)

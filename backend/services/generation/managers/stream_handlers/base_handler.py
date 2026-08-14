@@ -29,7 +29,6 @@ class StreamContext:
     # 可变状态 (Handler 可以修改这些状态，Manager 会读取)
     created_stream_ids: Set[str]
     pending_hitl_tool_calls: list
-    final_usage_data: dict
     should_interrupt: bool = False
     last_finish_reason: Optional[str] = None
 

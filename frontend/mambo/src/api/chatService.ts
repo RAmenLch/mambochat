@@ -136,6 +136,18 @@ export const deleteMessage = (messageId: string): Promise<Message> => {
 };
 
 /**
+ * 获取消息下的 TaskSubStep 子代理追踪步骤（按需加载，可按 task_group_id 过滤）。
+ */
+export const getMessageTaskSubSteps = (
+  messageId: string,
+  taskGroupId?: string,
+): Promise<SubMessage[]> => {
+  return apiClient.get(`/messages/${messageId}/task-substeps`, {
+    params: taskGroupId ? { task_group_id: taskGroupId } : undefined,
+  });
+};
+
+/**
  * 准备并开始生成AI回复。
  * @returns 返回包含新用户消息和AI助手占位符消息的对象。
  */

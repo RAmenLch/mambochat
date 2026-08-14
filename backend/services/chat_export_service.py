@@ -58,11 +58,21 @@ class ChatExporter:
         messages = await message_crud.get_messages_by_chat(self.db, chat_id)
         system_prompt = await self._build_system_prompt(chat)
 
+        # 主查询已排除 TaskSubStep，导出需按规范补全（EXPORT_SUB_TYPES 含 TASK_SUBSTEP）
+        task_subs = await message_crud.get_task_substeps_by_message_ids(
+            self.db, [m.id for m in messages]
+        )
+        task_subs_by_msg: Dict[str, List] = {}
+        for sub in task_subs:
+            task_subs_by_msg.setdefault(sub.messageId, []).append(sub)
+
         blobs: Dict[str, ExportBlob] = {}
         export_messages: List[ExportMessage] = []
         for msg in messages:
             export_subs: List[ExportSubMessage] = []
-            for sub in msg.sub_messages:
+            merged_subs = list(msg.sub_messages) + task_subs_by_msg.get(msg.id, [])
+            merged_subs.sort(key=lambda s: (s.sortOrder, s.createdAt))
+            for sub in merged_subs:
                 if sub.type not in EXPORT_SUB_TYPES:
                     continue
                 status = MessageStatus.FAILED.value if sub.status in _TRANSIENT_STATUS else sub.status

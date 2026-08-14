@@ -69,6 +69,14 @@ async def duplicate_chat_with_messages(
             if cutoff_index != -1:
                 active_messages = active_messages[:cutoff_index + 1]
 
+        # 主查询已排除 TaskSubStep，复制会话需保留子代理追踪步骤
+        task_subs = await message_crud.get_task_substeps_by_message_ids(
+            db, [m.id for m in active_messages]
+        )
+        task_subs_by_msg: Dict[str, List] = {}
+        for sub in task_subs:
+            task_subs_by_msg.setdefault(sub.messageId, []).append(sub)
+
         last_new_msg_id = None
         for msg in active_messages:
             new_msg = chat_model.Message(
@@ -84,7 +92,9 @@ async def duplicate_chat_with_messages(
             last_new_msg_id = new_msg.id
 
             new_sub_messages = []
-            for sub in msg.sub_messages:
+            merged_subs = list(msg.sub_messages) + task_subs_by_msg.get(msg.id, [])
+            merged_subs.sort(key=lambda s: (s.sortOrder, s.createdAt))
+            for sub in merged_subs:
                 if sub.type == SubMessageType.VERSION_SNAPSHOT.value:
                     continue
                 safe_status = sub.status

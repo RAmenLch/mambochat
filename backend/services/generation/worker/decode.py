@@ -28,6 +28,10 @@ class BaseDecode(ABC):
         pass
 
     @abstractmethod
+    def get_raw_usage(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        pass
+
+    @abstractmethod
     def get_hitl_interrupt(self, mode: str, event: Union[BaseMessage, Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
         pass
 
@@ -45,6 +49,13 @@ class DefaultLangChainDecode(BaseDecode):
         return None
 
     def get_reasoning_content(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[str]:
+        return None
+
+    def get_raw_usage(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not isinstance(message, AIMessage):
+            return None
+        if mode == "messages" and message.usage_metadata:
+            return dict(message.usage_metadata)
         return None
 
     def get_image_url(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:

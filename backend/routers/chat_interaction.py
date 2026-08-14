@@ -5,7 +5,7 @@ import json
 import time
 from pathlib import PurePosixPath
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Body, Depends, HTTPException, status, BackgroundTasks, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.responses import StreamingResponse
 from typing import List, Optional
@@ -345,7 +345,7 @@ async def read_chat_with_messages(chat_id: str, background_tasks: BackgroundTask
     chat_data = schemas.Chat.model_validate(db_chat)
     chat_response = schemas.ChatWithMessages(**chat_data.model_dump())
 
-    active_messages = await message_crud.get_messages_by_chat(db, chat_id=chat_id)
+    active_messages = await message_crud.get_messages_by_chat(db, chat_id=chat_id, latest_usage_only=True)
     chat_response.messages = await _hydrate_and_validate_messages(active_messages, db)
 
     return chat_response
@@ -376,7 +376,7 @@ async def update_message_and_regenerate(
 
     if not message_update.resend:
         # 修复: 从活跃路径中重新获取，以避免 DetachedInstanceError 并装配 sibling 元数据
-        active_msgs = await message_crud.get_messages_by_chat(db, chat_id=db_message.chatId)
+        active_msgs = await message_crud.get_messages_by_chat(db, chat_id=db_message.chatId, latest_usage_only=True)
         populated_user_msg = next((m for m in active_msgs if m.id == new_user_message.id), new_user_message)
 
         hydrated_user_message = (await _hydrate_and_validate_messages([populated_user_msg], db))[0]
@@ -394,7 +394,7 @@ async def update_message_and_regenerate(
     await _start_generation_task(background_tasks, db_message.chatId, assistant_placeholder.id)
 
     # 修复: 从活跃路径中重新获取，以避免 DetachedInstanceError 并装配 sibling 元数据
-    active_msgs = await message_crud.get_messages_by_chat(db, chat_id=db_message.chatId)
+    active_msgs = await message_crud.get_messages_by_chat(db, chat_id=db_message.chatId, latest_usage_only=True)
     populated_user_msg = next((m for m in active_msgs if m.id == new_user_message.id), new_user_message)
     populated_assistant_msg = next((m for m in active_msgs if m.id == assistant_placeholder.id), assistant_placeholder)
 
@@ -417,8 +417,27 @@ async def activate_message_branch(chat_id: str, message_id: str, db: AsyncSessio
     if not success:
         raise HTTPException(status_code=404, detail="Message not found")
 
-    active_messages = await message_crud.get_messages_by_chat(db, chat_id=chat_id)
+    active_messages = await message_crud.get_messages_by_chat(db, chat_id=chat_id, latest_usage_only=True)
     return await _hydrate_and_validate_messages(active_messages, db)
+
+
+@router.get(
+    "/messages/{message_id}/task-substeps",
+    response_model=List[schemas.SubMessage],
+    summary="获取消息下的 TaskSubStep 子代理追踪步骤",
+    response_model_exclude_none=True
+)
+async def get_message_task_substeps(
+        message_id: str,
+        task_group_id: Optional[str] = Query(None, description="可选：按 task_group_id 过滤"),
+        db: AsyncSession = Depends(get_db),
+):
+    db_message = await message_crud.get_message(db, message_id=message_id)
+    if not db_message:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    subs = await message_crud.get_task_substeps(db, message_id, task_group_id)
+    return [schemas.SubMessage.model_validate(s) for s in subs]
 
 
 @router.delete(
