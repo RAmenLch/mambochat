@@ -261,7 +261,7 @@ SUPPORTED_LLM_PARAMETERS: List[LLMParameter] = [
         key="glm::reasoning_effort",
         label="Reasoning Effort (GLM)",
         path=["reasoning_effort"],
-        description="控制 GLM-5.2 思考模式的推理深度。仅当 Thinking Type 为 enabled 时生效。max/xhigh=最强，high/medium/low=强推理，minimal/none=跳过思考。",
+        description="控制 GLM-5.2/5.3 思考模式的推理深度。GLM-5.3 仅支持 low/high/max 且始终思考；GLM-5.2 支持 none/minimal/low/medium/high/xhigh/max。仅当 Thinking Type 为 enabled 时生效。",
         type="string",
         limit=["none", "minimal", "low", "medium", "high", "xhigh", "max"],
         default_value="max",

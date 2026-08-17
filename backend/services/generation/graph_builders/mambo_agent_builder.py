@@ -40,6 +40,11 @@ from backend.services.generation.agent.mambo_resource_backend import MamboResour
 from backend.schemas.enums import BackendType
 
 
+# 缓存友好：限制单次 read / grep 的注入量，避免大工具结果拖垮缓存命中率
+_READ_CHARS = 10_000
+_GREP_MATCHES = 200
+
+
 def _make_session_factory() -> Callable[[], AsyncSession]:
     """创建异步 session 工厂，用于 MamboResourceBackend 的数据库访问。"""
     return lambda: AsyncSessionLocal()
@@ -76,6 +81,8 @@ def _build_mambo_backend(
                 session_factory=session_factory,
                 shortcuts=agent_config.skill_resource_roots,
                 workspace_root=VirtualPath("/workspace"),
+                max_read_chars=_READ_CHARS,
+                max_grep_matches=_GREP_MATCHES,
             )
         if agent_config.memory_resource_roots:
             virtual_workspaces["memory"] = MamboResourceBackend(
@@ -84,11 +91,17 @@ def _build_mambo_backend(
                 shortcuts=agent_config.memory_resource_roots,
                 workspace_root=VirtualPath("/workspace"),
                 enable_version_editing=False,
+                max_read_chars=_READ_CHARS,
+                max_grep_matches=_GREP_MATCHES,
             )
         # 始终使用 persisted StoreBackend，避免 create_mambo_agent 内部
         # 用 store=None 创建无持久化的 StoreBackend 兜底
         return HybridWorkspaceBackend(
-            real_backend=StoreBackend(store=store),
+            real_backend=StoreBackend(
+                store=store,
+                max_read_chars=_READ_CHARS,
+                max_grep_matches=_GREP_MATCHES,
+            ),
             virtual_workspaces=virtual_workspaces if virtual_workspaces else None,
         )
 
@@ -120,6 +133,8 @@ def _build_mambo_backend(
             shortcuts=agent_config.skill_resource_roots,
             workspace_root=VirtualPath("/workspace"),
             enable_version_editing=False,
+            max_read_chars=_READ_CHARS,
+            max_grep_matches=_GREP_MATCHES,
         )
 
     # ---- 4. Memory（长期记忆） ----
@@ -132,11 +147,17 @@ def _build_mambo_backend(
             shortcuts=agent_config.memory_resource_roots,
             workspace_root=VirtualPath("/workspace"),
             enable_version_editing=False,
+            max_read_chars=_READ_CHARS,
+            max_grep_matches=_GREP_MATCHES,
         )
 
     # ---- 5. 组装 ----
     if real_be is None:
-        real_be = StoreBackend(store=store)
+        real_be = StoreBackend(
+            store=store,
+            max_read_chars=_READ_CHARS,
+            max_grep_matches=_GREP_MATCHES,
+        )
 
     return HybridWorkspaceBackend(
         real_backend=real_be,
@@ -175,6 +196,8 @@ def _build_any_backend(
             edit_whitelist=_to_virtual_path_frozenset(config.get("edit_whitelist")),
             edit_blacklist=_to_virtual_path_frozenset(config.get("edit_blacklist")),
             ignore_dirs=_to_frozenset(config.get("ignore_dirs")),
+            max_read_chars=_READ_CHARS,
+            max_grep_matches=_GREP_MATCHES,
         )
 
     elif b_type == BackendType.API.value:
@@ -188,6 +211,8 @@ def _build_any_backend(
             edit_blacklist=config.get("edit_blacklist"),
             ignore_dirs=config.get("ignore_dirs"),
             enable_execute=execute_enabled,
+            max_read_chars=_READ_CHARS,
+            max_grep_matches=_GREP_MATCHES,
         )
 
     elif b_type == BackendType.RESOURCE.value:
@@ -197,6 +222,8 @@ def _build_any_backend(
             edit_whitelist=_to_frozenset(config.get("edit_whitelist")),
             edit_blacklist=_to_frozenset(config.get("edit_blacklist")),
             enable_version_editing=config.get("enable_version_editing", True),
+            max_read_chars=_READ_CHARS,
+            max_grep_matches=_GREP_MATCHES,
         )
 
     elif b_type == BackendType.LOCAL.value:
@@ -213,6 +240,8 @@ def _build_any_backend(
             edit_whitelist=_to_virtual_path_frozenset(config.get("edit_whitelist")),
             edit_blacklist=_to_virtual_path_frozenset(config.get("edit_blacklist")),
             ignore_dirs=_to_frozenset(config.get("ignore_dirs")),
+            max_read_chars=_READ_CHARS,
+            max_grep_matches=_GREP_MATCHES,
         )
 
     return None

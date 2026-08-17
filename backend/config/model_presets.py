@@ -47,6 +47,14 @@ _GLM_TOOL_STREAM = [*_GLM_THINKING, "glm::tool_stream"]
 # GLM 5.2：思考 + Tool Stream + 推理深度控制
 _GLM_REASONING = [*_GLM_TOOL_STREAM, "glm::reasoning_effort"]
 
+# GLM 5.3：始终思考（不可关闭）+ Tool Stream + 推理深度控制
+_GLM_REASONING_FIXED = [
+    *_GLM_BASE,
+    "glm::thinking.clear_thinking",
+    "glm::tool_stream",
+    "glm::reasoning_effort",
+]
+
 
 # ============================================================
 # GLM 模型共享列表（api.z.ai 与 open.bigmodel.cn 共有）
@@ -54,6 +62,14 @@ _GLM_REASONING = [*_GLM_TOOL_STREAM, "glm::reasoning_effort"]
 
 _GLM_SHARED_CHAT_MODELS: list[ModelPreset] = [
     # === GLM 5.x 系列 ===
+    # GLM-5.3：旗舰，1M 上下文，始终思考（不可关闭），支持 reasoning_effort
+    ModelPreset(
+        modelId="glm-5.3",
+        name="GLM-5.3",
+        context_length=1_000_000,
+        max_output_tokens=128_000,
+        supported_parameters=_GLM_REASONING_FIXED,
+    ),
     # GLM-5.2：旗舰，1M 上下文，支持 reasoning_effort
     ModelPreset(
         modelId="glm-5.2",

@@ -320,7 +320,7 @@ Agent is a core capability of MamboChat, providing two types of intelligent agen
 
 | Type | Description | Use Cases |
 |---|---|---|
-| **Mambo Agent** | A complex functional agent with file read/write, command execution, nested sub-agent calls, real-time file display, AI safety pre-review, long-term memory, automatic conversation compression, resource version snapshots, etc. | Code development, remote server operations, complex task execution |
+| **[Mambo Agent](https://github.com/RAmenLch/mambo_agents)** | A complex functional agent with file read/write, command execution, nested sub-agent calls, real-time file display, AI safety pre-review, long-term memory, automatic conversation compression, resource version snapshots, etc. | Code development, remote server operations, complex task execution |
 | **ReAct Agent** | A reasoning agent based on tool calls; can mount Knowledge Bases, MCP tools, Skills, and other extensions | Tasks requiring search, knowledge base queries, MCP tool calls, etc. |
 
 ### Create an Agent

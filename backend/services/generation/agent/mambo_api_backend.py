@@ -70,8 +70,13 @@ class MamboAPIBackend(BackendProtocol):
         timeout: float = 60.0,
         enable_execute: bool = False,
         execute_timeout: int = 180,
+        max_read_chars: int = 100_000,
+        max_grep_matches: int = 1000,
     ) -> None:
-        super().__init__()
+        super().__init__(
+            max_read_chars=max_read_chars,
+            max_grep_matches=max_grep_matches,
+        )
         self.backend_id = backend_id
         self.backend_name = backend_name or backend_id
         self.edit_whitelist = edit_whitelist or []
@@ -482,7 +487,9 @@ class MamboAPIBackend(BackendProtocol):
             )
 
         lines = result.get("lines")
-        if lines is not None:
+        # 若桌面端已在源头截断（truncated=true），优先采用截断后的 content，
+        # 避免用未截断的 lines 重建而绕过限长。
+        if lines is not None and not result.get("truncated"):
             content = "\n".join(lines)
 
         total = content.count("\n") + 1 if content else 0

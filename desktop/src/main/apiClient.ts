@@ -614,12 +614,22 @@ export class ApiClientManager {
       ? this.formatNumberedLines(selected, start + 1)
       : selected
 
+    // 缓存友好：限制单次 read 返回的字符总量，避免大文件整份注入上下文
+    const MAX_READ_CHARS = 10000
+    let content = selected.join('\n')
+    let truncated = false
+    if (content.length > MAX_READ_CHARS) {
+      content = content.slice(0, MAX_READ_CHARS) + '\n... (content truncated)'
+      truncated = true
+    }
+
     return {
-      content: selected.join('\n'),
+      content,
       lines: resultLines,
       total_lines: lines.length,
       offset: start,
       limit,
+      truncated,
       encoding: 'utf-8',
       file_type: 'text',
       mime_type: '',
@@ -798,7 +808,7 @@ export class ApiClientManager {
     log.info(`[ApiClient] handleGrepFiles: vpath=${vpath} physical=${base} pattern=${pattern} regex=${regex} glob=${glob}`)
 
     const isDir = fs.existsSync(base) && fs.statSync(base).isDirectory()
-    const MAX_GREP_MATCHES = 1000
+    const MAX_GREP_MATCHES = 200
 
     // 1) Try ripgrep (fast native search)
     const rgMatches = this._ripgrepGrep(pattern, base, isDir ? glob : undefined, regex)

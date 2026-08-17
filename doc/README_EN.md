@@ -20,7 +20,7 @@
     *   Automatic model capability detection (context length, vision, thinking mode) for hassle-free integration of Chinese models.
     *   Unified management for chat and embedding models.
     *   Model favorites and grouping.
-*   **🤖 Mambo Agent**
+*   **🤖 [Mambo Agent](https://github.com/RAmenLch/mambo_agents)**
     *   **Complex Task Execution**: Capable of reading/writing files, executing commands, nested sub-agent invocation, and performing remote server operations.
     *   **Real-time File Preview**: Files and images are displayed in real time as the AI reads them, with GalGame mode for image display.
     *   **AI Safety Pre-review**: Optionally designate a review model — only risky operations require manual confirmation. Review conditions are customizable.

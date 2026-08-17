@@ -266,10 +266,15 @@ class MamboResourceBackend(BackendProtocol):
         edit_whitelist: frozenset[str] | None = None,
         edit_blacklist: frozenset[str] | None = None,
         max_read_chars: int = 100_000,
+        max_grep_matches: int = 1000,
         summarizer: ReadSummarizer | None = None,
         enable_version_editing: bool = True,
     ) -> None:
-        super().__init__(max_read_chars=max_read_chars, summarizer=summarizer)
+        super().__init__(
+            max_read_chars=max_read_chars,
+            max_grep_matches=max_grep_matches,
+            summarizer=summarizer,
+        )
 
         if edit_whitelist is not None and edit_blacklist is not None:
             raise ValueError(
