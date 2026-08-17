@@ -45,7 +45,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, type ComputedRef } from 'vue'
+import { ref, computed, type ComputedRef } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 
@@ -72,11 +72,6 @@ const treeData = computed(() => resourceTree.value)
 const activeResourceDetails: ComputedRef<ResourceWithVersions | null> = computed(() => {
   if (!selectedResourceId.value) return null
   return resources.value.find((r) => r.id === selectedResourceId.value) || null
-})
-
-// --- Lifecycle ---
-onMounted(() => {
-  resourceStore.initializeList()
 })
 
 // --- Handlers ---

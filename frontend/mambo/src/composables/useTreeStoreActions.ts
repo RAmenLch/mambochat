@@ -44,27 +44,45 @@ export function useTreeStoreActions<TItem extends BaseTreeItem, TCreate, TUpdate
   const isLoading = ref(false);
   const loadedFolderIds = ref(new Set<string>());
   const loadingFolders = ref(new Set<string>());
+  // 并发保护：多个组件可能同时触发初始化（如资源树面板/资源管理器/后端面板），
+  // 并发执行会互相覆盖 items，导致“文件夹已标记加载但子节点数据丢失”的竞态。
+  let pendingInitialize: Promise<void> | null = null;
 
   async function initializeList() {
-    isLoading.value = true;
-    try {
-      items.value = [];
-      loadedFolderIds.value.clear();
-      loadingFolders.value.clear();
+    if (pendingInitialize) return pendingInitialize;
 
-      const rootItems = await api.fetchChildren(['root']);
-      items.value = rootItems;
-      loadedFolderIds.value.add('root');
-    } catch (error) {
-      console.error('Failed to initialize list:', error);
-    } finally {
-      isLoading.value = false;
-    }
+    isLoading.value = true;
+    pendingInitialize = (async () => {
+      try {
+        items.value = [];
+        loadedFolderIds.value.clear();
+        loadingFolders.value.clear();
+
+        const rootItems = await api.fetchChildren(['root']);
+        items.value = rootItems;
+        loadedFolderIds.value.add('root');
+      } catch (error) {
+        console.error('Failed to initialize list:', error);
+      } finally {
+        isLoading.value = false;
+        pendingInitialize = null;
+      }
+    })();
+    return pendingInitialize;
   }
 
   async function fetchChildren(parentId: string) {
     if (loadingFolders.value.has(parentId)) return;
-    if (loadedFolderIds.value.has(parentId)) return;
+    if (loadedFolderIds.value.has(parentId)) {
+      // 防御性校验：已标记加载的父节点，若子节点数据实际已不在列表中
+      // （例如被并发初始化覆盖），则撤销加载标记并重新拉取。
+      const hasChildren =
+        parentId === 'root'
+          ? items.value.some((item) => item.parentId === 'root' || item.parentId === null)
+          : items.value.some((item) => item.parentId === parentId);
+      if (hasChildren) return;
+      loadedFolderIds.value.delete(parentId);
+    }
 
     loadingFolders.value.add(parentId);
     try {
