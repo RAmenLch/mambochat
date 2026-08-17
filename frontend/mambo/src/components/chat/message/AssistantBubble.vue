@@ -373,7 +373,7 @@ function parseErrorMessage(content: string): string {
   for (const rule of ERROR_PREFIX_MATCHES) {
     if (body.startsWith(rule.prefix)) {
       const params = rule.extract ? rule.extract(body) : undefined;
-      return t(rule.key, params);
+      return params ? t(rule.key, params) : t(rule.key);
     }
   }
   return message;
