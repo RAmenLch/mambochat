@@ -2,7 +2,7 @@
 
 ## 1. 概述
 
-本规范定义 MamboChat Agent 分享文件的格式：一个 gzip 压缩的 JSON 文件，包含 Agent（含 subAgent 闭包）及其完整依赖（服务商+模型、资源树、MCP、Resource Backend、二进制载荷），用于在不同 MamboChat 实例之间迁移。
+本规范定义 MamboChat Agent 分享文件的格式：一个 gzip 压缩的 JSON 文件，包含 Agent（含 subAgent 闭包）及其完整依赖（服务商+模型、资源树、MCP、Resource / Local Backend、二进制载荷），用于在不同 MamboChat 实例之间迁移。
 
 - 文件扩展名：`.mamboagent`
 - 编码：UTF-8
@@ -52,7 +52,8 @@
 |---|---|
 | `AIProvider.apiKey` | 不导出。服务商段**恒**以 `apiKeyMissing: true` 标记（无论 DB 中是否有 key，导出端不做任何判断）。导入端创建服务商时以占位符 `"********"` 写入 apiKey（满足 DB 非空约束，与 Backend 密码脱敏 `PASSWORD_MASK` 同款），导入报告列出全部服务商供 UI 提示补填，补填前该服务商不可用 |
 | `McpServer.env` / `headers` | 不导出（字段省略） |
-| SSH / API / Local 类型 Backend | 整个实体不导出（`backends[]` 仅含 `backendType == "resource"`） |
+| SSH / API 类型 Backend | 整个实体不导出（含密码 / api_key 等凭据；`backends[]` 仅含 `backendType == "resource" \| "local"`） |
+| Local 类型 Backend | 整个实体导出：`configData` 仅含路径配置（`root_dir` / `edit_whitelist` / `edit_blacklist` / `ignore_dirs`），无凭据类敏感字段；`root_dir` 指向导出机本地路径，导入端不校验存在性，导入后用户需确认 / 调整目标机上的 `root_dir` |
 
 ### 4.3 blobs 载荷段
 
@@ -119,7 +120,7 @@
 | `resourcePromptList` | `resources[].sourceId` |
 | `enabledMcpIds` | `mcpServers[].sourceId` |
 | `subAgents` | `agents[].sourceId`（包内 Agent） |
-| `backendIds` / `defaultBackendId` | `backends[].sourceId`；导出时**已清洗**：`backendIds` 仅保留闭包内导出的 resource backend，`defaultBackendId` 若非闭包内 resource backend 则置 `null`（见 §5.6） |
+| `backendIds` / `defaultBackendId` | `backends[].sourceId`；导出时**已清洗**：`backendIds` 仅保留闭包内导出的 resource / local backend，`defaultBackendId` 若非闭包内 resource / local backend 则置 `null`（见 §5.6） |
 | `agentParameters.memory_resource_ids` | `resources[].sourceId` |
 | `agentParameters.security_review.model_id` | `providers[].models[].sourceId` |
 
@@ -285,9 +286,15 @@
 
 ### 5.6 `backends[]`
 
-仅 `backendType == "resource"`。`configData.resource_id` 为资源引用（指向包内 folder 节点，可能是普通 folder、KB 根或 Skill 根——容器归类由挂载来源决定，见 §6.4）。**导出端同步清洗 Agent 字段（不做原样导出）**：Agent 的 `backendIds` 仅保留闭包内导出的 backend id（ssh / local / api 引用移除）；`defaultBackendId` 若非闭包内导出的 backend 则导出为 `null`。导入端无需再过滤，原样落库即可。
+仅 `backendType == "resource" | "local"`（ssh / api 含凭据，整个实体不导出，见 §4.2）。两种类型的导出 / 导入规则：
+
+- **resource**：`configData.resource_id` 为资源引用（指向包内 folder 节点，可能是普通 folder、KB 根或 Skill 根——容器归类由挂载来源决定，见 §6.4），导入端映射替换为新资源 id。
+- **local**：`configData` 仅含路径配置（`root_dir` / `edit_whitelist` / `edit_blacklist` / `ignore_dirs`），**无任何跨段引用**，导出端原样导出、导入端原样落库；`root_dir` 指向导出机本地路径，导入端不校验存在性，导入后用户需确认 / 调整目标机上的 `root_dir` 配置（见 §4.2）。
+
+**导出端同步清洗 Agent 字段（不做原样导出）**：Agent 的 `backendIds` 仅保留闭包内导出的 backend id（ssh / api 引用移除）；`defaultBackendId` 若非闭包内导出的 backend 则导出为 `null`。导入端无需再过滤，原样落库即可。
 
 ```jsonc
+// resource 类型（configData.resource_id 为跨段引用）
 {
   "sourceId": "backend-uuid",
   "name": "workspace",
@@ -297,6 +304,23 @@
     "resource_id": "res-uuid",
     "edit_whitelist": ["/workspace/"],
     "edit_blacklist": null
+  },
+  "tools_config": { "execute": { "enabled": false, "require_review": true } }
+}
+```
+
+```jsonc
+// local 类型（configData 无跨段引用，原样导出 / 导入）
+{
+  "sourceId": "backend-uuid",
+  "name": "local_home",
+  "description": null,
+  "backendType": "local",
+  "configData": {
+    "root_dir": "~",
+    "edit_whitelist": null,
+    "edit_blacklist": null,
+    "ignore_dirs": [".git", "node_modules"]
   },
   "tools_config": { "execute": { "enabled": false, "require_review": true } }
 }
@@ -325,7 +349,7 @@
 
 ### 6.2 Backend 闭包
 
-Agent 闭包内所有 Agent 的 `backendIds` 中 `backendType == "resource"` 的并集（去重）。**导出时同步清洗 Agent 字段**：`backendIds` 仅保留闭包内 id（ssh / local / api 引用移除），`defaultBackendId` 若非闭包内 id 则导出为 `null`（见 §5.6）。
+Agent 闭包内所有 Agent 的 `backendIds` 中 `backendType == "resource" | "local"` 的并集（去重）；ssh / api 类型不导出（含凭据，见 §4.2）。**导出时同步清洗 Agent 字段**：`backendIds` 仅保留闭包内 id（ssh / api 引用移除），`defaultBackendId` 若非闭包内 id 则导出为 `null`（见 §5.6）。
 
 ### 6.3 资源闭包与目标结构（导出端预先确定）
 
@@ -333,13 +357,13 @@ Agent 闭包内所有 Agent 的 `backendIds` 中 `backendType == "resource"` 的
 
 - `resourcePromptList` 引用的资源；
 - `agentParameters.memory_resource_ids` 引用的资源；
-- `backends[]`（resource 类型）`configData.resource_id` 引用的 folder。
+- `backends[]`（仅 resource 类型）`configData.resource_id` 引用的 folder（local 类型不挂载资源，不进入资源闭包）。
 
 **导出端预先构建"导入目标结构"**：在包内虚拟出容器节点（`itemType="folder"`、`resourceType=null`、无版本，`sourceId` 为导出端生成的包内唯一 UUID），并将所有真实资源节点的 `parentId` **直接指向目标结构中的父节点**。导入端不推导、不重组，按包内 `parentId` 拓扑建树即可。
 
 **去重**：全部按 `sourceId` 取并集去重——同一真实资源被多处引用时**只导出一份**（放置位置见 §6.4 优先级），所有引用方（`resourcePromptList` / `memory_resource_ids` / `configData.resource_id`）在导入时统一重写指向该份。
 
-**子树展开（两阶段认领，先目录后叶子）**：`resourceType == "skill" | "knowledge_base"` 的节点及被 backend 挂载的 folder 导出**完整子树**（含全部子孙节点与版本，嵌套的 skill / kb 亦完整导出）；其余被引用的叶子资源（file / system_prompt / submessage_template）仅导出节点本身。
+**子树展开（两阶段认领，先目录后叶子）**：`resourceType == "skill" | "knowledge_base"` 的节点及被 resource 类型 backend 挂载的 folder 导出**完整子树**（含全部子孙节点与版本，嵌套的 skill / kb 亦完整导出）；其余被引用的叶子资源（file / system_prompt / submessage_template）仅导出节点本身。
 
 认领分两阶段进行：
 
@@ -370,7 +394,7 @@ Agent 闭包内所有 Agent 的 `backendIds` 中 `backendType == "resource"` 的
 | `resourcePromptList`（resourceType == `skill`） | `skill/<名>/` | 同上 |
 | `resourcePromptList`（其余：file / system_prompt / submessage_template） | `prompt/<名>` | 叶子 |
 | `memory_resource_ids` | `memory/<名>` | 叶子；与 `prompt/` 分目录，互不冲突 |
-| backend `configData.resource_id`（任意 FOLDER，含 KB 根 / Skill 根） | `RB_<backend名>/<folder名>/` | 外层容器统一加 `RB_` 前缀，与固定容器名（`kb` 等）及资源名天然隔离；backend 配置名全局唯一，加前缀后仍唯一；folder 名为内层根目录名 |
+| backend `configData.resource_id`（**resource 类型**，任意 FOLDER，含 KB 根 / Skill 根） | `RB_<backend名>/<folder名>/` | 外层容器统一加 `RB_` 前缀，与固定容器名（`kb` 等）及资源名天然隔离；backend 配置名全局唯一，加前缀后仍唯一；folder 名为内层根目录名；**local 类型 backend 不挂载资源，不产生容器** |
 
 **优先级（同一真实资源被多处引用时）**：
 
@@ -423,7 +447,7 @@ Agent 闭包内所有 Agent 的 `backendIds` 中 `backendType == "resource"` 的
    1. `providers`（apiKey 写入占位符 `"********"`，见 §4.2；导入报告列出全部服务商供 UI 提示补填）
    2. `resources`（**按包内 `parentId` 拓扑序建树**：虚拟容器节点创建为普通 folder（`itemType=folder`、`resourceType=null`、无版本）→ 子树成员保留 `resourceType` / `kb_id` / `kb_config`（`kb_id` 重写为新 KB 根 ID）→ 文件型版本经 File 服务落库；**KB 根节点调用 `create_knowledge_base` 等价逻辑创建**：校验 embedding 模型存在 / 类型为 embedding / dimension 受支持，校验失败则该项报错；`embedding_model_id` 传入重写后的新模型 id，`dimension` 以重写后模型 `meta_config.embedding_dimension` 推导为准（正常与导出 attributes 一致，attributes 中的 `dimension` 不参与校验），`embedding_rate_limit` 取自导出 attributes；KB 根版本**唯一**——创建即生成"初始配置"版本，随后**原地更新**该版本的 `attributes` / `content` 以匹配包内版本数据并设置 `latestVersionId`，不新增版本；其余带版本资源按包内版本数据重建版本（创建后调用 `batch_update_versions_order` 恢复包内 `sortOrder`）与 `latestVersionId`）
    3. `mcpServers`
-   4. `backends`（`configData.resource_id` 映射替换）
+   4. `backends`（resource 类型：`configData.resource_id` 映射替换；local 类型：`configData` 无跨段引用，原样落库）
    5. `agents`（主 Agent 放目标文件夹（Agent 树）；subAgent 平铺进 `<主Agent原名>_subagent` 文件夹（与主 Agent 同级）；重写全部引用字段；`backendIds` / `defaultBackendId` 包内已清洗（§5.6），重写映射后原样落库；头像经 File 服务落库）
 6. 返回导入报告：成功/失败清单、缺少 apiKey 的服务商列表。
 
@@ -467,13 +491,14 @@ Agent 闭包内所有 Agent 的 `backendIds` 中 `backendType == "resource"` 的
 ## 8. 兼容性与扩展性
 
 - `formatVersion` 语义：值为本规范最后一次变更时的 mambochat 版本（当前 `"1.3.0"`），仅在规范本身变更时 bump（见 §5.1）。导入端接受 `formatVersion <= 当前支持版本`（兼容旧版本导出的包）；`formatVersion > 当前支持版本` → 拒绝，提示用户升级平台。同一版本内的格式差异由"忽略未知字段/段"（见下）承担，不另设小版本号。
+- 同版本内的向后兼容扩展：`backends[]` 在 1.3.0 内扩展为允许 `backendType == "local"`（resource 仍为原语义）。旧包（仅 resource）导入不受影响；扩展前的导入实现无法识别 local 类型（会以错误类型建库并报资源引用错误），用户升级到包含该扩展的同一版本实现后即可正常导入，故不 bump formatVersion。
 - 未知字段：导入端 pydantic 以 `extra='ignore'` 解析。
 - 段级扩展：未来新增实体（如知识库）直接新增顶层段，旧导入端忽略。
 - JSON Schema 文件随应用发布（如 `backend/schemas/agent_package_schema_v1.json`），`$schema` 以相对路径引用，仅用于校验与 IDE 提示。
 
 ## 9. 完整示例
 
-以下示例展示新目标结构：主 Agent "Demo Agent"（Mambo）挂载 1 个 Skill 根（`r1`，含 `SKILL.md`）、1 个叶子（`r2`，system_prompt）、1 个 Backend（`bk1`，挂载普通 folder `f1`，含子文件 `f2`）、1 个 memory 资源（`m1`）；subAgent "helper"（`a2`）独有 1 个叶子（`s2`）。`sourceId` 使用简短占位符，真实导出为 UUID；`vc-*` 为导出端虚拟的容器节点。
+以下示例展示新目标结构：主 Agent "Demo Agent"（Mambo）挂载 1 个 Skill 根（`r1`，含 `SKILL.md`）、1 个叶子（`r2`，system_prompt）、1 个 Resource Backend（`bk1`，挂载普通 folder `f1`，含子文件 `f2`）、1 个 Local Backend（`bk2`，不挂载资源）、1 个 memory 资源（`m1`）；subAgent "helper"（`a2`）独有 1 个叶子（`s2`）。`sourceId` 使用简短占位符，真实导出为 UUID；`vc-*` 为导出端虚拟的容器节点。
 
 ```jsonc
 {
@@ -509,7 +534,7 @@ Agent 闭包内所有 Agent 的 `backendIds` 中 `backendType == "resource"` 的
       "resourcePromptList": ["r1", "r2"],
       "enabledMcpIds": ["mc1"],
       "subAgents": ["a2"],
-      "backendIds": ["bk1"],
+      "backendIds": ["bk1", "bk2"],
       "defaultBackendId": "bk1"
     },
     {
@@ -745,6 +770,19 @@ Agent 闭包内所有 Agent 的 `backendIds` 中 `backendType == "resource"` 的
         "edit_blacklist": null
       },
       "tools_config": { "execute": { "enabled": false, "require_review": true } }
+    },
+    {
+      "sourceId": "bk2",
+      "name": "local_home",
+      "description": null,
+      "backendType": "local",
+      "configData": {
+        "root_dir": "~",
+        "edit_whitelist": null,
+        "edit_blacklist": null,
+        "ignore_dirs": [".git", "node_modules"]
+      },
+      "tools_config": { "execute": { "enabled": false, "require_review": true } }
     }
   ],
   "blobs": [
@@ -792,6 +830,8 @@ Agent 闭包内所有 Agent 的 `backendIds` 中 `backendType == "resource"` 的
   Demo Agent_subagent/              ← subAgent 本体（§5.2，与主 Agent 同级）
     helper                          ← agent a2
 ```
+
+> Local Backend `bk2` 不挂载资源，不产生任何资源目录（§6.4）；导入后仅作为 Agent 的 backend 配置落库。
 
 ### 9.1 嵌套场景示例（backend folder 内含 KB 根）
 

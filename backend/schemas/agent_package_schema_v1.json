@@ -133,7 +133,7 @@
         "sourceId": { "type": "string" },
         "name": { "type": "string" },
         "description": { "type": ["string", "null"] },
-        "backendType": { "const": "resource" },
+        "backendType": { "enum": ["resource", "local"] },
         "configData": { "type": "object" },
         "tools_config": { "type": ["object", "null"] }
       }

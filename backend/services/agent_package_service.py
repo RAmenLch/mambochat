@@ -205,13 +205,13 @@ class AgentPackageExporter:
 
         agent_closure = await self._agent_closure(main_agent)
 
-        # Backend 闭包 + Agent 字段清洗（§6.2 / §5.6）
-        resource_backends, cleaned_backend_ids, cleaned_default_ids = await self._backend_closure(agent_closure)
-        for bk in resource_backends:
+        # Backend 闭包 + Agent 字段清洗（§6.2 / §5.6）：resource / local 可导出，ssh / api 不导出
+        export_backends, cleaned_backend_ids, cleaned_default_ids = await self._backend_closure(agent_closure)
+        for bk in export_backends:
             _check_illegal_chars(bk.name, "Backend 名")  # RB_ 前缀隔离保留字（§6.4），仅查非法字符
 
         # 资源闭包（最小树 + 目标结构，§6.3/§6.4/§6.7）
-        res_ctx = await self._build_resource_closure(main_agent, agent_closure, resource_backends)
+        res_ctx = await self._build_resource_closure(main_agent, agent_closure, export_backends)
 
         # blob 闭包（§4.3/§6.8）：文件型版本内容 + 头像，按 File 记录去重
         blob_ctx = await self._build_blob_closure(res_ctx, agent_closure)
@@ -254,7 +254,7 @@ class AgentPackageExporter:
                 configData=b.configData,
                 tools_config=b.tools_config,
             )
-            for b in resource_backends
+            for b in export_backends
         ]
 
         blobs_pkg = [
@@ -315,22 +315,22 @@ class AgentPackageExporter:
         for a in agent_closure:
             all_ids.update(a.backendIds or [])
         backends = await backend_crud.get_backends_by_ids(self.db, list(all_ids))
-        backend_map = {b.id: b for b in backends}
-        resource_backends = [b for b in backends if b.backendType == BackendType.RESOURCE.value]
-        resource_backend_ids = {b.id for b in resource_backends}
+        export_backends = [b for b in backends
+                           if b.backendType in (BackendType.RESOURCE.value, BackendType.LOCAL.value)]
+        export_backend_ids = {b.id for b in export_backends}
 
         cleaned_backend_ids: Dict[str, List[str]] = {}
         cleaned_default_ids: Dict[str, Optional[str]] = {}
         for a in agent_closure:
-            keep = [bid for bid in (a.backendIds or []) if bid in resource_backend_ids]
+            keep = [bid for bid in (a.backendIds or []) if bid in export_backend_ids]
             cleaned_backend_ids[a.id] = keep
             default = a.defaultBackendId
-            cleaned_default_ids[a.id] = default if default in resource_backend_ids else None
+            cleaned_default_ids[a.id] = default if default in export_backend_ids else None
 
-        return resource_backends, cleaned_backend_ids, cleaned_default_ids
+        return export_backends, cleaned_backend_ids, cleaned_default_ids
 
     # ── 资源闭包（§6.3/§6.4/§6.5/§6.7）──
-    async def _build_resource_closure(self, main_agent, agent_closure, resource_backends):
+    async def _build_resource_closure(self, main_agent, agent_closure, export_backends):
         # 1. 空间树
         spaces: Dict[str, _Space] = {}
         for i, a in enumerate(agent_closure):
@@ -343,11 +343,11 @@ class AgentPackageExporter:
                     sp.children.append(child)
                     child.parent = sp
 
-        # 2. Backend 按 Agent 归类（用于收集 backend 挂载）
+        # 2. Backend 按 Agent 归类（仅 resource 类型产生挂载；local 不挂载资源，§6.3）
         backends_by_agent: Dict[str, List] = defaultdict(list)
         for a in agent_closure:
-            for bk in resource_backends:
-                if bk.id in (a.backendIds or []):
+            for bk in export_backends:
+                if bk.id in (a.backendIds or []) and bk.backendType == BackendType.RESOURCE.value:
                     backends_by_agent[a.id].append(bk)
 
         # 3. 收集挂载请求（顺序即优先级：主空间 > 子空间；prompt > memory > backend，§6.4）
@@ -1022,6 +1022,8 @@ class AgentPackageImporter:
                         errors.append(f"资源 '{r.name}' 版本 '{v.name}': blobId 引用不存在")
 
         for b in pkg.backends:
+            if b.backendType != BackendType.RESOURCE.value:
+                continue  # local 类型 configData 无跨段引用（§5.6）
             rid = (b.configData or {}).get("resource_id")
             if rid and rid not in resource_ids:
                 errors.append(f"Backend '{b.name}': configData.resource_id 引用不存在")
@@ -1459,17 +1461,20 @@ class AgentPackageImporter:
 
     async def _create_backend(self, b: PackageBackend, res_id_map: Dict[str, str], new_name: str):
         cd = dict(b.configData or {})
-        rid = cd.get("resource_id")
-        if rid not in res_id_map:
-            raise AppHTTPException(status_code=400, error_code="AGENT_PACKAGE_BACKEND_RESOURCE_REF_INVALID", detail=f"Backend '{b.name}' 的 resource_id 引用无效")
-        cd["resource_id"] = res_id_map[rid]
+        if b.backendType == BackendType.RESOURCE.value:
+            # resource 类型：configData.resource_id 为跨段引用（§5.6），映射替换
+            rid = cd.get("resource_id")
+            if rid not in res_id_map:
+                raise AppHTTPException(status_code=400, error_code="AGENT_PACKAGE_BACKEND_RESOURCE_REF_INVALID", detail=f"Backend '{b.name}' 的 resource_id 引用无效")
+            cd["resource_id"] = res_id_map[rid]
+        # local 类型：configData 无跨段引用（root_dir / 黑白名单 / ignore_dirs），原样落库
         # ORM 直建：绕过 BackendConfigCreate 的 path_safe 保留字校验
         # （backend 名由 RB_ 前缀隔离保留字，DB 允许保留字名，见 _check_illegal_chars 注释）
         db_backend = backend_model.BackendConfig(
             id=generate_uuid(),
             name=new_name,
             description=b.description,
-            backendType=BackendType.RESOURCE.value,
+            backendType=b.backendType,
             configData=cd,
             tools_config=b.tools_config,
         )
