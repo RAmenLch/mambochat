@@ -1303,6 +1303,7 @@ class AgentPackageImporter:
             db_res = resource_model.Resource(
                 id=generate_uuid(),
                 name=r.name,
+                description=r.description,
                 itemType=ResourceItemType.FOLDER.value,
                 resourceType=None,
                 parentId=parent_id,

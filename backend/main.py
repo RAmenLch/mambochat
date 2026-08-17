@@ -44,6 +44,7 @@ from backend.routers import (
     resource_completion,  # <-- 新增：资源补全路由
 )
 from backend.services.cleanup_service import cleanup_zombie_files
+from backend.services.builtin_agent_seed import seed_builtin_agents
 from backend.services.kb_service import SUP_DIM
 from backend.services.vec_migration import ensure_vec_tables
 from backend.exceptions import AppHTTPException, app_http_exception_handler
@@ -194,6 +195,10 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"CRITICAL: 数据库迁移失败: {e}")
         raise e
+
+    # 首次启动导入内置 mambo_agent（幂等，失败不阻塞启动）
+    async with AsyncSessionLocal() as db:
+        await seed_builtin_agents(db)
 
     # 初始化底层持久化 Checkpointer
     await init_checkpointer()
