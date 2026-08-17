@@ -73,16 +73,7 @@ export function useTreeStoreActions<TItem extends BaseTreeItem, TCreate, TUpdate
 
   async function fetchChildren(parentId: string) {
     if (loadingFolders.value.has(parentId)) return;
-    if (loadedFolderIds.value.has(parentId)) {
-      // 防御性校验：已标记加载的父节点，若子节点数据实际已不在列表中
-      // （例如被并发初始化覆盖），则撤销加载标记并重新拉取。
-      const hasChildren =
-        parentId === 'root'
-          ? items.value.some((item) => item.parentId === 'root' || item.parentId === null)
-          : items.value.some((item) => item.parentId === parentId);
-      if (hasChildren) return;
-      loadedFolderIds.value.delete(parentId);
-    }
+    if (loadedFolderIds.value.has(parentId)) return;
 
     loadingFolders.value.add(parentId);
     try {
