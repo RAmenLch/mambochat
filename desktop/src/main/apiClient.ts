@@ -616,7 +616,7 @@ export class ApiClientManager {
 
     // 缓存友好：限制单次 read 返回的字符总量，避免大文件整份注入上下文
     const MAX_READ_CHARS = 10000
-    let content = selected.join('\n')
+    content = selected.join('\n')
     let truncated = false
     if (content.length > MAX_READ_CHARS) {
       content = content.slice(0, MAX_READ_CHARS) + '\n... (content truncated)'
@@ -1259,25 +1259,55 @@ export class ApiClientManager {
     }
   }
 
-  /** Simple fnmatch-style glob matching.
+  /** POSIX-style glob matching (pathlib-compatible), tested against a '/'-separated path.
    *  - ** matches zero or more directory levels (crosses /)
    *  - * matches any characters except /
    *  - ? matches a single character except /
+   *  - [...] / [!...] character classes
    */
   private fnmatch(name: string, pattern: string): boolean {
-    let escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    escaped = escaped.replace(/\*\*\//g, '\x01')
-    escaped = escaped.replace(/\/\*\*/g, '\x02')
-    escaped = escaped.replace(/\*\*/g, '\x03')
-    escaped = escaped.replace(/\*/g, '\x04')
-    escaped = escaped.replace(/\?/g, '\x05')
-    escaped = escaped.replace(/\x01/g, '(.*/)?')
-    escaped = escaped.replace(/\x02/g, '(/.*)?')
-    escaped = escaped.replace(/\x03/g, '.*')
-    escaped = escaped.replace(/\x04/g, '[^/]*')
-    escaped = escaped.replace(/\x05/g, '[^/]')
-    const re = new RegExp('^' + escaped + '$')
-    return re.test(name)
+    let re = ''
+    let i = 0
+    const n = pattern.length
+    const esc = (c: string) => c.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    while (i < n) {
+      const c = pattern[i]
+      i += 1
+      if (c === '*') {
+        if (pattern[i] === '*') {
+          i += 1
+          if (pattern[i] === '/') {
+            i += 1
+            re += '(?:.*/)?'
+          } else {
+            re += '.*'
+          }
+        } else {
+          re += '[^/]*'
+        }
+      } else if (c === '?') {
+        re += '[^/]'
+      } else if (c === '[') {
+        let j = i
+        if (pattern[j] === '!' || pattern[j] === '^') j += 1
+        if (pattern[j] === ']') j += 1
+        while (j < n && pattern[j] !== ']') j += 1
+        if (j >= n) {
+          re += esc('[')
+        } else {
+          let stuff = pattern.slice(i, j)
+          const negate = stuff.startsWith('!')
+          if (negate || stuff.startsWith('^')) stuff = stuff.slice(1)
+          stuff = stuff.replace(/\\/g, '\\\\')
+          re += '[' + (negate ? '^' : '') + stuff + ']'
+          i = j + 1
+        }
+      } else {
+        re += esc(c)
+      }
+    }
+    const regex = new RegExp('^' + re + '$')
+    return regex.test(name)
   }
 
   /** Convert http:// to ws:// and https:// to wss:// */

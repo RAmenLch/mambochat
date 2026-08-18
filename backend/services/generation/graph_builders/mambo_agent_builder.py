@@ -44,6 +44,10 @@ from backend.schemas.enums import BackendType
 _READ_CHARS = 10_000
 _GREP_MATCHES = 200
 
+# 缓存友好：工具结果（execute/tree 等）估算 token 超过此值即落盘（eviction），
+# 仅返回预览+文件路径给模型，避免大工具结果拖垮缓存命中率
+_EVICT_TOKENS = 8_000
+
 
 def _make_session_factory() -> Callable[[], AsyncSession]:
     """创建异步 session 工厂，用于 MamboResourceBackend 的数据库访问。"""
@@ -103,6 +107,8 @@ def _build_mambo_backend(
                 max_grep_matches=_GREP_MATCHES,
             ),
             virtual_workspaces=virtual_workspaces if virtual_workspaces else None,
+            max_read_chars=_READ_CHARS,
+            max_grep_matches=_GREP_MATCHES,
         )
 
     # ---- 1. 确定 real_backend：default_backend_id > 列表第一位 ----
@@ -162,6 +168,8 @@ def _build_mambo_backend(
     return HybridWorkspaceBackend(
         real_backend=real_be,
         virtual_workspaces=virtual_workspaces if virtual_workspaces else None,
+        max_read_chars=_READ_CHARS,
+        max_grep_matches=_GREP_MATCHES,
     )
 
 
@@ -471,4 +479,5 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
             checkpointer=checkpointer,
             interrupt_on=agent_config.hitl_interrupt_on if agent_config.hitl_interrupt_on else None,
             security_review=security_review,
+            tool_token_limit_before_evict=_EVICT_TOKENS,
         )

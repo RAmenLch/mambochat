@@ -80,6 +80,13 @@ Common entries (frontend features):
 - **Compressing history (manual summary)**: the dialogue before the compression point is replaced with a short summary. This "breaks" the original cache, but it's an **intentional, cost-effective** operation — every subsequent request becomes much shorter, saving significant money over the long run.
 - **Automatic summarization**: same principle as manual compression; it's the system's automatic cost-saving mechanism when a conversation gets too long.
 
+### 5. Other cases that don't break the cache but lower the hit rate
+
+The following cases **don't break the cache**, but they do lower the cache hit rate:
+
+- **Tools returning large results**: when a tool (such as web search, code execution, etc.) returns a very large result, that result is written into the context as a new input message. The higher the share of new input, the lower the share of cacheable content, and the cache hit rate drops accordingly.
+- **AI moderation feature**: AI moderation essentially starts a separate, extremely short conversation. Because the share of "new input messages" is very high in a short conversation, the cache hit rate drops noticeably — but such conversations are usually very short, so the actual overhead is generally small.
+
 ---
 
 ## 3. Which Operations Do NOT Break the Cache (Safe to Use)

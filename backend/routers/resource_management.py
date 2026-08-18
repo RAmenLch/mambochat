@@ -20,6 +20,7 @@ from backend.services import chat_service, resource_service
 from backend.services.resource_service import validate_name_uniqueness
 from backend.services.kb_service import KnowledgeBaseService
 from backend.services.file_service import FileService
+from backend.plugins.sillytavern import is_sillytavern_card_png
 
 router = APIRouter(prefix="/resources", tags=["Resource Management"])
 
@@ -189,6 +190,20 @@ async def upload_resource_file(
 ):
     if not parent_id and not resource_id:
         raise HTTPException(status_code=400, detail="Either parent_id or resource_id must be provided.")
+
+    # SillyTavern 角色卡分流：新建模式下，若为 PNG 角色卡则拆解为资源树
+    if parent_id:
+        file_content = await file.read()
+        await file.seek(0)
+        if is_sillytavern_card_png(file_content):
+            from backend.plugins.sillytavern import SillyTavernImportService
+            import_service = SillyTavernImportService(db)
+            try:
+                folder_res = await import_service.import_png(file, parent_id)
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"SillyTavern 角色卡导入失败: {e}")
+            await _hydrate_resources([folder_res], db)
+            return folder_res
 
     file_service = FileService(db)
 
