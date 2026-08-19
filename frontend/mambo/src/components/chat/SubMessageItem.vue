@@ -32,6 +32,22 @@
         </template>
       </el-image>
 
+      <audio
+        v-else-if="subMessage.file_info.mime_type.startsWith('audio/')"
+        :src="subMessage.file_info.url"
+        controls
+        preload="metadata"
+        class="file-audio-player"
+      ></audio>
+
+      <video
+        v-else-if="subMessage.file_info.mime_type.startsWith('video/')"
+        :src="subMessage.file_info.url"
+        controls
+        preload="metadata"
+        class="file-video-player"
+      ></video>
+
       <div v-else-if="isEditableFile && !isImageFile" class="editable-file-view">
         <div class="file-content-header">
           <div class="file-content-header-left">
@@ -744,8 +760,20 @@ function scrollToTop() {
   max-width: 240px;
   overflow: visible;
 }
+/* 音频/视频文件需要更宽的容器以正确渲染控件 */
+.sub-message-item.is-file:has(.file-audio-player),
+.sub-message-item.is-file:has(.file-video-player) {
+  max-width: 100%;
+}
 .file-display-container {
   overflow: visible;
+  min-width: 0;
+}
+/* 音频/视频容器需要明确宽度，避免inline-flex收缩为0 */
+.file-display-container:has(.file-audio-player),
+.file-display-container:has(.file-video-player) {
+  width: 100%;
+  min-width: 300px;
 }
 /* el-image 固定展示框，fit="contain" 等比缩放完整显示图片 */
 .file-image-thumbnail {
@@ -771,6 +799,18 @@ function scrollToTop() {
 .file-placeholder .el-icon {
   font-size: 32px;
   margin-bottom: 8px;
+}
+.file-audio-player {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+}
+.file-video-player {
+  display: block;
+  width: 100%;
+  max-width: 480px;
+  border-radius: 6px;
+  background-color: #000;
 }
 .file-card {
   display: flex;

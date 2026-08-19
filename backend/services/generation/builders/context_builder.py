@@ -3,7 +3,7 @@
 import json
 import base64
 from datetime import datetime as dt
-from typing import List, Dict, Any, Optional, Set, Tuple
+from typing import List, Dict, Any, Optional, Set, Tuple, Union
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -81,7 +81,7 @@ class MessageContextBuilder:
         self.language = language
 
         # 内部缓存，防止同一文件在单次装配中重复读取
-        self._file_content_cache: Dict[Any, Dict[str, Any]] = {}
+        self._file_content_cache: Dict[Any, Any] = {}
 
         # 自动摘要重算：由 _apply_zip_history_logic 填充，_build_payload 消费
         self._auto_target_sub_msg_id: Optional[str] = None
@@ -440,7 +440,10 @@ class MessageContextBuilder:
 
             part = await self._convert_sub_message_to_part(sub, msg.role)
             if part:
-                content_parts.append(part)
+                if isinstance(part, list):
+                    content_parts.extend(part)
+                else:
+                    content_parts.append(part)
                 last_sub_id = sub.id
 
         if not content_parts:
@@ -478,7 +481,7 @@ class MessageContextBuilder:
 
     async def _convert_sub_message_to_part(
         self, sub: SubMessageSchema, role: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[Union[Dict[str, Any], List[Dict[str, Any]]]]:
         part = None
         if sub.type == schemas_enums.SubMessageType.FILE.value:
             part = await self._process_file_part(sub.content, sub, role)
@@ -496,7 +499,7 @@ class MessageContextBuilder:
         else:
             part = {"type": "text", "text": sub.content}
 
-        if part and part.get("type") == "text" and self.content_limit:
+        if isinstance(part, dict) and part.get("type") == "text" and self.content_limit:
             text = part["text"]
             if len(text) > self.content_limit:
                 part["text"] = text[:self.content_limit] + "..."
@@ -518,7 +521,7 @@ class MessageContextBuilder:
 
     async def _process_file_part(
         self, file_id: str, sub: SubMessageSchema, role: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[Union[Dict[str, Any], List[Dict[str, Any]]]]:
         """转换 FILE 子消息为 LLM content part。
 
         - USER 角色：始终附加文件信息文本（需求 1），副本写入成功（file_copy_status=ok）时
@@ -617,7 +620,7 @@ class MessageContextBuilder:
 
     async def _process_user_file_part(
         self, file_service: FileService, db_file: Any, file_id: str, sub: SubMessageSchema
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[Union[Dict[str, Any], List[Dict[str, Any]]]]:
         """用户消息的文件转换：始终附带文件信息，副本写入成功时附带路径映射。"""
         mime = db_file.mime_type
         category = ("图片" if mime.startswith("image/") else

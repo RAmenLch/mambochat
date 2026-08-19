@@ -23,6 +23,20 @@
         fit="contain"
         class="file-image-thumbnail"
       />
+      <audio
+        v-else-if="subMessage.file_info.mime_type.startsWith('audio/')"
+        :src="subMessage.file_info.url"
+        controls
+        preload="metadata"
+        class="file-audio-player"
+      ></audio>
+      <video
+        v-else-if="subMessage.file_info.mime_type.startsWith('video/')"
+        :src="subMessage.file_info.url"
+        controls
+        preload="metadata"
+        class="file-video-player"
+      ></video>
       <div v-else-if="isEditableFile && !isImageFile" class="editable-file-view">
         <div class="file-content-header">
           <div class="file-content-header-left">
@@ -570,6 +584,20 @@ onBeforeUnmount(() => {
 
 .file-display-container {
   width: 100%;
+}
+
+.file-audio-player {
+  display: block;
+  width: 100%;
+  max-width: 320px;
+}
+
+.file-video-player {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  border-radius: 14px;
+  background-color: #000;
 }
 
 .file-card {
