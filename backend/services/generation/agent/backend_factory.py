@@ -52,10 +52,14 @@ async def build_skill_resource_roots(
 
 async def build_backend_from_chat_id(
     db: AsyncSession, chat_id: str,
+    thread_id: str | None = None,
 ) -> BackendProtocol:
     """从 chat_id 反查 agent，重建与生成任务相同的 BackendProtocol。
 
     用于 pending file SSE handler 等独立于生成任务生命周期的场景。
+    thread_id: 可选，显式指定 StoreBackend 的会话隔离键。图外场景
+        （如用户消息副本写入）应传 chat_id，否则默认 StoreBackend
+        会解析到 __default__ namespace。
     """
     from backend.crud import chat_crud, agent_crud
     from backend.services.generation.graph_builders.mambo_agent_builder import (
@@ -83,4 +87,4 @@ async def build_backend_from_chat_id(
     )
 
     store = get_store()
-    return _build_mambo_backend(agent_config, store=store)
+    return _build_mambo_backend(agent_config, store=store, thread_id=thread_id)

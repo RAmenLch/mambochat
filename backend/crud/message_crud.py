@@ -654,3 +654,59 @@ async def get_task_substeps_by_message_ids(
         .order_by(chat_model.SubMessage.sortOrder)
     )
     return list(result.scalars().all())
+
+
+def _aggregate_usage_subs(usage_subs: List[chat_model.SubMessage]) -> dict:
+    """将一组 USAGE 子消息聚合为累计 token 用量统计。
+
+    每个 USAGE 子消息的 content 为 JSON，含 prompt_tokens / completion_tokens /
+    total_tokens / cache_hit_tokens / cache_miss_tokens 等字段。
+    """
+    agg = {
+        "total_tokens": 0,
+        "cache_hit_tokens": 0,
+        "cache_miss_tokens": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+    }
+    for sub in usage_subs:
+        try:
+            data = json.loads(sub.content)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        for key in agg:
+            value = data.get(key)
+            if isinstance(value, (int, float)):
+                agg[key] += int(value)
+    return agg
+
+
+async def get_chat_usage_stats(db: AsyncSession, chat_id: str) -> dict:
+    """统计会话的 token 用量。
+
+    返回两项统计：
+    - conversation: 会话内全部 USAGE 子消息的累计用量（含所有分支）；
+    - active_path_main_agent: 当前激活路径上主 Agent 的累计用量
+      （子代理步骤为 TaskSubStep 子消息，不产生 USAGE，故活跃路径上的
+      USAGE 全部归属主 Agent）。
+    """
+    result = await db.execute(
+        select(chat_model.SubMessage)
+        .join(chat_model.Message, chat_model.Message.id == chat_model.SubMessage.messageId)
+        .filter(
+            chat_model.Message.chatId == chat_id,
+            chat_model.SubMessage.type == SubMessageType.USAGE.value,
+        )
+    )
+    all_usage = result.scalars().all()
+
+    path = await _get_active_linear_path(db, chat_id)
+    active_ids = {node.id for node in path}
+    active_usage = [s for s in all_usage if s.messageId in active_ids]
+
+    return {
+        "conversation": _aggregate_usage_subs(all_usage),
+        "active_path_main_agent": _aggregate_usage_subs(active_usage),
+    }

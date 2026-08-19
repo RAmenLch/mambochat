@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Union
 
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, ToolMessage
 
 
 class BaseDecode(ABC):
@@ -64,6 +64,13 @@ class DefaultLangChainDecode(BaseDecode):
     def get_toolcall_content(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[list]:
         if mode == "updates" and isinstance(message, AIMessage):
             return message.tool_calls or None
+        # if mode == "messages" and isinstance(message, (AIMessage, AIMessageChunk)):
+        #     # 流式场景：优先返回已聚合的 tool_calls，否则回退到 tool_call_chunks
+        #     if message.tool_calls:
+        #         return message.tool_calls
+        #     chunks = getattr(message, "tool_call_chunks", None)
+        #     if chunks:
+        #         return chunks
         return None
 
     def get_toolcall_result(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -92,9 +99,10 @@ class DefaultLangChainDecode(BaseDecode):
                     usage["completion_tokens_details"] = {"reasoning_tokens": reasoning}
 
             # 缓存命中 = input_token_details.cache_read (LangChain 已统一提取)
+            # 只要 API 返回了缓存字段即输出(即使为 0),便于前端展示"命中 0"。
             input_details = dict(metadata.get("input_token_details") or {})
             cache_read = input_details.get("cache_read")
-            if isinstance(cache_read, int) and cache_read > 0:
+            if isinstance(cache_read, int):
                 prompt_total = usage.get("prompt_tokens", 0) or 0
                 usage["cache_hit_tokens"] = cache_read
                 usage["cache_miss_tokens"] = max(prompt_total - cache_read, 0)

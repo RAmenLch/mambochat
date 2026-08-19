@@ -13,6 +13,7 @@ from backend.schemas import enums as schemas_enums
 from backend.schemas.message import McpToolContent, ErrorContent
 from backend.services.file_service import FileService
 from backend.services.generation.core.llm_io import MessageContext, MessageSchema, SubMessageSchema
+from backend.services.generation.agent.user_file_copy_service import derive_file_extension
 
 # 以 application/* 开头但本质是文本的 MIME 类型
 _KNOWN_TEXT_APPLICATION_TYPES = {
@@ -80,7 +81,7 @@ class MessageContextBuilder:
         self.language = language
 
         # 内部缓存，防止同一文件在单次装配中重复读取
-        self._file_content_cache: Dict[str, Dict[str, Any]] = {}
+        self._file_content_cache: Dict[Any, Dict[str, Any]] = {}
 
         # 自动摘要重算：由 _apply_zip_history_logic 填充，_build_payload 消费
         self._auto_target_sub_msg_id: Optional[str] = None
@@ -381,7 +382,7 @@ class MessageContextBuilder:
                     seen_tool_in_round = False
 
                 if self._should_include_sub_message(sub, recency_rank):
-                    part = await self._convert_sub_message_to_part(sub)
+                    part = await self._convert_sub_message_to_part(sub, schemas_enums.MessageRole.ASSISTANT.value)
                     if part:
                         current_round["content_parts"].append(part)
                         current_round["last_sub_id"] = sub.id
@@ -437,7 +438,7 @@ class MessageContextBuilder:
             if sub.type == schemas_enums.SubMessageType.MCP_TOOL.value:
                 continue
 
-            part = await self._convert_sub_message_to_part(sub)
+            part = await self._convert_sub_message_to_part(sub, msg.role)
             if part:
                 content_parts.append(part)
                 last_sub_id = sub.id
@@ -475,10 +476,12 @@ class MessageContextBuilder:
 
         return True
 
-    async def _convert_sub_message_to_part(self, sub: SubMessageSchema) -> Optional[Dict[str, Any]]:
+    async def _convert_sub_message_to_part(
+        self, sub: SubMessageSchema, role: str
+    ) -> Optional[Dict[str, Any]]:
         part = None
         if sub.type == schemas_enums.SubMessageType.FILE.value:
-            part = await self._process_file_part(sub.content)
+            part = await self._process_file_part(sub.content, sub, role)
         elif sub.type == schemas_enums.SubMessageType.ZIP_HISTORY.value:
             part = None
         elif sub.type == schemas_enums.SubMessageType.ERROR.value:
@@ -500,17 +503,55 @@ class MessageContextBuilder:
 
         return part
 
-    async def _process_file_part(self, file_id: str) -> Optional[Dict[str, Any]]:
-        if file_id in self._file_content_cache:
-            return self._file_content_cache[file_id]
+    @staticmethod
+    def _copy_status_of(sub: SubMessageSchema) -> Optional[str]:
+        """读取子消息上固化的副本写入标志位（file_copy_status）。"""
+        raw = getattr(sub, "config", None)
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except (ValueError, TypeError):
+                return None
+        if isinstance(raw, dict):
+            return raw.get("file_copy_status")
+        return None
+
+    async def _process_file_part(
+        self, file_id: str, sub: SubMessageSchema, role: str
+    ) -> Optional[Dict[str, Any]]:
+        """转换 FILE 子消息为 LLM content part。
+
+        - USER 角色：始终附加文件信息文本（需求 1），副本写入成功（file_copy_status=ok）时
+          附带路径映射（需求 3.2）；渲染只依赖持久化数据，保证同版本内逐字节稳定。
+        - 其他角色（assistant 的 show 工具文件等）：保持原有行为逐字节不变。
+        """
+        copy_status = self._copy_status_of(sub)
+        cache_key = (file_id, role, copy_status)
+        if cache_key in self._file_content_cache:
+            return self._file_content_cache[cache_key]
 
         file_service = FileService(self.db)
         db_file = await file_service.get_file(file_id)
         if not db_file:
             return None
 
-        result = None
+        if role == schemas_enums.MessageRole.USER.value:
+            result = await self._process_user_file_part(file_service, db_file, file_id, sub)
+        else:
+            result = await self._process_file_part_legacy(file_service, db_file)
+
+        if result:
+            self._file_content_cache[cache_key] = result
+
+        return result
+
+    async def _process_file_part_legacy(
+        self, file_service: FileService, db_file: Any
+    ) -> Optional[Dict[str, Any]]:
+        """非 USER 角色（assistant show 工具文件等）的原有转换逻辑，逐字节保持。"""
         mime = db_file.mime_type
+        file_id = db_file.id
+        result = None
 
         # --- 图片 (保持现有 OpenAI 格式) ---
         if mime.startswith("image/") \
@@ -572,10 +613,87 @@ class MessageContextBuilder:
                 support_hint = "，当前模型不支持PDF输入"
             result = {"type": "text", "text": f"\n[用户上传了{category}: {db_file.filename}{support_hint}]"}
 
-        if result:
-            self._file_content_cache[file_id] = result
-
         return result
+
+    async def _process_user_file_part(
+        self, file_service: FileService, db_file: Any, file_id: str, sub: SubMessageSchema
+    ) -> Optional[Dict[str, Any]]:
+        """用户消息的文件转换：始终附带文件信息，副本写入成功时附带路径映射。"""
+        mime = db_file.mime_type
+        category = ("图片" if mime.startswith("image/") else
+                    "音频" if mime.startswith("audio/") else
+                    "视频" if mime.startswith("video/") else
+                    "PDF文档" if mime == "application/pdf" else "文件")
+
+        info_body = f"[用户上传了{category}: {db_file.filename}"
+        if self._copy_status_of(sub) == "ok":
+            ext = derive_file_extension(db_file.filename, mime)
+            target = f"/.mambo/chat_user_file/{file_id}"
+            if ext:
+                target += f".{ext}"
+            info_body += f" | 副本文件 -> {target}"
+        info_body += "]"
+
+        # --- 图片 (OpenAI 格式) ---
+        if mime.startswith("image/") \
+                and self.enable_image_with_model and self.model_supports_images:
+            img_bytes = await file_service.get_file_content(file_id)
+            b64_data = base64.b64encode(img_bytes).decode('utf-8')
+            return [
+                {"type": "text", "text": f"\n{info_body}"},
+                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_data}"}},
+            ]
+
+        # --- 音频 (LangChain 标准格式) ---
+        if mime.startswith("audio/") and self.model_supports_audio:
+            audio_bytes = await file_service.get_file_content(file_id)
+            if len(audio_bytes) <= _MAX_AUDIO_SIZE:
+                b64_data = base64.b64encode(audio_bytes).decode('utf-8')
+                return [
+                    {"type": "text", "text": f"\n{info_body}"},
+                    {"type": "audio", "base64": b64_data, "mime_type": mime},
+                ]
+            return {"type": "text", "text": f"\n{info_body}，文件过大无法发送给模型"}
+
+        # --- 视频 (LangChain 标准格式) ---
+        if mime.startswith("video/") and self.model_supports_video:
+            video_bytes = await file_service.get_file_content(file_id)
+            if len(video_bytes) <= _MAX_VIDEO_SIZE:
+                b64_data = base64.b64encode(video_bytes).decode('utf-8')
+                return [
+                    {"type": "text", "text": f"\n{info_body}"},
+                    {"type": "video", "base64": b64_data, "mime_type": mime},
+                ]
+            return {"type": "text", "text": f"\n{info_body}，文件过大无法发送给模型"}
+
+        # --- PDF 等文件 (LangChain 标准格式) ---
+        if mime == "application/pdf" and self.model_supports_file:
+            pdf_bytes = await file_service.get_file_content(file_id)
+            if len(pdf_bytes) <= _MAX_FILE_SIZE:
+                b64_data = base64.b64encode(pdf_bytes).decode('utf-8')
+                return [
+                    {"type": "text", "text": f"\n{info_body}"},
+                    {"type": "file", "base64": b64_data, "mime_type": mime},
+                ]
+            return {"type": "text", "text": f"\n{info_body}，文件过大无法发送给模型"}
+
+        # --- 文本文件 ---
+        if _is_text_mime_type(mime):
+            text_bytes = await file_service.get_file_content(file_id)
+            content = text_bytes.decode('utf-8')
+            return {"type": "text", "text": f"\n{info_body}\n--- File: {db_file.filename} ---\n{content}\n--- End of File ---"}
+
+        # --- 不支持的模态 → 附带"模型不支持"提示 ---
+        support_hint = ""
+        if mime.startswith("image/") and not self.model_supports_images:
+            support_hint = "，当前模型不支持图片输入"
+        elif mime.startswith("audio/") and not self.model_supports_audio:
+            support_hint = "，当前模型不支持音频输入"
+        elif mime.startswith("video/") and not self.model_supports_video:
+            support_hint = "，当前模型不支持视频输入"
+        elif mime == "application/pdf" and not self.model_supports_file:
+            support_hint = "，当前模型不支持PDF输入"
+        return {"type": "text", "text": f"\n{info_body}{support_hint}"}
 
     def _merge_consecutive_roles(self, payload: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if not payload:

@@ -141,7 +141,7 @@ const hasUsage = computed(() => typeof usage.value.prompt_tokens === 'number');
 const reasoningTokens = computed(() => usage.value.completion_tokens_details?.reasoning_tokens);
 
 const hasCacheData = computed(
-  () => typeof usage.value.cache_hit_tokens === 'number' && (usage.value.cache_hit_tokens ?? 0) > 0
+  () => typeof usage.value.cache_hit_tokens === 'number'
 );
 
 const useDonutMode = computed(() => {

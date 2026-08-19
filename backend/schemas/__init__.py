@@ -5,6 +5,7 @@ from .message import (
     SubMessageConfig, SubMessageBase, SubMessageCreate, SubMessageUpdate, SubMessage,
     MessageBase, MessageCreate, MessageUpdate, Message
 )
+from .message import UsageAggregate, ChatUsageStats
 from .provider import (
     AIModelBase, AIModelCreate, AIModelUpdate, AIModel,
     AIProviderBase, AIProviderCreate, AIProviderUpdate, AIProvider,

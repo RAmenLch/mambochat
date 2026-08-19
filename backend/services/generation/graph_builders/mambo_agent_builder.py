@@ -54,9 +54,27 @@ def _make_session_factory() -> Callable[[], AsyncSession]:
     return lambda: AsyncSessionLocal()
 
 
+def _make_store_backend(
+    store: "AsyncSqliteStore | None",
+    thread_id: str | None,
+) -> StoreBackend:
+    """构造共享参数的 StoreBackend（real backend 与默认 /.mambo/ 空间共用）。
+
+    thread_id 显式传入时（图外场景），写入会落到对应会话的 namespace；
+    为 None 时（图内运行），运行时从 graph config 解析。
+    """
+    return StoreBackend(
+        store=store,
+        thread_id=thread_id,
+        max_read_chars=_READ_CHARS,
+        max_grep_matches=_GREP_MATCHES,
+    )
+
+
 def _build_mambo_backend(
     agent_config: AgentConfig,
     store: "AsyncSqliteStore | None" = None,
+    thread_id: str | None = None,
 ) -> BackendProtocol | None:
     """构建 Mambo Agent 的完整 Backend 体系。
 
@@ -68,6 +86,9 @@ def _build_mambo_backend(
     Args:
         agent_config: Agent 配置。
         store: 共享的 LangGraph BaseStore 实例，传递给 StoreBackend 以保证持久化。
+        thread_id: 可选，显式指定 StoreBackend 的会话隔离键（thread_id）。
+            图构建路径不传（运行时从 graph config 解析）；独立场景
+            （如消息创建时写入副本）必须传 chat_id，避免落到 __default__ namespace。
 
     Returns:
         HybridWorkspaceBackend 或 None（交给 create_mambo_agent 用默认 StoreBackend）
@@ -100,12 +121,12 @@ def _build_mambo_backend(
             )
         # 始终使用 persisted StoreBackend，避免 create_mambo_agent 内部
         # 用 store=None 创建无持久化的 StoreBackend 兜底
+        if thread_id is not None:
+            # 图外场景（如消息创建时写入副本）：覆盖默认 /.mambo/ StoreBackend，
+            # 使其写入目标会话的 namespace
+            virtual_workspaces["."] = _make_store_backend(store, thread_id)
         return HybridWorkspaceBackend(
-            real_backend=StoreBackend(
-                store=store,
-                max_read_chars=_READ_CHARS,
-                max_grep_matches=_GREP_MATCHES,
-            ),
+            real_backend=_make_store_backend(store, thread_id),
             virtual_workspaces=virtual_workspaces if virtual_workspaces else None,
             max_read_chars=_READ_CHARS,
             max_grep_matches=_GREP_MATCHES,
@@ -159,11 +180,11 @@ def _build_mambo_backend(
 
     # ---- 5. 组装 ----
     if real_be is None:
-        real_be = StoreBackend(
-            store=store,
-            max_read_chars=_READ_CHARS,
-            max_grep_matches=_GREP_MATCHES,
-        )
+        real_be = _make_store_backend(store, thread_id)
+
+    if thread_id is not None:
+        # 图外场景：覆盖默认 /.mambo/ StoreBackend，写入目标会话的 namespace
+        virtual_workspaces["."] = _make_store_backend(store, thread_id)
 
     return HybridWorkspaceBackend(
         real_backend=real_be,

@@ -1,7 +1,7 @@
 export default {
   edit: '编辑 Backend',
   host: '主机地址',
-  manager: 'Backend 配置',
+  manager: 'Backend (运行环境) 配置',
   name: '名称',
   new: '新建 Backend',
   duplicate: '复制',

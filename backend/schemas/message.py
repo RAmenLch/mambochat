@@ -93,6 +93,8 @@ class SubMessageConfig(BaseModel):
     pending_file_path: Optional[str] = Field(None, description="【仅用于File类型】标记该分区文件尚待生成，非空时前端应连接 SSE 等待")
     pending_file_timeout: Optional[int] = Field(None, description="【仅用于File类型】最大等待秒数")
     show_tool_mode: Optional[str] = Field(None, description="【仅用于File类型】show 工具的 mode 参数透传：Normal / Mini_Avatar / Gal_Avatar / Group")
+    file_copy_status: Optional[str] = Field(None, description="【仅用于File类型】用户文件副本写入 workspace 的状态：ok / failed；None=未处理（非 Mambo Agent 会话或历史消息）")
+    file_copy_error: Optional[str] = Field(None, description="【仅用于File类型】副本写入失败原因（file_copy_status=failed 时）")
 
 
 class SubMessageBase(BaseModel):
@@ -376,3 +378,20 @@ class TaskSubStepContent(BaseModel):
             return cls(**data)
         except (json.JSONDecodeError, TypeError) as e:
             raise ValueError(f"Invalid JSON for TaskSubStepContent: {e}")
+
+
+# --- Chat Usage Stats Schemas ---
+
+class UsageAggregate(BaseModel):
+    """一组累计 token 用量统计。"""
+    total_tokens: int = Field(0, description="总用量")
+    cache_hit_tokens: int = Field(0, description="缓存命中量")
+    cache_miss_tokens: int = Field(0, description="缓存未命中量")
+    prompt_tokens: int = Field(0, description="输入用量")
+    completion_tokens: int = Field(0, description="输出用量")
+
+
+class ChatUsageStats(BaseModel):
+    """会话 token 用量统计。"""
+    conversation: UsageAggregate = Field(..., description="会话内全部用量（含所有分支）")
+    active_path_main_agent: UsageAggregate = Field(..., description="当前激活路径上主 Agent 的用量")

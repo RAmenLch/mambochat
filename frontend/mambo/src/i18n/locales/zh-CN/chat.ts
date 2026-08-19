@@ -57,6 +57,12 @@ export default {
     chatSettings: '会话设置',
     versionHistory: '版本历史',
     versionHistoryTip: '查看文件版本历史与变更记录',
+    usageConversation: '会话总用量',
+    usageActivePath: '当前激活路径主 Agent',
+    usageTotal: '总用量',
+    usageCacheHit: '缓存命中',
+    usageInput: '输入',
+    usageOutput: '输出',
     mcpStatus: {
       healthy: '连接正常',
       unhealthy: '连接异常',

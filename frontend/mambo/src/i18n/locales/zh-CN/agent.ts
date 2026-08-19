@@ -1,6 +1,6 @@
 export default {
   title: 'Agent 管理',
-  manager: 'Agent 管理',
+  manager: 'Agent (智能体) 管理',
   basicInfo: '基本信息',
   avatar: 'Agent 头像',
   name: '名称',

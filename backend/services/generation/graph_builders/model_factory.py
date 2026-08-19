@@ -73,6 +73,7 @@ class ModelFactory:
                 openai_proxy=model_config.proxy_url,
                 timeout=model_config.timeout,
                 streaming=stream,
+                stream_usage=True,
                 callbacks=callbacks,
                 max_retries=max_retries,
                 thinking=thinking,
@@ -96,6 +97,7 @@ class ModelFactory:
                 openai_proxy=model_config.proxy_url,
                 timeout=model_config.timeout,
                 streaming=stream,
+                stream_usage=True,
                 default_headers={
                     "HTTP-Referer": "https://github.com/RAmenLch/mambochat",
                     "X-Title": "MamboChat",

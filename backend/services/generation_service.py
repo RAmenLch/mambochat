@@ -27,6 +27,7 @@ from backend.schemas.enums import FileManagementType, MessageStatus, MessageRole
 from backend.schemas.message import ErrorContent
 from backend.config.timezone_config import get_configured_now, TZ
 from backend.services.file_service import FileService
+from backend.services.generation.agent.user_file_copy_service import process_user_message_files
 
 GENERATION_START_TIMEOUT = timedelta(minutes=10)
 
@@ -169,6 +170,9 @@ async def create_user_message_and_prepare_generation(
                 new_type=FileManagementType.SUB_MESSAGE.value,
                 merge=True
             )
+
+    # Mambo Agent 会话：把用户文件副本写入 /.mambo/chat_user_file/ 并固化标志位
+    await process_user_message_files(db, chat_id, user_message.id)
 
     assistant_placeholder = await prepare_for_regeneration(db, chat_id, user_message.id)
 
@@ -359,6 +363,18 @@ async def run_title_generation_task(chat_id: str):
 
         except Exception as e:
             print(f"[Title Generation Service Error] for chat {chat_id}: {e}")
+            # 兜底：任务异常时也通知前端，避免前端 loading 永久卡住
+            try:
+                from backend.routers.notifications import GLOBAL_NOTIFICATIONS_STREAM_ID
+                await stream_manager.publish(GLOBAL_NOTIFICATIONS_STREAM_ID, {
+                    "type": "notification",
+                    "category": "title_generation_error",
+                    "context": {"chat_id": chat_id},
+                    "level": "error",
+                    "message": f"标题生成失败: {e}",
+                })
+            except Exception as notify_err:
+                print(f"[Title Generation Service] Failed to publish error notification: {notify_err}")
         finally:
             await stream_manager.mark_task_completed(task_id)
             await stream_manager.close_stream(task_id)

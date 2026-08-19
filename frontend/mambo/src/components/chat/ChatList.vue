@@ -223,7 +223,7 @@ const agentStore = useAgentStore();
 const router = useRouter();
 const route = useRoute();
 
-const { chatList, isChatListLoading, loadingFolders, loadedFolderIds, refreshingTitleChatId } = storeToRefs(chatListStore);
+const { chatList, isChatListLoading, loadingFolders, loadedFolderIds, refreshingTitleChatIds } = storeToRefs(chatListStore);
 const { currentChatId, currentChat } = storeToRefs(chatSessionStore);
 const { providers } = storeToRefs(providerStore);
 const { globalSettings } = storeToRefs(settingsStore);
@@ -293,7 +293,7 @@ const getAgentAvatarUrl = (agentId: string | null | undefined): string | null =>
   return agent?.agentAvatarUrl ? (resolveFileUrl(agent.agentAvatarUrl) ?? null) : null;
 };
 
-const isTitleRefreshing = computed(() => refreshingTitleChatId.value === currentChat.value?.id);
+const isTitleRefreshing = computed(() => currentChat.value?.id ? refreshingTitleChatIds.value.has(currentChat.value.id) : false);
 
 const {
   treeRef,

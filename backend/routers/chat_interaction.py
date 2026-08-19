@@ -352,6 +352,22 @@ async def read_chat_with_messages(chat_id: str, background_tasks: BackgroundTask
     return chat_response
 
 
+@router.get(
+    "/chats/{chat_id}/usage",
+    response_model=schemas.ChatUsageStats,
+    summary="统计会话的 token 用量",
+    response_model_exclude_none=True
+)
+async def get_chat_usage_stats(chat_id: str, db: AsyncSession = Depends(get_db)):
+    db_chat = await chat_crud.get_chat_meta(db, chat_id=chat_id)
+    if db_chat is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    if db_chat.itemType != 'chat':
+        raise HTTPException(status_code=400, detail="Cannot get usage stats for a folder.")
+
+    return await message_crud.get_chat_usage_stats(db, chat_id=chat_id)
+
+
 @router.put(
     "/messages/{message_id}",
     response_model=schemas.UpdateMessageResponse,
@@ -374,6 +390,10 @@ async def update_message_and_regenerate(
         parentId=db_message.parentId
     )
     new_user_message = await message_crud.create_message(db, message=new_message_create, chat_id=db_message.chatId)
+
+    # Mambo Agent 会话：把用户文件副本写入 /.mambo/chat_user_file/ 并固化标志位
+    from backend.services.generation.agent.user_file_copy_service import process_user_message_files
+    await process_user_message_files(db, db_message.chatId, new_user_message.id)
 
     if not message_update.resend:
         # 修复: 从活跃路径中重新获取，以避免 DetachedInstanceError 并装配 sibling 元数据

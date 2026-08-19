@@ -221,7 +221,7 @@ const systemConfigStore = useSystemConfigStore();
 const agentStore = useAgentStore();
 const backendStore = useBackendStore();
 
-const { refreshingTitleChatId } = storeToRefs(chatListStore);
+const { refreshingTitleChatIds } = storeToRefs(chatListStore);
 const {
   currentChat,
   currentChatId,
@@ -427,7 +427,7 @@ const resourceCompletionAgentId = computed(() => {
   return hasResourceBackend ? chat.agentId : null;
 });
 
-const isTitleRefreshing = computed(() => refreshingTitleChatId.value === currentChat.value?.id);
+const isTitleRefreshing = computed(() => currentChat.value?.id ? refreshingTitleChatIds.value.has(currentChat.value.id) : false);
 const isSendButtonDisabled = computed(() => isGenerating.value || !isReadyToSend.value);
 
 const attachedKnowledgeBases = computed(() => {

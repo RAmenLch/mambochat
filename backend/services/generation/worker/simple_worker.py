@@ -25,6 +25,9 @@ class SimpleWorker(AbstractGenerateWorker):
             llm_input.run_time_config
         )
 
+        if llm_input.agent_config.tools:
+            model = model.bind_tools(llm_input.agent_config.tools)
+
         messages = self._convert_messages(llm_input.context.messages)
 
         async for chunk in model.astream(messages):

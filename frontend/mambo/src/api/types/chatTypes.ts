@@ -152,6 +152,21 @@ export interface ChatWithMessages extends Chat {
   messages: Message[]
 }
 
+// --- Chat Usage Stats Types ---
+
+export interface UsageAggregate {
+  total_tokens: number
+  cache_hit_tokens: number
+  cache_miss_tokens: number
+  prompt_tokens: number
+  completion_tokens: number
+}
+
+export interface ChatUsageStats {
+  conversation: UsageAggregate
+  active_path_main_agent: UsageAggregate
+}
+
 export interface ImportChatReport {
   chat_id: string
   name: string

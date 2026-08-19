@@ -6,6 +6,7 @@ import type {
   ChatCreate,
   ChatWithMessages,
   ChatUpdate,
+  ChatUsageStats,
   Message,
   MoveRequest,
   MessageUpdate,
@@ -59,6 +60,13 @@ export const createChat = (chatData: ChatCreate): Promise<Chat> => {
  */
 export const getChatWithMessages = (chatId: string): Promise<ChatWithMessages> => {
   return apiClient.get(`/chats/${chatId}/messages`)
+};
+
+/**
+ * 统计会话的 token 用量（会话总量 + 当前激活路径主 Agent 用量）
+ */
+export const getChatUsage = (chatId: string): Promise<ChatUsageStats> => {
+  return apiClient.get(`/chats/${chatId}/usage`)
 };
 
 /**

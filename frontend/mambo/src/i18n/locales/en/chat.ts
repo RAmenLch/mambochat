@@ -57,6 +57,12 @@ export default {
     chatSettings: 'Chat Settings',
     versionHistory: 'Version History',
     versionHistoryTip: 'View file version history and changes',
+    usageConversation: 'Conversation Total',
+    usageActivePath: 'Active Path Main Agent',
+    usageTotal: 'Total',
+    usageCacheHit: 'Cache Hit',
+    usageInput: 'Input',
+    usageOutput: 'Output',
     mcpStatus: {
       healthy: 'Connected',
       unhealthy: 'Connection Error',
