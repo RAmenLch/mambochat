@@ -10,6 +10,9 @@ export default {
     moveWarning: '将资源移出知识库或移动到其他知识库会导致原有的切片和向量数据丢失，是否继续？',
     moveWarningTitle: '警告',
     newSkill: '新建 SKILL',
+    exportZip: '导出为 ZIP',
+    exportZipSuccess: '导出成功',
+    exportZipFailed: '导出失败',
   },
   explorer: {
     uploadingCount: '正在上传 {count} 个文件...',

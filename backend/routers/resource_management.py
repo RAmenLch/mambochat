@@ -1,10 +1,11 @@
 # backend/routers/resource_management.py
 
 import json
+import urllib.parse
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -305,6 +306,23 @@ async def move_resources(move_request: schemas.ResourceMoveRequest, db: AsyncSes
     if not success:
         raise HTTPException(status_code=400, detail="Move operation failed")
     return {"message": "Move successful"}
+
+
+@router.get("/{resource_id}/export", summary="导出文件夹资源为 ZIP")
+async def export_resource_zip(resource_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    将指定文件夹资源的整个子树导出为 ZIP。
+    仅导出最新版本；产物为纯净的文件/文件夹树，剔除资源系统元数据。
+    """
+    from backend.services.resource_export_service import ResourceExporter
+
+    zip_bytes, folder_name = await ResourceExporter(db).export_folder_zip(resource_id)
+
+    quoted_name = urllib.parse.quote(folder_name or "resources")
+    headers = {
+        "Content-Disposition": f"attachment; filename*=UTF-8''{quoted_name}.zip"
+    }
+    return Response(content=zip_bytes, media_type="application/zip", headers=headers)
 
 
 @router.get("/{resource_id}", response_model=schemas.ResourceWithVersions, summary="获取单个资源的详细信息")

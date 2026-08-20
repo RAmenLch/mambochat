@@ -11,6 +11,9 @@ export default {
       'Moving resources out of or between knowledge bases will cause existing chunks and vector data to be lost. Continue?',
     moveWarningTitle: 'Warning',
     newSkill: 'NEW SKILL',
+    exportZip: 'Export as ZIP',
+    exportZipSuccess: 'Export succeeded',
+    exportZipFailed: 'Export failed',
   },
   explorer: {
     uploadingCount: 'Uploading {count} files...',

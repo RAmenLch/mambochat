@@ -489,7 +489,11 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
             model=model,
             backend=backend,
             store=store,
-            system_prompt=agent_config.system_prompt,
+            system_prompt=(
+                "Follow the system instructions below and use the available tools as needed."
+                if agent_config.system_prompt
+                else None
+            ),
             subagents=compiled_subagents if compiled_subagents else None,
             include_general_purpose=include_general_purpose,
             summarization=summarization,

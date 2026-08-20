@@ -116,6 +116,31 @@ export const searchResources = (data: ResourceSearchRequest): Promise<ResourceSe
 };
 
 /**
+ * 导出文件夹资源为 ZIP（仅最新版本，剔除资源专属配置）
+ * @param id 文件夹资源ID
+ */
+export const exportResourceZip = (id: string): Promise<Blob> => {
+  return apiClient.get(`/resources/${id}/export`, { responseType: 'blob' });
+};
+
+/**
+ * 导出文件夹资源并触发浏览器下载
+ * @param id 文件夹资源ID
+ * @param name 文件夹名称（作为 zip 文件名）
+ */
+export const downloadResourceZip = async (id: string, name: string): Promise<void> => {
+  const blob = await exportResourceZip(id);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${name || 'resources'}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+/**
  * 创建新的 SKILL 资源
  * 后端会自动创建对应的文件夹和 SKILL.md 文件
  */
