@@ -435,6 +435,7 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
                 system_prompt=sr_config.system_prompt,
                 review_tools=review_tools,
                 review_mode="agent",
+                agent_max_steps=sr_config.agent_max_steps or 10,
                 tool_unpackers=tool_unpackers,
             )
 

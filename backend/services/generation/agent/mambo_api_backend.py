@@ -38,7 +38,7 @@ from mambo_agents.backends.protocol import (
     VirtualPath,
     WriteResult,
 )
-from mambo_agents.backends.schemas import BackendError, ErrorCode
+from mambo_agents.backends.schemas import BackendError, ErrorCode, VirtualPathArg
 from mambo_agents.backends.utils.multimodal import get_file_type, get_mime_type
 
 logger = logging.getLogger(__name__)
@@ -110,7 +110,7 @@ class MamboAPIBackend(BackendProtocol):
                 ),
                 args_schema=create_model(
                     "TreeSchema",
-                    path=(str, Field(default="/workspace", description="Root directory to display")),
+                    path=(VirtualPathArg, Field(default=VirtualPath("/workspace"), description="Root directory to display")),
                     depth=(int, Field(default=3, description="Maximum recursion depth")),
                 ),
                 coroutine=self.atree,
@@ -126,7 +126,7 @@ class MamboAPIBackend(BackendProtocol):
                 ),
                 args_schema=create_model(
                     "DeleteSchema",
-                    path=(str, Field(description="Absolute file path to delete")),
+                    path=(VirtualPathArg, Field(description="Absolute file path to delete")),
                 ),
                 coroutine=self.adelete,
             )

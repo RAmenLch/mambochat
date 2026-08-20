@@ -143,6 +143,10 @@ class SecurityReviewAgentConfig(BaseModel):
         None,
         description="需要 AI 审核的工具名列表。None 或空列表表示审核所有 interrupt_on 工具"
     )
+    agent_max_steps: Optional[int] = Field(
+        None,
+        description="审核 agent 最大步数（仅 review_mode='agent' 生效）。None 时使用默认值 10"
+    )
 
 
 class AgentConfig(BaseModel):

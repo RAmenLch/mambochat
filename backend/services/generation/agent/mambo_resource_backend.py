@@ -78,7 +78,7 @@ from mambo_agents.backends.protocol import (
     _get_mime_type,
     validate_multimodal_content,
 )
-from mambo_agents.backends.schemas import BackendError, ErrorCode, human_size
+from mambo_agents.backends.schemas import BackendError, ErrorCode, VirtualPathArg, human_size
 from mambo_agents.backends.utils import (
     detect_trailing_newline_mismatch,
     format_validation_error,
@@ -308,7 +308,7 @@ class MamboResourceBackend(BackendProtocol):
                 ),
                 args_schema=create_model(
                     "TreeSchema",
-                    path=(VirtualPath, Field(default=VirtualPath(wr), description=f"Root directory to display (e.g. '{wr}')")),
+                    path=(VirtualPathArg, Field(default=VirtualPath(wr), description=f"Root directory to display (e.g. '{wr}')")),
                     depth=(int, Field(default=3, description="Maximum recursion depth")),
                 ),
                 func=self._safe_tool_func("tree", self.tree),
@@ -331,7 +331,7 @@ class MamboResourceBackend(BackendProtocol):
                     ),
                     args_schema=create_model(
                         "LsVersionSchema",
-                        path=(VirtualPath, Field(description=f"Path to a resource (e.g. '{wr}/my_prompt$v/' or '{wr}/my_prompt'). The '$v' suffix is auto-appended if missing.")),
+                        path=(VirtualPathArg, Field(description=f"Path to a resource (e.g. '{wr}/my_prompt$v/' or '{wr}/my_prompt'). The '$v' suffix is auto-appended if missing.")),
                     ),
                     func=self._safe_tool_func("ls_version", self.ls_version),
                     coroutine=self._safe_tool_coroutine("ls_version", self.als_version),

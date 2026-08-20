@@ -1,6 +1,6 @@
 # backend/routers/file_management.py
 
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
@@ -74,9 +74,13 @@ async def edit_file_content(
         404: {"description": "File not found"},
     }
 )
-async def download_file(storage_path: str, db: AsyncSession = Depends(get_db)):
+async def download_file(storage_path: str, request: Request, db: AsyncSession = Depends(get_db)):
     """
     根据文件的存储路径提供文件访问，并使用原始文件名进行下载。
+
+    响应携带 ETag（内容 hash）与 Cache-Control：
+    - 同一链接重复展示时，浏览器命中缓存或 304，不再重复下载正文；
+    - 文件内容 hash 变化后，返回 200 与新内容。
     """
     file_service = FileService(db)
-    return await file_service.get_file_for_download(storage_path)
+    return await file_service.get_file_for_download(storage_path, request=request)

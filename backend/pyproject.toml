@@ -69,7 +69,7 @@ dependencies = [
     # Production server
     "gunicorn==23.0.0",
 
-    "mambo-agents==0.2.2",
+    "mambo-agents==0.2.3b1",
 ]
 
 [project.scripts]

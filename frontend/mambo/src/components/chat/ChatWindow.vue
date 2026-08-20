@@ -46,9 +46,11 @@
 
       <transition name="gal-fade">
         <div v-if="galAvatarState.visible" class="gal-avatar-panel">
-          <transition name="gal-img">
-            <img :key="galAvatarState.imageUrl ?? undefined" :src="galAvatarState.imageUrl!" class="gal-avatar-image" />
-          </transition>
+          <div class="gal-avatar-clip">
+            <transition name="gal-img">
+              <img :key="galAvatarState.imageUrl ?? undefined" :src="galAvatarState.imageUrl!" class="gal-avatar-image" />
+            </transition>
+          </div>
         </div>
       </transition>
 
@@ -991,16 +993,27 @@ watch(currentChatId, (newId) => {
   height: 0;
 }
 
-.gal-avatar-image {
+/* 210×285 显示窗口：圆角边框，裁剪图片两侧 */
+.gal-avatar-clip {
   position: absolute;
   bottom: 0;
   left: 0;
   width: 210px;
   height: 285px;
-  object-fit: cover;
+  overflow: hidden;
   border-radius: 10px;
   border: 2px solid var(--el-border-color-light);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+/* 285×285：Chrome 缩放（认可的算法效果），由外层窗口裁到 210 宽 */
+.gal-avatar-image {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 285px;
+  height: 285px;
 }
 
 .gal-fade-enter-active,

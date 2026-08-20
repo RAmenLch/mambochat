@@ -382,6 +382,7 @@ class MamboAgentInitializer(AbstractAgentInitializer):
                 model_id=sr.model_id,
                 system_prompt=sr.system_prompt,
                 review_tools=sr.review_tools,
+                agent_max_steps=sr.agent_max_steps,
             )
             if security_review_config.model_id:
                 sr_model = await provider_crud.get_model(self.db, security_review_config.model_id)

@@ -1,8 +1,11 @@
 # backend/services/file_service.py
 
+import hashlib
+import os
 import urllib.parse
+from email.utils import formatdate
 from typing import List, Optional, Union
-from fastapi import UploadFile, HTTPException, status, Response
+from fastapi import UploadFile, HTTPException, status, Response, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -235,7 +238,11 @@ class FileService:
 
         return file.content or ""
 
-    async def get_file_for_download(self, storage_path: str) -> Union[Response, FileResponse]:
+    async def get_file_for_download(
+        self,
+        storage_path: str,
+        request: Optional[Request] = None,
+    ) -> Union[Response, FileResponse]:
         file = await self.get_file_by_path(storage_path)
         if not file:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File record not found in database.")
@@ -243,27 +250,57 @@ class FileService:
         encoded_filename = urllib.parse.quote(file.filename)
 
         if file.storage_type == 'db':
-            headers = {"Content-Disposition": f"attachment; filename*=utf-8''{encoded_filename}"}
+            # DB 存储的小型文本文件可被编辑，使用内容 hash 作为强校验器（ETag）。
+            # 采用 no-cache：浏览器缓存正文，但每次展示都回源校验；
+            # 内容未变时命中 304（不传输正文），内容变更时返回 200 新内容。
+            content = (file.content or "").encode('utf-8')
+            etag = f'"{hashlib.sha256(content).hexdigest()}"'
+            cache_control = "private, no-cache"
+            headers = {
+                "Content-Disposition": f"attachment; filename*=utf-8''{encoded_filename}",
+                "ETag": etag,
+                "Cache-Control": cache_control,
+            }
+            if request and request.headers.get("if-none-match") == etag:
+                return Response(
+                    status_code=status.HTTP_304_NOT_MODIFIED,
+                    headers={"ETag": etag, "Cache-Control": cache_control},
+                )
+            return Response(content=content, media_type=file.mime_type, headers=headers)
+
+        # 本地存储文件
+        if not isinstance(storage_service, LocalStorageService):
+            raise HTTPException(status_code=501, detail="Download not implemented for current storage type.")
+
+        base_path = storage_service.base_path.resolve()
+        file_path = (base_path / file.storage_path).resolve()
+
+        if not str(file_path).startswith(str(base_path)) or not file_path.is_file():
+            raise HTTPException(status_code=404, detail="Physical file not found or access forbidden.")
+
+        # 本地文件只增不改（内容替换会生成新的 storage_path），可用 stat 派生 ETag：
+        # mtime+size 变化即视为内容 hash 变化，触发重新下载。
+        stat_result = os.stat(file_path)
+        etag_base = str(stat_result.st_mtime_ns) + "-" + str(stat_result.st_size)
+        etag = f'"{hashlib.md5(etag_base.encode(), usedforsecurity=False).hexdigest()}"'
+        cache_control = "private, max-age=31536000, immutable"
+        headers = {
+            "ETag": etag,
+            "Cache-Control": cache_control,
+        }
+        if request and request.headers.get("if-none-match") == etag:
             return Response(
-                content=(file.content or "").encode('utf-8'),
-                media_type=file.mime_type,
-                headers=headers
+                status_code=status.HTTP_304_NOT_MODIFIED,
+                headers={**headers, "Last-Modified": formatdate(stat_result.st_mtime, usegmt=True)},
             )
-        else:
-            if not isinstance(storage_service, LocalStorageService):
-                raise HTTPException(status_code=501, detail="Download not implemented for current storage type.")
 
-            base_path = storage_service.base_path.resolve()
-            file_path = (base_path / file.storage_path).resolve()
-
-            if not str(file_path).startswith(str(base_path)) or not file_path.is_file():
-                raise HTTPException(status_code=404, detail="Physical file not found or access forbidden.")
-
-            return FileResponse(
-                path=file_path,
-                media_type=file.mime_type,
-                filename=file.filename
-            )
+        return FileResponse(
+            path=file_path,
+            media_type=file.mime_type,
+            filename=file.filename,
+            stat_result=stat_result,
+            headers=headers,
+        )
 
     async def edit_file(self, file_id: str, new_content: str) -> File:
         file = await self.get_file(file_id)

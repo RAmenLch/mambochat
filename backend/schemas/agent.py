@@ -26,6 +26,7 @@ class SecurityReviewConfigSchema(BaseModel):
     model_id: Optional[str] = Field(None)
     system_prompt: Optional[str] = Field(None)
     review_tools: Optional[List[str]] = Field(None)
+    agent_max_steps: Optional[int] = Field(None, description="审核 agent 最大步数（仅 agent 模式生效），缺省使用默认值 10")
 
 
 class VersionControlConfigSchema(BaseModel):
