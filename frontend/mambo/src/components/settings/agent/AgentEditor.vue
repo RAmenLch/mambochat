@@ -73,7 +73,7 @@
             </el-col>
           </el-row>
 
-          <el-row :gutter="40" v-if="form.aiModelId">
+          <el-row :gutter="40">
             <el-col :span="12">
               <el-form-item>
                 <template #label>
@@ -104,7 +104,7 @@
             </el-col>
           </el-row>
 
-          <el-row :gutter="40" v-if="form.aiModelId">
+          <el-row :gutter="40">
             <el-col :span="12">
               <el-form-item>
                 <template #label>
@@ -1060,13 +1060,26 @@ watch(agentData, async (newVal) => {
   }
 }, { immediate: true, deep: true });
 
+const UNIVERSAL_PARAM_KEYS = new Set([
+  'max_context_messages', 'stream',
+  'enable_suggest', 'enable_ask_user',
+]);
+
 watch(() => form.aiModelId, (newModelId) => {
-  if (!newModelId) return;
+  if (!newModelId) {
+    const newParams: Record<string, any> = {};
+    for (const key in form.modelParameters) {
+      if (UNIVERSAL_PARAM_KEYS.has(key)) newParams[key] = form.modelParameters[key];
+    }
+    form.modelParameters = newParams;
+    return;
+  }
+
   const currentModel = allModels.value.find(m => m.id === newModelId);
   if (!currentModel) return;
 
   const supportedParams = new Set(currentModel.meta_config?.supported_parameters ?? []);
-  const keysToKeep = new Set(['max_context_messages', 'stream', 'enable_suggest', 'enable_ask_user', 'temperature', 'top_p']);
+  const keysToKeep = new Set(UNIVERSAL_PARAM_KEYS);
 
   systemConfigStore.llmParameters.forEach(p => {
     if (supportedParams.has(p.key) || p.default_activate) keysToKeep.add(p.key);
@@ -1317,7 +1330,7 @@ async function handleSave() {
       description: form.description,
       AgentType: form.AgentType as any,
       systemPrompt: form.systemPrompt,
-      aiModelId: form.aiModelId,
+      aiModelId: form.aiModelId ?? null,
       modelParameters: finalModelParameters,
 
       // 建议顺手把这里的其他数组也加上展开运算符 [...array] 和 [] 回退，防止遇到同样的 Bug
@@ -1328,7 +1341,7 @@ async function handleSave() {
         : [],
 
       backendIds: finalBackendIds,
-      defaultBackendId: form.defaultBackendId,
+      defaultBackendId: form.defaultBackendId ?? null,
       memoryResourceIds: form.AgentType === 'Mambo' && form.mambo_memory_enabled
         ? [...form.mambo_memory_resource_ids]
         : [],
