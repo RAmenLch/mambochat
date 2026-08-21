@@ -463,6 +463,27 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
                 whitelist_folders=[VirtualPath("/workspace")],
             )
 
+        # --- Goal loop middleware (opt-in) ---
+        goal_loop = None
+        gl_cfg = getattr(agent_config, 'goal_loop_config', None)
+        if gl_cfg:
+            from mambo_agents.middleware import GoalLoopConfig as _GoalLoopConfig
+            from mambo_agents.middleware import tool_called_at_least
+            gl_mode = gl_cfg.get("mode", "llm")
+            gl_kwargs: Dict[str, Any] = {
+                "mode": gl_mode,
+                "max_rounds": gl_cfg.get("max_rounds", 256),
+            }
+            if gl_mode == "preset":
+                gl_kwargs["objective"] = gl_cfg.get("objective")
+                gl_kwargs["conditions"] = [
+                    tool_called_at_least(c["tool"], c.get("times", 1), c.get("args"))
+                    for c in (gl_cfg.get("conditions") or [])
+                ]
+            else:
+                gl_kwargs["blocked_threshold"] = gl_cfg.get("blocked_threshold", 3)
+            goal_loop = _GoalLoopConfig(**gl_kwargs)
+
         # --- Show tool middleware (opt-in, default on) ---
         _show_middleware = None
         if getattr(agent_config, 'enable_show', True):
@@ -505,5 +526,6 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
             checkpointer=checkpointer,
             interrupt_on=agent_config.hitl_interrupt_on if agent_config.hitl_interrupt_on else None,
             security_review=security_review,
+            goal_loop=goal_loop,
             tool_token_limit_before_evict=_EVICT_TOKENS,
         )

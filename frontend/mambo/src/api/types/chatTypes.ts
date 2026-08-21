@@ -33,6 +33,8 @@ export interface SubMessageConfig {
   pending_file_path?: string | null
   pending_file_timeout?: number | null
   show_tool_mode?: string | null
+  /** get_goal MCP_TOOL 轮次边界标志（GoalLoopMiddleware 注入），前端据此渲染轮次分隔线 */
+  is_goal_loop_round?: boolean | null
 }
 
 export interface SubMessage {

@@ -23,6 +23,22 @@ export interface VersionControlConfig {
   auto_snapshot: boolean
 }
 
+/** 任务循环完成条件：某工具在当前轮内至少调用 times 次，且参数全部匹配才算一次有效调用 */
+export interface GoalLoopCondition {
+  tool: string
+  times: number
+  args?: Record<string, any> | null
+}
+
+/** 任务循环配置：mode=llm 交给AI自己规划 / mode=preset 按我的规则执行 */
+export interface GoalLoopConfig {
+  mode: 'llm' | 'preset'
+  max_rounds: number
+  objective?: string | null
+  conditions?: GoalLoopCondition[] | null
+  blocked_threshold?: number | null
+}
+
 export interface MamboAgentParameters {
   include_general_purpose: boolean
   enable_planning: boolean
@@ -33,6 +49,7 @@ export interface MamboAgentParameters {
   summarization_config?: SummarizationConfig | null
   security_review?: SecurityReviewConfig | null
   version_control?: VersionControlConfig | null
+  goal_loop?: GoalLoopConfig | null
   mcp_direct_tool_threshold: number
 }
 
@@ -90,6 +107,13 @@ export interface ChatDuplicateRequest {
 export interface HitlToolInfo {
   name: string;
   source: 'mcp' | 'backend';
+}
+
+/** 任务循环「我的规则」工具建议：工具名（执行侧真实名）+ 参数名建议列表 */
+export interface GoalLoopToolInfo {
+  name: string;
+  source: 'mcp' | 'backend' | 'builtin';
+  args: string[];
 }
 
 export interface ChatArchiveRequest {

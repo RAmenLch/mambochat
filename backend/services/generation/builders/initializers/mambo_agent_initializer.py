@@ -422,6 +422,22 @@ class MamboAgentInitializer(AbstractAgentInitializer):
                         context_length=sr_context_length,
                     )
 
+        # --- 任务循环配置解析 (GoalLoopMiddleware) ---
+        goal_loop_config: Optional[Dict[str, Any]] = None
+        gl = mambo_params.goal_loop
+        if gl is not None:
+            goal_loop_config = {
+                "mode": gl.mode,
+                "max_rounds": gl.max_rounds,
+                "objective": gl.objective,
+                "conditions": (
+                    [c.model_dump() for c in gl.conditions]
+                    if gl.conditions
+                    else None
+                ),
+                "blocked_threshold": gl.blocked_threshold,
+            }
+
         agent_config = AgentConfig(
             name=self.agent.name,
             description=self.agent.description or "",
@@ -445,6 +461,7 @@ class MamboAgentInitializer(AbstractAgentInitializer):
             security_review_llm_config=security_review_llm_config,
             enable_version_control=enable_vc,
             version_control_config=vc_config,
+            goal_loop_config=goal_loop_config,
             mcp_server_configs=mcp_server_configs,
             mcp_exclude_tools=mcp_exclude_tools,
             mcp_direct_tool_threshold=mambo_params.mcp_direct_tool_threshold,

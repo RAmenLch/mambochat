@@ -95,6 +95,7 @@ class SubMessageConfig(BaseModel):
     show_tool_mode: Optional[str] = Field(None, description="【仅用于File类型】show 工具的 mode 参数透传：Normal / Mini_Avatar / Gal_Avatar / Group")
     file_copy_status: Optional[str] = Field(None, description="【仅用于File类型】用户文件副本写入 workspace 的状态：ok / failed；None=未处理（非 Mambo Agent 会话或历史消息）")
     file_copy_error: Optional[str] = Field(None, description="【仅用于File类型】副本写入失败原因（file_copy_status=failed 时）")
+    is_goal_loop_round: Optional[bool] = Field(None, description="【仅用于MCP_TOOL类型·get_goal】是否为 GoalLoopMiddleware 注入的轮次边界 get_goal（tool_call_id 以 goal-loop- 前缀标识）；前端据此渲染轮次分隔线，轮数从 result 文本解析")
 
 
 class SubMessageBase(BaseModel):

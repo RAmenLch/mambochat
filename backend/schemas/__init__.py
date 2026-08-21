@@ -32,6 +32,6 @@ from .resource import (Resource, ResourceVersion,
                        SkillCreate,SkillValidationResult,SkillImportResponse,SkillImportResultItem,GithubImportRequest
                        )
 
-from .agent import (AgentBase,AgentCreate,AgentUpdate,AgentResponse,AgentMoveRequest,SecurityReviewConfigSchema,HitlToolInfo,SummarizationConfigSchema,MamboAgentParametersSchema)
+from .agent import (AgentBase,AgentCreate,AgentUpdate,AgentResponse,AgentMoveRequest,SecurityReviewConfigSchema,HitlToolInfo,GoalLoopToolInfo,SummarizationConfigSchema,MamboAgentParametersSchema)
 
 from .chat_export import (ChatExportPackage, ExportChat, ExportMessage, ExportSubMessage, ExportFileRef, ExportBlob, ImportReport)

@@ -389,6 +389,132 @@
 
         <div class="section-divider"></div>
 
+        <!-- 任务循环 -->
+        <div class="field-row">
+          <div class="field-label">
+            <span>{{ $t('agent.goalLoop.title') }}</span>
+          </div>
+          <el-switch v-model="form.mambo_goal_loop_enabled" size="small" />
+        </div>
+
+        <template v-if="form.mambo_goal_loop_enabled">
+          <div class="field-item">
+            <label class="field-label">{{ $t('agent.goalLoop.mode') }}</label>
+            <el-radio-group v-model="form.mambo_goal_loop_mode" @change="handleGoalLoopModeChange">
+              <el-radio value="llm" size="small">{{ $t('agent.goalLoop.modeLlm') }}</el-radio>
+              <el-radio value="preset" size="small">{{ $t('agent.goalLoop.modePreset') }}</el-radio>
+            </el-radio-group>
+            <div class="goal-loop-mode-desc">
+              {{ form.mambo_goal_loop_mode === 'llm' ? $t('agent.goalLoop.modeLlmDesc') : $t('agent.goalLoop.modePresetDesc') }}
+            </div>
+          </div>
+
+          <template v-if="form.mambo_goal_loop_mode === 'llm'">
+            <div class="field-item">
+              <label class="field-label">{{ $t('agent.goalLoop.maxRounds') }}</label>
+              <el-input-number
+                v-model="form.mambo_goal_loop_max_rounds"
+                :min="1"
+                :step="1"
+                size="small"
+                controls-position="right"
+                style="width: 130px"
+              />
+            </div>
+            <div class="field-item">
+              <label class="field-label">{{ $t('agent.goalLoop.blockedThreshold') }}</label>
+              <el-input-number
+                v-model="form.mambo_goal_loop_blocked_threshold"
+                :min="1"
+                :step="1"
+                size="small"
+                controls-position="right"
+                style="width: 130px"
+              />
+            </div>
+          </template>
+
+          <template v-else>
+            <div class="field-item">
+              <label class="field-label">{{ $t('agent.goalLoop.objective') }}</label>
+              <textarea
+                v-model="form.mambo_goal_loop_objective"
+                class="native-textarea"
+                :rows="3"
+                :placeholder="$t('agent.goalLoop.objectivePlaceholder')"
+              ></textarea>
+            </div>
+
+            <div class="field-item">
+              <label class="field-label">{{ $t('agent.goalLoop.conditions') }}</label>
+              <div class="goal-loop-conditions">
+                <div v-for="(cond, idx) in form.mambo_goal_loop_conditions" :key="idx" class="goal-loop-condition">
+                  <el-select
+                    v-model="cond.tool"
+                    filterable
+                    allow-create
+                    :placeholder="$t('agent.goalLoop.conditionToolPlaceholder')"
+                    style="width: 100%"
+                    popper-class="mobile-popper"
+                  >
+                    <el-option v-for="tool in goalLoopToolOptions" :key="tool.name" :label="tool.name" :value="tool.name" />
+                  </el-select>
+                  <div class="goal-loop-condition-subrow">
+                    <span class="goal-loop-times-label">{{ $t('agent.goalLoop.conditionTimesLabel') }}</span>
+                    <el-input-number v-model="cond.times" :min="1" :step="1" size="small" controls-position="right" style="width: 90px" />
+                    <span class="goal-loop-times-suffix">{{ $t('agent.goalLoop.conditionTimesSuffix') }}</span>
+                    <el-button link type="primary" size="small" @click="cond.argsOpen = !cond.argsOpen">
+                      {{ $t('agent.goalLoop.conditionArgs') }}
+                    </el-button>
+                    <el-button link type="danger" size="small" :icon="Delete" @click="removeGoalLoopCondition(idx)" />
+                  </div>
+                  <div v-if="cond.argsOpen" class="goal-loop-args">
+                    <div v-for="(arg, aidx) in cond.args" :key="aidx" class="goal-loop-arg-row">
+                      <el-select
+                        v-model="arg.key"
+                        filterable
+                        allow-create
+                        :placeholder="$t('agent.goalLoop.argKeyPlaceholder')"
+                        class="goal-loop-arg-key"
+                        popper-class="mobile-popper"
+                        :no-data-text="goalLoopToolArgs(cond.tool).length ? undefined : $t('agent.goalLoop.argKeyNoArgs')"
+                      >
+                        <el-option v-for="argName in goalLoopToolArgs(cond.tool)" :key="argName" :label="argName" :value="argName" />
+                      </el-select>
+                      <span class="goal-loop-arg-eq">=</span>
+                      <input v-model="arg.value" class="native-input goal-loop-arg-value" :placeholder="$t('agent.goalLoop.argValuePlaceholder')" />
+                      <el-button link type="danger" size="small" :icon="Delete" @click="removeGoalLoopArg(cond, aidx)" />
+                    </div>
+                    <el-button link type="primary" size="small" :icon="Plus" @click="addGoalLoopArg(cond)">
+                      {{ $t('agent.goalLoop.addArg') }}
+                    </el-button>
+                  </div>
+                </div>
+                <el-button type="primary" plain size="small" :icon="Plus" @click="addGoalLoopCondition">
+                  {{ $t('agent.goalLoop.addCondition') }}
+                </el-button>
+                <div class="goal-loop-conditions-hint">
+                  {{ $t('agent.goalLoop.conditionsDesc') }}
+                </div>
+              </div>
+            </div>
+
+            <div class="field-item">
+              <label class="field-label">{{ $t('agent.goalLoop.maxRounds') }}</label>
+              <el-input-number
+                v-model="form.mambo_goal_loop_max_rounds"
+                :min="1"
+                :step="1"
+                size="small"
+                controls-position="right"
+                style="width: 130px"
+              />
+            </div>
+          </template>
+        </template>
+
+        <div class="section-divider"></div>
+
         <div class="field-row">
           <div class="field-label">
             <span>{{ $t('agent.mcpThreshold') }}</span>
@@ -580,7 +706,7 @@ import { ref, reactive, watch, computed, onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useI18n } from 'vue-i18n';
 import { ElMessage } from 'element-plus';
-import { User, QuestionFilled, Collection, Plus, Connection, Monitor, Loading, Close } from '@element-plus/icons-vue';
+import { User, QuestionFilled, Collection, Plus, Connection, Monitor, Loading, Close, Delete } from '@element-plus/icons-vue';
 
 import { useAgentStore } from '@/stores/agentStore';
 import { useProviderStore } from '@/stores/providerStore';
@@ -588,9 +714,9 @@ import { useSystemConfigStore } from '@/stores/systemConfigStore';
 import { useMcpStore } from '@/stores/mcpStore';
 import { useBackendStore } from '@/stores/backendStore';
 
-import { uploadAgentAvatar, deleteAgentAvatar, getAgent, getAgentHitlTools } from '@/api/agentService';
+import { uploadAgentAvatar, deleteAgentAvatar, getAgent, getAgentHitlTools, getGoalLoopTools } from '@/api/agentService';
 import { getResourceDetails } from '@/api/resourceService';
-import type { Resource, Agent, AgentType, HitlToolInfo, MamboAgentParameters } from '@/api/types';
+import type { Resource, Agent, AgentType, HitlToolInfo, GoalLoopToolInfo, MamboAgentParameters, GoalLoopConfig } from '@/api/types';
 
 import AvatarUploader from '@/components/settings/AvatarUploader.vue';
 import ResourceSelectorDialog from '@/mobile/components/chat/dialogs/ResourceSelectorDialog.vue';
@@ -647,6 +773,16 @@ const { scrollToTopIfStarred } = useModelSelectScroll();
 const hitlToolOptions = ref<HitlToolInfo[]>([]);
 const hitlToolOptionsLoaded = ref(false);
 
+/** 任务循环「我的规则」工具名 / 参数名建议（与执行侧工具名一致） */
+const goalLoopToolOptions = ref<GoalLoopToolInfo[]>([]);
+const goalLoopToolOptionsLoaded = ref(false);
+
+/** 某条件已选工具对应的参数名建议列表 */
+function goalLoopToolArgs(toolName: string): string[] {
+  const found = goalLoopToolOptions.value.find(t => t.name === toolName);
+  return found ? found.args : [];
+}
+
 const staleToolNames = computed(() => {
   if (!hitlToolOptionsLoaded.value) return [] as string[];
   const activeNames = new Set(hitlToolOptions.value.map(t => t.name));
@@ -655,6 +791,90 @@ const staleToolNames = computed(() => {
 
 function removeReviewTool(toolName: string) {
   form.mambo_security_review_tools = form.mambo_security_review_tools.filter(v => v !== toolName);
+}
+
+// --- 任务循环 (GoalLoop) ---
+interface GoalLoopConditionRow {
+  tool: string;
+  times: number;
+  args: { key: string; value: string }[];
+  argsOpen?: boolean;
+}
+
+const GOAL_LOOP_DEFAULT_ROUNDS: Record<'llm' | 'preset', number> = { llm: 32, preset: 2 };
+const GOAL_LOOP_DEFAULT_BLOCKED_THRESHOLD = 3;
+
+/** 参数值解析：true/false/null/数字 → 原类型，其余保持字符串 */
+function parseArgValue(raw: string): any {
+  const trimmed = raw.trim();
+  if (trimmed === 'true') return true;
+  if (trimmed === 'false') return false;
+  if (trimmed === 'null') return null;
+  if (/^-?\d+(\.\d+)?$/.test(trimmed)) return Number(trimmed);
+  return trimmed;
+}
+
+function buildGoalLoopConfig(): GoalLoopConfig {
+  if (form.mambo_goal_loop_mode === 'preset') {
+    return {
+      mode: 'preset',
+      max_rounds: form.mambo_goal_loop_max_rounds,
+      objective: form.mambo_goal_loop_objective.trim(),
+      conditions: form.mambo_goal_loop_conditions
+        .filter(c => c.tool.trim())
+        .map(c => {
+          const args: Record<string, any> = {};
+          for (const a of c.args) {
+            if (a.key.trim()) args[a.key.trim()] = parseArgValue(a.value);
+          }
+          return {
+            tool: c.tool.trim(),
+            times: c.times,
+            args: Object.keys(args).length > 0 ? args : null,
+          };
+        }),
+    };
+  }
+  return {
+    mode: 'llm',
+    max_rounds: form.mambo_goal_loop_max_rounds,
+    blocked_threshold: form.mambo_goal_loop_blocked_threshold,
+  };
+}
+
+function resetGoalLoopForm() {
+  form.mambo_goal_loop_mode = 'llm';
+  form.mambo_goal_loop_max_rounds = GOAL_LOOP_DEFAULT_ROUNDS.llm;
+  form.mambo_goal_loop_blocked_threshold = GOAL_LOOP_DEFAULT_BLOCKED_THRESHOLD;
+  form.mambo_goal_loop_objective = '';
+  form.mambo_goal_loop_conditions = [];
+}
+
+function handleGoalLoopModeChange(mode: string | number | boolean | undefined) {
+  const m = (mode ?? 'llm') as 'llm' | 'preset';
+  form.mambo_goal_loop_max_rounds = GOAL_LOOP_DEFAULT_ROUNDS[m];
+  if (m === 'preset') {
+    form.mambo_goal_loop_blocked_threshold = GOAL_LOOP_DEFAULT_BLOCKED_THRESHOLD;
+  } else {
+    form.mambo_goal_loop_objective = '';
+    form.mambo_goal_loop_conditions = [];
+  }
+}
+
+function addGoalLoopCondition() {
+  form.mambo_goal_loop_conditions.push({ tool: '', times: 1, args: [], argsOpen: false });
+}
+
+function removeGoalLoopCondition(idx: number) {
+  form.mambo_goal_loop_conditions.splice(idx, 1);
+}
+
+function addGoalLoopArg(cond: GoalLoopConditionRow) {
+  cond.args.push({ key: '', value: '' });
+}
+
+function removeGoalLoopArg(cond: GoalLoopConditionRow, aidx: number) {
+  cond.args.splice(aidx, 1);
 }
 
 const agentData = computed(() => agentList.value.find(a => a.id === currentAgentId.value));
@@ -685,6 +905,12 @@ const form = reactive({
   mambo_security_review_system_prompt: '',
   mambo_security_review_tools: [] as string[],
   mambo_version_control_enabled: false,
+  mambo_goal_loop_enabled: false,
+  mambo_goal_loop_mode: 'llm' as 'llm' | 'preset',
+  mambo_goal_loop_max_rounds: 32,
+  mambo_goal_loop_blocked_threshold: 3,
+  mambo_goal_loop_objective: '',
+  mambo_goal_loop_conditions: [] as GoalLoopConditionRow[],
   mambo_mcp_threshold: 15,
 });
 
@@ -777,9 +1003,30 @@ watch(agentData, async (newVal) => {
     }
     const vcCfg = mamboParams.version_control;
     form.mambo_version_control_enabled = !!(vcCfg && vcCfg.enabled);
+
+    // 任务循环配置还原
+    const glCfg = mamboParams.goal_loop;
+    if (glCfg) {
+      form.mambo_goal_loop_enabled = true;
+      form.mambo_goal_loop_mode = glCfg.mode === 'preset' ? 'preset' : 'llm';
+      form.mambo_goal_loop_max_rounds = glCfg.max_rounds ?? GOAL_LOOP_DEFAULT_ROUNDS[form.mambo_goal_loop_mode];
+      form.mambo_goal_loop_blocked_threshold = glCfg.blocked_threshold ?? GOAL_LOOP_DEFAULT_BLOCKED_THRESHOLD;
+      form.mambo_goal_loop_objective = glCfg.objective || '';
+      form.mambo_goal_loop_conditions = (glCfg.conditions || []).map(c => ({
+        tool: c.tool,
+        times: c.times,
+        args: Object.entries(c.args || {}).map(([key, value]) => ({ key, value: String(value) })),
+        argsOpen: false,
+      }));
+    } else {
+      form.mambo_goal_loop_enabled = false;
+      resetGoalLoopForm();
+    }
+
     form.mambo_mcp_threshold = mamboParams.mcp_direct_tool_threshold ?? 15;
 
     fetchHitlTools(newVal.id);
+    fetchGoalLoopTools(newVal.id);
 
     if (newVal.resourcePromptList && newVal.resourcePromptList.length > 0) {
       try { mountedResources.value = (await Promise.all(newVal.resourcePromptList.map(id => getResourceDetails(id)))).filter(r => !!r) as Resource[]; }
@@ -939,6 +1186,17 @@ async function fetchHitlTools(agentId: string) {
   } catch { hitlToolOptions.value = []; }
 }
 
+async function fetchGoalLoopTools(agentId: string) {
+  goalLoopToolOptionsLoaded.value = false;
+  try {
+    goalLoopToolOptions.value = await getGoalLoopTools(agentId);
+  } catch {
+    goalLoopToolOptions.value = [];
+  } finally {
+    goalLoopToolOptionsLoaded.value = true;
+  }
+}
+
 function buildMamboAgentParameters(): MamboAgentParameters | null {
   return {
     include_general_purpose: form.mambo_general_purpose,
@@ -961,6 +1219,7 @@ function buildMamboAgentParameters(): MamboAgentParameters | null {
       review_tools: form.mambo_security_review_tools.length > 0 ? [...form.mambo_security_review_tools] : null,
     } : null,
     version_control: form.mambo_version_control_enabled ? { enabled: true, auto_snapshot: true } : null,
+    goal_loop: form.mambo_goal_loop_enabled ? buildGoalLoopConfig() : null,
     mcp_direct_tool_threshold: form.mambo_mcp_threshold,
   };
 }
@@ -991,6 +1250,31 @@ async function handleDeleteAvatar() {
 
 async function handleSave() {
   if (!currentAgentId.value) return;
+
+  // 任务循环配置校验
+  if (form.mambo_goal_loop_enabled) {
+    if (form.mambo_goal_loop_mode === 'preset') {
+      if (!form.mambo_goal_loop_objective.trim()) {
+        ElMessage.warning(t('agent.goalLoop.validateObjective'));
+        return;
+      }
+      if (form.mambo_goal_loop_conditions.length === 0) {
+        ElMessage.warning(t('agent.goalLoop.validateCondition'));
+        return;
+      }
+      for (const c of form.mambo_goal_loop_conditions) {
+        if (!c.tool.trim()) {
+          ElMessage.warning(t('agent.goalLoop.validateTool'));
+          return;
+        }
+      }
+    }
+    if (!form.mambo_goal_loop_max_rounds || form.mambo_goal_loop_max_rounds < 1) {
+      ElMessage.warning(t('agent.goalLoop.validateRounds'));
+      return;
+    }
+  }
+
   isSaving.value = true;
   try {
     const resourcePromptList = mountedResources.value.map(r => r.id);
@@ -1583,6 +1867,80 @@ onMounted(() => {
   align-items: center;
   height: 100%;
   background: var(--color-background);
+}
+
+/* ===== GoalLoop ===== */
+.goal-loop-mode-desc {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.5;
+}
+
+.goal-loop-conditions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.goal-loop-condition {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 0.5px solid rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+  background: var(--el-fill-color-blank);
+}
+
+.goal-loop-condition-subrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.goal-loop-times-label,
+.goal-loop-times-suffix {
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+  white-space: nowrap;
+}
+
+.goal-loop-args {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--el-fill-color-light);
+  border-radius: 8px;
+}
+
+.goal-loop-arg-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.goal-loop-arg-key {
+  flex: 1;
+  min-width: 0;
+}
+
+.goal-loop-arg-eq {
+  color: var(--el-text-color-secondary);
+}
+
+.goal-loop-arg-value {
+  flex: 1.4;
+  min-width: 0;
+}
+
+.goal-loop-conditions-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.5;
 }
 
 /* ===== Dark Mode ===== */

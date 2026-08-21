@@ -6,6 +6,7 @@ DeepAgent 需要 VFS files 注入，请使用 deep_agent_chat_worker.DeepAgentCh
 
 from typing import AsyncGenerator, Tuple, Optional
 
+from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command, Overwrite
 
@@ -13,6 +14,17 @@ from backend.services.generation.worker.abstract_worker import AbstractGenerateW
 from backend.services.generation.core.llm_io import LLMInput
 from backend.services.generation.graph_builders.factory import GraphBuilderFactory
 from backend.services.generation.core.llm_io import SummarizationEventInfo
+
+# GoalLoopMiddleware 注入的 get_goal 工具调用 ID 前缀
+# （对应 mambo_agents.middleware.goal_loop._INJECT_PREFIX = "goal-loop-"）。
+_GOAL_LOOP_INJECT_PREFIX = "goal-loop-"
+
+# GoalLoopMiddleware.after_agent 节点名。该节点以"相同消息 id 原地替换"的方式
+# 把 get_goal 调用追加到最后一条模型 AIMessage 上并跳回 tools 节点执行
+# （after_agent 仅在模型无工具调用的轮次运行，故副本 tool_calls 只含注入的 get_goal）。
+# 该分支只提取 goal-loop- 注入调用构造合成消息交给 ToolExecutionHandler，
+# 使 get_goal 像 write_plans 等中间件工具一样落库为 MCP_TOOL 子消息，与 state 对齐。
+_GOAL_LOOP_AFTER_AGENT_NODE = "GoalLoopMiddleware.after_agent"
 
 
 class UniversalGraphWorker(AbstractGenerateWorker):
@@ -82,6 +94,8 @@ class UniversalGraphWorker(AbstractGenerateWorker):
             else:
                 input_data = Command(resume=resume_payload)
 
+        # goal_loop 的 after_agent 副本已在上述分支单独处理（只提取 get_goal 注入调用），
+        # model/tools 节点发射的 messages 天然唯一，直接透传给 Handler 链。
         async for stream_event in agent.astream(
                 input=input_data,
                 config=thread_config,
@@ -94,6 +108,32 @@ class UniversalGraphWorker(AbstractGenerateWorker):
             event = stream_event.get("data")
 
             if mode == "updates" and isinstance(event, dict):
+                # GoalLoopMiddleware.after_agent：其 messages 是"模型 AIMessage 的原地替换副本"
+                # （同一 id，追加了注入的 get_goal 调用）。正文在 updates 模式下不会重复落库
+                # （provider decoder 的 get_text_content 在 updates 模式返回 None），因此只需
+                # 提取 goal-loop- 前缀的注入调用，构造"纯调用"合成消息交给 ToolExecutionHandler，
+                # 使 get_goal 像 write_plans 等中间件工具一样落库为 MCP_TOOL 子消息，与 state 对齐。
+                if _GOAL_LOOP_AFTER_AGENT_NODE in event:
+                    after_update = event[_GOAL_LOOP_AFTER_AGENT_NODE]
+                    if isinstance(after_update, dict) and "messages" in after_update:
+                        for message in after_update["messages"]:
+                            if isinstance(message, AIMessage):
+                                injected = [
+                                    tc for tc in (message.tool_calls or [])
+                                    if str(tc.get("id", "")).startswith(_GOAL_LOOP_INJECT_PREFIX)
+                                ]
+                                if injected:
+                                    # 保留原消息 id：run_uuid 归属原模型轮次，
+                                    # context_builder 才能把 get_goal 归入同一 assistant 轮重建。
+                                    # content 用空串：updates 模式 decoder 不产出正文，
+                                    # 空 content 不会被 TextAndReasoningHandler 落库。
+                                    synthetic = AIMessage(
+                                        id=getattr(message, "id", None),
+                                        content="",
+                                        tool_calls=injected,
+                                    )
+                                    yield mode, synthetic
+                    continue
                 if "model" in event:
                     model_update = event["model"]
                     if isinstance(model_update, dict):

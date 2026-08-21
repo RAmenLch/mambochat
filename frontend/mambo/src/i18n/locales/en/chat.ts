@@ -133,6 +133,8 @@ export default {
     hideStack: 'Hide Stack Trace',
     retryFromError: 'Recover from Error',
     zipCoverageTip: 'History summary covers everything above this section (inclusive)',
+    goalLoopRound: 'Round {round} / {max}',
+    goalLoopRoundUnknown: 'Round',
     mcp: {
       invalidCall: 'Invalid tool call',
       unknownTool: 'Unknown tool',

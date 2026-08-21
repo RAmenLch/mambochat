@@ -81,27 +81,38 @@
 
     <!-- 工具调用内联标签区域 -->
     <div class="group-tools-wrapper" v-if="group.toolSubMessages.length > 0">
-      <div
-        v-for="tool in group.toolSubMessages"
-        :key="tool.id"
-        class="tool-chip"
-        :class="{
-          'has-review': tool.type === 'ReviewTool',
-          'is-mcp-wrapped': isMcpWrapped(tool),
-        }"
-        @click.stop="$emit('open-tool-dialog', tool.id)"
-      >
-        <el-icon>
-          <Warning v-if="tool.type === 'ReviewTool'" style="color: var(--el-color-warning)" />
-          <Loading v-else-if="tool.status === 'generating'" class="is-loading" />
-          <CircleClose v-else-if="isToolError(tool)" style="color: var(--el-color-error)" />
-          <CircleCheck v-else style="color: var(--el-color-success)" />
-        </el-icon>
-        <span class="tool-chip-title">{{ getToolBubbleText(tool) }}</span>
-        <span v-if="getSecurityReviewForTool(tool)" class="security-review-badge" :class="{ 'is-failed': !getSecurityReviewForTool(tool)!.passed }">
-          🛡️ {{ getSecurityReviewForTool(tool)!.passed ? t('agent.securityReviewPassed') : t('agent.securityReviewFailed') }}
-        </span>
-      </div>
+      <template v-for="tool in group.toolSubMessages" :key="tool.id">
+        <!-- GoalLoop 轮次边界 get_goal：渲染轮次分隔线（点击仍可打开详情） -->
+        <div
+          v-if="isGoalLoopRoundMarker(tool)"
+          class="goal-round-divider"
+          @click.stop="$emit('open-tool-dialog', tool.id)"
+        >
+          <span class="goal-round-divider-line" />
+          <span class="goal-round-divider-label">{{ goalRoundText(tool) }}</span>
+          <span class="goal-round-divider-line" />
+        </div>
+        <div
+          v-else
+          class="tool-chip"
+          :class="{
+            'has-review': tool.type === 'ReviewTool',
+            'is-mcp-wrapped': isMcpWrapped(tool),
+          }"
+          @click.stop="$emit('open-tool-dialog', tool.id)"
+        >
+          <el-icon>
+            <Warning v-if="tool.type === 'ReviewTool'" style="color: var(--el-color-warning)" />
+            <Loading v-else-if="tool.status === 'generating'" class="is-loading" />
+            <CircleClose v-else-if="isToolError(tool)" style="color: var(--el-color-error)" />
+            <CircleCheck v-else style="color: var(--el-color-success)" />
+          </el-icon>
+          <span class="tool-chip-title">{{ getToolBubbleText(tool) }}</span>
+          <span v-if="getSecurityReviewForTool(tool)" class="security-review-badge" :class="{ 'is-failed': !getSecurityReviewForTool(tool)!.passed }">
+            🛡️ {{ getSecurityReviewForTool(tool)!.passed ? t('agent.securityReviewPassed') : t('agent.securityReviewFailed') }}
+          </span>
+        </div>
+      </template>
     </div>
 
     <!-- 操作菜单插槽 (跟随当前 Group 浮现) -->
@@ -117,7 +128,7 @@ import { computed, ref } from 'vue'
 import type { Message, SubMessage, McpToolContent, ReviewToolContent, SecurityReviewContent, FileResponse } from '@/api/types'
 import SubMessageItem from '../SubMessageItem.vue'
 import type { BubbleSectionGroup } from '@/composables/useAssistantTimeline'
-import { unpackMcpToolCall, getToolArgsSummary } from '@/utils/mcpToolUnpack'
+import { unpackMcpToolCall, getToolArgsSummary, parseGoalLoopRound } from '@/utils/mcpToolUnpack'
 import { Warning, Loading, CircleClose, CircleCheck, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
@@ -211,6 +222,22 @@ function isToolError(tool: SubMessage): boolean {
   if (tool.type !== 'McpTool') return false
   const content = getParsedContent(tool) as McpToolContent | null
   return content?.is_error || false
+}
+
+/** 是否为 GoalLoopMiddleware 注入的轮次边界 get_goal（config.is_goal_loop_round 标志） */
+function isGoalLoopRoundMarker(tool: SubMessage): boolean {
+  return tool.type === 'McpTool' && tool.config?.is_goal_loop_round === true
+}
+
+/** 轮次分隔线文案：优先从 result 解析"第 X/Y 轮"，解析不到则显示通用文案 */
+function goalRoundText(tool: SubMessage): string {
+  if (tool.type !== 'McpTool') return ''
+  const content = getParsedContent(tool) as McpToolContent | null
+  const info = content ? parseGoalLoopRound(content.result) : null
+  if (info) {
+    return t('chat.message.goalLoopRound', { round: info.round, max: info.max })
+  }
+  return t('chat.message.goalLoopRoundUnknown')
 }
 
 function isMcpWrapped(tool: SubMessage): boolean {
@@ -356,6 +383,36 @@ function fileGroupPreviewIndex(fileIdx: number): number {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 6px;
+}
+
+/* GoalLoop 轮次边界分隔线：通栏展示，营造"下一轮开始"的轮次感 */
+.goal-round-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 2px 0;
+  padding: 4px 0;
+  cursor: pointer;
+  user-select: none;
+}
+.goal-round-divider-line {
+  flex: 1;
+  height: 1px;
+  background: var(--el-border-color-darker);
+  opacity: 0.45;
+}
+.goal-round-divider-label {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-color-primary);
+  background-color: var(--el-color-primary-light-9);
+  border: 1px solid var(--el-color-primary-light-5);
+  padding: 3px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
 }
 
 .tool-chip {

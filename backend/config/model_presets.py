@@ -312,6 +312,26 @@ MODEL_PRESETS: dict[str, list[ModelPreset]] = {
                 "deepseek::reasoning_effort",
             ],
         ),
+        # --- 视觉模型（2026/08/21 发布，实验性质） ---
+        # 支持 JPEG/PNG/GIF/WebP 图片输入，纯文本能力与 V4-Flash 持平
+        ModelPreset(
+            modelId="deepseek-v4-flash-vision-exp",
+            name="DeepSeek V4 Flash Vision (Exp)",
+            context_length=1_000_000,
+            max_output_tokens=384_000,
+            input_modalities=["text", "image"],
+            supported_parameters=[
+                "temperature",
+                "top_p",
+                "max_tokens",
+                "max_completion_tokens",
+                "frequency_penalty",
+                "presence_penalty",
+                "stop",
+                "deepseek::thinking.type",
+                "deepseek::reasoning_effort",
+            ],
+        ),
         # --- 旧版（2026/07/24 弃用，当前仍可用） ---
         ModelPreset(
             modelId="deepseek-chat",

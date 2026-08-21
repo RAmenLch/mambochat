@@ -73,6 +73,25 @@ function extractString(raw: unknown): string | null {
   return String(raw)
 }
 
+export interface GoalLoopRoundInfo {
+  round: number
+  max: number
+}
+
+/**
+ * 从 get_goal 的 result 文本解析轮次信息（"第 X/Y 轮"）。
+ * result 是 payload 的 JSON 序列化字符串，在原文上直接正则匹配。
+ * 解析失败（结果未到 / mambo_agents 文案变更）返回 null，由调用方降级处理。
+ */
+export function parseGoalLoopRound(
+  result: string | null | undefined,
+): GoalLoopRoundInfo | null {
+  if (!result) return null
+  const m = result.match(/第\s*(\d+)\s*\/\s*(\d+)\s*轮/)
+  if (!m) return null
+  return { round: Number(m[1]), max: Number(m[2]) }
+}
+
 /**
  * 提取工具参数摘要，用于在工具气泡上直接展示关键参数。
  * 仅对 read / edit / write / ls / grep / glob / delete 返回有效摘要，其余返回空字符串。

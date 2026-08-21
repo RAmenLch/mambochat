@@ -98,29 +98,42 @@
 
     <!-- 工具调用小气泡 -->
     <div class="group-tools-wrapper" v-if="group.toolSubMessages.length > 0">
-      <div
-        v-for="tool in group.toolSubMessages"
-        :key="tool.id"
-        class="minimized-item"
-        :class="{
-          'has-review': tool.type === 'ReviewTool',
-          'has-ask-user': tool.type === 'AskUser',
-          'is-mcp-wrapped': isMcpWrapped(tool),
-        }"
-        @click="$emit('open-tool-dialog', tool.id)"
-      >
-        <el-icon>
-          <Warning v-if="tool.type === 'ReviewTool'" style="color: var(--el-color-warning)" />
-          <QuestionFilled v-else-if="tool.type === 'AskUser'" style="color: var(--el-color-primary)" />
-          <Loading v-else-if="tool.status === 'generating'" class="is-loading" />
-          <CircleClose v-else-if="isToolError(tool)" style="color: var(--el-color-error)" />
-          <CircleCheck v-else style="color: var(--el-color-success)" />
-        </el-icon>
-        <span class="minimized-item-title">{{ getToolBubbleText(tool) }}</span>
-        <span v-if="getSecurityReviewForTool(tool)" class="security-review-badge" :class="{ 'is-failed': !getSecurityReviewForTool(tool)!.passed }">
-          🛡️ {{ getSecurityReviewForTool(tool)!.passed ? t('agent.securityReviewPassed') : t('agent.securityReviewFailed') }}
-        </span>
-      </div>
+      <template v-for="tool in group.toolSubMessages" :key="tool.id">
+        <!-- GoalLoop 轮次边界 get_goal：渲染通栏轮次分隔线（点击仍可打开详情） -->
+        <div
+          v-if="isGoalLoopRoundMarker(tool)"
+          class="goal-round-divider"
+          @click="$emit('open-tool-dialog', tool.id)"
+        >
+          <span class="goal-round-divider-line" />
+          <span class="goal-round-divider-label">
+            {{ goalRoundText(tool) }}
+          </span>
+          <span class="goal-round-divider-line" />
+        </div>
+        <div
+          v-else
+          class="minimized-item"
+          :class="{
+            'has-review': tool.type === 'ReviewTool',
+            'has-ask-user': tool.type === 'AskUser',
+            'is-mcp-wrapped': isMcpWrapped(tool),
+          }"
+          @click="$emit('open-tool-dialog', tool.id)"
+        >
+          <el-icon>
+            <Warning v-if="tool.type === 'ReviewTool'" style="color: var(--el-color-warning)" />
+            <QuestionFilled v-else-if="tool.type === 'AskUser'" style="color: var(--el-color-primary)" />
+            <Loading v-else-if="tool.status === 'generating'" class="is-loading" />
+            <CircleClose v-else-if="isToolError(tool)" style="color: var(--el-color-error)" />
+            <CircleCheck v-else style="color: var(--el-color-success)" />
+          </el-icon>
+          <span class="minimized-item-title">{{ getToolBubbleText(tool) }}</span>
+          <span v-if="getSecurityReviewForTool(tool)" class="security-review-badge" :class="{ 'is-failed': !getSecurityReviewForTool(tool)!.passed }">
+            🛡️ {{ getSecurityReviewForTool(tool)!.passed ? t('agent.securityReviewPassed') : t('agent.securityReviewFailed') }}
+          </span>
+        </div>
+      </template>
     </div>
 
     <!-- Zip History 覆盖指示器 -->
@@ -143,7 +156,7 @@ import type { Message, SubMessage, McpToolContent, ReviewToolContent, AskUserCon
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import SubMessageItem from '../SubMessageItem.vue';
 import type { BubbleSectionGroup } from '@/composables/useAssistantTimeline';
-import { unpackMcpToolCall, getToolArgsSummary } from '@/utils/mcpToolUnpack';
+import { unpackMcpToolCall, getToolArgsSummary, parseGoalLoopRound } from '@/utils/mcpToolUnpack';
 import { Edit, CopyDocument, ArrowUpBold, ArrowDownBold, Warning, Loading, CircleClose, CircleCheck, QuestionFilled, Document, ArrowLeft, ArrowRight } from '@element-plus/icons-vue';
 
 const { t } = useI18n();
@@ -358,6 +371,22 @@ function isToolError(tool: SubMessage): boolean {
   return content?.is_error || false;
 }
 
+/** 是否为 GoalLoopMiddleware 注入的轮次边界 get_goal（config.is_goal_loop_round 标志） */
+function isGoalLoopRoundMarker(tool: SubMessage): boolean {
+  return tool.type === 'McpTool' && tool.config?.is_goal_loop_round === true;
+}
+
+/** 轮次分隔线文案：优先从 result 解析"第 X/Y 轮"，解析不到则显示通用文案 */
+function goalRoundText(tool: SubMessage): string {
+  if (tool.type !== 'McpTool') return '';
+  const content = getParsedContent(tool) as McpToolContent | null;
+  const info = content ? parseGoalLoopRound(content.result) : null;
+  if (info) {
+    return t('chat.message.goalLoopRound', { round: info.round, max: info.max });
+  }
+  return t('chat.message.goalLoopRoundUnknown');
+}
+
 /** 文件组中所有图片的聚合预览列表（用于键盘导航） */
 const fileGroupPreviewList = computed(() => {
   if (!props.group.fileSubMessages) return [];
@@ -433,6 +462,43 @@ function fileGroupPreviewIndex(fileIdx: number): number {
   gap: 8px;
   margin-top: 8px;
   padding-left: 4px;
+}
+
+/* GoalLoop 轮次边界分隔线：通栏展示，营造"下一轮开始"的轮次感 */
+.goal-round-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin: 4px 0;
+  padding: 6px 0;
+  cursor: pointer;
+  user-select: none;
+}
+.goal-round-divider-line {
+  flex: 1;
+  height: 1px;
+  background: var(--el-border-color-darker);
+  opacity: 0.45;
+}
+.goal-round-divider-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-color-primary);
+  background-color: var(--el-color-primary-light-9);
+  border: 1px solid var(--el-color-primary-light-5);
+  padding: 3px 14px;
+  border-radius: 999px;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+.goal-round-divider:hover .goal-round-divider-label {
+  color: var(--el-color-primary);
+  border-color: var(--el-color-primary);
+  background-color: var(--el-color-primary-light-8);
 }
 
 /* 文件/图片分组容器：flex-wrap 同行排布多张图片 */

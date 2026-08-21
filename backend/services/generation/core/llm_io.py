@@ -261,6 +261,11 @@ class AgentConfig(BaseModel):
         default=None,
         description="版本控制详细配置，包含 auto_snapshot 等"
     )
+    goal_loop_config: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="任务循环配置（仅 Mambo Agent 有效）。由 Initializer 填充，Builder 消费以创建 GoalLoopMiddleware。"
+                    "结构: {mode, max_rounds, objective, conditions, blocked_threshold}"
+    )
 
 
 class LLMInput(BaseModel):

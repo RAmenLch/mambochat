@@ -1,6 +1,6 @@
 # backend/schemas/agent.py
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Literal
 
@@ -35,6 +35,40 @@ class VersionControlConfigSchema(BaseModel):
     auto_snapshot: bool = Field(True, description="是否自动在文件写入/编辑/删除时创建快照")
 
 
+class GoalLoopConditionSchema(BaseModel):
+    """任务循环完成条件：某工具在当前轮内至少调用 times 次，且参数全部匹配才算一次有效调用"""
+    tool: str = Field(..., description="工具名")
+    times: int = Field(1, ge=1, description="至少调用次数")
+    args: Optional[Dict[str, Any]] = Field(None, description="参数匹配（多个参数需全部匹配）")
+
+
+class GoalLoopConfigSchema(BaseModel):
+    """任务循环配置
+
+    mode=llm    ：交给 AI 自己规划目标，自动多轮执行直至完成/卡住/轮数用尽（适合长程任务）
+    mode=preset ：按用户设定的目标与完成条件循环，每轮强制围绕目标执行（全部条件满足才结束）
+    """
+    mode: Literal["llm", "preset"] = Field("llm", description="循环模式: llm=交给AI自己规划 / preset=按我的规则执行")
+    max_rounds: int = Field(256, ge=1, description="轮数上限，到达后强制停止")
+    objective: Optional[str] = Field(None, description="每轮目标（preset 必填）")
+    conditions: Optional[List[GoalLoopConditionSchema]] = Field(None, description="完成条件（preset 用，全部满足才结束）")
+    blocked_threshold: Optional[int] = Field(None, ge=1, description="至少工作满该轮数才允许宣告卡住（llm 用，默认 3）")
+
+    @model_validator(mode="after")
+    def _validate_mode_fields(self):
+        if self.mode == "preset":
+            if not self.objective or not self.objective.strip():
+                raise ValueError("mode='preset' 需要非空的 objective")
+            if self.blocked_threshold not in (None, 3):
+                raise ValueError("blocked_threshold 仅在 mode='llm' 时可用")
+        else:
+            if self.objective is not None:
+                raise ValueError("objective 仅在 mode='preset' 时可用")
+            if self.conditions:
+                raise ValueError("conditions 仅在 mode='preset' 时可用")
+        return self
+
+
 class MamboAgentParametersSchema(BaseModel):
     """Mambo Agent 专属参数（持久化到 Agent.agentParameters JSON 列）"""
     include_general_purpose: bool = Field(False, description="是否启用通用子代理")
@@ -46,6 +80,7 @@ class MamboAgentParametersSchema(BaseModel):
     summarization_config: Optional[SummarizationConfigSchema] = Field(None, description="摘要详细配置")
     security_review: Optional[SecurityReviewConfigSchema] = Field(None, description="AI 安全审核配置")
     version_control: Optional[VersionControlConfigSchema] = Field(None, description="版本控制配置")
+    goal_loop: Optional[GoalLoopConfigSchema] = Field(None, description="任务循环配置")
     mcp_direct_tool_threshold: int = Field(15, description="MCP 工具数量阈值：低于此值时直接暴露工具，否则使用 meta-tool 包装模式")
 
 
@@ -53,6 +88,17 @@ class HitlToolInfo(BaseModel):
     """HITL 可审核工具信息（用于前端审核范围选择器）"""
     name: str = Field(..., description="工具名")
     source: str = Field(..., description="工具来源: 'mcp' 或 'backend'")
+
+
+class GoalLoopToolInfo(BaseModel):
+    """任务循环「我的规则」工具建议信息（用于前端完成条件工具/参数选择器）。
+
+    name 为执行侧真实工具名（MCP 工具为 ``服务器名__工具名`` 格式），
+    与 mambo_agents goal_loop 的 tool_called_at_least 匹配方式保持一致。
+    """
+    name: str = Field(..., description="执行侧工具名")
+    source: str = Field(..., description="工具来源: 'mcp' / 'backend' / 'builtin'")
+    args: List[str] = Field(default_factory=list, description="参数名建议列表（来自工具 schema）")
 
 
 # ─────────────────────────── Agent CRUD Schema ───────────────────────────

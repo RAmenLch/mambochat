@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List
+from typing import List, Dict, Any, Optional
 
 from backend.crud import agent_crud, file_crud, mcp_crud, backend_crud
 from backend import schemas
@@ -10,9 +10,64 @@ from backend.models import agent_model
 from backend.database import get_db
 from backend.services.file_service import FileService
 from backend.services.resource_service import validate_mounted_resources, validate_memory_resources
-from backend.schemas.enums import FileManagementType, ToolReviewMode
+from backend.schemas.enums import FileManagementType, ToolReviewMode, BackendType
+
+try:
+    from mambo_agents.middleware.mcp import mcp_tool_name
+except ImportError:  # 运行时环境缺少 mambo_agents 时退化实现（与 mcp_tool_name 同规则）
+    import re as _re
+    _TOOL_NAME_SAFE_RE = _re.compile(r"[^a-zA-Z0-9_-]")
+    def mcp_tool_name(server_name: str, tool_name: str) -> str:
+        return f"{server_name}__{_TOOL_NAME_SAFE_RE.sub('_', tool_name)}"
 
 router = APIRouter()
+
+
+# ─────────────────── 任务循环「我的规则」工具建议常量 ───────────────────
+# 内置 / Backend 工具的参数名建议表，与 mambo_agents 执行侧工具定义对齐。
+# 剔除 goal 相关工具（get_goal / create_goal / update_goal，由中间件注入，不可作为完成条件）。
+_BUILTIN_TOOL_ARGS: Dict[str, List[str]] = {
+    "ls": ["path"],
+    "read": ["file_path", "offset", "limit", "include_line_numbers"],
+    "write": ["file_path", "content", "overwrite"],
+    "edit": ["file_path", "old_str", "new_str", "replace_all"],
+    "grep": ["pattern", "path", "glob", "regex", "offset", "limit"],
+    "glob": ["pattern", "path"],
+    "copy": ["source", "destination"],
+    "tree": ["path", "depth"],
+    "delete": ["path"],
+    "execute": ["command"],
+    "ls_version": ["path"],
+    "task": ["description", "subagent_type"],
+    "async_task": ["description", "subagent_type"],
+    "async_status": ["task_id"],
+    "write_plans": ["plans"],
+    "show": ["path", "mode", "wait_timeout"],
+}
+
+# 无条件存在的内置中间件工具（核心六件 + 子代理 + 计划 + show 视配置）
+_BUILTIN_CORE_TOOLS: List[str] = ["ls", "read", "write", "edit", "glob", "grep"]
+_BUILTIN_SUBAGENT_TOOLS: List[str] = ["task", "async_task", "async_status"]
+_BUILTIN_PLANNING_TOOLS: List[str] = ["write_plans"]
+_BUILTIN_SHOW_TOOLS: List[str] = ["show"]
+
+
+def _extract_tool_args(input_schema: Optional[Dict[str, Any]]) -> List[str]:
+    """从 MCP 工具 input_schema（JSON Schema）提取参数名列表。"""
+    if not input_schema or not isinstance(input_schema, dict):
+        return []
+    properties = input_schema.get("properties")
+    if not isinstance(properties, dict):
+        return []
+    return [str(k) for k in properties.keys()]
+
+
+def _append_tool(tools: List[schemas.GoalLoopToolInfo], seen: set, name: str, source: str, args: List[str]):
+    """去重追加一个工具建议项。"""
+    if name in seen:
+        return
+    tools.append(schemas.GoalLoopToolInfo(name=name, source=source, args=list(args)))
+    seen.add(name)
 
 
 async def _attach_avatar_url(db: AsyncSession, agent: agent_model.Agent) -> schemas.AgentResponse:
@@ -218,6 +273,88 @@ async def get_agent_hitl_tools(agent_id: str, db: AsyncSession = Depends(get_db)
                         tools.append(schemas.HitlToolInfo(name="execute", source="backend"))
                         seen.add("execute")
                     break
+
+    return tools
+
+
+@router.get(
+    "/agents/{agent_id}/goal-loop-tools",
+    response_model=List[schemas.GoalLoopToolInfo],
+    summary="获取 Agent 任务循环「我的规则」的工具及参数名建议列表"
+)
+async def get_agent_goal_loop_tools(agent_id: str, db: AsyncSession = Depends(get_db)):
+    """返回当前 agent 任务循环「我的规则」可选的工具名与参数名建议。
+
+    工具名与执行侧（mambo_agents goal_loop 的 tool_called_at_least）保持一致：
+    - MCP 工具：``服务器名__工具名``（与 mcp_tool_name 规则一致），参数名取自 input_schema
+    - Backend 工具：execute / tree / delete / copy / ls_version
+    - 内置中间件工具：ls/read/write/edit/glob/grep/task/async_task/async_status/write_plans/show
+
+    goal 相关工具（get_goal / create_goal / update_goal）由中间件注入，不纳入建议。
+    前端「我的规则」完成条件选择器应基于此列表展示可选项。
+    """
+    db_agent = await agent_crud.get_agent(db, agent_id=agent_id)
+    if db_agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    tools: List[schemas.GoalLoopToolInfo] = []
+    seen: set[str] = set()
+
+    # 来源1: 启用的 MCP 工具（is_enabled）→ 服务器名__工具名 + input_schema 参数名
+    mcp_ids = db_agent.enabledMcpIds or []
+    if mcp_ids:
+        servers = await mcp_crud.get_mcp_servers_by_ids(db, mcp_ids)
+        enabled_servers = {s.id: s.name for s in servers if s.isEnabled}
+        if enabled_servers:
+            mcp_tools = await mcp_crud.get_tools_by_server_ids(db, mcp_ids)
+            for tool in mcp_tools:
+                sname = enabled_servers.get(tool.server_id)
+                if not sname:
+                    continue
+                _append_tool(
+                    tools, seen,
+                    name=mcp_tool_name(sname, tool.name),
+                    source="mcp",
+                    args=_extract_tool_args(tool.input_schema),
+                )
+
+    # 来源2: Backend 工具（默认 backend 决定 execute 可用性；RESOURCE 附加 ls_version）
+    # 与 hitl-tools 相同的回退规则：defaultBackendId 未设置时取 backendIds 第一个
+    if db_agent.backendIds:
+        effective_default_id: str = db_agent.defaultBackendId or db_agent.backendIds[0]
+        backends_db = await backend_crud.get_backends_by_ids(db, db_agent.backendIds)
+        for b in backends_db:
+            if b.id != effective_default_id:
+                continue
+            # execute 仅当默认 backend 开启时注册（Local/SSH/API）
+            exec_cfg = (b.tools_config or {}).get("execute", {})
+            if exec_cfg.get("enabled"):
+                _append_tool(tools, seen, name="execute", source="backend",
+                             args=_BUILTIN_TOOL_ARGS.get("execute", []))
+            # tree / delete：所有 Backend 类型固定提供
+            _append_tool(tools, seen, name="tree", source="backend",
+                         args=_BUILTIN_TOOL_ARGS.get("tree", []))
+            _append_tool(tools, seen, name="delete", source="backend",
+                         args=_BUILTIN_TOOL_ARGS.get("delete", []))
+            # copy：HybridWorkspaceBackend 包装层固定提供
+            _append_tool(tools, seen, name="copy", source="backend",
+                         args=_BUILTIN_TOOL_ARGS.get("copy", []))
+            # ls_version：RESOURCE 类型 backend（MamboResourceBackend）专属
+            if b.backendType == BackendType.RESOURCE.value:
+                _append_tool(tools, seen, name="ls_version", source="backend",
+                             args=_BUILTIN_TOOL_ARGS.get("ls_version", []))
+            break
+
+    # 来源3: 内置中间件工具（固定存在；show 跟随 enable_show 配置）
+    agent_params = db_agent.agentParameters or {}
+    builtin_names: List[str] = list(_BUILTIN_CORE_TOOLS)
+    builtin_names += list(_BUILTIN_SUBAGENT_TOOLS)
+    builtin_names += list(_BUILTIN_PLANNING_TOOLS)
+    if agent_params.get("enable_show", True):
+        builtin_names += list(_BUILTIN_SHOW_TOOLS)
+    for name in builtin_names:
+        _append_tool(tools, seen, name=name, source="builtin",
+                     args=_BUILTIN_TOOL_ARGS.get(name, []))
 
     return tools
 

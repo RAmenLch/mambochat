@@ -37,6 +37,7 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
     # - subagent: task (SubAgentMiddleware)
     # - async subagent: async_task, async_status (AsyncSubAgentMiddleware)
     # - planning: write_plans (MamboPlanMiddleware)
+    # - goal loop: get_goal (GoalLoopMiddleware，可带 tool_prefix；由 matches_tool_name 兼容)
     # 注：backend 专属工具（如 ls_version）通过 register_tool() 动态注入，不在此硬编码
     BUILTIN_TOOLS = frozenset({
         "ls",
@@ -68,6 +69,10 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
         return None
 
     def matches_tool_name(self, tool_name: str) -> bool:
+        # get_goal 由 GoalLoopMiddleware 注入（可带 tool_prefix，如 "xxx_get_goal"），
+        # 需像 write_plans 等中间件工具一样落库为 MCP_TOOL，保证 DB 与 state 对齐。
+        if tool_name == "get_goal" or tool_name.endswith("get_goal"):
+            return True
         return tool_name in self.BUILTIN_TOOLS or tool_name in self._extra_tool_names
 
     def register_tool(self, name: str) -> None:
@@ -97,13 +102,21 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
         sub_id = generate_uuid()
         self._tool_sub_msg_map[tool_call_id] = sub_id
 
+        config = SubMessageConfig(is_minimal=True)
+        # GoalLoopMiddleware 注入的 get_goal 调用 id 恒以 "goal-loop-" 开头
+        # （对应 mambo_agents.middleware.goal_loop._INJECT_PREFIX），与 LLM 自主
+        # 调用的 get_goal（随机 id）区分。该 flag 供前端渲染"轮次分隔线"，
+        # 轮次数不在 config 中携带，由前端从 get_goal 的 result 文本解析。
+        if name.endswith("get_goal") and tool_call_id.startswith("goal-loop-"):
+            config.is_goal_loop_round = True
+
         yield CreateSubMessage(
             sub_message_id=sub_id,
             type=schemas_enums.SubMessageType.MCP_TOOL.value,
             sortOrder=2,
             status=schemas_enums.MessageStatus.GENERATING,
             initial_content=tool_content.to_json_string(),
-            config=SubMessageConfig(is_minimal=True),
+            config=config,
         )
 
     async def create_result_instruction(
