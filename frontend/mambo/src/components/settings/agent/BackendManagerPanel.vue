@@ -1049,7 +1049,10 @@ async function resolveResourcePathAsync(resourceId: string): Promise<void> {
 watch(backendList, (list) => {
   list
     .filter(b => b.backendType === 'resource' && b.configData?.resource_id)
-    .forEach(b => resolveResourcePathAsync(b.configData.resource_id));
+    .forEach(b => {
+      const resourceId = b.configData?.resource_id;
+      if (resourceId) resolveResourcePathAsync(resourceId);
+    });
 }, { immediate: true });
 
 function collectFolders(nodes: any[]): { id: string; name: string; path: string }[] {
