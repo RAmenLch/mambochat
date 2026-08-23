@@ -36,4 +36,12 @@ export default {
     updateSuccess: '更新服务商及模型成功！',
     createSuccess: '新增服务商成功！',
   },
+  test: {
+    success: '连接成功',
+    invalidJson: '连接失败: 服务器返回的不是有效的JSON格式。请确认 API Host 是 API 的基础地址 (例如 https://api.openai.com/v1)，而不是一个网页地址。',
+    httpError: '连接失败: 服务器返回了错误状态码。请检查 API Key 与 API Host。',
+    proxyError: '代理服务器错误。请检查代理地址和端口是否正确，以及代理服务是否正在运行。',
+    requestError: '连接失败: 无法访问 API Host。请检查网络连接或地址拼写是否正确。',
+    unknown: '发生未知错误',
+  },
 }

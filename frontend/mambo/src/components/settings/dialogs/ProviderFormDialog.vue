@@ -113,6 +113,7 @@ import type {
   ProviderWorkerType
 } from '@/api/types';
 import { isAxiosError } from "axios";
+import { localizeProviderTestMessage } from '@/utils/providerTestMessage';
 
 // 此处模型数据包含了可选的 meta_config
 interface ModelFormData extends AIModelBase {
@@ -271,7 +272,9 @@ async function handleTestConnection() {
     } else {
       res = await providerStore.testConnection({ apiHost: providerForm.apiHost, apiKey: providerForm.apiKey }, providerForm.use_proxy);
     }
-    const msg = res.status === 'success' ? t('provider.form.testSuccess') : (res.message || t('provider.form.testFailed'));
+    const msg = res.status === 'success'
+      ? t('provider.form.testSuccess')
+      : (localizeProviderTestMessage(res.code) || res.message || t('provider.form.testFailed'));
     ElMessage({ type: res.status === 'success' ? 'success' : 'error', message: msg });
   } catch (error: unknown) {
     if(isAxiosError(error)){

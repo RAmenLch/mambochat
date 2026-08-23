@@ -4,7 +4,7 @@ import type { FileResponse } from './common'
 
 export type MessageRole = 'user' | 'assistant' | 'system'
 export type ChatItemType = 'chat' | 'folder'
-export type MessageStatus = 'generating' | 'completed' | 'failed' | 'pending_review'
+export type MessageStatus = 'generating' | 'completed' | 'failed' | 'pending_review' | 'waiting'
 export type ChatMode = 'normal' | 'agent'
 
 // --- SubMessage Types ---
@@ -20,6 +20,8 @@ export type SubMessageType =
   | 'ReviewTool'
   | 'AskUser'
   | 'Error'
+  | 'TaskSubStep'
+  | 'SecurityReview'
 
 export interface SubMessageConfig {
   is_collapsed: boolean
@@ -27,6 +29,12 @@ export interface SubMessageConfig {
   context_participation_length?: number
   zip_enable?: boolean | null
   target_sub_msg_id?: string | null
+  task_group_id?: string | null
+  pending_file_path?: string | null
+  pending_file_timeout?: number | null
+  show_tool_mode?: string | null
+  /** get_goal MCP_TOOL 轮次边界标志（GoalLoopMiddleware 注入），前端据此渲染轮次分隔线 */
+  is_goal_loop_round?: boolean | null
 }
 
 export interface SubMessage {
@@ -107,6 +115,7 @@ export interface Chat {
   isLoaded?: boolean
   resource_prompt_list?: string[] | null
   enabled_mcp_ids?: string[] | null
+  web_search_mode?: 'direct_read' | 'search_and_read' | 'disable' | null
   chatMode?: ChatMode
   agentId?: string | null
 }
@@ -122,6 +131,7 @@ export interface ChatCreate {
   parentId?: string | null
   sortOrder?: number
   enabled_mcp_ids?: string[] | null
+  web_search_mode?: 'direct_read' | 'search_and_read' | 'disable' | null
   chatMode?: ChatMode
   agentId?: string | null
 }
@@ -135,12 +145,35 @@ export interface ChatUpdate {
   sortOrder?: number
   resource_prompt_list?: string[] | null
   enabled_mcp_ids?: string[] | null
+  web_search_mode?: 'direct_read' | 'search_and_read' | 'disable' | null
   chatMode?: ChatMode
   agentId?: string | null
 }
 
 export interface ChatWithMessages extends Chat {
   messages: Message[]
+}
+
+// --- Chat Usage Stats Types ---
+
+export interface UsageAggregate {
+  total_tokens: number
+  cache_hit_tokens: number
+  cache_miss_tokens: number
+  prompt_tokens: number
+  completion_tokens: number
+}
+
+export interface ChatUsageStats {
+  conversation: UsageAggregate
+  active_path_main_agent: UsageAggregate
+}
+
+export interface ImportChatReport {
+  chat_id: string
+  name: string
+  message_count: number
+  file_count: number
 }
 
 export interface ChatReorderItem {
@@ -194,6 +227,14 @@ export interface ToolDecision {
   message?: string | null
 }
 
+export interface SecurityReviewContent {
+  tool_call_id: string
+  tool_name: string
+  risk_level: 'low' | 'medium' | 'high' | 'critical'
+  reason: string
+  passed: boolean
+}
+
 export interface ReviewToolRequest {
   sub_message_id: string
   decision: ToolDecision
@@ -226,6 +267,21 @@ export interface AskUserAnswerRequest {
   sub_message_id: string
   answers: string[]
   ask_status: string
+}
+
+// --- TaskSubStep Types ---
+
+export interface TaskSubStepContent {
+  tool_call_id: string
+  subagent_type: string
+  display_type: 'reasoning' | 'text' | 'tool_call' | 'tool_result'
+  content: string
+  tool_name?: string | null
+  tool_args?: Record<string, unknown> | null
+  step_order: number
+  description?: string | null
+  /** 子代理内部工具调用的 tool_call_id，用于绑定 AI 审核 / 中断审核事件 */
+  sub_tool_call_id?: string | null
 }
 
 // --- Search Types (Chat) ---

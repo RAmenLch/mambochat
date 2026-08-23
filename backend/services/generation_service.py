@@ -5,7 +5,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import AsyncGenerator, Tuple, Optional, Type
+from typing import AsyncGenerator, Tuple, Optional, Type, Dict
 
 from backend.services.generation.executor.dispatcher import InstructionDispatcher
 from backend.services.stream_manager_service import stream_manager
@@ -20,14 +20,20 @@ from backend.services.generation.managers.zip_history_manager import ZipHistoryG
 
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.worker.chat_worker import UniversalGraphWorker
+from backend.services.generation.worker.deep_agent_chat_worker import DeepAgentChatWorker
 from backend.services.generation.worker.simple_worker import SimpleWorker
 
-from backend.schemas.enums import FileManagementType, MessageStatus, MessageRole, SubMessageType, ProviderWorkerType
+from backend.schemas.enums import FileManagementType, MessageStatus, MessageRole, SubMessageType, ProviderWorkerType, AgentTypeEnum, ChatMode
 from backend.schemas.message import ErrorContent
 from backend.config.timezone_config import get_configured_now, TZ
 from backend.services.file_service import FileService
+from backend.services.generation.agent.user_file_copy_service import process_user_message_files
 
 GENERATION_START_TIMEOUT = timedelta(minutes=10)
+
+# 新建会话的默认标题占位 Key（前端按此 Key 做 i18n 显示）
+# 仅当会话名仍为该 Key 时，首轮问答完成后才自动触发标题生成
+DEFAULT_CHAT_TITLE_KEY = "__DEFAULT_CHAT_TITLE__"
 
 
 async def _calculate_message_status(message: chat_model.Message) -> schemas.MessageStatus:
@@ -115,6 +121,7 @@ async def prepare_for_regeneration(
         parentId=target_parent_id
     )
     assistant_placeholder = await message_crud.create_message(db, message=assistant_message_create, chat_id=chat_id)
+
     return assistant_placeholder
 
 
@@ -168,6 +175,9 @@ async def create_user_message_and_prepare_generation(
                 merge=True
             )
 
+    # Mambo Agent 会话：把用户文件副本写入 /.mambo/chat_user_file/ 并固化标志位
+    await process_user_message_files(db, chat_id, user_message.id)
+
     assistant_placeholder = await prepare_for_regeneration(db, chat_id, user_message.id)
 
     return user_message, assistant_placeholder
@@ -192,12 +202,26 @@ def _create_worker_instance(worker_type: str) -> AbstractGenerateWorker:
 
 
 async def _get_worker_for_chat(db: AsyncSession, chat_id: str) -> AbstractGenerateWorker:
-    db_chat = await chat_crud.get_chat(db, chat_id=chat_id)
-    worker_type = ProviderWorkerType.OPENAI
-    if db_chat and db_chat.ai_model and db_chat.ai_model.provider:
-        worker_type = db_chat.ai_model.provider.worker_type
+    """根据 Chat 绑定的 Agent 类型选择对应的 Worker。
 
-    return _create_worker_instance(worker_type)
+    - DeepAgent → DeepAgentChatWorker（需要 VFS files 注入）【DEPRECATED：DeepAgent 已淘汰，仅兼容存量】
+    - 其他（ReAct / Mambo / 无 Agent）→ UniversalGraphWorker
+    """
+    from backend.crud import agent_crud
+
+    db_chat = await chat_crud.get_chat(db, chat_id=chat_id)
+
+    # DEPRECATED: DeepAgent 已淘汰，不再维护，此分支仅用于兼容存量数据
+    if db_chat and db_chat.chatMode == ChatMode.AGENT.value and db_chat.agentId:
+        agent = await agent_crud.get_agent(db, db_chat.agentId)
+        if agent:
+            agent_type = agent.AgentType
+            if hasattr(agent_type, 'value'):
+                agent_type = agent_type.value
+            if agent_type == AgentTypeEnum.DEEP.value:
+                return DeepAgentChatWorker()
+
+    return UniversalGraphWorker()
 
 
 
@@ -250,6 +274,23 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
             await stream_manager.mark_task_completed(assistant_message_id)
             await stream_manager.close_stream(assistant_message_id)
             await stream_manager.release_generation_lock(chat_id)
+            if final_status == MessageStatus.COMPLETED:
+                await maybe_schedule_title_generation(chat_id)
+
+
+async def maybe_schedule_title_generation(chat_id: str) -> None:
+    """
+    首轮问答生成完成后的标题生成调度入口。
+
+    仅当会话名仍为默认占位 Key 时才会触发（生成成功后名字被改写，
+    或用户已手动改名，则不再触发）。任务级去重由
+    run_title_generation_task 内部的原子抢注保证。
+    """
+    async with AsyncSessionLocal() as db:
+        chat = await chat_crud.get_chat(db, chat_id=chat_id)
+        if not chat or chat.name != DEFAULT_CHAT_TITLE_KEY:
+            return
+    asyncio.create_task(run_title_generation_task(chat_id, only_if_default=True))
 
 
 async def _run_retry_generation_task(chat_id: str, assistant_message_id: str):
@@ -318,17 +359,30 @@ async def _run_retry_generation_task(chat_id: str, assistant_message_id: str):
             await stream_manager.mark_task_completed(assistant_message_id)
             await stream_manager.close_stream(assistant_message_id)
             await stream_manager.release_generation_lock(chat_id)
+            if final_status == MessageStatus.COMPLETED:
+                await maybe_schedule_title_generation(chat_id)
 
 
-async def run_title_generation_task(chat_id: str):
+async def run_title_generation_task(chat_id: str, only_if_default: bool = False):
     """
     后台任务：为指定的会话生成并更新标题。
+
+    - 通过原子抢注（try_mark_task_running）保证同一会话同时最多只有一个标题任务，
+      自动触发 / 手动刷新 / 多客户端并发均被去重。
+    - only_if_default=True 时（自动调度路径），任务开始前二次校验会话名仍为默认 Key，
+      防止抢注瞬间名字已被修改导致误生成。
     """
     task_id = f"title-gen-{chat_id}"
-    await stream_manager.mark_task_running(task_id)
+    if not await stream_manager.try_mark_task_running(task_id):
+        return
 
     async with AsyncSessionLocal() as db:
         try:
+            if only_if_default:
+                chat = await chat_crud.get_chat(db, chat_id=chat_id)
+                if not chat or chat.name != DEFAULT_CHAT_TITLE_KEY:
+                    return
+
             worker = SimpleWorker()
 
             manager = TitleGenerateManager(db_session=db)
@@ -343,6 +397,18 @@ async def run_title_generation_task(chat_id: str):
 
         except Exception as e:
             print(f"[Title Generation Service Error] for chat {chat_id}: {e}")
+            # 兜底：任务异常时也通知前端，避免前端 loading 永久卡住
+            try:
+                from backend.routers.notifications import GLOBAL_NOTIFICATIONS_STREAM_ID
+                await stream_manager.publish(GLOBAL_NOTIFICATIONS_STREAM_ID, {
+                    "type": "notification",
+                    "category": "title_generation_error",
+                    "context": {"chat_id": chat_id},
+                    "level": "error",
+                    "message": f"标题生成失败: {e}",
+                })
+            except Exception as notify_err:
+                print(f"[Title Generation Service] Failed to publish error notification: {notify_err}")
         finally:
             await stream_manager.mark_task_completed(task_id)
             await stream_manager.close_stream(task_id)
@@ -407,6 +473,18 @@ async def subscribe_to_stream(
     calculated_status = await _calculate_message_status(message)
 
     sub_messages_data = [schemas.SubMessage.model_validate(sm).model_dump(mode='json') for sm in message.sub_messages]
+
+    # 为 File 类型的子消息填充 file_info，以便前端在 SSE 流中立即加载图片
+    file_ids = [sm.content for sm in message.sub_messages if sm.type == 'File' and sm.content]
+    if file_ids:
+        from backend.services.file_service import FileService
+        file_service = FileService(db)
+        file_records = await file_service.batch_get_files(file_ids)
+        file_map = {f.id: file_service.convert_to_schema(f).model_dump(mode='json') for f in file_records}
+        for sm_data in sub_messages_data:
+            if sm_data.get('type') == 'File' and sm_data.get('content') in file_map:
+                sm_data['file_info'] = file_map[sm_data['content']]
+
     initial_event_data = {
         "type": "replace",
         "sub_messages": sub_messages_data,

@@ -19,7 +19,7 @@ from backend.services.generation.core.instructions import (
 )
 from backend.schemas import enums as schemas_enums
 from backend.models.base_model import generate_uuid
-from backend.schemas.message import McpToolContent
+from backend.schemas.message import McpToolContent, SubMessageConfig
 
 logger = logging.getLogger(__name__)
 
@@ -199,7 +199,10 @@ class AskUserToolProvider(BaseToolProvider):
                 "questions": questions,
                 "tool_call_id": tool_call_id,
             }
+            import time
+            # time.sleep(2)
             response = interrupt(ask_request)
+            print(response)
             return _parse_answers(response, questions, tool_call_id)
 
         return [ask_user]
@@ -217,7 +220,8 @@ class AskUserToolProvider(BaseToolProvider):
             tool_call_id: str,
             name: str,
             arguments: Dict[str, Any],
-            tool_def: Optional[BaseTool] = None
+            tool_def: Optional[BaseTool] = None,
+            run_uuid: Optional[str] = None
     ) -> AsyncGenerator[BaseInstruction, None]:
         """
         创建 McpTool 类型的子消息，展示 ask_user 工具调用。
@@ -234,6 +238,7 @@ class AskUserToolProvider(BaseToolProvider):
             name=name,
             arguments=json.dumps(arguments, ensure_ascii=False) if isinstance(arguments, dict) else str(arguments or ""),
             input_schema=input_schema,
+            run_uuid=run_uuid,
         )
 
         self._tool_info_cache[tool_call_id] = content_obj
@@ -246,7 +251,7 @@ class AskUserToolProvider(BaseToolProvider):
             sortOrder=2,
             status=schemas_enums.MessageStatus.GENERATING,
             initial_content=content_obj.to_json_string(),
-            config={"is_minimal": True}
+            config=SubMessageConfig(is_minimal=True)
         )
 
     async def create_result_instruction(

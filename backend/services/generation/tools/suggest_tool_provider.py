@@ -11,6 +11,7 @@ from backend.services.generation.core.instructions import (
     CreateSubMessage, InterruptGeneration
 )
 from backend.schemas import enums as schemas_enums
+from backend.schemas.message import SubMessageConfig
 from backend.models.base_model import generate_uuid
 
 
@@ -53,7 +54,8 @@ class SuggestToolProvider(BaseToolProvider):
             tool_call_id: str,
             name: str,
             arguments: Dict[str, Any],
-            tool_def: Optional[BaseTool] = None
+            tool_def: Optional[BaseTool] = None,
+            run_uuid: Optional[str] = None
     ) -> AsyncGenerator[BaseInstruction, None]:
         """
         解析 suggest 工具调用，生成 SUGGEST 类型的子消息。
@@ -80,9 +82,7 @@ class SuggestToolProvider(BaseToolProvider):
             sortOrder=99,
             status=schemas_enums.MessageStatus.COMPLETED,
             initial_content=content_json,
-            config={
-                "context_participation_length": 0
-            }
+            config=SubMessageConfig(context_participation_length=0)
         )
         yield InterruptGeneration()
 

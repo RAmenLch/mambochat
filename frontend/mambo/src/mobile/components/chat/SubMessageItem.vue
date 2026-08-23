@@ -9,20 +9,112 @@
       'is-file': subMessage.type === 'File',
       'is-inactive': isInactive,
       'is-inline': isInline,
-      'is-review-pending': subMessage.type === 'ReviewTool' && !isReviewDecided
+      'is-review-pending': subMessage.type === 'ReviewTool' && !isReviewDecided,
+      'show-mode-mini-avatar': showToolMode === 'Mini_Avatar',
+      'show-mode-gal-avatar': showToolMode === 'Gal_Avatar',
+      'show-mode-group': showToolMode === 'Group',
     }"
   >
     <!-- 文件类型消息 -->
-    <div v-if="subMessage.type === 'File' && subMessage.file_info" class="file-display-container">
+    <div v-if="subMessage.type === 'File' && subMessage.file_info && showToolMode !== 'Mini_Avatar' && showToolMode !== 'Gal_Avatar'" class="file-display-container">
       <el-image
         v-if="subMessage.file_info.mime_type.startsWith('image/')"
         :src="subMessage.file_info.url"
-        :preview-src-list="[subMessage.file_info.url]"
-        :initial-index="0"
-        fit="cover"
+        fit="contain"
         class="file-image-thumbnail"
-        hide-on-click-modal
       />
+      <audio
+        v-else-if="subMessage.file_info.mime_type.startsWith('audio/')"
+        :src="subMessage.file_info.url"
+        controls
+        preload="metadata"
+        class="file-audio-player"
+      ></audio>
+      <video
+        v-else-if="subMessage.file_info.mime_type.startsWith('video/')"
+        :src="subMessage.file_info.url"
+        controls
+        preload="metadata"
+        class="file-video-player"
+      ></video>
+      <div v-else-if="isEditableFile && !isImageFile" class="editable-file-view">
+        <div class="file-content-header">
+          <div class="file-content-header-left">
+            <el-icon :size="16"><component :is="fileIcon" /></el-icon>
+            <span class="file-content-filename" :title="subMessage.file_info.filename">
+              {{ subMessage.file_info.filename }}
+            </span>
+            <el-tag v-if="!isMarkdownFile" size="small" class="file-content-language-tag">
+              {{ fileLanguage }}
+            </el-tag>
+          </div>
+          <div class="file-content-header-actions">
+            <el-icon
+              class="action-icon"
+              @click="isFileContentCollapsed = !isFileContentCollapsed"
+            >
+              <component :is="isFileContentCollapsed ? ArrowDownBold : ArrowUpBold" />
+            </el-icon>
+            <el-icon
+              class="action-icon"
+              :class="{ 'wrap-active': isFileCodeWrapEnabled }"
+              @click="isFileCodeWrapEnabled = !isFileCodeWrapEnabled"
+            >
+              <Sort />
+            </el-icon>
+            <el-icon class="action-icon" @click="handleFileEdit"><Edit /></el-icon>
+            <el-icon class="action-icon" @click="handleCopyFileContent"><CopyDocument /></el-icon>
+            <a :href="subMessage.file_info.url" download class="file-content-download-link">
+              <el-icon class="action-icon"><Download /></el-icon>
+            </a>
+          </div>
+        </div>
+
+        <div v-if="fileContentLoading" class="file-content-loading">
+          <el-icon class="is-loading"><Loading /></el-icon>
+          <span>{{ t('common.status.loading') }}</span>
+        </div>
+        <div v-else-if="fileContentError" class="file-content-error">
+          <span>{{ t('chat.attachment.fileLoadFailed') }}</span>
+        </div>
+
+        <div v-else-if="isMarkdownFile" class="message-content file-message-content" :class="{ collapsed: isFileContentCollapsed }">
+          <div v-for="(block, idx) in fileContentBlocks" :key="idx" class="content-block">
+            <CodeBlock
+              v-if="block.type === 'code'"
+              :code="block.content"
+              :language="block.language || 'Text'"
+              :is-generating="false"
+              :range="block.range"
+              :markup="block.markup"
+              :closed="block.closed !== false"
+              @edit="handleCodeBlockEdit"
+              @copy="handleBlockCopy"
+            />
+            <img
+              v-else-if="block.type === 'base64_image'"
+              :src="block.content"
+              :alt="block.alt"
+              class="rendered-image"
+            />
+            <div v-else v-html="block.content"></div>
+          </div>
+        </div>
+
+        <div v-else class="file-code-wrapper" :class="{ collapsed: isFileContentCollapsed, 'wrap-enabled': isFileCodeWrapEnabled }">
+          <CodeBlock
+            :code="fileContent || ''"
+            :language="fileLanguage"
+            :is-generating="false"
+            :range="{ start: 0, end: (fileContent || '').length }"
+            :closed="true"
+            :show-header="false"
+            @edit="handleFileEditFromCodeBlock"
+            @copy="handleBlockCopy"
+          />
+        </div>
+      </div>
+
       <div v-else class="file-card">
         <div class="file-card-icon">
           <el-icon :size="24"><component :is="fileIcon" /></el-icon>
@@ -34,6 +126,18 @@
         <a :href="subMessage.file_info.url" download class="file-card-download">
           <el-icon><Download /></el-icon>
         </a>
+      </div>
+    </div>
+
+    <div v-else-if="isPendingFile && showToolMode !== 'Mini_Avatar' && showToolMode !== 'Gal_Avatar'" class="file-pending-container">
+      <div class="file-pending-card">
+        <div class="file-pending-icon">
+          <el-icon :size="22" class="is-loading"><Loading /></el-icon>
+        </div>
+        <div class="file-pending-info">
+          <div class="file-pending-name">{{ pendingFileName }}</div>
+          <div class="file-pending-status">{{ pendingStatusText }}</div>
+        </div>
       </div>
     </div>
 
@@ -116,10 +220,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { SubMessage, Message, McpToolContent, ReviewToolContent } from '@/api/types'
+import type { SubMessage, Message, McpToolContent, ReviewToolContent, FileResponse } from '@/api/types'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
+import { useChatSessionStore } from '@/stores/chatSessionStore'
+import { usePendingFileStore } from '@/stores/pendingFileStore'
+import { getFileContent } from '@/api/fileService'
+import { unpackMcpToolCall } from '@/utils/mcpToolUnpack'
 import { ElMessage } from 'element-plus'
 import {
   Edit,
@@ -132,7 +240,8 @@ import {
   CircleClose,
   CircleCheck,
   Document,
-  Warning
+  Warning,
+  Sort,
 } from '@element-plus/icons-vue'
 import CodeBlock from '@/components/chat/CodeBlock.vue'
 import { copyToClipboard } from '@/utils/clipboard'
@@ -150,6 +259,8 @@ const props = withDefaults(
     index?: number
     isInactive?: boolean
     isInline?: boolean
+    previewSrcList?: string[]
+    previewIndex?: number
   }>(),
   {
     id: '',
@@ -157,6 +268,8 @@ const props = withDefaults(
     index: 1,
     isInactive: false,
     isInline: false,
+    previewSrcList: () => [],
+    previewIndex: 0,
   },
 )
 
@@ -166,12 +279,29 @@ const emit = defineEmits<{
     payload: { content: string; range?: ParsedBlock['range']; language?: string; markup?: string },
   ): void
   (e: 'copy'): void
+  (e: 'edit-file', file: FileResponse): void
 }>()
 
 const interactionStore = useChatInteractionStore()
+const sessionStore = useChatSessionStore()
+const pendingFileStore = usePendingFileStore()
 const isCollapsed = ref(props.subMessage.config.is_collapsed || false)
 const isGenerating = computed(() => props.subMessage.status === 'generating')
 const rootRef = ref<HTMLElement | null>(null)
+const pendingFailed = ref(false)
+
+const fileContent = ref<string | null>(null)
+const fileContentLoading = ref(false)
+const fileContentError = ref(false)
+const isFileContentCollapsed = ref(false)
+const isFileCodeWrapEnabled = ref(false)
+
+const effectivePreviewSrcList = computed(() => {
+  if (props.previewSrcList && props.previewSrcList.length > 0) {
+    return props.previewSrcList
+  }
+  return props.subMessage.file_info?.url ? [props.subMessage.file_info.url] : []
+})
 
 const isToolType = computed(() => props.subMessage.type === 'McpTool' || props.subMessage.type === 'ReviewTool')
 
@@ -199,7 +329,8 @@ const isReviewDecided = computed(() => {
 
 const toolSummaryText = computed((): string => {
   if (!toolContent.value) return t('chat.message.mcp.invalidCall')
-  const toolName = toolContent.value.name || t('chat.message.mcp.unknownTool')
+  const unpacked = unpackMcpToolCall(toolContent.value)
+  const toolName = unpacked.displayName
 
   if (props.subMessage.type === 'ReviewTool') {
     if (!isReviewDecided.value) return t('chat.message.pendingReview')
@@ -229,6 +360,71 @@ const formattedFileSize = computed(() => {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`
 })
 
+const isPendingFile = computed(() =>
+  props.subMessage.type === 'File' &&
+  props.subMessage.status === 'waiting' &&
+  !!props.subMessage.config.pending_file_path
+)
+
+const isEditableFile = computed(() =>
+  props.subMessage.type === 'File' &&
+  !!props.subMessage.file_info?.editable
+)
+
+const isImageFile = computed(() =>
+  props.subMessage.type === 'File' &&
+  !!props.subMessage.file_info?.mime_type?.startsWith('image/')
+)
+
+const isMarkdownFile = computed(() => {
+  if (!isEditableFile.value || !props.subMessage.file_info) return false
+  const filename = props.subMessage.file_info.filename.toLowerCase()
+  return filename.endsWith('.md') || filename.endsWith('.markdown')
+})
+
+const showToolMode = computed(() =>
+  props.subMessage.config.show_tool_mode || 'Normal'
+)
+
+function getLanguageFromFilename(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() || ''
+  const map: Record<string, string> = {
+    'py': 'python', 'js': 'javascript', 'ts': 'typescript', 'jsx': 'javascript',
+    'tsx': 'typescript', 'json': 'json', 'html': 'html', 'css': 'css',
+    'scss': 'scss', 'less': 'less', 'xml': 'xml', 'yaml': 'yaml', 'yml': 'yaml',
+    'toml': 'toml', 'ini': 'ini', 'cfg': 'ini', 'sh': 'bash', 'bash': 'bash',
+    'ps1': 'powershell', 'bat': 'batch', 'sql': 'sql',
+    'java': 'java', 'c': 'c', 'cpp': 'cpp', 'h': 'c',
+    'cs': 'csharp', 'go': 'go', 'rs': 'rust', 'rb': 'ruby', 'php': 'php',
+    'swift': 'swift', 'kt': 'kotlin', 'scala': 'scala', 'r': 'r',
+    'vue': 'html', 'svelte': 'html', 'dockerfile': 'dockerfile',
+    'gitignore': 'plaintext', 'env': 'plaintext', 'log': 'plaintext',
+    'txt': 'plaintext', 'md': 'markdown', 'markdown': 'markdown',
+  }
+  return map[ext] || ext || 'plaintext'
+}
+
+const fileLanguage = computed(() => {
+  if (!isEditableFile.value || !props.subMessage.file_info) return ''
+  return getLanguageFromFilename(props.subMessage.file_info.filename)
+})
+
+const fileContentBlocks = computed(() => {
+  if (!isMarkdownFile.value || !fileContent.value) return []
+  return parseMarkdown(fileContent.value)
+})
+
+const pendingFileName = computed(() => {
+  if (!isPendingFile.value) return ''
+  const path = props.subMessage.config.pending_file_path || ''
+  return path.split('/').pop() || path
+})
+
+const pendingStatusText = computed(() => {
+  if (pendingFailed.value) return t('chat.attachment.fileTimeout')
+  return t('chat.attachment.waitingForFile')
+})
+
 const contentBlocks = computed(() => {
   if (props.subMessage.type !== 'File' && !isToolType.value) {
     return parseMarkdown(props.subMessage.content)
@@ -237,7 +433,10 @@ const contentBlocks = computed(() => {
 })
 
 const partitionTitle = computed(() => {
-  if (isToolType.value) return t('chat.message.mcp.toolCallTitle', { name: toolContent.value?.name || 'Tool' })
+  if (isToolType.value) {
+    const name = toolContent.value ? unpackMcpToolCall(toolContent.value).displayName : 'Tool'
+    return t('chat.message.mcp.toolCallTitle', { name })
+  }
   if (props.subMessage.type === 'Reasoning') return t('chat.message.reasoning')
   if (props.subMessage.type === 'Normal') return t('chat.message.content')
   return `Part ${props.index}`
@@ -246,6 +445,20 @@ const partitionTitle = computed(() => {
 watch(
   () => props.subMessage.config.is_collapsed,
   (val) => (isCollapsed.value = val || false),
+)
+
+watch(
+  () => props.subMessage.file_info,
+  (newInfo, oldInfo) => {
+    if (newInfo && newInfo !== oldInfo && isEditableFile.value && !isImageFile.value) {
+      fileContentLoading.value = true
+      fileContentError.value = false
+      getFileContent(newInfo.id)
+        .then((res) => { fileContent.value = res.content })
+        .catch(() => { fileContentError.value = true })
+        .finally(() => { fileContentLoading.value = false })
+    }
+  },
 )
 
 function handleHeaderEditClick() {
@@ -289,6 +502,51 @@ async function handleBlockCopy(content: string) {
     ElMessage.error(t('chat.message.copyFailed'))
   }
 }
+
+function handleFileEdit() {
+  if (props.subMessage.file_info) {
+    emit('edit-file', props.subMessage.file_info)
+  }
+}
+
+function handleFileEditFromCodeBlock() {
+  handleFileEdit()
+}
+
+async function handleCopyFileContent() {
+  try {
+    await copyToClipboard(fileContent.value || '')
+    ElMessage.success(t('chat.message.codeCopied'))
+  } catch (err) {
+    ElMessage.error(t('chat.message.copyFailed'))
+    console.error('Could not copy text: ', err)
+  }
+}
+
+onMounted(() => {
+  if (isPendingFile.value) {
+    pendingFileStore.register(props.subMessage.id, {
+      onReady() {
+        // 子消息数据已由 pendingFileStore 在 store 层更新，组件自动重渲染
+      },
+      onTimeout() {
+        pendingFailed.value = true
+      },
+    })
+  }
+
+  if (isEditableFile.value && !isImageFile.value && props.subMessage.file_info) {
+    fileContentLoading.value = true
+    getFileContent(props.subMessage.file_info.id)
+      .then((res) => { fileContent.value = res.content })
+      .catch(() => { fileContentError.value = true })
+      .finally(() => { fileContentLoading.value = false })
+  }
+})
+
+onBeforeUnmount(() => {
+  pendingFileStore.unregister(props.subMessage.id)
+})
 </script>
 
 <style scoped>
@@ -296,132 +554,287 @@ async function handleBlockCopy(content: string) {
   display: flex;
   flex-direction: column;
   width: 100%;
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 8px;
-  background-color: var(--color-background-soft);
   overflow: hidden;
-  margin-bottom: 4px;
-  transition: all 0.3s ease;
 }
 
 .sub-message-item.is-inline {
-  border: none;
-  background-color: transparent;
-  margin-bottom: 0;
-  box-shadow: none;
+  background: transparent;
 }
 
 .sub-message-item.is-inactive {
-  opacity: 1;
-  border-style: dashed;
-  border-color: var(--el-border-color);
-  background-color: var(--el-fill-color-lighter);
-}
-
-.sub-message-item.is-inactive:hover {
-  border-style: solid;
-  border-color: var(--el-text-color-placeholder);
+  opacity: 0.6;
 }
 
 .sub-message-item.is-review-pending {
-  border-color: var(--el-color-warning-light-5);
-  background-color: var(--el-color-warning-light-9);
-}
-
-.is-user .sub-message-item {
-  background-color: var(--el-color-primary-light-9);
-  border-color: var(--el-color-primary-light-8);
-}
-
-.is-user .sub-message-item.is-inactive {
-  opacity: 1;
-  border-style: dashed;
-  border-color: var(--el-color-primary-light-5);
-  background-color: var(--el-color-primary-light-9);
-}
-
-.is-user .sub-message-item.is-inactive:hover {
-  border-style: solid;
-  border-color: var(--el-color-primary-light-5);
+  border-left: 3px solid var(--el-color-warning);
+  padding-left: 8px;
 }
 
 .sub-message-item.is-file {
-  background: transparent;
-  border: none;
-  padding: 0;
+  overflow: visible;
 }
 
+/* File display */
 .file-image-thumbnail {
   width: 100%;
-  border-radius: 8px;
-  max-height: 200px;
+  height: 300px;
+  border-radius: 14px;
+  display: block;
+}
+
+.file-display-container {
+  width: 100%;
+}
+
+.file-audio-player {
+  display: block;
+  width: 100%;
+  max-width: 320px;
+}
+
+.file-video-player {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  border-radius: 14px;
+  background-color: #000;
 }
 
 .file-card {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px;
-  border-radius: 8px;
-  background-color: var(--color-background-soft);
-  border: 1px solid var(--el-border-color-light);
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  max-width: 260px;
+}
+
+.is-user .file-card {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
 .file-card-info {
-  flex-grow: 1;
+  flex: 1;
   min-width: 0;
 }
 
 .file-card-name {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  color: inherit;
 }
 
 .file-card-size {
-  font-size: 12px;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+/* Editable file view */
+.editable-file-view {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+}
+.is-user .editable-file-view {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.file-content-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 10px;
+  background: rgba(0, 0, 0, 0.05);
+  min-height: 32px;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.is-user .file-content-header {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.file-content-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
   color: var(--el-text-color-secondary);
+}
+.is-user .file-content-header-left {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.file-content-filename {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.is-user .file-content-filename {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.file-content-language-tag {
+  flex-shrink: 0;
+  font-size: 10px;
+}
+
+.file-content-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.file-content-header-actions .action-icon.wrap-active {
+  color: var(--el-color-primary);
+}
+
+.file-content-download-link {
+  display: inline-flex;
+  text-decoration: none;
+  color: inherit;
+}
+
+.file-content-loading,
+.file-content-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 20px 12px;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+.is-user .file-content-loading,
+.is-user .file-content-error {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.file-message-content {
+  padding: 8px 10px;
+}
+
+.file-code-wrapper {
+  overflow: hidden;
+}
+.file-code-wrapper.collapsed {
+  max-height: 6.5em;
+}
+.file-code-wrapper.wrap-enabled :deep(pre),
+.file-code-wrapper.wrap-enabled :deep(code) {
+  white-space: pre-wrap !important;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+.file-code-wrapper :deep(.code-block-container) {
+  margin: 0;
+  border-radius: 0;
+  border: none;
+}
+
+/* end editable file view */
+
+.file-pending-container {
+  width: 100%;
+}
+.file-pending-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px dashed rgba(255, 255, 255, 0.4);
+  max-width: 260px;
+}
+.is-user .file-pending-card {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.45);
+}
+.file-pending-icon {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+.file-pending-info {
+  flex: 1;
+  min-width: 0;
+}
+.file-pending-name {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: inherit;
+}
+.file-pending-status {
+  font-size: 11px;
+  opacity: 0.7;
+  margin-top: 2px;
 }
 
 .sub-message-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 6px 10px;
-  background-color: rgba(0, 0, 0, 0.03);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  padding: 4px 0 8px;
 }
 
 .partition-title {
-  font-size: 12px;
-  font-weight: bold;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--el-text-color-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.is-user .partition-title {
+  color: rgba(255, 255, 255, 0.7);
 }
 
 .actions {
   display: flex;
-  gap: 16px;
+  gap: 12px;
   align-items: center;
 }
 
 .action-icon {
-  font-size: 16px;
-  color: var(--el-text-color-secondary);
+  font-size: 15px;
+  color: var(--el-text-color-placeholder);
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  padding: 4px;
+}
+
+.is-user .action-icon {
+  color: rgba(255, 255, 255, 0.6);
 }
 
 .message-content {
-  padding: 8px; /* Reduced from 10px */
-  font-size: 14px; /* Reduced from 15px */
-  line-height: 1.5; /* Adjusted for smaller font */
+  font-size: 14px;
+  line-height: 1.5;
   color: var(--color-text);
-  overflow-x: auto;
+  overflow: hidden;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
-.sub-message-item.is-inline .message-content {
-  padding: 0;
+.is-user .message-content {
+  color: rgba(255, 255, 255, 0.95);
 }
 
 .message-content.collapsed {
@@ -430,13 +843,14 @@ async function handleBlockCopy(content: string) {
 
 .content-block :deep(img) {
   max-width: 100%;
-  border-radius: 4px;
+  border-radius: 8px;
 }
 
 .content-block :deep(pre) {
-  margin: 8px 0; /* Reduced from 10px */
+  margin: 6px 0;
   overflow-x: auto;
-  font-size: 13px; /* Smaller code font */
+  font-size: 13px;
+  border-radius: 8px;
 }
 
 .content-block :deep(table) {
@@ -445,51 +859,49 @@ async function handleBlockCopy(content: string) {
   margin: 0.8em 0;
   display: block;
   overflow-x: auto;
-  border-spacing: 0;
-  font-size: 13px; /* Smaller table font */
+  font-size: 13px;
 }
 
 .content-block :deep(th),
 .content-block :deep(td) {
-  padding: 4px 8px; /* Reduced from 6px 10px */
+  padding: 4px 8px;
   border: 1px solid var(--el-border-color);
   text-align: left;
 }
 
 .content-block :deep(th) {
-  background-color: var(--el-fill-color-light);
+  background: var(--el-fill-color-light);
   font-weight: 600;
-  color: var(--el-text-color-primary);
 }
 
 .content-block :deep(blockquote) {
-  margin: 8px 0; /* Reduced from 10px */
+  margin: 6px 0;
   padding-left: 10px;
   border-left: 3px solid var(--el-border-color);
   color: var(--el-text-color-secondary);
-  font-size: 13px; /* Smaller quote font */
+  font-size: 13px;
 }
 
 .mcp-tool-body {
   display: flex;
   flex-direction: column;
-  gap: 4px; /* Reduced from 5px */
+  gap: 4px;
 }
 
 .mcp-tool-summary {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px; /* Reduced from 13px */
+  font-size: 12px;
   color: var(--el-text-color-secondary);
 }
 
 .mcp-tool-result {
-  background-color: var(--el-fill-color-light);
-  padding: 6px; /* Reduced from 8px */
-  border-radius: 4px;
-  font-size: 12px; /* Reduced from 13px */
-  max-height: 120px; /* Reduced from 150px */
+  background: var(--el-fill-color-light);
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  max-height: 120px;
   overflow-y: auto;
 }
 
@@ -500,13 +912,13 @@ async function handleBlockCopy(content: string) {
 .typing-indicator {
   display: flex;
   gap: 4px;
-  padding: 5px;
+  padding: 4px 0;
 }
 
 .typing-indicator span {
-  width: 6px;
-  height: 6px;
-  background: #999;
+  width: 5px;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.6);
   border-radius: 50%;
   animation: bounce 1.4s infinite;
 }

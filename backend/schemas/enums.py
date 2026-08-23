@@ -7,6 +7,13 @@ class ChatMode(str, Enum):
     NORMAL = "normal"
     AGENT = "agent"
 
+
+class WebSearchMode(str, Enum):
+    """联网搜索模式"""
+    DISABLE = "disable"                  # 显式关闭
+    DIRECT_READ = "direct_read"          # 仅直接读取网页
+    SEARCH_AND_READ = "search_and_read"  # 检索 + 读取网页
+
 class MessageRole(str, Enum):
     USER = "user"
     ASSISTANT = "assistant"
@@ -18,6 +25,7 @@ class MessageStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     PENDING_REVIEW = "pending_review"
+    WAITING = "waiting"
 
 
 class SubMessageType(str, Enum):
@@ -32,6 +40,9 @@ class SubMessageType(str, Enum):
     REVIEW_TOOL = "ReviewTool"
     ASK_USER = "AskUser"
     ERROR = "Error"
+    TASK_SUBSTEP = "TaskSubStep"
+    SECURITY_REVIEW = "SecurityReview"
+    VERSION_SNAPSHOT = "VersionSnapshot"
 
 
 class FileManagementType(str, Enum):
@@ -77,7 +88,7 @@ class ResourceType(str, Enum):
     KNOWLEDGE_BASE = "knowledge_base"
     SYSTEM_PROMPT = "system_prompt"
     SUBMESSAGE_TEMPLATE = "submessage_template"
-    KB_FILE = "kb_file"  # 旧版知识库文件类型（保留用于兼容）
+    KB_FILE = "kb_file"  # 已弃用：无创建入口，仅兼容存量旧数据（读取/清理时按文件类型处理）
     FILE = "file"        # 通用文件资源类型，支持向量化
     SKILL = "skill"
 
@@ -97,6 +108,7 @@ class McpTransportType(str, Enum):
     """定义 MCP 服务器的传输类型"""
     STDIO = "stdio"
     SSE = "sse"
+    STREAMABLE_HTTP = "streamable_http"
 
 class ToolReviewMode(str, Enum):
     NONE = "none"
@@ -122,9 +134,26 @@ class AgentItemType(str, Enum):
 class AgentTypeEnum(str, Enum):
     """定义 Agent 初始化的类型标识符"""
     REACT = "ReActAgent"
-    DEEP = "DeepAgent"
+    DEEP = "DeepAgent"  # 已弃用（DEPRECATED）：DeepAgent 已淘汰，不再维护，仅保留兼容存量数据
+    MAMBO = "Mambo"
 
 class BackendType(str, Enum):
     """定义 Backend 的类型"""
     SSH = "ssh"
     API = "api"
+    RESOURCE = "resource"
+    LOCAL = "local"
+
+
+# --- 业务错误码（前端 i18n 映射用） ---
+
+class ErrorCode(str, Enum):
+    """
+    业务错误码枚举，用于前端 i18n 国际化映射。
+    后端抛出 AppHTTPException 时附带此错误码，前端拦截器根据 error_code 查找对应翻译，
+    从而避免在响应中返回硬编码的英文错误信息。
+
+    命名规范: 大写下划线格式，按业务模块前缀分组（如 SKILL_ / KB_ / RESOURCE_ 等）。
+    前端 i18n key 映射规则: backendError.<error_code_lowercase>
+    """
+    SKILL_CREATE_RESTRICTION = "SKILL_CREATE_RESTRICTION"

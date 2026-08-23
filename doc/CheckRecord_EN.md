@@ -1,37 +1,55 @@
 # MamboChat Model Feature Verification Records
 
-## 1. SiliconFlow https://api.siliconflow.cn/v1/
-### Pro/deepseek-ai/DeepSeek-R1 (OpenAI Compatible)
-| Feature  | Verified |
-|-----|--|
-| Chain of Thought Output |✔| 
- | Tool Calling|✔|
+## 1. DeepSeek https://api.deepseek.com/v1
 
-### Pro/zai-org/GLM-4.7 (OpenAI Compatible)
-| Feature  | Verified |
-|-----|--|
-| Chain of Thought Output |✔| 
- | Tool Calling|✔|
+### deepseek-chat [deepseek-v4-flash] (DeepSeek Native)
+| Feature | Verified |
+|----|----|
+| Tool Calling|  ✔   |
 
-### zai-org/GLM-4.6V (OpenAI Compatible)
-| Feature | Verified | Notes |
-|----|--|--|
-| Chain of Thought Output |✔| 
-| Image Input| ✔| Requires `image` input modality config |
-
-### deepseek-ai/DeepSeek-V3.2 (OpenAI Compatible)
-| Feature      | Verified |
-|---------|--|
-| Chain of Thought Output   |✔| 
+### deepseek-reason [deepseek-v4-flash] (DeepSeek Native)
+| Feature        | Verified |
+|-----------|-|
+| Chain of Thought Output | ✔ |
 | Tool Calling (CoT) |✔|
 
-### Qwen/Qwen3-Embedding-8B (Embedding)
-| Feature       | Verified |
-|----------|--|
-| Embedding (4096 dims) |✔|
+### deepseek-v4-flash (DeepSeek Native)
+| Feature        | Verified | Notes                                                               |
+|-----------|----|------------------------------------------------------------------|
+| Chain of Thought Output     | ✔  | Can be disabled via Thinking Type (DeepSeek); adjustable via Reasoning Effort (DeepSeek) |
+| Tool Calling (CoT) | ✔  |                                                                  |
 
+### deepseek-v4-pro (DeepSeek Native)
+| Feature        | Verified | Notes                                                               |
+|-----------|----|------------------------------------------------------------------|
+| Chain of Thought Output     | ✔  | Can be disabled via Thinking Type (DeepSeek); adjustable via Reasoning Effort (DeepSeek) |
+| Tool Calling (CoT) | ✔  |                                                                  |
 
-## 2. OpenRouter https://openrouter.ai/api/v1
+## 2. KIMI https://api.moonshot.cn/v1
+
+### kimi-k3
+| Feature    | Verified |
+|-------|--|
+| Chain of Thought Output | ✔  |
+| Image Input  | ✔  |
+| Tool Calling (CoT) | ✔  |
+
+### kimi-k2.5
+| Feature    | Verified |
+|-------|--|
+| Chain of Thought Output | ✔  |
+| Image Input  | ✔  |
+| Tool Calling (CoT) | ✔  |
+
+## 3. GLM https://open.bigmodel.cn/api/paas/v4
+
+### GLM-5.2
+| Feature        | Verified |
+|-----------|--|
+| Chain of Thought Output | ✔  | 
+| Tool Calling (CoT) | ✔  |
+
+## 4. OpenRouter https://openrouter.ai/api/v1
 ### google/gemini-3-pro-preview (OpenAI Compatible)
 | Feature | Verified |
 |----|--|
@@ -62,7 +80,7 @@
 
 
 
-## 3. Google 
+## 5. Google 
 
 ### models/gemini-3-flash-preview (OpenAI Compatible https://generativelanguage.googleapis.com/v1beta/openai/)
 | Feature | Verified |
@@ -78,27 +96,32 @@
 | Image Input| ✔  | Requires `image` input modality config            |
 | Tool Calling|  ✔   |
 
-## 4. DeepSeek https://api.deepseek.com/v1
+## 6. SiliconFlow https://api.siliconflow.cn/v1/
+### Pro/deepseek-ai/DeepSeek-R1 (OpenAI Compatible)
+| Feature  | Verified |
+|-----|--|
+| Chain of Thought Output |✔| 
+ | Tool Calling|✔|
 
-### deepseek-chat [deepseek-v4-flash] (DeepSeek Native)
-| Feature | Verified |
-|----|----|
-| Tool Calling|  ✔   |
+### Pro/zai-org/GLM-4.7 (OpenAI Compatible)
+| Feature  | Verified |
+|-----|--|
+| Chain of Thought Output |✔| 
+ | Tool Calling|✔|
 
-### deepseek-reason [deepseek-v4-flash] (DeepSeek Native)
-| Feature        | Verified |
-|-----------|-|
-| Chain of Thought Output | ✔ |
+### zai-org/GLM-4.6V (OpenAI Compatible)
+| Feature | Verified | Notes |
+|----|--|--|
+| Chain of Thought Output |✔| 
+| Image Input| ✔| Requires `image` input modality config |
+
+### deepseek-ai/DeepSeek-V3.2 (OpenAI Compatible)
+| Feature      | Verified |
+|---------|--|
+| Chain of Thought Output   |✔| 
 | Tool Calling (CoT) |✔|
 
-### deepseek-v4-flash (DeepSeek Native)
-| Feature        | Verified | Notes                                                               |
-|-----------|----|------------------------------------------------------------------|
-| Chain of Thought Output     | ✔  | Can be disabled via Thinking Type (DeepSeek); adjustable via Reasoning Effort (DeepSeek) |
-| Tool Calling (CoT) | ✔  |                                                                  |
-
-### deepseek-v4-pro (DeepSeek Native)
-| Feature        | Verified | Notes                                                               |
-|-----------|----|------------------------------------------------------------------|
-| Chain of Thought Output     | ✔  | Can be disabled via Thinking Type (DeepSeek); adjustable via Reasoning Effort (DeepSeek) |
-| Tool Calling (CoT) | ✔  |                                                                  |
+### Qwen/Qwen3-Embedding-8B (Embedding)
+| Feature       | Verified |
+|----------|--|
+| Embedding (4096 dims) |✔|

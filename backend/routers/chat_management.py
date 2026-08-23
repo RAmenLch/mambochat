@@ -1,20 +1,31 @@
 # backend/routers/chat_management.py
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
+import logging
+from datetime import datetime
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Body, Response, UploadFile, File as FastAPIFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Optional, Dict, Any
 
-from backend.crud import chat_crud, setting_crud, provider_crud, resource_crud, agent_crud
+from backend.crud import chat_crud, setting_crud, provider_crud, resource_crud, agent_crud, checkpoint_map_crud
 from backend.services import chat_service
 from backend.services.resource_service import validate_mounted_resources
+from backend.services.chat_export_service import ChatExporter
+from backend.services.chat_import_service import ChatImporter, MAX_PACKAGE_SIZE
+from backend.schemas.chat_export import ChatExportPackage, ImportReport
 from backend import schemas
 from backend.models import chat_model
 from backend.database import get_db
+from backend.exceptions import AppHTTPException
 from backend.routers.settings import get_global_settings
 from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 from backend.schemas.enums import ResourceItemType, ResourceType
 from backend.checkpointer import adelete_thread
+from backend.store import adelete_thread_store
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -333,9 +344,21 @@ async def delete_chat(chat_id: str, db: AsyncSession = Depends(get_db)):
     db_chat = await chat_crud.delete_chat(db, chat_id=chat_id)
     if db_chat is None:
         raise HTTPException(status_code=404, detail="Item not found")
-    # 清理所有相关会话的 LangGraph checkpoint 数据
+    # 清理所有相关会话的 LangGraph checkpoint 与 Store 数据
     for cid in chat_ids_to_cleanup:
-        await adelete_thread(cid)
+        try:
+            await adelete_thread(cid)
+        except Exception:
+            logger.exception("清理会话 %s 的 Checkpoint 数据失败", cid)
+        try:
+            await adelete_thread_store(cid)
+        except Exception:
+            logger.exception("清理会话 %s 的 Store 数据失败", cid)
+    # 清理所有相关会话的 message→checkpoint 映射，避免悬空
+    try:
+        await checkpoint_map_crud.delete_by_chat_ids(db, chat_ids_to_cleanup)
+    except Exception:
+        logger.exception("清理会话的 message_checkpoints_map 数据失败")
     return db_chat
 
 
@@ -378,3 +401,44 @@ async def archive_chats_endpoint(
     if not new_folder:
         raise HTTPException(status_code=400, detail="Failed to archive chats. Ensure requested items exist.")
     return new_folder
+
+
+@router.get(
+    "/chats/{chat_id}/export",
+    summary="导出会话为 JSON（mambochat.chat-export 可导入格式）"
+)
+async def export_chat_json(chat_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    按 doc/chat-export-spec.md 导出单个会话：活跃线性路径消息 + 文件 blob。
+    导出的文件可被 /chats/import 重新导入为新会话。
+    """
+    exporter = ChatExporter(db)
+    pkg = await exporter.export(chat_id)
+    data = pkg.model_dump_json(indent=2)
+    filename = f"{pkg.chat.name}_{datetime.now().strftime('%Y-%m-%d')}.json"
+    return Response(
+        content=data,
+        media_type="application/json; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename*=utf-8''{quote(filename)}"},
+    )
+
+
+@router.post(
+    "/chats/import",
+    response_model=ImportReport,
+    summary="导入会话 JSON 文件（mambochat.chat-export）"
+)
+async def import_chat_json(file: UploadFile = FastAPIFile(...), db: AsyncSession = Depends(get_db)):
+    """
+    解析会话导出包并导入为新会话（放入根目录；名称冲突自动加后缀）。
+    """
+    raw = await file.read()
+    if len(raw) > MAX_PACKAGE_SIZE:
+        raise AppHTTPException(status_code=400, error_code="IMPORT_FILE_TOO_LARGE", detail="导入文件超过大小上限（100 MB）")
+    try:
+        pkg = ChatExportPackage.model_validate_json(raw)
+    except Exception as e:
+        raise AppHTTPException(status_code=400, error_code="CHAT_IMPORT_PARSE_ERROR", detail=f"JSON 解析失败: {e}")
+
+    importer = ChatImporter(db)
+    return await importer.do_import(pkg)

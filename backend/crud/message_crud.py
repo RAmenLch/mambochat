@@ -1,9 +1,10 @@
 # backend/crud/message_crud.py
 
+from dataclasses import dataclass, field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.orm import selectinload
-from sqlalchemy import update, delete as sa_delete
+from sqlalchemy.orm import selectinload, with_loader_criteria
+from sqlalchemy import update, delete as sa_delete, and_, func
 from typing import List, Optional
 import json
 from datetime import datetime, timezone
@@ -11,6 +12,7 @@ from datetime import datetime, timezone
 from backend.models import chat_model
 from backend import schemas
 from backend.models.chat_model import SubMessage
+from backend.models.checkpoint_map_model import MessageCheckpointMap
 from backend.schemas.enums import MessageStatus, SubMessageType
 from backend.config.timezone_config import get_configured_now, TZ
 
@@ -46,6 +48,31 @@ def _safe_timestamp(dt) -> float:
         except ValueError:
             pass
     return 0.0
+
+
+@dataclass
+class _PathNode:
+    """活跃路径计算用的轻量消息节点（不加载 sub_messages / content）。"""
+    id: str
+    parentId: Optional[str]
+    createdAt: datetime
+    lastActiveAt: datetime
+    sortOrder: int
+    role: str
+    sibling_ids: List[str] = field(default_factory=list)
+    sibling_index: int = 0
+
+
+def _parse_config_dict(config) -> dict:
+    """解析 SubMessage.config 的 JSON 字符串为 dict。"""
+    if not config:
+        return {}
+    if isinstance(config, dict):
+        return config
+    try:
+        return json.loads(config)
+    except (json.JSONDecodeError, TypeError):
+        return {}
 
 
 async def batch_update_sub_messages_status_optimistic(
@@ -107,23 +134,43 @@ async def update_message(db: AsyncSession, message_id: str, message_update: sche
     return db_message
 
 
-async def _get_active_linear_path(db: AsyncSession, chat_id: str) -> List[chat_model.Message]:
+async def _get_active_linear_path(db: AsyncSession, chat_id: str) -> List[_PathNode]:
+    """轻量版活跃路径计算：只读路径所需列，不加载 SubMessage / content。
+
+    返回按路径顺序排列的 _PathNode 列表（含 sibling_ids / sibling_index 元数据）。
+    """
     result = await db.execute(
-        select(chat_model.Message)
-        .options(selectinload(chat_model.Message.sub_messages))
-        .filter(chat_model.Message.chatId == chat_id)
+        select(
+            chat_model.Message.id,
+            chat_model.Message.parentId,
+            chat_model.Message.createdAt,
+            chat_model.Message.lastActiveAt,
+            chat_model.Message.sortOrder,
+            chat_model.Message.role,
+        ).filter(chat_model.Message.chatId == chat_id)
     )
-    all_messages = result.scalars().all()
+    rows = result.all()
+    all_nodes = [
+        _PathNode(
+            id=r.id,
+            parentId=r.parentId,
+            createdAt=r.createdAt,
+            lastActiveAt=r.lastActiveAt,
+            sortOrder=r.sortOrder,
+            role=r.role,
+        )
+        for r in rows
+    ]
 
     parent_map = {}
-    for msg in all_messages:
-        parent_map.setdefault(msg.parentId, []).append(msg)
+    for node in all_nodes:
+        parent_map.setdefault(node.parentId, []).append(node)
 
     # 使用 _safe_timestamp 避免类型冲突
     for pid in parent_map:
         parent_map[pid].sort(key=lambda x: _safe_timestamp(x.createdAt))
 
-    active_list = []
+    active_list: List[_PathNode] = []
     roots = parent_map.get(None, [])
     if not roots:
         return active_list
@@ -133,11 +180,10 @@ async def _get_active_linear_path(db: AsyncSession, chat_id: str) -> List[chat_m
 
     while current:
         siblings = parent_map.get(current.parentId, [])
-        setattr(current, 'sibling_ids', [s.id for s in siblings])
-        if current in siblings:
-            setattr(current, 'sibling_index', siblings.index(current))
-        else:
-            setattr(current, 'sibling_index', 0)
+        current.sibling_ids = [s.id for s in siblings]
+        current.sibling_index = next(
+            (i for i, s in enumerate(siblings) if s.id == current.id), 0
+        )
 
         active_list.append(current)
 
@@ -160,18 +206,101 @@ async def _get_active_linear_path(db: AsyncSession, chat_id: str) -> List[chat_m
     return active_list
 
 
-async def get_messages_by_chat(db: AsyncSession, chat_id: str, skip: int = 0, limit: Optional[int] = None) -> List[
-    chat_model.Message]:
-    active_list = await _get_active_linear_path(db, chat_id)
+async def _load_messages_by_ids(
+    db: AsyncSession,
+    message_ids: List[str],
+    latest_usage_only: bool = False,
+) -> dict:
+    """按 ID 批量加载 Message（含子消息），SQL 层排除 TaskSubStep 类型。
+
+    latest_usage_only=True 时额外排除 USAGE，仅保留每个 message 最新一条
+    USAGE 子消息（按 createdAt DESC, sortOrder DESC 取第一条），
+    用于面向前端的接口，避免全量返回历史 usage。
+    """
+    if not message_ids:
+        return {}
+    sub_criteria = [chat_model.SubMessage.type != SubMessageType.TASK_SUBSTEP.value]
+    if latest_usage_only:
+        sub_criteria.append(chat_model.SubMessage.type != SubMessageType.USAGE.value)
+    result = await db.execute(
+        select(chat_model.Message)
+        .options(
+            selectinload(chat_model.Message.sub_messages),
+            with_loader_criteria(chat_model.SubMessage, and_(*sub_criteria)),
+        )
+        .filter(chat_model.Message.id.in_(message_ids))
+    )
+    by_id = {m.id: m for m in result.scalars().all()}
+
+    if latest_usage_only:
+        rn = func.row_number().over(
+            partition_by=chat_model.SubMessage.messageId,
+            order_by=(
+                chat_model.SubMessage.createdAt.desc(),
+                chat_model.SubMessage.sortOrder.desc(),
+            ),
+        ).label("rn")
+        subq = (
+            select(chat_model.SubMessage.id, rn)
+            .where(
+                chat_model.SubMessage.type == SubMessageType.USAGE.value,
+                chat_model.SubMessage.messageId.in_(message_ids),
+            )
+            .subquery()
+        )
+        latest_usages = (
+            await db.execute(
+                select(chat_model.SubMessage)
+                .join(subq, chat_model.SubMessage.id == subq.c.id)
+                .where(subq.c.rn == 1)
+            )
+        ).scalars().all()
+        for usage_sub in latest_usages:
+            msg = by_id.get(usage_sub.messageId)
+            if msg is not None:
+                msg.sub_messages.append(usage_sub)
+        for msg in by_id.values():
+            msg.sub_messages.sort(key=lambda s: s.sortOrder)
+
+    return by_id
+
+
+async def get_messages_by_chat(db: AsyncSession, chat_id: str, skip: int = 0, limit: Optional[int] = None,
+                               latest_usage_only: bool = False) -> List[chat_model.Message]:
+    # 阶段1：轻量列计算活跃路径（不读 content）
+    path = await _get_active_linear_path(db, chat_id)
+    ids = [node.id for node in path]
+    if not ids:
+        return []
+
+    # 阶段2：仅加载活跃路径消息及其子消息（排除 TaskSubStep）
+    by_id = await _load_messages_by_ids(db, ids, latest_usage_only=latest_usage_only)
+    ordered = [by_id[i] for i in ids if i in by_id]
+
+    # 回填 sibling 元数据（阶段1 已算好）
+    for node, msg in zip(path, ordered):
+        msg.sibling_ids = node.sibling_ids
+        msg.sibling_index = node.sibling_index
 
     if limit is not None:
-        return active_list[skip: skip + limit]
-    return active_list[skip:]
+        return ordered[skip: skip + limit]
+    return ordered[skip:]
 
 
 async def get_limited_recent_messages(db: AsyncSession, chat_id: str, limit: int) -> List[chat_model.Message]:
-    active_list = await _get_active_linear_path(db, chat_id)
-    return active_list[-limit:] if limit > 0 else []
+    path = await _get_active_linear_path(db, chat_id)
+    recent = path[-limit:] if limit > 0 else []
+    if not recent:
+        return []
+
+    ids = [node.id for node in recent]
+    by_id = await _load_messages_by_ids(db, ids)
+    ordered = [by_id[i] for i in ids if i in by_id]
+
+    for node, msg in zip(recent, ordered):
+        msg.sibling_ids = node.sibling_ids
+        msg.sibling_index = node.sibling_index
+    return ordered
 
 
 async def create_message(db: AsyncSession, message: schemas.MessageCreate, chat_id: str) -> chat_model.Message:
@@ -287,6 +416,11 @@ async def delete_message(db: AsyncSession, message_id: str) -> Optional[chat_mod
             .where(chat_model.Message.id.in_(descendant_ids))
             .values(sortOrder=chat_model.Message.sortOrder - 1)
         )
+
+    # 同事务清理该消息的 message→checkpoint 映射，避免悬空
+    await db.execute(
+        sa_delete(MessageCheckpointMap).where(MessageCheckpointMap.message_id == message_id)
+    )
 
     await db.delete(db_message)
     await db.commit()
@@ -472,3 +606,107 @@ async def delete_zip_history_by_message_id(
     result = await db.execute(stmt)
     await db.commit()
     return result.rowcount
+
+
+async def get_task_substeps(
+    db: AsyncSession,
+    message_id: str,
+    task_group_id: Optional[str] = None,
+) -> List[chat_model.SubMessage]:
+    """获取指定消息下的 TaskSubStep 子代理追踪步骤，可按 task_group_id 过滤。
+
+    返回按 sortOrder 排序的完整子消息列表（含 content）。
+    """
+    stmt = (
+        select(chat_model.SubMessage)
+        .filter(
+            chat_model.SubMessage.messageId == message_id,
+            chat_model.SubMessage.type == SubMessageType.TASK_SUBSTEP.value,
+        )
+        .order_by(chat_model.SubMessage.sortOrder)
+    )
+    if task_group_id:
+        # SQL 层先粗过滤，再 Python 精确匹配 config 中的 task_group_id
+        stmt = stmt.filter(chat_model.SubMessage.config.contains(task_group_id))
+
+    result = await db.execute(stmt)
+    subs = result.scalars().all()
+
+    if task_group_id:
+        subs = [s for s in subs if _parse_config_dict(s.config).get("task_group_id") == task_group_id]
+
+    return list(subs)
+
+
+async def get_task_substeps_by_message_ids(
+    db: AsyncSession,
+    message_ids: List[str],
+) -> List[chat_model.SubMessage]:
+    """批量获取多个消息下的所有 TaskSubStep（供导出 / 复制会话补全使用）。"""
+    if not message_ids:
+        return []
+    result = await db.execute(
+        select(chat_model.SubMessage)
+        .filter(
+            chat_model.SubMessage.messageId.in_(message_ids),
+            chat_model.SubMessage.type == SubMessageType.TASK_SUBSTEP.value,
+        )
+        .order_by(chat_model.SubMessage.sortOrder)
+    )
+    return list(result.scalars().all())
+
+
+def _aggregate_usage_subs(usage_subs: List[chat_model.SubMessage]) -> dict:
+    """将一组 USAGE 子消息聚合为累计 token 用量统计。
+
+    每个 USAGE 子消息的 content 为 JSON，含 prompt_tokens / completion_tokens /
+    total_tokens / cache_hit_tokens / cache_miss_tokens 等字段。
+    """
+    agg = {
+        "total_tokens": 0,
+        "cache_hit_tokens": 0,
+        "cache_miss_tokens": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+    }
+    for sub in usage_subs:
+        try:
+            data = json.loads(sub.content)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        for key in agg:
+            value = data.get(key)
+            if isinstance(value, (int, float)):
+                agg[key] += int(value)
+    return agg
+
+
+async def get_chat_usage_stats(db: AsyncSession, chat_id: str) -> dict:
+    """统计会话的 token 用量。
+
+    返回两项统计：
+    - conversation: 会话内全部 USAGE 子消息的累计用量（含所有分支）；
+    - active_path_main_agent: 当前激活路径上主 Agent 的累计用量
+      （子代理步骤为 TaskSubStep 子消息，不产生 USAGE，故活跃路径上的
+      USAGE 全部归属主 Agent）。
+    """
+    result = await db.execute(
+        select(chat_model.SubMessage)
+        .join(chat_model.Message, chat_model.Message.id == chat_model.SubMessage.messageId)
+        .filter(
+            chat_model.Message.chatId == chat_id,
+            chat_model.SubMessage.type == SubMessageType.USAGE.value,
+        )
+    )
+    all_usage = result.scalars().all()
+
+    path = await _get_active_linear_path(db, chat_id)
+    active_ids = {node.id for node in path}
+    active_usage = [s for s in all_usage if s.messageId in active_ids]
+
+    return {
+        "conversation": _aggregate_usage_subs(all_usage),
+        "active_path_main_agent": _aggregate_usage_subs(active_usage),
+    }

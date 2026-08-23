@@ -237,41 +237,98 @@ def build_file_node_tree(resources: List[Any], file_contents: Dict[str, str], ro
     return _build_node(root_id)
 
 
-def identify_skill_roots(root_dir: str) -> List[str]:
+def identify_skill_roots(root_dir: str, max_depth: int = 3) -> List[str]:
     """
-    扫描目录，识别所有符合规范的 Skill 根目录路径。
-    逻辑：
-    1. 找到所有 SKILL.md 文件。
-    2. 按路径深度排序。
-    3. 过滤掉作为已知 Skill 子目录的 SKILL.md（防止嵌套 Skill 被识别为独立 Skill）。
+    扫描目录，识别所有符合规范的 Skill 根目录路径（对齐 npx skills 的容器发现语义）。
 
-    :param root_dir: 解压后的临时目录根路径。
+    容器与深度：
+    1. 根容器：root_dir 的直接子目录含 SKILL.md（1 层）。
+    2. root_dir/skills/：内部最多 max_depth 层。
+    3. root_dir/$X/skills/（X 为任意一层子目录）：内部最多 max_depth 层。
+
+    其他规则：
+    - 某目录发现 SKILL.md 后停止下钻（嵌套 Skill 视为依赖，不单独识别）。
+    - 同名去重：按 frontmatter name（小写）去重，浅层/高优先级容器优先。
+    - 跳过 node_modules/.git/dist/build/__pycache__ 及隐藏目录。
+
+    :param root_dir: 解压后的仓库根路径。
+    :param max_depth: 容器内最大递归深度（SKILL.md 所在目录层级）。
     :return: 有效 Skill 目录的绝对路径列表。
     """
-    skill_files = []
+    SKIP_DIRS = {"node_modules", ".git", "dist", "build", "__pycache__"}
 
-    # 遍历目录寻找所有 SKILL.md
-    for dirpath, dirnames, filenames in os.walk(root_dir):
-        if "SKILL.md" in filenames:
-            skill_files.append(os.path.join(dirpath, "SKILL.md"))
+    found: List[str] = []
 
-    # 按路径深度升序排序，确保父级 Skill 先被处理
-    skill_files.sort(key=lambda x: x.count(os.sep))
+    def _frontmatter_name(skill_dir: str) -> Optional[str]:
+        md_path = os.path.join(skill_dir, "SKILL.md")
+        try:
+            with open(md_path, "r", encoding="utf-8") as f:
+                text = f.read()
+            match = re.match(r"^---\s*\n(.*?)\n---", text, re.DOTALL)
+            if match:
+                data = yaml.safe_load(match.group(1))
+                name = data.get("name") if isinstance(data, dict) else None
+                if isinstance(name, str) and name.strip():
+                    return name.strip().lower()
+        except Exception:
+            pass
+        return None
 
-    valid_skill_dirs = []
+    def _scan_container(container: str) -> None:
+        """容器目录内深度受限扫描，发现 SKILL.md 即停止下钻。"""
+        def _walk(current: str, depth: int) -> None:
+            if depth > max_depth:
+                return
+            if os.path.isfile(os.path.join(current, "SKILL.md")):
+                found.append(current)
+                return
+            try:
+                entries = sorted(os.listdir(current))
+            except OSError:
+                return
+            for entry in entries:
+                if entry.startswith(".") or entry in SKIP_DIRS:
+                    continue
+                child = os.path.join(current, entry)
+                if os.path.isdir(child):
+                    _walk(child, depth + 1)
 
-    for skill_file_path in skill_files:
-        current_skill_dir = os.path.dirname(skill_file_path)
+        _walk(container, 1)
 
-        # 检查当前 Skill 是否已被包含在已确认的 Skill 目录中
-        is_nested = False
-        for existing_dir in valid_skill_dirs:
-            # 如果当前目录是已确认目录的子目录，则视为嵌套依赖，跳过
-            if current_skill_dir.startswith(existing_dir + os.sep):
-                is_nested = True
-                break
+    try:
+        root_entries = sorted(os.listdir(root_dir))
+    except OSError:
+        root_entries = []
 
-        if not is_nested:
-            valid_skill_dirs.append(current_skill_dir)
+    # 1. 根容器：直接子目录含 SKILL.md（1 层）
+    for entry in root_entries:
+        child = os.path.join(root_dir, entry)
+        if os.path.isdir(child) and os.path.isfile(os.path.join(child, "SKILL.md")):
+            found.append(child)
 
-    return valid_skill_dirs
+    # 2. root_dir/skills/ 容器
+    skills_dir = os.path.join(root_dir, "skills")
+    if os.path.isdir(skills_dir):
+        _scan_container(skills_dir)
+
+    # 3. root_dir/$X/skills/ 容器（X 为任意一层子目录）
+    for entry in root_entries:
+        if entry == "skills" or entry.startswith("."):
+            continue
+        x_skills = os.path.join(root_dir, entry, "skills")
+        if os.path.isdir(x_skills):
+            _scan_container(x_skills)
+
+    # 同名去重：frontmatter name 小写，浅层/高优先级容器优先
+    seen_names: set = set()
+    result: List[str] = []
+    for skill_dir in found:
+        name = _frontmatter_name(skill_dir)
+        if name is None:
+            name = os.path.basename(skill_dir).lower()
+        if name in seen_names:
+            continue
+        seen_names.add(name)
+        result.append(skill_dir)
+
+    return result

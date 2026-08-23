@@ -20,6 +20,11 @@ async def create_mcp_server(db: AsyncSession, server: McpServerCreate) -> McpSer
         args=server.args,
         env=server.env,
         url=str(server.url) if server.url else None,
+        headers=server.headers,
+        timeout=server.timeout,
+        sse_read_timeout=server.sse_read_timeout,
+        cwd=server.cwd,
+        useProxy=server.useProxy,
         isEnabled=server.isEnabled
     )
     db.add(db_server)
@@ -88,6 +93,31 @@ async def delete_mcp_server(db: AsyncSession, server_id: str) -> bool:
     await db.delete(db_server)
     await db.commit()
     return True
+
+async def get_mcp_servers_by_ids(db: AsyncSession, server_ids: List[str]) -> List[McpServer]:
+    """
+    根据 ID 列表批量获取 MCP 服务器配置。
+    """
+    if not server_ids:
+        return []
+    result = await db.execute(
+        select(McpServer).filter(McpServer.id.in_(server_ids))
+    )
+    return list(result.scalars().all())
+
+
+async def get_all_tools_by_server_ids(db: AsyncSession, server_ids: List[str]) -> List[McpTool]:
+    """
+    根据 MCP 服务器 ID 列表批量获取所有关联的工具（含已禁用）。
+    与 get_tools_by_server_ids 不同，不过滤 is_enabled。
+    """
+    if not server_ids:
+        return []
+    result = await db.execute(
+        select(McpTool).filter(McpTool.server_id.in_(server_ids))
+    )
+    return list(result.scalars().all())
+
 
 async def get_tools_by_server_ids(db: AsyncSession, server_ids: List[str]) -> List[McpTool]:
     """

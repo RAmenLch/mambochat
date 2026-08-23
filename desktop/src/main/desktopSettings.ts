@@ -491,6 +491,38 @@ function getSettingsHtml(): string {
         <div class="form-hint">${translate(locale, 'remote.serverUrl.hint')}</div>
       </div>
     </div>
+
+    <div class="card">
+      <div class="card-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        ${translate(locale, 'apiClient.title')}
+      </div>
+      <div class="form-group">
+        <label class="form-label">${translate(locale, 'apiClient.rootDir')}</label>
+        <input type="text" id="apiClientRootDir" placeholder="C:\\Users\\xxx\\projects" onchange="saveApiClientRootDir()">
+        <div class="form-hint">${translate(locale, 'apiClient.rootDir.hint')}</div>
+      </div>
+      <div class="form-group">
+        <label class="switch-label">
+          <span class="switch">
+            <input type="checkbox" id="apiClientAutoStart" onchange="toggleApiClientAutoStart()">
+            <span class="switch-slider"></span>
+          </span>
+          <span>${translate(locale, 'apiClient.autoStart')}</span>
+        </label>
+      </div>
+      <div class="status-bar stopped" id="apiClientStatusBar">
+        <span class="dot"></span>
+        <span id="apiClientStatusText">${translate(locale, 'apiClient.status.disconnected')}</span>
+      </div>
+      <div id="apiClientRegisteredId" style="font-size:12px;color:#909399;margin-bottom:12px;display:none;"></div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btnApiClientStart" onclick="startApiClient()">${translate(locale, 'apiClient.start')}</button>
+        <button class="btn btn-danger" id="btnApiClientStop" onclick="stopApiClient()" style="display:none;">${translate(locale, 'apiClient.stop')}</button>
+        <button class="btn btn-default" id="btnApiClientRestart" onclick="restartApiClient()" style="display:none;">${translate(locale, 'apiClient.restart')}</button>
+        <button class="btn btn-success" id="btnApiClientRegister" onclick="registerApiClient()">${translate(locale, 'apiClient.register')}</button>
+      </div>
+    </div>
   </div>
 
 
@@ -565,6 +597,12 @@ function gatherConfig() {
     },
     remote: {
       url: document.getElementById('remoteUrl').value.replace(/\\/+$/, ''),
+      apiClient: {
+        backendId: currentConfig?.remote?.apiClient?.backendId || '',
+        apiKey: currentConfig?.remote?.apiClient?.apiKey || '',
+        rootDir: document.getElementById('apiClientRootDir').value,
+        autoStart: document.getElementById('apiClientAutoStart').checked,
+      },
     },
   };
 }
@@ -580,7 +618,10 @@ function applyConfigToUI(config) {
   document.getElementById('allowExternal').checked = !!config.local.allowExternalAccess;
   document.getElementById('gatewayPort').value = config.local.gatewayPort || 5173;
   document.getElementById('remoteUrl').value = config.remote.url;
+  document.getElementById('apiClientRootDir').value = config.remote.apiClient?.rootDir || '';
+  document.getElementById('apiClientAutoStart').checked = !!config.remote.apiClient?.autoStart;
   updateNetworkVisibility();
+  updateApiClientRegisteredId();
 }
 
 async function saveConfig() {
@@ -636,13 +677,35 @@ async function saveConfig() {
       try {
         await api.gateway.restart('127.0.0.1', gatewayPort);
       } catch (e) { log.error('Gateway restart failed:', e); }
-      showToast(t('toast.remoteActive'), 'success');
+
+      // Handle API client: stop if switching from remote with different config
+      const apiClientChanged = prevMode !== 'remote' ||
+        config.remote.apiClient?.backendId !== prevConfig.remote.apiClient?.backendId ||
+        config.remote.apiClient?.rootDir !== prevConfig.remote.apiClient?.rootDir;
+
+      if (apiClientChanged && config.remote.apiClient?.autoStart && config.remote.apiClient?.backendId) {
+        // Stop previous client first (if running), then start with new config
+        try { await api.apibackend.stop(); } catch (e) { /* ignore */ }
+        const result = await api.apibackend.start();
+        if (result.success) {
+          showToast(t('toast.remoteActive') + ' - ' + t('apiClient.status.connected'), 'success');
+        } else {
+          showToast(t('toast.remoteActive') + ' - ' + t('apiClient.status.error') + ': ' + (result.error || ''), 'warning');
+        }
+      } else if (prevConfig.remote.apiClient?.autoStart && !config.remote.apiClient?.autoStart) {
+        // User disabled auto-start — disconnect if running
+        try { await api.apibackend.stop(); } catch (e) { /* ignore */ }
+        showToast(t('toast.remoteActive'), 'success');
+      } else {
+        showToast(t('toast.remoteActive'), 'success');
+      }
     }
 
     // Notify main process to update main window
     await api.config.apply(config);
     updateActiveModeBadge(config.mode);
     refreshStatus();
+    refreshApiClientStatus();
   } catch (e) {
     showToast(t('toast.saveFailed') + ': ' + String(e), 'error');
   } finally {
@@ -817,6 +880,158 @@ async function testConnection() {
   }
 }
 
+// --- API Client ---
+async function startApiClient() {
+  const btn = document.getElementById('btnApiClientStart');
+  btn.disabled = true;
+  try {
+    const result = await api.apibackend.start();
+    if (result.success) {
+      showToast(t('apiClient.status.connected'), 'success');
+    } else {
+      showToast(t('apiClient.status.error') + ': ' + (result.error || 'Unknown'), 'error');
+    }
+    refreshApiClientStatus();
+  } catch (e) {
+    showToast(t('apiClient.status.error') + ': ' + String(e), 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function stopApiClient() {
+  const btn = document.getElementById('btnApiClientStop');
+  btn.disabled = true;
+  try {
+    await api.apibackend.stop();
+    showToast(t('apiClient.status.disconnected'), 'info');
+    refreshApiClientStatus();
+  } catch (e) {
+    showToast(t('apiClient.status.error') + ': ' + String(e), 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function restartApiClient() {
+  const btn = document.getElementById('btnApiClientRestart');
+  btn.disabled = true;
+  try {
+    await api.apibackend.stop();
+    const result = await api.apibackend.start();
+    if (result.success) {
+      showToast(t('apiClient.status.connected'), 'success');
+    } else {
+      showToast(t('apiClient.status.error') + ': ' + (result.error || 'Unknown'), 'error');
+    }
+    refreshApiClientStatus();
+  } catch (e) {
+    showToast(t('apiClient.status.error') + ': ' + String(e), 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function registerApiClient() {
+  const btn = document.getElementById('btnApiClientRegister');
+  btn.disabled = true;
+  btn.classList.add('btn-loading');
+  try {
+    const url = document.getElementById('remoteUrl').value.replace(/\\/+$/, '');
+    const rootDir = document.getElementById('apiClientRootDir').value;
+    const result = await api.apibackend.register(url, rootDir);
+    if (result.success) {
+      // Update currentConfig so gatherConfig picks up the new credentials
+      if (!currentConfig) currentConfig = {};
+      if (!currentConfig.remote) currentConfig.remote = {};
+      if (!currentConfig.remote.apiClient) currentConfig.remote.apiClient = {};
+      currentConfig.remote.apiClient.backendId = result.backendId;
+      currentConfig.remote.apiClient.apiKey = result.apiKey;
+      currentConfig.remote.apiClient.rootDir = rootDir;
+
+      // Also persist the updated config to disk immediately
+      await api.config.update(currentConfig);
+
+      updateApiClientRegisteredId();
+      showToast(t('apiClient.registered', {id: result.backendId}), 'success');
+    } else {
+      showToast(t('apiClient.registerFailed') + ': ' + (result.error || 'Unknown'), 'error');
+    }
+  } catch (e) {
+    showToast(t('apiClient.registerFailed') + ': ' + String(e), 'error');
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove('btn-loading');
+  }
+}
+
+function refreshApiClientStatus() {
+  api.apibackend.status().then(status => {
+    updateApiClientStatusUI(status);
+  }).catch(e => {
+    log.error('[Settings] Failed to get API client status:', e);
+  });
+}
+
+function updateApiClientStatusUI(status) {
+  const bar = document.getElementById('apiClientStatusBar');
+  const text = document.getElementById('apiClientStatusText');
+  const btnStart = document.getElementById('btnApiClientStart');
+  const btnStop = document.getElementById('btnApiClientStop');
+  const btnRestart = document.getElementById('btnApiClientRestart');
+
+  if (status.connecting) {
+    bar.className = 'status-bar starting';
+    text.textContent = t('apiClient.status.connecting');
+    btnStart.style.display = 'none';
+    btnStop.style.display = 'none';
+    btnRestart.style.display = 'none';
+    return;
+  }
+
+  if (status.connected) {
+    bar.className = 'status-bar running';
+    text.textContent = t('apiClient.status.connected') + (status.backendId ? ' (backend: ' + status.backendId.substring(0, 8) + '...)' : '');
+    btnStart.style.display = 'none';
+    btnStop.style.display = '';
+    btnRestart.style.display = '';
+  } else {
+    bar.className = 'status-bar ' + (status.error && status.error !== 'Not connected' ? 'error' : 'stopped');
+    text.textContent = status.error && status.error !== 'Not connected' ? status.error : t('apiClient.status.disconnected');
+    btnStart.style.display = '';
+    btnStop.style.display = 'none';
+    btnRestart.style.display = 'none';
+  }
+}
+
+function updateApiClientRegisteredId() {
+  const el = document.getElementById('apiClientRegisteredId');
+  if (currentConfig?.remote?.apiClient?.backendId) {
+    el.style.display = 'block';
+    el.textContent = t('apiClient.registered', {id: currentConfig.remote.apiClient.backendId});
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+function toggleApiClientAutoStart() {
+  if (!currentConfig) return;
+  const checked = document.getElementById('apiClientAutoStart').checked;
+  if (!currentConfig.remote) currentConfig.remote = {};
+  if (!currentConfig.remote.apiClient) currentConfig.remote.apiClient = {};
+  currentConfig.remote.apiClient.autoStart = checked;
+  api.config.update(currentConfig);
+}
+
+async function saveApiClientRootDir() {
+  if (!currentConfig) return;
+  const rootDir = document.getElementById('apiClientRootDir').value;
+  if (!currentConfig.remote) currentConfig.remote = {};
+  if (!currentConfig.remote.apiClient) currentConfig.remote.apiClient = {};
+  currentConfig.remote.apiClient.rootDir = rootDir;
+  await api.config.update(currentConfig);
+}
+
 // --- Init ---
 async function init() {
   try {
@@ -848,6 +1063,17 @@ async function init() {
     });
 
     refreshStatus();
+    refreshApiClientStatus();
+
+    // Subscribe to API client status changes
+    const apiClientCleanup = api.apibackend.onStatusChange(status => updateApiClientStatusUI(status));
+
+    // Override cleanup to include apiClient
+    const origCleanup = window.onbeforeunload;
+    window.addEventListener('beforeunload', () => {
+      if (statusCleanup) statusCleanup();
+      if (apiClientCleanup) apiClientCleanup();
+    });
   } catch (e) {
     showToast(t('toast.loadFailed') + ': ' + String(e), 'error');
   }

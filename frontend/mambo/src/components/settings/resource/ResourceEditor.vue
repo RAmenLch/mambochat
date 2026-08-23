@@ -13,6 +13,7 @@
       @set-active="handleSetActiveVersion"
       @toggle-kb-view="viewMode = 'kb_config'"
       @reorder-versions="handleReorderVersions"
+      @delete-version="handleDeleteVersion"
     />
 
     <!-- Region: KB Configuration View -->
@@ -62,12 +63,13 @@
         </div>
 
         <!-- Footer Actions -->
-        <div
-          class="editor-footer"
-          v-if="resource.itemType === 'resource'"
-        >
+        <div class="editor-footer">
           <el-button @click="resetForm">{{ t('resource.editor.reset') }}</el-button>
-          <el-button v-if="resource.resourceType !== 'file' || isEditableFile" type="success" @click="openNewVersionDialog">{{ t('resource.editor.saveAsNew') }}</el-button>
+          <el-button
+            v-if="resource.itemType === 'resource' && (resource.resourceType !== 'file' || isEditableFile)"
+            type="success"
+            @click="openNewVersionDialog"
+          >{{ t('resource.editor.saveAsNew') }}</el-button>
           <el-button type="primary" @click="handleSaveChanges" :disabled="!isFormDirty">
             {{ t('common.action.save') }}
           </el-button>
@@ -142,6 +144,7 @@ const {
   loadVersionIntoEditor,
   handleSetActiveVersion,
   handleReorderVersions,
+  handleDeleteVersion,
   openNewVersionDialog,
   handleConfirmNewVersion,
 } = useResourceEditor(props)

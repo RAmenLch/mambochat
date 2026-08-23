@@ -11,7 +11,7 @@ class LLMParameter(BaseModel):
     """
     key: str = Field(..., description="唯一的参数标识符，用于数据库存储和内部引用。例如：'temperature' 或 'openai::tool_choice'。")
     label: str = Field(..., description="在前端UI中展示给用户的名称。例如：'Temperature'。")
-    path: List[str] = Field(..., description="用于构建最终API请求体的路径。例如：['temperature'] 或 ['tool_config', 'tool_choice']。")
+    path: List[str] = Field(..., description="用于构建最终API请求体的路径。例如：['temperature'] 或 ['tool_config', 'tool_choice']。若以 'extra_body' 开头（如 ['extra_body', 'thinking', 'type']），该参数经请求体的 extra_body 字段传递，用于非 OpenAI 标准扩展参数。")
     description: str = Field(..., description="参数功能的详细描述，供前端UI展示。")
     type: Literal['integer', 'number', 'string', 'boolean'] = Field(..., description="参数值的数据类型。")
     limit: Optional[Union[List[Any], dict[str, float]]] = Field(None, description="值的约束。对于string类型，是枚举值列表；对于number/integer类型，是包含 'min' 和 'max' 的字典。")
@@ -236,6 +236,90 @@ SUPPORTED_LLM_PARAMETERS: List[LLMParameter] = [
         default_activate=False
     ),
 
+    # --- GLM / Z.AI / 智谱 特有参数 ---
+    LLMParameter(
+        key="glm::thinking.type",
+        label="Thinking Type (GLM)",
+        path=["thinking", "type"],
+        description="控制 GLM 模型（4.5 及以上）的思维链开关。启用后，GLM-5.x/4.6+ 由模型自行判断是否思考，GLM-4.7/4.5V 则强制思考。",
+        type="string",
+        limit=["enabled", "disabled"],
+        default_value="enabled",
+        default_activate=False
+    ),
+    LLMParameter(
+        key="glm::thinking.clear_thinking",
+        label="Clear Thinking History (GLM)",
+        path=["thinking", "clear_thinking"],
+        description="控制是否清除历史回合中的 reasoning_content（思考内容）。开启可减少上下文长度和成本（推荐），关闭则保留全部历史思考。",
+        type="boolean",
+        limit=[True, False],
+        default_value=True,
+        default_activate=False
+    ),
+    LLMParameter(
+        key="glm::reasoning_effort",
+        label="Reasoning Effort (GLM)",
+        path=["reasoning_effort"],
+        description="控制 GLM-5.2/5.3 思考模式的推理深度。GLM-5.3 仅支持 low/high/max 且始终思考；GLM-5.2 支持 none/minimal/low/medium/high/xhigh/max。仅当 Thinking Type 为 enabled 时生效。",
+        type="string",
+        limit=["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+        default_value="max",
+        default_activate=False
+    ),
+    LLMParameter(
+        key="glm::do_sample",
+        label="Do Sample (GLM)",
+        path=["do_sample"],
+        description="是否启用采样。关闭时 temperature、top_p 等采样参数失效，输出更确定。GLM 默认开启。",
+        type="boolean",
+        limit=[True, False],
+        default_value=True,
+        default_activate=False
+    ),
+    LLMParameter(
+        key="glm::tool_stream",
+        label="Tool Stream (GLM)",
+        path=["tool_stream"],
+        description="是否对 Function Calls 启用流式响应。仅 GLM-4.6 及以上版本支持。",
+        type="boolean",
+        limit=[True, False],
+        default_value=False,
+        default_activate=False
+    ),
+
+    # --- Kimi (Moonshot) 特有参数 ---
+    LLMParameter(
+        key="kimi::thinking.type",
+        label="Thinking Type (Kimi)",
+        path=["extra_body", "thinking", "type"],
+        description="控制 Kimi K2.5/K2.6 可选思考模式开关。enabled 开启，disabled 关闭。",
+        type="string",
+        limit=["enabled", "disabled"],
+        default_value="enabled",
+        default_activate=False
+    ),
+    LLMParameter(
+        key="kimi::thinking.keep",
+        label="Preserved Thinking (Kimi)",
+        path=["extra_body", "thinking", "keep"],
+        description="控制是否将历史轮次的推理内容保留在上下文中。仅 Kimi K2.6 支持可选（设为 'all' 启用），K2.7 Code 始终启用且不可关闭。",
+        type="string",
+        limit=["all"],
+        default_value="all",
+        default_activate=False
+    ),
+    LLMParameter(
+        key="kimi::reasoning_effort",
+        label="Reasoning Effort (Kimi K3)",
+        path=["reasoning_effort"],
+        description="控制 Kimi K3 模型的思考深度。K3 始终开启思考模式，此参数控制力度：low=快速推理，high=深度推理，max=最强推理（默认）。注意：K3 的 temperature 固定为 1.0、top_p 固定为 0.95，不建议显式传入。",
+        type="string",
+        limit=["low", "high", "max"],
+        default_value="max",
+        default_activate=False
+    ),
+
 ]
 
 
@@ -270,6 +354,21 @@ DEFAULT_PROVIDERS: List[dict[str, str]] = [
     {
         "name": "SiliconFlow",
         "apiHost": "https://api.siliconflow.cn/v1/",
+        "worker_type": "openai"
+    },
+    {
+        "name": "Z.AI (GLM)",
+        "apiHost": "https://api.z.ai/api/paas/v4",
+        "worker_type": "openai"
+    },
+    {
+        "name": "智谱 BigModel (GLM)",
+        "apiHost": "https://open.bigmodel.cn/api/paas/v4",
+        "worker_type": "openai"
+    },
+    {
+        "name": "Kimi (Moonshot)",
+        "apiHost": "https://api.moonshot.cn/v1",
         "worker_type": "openai"
     },
     {

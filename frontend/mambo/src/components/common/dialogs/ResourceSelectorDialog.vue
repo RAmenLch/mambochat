@@ -73,7 +73,7 @@ import KnowledgeBaseSearchDialog from '@/components/chat/dialogs/KnowledgeBaseSe
 
 const props = defineProps<{
   visible: boolean;
-  context: 'chat-settings' | 'chat-toolbar' | 'agent-toolbar' | 'agent-react' | 'agent-deep';
+  context: 'chat-settings' | 'chat-toolbar' | 'agent-toolbar' | 'agent-react' | 'agent-deep' | 'agent-memory';
 }>();
 
 const emit = defineEmits<{
@@ -121,6 +121,13 @@ const contextConfig = computed(() => {
       return {
         allowedTypes: ['system_prompt', 'submessage_template', 'knowledge_base', 'skill'],
         canMount: ['system_prompt', 'submessage_template', 'knowledge_base', 'skill'],
+        canAppend: [],
+        canMountKb: []
+      };
+    case 'agent-memory':
+      return {
+        allowedTypes: ['file', 'system_prompt', 'submessage_template'],
+        canMount: ['file', 'system_prompt', 'submessage_template'],
         canAppend: [],
         canMountKb: []
       };

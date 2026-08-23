@@ -1,8 +1,11 @@
 # backend/services/file_service.py
 
+import hashlib
+import os
 import urllib.parse
+from email.utils import formatdate
 from typing import List, Optional, Union
-from fastapi import UploadFile, HTTPException, status, Response
+from fastapi import UploadFile, HTTPException, status, Response, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -10,6 +13,7 @@ from sqlalchemy.future import select
 from backend.models.file_model import File
 from backend.models.base_model import generate_uuid
 from backend.crud import file_crud
+from backend.exceptions import AppHTTPException
 from backend.services.storage_service import storage_service, LocalStorageService
 from backend.utils.file_utils import FileUtils
 from backend import schemas
@@ -51,14 +55,15 @@ class FileService:
 
         mime_type = FileUtils.correct_mime_type(file.filename, file.content_type, sample)
         if not FileUtils.is_allowed_mime_type(mime_type):
-            raise HTTPException(status_code=400, detail=f"不支持的文件类型: {mime_type}。")
+            raise AppHTTPException(status_code=400, error_code="FILE_UNSUPPORTED_TYPE", detail=f"不支持的文件类型: {mime_type}。")
 
         data = await file.read()
 
         # 二次大小校验：基于实际读取的字节数，而非客户端 Content-Length
         if max_size is not None and len(data) > max_size:
-            raise HTTPException(
+            raise AppHTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                error_code="FILE_TOO_LARGE",
                 detail=f"文件过大。最大允许 {max_size // 1024 // 1024} MB。"
             )
 
@@ -86,7 +91,7 @@ class FileService:
             try:
                 storage_path = await storage_service.save_from_bytes(data, file.filename, sub_path)
             except Exception as e:
-                raise HTTPException(status_code=500, detail=f"文件存储失败: {e}")
+                raise AppHTTPException(status_code=500, error_code="FILE_STORE_FAILED", detail=f"文件存储失败: {e}")
 
             db_file = File(
                 id=file_id,
@@ -112,7 +117,7 @@ class FileService:
         final_mime_type = FileUtils.correct_mime_type(filename, mime_type, sample)
 
         if not FileUtils.is_allowed_mime_type(final_mime_type):
-            raise HTTPException(status_code=400, detail=f"不支持的文件类型: {final_mime_type}。")
+            raise AppHTTPException(status_code=400, error_code="FILE_UNSUPPORTED_TYPE", detail=f"不支持的文件类型: {final_mime_type}。")
 
         final_id = file_id or generate_uuid()
         file_size = len(data)
@@ -138,7 +143,7 @@ class FileService:
             try:
                 storage_path = await storage_service.save_from_bytes(data, filename, sub_path)
             except Exception as e:
-                raise HTTPException(status_code=500, detail=f"文件存储失败: {e}")
+                raise AppHTTPException(status_code=500, error_code="FILE_STORE_FAILED", detail=f"文件存储失败: {e}")
 
             db_file = File(
                 id=final_id,
@@ -151,6 +156,46 @@ class FileService:
             )
             return await self._commit_file_record(db_file, physical_path_to_rollback=storage_path)
 
+    async def create_empty_text_file(
+        self,
+        filename: str,
+        management_type: List[str],
+        auto_commit: bool = True,
+    ) -> File:
+        """
+        在数据库中创建一个空文本文件。
+        用于在右键新建文件类型资源时自动生成可编辑的空文件，无需用户手动上传。
+
+        Args:
+            filename: 文件名，若不含扩展名则自动追加 .txt
+            management_type: 管理类型列表
+            auto_commit: 是否自动提交事务。设为 False 时仅 flush，由调用方统一提交。
+
+        Returns:
+            创建好的 File 模型实例。
+        """
+        if '.' not in filename:
+            filename = filename + '.txt'
+
+        file_id = generate_uuid()
+        db_file = File(
+            id=file_id,
+            filename=filename,
+            storage_path=f"virtual_db_{file_id}",
+            mime_type='text/plain',
+            size=0,
+            storage_type='db',
+            content='',
+            management_type=management_type,
+        )
+
+        if auto_commit:
+            return await self._commit_file_record(db_file)
+        else:
+            self.db.add(db_file)
+            await self.db.flush()
+            return db_file
+
     async def _commit_file_record(self, db_file: File, physical_path_to_rollback: Optional[str] = None) -> File:
         try:
             self.db.add(db_file)
@@ -161,7 +206,7 @@ class FileService:
             await self.db.rollback()
             if physical_path_to_rollback:
                 await storage_service.delete(physical_path_to_rollback)
-            raise HTTPException(status_code=500, detail=f"数据库保存失败: {e}")
+            raise AppHTTPException(status_code=500, error_code="FILE_DB_SAVE_FAILED", detail=f"数据库保存失败: {e}")
 
     async def get_file_content(self, file_id: str) -> bytes:
         file = await self.get_file(file_id)
@@ -193,7 +238,11 @@ class FileService:
 
         return file.content or ""
 
-    async def get_file_for_download(self, storage_path: str) -> Union[Response, FileResponse]:
+    async def get_file_for_download(
+        self,
+        storage_path: str,
+        request: Optional[Request] = None,
+    ) -> Union[Response, FileResponse]:
         file = await self.get_file_by_path(storage_path)
         if not file:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File record not found in database.")
@@ -201,27 +250,57 @@ class FileService:
         encoded_filename = urllib.parse.quote(file.filename)
 
         if file.storage_type == 'db':
-            headers = {"Content-Disposition": f"attachment; filename*=utf-8''{encoded_filename}"}
+            # DB 存储的小型文本文件可被编辑，使用内容 hash 作为强校验器（ETag）。
+            # 采用 no-cache：浏览器缓存正文，但每次展示都回源校验；
+            # 内容未变时命中 304（不传输正文），内容变更时返回 200 新内容。
+            content = (file.content or "").encode('utf-8')
+            etag = f'"{hashlib.sha256(content).hexdigest()}"'
+            cache_control = "private, no-cache"
+            headers = {
+                "Content-Disposition": f"attachment; filename*=utf-8''{encoded_filename}",
+                "ETag": etag,
+                "Cache-Control": cache_control,
+            }
+            if request and request.headers.get("if-none-match") == etag:
+                return Response(
+                    status_code=status.HTTP_304_NOT_MODIFIED,
+                    headers={"ETag": etag, "Cache-Control": cache_control},
+                )
+            return Response(content=content, media_type=file.mime_type, headers=headers)
+
+        # 本地存储文件
+        if not isinstance(storage_service, LocalStorageService):
+            raise HTTPException(status_code=501, detail="Download not implemented for current storage type.")
+
+        base_path = storage_service.base_path.resolve()
+        file_path = (base_path / file.storage_path).resolve()
+
+        if not str(file_path).startswith(str(base_path)) or not file_path.is_file():
+            raise HTTPException(status_code=404, detail="Physical file not found or access forbidden.")
+
+        # 本地文件只增不改（内容替换会生成新的 storage_path），可用 stat 派生 ETag：
+        # mtime+size 变化即视为内容 hash 变化，触发重新下载。
+        stat_result = os.stat(file_path)
+        etag_base = str(stat_result.st_mtime_ns) + "-" + str(stat_result.st_size)
+        etag = f'"{hashlib.md5(etag_base.encode(), usedforsecurity=False).hexdigest()}"'
+        cache_control = "private, max-age=31536000, immutable"
+        headers = {
+            "ETag": etag,
+            "Cache-Control": cache_control,
+        }
+        if request and request.headers.get("if-none-match") == etag:
             return Response(
-                content=(file.content or "").encode('utf-8'),
-                media_type=file.mime_type,
-                headers=headers
+                status_code=status.HTTP_304_NOT_MODIFIED,
+                headers={**headers, "Last-Modified": formatdate(stat_result.st_mtime, usegmt=True)},
             )
-        else:
-            if not isinstance(storage_service, LocalStorageService):
-                raise HTTPException(status_code=501, detail="Download not implemented for current storage type.")
 
-            base_path = storage_service.base_path.resolve()
-            file_path = (base_path / file.storage_path).resolve()
-
-            if not str(file_path).startswith(str(base_path)) or not file_path.is_file():
-                raise HTTPException(status_code=404, detail="Physical file not found or access forbidden.")
-
-            return FileResponse(
-                path=file_path,
-                media_type=file.mime_type,
-                filename=file.filename
-            )
+        return FileResponse(
+            path=file_path,
+            media_type=file.mime_type,
+            filename=file.filename,
+            stat_result=stat_result,
+            headers=headers,
+        )
 
     async def edit_file(self, file_id: str, new_content: str) -> File:
         file = await self.get_file(file_id)
@@ -229,11 +308,11 @@ class FileService:
             raise HTTPException(status_code=404, detail="File not found")
 
         if file.storage_type == 'local':
-            raise HTTPException(status_code=400, detail="本地文件不支持直接编辑")
+            raise AppHTTPException(status_code=400, error_code="FILE_LOCAL_EDIT_NOT_SUPPORTED", detail="本地文件不支持直接编辑")
 
         content_bytes = new_content.encode('utf-8')
         if len(content_bytes) > 262144:
-            raise HTTPException(status_code=400, detail="编辑后的文本超出大小限制")
+            raise AppHTTPException(status_code=400, error_code="FILE_EDIT_TOO_LARGE", detail="编辑后的文本超出大小限制")
 
         file.content = new_content
         file.size = len(content_bytes)

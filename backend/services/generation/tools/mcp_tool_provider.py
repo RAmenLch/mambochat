@@ -16,7 +16,7 @@ from backend.services.generation.core.instructions import (
     UpdateSubMessageStatus
 )
 from backend.schemas import enums as schemas_enums
-from backend.schemas.message import McpToolContent
+from backend.schemas.message import McpToolContent, SubMessageConfig
 from backend.models.base_model import generate_uuid
 
 logger = logging.getLogger(__name__)
@@ -112,7 +112,8 @@ class MCPToolProvider(BaseToolProvider):
             tool_call_id: str,
             name: str,
             arguments: Dict[str, Any],
-            tool_def: Optional[BaseTool] = None
+            tool_def: Optional[BaseTool] = None,
+            run_uuid: Optional[str] = None
     ) -> AsyncGenerator[BaseInstruction, None]:
         # 1. 提取工具定义中的 JSON Schema
         input_schema = tool_def.args if tool_def else None
@@ -122,7 +123,8 @@ class MCPToolProvider(BaseToolProvider):
             tool_call_id=tool_call_id,
             name=name,
             arguments=arguments,
-            input_schema=input_schema  # 注入 Schema
+            input_schema=input_schema,  # 注入 Schema
+            run_uuid=run_uuid,
         )
 
         # 3. 缓存状态，建立 ID 映射
@@ -137,7 +139,7 @@ class MCPToolProvider(BaseToolProvider):
             sortOrder=2,
             status=schemas_enums.MessageStatus.GENERATING,
             initial_content=tool_content.to_json_string(),
-            config={"is_minimal": True}
+            config=SubMessageConfig(is_minimal=True)
         )
 
     async def create_result_instruction(

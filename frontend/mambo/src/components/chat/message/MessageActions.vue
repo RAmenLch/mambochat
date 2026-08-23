@@ -102,6 +102,10 @@
     <UsageInfo
       v-if="usageSubMessage"
       :usage-sub-message="usageSubMessage"
+      :max-context-tokens="maxContextTokens"
+      :start-time="message.createdAt"
+      :end-time="usageSubMessage.createdAt"
+      :is-generating="isGenerating"
       class="usage-info-component"
     />
   </div>
@@ -132,6 +136,7 @@ const props = defineProps<{
   isSingleViewCollapsed: boolean
   firstSubMessage?: SubMessage
   usageSubMessage?: SubMessage
+  maxContextTokens?: number
 }>()
 
 const emit = defineEmits<{

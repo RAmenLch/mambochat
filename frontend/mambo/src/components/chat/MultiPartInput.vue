@@ -31,6 +31,7 @@
           ref="universalEditorRef"
           v-model="localPartitions[activeIndex].content"
           :monaco-options="editorOptions"
+          :completion-agent-id="completionAgentId"
           @submit="$emit('send')"
         />
       </div>
@@ -58,6 +59,7 @@ interface Partition {
 const props = defineProps<{
   modelValue: Partition[]
   activeIndex: number
+  completionAgentId?: string | null
 }>()
 
 // 定义组件可发出的事件

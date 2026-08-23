@@ -1,6 +1,6 @@
 // frontend/mambo/src/api/agentService.ts
 import apiClient from './index';
-import type { Agent, AgentCreate, AgentUpdate, MoveRequest } from './types';
+import type { Agent, AgentCreate, AgentUpdate, MoveRequest, HitlToolInfo, GoalLoopToolInfo } from './types';
 import type { FileResponse } from './types/common'; // [新增] 引入 FileResponse
 
 export const getAgents = (skip = 0, limit = 1000): Promise<Agent[]> => {
@@ -47,4 +47,19 @@ export const uploadAgentAvatar = (agentId: string, file: File): Promise<FileResp
 // [新增] 删除 Agent 头像
 export const deleteAgentAvatar = (agentId: string): Promise<void> => {
   return apiClient.delete(`/agents/${agentId}/avatar`);
+};
+
+// [新增] 获取 Agent 的可 AI 审核工具列表
+export const getAgentHitlTools = (agentId: string): Promise<HitlToolInfo[]> => {
+  return apiClient.get(`/agents/${agentId}/hitl-tools`);
+};
+
+// [新增] 获取 Agent 任务循环「我的规则」的工具及参数名建议列表
+export const getGoalLoopTools = (agentId: string): Promise<GoalLoopToolInfo[]> => {
+  return apiClient.get(`/agents/${agentId}/goal-loop-tools`);
+};
+
+// [新增] 复制 Agent（副本）
+export const duplicateAgent = (agentId: string): Promise<Agent> => {
+  return apiClient.post(`/agents/${agentId}/duplicate`);
 };

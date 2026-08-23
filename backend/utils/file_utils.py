@@ -10,6 +10,7 @@ ALLOWED_MIME_TYPES = {
     # --- 图片 ---
     "image/jpeg", "image/png", "image/gif", "image/webp",
     "image/svg+xml", "image/bmp", "image/tiff", "image/heic", "image/heif",
+    "image/x-icon", "image/vnd.microsoft.icon",
 
     # --- 音频 ---
     "audio/mpeg", "audio/wav", "audio/ogg", "audio/webm",

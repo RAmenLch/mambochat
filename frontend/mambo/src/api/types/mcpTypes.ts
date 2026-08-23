@@ -1,6 +1,6 @@
 // frontend/mambo/src/api/types/mcpTypes.ts
 
-export type McpTransportType = 'stdio' | 'sse';
+export type McpTransportType = 'stdio' | 'sse' | 'streamable_http';
 export type McpHealthStatus = 'healthy' | 'unhealthy' | null;
 
 export type ToolReviewMode = 'none' | 'require_review';
@@ -23,9 +23,16 @@ export interface McpServer {
   command: string | null;
   args: string[] | null;
   env: Record<string, string> | null;
+  cwd: string | null;
 
   // SSE 模式专属字段
   url: string | null;
+  headers: Record<string, string> | null;
+  timeout: number | null;
+  sse_read_timeout: number | null;
+
+  // 是否启用全局代理（仅 http 传输生效）
+  useProxy: boolean;
 }
 
 export interface McpCreateRequest {
@@ -38,9 +45,16 @@ export interface McpCreateRequest {
   command?: string | null;
   args?: string[] | null;
   env?: Record<string, string> | null;
+  cwd?: string | null;
 
   // SSE 模式参数
   url?: string | null;
+  headers?: Record<string, string> | null;
+  timeout?: number | null;
+  sse_read_timeout?: number | null;
+
+  // 是否启用全局代理（仅 http 传输生效）
+  useProxy?: boolean;
 }
 
 export interface McpUpdateRequest {
@@ -53,9 +67,16 @@ export interface McpUpdateRequest {
   command?: string | null;
   args?: string[] | null;
   env?: Record<string, string> | null;
+  cwd?: string | null;
 
   // SSE 模式参数
   url?: string | null;
+  headers?: Record<string, string> | null;
+  timeout?: number | null;
+  sse_read_timeout?: number | null;
+
+  // 是否启用全局代理（仅 http 传输生效）
+  useProxy?: boolean;
 }
 
 export interface McpTestResponse {

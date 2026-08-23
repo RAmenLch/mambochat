@@ -31,7 +31,7 @@ if not exist "%FRONTEND_DIR%\dist\index.html" (
 )
 
 :: Setup Environment
-set "PATH=%NODE_DIR%;%PYTHON_DIR%;%PATH%"
+set "PATH=%NODE_DIR%;%PYTHON_DIR%\Scripts;%PYTHON_DIR%;%PATH%"
 set "PYTHONPATH=%ROOT_DIR%"
 set "TZ=Asia/Shanghai"
 

@@ -7,8 +7,8 @@ from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy import func, or_, update, literal, null, case, union_all
 from typing import List, Optional, Tuple, Any
 
-from backend.models import resource_model
-from backend.schemas.enums import MoveAction, ResourceItemType
+from backend.models import file_model, resource_model
+from backend.schemas.enums import MoveAction, ResourceItemType, ResourceType
 from backend import schemas
 
 
@@ -77,6 +77,35 @@ async def get_resources_by_parent_ids(db: AsyncSession, parent_ids: List[str]) -
     return result.scalars().all()
 
 
+async def get_resources_by_parent_ids_with_versions(
+    db: AsyncSession,
+    parent_ids: List[str],
+) -> List[resource_model.Resource]:
+    """同 get_resources_by_parent_ids，但预加载 latest_version。"""
+    if not parent_ids:
+        return []
+
+    conditions = []
+    valid_uuids = [pid for pid in parent_ids if pid != "root"]
+
+    if valid_uuids:
+        conditions.append(resource_model.Resource.parentId.in_(valid_uuids))
+
+    if "root" in parent_ids:
+        conditions.append(resource_model.Resource.parentId.is_(None))
+
+    if not conditions:
+        return []
+
+    result = await db.execute(
+        select(resource_model.Resource)
+        .options(joinedload(resource_model.Resource.latest_version))
+        .filter(or_(*conditions))
+        .order_by(resource_model.Resource.sortOrder.asc())
+    )
+    return result.scalars().all()
+
+
 async def get_resource_by_name_and_parent(
         db: AsyncSession,
         name: str,
@@ -93,15 +122,40 @@ async def get_resource_by_name_and_parent(
     return result.scalars().first()
 
 
-async def get_child_names_by_parent_id(db: AsyncSession, parent_id: Optional[str]) -> List[str]:
+async def get_resource_by_name_and_parent_with_version(
+    db: AsyncSession,
+    name: str,
+    parent_id: str,
+) -> Optional[resource_model.Resource]:
+    """同 get_resource_by_name_and_parent，但预加载 latest_version。"""
+    result = await db.execute(
+        select(resource_model.Resource)
+        .options(joinedload(resource_model.Resource.latest_version))
+        .filter(
+            resource_model.Resource.name == name,
+            resource_model.Resource.parentId == parent_id,
+        )
+    )
+    return result.scalars().first()
+
+
+async def get_child_names_by_parent_id(
+        db: AsyncSession,
+        parent_id: Optional[str],
+        exclude_ids: Optional[set] = None
+) -> List[str]:
     """
     获取指定父节点下所有直接子资源的名称列表，用于冲突检测。
+    可选排除指定 ID 的资源（如移动时排除被移动项自身）。
     """
     stmt = select(resource_model.Resource.name)
     if parent_id is None:
         stmt = stmt.filter(resource_model.Resource.parentId.is_(None))
     else:
         stmt = stmt.filter(resource_model.Resource.parentId == parent_id)
+
+    if exclude_ids:
+        stmt = stmt.filter(resource_model.Resource.id.notin_(exclude_ids))
 
     result = await db.execute(stmt)
     return result.scalars().all()
@@ -241,9 +295,18 @@ async def create_resource_version(db: AsyncSession, resource_id: str, version_cr
     if not db_resource or db_resource.itemType != ResourceItemType.RESOURCE.value:
         return None
 
+    # 自动计算 sortOrder（追加到末尾）
+    stmt = select(func.max(resource_model.ResourceVersion.sortOrder)).filter(
+        resource_model.ResourceVersion.resourceId == resource_id
+    )
+    result = await db.execute(stmt)
+    max_order = result.scalar()
+    next_order = (max_order if max_order is not None else -1) + 1
+
     new_version = resource_model.ResourceVersion(
         **version_create.model_dump(),
-        resourceId=resource_id
+        resourceId=resource_id,
+        sortOrder=next_order,
     )
     db.add(new_version)
     await db.commit()
@@ -295,6 +358,27 @@ async def set_active_version(db: AsyncSession, resource_id: str, version_id: str
     await db.refresh(db_resource, ['latest_version'])
 
     return db_resource
+
+
+async def delete_resource_version(db: AsyncSession, version_id: str) -> Optional[resource_model.ResourceVersion]:
+    """删除指定的资源版本。如果版本是活跃版本则拒绝删除。"""
+    result = await db.execute(
+        select(resource_model.ResourceVersion)
+        .options(joinedload(resource_model.ResourceVersion.resource))
+        .filter(resource_model.ResourceVersion.id == version_id)
+    )
+    db_version = result.scalars().first()
+    if not db_version:
+        return None
+
+    # 不允许删除活跃版本
+    parent_resource = db_version.resource
+    if parent_resource and parent_resource.latestVersionId == version_id:
+        return None
+
+    await db.delete(db_version)
+    await db.commit()
+    return db_version
 
 
 async def batch_update_resources_order(db: AsyncSession, updates: List[schemas.ResourceReorderItem]) -> bool:
@@ -405,7 +489,7 @@ async def search_resources_and_versions(
         limit: int
 ) -> Tuple[list[Row], int]:
     """
-    全局搜索资源名称、描述以及最新版本的内容。
+    全局搜索资源名称、描述、最新版本的内容以及可写文件（数据库直存）的文本内容。
     返回: (结果列表, 总数)
     结果列表中的每一项包含: resource_id, resource_name, version_id, raw_content, match_type, updated_at
     """
@@ -438,6 +522,7 @@ async def search_resources_and_versions(
 
     # 3. 构建 ResourceVersion 内容搜索查询 (仅搜索最新版本)
     # Join Resource 表以获取 latestVersionId，并确保只搜索当前活跃的版本
+    # 排除 FILE 类型：其 content 存的是文件 ID（真实文本在 File 表，由第 4.5 步单独检索）
     q_content = select(
         resource_model.Resource.id.label("resource_id"),
         resource_model.Resource.name.label("resource_name"),
@@ -451,6 +536,7 @@ async def search_resources_and_versions(
     ).where(
         # 使用枚举值进行判断
         resource_model.Resource.itemType == ResourceItemType.RESOURCE.value,
+        resource_model.Resource.resourceType != ResourceType.FILE.value,
         match_op(resource_model.ResourceVersion.content)
     )
 
@@ -483,8 +569,35 @@ async def search_resources_and_versions(
     if target_resource_ids_query is not None:
         q_meta = q_meta.where(resource_model.Resource.id.in_(target_resource_ids_query))
 
+    # 4.5 构建可写文件（数据库直存）内容搜索查询
+    # 仅检索 storage_type == 'db' 的文本文件（File.content 为真实文本），
+    # local 磁盘文件不参与检索（与资源补全的可写判定约定一致）。
+    q_file_content = select(
+        resource_model.Resource.id.label("resource_id"),
+        resource_model.Resource.name.label("resource_name"),
+        null().label("version_id"),
+        file_model.File.content.label("raw_content"),
+        literal("content").label("match_type"),
+        resource_model.Resource.updatedAt.label("updated_at")
+    ).join(
+        resource_model.ResourceVersion,
+        resource_model.Resource.latestVersionId == resource_model.ResourceVersion.id
+    ).join(
+        file_model.File,
+        resource_model.ResourceVersion.content == file_model.File.id
+    ).where(
+        resource_model.Resource.itemType == ResourceItemType.RESOURCE.value,
+        resource_model.Resource.resourceType == ResourceType.FILE.value,
+        file_model.File.storage_type == 'db',
+        file_model.File.content.isnot(None),
+        match_op(file_model.File.content)
+    )
+
+    if target_resource_ids_query is not None:
+        q_file_content = q_file_content.where(resource_model.Resource.id.in_(target_resource_ids_query))
+
     # 5. 合并查询
-    union_query = union_all(q_content, q_meta).subquery()
+    union_query = union_all(q_content, q_meta, q_file_content).subquery()
 
     # 6. 获取总数
     count_stmt = select(func.count()).select_from(union_query)
@@ -577,6 +690,43 @@ async def get_skill_descendants_with_versions(db: AsyncSession, skill_ids: List[
         select(resource_model.Resource)
         .options(joinedload(resource_model.Resource.latest_version))
         .where(resource_model.Resource.id.in_(descendant_ids))
+    )
+
+    return list(resources_result.scalars().all())
+
+
+async def get_descendants_with_versions(
+    db: AsyncSession,
+    root_id: str,
+) -> list[resource_model.Resource]:
+    """递归获取指定文件夹下所有子孙节点，预加载 latest_version。
+
+    通用版本（不限制 resourceType），供 workspace backend 等使用。
+    """
+    cte = select(
+        resource_model.Resource.id,
+        resource_model.Resource.parentId,
+    ).where(resource_model.Resource.id == root_id).cte(name="descendants", recursive=True)
+
+    cte = cte.union_all(
+        select(
+            resource_model.Resource.id,
+            resource_model.Resource.parentId,
+        ).join(cte, resource_model.Resource.parentId == cte.c.id)
+    )
+
+    stmt = select(cte.c.id)
+    result = await db.execute(stmt)
+    all_ids = result.scalars().all()
+
+    if not all_ids:
+        return []
+
+    resources_result = await db.execute(
+        select(resource_model.Resource)
+        .options(joinedload(resource_model.Resource.latest_version))
+        .where(resource_model.Resource.id.in_(all_ids))
+        .where(resource_model.Resource.id != root_id)
     )
 
     return list(resources_result.scalars().all())

@@ -1,4 +1,8 @@
 # backend/services/generation/tools/deep_builtin_tool_provider.py
+#
+# 【DEPRECATED - 已弃用，不再维护】
+# 本文件为 DeepAgent（deepagents 库）专用内置工具提供者（UI 兼容层）。
+# DeepAgent 已被淘汰，前端已无创建入口，本文件仅保留用于兼容存量数据。
 
 from typing import List, Optional, Dict, Any, AsyncGenerator
 
@@ -12,13 +16,13 @@ from backend.services.generation.core.instructions import (
     UpdateSubMessageStatus
 )
 from backend.schemas import enums as schemas_enums
-from backend.schemas.message import McpToolContent
+from backend.schemas.message import McpToolContent, SubMessageConfig
 from backend.models.base_model import generate_uuid
 
 
 class DeepAgentBuiltinToolProvider(BaseToolProvider):
     """
-    DeepAgent 内置工具提供者 (UI 兼容层)。
+    【DEPRECATED - 已弃用，不再维护】DeepAgent 内置工具提供者 (UI 兼容层)。
     拦截 DeepAgent 底层隐式注入的内置系统工具调用，并将其转换为前端可渲染的 UI 消息指令。
     复用现有的 MCP_TOOL 子消息类型，使前端能够无缝展示文件操作、终端执行等进度。
     """
@@ -59,7 +63,8 @@ class DeepAgentBuiltinToolProvider(BaseToolProvider):
             tool_call_id: str,
             name: str,
             arguments: Dict[str, Any],
-            tool_def: Optional[BaseTool] = None
+            tool_def: Optional[BaseTool] = None,
+            run_uuid: Optional[str] = None
     ) -> AsyncGenerator[BaseInstruction, None]:
 
         # 提取 Schema (由于是内置工具，tool_def 可能为空，前端组件会自动降级渲染 arguments)
@@ -70,7 +75,8 @@ class DeepAgentBuiltinToolProvider(BaseToolProvider):
             tool_call_id=tool_call_id,
             name=name,
             arguments=arguments,
-            input_schema=input_schema
+            input_schema=input_schema,
+            run_uuid=run_uuid,
         )
 
         # 缓存状态，建立 ID 映射
@@ -85,7 +91,7 @@ class DeepAgentBuiltinToolProvider(BaseToolProvider):
             sortOrder=2,
             status=schemas_enums.MessageStatus.GENERATING,
             initial_content=tool_content.to_json_string(),
-            config={"is_minimal": True}
+            config=SubMessageConfig(is_minimal=True)
         )
 
     async def create_result_instruction(

@@ -6,11 +6,12 @@ from sqlalchemy.future import select
 from typing import Any, Optional
 
 from backend.crud import setting_crud, provider_crud
-from backend.services import provider_service
+from backend.services import provider_service, cleanup_service
 from backend.services.file_service import FileService
 from backend.models import setting_model
 from backend import schemas
 from backend.database import get_db
+from backend.exceptions import AppHTTPException
 from backend.schemas.enums import FileManagementType
 
 router = APIRouter()
@@ -45,6 +46,7 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
         "default_max_retries",
         "default_timeout",
         "proxy_enabled", "proxy_url",
+        "web_search_default_mode", "web_search_use_proxy",
         "user_avatar_file_id", "ai_avatar_file_id",
         "frontend_editor", "kb_default_chunk_size", "kb_default_chunk_overlap", "send_message_shortcut",
         "language"
@@ -88,6 +90,9 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
     proxy_enabled = _get_typed_setting(settings_map.get("proxy_enabled"), False, bool)
     proxy_url = _get_typed_setting(settings_map.get("proxy_url"), None, str)
 
+    web_search_default_mode = _get_typed_setting(settings_map.get("web_search_default_mode"), "disable", str)
+    web_search_use_proxy = _get_typed_setting(settings_map.get("web_search_use_proxy"), False, bool)
+
     frontend_editor = _get_typed_setting(settings_map.get("frontend_editor"), "simple", str)
     kb_default_chunk_size = _get_typed_setting(settings_map.get("kb_default_chunk_size"), 500, int)
     kb_default_chunk_overlap = _get_typed_setting(settings_map.get("kb_default_chunk_overlap"), 50, int)
@@ -109,6 +114,8 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
         default_timeout=default_timeout,
         proxy_enabled=proxy_enabled,
         proxy_url=proxy_url,
+        web_search_default_mode=web_search_default_mode,
+        web_search_use_proxy=web_search_use_proxy,
         user_avatar_url=user_avatar_url,
         ai_avatar_url=ai_avatar_url,
         frontend_editor=frontend_editor,
@@ -139,8 +146,9 @@ async def update_global_settings(
         if model_id:
             db_model = await provider_crud.get_model(db, model_id=model_id)
             if not db_model:
-                raise HTTPException(
+                raise AppHTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
+                    error_code="SETTINGS_MODEL_NOT_FOUND",
                     detail=f"模型ID '{model_id}' 不存在。"
                 )
         settings_to_update.append(schemas.GlobalSetting(key="default_model_id", value=model_id))
@@ -150,8 +158,9 @@ async def update_global_settings(
         if model_id:
             db_model = await provider_crud.get_model(db, model_id=model_id)
             if not db_model:
-                raise HTTPException(
+                raise AppHTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
+                    error_code="SETTINGS_TITLE_MODEL_NOT_FOUND",
                     detail=f"标题生成模型ID '{model_id}' 不存在。"
                 )
         settings_to_update.append(schemas.GlobalSetting(key="title_generation_model_id", value=model_id))
@@ -161,8 +170,9 @@ async def update_global_settings(
         if provider_id:
             db_provider = await provider_crud.get_provider(db, provider_id=provider_id)
             if not db_provider:
-                raise HTTPException(
+                raise AppHTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
+                    error_code="SETTINGS_PROVIDER_NOT_FOUND",
                     detail=f"服务商ID '{provider_id}' 不存在。"
                 )
         settings_to_update.append(schemas.GlobalSetting(key="last_selected_provider_id", value=provider_id))
@@ -173,6 +183,7 @@ async def update_global_settings(
         "default_max_retries",
         "default_timeout",
         "proxy_enabled", "proxy_url",
+        "web_search_default_mode", "web_search_use_proxy",
         "zip_history_system_prompt",
         "frontend_editor", "kb_default_chunk_size", "kb_default_chunk_overlap", "send_message_shortcut",
         "language"
@@ -181,8 +192,9 @@ async def update_global_settings(
         if key in update_data:
             value = update_data[key]
             if key == "default_max_retries" and value is not None and int(value) < 1:
-                raise HTTPException(
+                raise AppHTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
+                    error_code="INVALID_MAX_RETRIES",
                     detail="default_max_retries 必须 >= 1"
                 )
             settings_to_update.append(schemas.GlobalSetting(key=key, value=str(value) if value is not None else None))
@@ -296,3 +308,24 @@ async def test_proxy(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Test URL cannot be empty.")
 
     return await provider_service.test_proxy_connection(proxy_url, test_url)
+
+
+@router.post(
+    "/settings/checkpoints/cleanup",
+    summary="主动清理 checkpoints 数据库"
+)
+async def trigger_checkpoint_cleanup():
+    """
+    触发 checkpoints.db 的 VACUUM（后台执行），立即返回当前状态。
+    可通过 /settings/checkpoints/cleanup/status 轮询进度。
+    """
+    return await cleanup_service.run_checkpoint_vacuum()
+
+
+@router.get(
+    "/settings/checkpoints/cleanup/status",
+    summary="查询 checkpoints 清理状态"
+)
+async def get_checkpoint_cleanup_status():
+    """返回 checkpoints.db 清理状态（含进度与可回收量）。"""
+    return cleanup_service.get_checkpoint_cleanup_status()

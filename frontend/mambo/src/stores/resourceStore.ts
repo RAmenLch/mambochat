@@ -15,6 +15,7 @@ import {
   createSkill,
   validateSkill,
   reorderResourceVersions,
+  deleteResourceVersion,
 } from '@/api/resourceService';
 import {
   uploadResourceFile,
@@ -233,6 +234,20 @@ export const useResourceStore = defineStore('resource', () => {
   }
 
   /**
+   * 删除指定资源的版本。
+   */
+  async function deleteVersion(resourceId: string, versionId: string) {
+    try {
+      await deleteResourceVersion(versionId);
+      // 重新获取资源详情以同步版本列表
+      await fetchResourceDetails(resourceId);
+    } catch (error) {
+      console.error(`Failed to delete version ${versionId}:`, error);
+      await fetchResourceDetails(resourceId);
+    }
+  }
+
+  /**
    * 获取单个资源的完整信息，包括所有版本。
    * 在懒加载模式下，列表项不包含详细内容，点击资源时需调用此方法。
    */
@@ -422,6 +437,7 @@ export const useResourceStore = defineStore('resource', () => {
     createNewVersion,
     setActiveResourceVersion,
     reorderVersions,
+    deleteVersion,
     fetchResourceDetails,
     fetchFileContent,
     saveFileContent,

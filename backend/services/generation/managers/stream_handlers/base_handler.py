@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import AsyncGenerator, List, Dict, Set, Optional
 
 from langchain_core.tools import BaseTool
@@ -29,9 +29,19 @@ class StreamContext:
     # 可变状态 (Handler 可以修改这些状态，Manager 会读取)
     created_stream_ids: Set[str]
     pending_hitl_tool_calls: list
-    final_usage_data: dict
     should_interrupt: bool = False
     last_finish_reason: Optional[str] = None
+
+    # 新增：subagent_event 相关追踪字段
+    subagent_step_counters: Dict[str, int] = field(default_factory=dict)
+
+    # 多中断批次追踪：当多个工具并行调用 interrupt() 时，多个 __interrupt__
+    # 事件会按 task 逐个发射。此字段让 HitlHandler 在多次 handle() 调用间
+    # 共享同一个 batch_id，确保所有中断属于同一批次。
+    hitl_batch_id: Optional[str] = None
+
+    # 多中断序号：跨事件递增，确保每个 AskUserContent 有唯一的 interrupt_index
+    hitl_interrupt_counter: int = 0
 
 
 class BaseStreamHandler(ABC):

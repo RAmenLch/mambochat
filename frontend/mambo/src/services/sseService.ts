@@ -52,7 +52,6 @@ export function subscribeToMessageStream(params: SseSubscriptionParams): AbortCo
   fetchEventSource(url, {
     method: 'GET',
     signal: controller.signal,
-    // 即使浏览器标签页在后台，也保持连接
     openWhenHidden: true,
 
     onmessage(event) {
@@ -61,25 +60,74 @@ export function subscribeToMessageStream(params: SseSubscriptionParams): AbortCo
         onMessage(data);
       } catch (e) {
         console.error('Failed to parse SSE data chunk:', event.data, e);
-        // 出现解析错误时，也通知调用方，以便其可以尝试同步最终状态
         onError(e);
       }
     },
 
     onclose() {
-      // 正常关闭时通知调用方
       onClose();
     },
 
     onerror(err) {
-      // 如果错误不是由 AbortController.abort() 触发的，则视为真实错误并通知调用方
       if (err.name !== 'AbortError') {
         onError(err);
       }
-      // fetchEventSource 在发生错误后会尝试重连，除非我们抛出错误
-      // 这里不抛出，让其内部机制处理，但我们已经通知了调用方
     },
   });
 
   return controller;
+}
+
+/**
+ * 待生成文件聚合 SSE 流的事件类型。
+ */
+export type PendingFileEvent =
+  | { type: 'file_ready'; sub_message_id: string; file_id: string; file_info?: Record<string, unknown> }
+  | { type: 'file_timeout'; sub_message_id: string; path: string };
+
+/**
+ * 订阅待生成文件的聚合 SSE 流。
+ * 按会话聚合：进入会话时建立一条连接，等待该会话所有 pending 文件；
+ * 全部文件就绪/超时后服务端正常关闭连接。
+ */
+export function subscribeToPendingFiles(
+  chatId: string,
+  callbacks: {
+    onMessage: (data: PendingFileEvent) => void
+    onClose: () => void
+    onError: (error: unknown) => void
+  },
+): AbortController {
+  const controller = new AbortController()
+  const url = resolveApiUrl(`/api/chats/${chatId}/wait-for-files`)
+
+  fetchEventSource(url, {
+    method: 'GET',
+    signal: controller.signal,
+    openWhenHidden: true,
+
+    onmessage(event) {
+      try {
+        const data = JSON.parse(event.data)
+        if (data.type === 'file_ready' || data.type === 'file_timeout') {
+          callbacks.onMessage(data)
+        }
+      } catch (e) {
+        console.error('Failed to parse pending files SSE data:', event.data, e)
+        callbacks.onError(e)
+      }
+    },
+
+    onclose() {
+      callbacks.onClose()
+    },
+
+    onerror(err) {
+      if (err.name !== 'AbortError') {
+        callbacks.onError(err)
+      }
+    },
+  })
+
+  return controller
 }

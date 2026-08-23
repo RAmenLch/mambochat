@@ -1,4 +1,9 @@
 # backend/services/generation/agent/tree_extension.py
+#
+# 【DEPRECATED - 已弃用，不再维护】
+# 本文件为 DeepAgent（deepagents 库）专用 Tree Backend 扩展。
+# DeepAgent 已被淘汰，前端已无创建入口，本文件仅保留用于兼容存量数据。
+# 新功能请基于 Mambo Agent（mambo_agents）实现。
 
 from abc import abstractmethod
 import asyncio
@@ -84,11 +89,27 @@ class _NonExecutableBackendProxy(TreeBackendProtocol):
     async def aedit(self, file_path: str, old_string: str, new_string: str, replace_all: bool = False):
         return await self._inner.aedit(file_path, old_string, new_string, replace_all)
 
-    def grep(self, pattern: str, path: str | None = None, glob: str | None = None):
-        return self._inner.grep(pattern, path, glob)
+    def grep(
+        self,
+        pattern: str,
+        path: str | None = None,
+        glob: str | None = None,
+        regex: bool = False,
+        offset: int = 0,
+        limit: int | None = None,
+    ):
+        return self._inner.grep(pattern, path, glob, regex, offset, limit)
 
-    async def agrep(self, pattern: str, path: str | None = None, glob: str | None = None):
-        return await self._inner.agrep(pattern, path, glob)
+    async def agrep(
+        self,
+        pattern: str,
+        path: str | None = None,
+        glob: str | None = None,
+        regex: bool = False,
+        offset: int = 0,
+        limit: int | None = None,
+    ):
+        return await self._inner.agrep(pattern, path, glob, regex, offset, limit)
 
     def glob(self, pattern: str, path: str = "/"):
         return self._inner.glob(pattern, path)

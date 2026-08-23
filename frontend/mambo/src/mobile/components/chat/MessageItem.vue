@@ -1,20 +1,24 @@
 <!-- frontend/mambo/src/mobile/components/chat/MessageItem.vue -->
 <template>
-  <!-- 点击空白区域关闭菜单 -->
-  <div :id="id" class="mobile-message-item" :class="roleClass" @click="clearActions">
+  <div
+    :id="id"
+    class="mobile-message-item"
+    :class="roleClass"
+    @click="clearActions"
+    @touchstart="handleTouchStart"
+    @touchend="handleTouchEnd"
+    @touchmove="handleTouchMove"
+  >
 
-    <!-- 用户消息 -->
+    <!-- 用户消息：右侧气泡 -->
     <template v-if="message.role === 'user'">
-      <!-- 头像 -->
       <div class="message-avatar">
-        <el-avatar :size="32" :src="avatarUrl || ''">
-          <el-icon><User /></el-icon>
+        <el-avatar :size="28" :src="avatarUrl || ''">
+          <el-icon :size="16"><User /></el-icon>
         </el-avatar>
       </div>
 
-      <!-- 消息体 -->
-      <div class="message-body">
-        <!-- 最小化子消息区域 -->
+      <div class="message-body user-body">
         <div v-if="minimizedSubMessages.length > 0" class="minimized-bar">
           <el-tag
             v-for="sub in minimizedSubMessages"
@@ -28,18 +32,20 @@
           </el-tag>
         </div>
 
-        <!-- 子消息列表 -->
         <div class="sub-messages-container">
           <div
             v-if="message.status === 'generating' && normalSubMessages.length === 0"
-            class="initial-loading"
+            class="bubble user-bubble typing-bubble"
           >
             <div class="typing-indicator"><span></span><span></span><span></span></div>
           </div>
 
           <template v-for="(subMessage, index) in normalSubMessages" :key="subMessage.id">
-            <!-- 针对单个用户子消息的包裹层，绑定点击事件 -->
-            <div class="user-sub-message-wrapper" @click.stop="toggleActions(subMessage.id)">
+            <div
+              class="bubble user-bubble"
+              :class="{ 'is-first': index === 0, 'is-last': index === normalSubMessages.length - 1 }"
+              @click.stop="toggleActions(subMessage.id)"
+            >
               <SubMessageItem
                 :id="`sub-msg-${subMessage.id}`"
                 :sub-message="subMessage"
@@ -48,89 +54,90 @@
                 :show-header="normalSubMessages.length > 1 || subMessage.type !== 'Normal'"
                 :is-inactive="isSubMessageInactive(subMessage)"
                 @edit="(payload) => handleEditRequest(subMessage, payload)"
+                @edit-file="handleFileEdit"
                 @copy="handleCopySingle(subMessage)"
               />
-
-              <!-- 用户消息的内联浮动菜单 -->
-              <transition name="fade-slide">
-                <div v-if="activeSubMessageId === subMessage.id && message.status !== 'generating'" class="floating-actions inline-actions is-user-side" @click.stop>
-                  <el-icon class="action-btn" @click="handleEditSpecific(subMessage.id)"><Edit /></el-icon>
-                  <el-icon class="action-btn" @click="handleCopySpecific(subMessage.id)"><CopyDocument /></el-icon>
-                  <el-icon class="action-btn" @click="handleRegenerate"><RefreshRight /></el-icon>
-                  <el-dropdown trigger="click" @command="handleCommand">
-                    <el-icon class="action-btn"><MoreFilled /></el-icon>
-                    <template #dropdown>
-                      <el-dropdown-menu>
-                        <el-dropdown-item command="delete" class="text-danger">
-                          <el-icon><Delete /></el-icon>{{ $t('common.action.delete') }}
-                        </el-dropdown-item>
-                      </el-dropdown-menu>
-                    </template>
-                  </el-dropdown>
-                </div>
-              </transition>
             </div>
           </template>
         </div>
       </div>
+
+      <div
+        v-if="activeSubMessageId && message.status !== 'generating'"
+        class="inline-actions user-inline-actions"
+        @click.stop
+      >
+        <button class="action-btn" @click="handleEditSpecific(activeSubMessageId)">
+          <el-icon :size="16"><Edit /></el-icon>
+        </button>
+        <button class="action-btn" @click="handleCopySpecific(activeSubMessageId)">
+          <el-icon :size="16"><CopyDocument /></el-icon>
+        </button>
+        <button class="action-btn danger" @click="handleDeleteMessage">
+          <el-icon :size="16"><Delete /></el-icon>
+        </button>
+      </div>
     </template>
 
-    <!-- AI 消息 -->
+    <!-- AI 消息：左侧气泡 -->
     <template v-else-if="message.role === 'assistant'">
-      <div class="assistant-message-container">
+      <div class="message-avatar">
+        <el-avatar :size="28" :src="avatarUrl || ''">
+          <el-icon :size="16"><Cpu /></el-icon>
+        </el-avatar>
+      </div>
+
+      <div class="message-body assistant-body">
         <MobileAssistantBubble
           :message="message"
           :is-generating="message.status === 'generating'"
           :current-message-rank="currentMessageRank"
           @edit="handleEditRequest"
+          @edit-file="handleFileEdit"
           @copy="handleCopySingle"
           @open-tool-dialog="(toolId) => $emit('open-tool-dialog', message, toolId, 'single')"
           @toggle-actions="toggleActions"
         >
-          <template #avatar>
-            <div class="message-avatar">
-              <el-avatar :size="32" :src="avatarUrl || ''">
-                <el-icon><Cpu /></el-icon>
-              </el-avatar>
-            </div>
-          </template>
 
-          <!-- 接收 AI 子消息的插槽，渲染对应的内联菜单 -->
           <template #actions="{ subMessageId }">
-            <transition name="fade-slide">
-              <div v-if="activeSubMessageId === subMessageId && message.status !== 'generating'" class="floating-actions inline-actions" @click.stop>
-                <!-- 分支切换 -->
-                <div v-if="hasSiblings" class="branch-switcher">
-                  <el-icon class="action-btn" :class="{'is-disabled': !canGoPrev}" @click="handlePrev"><ArrowLeft /></el-icon>
-                  <span class="branch-text">{{ currentIndex }} / {{ totalSiblings }}</span>
-                  <el-icon class="action-btn" :class="{'is-disabled': !canGoNext}" @click="handleNext"><ArrowRight /></el-icon>
-                  <el-divider direction="vertical" />
-                </div>
-
-                <!-- Token 消耗 -->
-                <el-icon v-if="usageSubMessage" class="action-btn" @click="handleShowUsage"><Coin /></el-icon>
-
-                <el-icon class="action-btn" @click="handleEditSpecific(subMessageId)"><Edit /></el-icon>
-                <el-icon class="action-btn" @click="handleCopySpecific(subMessageId)"><CopyDocument /></el-icon>
-                <el-icon class="action-btn" @click="handleRegenerate"><RefreshRight /></el-icon>
-                <el-icon class="action-btn" @click="handleCompressHistory"><Clock /></el-icon>
-
-                <el-dropdown trigger="click" @command="handleCommand">
-                  <el-icon class="action-btn"><MoreFilled /></el-icon>
-                  <template #dropdown>
-                    <el-dropdown-menu>
-                      <el-dropdown-item command="delete" class="text-danger">
-                        <el-icon><Delete /></el-icon>{{ $t('common.action.delete') }}
-                      </el-dropdown-item>
-                    </el-dropdown-menu>
-                  </template>
-                </el-dropdown>
+            <div
+              v-if="activeSubMessageId === subMessageId && message.status !== 'generating'"
+              class="inline-actions"
+              @click.stop
+            >
+              <div v-if="hasSiblings" class="branch-switcher">
+                <button class="action-btn" :disabled="!canGoPrev" @click="handlePrev">
+                  <el-icon :size="16"><ArrowLeft /></el-icon>
+                </button>
+                <span class="branch-text">{{ currentIndex }}/{{ totalSiblings }}</span>
+                <button class="action-btn" :disabled="!canGoNext" @click="handleNext">
+                  <el-icon :size="16"><ArrowRight /></el-icon>
+                </button>
               </div>
-            </transition>
+              <UsageInfo
+                v-if="usageSubMessage"
+                :usage-sub-message="usageSubMessage"
+                :max-context-tokens="maxContextTokens"
+                :start-time="message.createdAt"
+                :end-time="usageSubMessage.createdAt"
+                :is-generating="false"
+              />
+              <button class="action-btn" @click="handleEditSpecific(subMessageId)">
+                <el-icon :size="16"><Edit /></el-icon>
+              </button>
+              <button class="action-btn" @click="handleCopySpecific(subMessageId)">
+                <el-icon :size="16"><CopyDocument /></el-icon>
+              </button>
+              <button class="action-btn" @click="handleRegenerate">
+                <el-icon :size="16"><RefreshRight /></el-icon>
+              </button>
+              <button class="action-btn danger" @click="handleDeleteMessage">
+                <el-icon :size="16"><Delete /></el-icon>
+              </button>
+            </div>
           </template>
         </MobileAssistantBubble>
 
-        <!-- Zip History -->
         <div v-if="zipHistorySubMessage" class="zip-history-section">
           <div class="zip-history-bookmark" :class="zipBookmarkClass" @click.stop="handleZipBookmarkClick">
             <el-icon :class="{ 'is-loading': zipStatus === 'generating' }">
@@ -145,25 +152,43 @@
           />
         </div>
 
-        <!-- 建议区域 -->
         <div class="suggestion-area" v-if="message.status !== 'generating' && isLastMessage && suggestionList.length > 0">
-          <el-tag
+          <button
             v-for="(suggestion, idx) in suggestionList"
             :key="idx"
-            class="suggestion-item"
-            type="info"
-            effect="plain"
-            round
-            size="small"
+            class="suggestion-chip"
             @click.stop="$emit('suggestion-click', suggestion)"
           >
             {{ suggestion }}
-          </el-tag>
+          </button>
         </div>
       </div>
     </template>
 
-    <!-- 编辑弹窗 -->
+    <!-- 长按操作面板 -->
+    <Teleport to="body">
+      <Transition name="sheet">
+        <div v-if="actionSheetVisible" class="action-sheet-overlay" @click="closeActionSheet">
+          <div class="action-sheet" @click.stop>
+            <div class="sheet-handle"></div>
+            <div class="sheet-actions">
+              <button
+                v-for="action in currentActions"
+                :key="action.key"
+                class="sheet-action-btn"
+                :class="{ danger: action.danger }"
+                @click="action.handler()"
+              >
+                <el-icon :size="20"><component :is="action.icon" /></el-icon>
+                <span>{{ action.label }}</span>
+              </button>
+            </div>
+            <button class="sheet-cancel" @click="closeActionSheet">{{ $t('common.action.cancel') }}</button>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
     <MobileMessageEditDialog
       v-model:visible="editDialogVisible"
       :initial-content="originalEditingContent"
@@ -175,25 +200,36 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
-import type { Message, SubMessage, SubMessageCreate, MessageStatus } from '@/api/types'
+import type { Message, SubMessage, SubMessageCreate, MessageStatus, FileResponse } from '@/api/types'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useAgentStore } from '@/stores/agentStore'
+import { useProviderStore } from '@/stores/providerStore'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  User, Cpu, Document, MoreFilled, CopyDocument, RefreshRight, Delete, Edit, Clock, Loading, CircleCheck, ArrowLeft, ArrowRight, Coin
+  User, Cpu, Document, CopyDocument, RefreshRight, Delete, Edit, Clock, Loading, CircleCheck, ArrowLeft, ArrowRight
 } from '@element-plus/icons-vue'
 import SubMessageItem from './SubMessageItem.vue'
 import ZipHistoryCard from './ZipHistoryCard.vue'
 import MobileAssistantBubble from './message/MobileAssistantBubble.vue'
 import MobileMessageEditDialog from '@/mobile/components/chat/dialogs/MobileMessageEditDialog.vue'
+import UsageInfo from '@/components/chat/UsageInfo.vue'
 import { copyToClipboard } from '@/utils/clipboard'
+import { getFileContent, updateFileContent } from '@/api/fileService'
 import { type ParsedBlock } from '@/utils/markdownParser'
 import { resolveFileUrl } from '@/services/electronUrl'
+
+interface ActionItem {
+  key: string
+  label: string
+  icon: Component
+  danger?: boolean
+  handler: () => void
+}
 
 const props = defineProps<{
   id?: string
@@ -212,12 +248,120 @@ const interactionStore = useChatInteractionStore()
 const sessionStore = useChatSessionStore()
 const settingsStore = useSettingsStore()
 const agentStore = useAgentStore()
+const providerStore = useProviderStore()
 
 const { globalSettings } = storeToRefs(settingsStore)
 const { messageRecencyRanks } = storeToRefs(sessionStore)
 
-// --- Interaction State ---
 const activeSubMessageId = ref<string | null>(null)
+const actionSheetVisible = ref(false)
+const currentActions = ref<ActionItem[]>([])
+
+let longPressTimer: ReturnType<typeof setTimeout> | null = null
+let touchStartX = 0
+let touchStartY = 0
+let hasMoved = false
+
+function handleTouchStart(e: TouchEvent) {
+  hasMoved = false
+  touchStartX = e.touches[0].clientX
+  touchStartY = e.touches[0].clientY
+  longPressTimer = setTimeout(() => {
+    if (!hasMoved) {
+      showActionSheet()
+    }
+  }, 500)
+}
+
+function handleTouchMove(e: TouchEvent) {
+  const dx = Math.abs(e.touches[0].clientX - touchStartX)
+  const dy = Math.abs(e.touches[0].clientY - touchStartY)
+  if (dx > 8 || dy > 8) {
+    hasMoved = true
+    if (longPressTimer) clearTimeout(longPressTimer)
+  }
+}
+
+function handleTouchEnd() {
+  if (longPressTimer) clearTimeout(longPressTimer)
+}
+
+function showActionSheet() {
+  const actions: ActionItem[] = []
+
+  if (props.message.role === 'user') {
+    actions.push({
+      key: 'edit',
+      label: t('common.action.edit'),
+      icon: Edit,
+      handler: () => {
+        if (normalSubMessages.value.length > 0) {
+          const firstNormal = normalSubMessages.value[0]
+          handleEditRequest(firstNormal, { content: firstNormal.content })
+        }
+        closeActionSheet()
+      }
+    })
+  }
+
+  if (props.message.role === 'assistant') {
+    if (hasSiblings.value) {
+      actions.push({
+        key: 'prev-branch',
+        label: t('chat.message.prevBranch'),
+        icon: ArrowLeft,
+        handler: () => { handlePrev(); closeActionSheet() }
+      })
+      actions.push({
+        key: 'next-branch',
+        label: t('chat.message.nextBranch'),
+        icon: ArrowRight,
+        handler: () => { handleNext(); closeActionSheet() }
+      })
+    }
+    actions.push({
+      key: 'regenerate',
+      label: t('chat.message.regenerate'),
+      icon: RefreshRight,
+      handler: () => { handleRegenerate(); closeActionSheet() }
+    })
+  }
+
+  actions.push({
+    key: 'copy',
+    label: t('common.action.copy'),
+    icon: CopyDocument,
+    handler: () => {
+      const text = normalSubMessages.value.map(sm => sm.content).join('\n')
+      copyToClipboard(text).then(() => ElMessage.success(t('chat.message.codeCopied')))
+      closeActionSheet()
+    }
+  })
+
+  if (props.message.role === 'assistant') {
+    actions.push({
+      key: 'compress',
+      label: t('chat.message.compressHistory'),
+      icon: Clock,
+      handler: () => { handleCompressHistory(); closeActionSheet() }
+    })
+  }
+
+  actions.push({
+    key: 'delete',
+    label: t('common.action.delete'),
+    icon: Delete,
+    danger: true,
+    handler: () => { handleDeleteMessage(); closeActionSheet() }
+  })
+
+  currentActions.value = actions
+  actionSheetVisible.value = true
+}
+
+function closeActionSheet() {
+  actionSheetVisible.value = false
+}
 
 const toggleActions = (id?: string) => {
   if (props.message.status === 'generating') return
@@ -248,7 +392,6 @@ function isSubMessageInactive(subMessage: SubMessage): boolean {
   return false
 }
 
-// --- Multi-Branch Logic ---
 const hasSiblings = computed(() => props.message.sibling_ids && props.message.sibling_ids.length > 1)
 const currentIndex = computed(() => props.message.sibling_index + 1)
 const totalSiblings = computed(() => props.message.sibling_ids ? props.message.sibling_ids.length : 0)
@@ -267,7 +410,6 @@ function handleNext() {
   }
 }
 
-// --- Data Logic ---
 const displayableSubMessages = computed(() =>
   props.message.sub_messages.filter(
     (sm) => sm.type !== 'Usage' && sm.type !== 'ZipHistory' && sm.type !== 'Suggest',
@@ -340,8 +482,17 @@ const avatarUrl = computed(() => {
   if (props.message.role === 'user') {
     return resolveFileUrl(globalSettings.value.user_avatar_url)
   }
-
   if (props.message.role === 'assistant') {
+    // Mini_Avatar 模式：优先使用 show 工具设置的图片作为头像
+    const miniAvatarSub = props.message.sub_messages.find(
+      sm => sm.type === 'File' &&
+        sm.config?.show_tool_mode === 'Mini_Avatar' &&
+        sm.file_info?.mime_type?.startsWith('image/')
+    )
+    if (miniAvatarSub?.file_info?.url) {
+      return miniAvatarSub.file_info.url
+    }
+
     const currentChat = sessionStore.currentChat
     if (currentChat?.chatMode === 'agent' && currentChat.agentId) {
       const agent = agentStore.allAgents.find(a => a.id === currentChat.agentId)
@@ -351,11 +502,9 @@ const avatarUrl = computed(() => {
     }
     return resolveFileUrl(globalSettings.value.ai_avatar_url)
   }
-
   return null
 })
 
-// --- Usage Info Logic ---
 const usageSubMessage = computed(() => {
   const usageMessages = props.message.sub_messages.filter((sm) => sm.type === 'Usage')
   if (usageMessages.length === 0) return undefined
@@ -375,9 +524,16 @@ function handleShowUsage() {
   }
 }
 
-// --- Edit Logic ---
+const maxContextTokens = computed(() => {
+  const chat = sessionStore.currentChat
+  if (!chat?.aiModelId) return undefined
+  const model = providerStore.allModels.find(m => m.id === chat.aiModelId)
+  return model?.meta_config?.context_length ?? undefined
+})
+
 const editDialogVisible = ref(false)
 const editingSubMessage = ref<SubMessage | null>(null)
+const editingFileInfo = ref<FileResponse | null>(null)
 const originalEditingContent = ref('')
 const editingRange = ref<{ start: number; end: number } | null>(null)
 const editingMarkup = ref('```')
@@ -386,6 +542,7 @@ const editingLanguage = ref('')
 watch(editDialogVisible, (newValue) => {
   if (!newValue) {
     editingSubMessage.value = null
+    editingFileInfo.value = null
     originalEditingContent.value = ''
     editingRange.value = null
     editingMarkup.value = '```'
@@ -411,13 +568,24 @@ function handleEditRequest(
   editDialogVisible.value = true
 }
 
-// 精准编辑特定的 SubMessage
+async function handleFileEdit(file: FileResponse) {
+  try {
+    const response = await getFileContent(file.id)
+    editingFileInfo.value = file
+    editingSubMessage.value = null
+    editingRange.value = null
+    originalEditingContent.value = response.content
+    editDialogVisible.value = true
+  } catch (error) {
+    ElMessage.error(t('chat.message.fileLoadFailed'))
+  }
+}
+
 function handleEditSpecific(id: string) {
   const targetSub = props.message.sub_messages.find((sm) => sm.id === id)
   if (targetSub) {
     handleEditRequest(targetSub, { content: targetSub.content })
   } else if (normalSubMessages.value.length > 0) {
-    // Fallback: 如果点的是纯工具组，降级编辑第一个普通消息
     const firstNormal = normalSubMessages.value[0]
     handleEditRequest(firstNormal, { content: firstNormal.content })
   }
@@ -437,7 +605,22 @@ function getUpdatedFullContent(newPartialContent: string): string {
   )
 }
 
-function handleSaveEdit(newContent: string) {
+async function handleSaveEdit(newContent: string) {
+  const currentEditingFile = editingFileInfo.value
+  if (currentEditingFile) {
+    try {
+      const updatedFile = await updateFileContent(currentEditingFile.id, newContent)
+      const msg = sessionStore.currentChatMessages.find(m => m.id === props.message.id)
+      if (msg) {
+        const subMsg = msg.sub_messages.find(sm => sm.file_info?.id === currentEditingFile.id)
+        if (subMsg) subMsg.file_info = updatedFile
+      }
+    } catch (error) {
+      console.error('Failed to save file content:', error)
+    }
+    return
+  }
+
   if (!editingSubMessage.value) return
   const updatedContent = getUpdatedFullContent(newContent)
   interactionStore.updateSubMessage({
@@ -472,7 +655,6 @@ function restoreSubMessage(subMessageId: string) {
   })
 }
 
-// --- Zip History Actions ---
 function handleZipBookmarkClick() {
   if (zipStatus.value === 'generating') return
   isZipCardVisible.value = !isZipCardVisible.value
@@ -483,7 +665,6 @@ function handleCompressHistory() {
   ElMessage.info(t('chat.message.compressStarted'))
 }
 
-// --- Actions ---
 async function handleCopySingle(subMessage: SubMessage) {
   try {
     await copyToClipboard(subMessage.content)
@@ -491,7 +672,6 @@ async function handleCopySingle(subMessage: SubMessage) {
   } catch {}
 }
 
-// 精准复制特定的 SubMessage
 async function handleCopySpecific(id: string) {
   const targetSub = props.message.sub_messages.find((sm) => sm.id === id)
   if (targetSub) {
@@ -505,15 +685,13 @@ function handleRegenerate() {
   activeSubMessageId.value = null
 }
 
-async function handleCommand(command: string) {
-  if (command === 'delete') {
-    try {
-      await ElMessageBox.confirm(t('chat.message.deleteConfirm'), t('common.action.delete'), {
-        type: 'warning',
-      })
-      await interactionStore.deleteMessage(props.message.id)
-    } catch {}
-  }
+async function handleDeleteMessage() {
+  try {
+    await ElMessageBox.confirm(t('chat.message.deleteConfirm'), t('common.action.delete'), {
+      type: 'warning',
+    })
+    await interactionStore.deleteMessage(props.message.id)
+  } catch {}
   activeSubMessageId.value = null
 }
 </script>
@@ -522,12 +700,28 @@ async function handleCommand(command: string) {
 .mobile-message-item {
   display: flex;
   gap: 8px;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
   width: 100%;
+  animation: msg-in 0.3s ease-out;
+}
+
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .mobile-message-item.is-user {
   flex-direction: row-reverse;
+}
+
+.mobile-message-item.is-assistant {
+  flex-direction: row;
 }
 
 .message-avatar {
@@ -536,22 +730,92 @@ async function handleCommand(command: string) {
 }
 
 .message-body {
-  flex-grow: 1;
+  flex: 1;
   min-width: 0;
+  max-width: 82%;
   display: flex;
   flex-direction: column;
 }
 
-.user-sub-message-wrapper {
-  display: flex;
-  flex-direction: column;
-  cursor: pointer;
+.user-body {
+  align-items: flex-end;
 }
 
-.assistant-message-container {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
+.assistant-body {
+  align-items: flex-start;
+  max-width: 85%;
+}
+
+.bubble {
+  padding: 10px 14px;
+  border-radius: 18px;
+  font-size: 14px;
+  line-height: 1.5;
+  word-break: break-word;
+  position: relative;
+}
+
+.user-bubble {
+  background: #409EFF !important;
+  background: linear-gradient(135deg, var(--el-color-primary, #409EFF), var(--el-color-primary-light-1, #66b1ff)) !important;
+  color: #fff !important;
+  border-bottom-right-radius: 4px;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.user-bubble :deep(.message-content),
+.user-bubble :deep(.message-content *) {
+  color: rgba(255, 255, 255, 0.95) !important;
+}
+
+.user-bubble :deep(.partition-title) {
+  color: rgba(255, 255, 255, 0.7) !important;
+}
+
+.user-bubble :deep(.action-icon) {
+  color: rgba(255, 255, 255, 0.6) !important;
+}
+
+.user-bubble :deep(pre),
+.user-bubble :deep(code) {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.user-bubble :deep(.el-tag) {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.user-bubble.is-first {
+  border-top-right-radius: 18px;
+}
+
+.user-bubble.is-last {
+  border-bottom-right-radius: 4px;
+}
+
+.typing-bubble {
+  padding: 10px 16px;
+}
+
+.assistant-body :deep(.sub-message-item) {
+  border: none;
+  background: transparent;
+  border-radius: 0;
+  margin-bottom: 0;
+  box-shadow: none;
+}
+
+.assistant-body :deep(.sub-message-item .message-content) {
+  padding: 0;
+}
+
+/* AI message sections are card-style inside the bubble group */
+.assistant-body :deep(.mobile-bubble-section-group) {
+  border-bottom: none;
+  padding: 4px 0;
 }
 
 .minimized-bar {
@@ -559,26 +823,13 @@ async function handleCommand(command: string) {
   gap: 4px;
   margin-bottom: 4px;
   flex-wrap: wrap;
-}
-
-.minimized-bar .el-tag.is-inactive {
-  opacity: 1;
-  border-style: dashed;
-  background-color: var(--el-fill-color-lighter);
-  color: var(--el-text-color-regular);
+  justify-content: flex-end;
 }
 
 .sub-messages-container {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-
-.initial-loading {
-  padding: 10px;
-  background: var(--color-background-soft);
-  border-radius: 8px;
-  display: inline-flex;
+  gap: 2px;
 }
 
 .typing-indicator {
@@ -588,7 +839,7 @@ async function handleCommand(command: string) {
 .typing-indicator span {
   width: 6px;
   height: 6px;
-  background: #999;
+  background: rgba(255, 255, 255, 0.6);
   border-radius: 50%;
   animation: bounce 1.4s infinite;
 }
@@ -597,7 +848,69 @@ async function handleCommand(command: string) {
   40% { transform: scale(1); }
 }
 
-/* Zip History Styles */
+.inline-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--color-background);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 10px;
+  padding: 4px 8px;
+  margin-top: 6px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+}
+
+.user-inline-actions {
+  align-self: flex-end;
+}
+
+.branch-switcher {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 6px;
+  margin-right: 4px;
+  border-right: 1px solid var(--el-border-color-lighter);
+}
+
+.branch-text {
+  font-size: 11px;
+  color: var(--el-text-color-regular);
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+  min-width: 28px;
+  text-align: center;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.action-btn:active {
+  background-color: var(--el-fill-color-light);
+  color: var(--el-color-primary);
+}
+
+.action-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.action-btn.danger:active {
+  color: var(--el-color-danger);
+}
+
 .zip-history-section {
   margin-top: 8px;
 }
@@ -606,27 +919,26 @@ async function handleCommand(command: string) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
-  border-radius: 6px;
-  background-color: var(--color-background-soft);
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: var(--color-background-soft);
   border: 1px solid var(--el-border-color);
   color: var(--el-text-color-regular);
-  font-size: 13px;
+  font-size: 12px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .zip-history-bookmark.is-enabled {
-  background-color: var(--el-color-success-light-9);
+  background: var(--el-color-success-light-9);
   border-color: var(--el-color-success-light-5);
   color: var(--el-color-success);
 }
 
 .zip-history-bookmark.is-generating {
-  background-color: var(--el-color-primary-light-9);
+  background: var(--el-color-primary-light-9);
   border-color: var(--el-color-primary-light-5);
   color: var(--el-color-primary);
-  cursor: default;
 }
 
 .zip-history-bookmark .el-icon.is-loading {
@@ -642,82 +954,128 @@ async function handleCommand(command: string) {
   margin-top: 8px;
 }
 
-/* Suggestion Area */
 .suggestion-area {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 8px;
+  margin-top: 10px;
 }
 
-.suggestion-item {
-  margin: 0;
-}
-
-/* Floating Actions - Inline Mode */
-.floating-actions.inline-actions {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-  background-color: var(--color-background);
+.suggestion-chip {
+  padding: 6px 14px;
+  border-radius: 16px;
   border: 1px solid var(--el-border-color-light);
-  border-radius: 6px;
-  padding: 4px 10px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  z-index: 10;
-  margin-top: 4px;
-}
-
-/* AI 消息的操作菜单靠右对齐 (由于放在 group-actions-container 已经靠右，这里保持默认) */
-
-/* 用户消息的操作菜单靠左对齐 */
-.floating-actions.inline-actions.is-user-side {
-  align-self: flex-end; /* 因为 user 消息整体是 row-reverse，这里用 flex-end 靠左 */
-}
-
-.branch-switcher {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.branch-text {
-  font-size: 12px;
+  background: var(--color-background-soft);
+  font-size: 13px;
   color: var(--el-text-color-regular);
-  user-select: none;
-  font-variant-numeric: tabular-nums;
-  margin: 0 2px;
-}
-
-.action-btn {
-  font-size: 16px;
-  color: var(--el-text-color-secondary);
   cursor: pointer;
-  transition: color 0.2s;
+  transition: all 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  font-family: inherit;
 }
 
-.action-btn:hover {
+.suggestion-chip:active {
+  background: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary-light-5);
   color: var(--el-color-primary);
 }
 
-.action-btn.is-disabled {
-  color: var(--el-text-color-disabled);
-  cursor: not-allowed;
+/* Action Sheet */
+.action-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 2000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.fade-slide-enter-active,
-.fade-slide-leave-active {
-  transition: opacity 0.2s, transform 0.2s;
+.action-sheet {
+  width: 100%;
+  max-width: 500px;
+  background: var(--color-background);
+  border-radius: 16px 16px 0 0;
+  padding: 8px 16px;
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.fade-slide-enter-from,
-.fade-slide-leave-to {
-  opacity: 0;
-  transform: translateY(-5px); /* 改为稍微向下偏移滑入，更符合内联展开的视觉 */
+.sheet-handle {
+  width: 36px;
+  height: 4px;
+  background: var(--el-border-color);
+  border-radius: 2px;
+  margin: 8px auto 12px;
 }
 
-.text-danger {
+.sheet-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sheet-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 8px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  font-size: 16px;
+  color: var(--el-text-color-primary);
+  cursor: pointer;
+  transition: background-color 0.15s;
+  font-family: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sheet-action-btn:active {
+  background: var(--el-fill-color-light);
+}
+
+.sheet-action-btn.danger {
   color: var(--el-color-danger);
+}
+
+.sheet-cancel {
+  width: 100%;
+  padding: 14px;
+  margin-top: 8px;
+  border: none;
+  border-radius: 10px;
+  background: var(--el-fill-color-light);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sheet-cancel:active {
+  background: var(--el-fill-color);
+}
+
+.sheet-enter-active {
+  transition: all 0.25s ease-out;
+}
+.sheet-leave-active {
+  transition: all 0.2s ease-in;
+}
+.sheet-enter-from .action-sheet,
+.sheet-leave-to .action-sheet {
+  transform: translateY(100%);
+}
+.sheet-enter-from {
+  opacity: 0;
+}
+.sheet-leave-to {
+  opacity: 0;
 }
 </style>

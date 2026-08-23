@@ -22,7 +22,7 @@
       <el-table-column prop="transportType" :label="t('settings.mcp.columns.type')" width="100">
         <template #default="{ row }">
           <el-tag :type="row.transportType === 'stdio' ? 'info' : 'warning'">
-            {{ row.transportType.toUpperCase() }}
+            {{ row.transportType === 'streamable_http' ? 'HTTP' : row.transportType.toUpperCase() }}
           </el-tag>
         </template>
       </el-table-column>
@@ -37,6 +37,9 @@
           </div>
           <div v-else class="config-detail">
             <div class="detail-item"><strong>URL:</strong> {{ row.url }}</div>
+            <div class="detail-item" v-if="row.headers && Object.keys(row.headers).length">
+              <strong>Headers:</strong> {{ Object.entries(row.headers).map(([k, v]) => `${k}: ${v}`).join(', ') }}
+            </div>
           </div>
         </template>
       </el-table-column>
@@ -589,9 +592,18 @@ const formatJson = (obj: Record<string, unknown> | null) => {
   gap: 6px;
 }
 
+.tool-info-cell span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
 .info-icon {
   color: var(--el-text-color-secondary);
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 .tool-tooltip-content {

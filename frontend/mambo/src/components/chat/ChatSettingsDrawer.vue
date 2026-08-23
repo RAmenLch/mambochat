@@ -118,6 +118,12 @@
             >
               <el-option v-for="opt in param.limit" :key="opt" :label="opt" :value="opt" />
             </el-select>
+            <el-input
+              v-else-if="param.type === 'string'"
+              v-model="chatSettingsForm.modelParameters[param.key]"
+              :disabled="!param.isEnabled"
+              class="parameter-input"
+            />
             <el-switch
               v-else-if="param.type === 'boolean'"
               v-model="chatSettingsForm.modelParameters[param.key]"
@@ -308,16 +314,22 @@ watch(chatConfigSnapshot, async (newConfig, oldConfig) => {
       if (newConfig.resource_prompt_list && newConfig.resource_prompt_list.length > 0) {
         mountedSystemResources.value = [];
         try {
-          const promises = newConfig.resource_prompt_list.map(id => getResourceDetails(id));
+          const promises = newConfig.resource_prompt_list.map(id => getResourceDetails(id).catch(() => null));
           const results = await Promise.all(promises);
 
           // 过滤：仅保留 System Prompt 和 Submessage Template
+          // 已删除的资源创建占位 stub，引导用户取消选择
           const orderedResults = newConfig.resource_prompt_list
-            .map(id => results.find(r => r.id === id))
+            .map((id, i) => {
+              const r = results[i];
+              if (r) return r;
+              // 创建已删除资源的占位 stub
+              return { id, name: t('resource.deletedNameWithId', { id: id.substring(0, 8) }), resourceType: 'file', _deleted: true } as unknown as Resource;
+            })
             .filter((r) => !!r) as Resource[];
 
           mountedSystemResources.value = orderedResults.filter(
-            r => r.resourceType === 'system_prompt' || r.resourceType === 'submessage_template'
+            r => (r as any)._deleted || r.resourceType === 'system_prompt' || r.resourceType === 'submessage_template'
           );
         } catch (error) {
           console.error('Failed to load mounted resources:', error);
@@ -418,8 +430,10 @@ function handleSaveSettings() {
     }
   }
 
-  // 1. 获取抽屉中编辑的资源 ID (System Prompt / Template)
-  const drawerResourceIds = mountedSystemResources.value.map(r => r.id);
+  // 1. 获取抽屉中编辑的资源 ID (System Prompt / Template)，排除已删除的占位
+  const drawerResourceIds = mountedSystemResources.value
+    .filter(r => !(r as any)._deleted)
+    .map(r => r.id);
 
   // 2. 获取当前挂载的知识库 ID (从 Session Store 中获取，避免覆盖)
   const currentKbIds = chatSessionStore.systemPromptResources

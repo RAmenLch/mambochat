@@ -44,22 +44,31 @@ export function useTreeStoreActions<TItem extends BaseTreeItem, TCreate, TUpdate
   const isLoading = ref(false);
   const loadedFolderIds = ref(new Set<string>());
   const loadingFolders = ref(new Set<string>());
+  // 并发保护：多个组件可能同时触发初始化（如资源树面板/资源管理器/后端面板），
+  // 并发执行会互相覆盖 items，导致“文件夹已标记加载但子节点数据丢失”的竞态。
+  let pendingInitialize: Promise<void> | null = null;
 
   async function initializeList() {
-    isLoading.value = true;
-    try {
-      items.value = [];
-      loadedFolderIds.value.clear();
-      loadingFolders.value.clear();
+    if (pendingInitialize) return pendingInitialize;
 
-      const rootItems = await api.fetchChildren(['root']);
-      items.value = rootItems;
-      loadedFolderIds.value.add('root');
-    } catch (error) {
-      console.error('Failed to initialize list:', error);
-    } finally {
-      isLoading.value = false;
-    }
+    isLoading.value = true;
+    pendingInitialize = (async () => {
+      try {
+        items.value = [];
+        loadedFolderIds.value.clear();
+        loadingFolders.value.clear();
+
+        const rootItems = await api.fetchChildren(['root']);
+        items.value = rootItems;
+        loadedFolderIds.value.add('root');
+      } catch (error) {
+        console.error('Failed to initialize list:', error);
+      } finally {
+        isLoading.value = false;
+        pendingInitialize = null;
+      }
+    })();
+    return pendingInitialize;
   }
 
   async function fetchChildren(parentId: string) {

@@ -2,144 +2,156 @@
 <template>
   <el-drawer
     :model-value="visible"
-    :title="$t('chat.settings.title')"
     direction="rtl"
     size="100%"
     :before-close="handleDrawerClose"
+    :show-close="false"
     class="mobile-settings-drawer"
   >
+    <template #header>
+      <div class="drawer-header">
+        <span class="drawer-title">{{ $t('chat.settings.title') }}</span>
+        <el-button :icon="Close" circle size="small" @click="handleDrawerClose" class="header-close-btn" />
+      </div>
+    </template>
     <div class="drawer-content">
       <el-form v-if="chatData" :model="chatSettingsForm" label-position="top">
-        <el-form-item :label="$t('chat.settings.name')">
-          <el-input
-            v-model.trim="chatSettingsForm.name"
-            :placeholder="$t('chat.settings.namePlaceholder')"
-          />
-        </el-form-item>
-
-        <el-form-item :label="$t('chat.settings.model')">
-          <el-select
-            ref="modelSelectRef"
-            v-model="chatSettingsForm.aiModelId"
-            :placeholder="$t('chat.settings.modelPlaceholder')"
-            style="width: 100%"
-            @visible-change="(visible: boolean) => scrollToTopIfStarred(visible, modelSelectRef)"
-          >
-            <el-option-group
-              v-for="group in filteredGroupedModels"
-              :key="group.label"
-              :label="group.label"
-            >
-              <el-option
-                v-for="item in group.options"
-                :key="item.id"
-                :label="item.name"
-                :value="item.id"
-              />
-            </el-option-group>
-          </el-select>
-        </el-form-item>
-
-        <el-form-item>
-          <template #label>
-            <div class="form-item-label-with-action">
-              <span>{{ $t('chat.settings.systemPrompt') }}</span>
-              <el-button type="primary" link @click="promptDialogVisible = true">
-                {{ $t('chat.settings.selectFromResource') }}
-              </el-button>
-            </div>
-          </template>
-          <el-input
-            v-model="chatSettingsForm.systemPrompt"
-            type="textarea"
-            :rows="6"
-            :placeholder="$t('chat.settings.systemPromptPlaceholder')"
-          />
-          <div v-if="mountedSystemResources.length > 0" class="mounted-resources-wrapper">
-            <el-space wrap>
-              <el-tag
-                v-for="resource in mountedSystemResources"
-                :key="resource.id"
-                closable
-                type="info"
-                @close="handleRemoveMountedResource(resource.id)"
-              >
-                {{ resource.name }}
-              </el-tag>
-            </el-space>
-          </div>
-        </el-form-item>
-
-        <el-divider>{{ $t('chat.settings.modelParams') }}</el-divider>
-
-        <el-form-item :label="$t('chat.settings.contextCount')">
-          <el-input-number
-            v-model="chatSettingsForm.modelParameters.max_context_messages"
-            :min="0"
-            :step="2"
-            controls-position="right"
-            style="width: 100%"
-          />
-        </el-form-item>
-
-        <el-form-item :label="$t('chat.settings.stream')">
-          <el-switch v-model="chatSettingsForm.modelParameters.stream" />
-        </el-form-item>
-        <el-form-item :label="$t('chat.settings.enableSuggest')">
-          <el-switch v-model="chatSettingsForm.modelParameters.enable_suggest" />
-        </el-form-item>
-        <el-form-item :label="$t('chat.settings.enableAskUser')">
-          <el-switch v-model="chatSettingsForm.modelParameters.enable_ask_user" />
-        </el-form-item>
-
-        <el-form-item v-for="param in dynamicParameters" :key="param.key">
-          <template #label>
-            <div class="param-label-row">
-              <span class="param-label-text">{{ param.label }}</span>
-              <el-switch
-                :model-value="param.isEnabled"
-                @change="(isEnabled: string | number | boolean) => handleToggleParameter(param, isEnabled as boolean)"
-                size="small"
-              />
-            </div>
-          </template>
-
-          <div v-if="param.isEnabled" class="mobile-param-control">
-            <el-slider
-              v-if="param.type === 'number'"
-              v-model="chatSettingsForm.modelParameters[param.key]"
-              :min="!Array.isArray(param.limit) ? (param.limit?.min ?? 0) : 0"
-              :max="!Array.isArray(param.limit) ? (param.limit?.max ?? 1) : 1"
-              :step="
-                getSliderStep(
-                  !Array.isArray(param.limit) ? (param.limit?.min ?? 0) : 0,
-                  !Array.isArray(param.limit) ? (param.limit?.max ?? 1) : 1,
-                )
-              "
-              show-input
-              input-size="small"
+        <div class="form-section">
+          <div class="form-section-title">基本信息</div>
+          <el-form-item :label="$t('chat.settings.name')">
+            <el-input
+              v-model.trim="chatSettingsForm.name"
+              :placeholder="$t('chat.settings.namePlaceholder')"
             />
+          </el-form-item>
+          <el-form-item :label="$t('chat.settings.model')">
+            <el-select
+              ref="modelSelectRef"
+              v-model="chatSettingsForm.aiModelId"
+              :placeholder="$t('chat.settings.modelPlaceholder')"
+              style="width: 100%"
+              @visible-change="(visible: boolean) => scrollToTopIfStarred(visible, modelSelectRef)"
+            >
+              <el-option-group
+                v-for="group in filteredGroupedModels"
+                :key="group.label"
+                :label="group.label"
+              >
+                <el-option
+                  v-for="item in group.options"
+                  :key="item.id"
+                  :label="item.name"
+                  :value="item.id"
+                />
+              </el-option-group>
+            </el-select>
+          </el-form-item>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">对话设置</div>
+          <el-form-item>
+            <template #label>
+              <div class="form-item-label-with-action">
+                <span>{{ $t('chat.settings.systemPrompt') }}</span>
+                <el-button type="primary" link @click="promptDialogVisible = true">
+                  {{ $t('chat.settings.selectFromResource') }}
+                </el-button>
+              </div>
+            </template>
+            <el-input
+              v-model="chatSettingsForm.systemPrompt"
+              type="textarea"
+              :rows="6"
+              :placeholder="$t('chat.settings.systemPromptPlaceholder')"
+            />
+            <div v-if="mountedSystemResources.length > 0" class="mounted-resources-wrapper">
+              <el-space wrap>
+                <el-tag
+                  v-for="resource in mountedSystemResources"
+                  :key="resource.id"
+                  closable
+                  type="info"
+                  @close="handleRemoveMountedResource(resource.id)"
+                >
+                  {{ resource.name }}
+                </el-tag>
+              </el-space>
+            </div>
+          </el-form-item>
+
+          <el-form-item :label="$t('chat.settings.contextCount')">
             <el-input-number
-              v-else-if="param.type === 'integer'"
-              v-model="chatSettingsForm.modelParameters[param.key]"
-              :min="!Array.isArray(param.limit) ? param.limit?.min : undefined"
-              :max="!Array.isArray(param.limit) ? param.limit?.max : undefined"
+              v-model="chatSettingsForm.modelParameters.max_context_messages"
+              :min="0"
+              :step="2"
               controls-position="right"
               style="width: 100%"
             />
-            <el-select
-              v-else-if="param.type === 'string' && Array.isArray(param.limit)"
-              v-model="chatSettingsForm.modelParameters[param.key]"
-              style="width: 100%"
-            >
-              <el-option v-for="opt in param.limit" :key="opt" :label="opt" :value="opt" />
-            </el-select>
-            <el-switch
-              v-else-if="param.type === 'boolean'"
-              v-model="chatSettingsForm.modelParameters[param.key]"
-            />
-          </div>
-        </el-form-item>
+          </el-form-item>
+
+          <el-form-item :label="$t('chat.settings.stream')">
+            <el-switch v-model="chatSettingsForm.modelParameters.stream" />
+          </el-form-item>
+          <el-form-item :label="$t('chat.settings.enableSuggest')">
+            <el-switch v-model="chatSettingsForm.modelParameters.enable_suggest" />
+          </el-form-item>
+          <el-form-item :label="$t('chat.settings.enableAskUser')">
+            <el-switch v-model="chatSettingsForm.modelParameters.enable_ask_user" />
+          </el-form-item>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">{{ $t('chat.settings.modelParams') }}</div>
+          <el-form-item v-for="param in dynamicParameters" :key="param.key">
+            <template #label>
+              <div class="param-label-row">
+                <span class="param-label-text">{{ param.label }}</span>
+                <el-switch
+                  :model-value="param.isEnabled"
+                  @change="(isEnabled: string | number | boolean) => handleToggleParameter(param, isEnabled as boolean)"
+                  size="small"
+                />
+              </div>
+            </template>
+
+            <div v-if="param.isEnabled" class="mobile-param-control">
+              <el-slider
+                v-if="param.type === 'number'"
+                v-model="chatSettingsForm.modelParameters[param.key]"
+                :min="!Array.isArray(param.limit) ? (param.limit?.min ?? 0) : 0"
+                :max="!Array.isArray(param.limit) ? (param.limit?.max ?? 1) : 1"
+                :step="
+                  getSliderStep(
+                    !Array.isArray(param.limit) ? (param.limit?.min ?? 0) : 0,
+                    !Array.isArray(param.limit) ? (param.limit?.max ?? 1) : 1,
+                  )
+                "
+                show-input
+                input-size="small"
+              />
+              <el-input-number
+                v-else-if="param.type === 'integer'"
+                v-model="chatSettingsForm.modelParameters[param.key]"
+                :min="!Array.isArray(param.limit) ? param.limit?.min : undefined"
+                :max="!Array.isArray(param.limit) ? param.limit?.max : undefined"
+                controls-position="right"
+                style="width: 100%"
+              />
+              <el-select
+                v-else-if="param.type === 'string' && Array.isArray(param.limit)"
+                v-model="chatSettingsForm.modelParameters[param.key]"
+                style="width: 100%"
+              >
+                <el-option v-for="opt in param.limit" :key="opt" :label="opt" :value="opt" />
+              </el-select>
+              <el-switch
+                v-else-if="param.type === 'boolean'"
+                v-model="chatSettingsForm.modelParameters[param.key]"
+              />
+            </div>
+          </el-form-item>
+        </div>
       </el-form>
     </div>
 
@@ -148,7 +160,7 @@
         <el-button @click="emit('update:visible', false)" class="footer-btn">{{
           $t('common.action.cancel')
         }}</el-button>
-        <el-button type="primary" @click="handleSaveSettings" class="footer-btn">{{
+        <el-button type="primary" @click="handleSaveSettings" class="footer-btn save-btn">{{
           $t('common.action.save')
         }}</el-button>
       </div>
@@ -164,8 +176,9 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, watch, ref, computed } from 'vue'
+import { ref, reactive, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Close } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useSystemConfigStore } from '@/stores/systemConfigStore'
 import { useProviderStore } from '@/stores/providerStore'
@@ -379,18 +392,152 @@ function handleSaveSettings() {
 </script>
 
 <style scoped>
+.mobile-settings-drawer :deep(.el-drawer__header) {
+  margin-bottom: 0 !important;
+  padding: 8px 16px 4px 16px;
+}
+
+.mobile-settings-drawer :deep(.el-drawer__body) {
+  padding: 0 16px 20px 16px;
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.drawer-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.drawer-title::before {
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 20px;
+  background: var(--el-color-primary);
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.header-close-btn {
+  color: var(--el-text-color-secondary);
+  border: none;
+  background: var(--el-fill-color-light);
+  width: 32px;
+  height: 32px;
+}
+
 .drawer-content {
-  padding: 0 10px 40px 10px;
+  padding: 0 10px 28px 10px;
+}
+
+.form-section {
+  background: var(--color-background-soft);
+  border-radius: 14px;
+  padding: 16px 16px 4px 16px;
+  margin-bottom: 16px;
+  border: 1px solid var(--el-border-color-lighter);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+
+.form-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  margin-bottom: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.form-section-title::before {
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 16px;
+  background: var(--el-color-primary);
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.drawer-content :deep(.el-form-item__label) {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--el-text-color-primary);
+  margin-bottom: 4px;
+}
+
+.drawer-content :deep(.el-input__wrapper),
+.drawer-content :deep(.el-select .el-input__wrapper),
+.drawer-content :deep(.el-input-number .el-input__wrapper) {
+  border-radius: 10px;
+  background-color: var(--el-bg-color);
+  box-shadow: 0 0 0 1px var(--el-border-color-lighter) inset;
+}
+
+.drawer-content :deep(.el-textarea__inner) {
+  border-radius: 12px;
+  background-color: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
+  font-size: 14px;
+  line-height: 1.6;
+  padding: 14px;
+}
+
+.drawer-content :deep(.el-divider__text) {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
 }
 
 .drawer-footer {
-  display: flex;
-  gap: 15px;
-  padding-bottom: env(safe-area-inset-bottom);
+  padding: 0;
+}
+
+.footer-divider {
+  height: 1px;
+  background: var(--el-border-color-lighter);
+  margin: 0 -20px 8px -20px;
+}
+
+.footer-buttons {
+  display: inline-flex;
+  justify-content: center;
+  gap: 12px;
+  padding: 0 16px;
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
 }
 
 .footer-btn {
-  flex: 1;
+  flex: 0 0 auto;
+  width: auto;
+  height: 40px;
+  padding: 0 32px;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.cancel-btn {
+  background: var(--el-fill-color-light);
+  border: none;
+  color: var(--el-text-color-regular);
+}
+
+.save-btn {
+  background: linear-gradient(135deg, var(--el-color-primary), var(--el-color-primary-light-3)) !important;
+  border: none !important;
+  color: #fff !important;
+  box-shadow: 0 4px 14px rgba(64, 158, 255, 0.35);
 }
 
 .param-label-row {
@@ -406,6 +553,7 @@ function handleSaveSettings() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 500;
 }
 
 .form-item-label-with-action {
@@ -416,10 +564,16 @@ function handleSaveSettings() {
 }
 
 .mounted-resources-wrapper {
-  margin-top: 8px;
-  background-color: var(--color-background-soft);
-  padding: 8px;
-  border-radius: 4px;
+  margin-top: 10px;
+  background-color: var(--el-bg-color);
+  padding: 10px 12px;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px var(--el-border-color-lighter) inset;
+}
+
+.mounted-resources-wrapper :deep(.el-tag) {
+  border-radius: 8px;
+  font-weight: 500;
 }
 
 .mobile-param-control {
@@ -433,9 +587,46 @@ function handleSaveSettings() {
 
 .mobile-param-control :deep(.el-slider__runway) {
   margin-right: 12px;
+  height: 6px;
+  border-radius: 3px;
+}
+
+.mobile-param-control :deep(.el-slider__bar) {
+  height: 6px;
+  border-radius: 3px;
+}
+
+.mobile-param-control :deep(.el-slider__button) {
+  width: 20px;
+  height: 20px;
 }
 
 .mobile-param-control > .el-input-number {
   width: 100%;
+}
+
+.drawer-content :deep(.el-switch) {
+  --el-switch-on-color: var(--el-color-primary);
+}
+
+.drawer-content :deep(.el-input-number) {
+  width: 100%;
+}
+</style>
+
+<style>
+.mobile-settings-drawer .el-drawer__header {
+  margin-bottom: 0 !important;
+  padding: 14px 16px 10px 16px !important;
+}
+.mobile-settings-drawer .el-drawer__body {
+  padding-top: 0 !important;
+}
+.mobile-settings-drawer .el-drawer__footer {
+  padding: 5px 0 5px 0 !important;
+  text-align: center !important;
+}
+.rs-overlay {
+  z-index: 2100 !important;
 }
 </style>

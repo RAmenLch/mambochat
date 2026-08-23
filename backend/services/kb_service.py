@@ -4,14 +4,12 @@ import asyncio
 import json
 import logging
 import re
-import jieba
 from abc import ABC, abstractmethod
-from typing import List, Tuple, Optional, Set, Dict
+from typing import List, Tuple, Optional, Set, Dict, Any
 from collections import defaultdict
 from io import BytesIO
 
 from fastapi import HTTPException
-from langchain_openai import OpenAIEmbeddings
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
 
@@ -423,10 +421,11 @@ class KnowledgeBaseService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def _get_embedding_client(self, model_id: str) -> Tuple[OpenAIEmbeddings, int]:
+    async def _get_embedding_client(self, model_id: str) -> Tuple[Any, int]:
         """
         根据 model_id 获取配置好的 LangChain Embedding 客户端和维度。
         """
+        from langchain_openai import OpenAIEmbeddings
         model = await provider_crud.get_model(self.db, model_id)
         if not model or not model.provider:
             raise ValueError(f"Model {model_id} not found or provider missing.")
@@ -784,6 +783,7 @@ class KnowledgeBaseService:
         """
         核心任务循环：处理切分、嵌入、存储(向量+FTS)、状态更新和取消。
         """
+        import jieba
         KnowledgeBaseService._running_tasks.add(resource_id)
 
         total_count = 0
@@ -1111,6 +1111,7 @@ class KnowledgeBaseService:
         # Keyword Path (BM25)
         async def _keyword_search():
             try:
+                import jieba
                 # 使用 jieba 对 Query 分词，并用 OR 连接以提高召回
                 keywords = list(jieba.cut(request.query_text))
                 if not keywords:

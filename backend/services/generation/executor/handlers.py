@@ -24,7 +24,7 @@ from backend.crud import checkpoint_map_crud
 async def handle_create_sub_message(
     instruction: CreateSubMessage, chat_id: str, assistant_message_id: str, db: AsyncSession
 ) -> None:
-    config_data = schemas.message.SubMessageConfig(**(instruction.config or {}))
+    config_data = instruction.config if instruction.config is not None else schemas.message.SubMessageConfig()
     sub_message_create_schema = schemas.message.SubMessageCreate(
         id=instruction.sub_message_id,
         content=instruction.initial_content,
@@ -42,6 +42,15 @@ async def handle_create_sub_message(
     )
 
     stream_data = schemas.message.SubMessage.model_validate(db_sub_message).model_dump(mode='json')
+
+    # 对于 File 类型的子消息，主动填充 file_info，以便前端在 SSE 流中立即加载图片
+    if instruction.type == 'File' and db_sub_message.content:
+        file_service = FileService(db)
+        file_record = await file_service.get_file(db_sub_message.content)
+        if file_record:
+            file_schema = file_service.convert_to_schema(file_record)
+            stream_data['file_info'] = file_schema.model_dump(mode='json')
+
     await stream_manager.publish(
         assistant_message_id,
         {"type": "create", "sub_message": stream_data}
@@ -108,7 +117,7 @@ async def handle_update_sub_message_config(
             except (json.JSONDecodeError, TypeError):
                 current_config = {}
 
-        merged_config = {**current_config, **instruction.config}
+        merged_config = {**current_config, **instruction.config.model_dump(exclude_none=True)}
         config_obj = schemas.message.SubMessageConfig.model_validate(merged_config)
         update_schema = schemas.message.SubMessageUpdate(config=config_obj)
 
@@ -174,6 +183,8 @@ async def handle_update_zip_history(
     }
     if instruction.target_sub_msg_id:
         config_kwargs["target_sub_msg_id"] = instruction.target_sub_msg_id
+    if instruction.auto:
+        config_kwargs["auto_summary"] = True
 
     updated_sub_message = None
     if existing:

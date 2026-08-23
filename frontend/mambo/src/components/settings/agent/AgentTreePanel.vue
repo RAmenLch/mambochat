@@ -22,6 +22,7 @@
               <el-dropdown-menu>
                 <el-dropdown-item command="newAgent"><el-icon><User /></el-icon>{{ $t('agent.tree.newAgent') }}</el-dropdown-item>
                 <el-dropdown-item command="newFolder"><el-icon><FolderAdd /></el-icon>{{ $t('agent.tree.newFolder') }}</el-dropdown-item>
+                <el-dropdown-item command="importAgent" divided><el-icon><Upload /></el-icon>{{ $t('agentPackage.import') }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -44,7 +45,7 @@
       </template>
     </ExplorerTree>
 
-    <el-dropdown ref="contextMenuRef" trigger="contextmenu" @command="handleMenuCommand" popper-class="no-animation-popper">
+    <el-dropdown ref="contextMenuRef" trigger="contextmenu" @command="handleContextMenuCommand" popper-class="no-animation-popper">
       <span :style="contextMenuPosition" />
       <template #dropdown>
         <el-dropdown-menu>
@@ -54,8 +55,17 @@
           <el-dropdown-item v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'" command="newFolder">
             <el-icon><FolderAdd /></el-icon>{{ $t('agent.tree.newFolder') }}
           </el-dropdown-item>
+          <el-dropdown-item v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'" command="importAgent" divided>
+            <el-icon><Upload /></el-icon>{{ $t('agentPackage.import') }}
+          </el-dropdown-item>
           <template v-if="contextMenuItem">
-            <el-dropdown-item command="rename" :divided="contextMenuItem.itemType === 'folder'">
+            <el-dropdown-item v-if="contextMenuItem.itemType === 'agent'" command="export" divided>
+              <el-icon><Download /></el-icon>{{ $t('agentPackage.export') }}
+            </el-dropdown-item>
+            <el-dropdown-item v-if="contextMenuItem.itemType === 'agent'" command="duplicate">
+              <el-icon><DocumentCopy /></el-icon>{{ $t('agent.tree.duplicate') }}
+            </el-dropdown-item>
+            <el-dropdown-item command="rename" divided>
               <el-icon><EditPen /></el-icon>{{ $t('agent.tree.rename') }}
             </el-dropdown-item>
             <el-dropdown-item command="delete" class="delete-item">
@@ -74,22 +84,28 @@
       :select-config="dialogProps.selectConfig"
       @confirm="onDialogConfirm"
     />
+
+    <!-- Agent 导出包导入对话框 -->
+    <AgentPackageImportDialog v-model="importDialogVisible" @imported="handleImported" />
   </el-aside>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, watch, nextTick } from 'vue';
+import { computed, onMounted, watch, nextTick, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { useI18n } from 'vue-i18n';
-import { Plus, User, Folder, FolderAdd, EditPen, Delete } from '@element-plus/icons-vue';
+import { Plus, User, Folder, FolderAdd, EditPen, Delete, DocumentCopy, Upload, Download } from '@element-plus/icons-vue';
+import { ElMessage } from 'element-plus';
 import { resolveFileUrl } from '@/services/electronUrl';
 import { useAgentStore } from '@/stores/agentStore';
 import { getAgent, getAgentChildren } from '@/api/agentService';
+import { downloadAgentPackage } from '@/api/agentPackageService';
 import { buildChatTree } from '@/utils/treeHelper';
 import { useTreeController, type DialogPayload, type DialogConfirmPayload } from '@/composables/useTreeController';
 import ExplorerTree from '@/components/common/ExplorerTree.vue';
 import EntityFormDialog from '@/components/common/EntityFormDialog.vue';
+import AgentPackageImportDialog from './AgentPackageImportDialog.vue';
 import type { Agent, AgentCreate, AgentUpdate, BaseTreeItem } from '@/api/types';
 
 const { t } = useI18n();
@@ -122,11 +138,11 @@ const {
         initialName: t('agent.tree.newAgent'),
         selectConfig: {
           label: t('agent.type'),
-          options: [
-            { label: 'ReAct Agent', value: 'ReActAgent' },
-            { label: 'Deep Agent', value: 'DeepAgent' }
+            options: [
+            { label: 'Mambo Agent', value: 'Mambo' },
+            { label: 'ReAct Agent', value: 'ReActAgent' }
           ],
-          initialValue: 'ReActAgent'
+          initialValue: 'Mambo'
         }
       };
     }
@@ -146,7 +162,7 @@ const {
       name: formPayload.name,
       itemType: isFolder ? 'folder' : 'agent',
       parentId: payload.parentId || null,
-      AgentType: isFolder ? undefined : ((formPayload.selectValue as any) || 'ReActAgent'),
+      AgentType: isFolder ? undefined : ((formPayload.selectValue as any) || 'Mambo'),
       backendIds: []
     });
 
@@ -155,7 +171,55 @@ const {
   }
 });
 
-const handleHeaderCommand = (command: string) => handleMenuCommand(command);
+const handleHeaderCommand = (command: string) => {
+  if (command === 'importAgent') {
+    importDialogVisible.value = true;
+    return;
+  }
+  handleMenuCommand(command);
+};
+
+// 导入对话框可见性
+const importDialogVisible = ref(false);
+
+// 导入成功：跳转到新导入的主 Agent（树/资源列表已在对话框内刷新）
+const handleImported = (mainAgentId: string | null) => {
+  if (mainAgentId) {
+    agentStore.selectAgent(mainAgentId);
+    router.replace({
+      query: { ...route.query, tab: 'agentManager', agentId: mainAgentId },
+    });
+  }
+};
+
+// 包装 handleMenuCommand，拦截「导入」「复制副本」「导出」命令直接执行
+const originalHandleMenuCommand = handleMenuCommand;
+const handleContextMenuCommand = async (command: string) => {
+  if (command === 'importAgent') {
+    importDialogVisible.value = true;
+    return;
+  }
+  if (command === 'duplicate' && contextMenuItem.value) {
+    try {
+      await agentStore.duplicateAgentItem(contextMenuItem.value.id);
+      ElMessage.success(t('agent.tree.duplicateSuccess'));
+    } catch (error) {
+      ElMessage.error(t('agent.tree.duplicateFailed'));
+    }
+    return;
+  }
+  if (command === 'export' && contextMenuItem.value) {
+    const target = contextMenuItem.value as unknown as Agent;
+    try {
+      await downloadAgentPackage(target.id, target.name);
+      ElMessage.success(t('agentPackage.exportSuccess'));
+    } catch (error) {
+      ElMessage.error(t('agentPackage.exportFailed'));
+    }
+    return;
+  }
+  await originalHandleMenuCommand(command);
+};
 
 const handleNodeClick = (data: BaseTreeItem) => {
   if (data.itemType === 'agent') {

@@ -1,7 +1,7 @@
 // frontend/mambo/src/stores/backendStore.ts
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import { getBackends, createBackend, updateBackend, deleteBackend, getSshPublicKey, testSshConnection } from '@/api/backendService';
+import { getBackends, getBackend, createBackend, updateBackend, deleteBackend, getSshPublicKey, testSshConnection, duplicateBackend } from '@/api/backendService';
 import type { BackendConfig, BackendCreate, BackendUpdate, SshTestRequest } from '@/api/types/backendTypes';
 
 export const useBackendStore = defineStore('backend', () => {
@@ -56,6 +56,29 @@ export const useBackendStore = defineStore('backend', () => {
     return await testSshConnection(data);
   }
 
+  // [新增] 按 ID 回源兜底：缓存未命中时从后端拉取单个 Backend 并合并进缓存，
+  // 避免懒加载缓存过期导致导入的 Agent 引用新 Backend 时显示"未知 Backend"
+  async function ensureBackend(id: string) {
+    const existing = backendList.value.find(b => b.id === id);
+    if (existing) return existing;
+    try {
+      const backend = await getBackend(id);
+      if (!backendList.value.find(b => b.id === id)) {
+        backendList.value.push(backend);
+      }
+      return backend;
+    } catch {
+      return null;
+    }
+  }
+
+  // [新增] 复制 Backend 副本
+  async function duplicateBackendItem(backendId: string) {
+    const newBackend = await duplicateBackend(backendId);
+    backendList.value.push(newBackend);
+    return newBackend;
+  }
+
   return {
     backendList,
     isLoading,
@@ -65,6 +88,8 @@ export const useBackendStore = defineStore('backend', () => {
     createNewBackend,
     updateExistingBackend,
     removeBackend,
-    testConnection // [新增]
+    testConnection, // [新增]
+    ensureBackend, // [新增]
+    duplicateBackendItem // [新增]
   };
 });

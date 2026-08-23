@@ -17,7 +17,6 @@ import {
 } from '@/api/chatService'
 import { subscribeToMessageStream } from '@/services/sseService';
 import { useChatSessionStore } from './chatSessionStore';
-import { useChatListStore } from './chatListStore';
 import type {
   Message,
   SubMessage,
@@ -34,7 +33,6 @@ import type {
  */
 export const useChatInteractionStore = defineStore('chatInteraction', () => {
   const sessionStore = useChatSessionStore();
-  const listStore = useChatListStore();
 
   /**
    * 订阅指定助手消息的SSE流。
@@ -63,17 +61,6 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
           if (!hasPendingReview) {
             await batchUpdateSubMessagesMinimalState(assistantMessageId, true);
           }
-        }
-        if (
-          sessionStore.currentChat &&
-            (
-                sessionStore.currentChat.name === '新的会话' ||
-                sessionStore.currentChat.name === 'New Chat'
-            )
-            &&
-          sessionStore.currentChatMessages.length === 2
-        ) {
-          listStore.refreshChatTitle(chatId);
         }
       } catch (err) {
         console.error("Failed to fetch final message state, performing a full refresh:", err);
@@ -126,8 +113,9 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
   /**
    * 从指定消息开始重新生成对话。
    * @param messageId - 作为重新生成起点的消息ID。
+   * @param versionRollback - 可选，版本回滚配置。
    */
-  async function regenerateFrom(messageId: string) {
+  async function regenerateFrom(messageId: string, versionRollback?: { files: string[] }) {
     const chatId = sessionStore.currentChatId;
     if (!chatId || sessionStore.isGenerating) return;
 
@@ -139,7 +127,7 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     sessionStore._spliceMessages(sliceIndex);
 
     try {
-      const assistantPlaceholder = await prepareRegenerate(chatId, messageId);
+      const assistantPlaceholder = await prepareRegenerate(chatId, messageId, versionRollback);
       sessionStore._addMessage(assistantPlaceholder);
       if (assistantPlaceholder.status === 'generating') {
         _subscribeToMessageStream(assistantPlaceholder);
@@ -450,6 +438,32 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
   }
 
   /**
+   * 切换单个 Reasoning 子消息的最小化状态
+   * @param messageId - 所属消息ID
+   * @param subMessageId - 子消息ID
+   * @param isMinimal - 是否最小化
+   */
+  async function updateSingleSubMessageMinimalState(messageId: string, subMessageId: string, isMinimal: boolean) {
+    const message = sessionStore.currentChatMessages.find(m => m.id === messageId);
+    if (!message) return;
+
+    const subMessage = message.sub_messages.find(sm => sm.id === subMessageId);
+    if (!subMessage || subMessage.type !== 'Reasoning') return;
+    if (subMessage.config.is_minimal === isMinimal) return;
+
+    subMessage.config = { ...subMessage.config, is_minimal: isMinimal };
+
+    try {
+      await updateSubMessageAPI(subMessageId, { config: { ...subMessage.config, is_minimal: isMinimal } });
+    } catch (error) {
+      console.error(`Failed to update minimal state for subMessage ${subMessageId}:`, error);
+      if (sessionStore.currentChatId) {
+        await sessionStore.selectChat(sessionStore.currentChatId, true);
+      }
+    }
+  }
+
+  /**
    * 激活指定消息分支
    * @param messageId - 目标消息ID
    */
@@ -501,6 +515,7 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     updateZipHistorySubMessage,
     _subscribeToMessageStream,
     batchUpdateSubMessagesMinimalState,
+    updateSingleSubMessageMinimalState,
     submitToolReview,
     submitAskUserAnswer,
     activateBranch,

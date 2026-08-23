@@ -37,4 +37,12 @@ export default {
     updateSuccess: 'Provider and models updated successfully!',
     createSuccess: 'Provider added successfully!',
   },
+  test: {
+    success: 'Connection successful',
+    invalidJson: 'Connection failed: the server did not return valid JSON. Please make sure the API Host is the base API address (e.g. https://api.openai.com/v1), not a webpage URL.',
+    httpError: 'Connection failed: the server returned an error status code. Please check the API Key and API Host.',
+    proxyError: 'Proxy server error. Please check the proxy address and port, and make sure the proxy service is running.',
+    requestError: 'Connection failed: unable to access the API Host. Please check the network connection or the address spelling.',
+    unknown: 'An unknown error occurred',
+  },
 }

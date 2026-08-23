@@ -1,4 +1,9 @@
 # backend/services/generation/builders/initializers/deep_agent_initializer.py
+#
+# 【DEPRECATED - 已弃用，不再维护】
+# 本文件为 DeepAgent（deepagents 库）专用初始化器。
+# DeepAgent 已被淘汰，前端已无创建入口，本文件仅保留用于兼容存量数据。
+# 新功能请基于 Mambo Agent（MamboAgentInitializer）实现。
 
 import asyncio
 import json
@@ -21,10 +26,14 @@ from backend.services.generation.tools.suggest_tool_provider import SuggestToolP
 from backend.services.generation.tools.ask_user_tool_provider import AskUserToolProvider
 from backend.services.generation.tools.kb_tool_provider import KBToolProvider
 from backend.services.generation.tools.deep_builtin_tool_provider import DeepAgentBuiltinToolProvider
+from backend.services.generation.tools.web_search_tool_provider import WebSearchToolProvider
+from backend.schemas.enums import WebSearchMode
 from backend.services.file_service import FileService
 
 
 class DeepAgentInitializer(AbstractAgentInitializer):
+    """【DEPRECATED - 已弃用，不再维护】DeepAgent 初始化器。请使用 MamboAgentInitializer 替代。"""
+
     def __init__(
             self,
             db: AsyncSession,
@@ -32,7 +41,9 @@ class DeepAgentInitializer(AbstractAgentInitializer):
             resume_payload: Optional[Dict[str, Any]] = None,
             enable_tools: bool = False,
             enable_resource_merge: bool = False,
-            external_tools: Optional[List[BaseTool]] = None
+            external_tools: Optional[List[BaseTool]] = None,
+            web_search_mode: Optional[WebSearchMode] = None,
+            web_search_proxy_url: Optional[str] = None,
     ):
         self.db = db
         self.agent = agent
@@ -40,6 +51,8 @@ class DeepAgentInitializer(AbstractAgentInitializer):
         self.enable_tools = enable_tools
         self.enable_resource_merge = enable_resource_merge
         self.external_tools = external_tools or []
+        self.web_search_mode = web_search_mode
+        self.web_search_proxy_url = web_search_proxy_url
 
         self.providers: List[BaseToolProvider] = []
         self.hitl_interrupt_on: Dict[str, bool] = {}
@@ -83,6 +96,10 @@ class DeepAgentInitializer(AbstractAgentInitializer):
                 for tool in mcp_tools:
                     if tool.review_mode == ToolReviewMode.REQUIRE_REVIEW.value:
                         self.hitl_interrupt_on[tool.name] = True
+
+            # WebSearch 内置搜索工具
+            if self.web_search_mode is not None:
+                self.providers.append(WebSearchToolProvider(self.web_search_mode, proxy_url=self.web_search_proxy_url))
 
             enable_suggest = params.get("enable_suggest", False)
             if enable_suggest:
@@ -149,7 +166,9 @@ class DeepAgentInitializer(AbstractAgentInitializer):
                         resume_payload=self.resume_payload,
                         enable_tools=self.enable_tools,
                         enable_resource_merge=self.enable_resource_merge,
-                        external_tools=self.external_tools
+                        external_tools=self.external_tools,
+                        web_search_mode=self.web_search_mode,
+                        web_search_proxy_url=self.web_search_proxy_url,
                     )
                 else:
                     sub_init = AgentBasedReActInitializer(
@@ -158,7 +177,9 @@ class DeepAgentInitializer(AbstractAgentInitializer):
                         resume_payload=self.resume_payload,
                         enable_tools=self.enable_tools,
                         enable_resource_merge=self.enable_resource_merge,
-                        external_tools=self.external_tools
+                        external_tools=self.external_tools,
+                        web_search_mode=self.web_search_mode,
+                        web_search_proxy_url=self.web_search_proxy_url,
                     )
 
                 sub_config, _ = await sub_init.initialize()
@@ -171,10 +192,12 @@ class DeepAgentInitializer(AbstractAgentInitializer):
                             proxy_url = global_proxy_url
 
                         api_params = map_model_parameters(sub.parsed_model_parameters)
+                        api_params["_worker_type"] = sub_model.provider.worker_type
 
                         sub_model_max_retries = 0
                         sub_model_timeout = None
                         sub_model_stream_chunk_timeout = None
+                        sub_model_context_length = None
                         if sub_model.meta_config:
                             try:
                                 meta = json.loads(sub_model.meta_config) if isinstance(sub_model.meta_config, str) else sub_model.meta_config
@@ -184,6 +207,9 @@ class DeepAgentInitializer(AbstractAgentInitializer):
                                 raw_stream_chunk_timeout = meta.get("stream_chunk_timeout")
                                 if raw_stream_chunk_timeout is not None:
                                     sub_model_stream_chunk_timeout = float(raw_stream_chunk_timeout)
+                                raw_context_length = meta.get("context_length")
+                                if raw_context_length is not None:
+                                    sub_model_context_length = int(raw_context_length)
                             except (json.JSONDecodeError, ValueError, TypeError):
                                 pass
                         sub_max_retries = sub_model_max_retries if sub_model_max_retries > 0 else global_max_retries
@@ -197,7 +223,8 @@ class DeepAgentInitializer(AbstractAgentInitializer):
                             parameters=api_params,
                             max_retries=sub_max_retries,
                             timeout=sub_timeout,
-                            stream_chunk_timeout=sub_model_stream_chunk_timeout
+                            stream_chunk_timeout=sub_model_stream_chunk_timeout,
+                            context_length=sub_model_context_length,
                         )
 
                 sub_configs.append(sub_config)
@@ -207,11 +234,14 @@ class DeepAgentInitializer(AbstractAgentInitializer):
         additional_system_prompt = "\n\n".join(extended_prompts) if extended_prompts else ""
         final_system_prompt = f"{base_prompt}\n\n{additional_system_prompt}".strip() if additional_system_prompt else base_prompt
 
-        # HITL: check if default backend requires execute review
-        if self.agent.defaultBackendId and self.agent.backendIds:
+        # HITL: check if the effective default backend requires execute review.
+        # When defaultBackendId is not explicitly set, the builder falls back to
+        # the first backend in backendIds — so we must do the same here.
+        if self.agent.backendIds:
+            effective_default_id: str = self.agent.defaultBackendId or self.agent.backendIds[0]
             backends_db_for_hitl = await backend_crud.get_backends_by_ids(self.db, self.agent.backendIds)
             for b in backends_db_for_hitl:
-                if b.id == self.agent.defaultBackendId and b.tools_config:
+                if b.id == effective_default_id and b.tools_config:
                     exec_cfg = b.tools_config.get("execute", {})
                     if exec_cfg.get("enabled") and exec_cfg.get("require_review"):
                         self.hitl_interrupt_on["execute"] = True

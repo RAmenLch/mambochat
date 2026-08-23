@@ -7,7 +7,7 @@
     @mouseenter="showActions = true"
     @mouseleave="showActions = false"
   >
-    <div class="message-avatar">
+    <div class="message-avatar" v-if="!hideAvatar">
       <el-avatar :src="avatarUrl || ''">
         <el-icon v-if="message.role === 'user'"><User /></el-icon>
         <el-icon v-else><Cpu /></el-icon>
@@ -47,6 +47,7 @@
           :is-generating="message.status === 'generating'"
           :current-message-rank="currentMessageRank"
           @edit="handleEditRequest"
+          @edit-file="handleFileEdit"
           @copy="handleCopySingle"
           @open-tool-dialog="(toolId) => $emit('open-tool-dialog', message, toolId, 'single')"
         />
@@ -92,6 +93,7 @@
         :is-single-view-collapsed="isSingleViewCollapsed"
         :first-sub-message="firstSubMessage"
         :usage-sub-message="usageSubMessage"
+        :max-context-tokens="modelMaxContextTokens"
         @regenerate="handleRegenerate"
         @toggle-collapse="toggleSingleViewCollapse"
         @edit-request="handleEditRequest"
@@ -123,6 +125,7 @@ import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useAgentStore } from '@/stores/agentStore'
+import { useProviderStore } from '@/stores/providerStore'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { User, Cpu, Loading, CircleCheck, Clock } from '@element-plus/icons-vue'
 import { copyToClipboard } from '@/utils/clipboard'
@@ -147,6 +150,7 @@ const props = defineProps<{
   id: string
   message: Message
   isLastMessage: boolean
+  hideAvatar?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -162,6 +166,7 @@ const interactionStore = useChatInteractionStore()
 const sessionStore = useChatSessionStore()
 const settingsStore = useSettingsStore()
 const agentStore = useAgentStore()
+const providerStore = useProviderStore()
 const { globalSettings } = storeToRefs(settingsStore)
 const { messageRecencyRanks } = storeToRefs(sessionStore)
 
@@ -186,6 +191,15 @@ const usageSubMessage = computed(() => {
   const usageMessages = props.message.sub_messages.filter((sm) => sm.type === 'Usage');
   if (usageMessages.length === 0) return undefined;
   return usageMessages.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+});
+
+/** 当前会话所用模型的 context_length（token 数），> 0 时启用环形图 */
+const modelMaxContextTokens = computed<number | undefined>(() => {
+  const modelId = sessionStore.currentChat?.aiModelId;
+  if (!modelId) return undefined;
+  const model = providerStore.allModels.find(m => m.id === modelId);
+  if (!model?.meta_config?.context_length) return undefined;
+  return model.meta_config.context_length;
 });
 const zipHistorySubMessage = computed(() => props.message.sub_messages.find((sm) => sm.type === 'ZipHistory'))
 const suggestSubMessage = computed(() => props.message.sub_messages.find((sm) => sm.type === 'Suggest'))
@@ -240,6 +254,16 @@ const avatarUrl = computed(() => {
     return resolveFileUrl(globalSettings.value.user_avatar_url)
   }
   if (props.message.role === 'assistant') {
+    // Mini_Avatar 模式：优先使用 show 工具设置的图片作为头像
+    const miniAvatarSub = props.message.sub_messages.find(
+      sm => sm.type === 'File' &&
+        sm.config?.show_tool_mode === 'Mini_Avatar' &&
+        sm.file_info?.mime_type?.startsWith('image/')
+    )
+    if (miniAvatarSub?.file_info?.url) {
+      return miniAvatarSub.file_info.url
+    }
+
     const currentChat = sessionStore.currentChat
     if (currentChat?.chatMode === 'agent' && currentChat.agentId) {
       const agent = agentStore.allAgents.find(a => a.id === currentChat.agentId)

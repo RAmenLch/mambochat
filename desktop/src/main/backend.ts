@@ -11,7 +11,7 @@
 import { spawn, ChildProcess, execSync } from 'child_process'
 import { createServer, createConnection } from 'net'
 import { app, BrowserWindow } from 'electron'
-import { join, isAbsolute } from 'path'
+import { join, isAbsolute, delimiter } from 'path'
 import type { AppConfig } from './config'
 import { getDataDirectory } from './paths'
 import { ensureRuntimeExtracted } from './runtime-extract'
@@ -343,8 +343,15 @@ export class BackendProcessManager {
    * Build environment variables for the backend process.
    */
   private buildEnvironment(appDir: string): Record<string, string> {
+    // Prepend the runtime Scripts dir to PATH so the backend process
+    // (execute tool) can resolve the `mambo` CLI without user PATH config.
+    const scriptsDir = join(appDir, 'runtime', 'python', 'Scripts')
+    const existingPath = process.env.PATH || ''
+    const pathValue = existingPath ? `${scriptsDir}${delimiter}${existingPath}` : scriptsDir
+
     return {
       PYTHONPATH: appDir,
+      PATH: pathValue,
       TZ: 'Asia/Shanghai',
       PYTHONIOENCODING: 'utf-8',
       // 桌面端使用 DEBUG 级别，方便查看 embedding 等详细日志

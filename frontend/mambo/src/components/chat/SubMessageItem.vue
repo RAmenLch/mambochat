@@ -6,18 +6,21 @@
     class="sub-message-item"
     :class="{
       'is-user': parentMessage.role === 'user',
-      'is-file': subMessage.type === 'File',
+      'is-file': subMessage.type === 'File' && !(isEditableFile && !isImageFile),
       'is-inactive': isInactive,
-      'is-inline': isInline
+      'is-inline': isInline,
+      'show-mode-mini-avatar': showToolMode === 'Mini_Avatar',
+      'show-mode-gal-avatar': showToolMode === 'Gal_Avatar',
+      'show-mode-group': showToolMode === 'Group',
     }"
   >
-    <div v-if="subMessage.type === 'File' && subMessage.file_info" class="file-display-container">
+    <div v-if="subMessage.type === 'File' && subMessage.file_info && showToolMode !== 'Mini_Avatar' && showToolMode !== 'Gal_Avatar'" class="file-display-container">
       <el-image
         v-if="subMessage.file_info.mime_type.startsWith('image/')"
         :src="subMessage.file_info.url"
-        :preview-src-list="[subMessage.file_info.url]"
-        :initial-index="0"
-        fit="cover"
+        :preview-src-list="previewSrcList"
+        :initial-index="previewIndex"
+        fit="contain"
         class="file-image-thumbnail"
         hide-on-click-modal
       >
@@ -28,6 +31,118 @@
           </div>
         </template>
       </el-image>
+
+      <audio
+        v-else-if="subMessage.file_info.mime_type.startsWith('audio/')"
+        :src="subMessage.file_info.url"
+        controls
+        preload="metadata"
+        class="file-audio-player"
+      ></audio>
+
+      <video
+        v-else-if="subMessage.file_info.mime_type.startsWith('video/')"
+        :src="subMessage.file_info.url"
+        controls
+        preload="metadata"
+        class="file-video-player"
+      ></video>
+
+      <div v-else-if="isEditableFile && !isImageFile" class="editable-file-view">
+        <div class="file-content-header">
+          <div class="file-content-header-left">
+            <el-icon :size="16"><component :is="fileIcon" /></el-icon>
+            <span class="file-content-filename" :title="subMessage.file_info.filename">
+              {{ subMessage.file_info.filename }}
+            </span>
+            <el-tag v-if="!isMarkdownFile" size="small" class="file-content-language-tag">
+              {{ fileLanguage }}
+            </el-tag>
+          </div>
+          <div class="file-content-header-actions">
+            <el-tooltip
+              :content="isFileContentCollapsed ? t('common.action.expand') : t('common.action.collapse')"
+              placement="top"
+              :show-after="500"
+            >
+              <el-button
+                :icon="isFileContentCollapsed ? ArrowDownBold : ArrowUpBold"
+                circle
+                text
+                size="small"
+                @click="isFileContentCollapsed = !isFileContentCollapsed"
+              />
+            </el-tooltip>
+            <el-tooltip
+              :content="isFileCodeWrapEnabled ? t('chat.codeBlock.noWrap') : t('chat.codeBlock.wrap')"
+              placement="top"
+              :show-after="500"
+            >
+              <el-button
+                :icon="Sort"
+                circle
+                text
+                size="small"
+                :class="{ 'wrap-active': isFileCodeWrapEnabled }"
+                @click="isFileCodeWrapEnabled = !isFileCodeWrapEnabled"
+              />
+            </el-tooltip>
+            <el-tooltip :content="t('common.action.edit')" placement="top" :show-after="500">
+              <el-button :icon="Edit" circle text size="small" @click="handleFileEdit" />
+            </el-tooltip>
+            <el-tooltip :content="t('common.action.copy')" placement="top" :show-after="500">
+              <el-button :icon="CopyDocument" circle text size="small" @click="handleCopyFileContent" />
+            </el-tooltip>
+            <a :href="subMessage.file_info.url" download class="file-content-download-link">
+              <el-button :icon="Download" circle text size="small" />
+            </a>
+          </div>
+        </div>
+
+        <div v-if="fileContentLoading" class="file-content-loading">
+          <el-icon class="is-loading"><Loading /></el-icon>
+          <span>{{ t('common.status.loading') }}</span>
+        </div>
+        <div v-else-if="fileContentError" class="file-content-error">
+          <span>{{ t('chat.attachment.fileLoadFailed') }}</span>
+        </div>
+
+        <div v-else-if="isMarkdownFile" class="message-content file-message-content" :class="{ collapsed: isFileContentCollapsed }">
+          <div v-for="(block, idx) in fileContentBlocks" :key="idx" class="content-block">
+            <CodeBlock
+              v-if="block.type === 'code'"
+              :code="block.content"
+              :language="block.language || 'Text'"
+              :is-generating="false"
+              :range="block.range"
+              :markup="block.markup"
+              :closed="block.closed !== false"
+              @edit="handleCodeBlockEdit"
+              @copy="handleBlockCopy"
+            />
+            <img
+              v-else-if="block.type === 'base64_image'"
+              :src="block.content"
+              :alt="block.alt"
+              class="rendered-image"
+            />
+            <div v-else class="markdown-content" v-html="block.content"></div>
+          </div>
+        </div>
+
+        <div v-else class="file-code-wrapper" :class="{ collapsed: isFileContentCollapsed, 'wrap-enabled': isFileCodeWrapEnabled }">
+          <CodeBlock
+            :code="fileContent || ''"
+            :language="fileLanguage"
+            :is-generating="false"
+            :range="{ start: 0, end: (fileContent || '').length }"
+            :closed="true"
+            :show-header="false"
+            @edit="handleFileEditFromCodeBlock"
+            @copy="handleBlockCopy"
+          />
+        </div>
+      </div>
 
       <div v-else class="file-card">
         <div class="file-card-icon">
@@ -53,6 +168,22 @@
         <a :href="subMessage.file_info.url" download class="file-card-download">
           <el-button :icon="Download" circle />
         </a>
+      </div>
+    </div>
+
+    <div v-else-if="isPendingFile && showToolMode !== 'Mini_Avatar' && showToolMode !== 'Gal_Avatar'" class="file-pending-container">
+      <div class="file-pending-card">
+        <div class="file-pending-icon">
+          <el-icon :size="28" class="is-loading"><Loading /></el-icon>
+        </div>
+        <div class="file-pending-info">
+          <div class="file-pending-name">
+            {{ pendingFileName }}
+          </div>
+          <div class="file-pending-status">
+            {{ pendingStatusText }}
+          </div>
+        </div>
       </div>
     </div>
 
@@ -212,6 +343,10 @@ import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SubMessage, Message, SubMessageConfig, McpToolContent, FileResponse } from '@/api/types'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
+import { useChatSessionStore } from '@/stores/chatSessionStore'
+import { usePendingFileStore } from '@/stores/pendingFileStore'
+import { getFileContent } from '@/api/fileService'
+import { unpackMcpToolCall } from '@/utils/mcpToolUnpack'
 import { ElMessage } from 'element-plus'
 import {
   Edit,
@@ -226,6 +361,7 @@ import {
   CircleCheck,
   Top,
   Document,
+  Sort,
 } from '@element-plus/icons-vue'
 import CodeBlock from './CodeBlock.vue'
 import { copyToClipboard } from '@/utils/clipboard'
@@ -244,6 +380,10 @@ const props = withDefaults(
     isMinimizeDisabled?: boolean
     isInactive?: boolean
     isInline?: boolean
+    /** 预览图片列表，用于 el-image 的 preview-src-list（聚合同组所有图片 URL 以支持键盘导航） */
+    previewSrcList?: string[]
+    /** 当前图片在 previewSrcList 中的索引 */
+    previewIndex?: number
   }>(),
   {
     id: '',
@@ -252,6 +392,8 @@ const props = withDefaults(
     isMinimizeDisabled: false,
     isInactive: false,
     isInline: false,
+    previewSrcList: () => [],
+    previewIndex: 0,
   },
 )
 
@@ -265,11 +407,21 @@ const emit = defineEmits<{
 }>()
 
 const interactionStore = useChatInteractionStore()
+const sessionStore = useChatSessionStore()
+const pendingFileStore = usePendingFileStore()
 const isCollapsed = ref(props.subMessage.config.is_collapsed || false)
 const isGenerating = computed(() => props.subMessage.status === 'generating')
 const rootRef = ref<HTMLElement | null>(null)
 const contentRef = ref<HTMLElement | null>(null)
 const showBackToTop = ref(false)
+const pendingFailed = ref(false)
+
+const fileContent = ref<string | null>(null)
+const fileContentLoading = ref(false)
+const fileContentError = ref(false)
+const isFileContentCollapsed = ref(false)
+
+const isFileCodeWrapEnabled = ref(false)
 
 let resizeObserver: ResizeObserver | null = null
 
@@ -282,12 +434,32 @@ onMounted(() => {
     })
     resizeObserver.observe(contentRef.value)
   }
+
+  if (isPendingFile.value) {
+    pendingFileStore.register(props.subMessage.id, {
+      onReady() {
+        // 子消息数据已由 pendingFileStore 在 store 层更新，组件自动重渲染
+      },
+      onTimeout() {
+        pendingFailed.value = true
+      },
+    })
+  }
+
+  if (isEditableFile.value && !isImageFile.value && props.subMessage.file_info) {
+    fileContentLoading.value = true
+    getFileContent(props.subMessage.file_info.id)
+      .then((res) => { fileContent.value = res.content })
+      .catch(() => { fileContentError.value = true })
+      .finally(() => { fileContentLoading.value = false })
+  }
 })
 
 onBeforeUnmount(() => {
   if (resizeObserver) {
     resizeObserver.disconnect()
   }
+  pendingFileStore.unregister(props.subMessage.id)
 })
 
 const mcpContent = computed((): McpToolContent | null => {
@@ -312,7 +484,8 @@ const mcpArguments = computed((): { query?: string } | null => {
 
 const mcpSummaryText = computed((): string => {
   if (!mcpContent.value) return t('chat.message.mcp.invalidCall')
-  const toolName = mcpContent.value.name || t('chat.message.mcp.unknownTool')
+  const unpacked = unpackMcpToolCall(mcpContent.value)
+  const toolName = unpacked.displayName
   const query = mcpArguments.value?.query || '...'
 
   if (isGenerating.value) {
@@ -340,6 +513,71 @@ const formattedFileSize = computed(() => {
   return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`
 })
 
+const isPendingFile = computed(() =>
+  props.subMessage.type === 'File' &&
+  props.subMessage.status === 'waiting' &&
+  !!props.subMessage.config.pending_file_path
+)
+
+const isEditableFile = computed(() =>
+  props.subMessage.type === 'File' &&
+  !!props.subMessage.file_info?.editable
+)
+
+const isImageFile = computed(() =>
+  props.subMessage.type === 'File' &&
+  !!props.subMessage.file_info?.mime_type?.startsWith('image/')
+)
+
+const isMarkdownFile = computed(() => {
+  if (!isEditableFile.value || !props.subMessage.file_info) return false
+  const filename = props.subMessage.file_info.filename.toLowerCase()
+  return filename.endsWith('.md') || filename.endsWith('.markdown')
+})
+
+const showToolMode = computed(() =>
+  props.subMessage.config.show_tool_mode || 'Normal'
+)
+
+function getLanguageFromFilename(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() || ''
+  const map: Record<string, string> = {
+    'py': 'python', 'js': 'javascript', 'ts': 'typescript', 'jsx': 'javascript',
+    'tsx': 'typescript', 'json': 'json', 'html': 'html', 'css': 'css',
+    'scss': 'scss', 'less': 'less', 'xml': 'xml', 'yaml': 'yaml', 'yml': 'yaml',
+    'toml': 'toml', 'ini': 'ini', 'cfg': 'ini', 'sh': 'bash', 'bash': 'bash',
+    'ps1': 'powershell', 'bat': 'batch', 'sql': 'sql',
+    'java': 'java', 'c': 'c', 'cpp': 'cpp', 'h': 'c',
+    'cs': 'csharp', 'go': 'go', 'rs': 'rust', 'rb': 'ruby', 'php': 'php',
+    'swift': 'swift', 'kt': 'kotlin', 'scala': 'scala', 'r': 'r',
+    'vue': 'html', 'svelte': 'html', 'dockerfile': 'dockerfile',
+    'gitignore': 'plaintext', 'env': 'plaintext', 'log': 'plaintext',
+    'txt': 'plaintext', 'md': 'markdown', 'markdown': 'markdown',
+  }
+  return map[ext] || ext || 'plaintext'
+}
+
+const fileLanguage = computed(() => {
+  if (!isEditableFile.value || !props.subMessage.file_info) return ''
+  return getLanguageFromFilename(props.subMessage.file_info.filename)
+})
+
+const fileContentBlocks = computed(() => {
+  if (!isMarkdownFile.value || !fileContent.value) return []
+  return parseMarkdown(fileContent.value)
+})
+
+const pendingFileName = computed(() => {
+  if (!isPendingFile.value) return ''
+  const path = props.subMessage.config.pending_file_path || ''
+  return path.split('/').pop() || path
+})
+
+const pendingStatusText = computed(() => {
+  if (pendingFailed.value) return t('chat.attachment.fileTimeout')
+  return t('chat.attachment.waitingForFile')
+})
+
 const contentBlocks = computed(() => {
   if (props.subMessage.type !== 'File' && props.subMessage.type !== 'McpTool') {
     return parseMarkdown(props.subMessage.content)
@@ -349,9 +587,9 @@ const contentBlocks = computed(() => {
 
 const partitionTitle = computed(() => {
   if (props.subMessage.type === 'McpTool') {
-    return t('chat.message.mcp.toolCallTitle', {
-      name: mcpContent.value?.name || t('chat.message.mcp.unknownTool'),
-    })
+    const content = mcpContent.value
+    const name = content ? unpackMcpToolCall(content).displayName : t('chat.message.mcp.unknownTool')
+    return t('chat.message.mcp.toolCallTitle', { name })
   }
   if (props.subMessage.type === 'Reasoning') return t('chat.message.reasoning')
   if (props.subMessage.type === 'Normal') {
@@ -367,6 +605,20 @@ watch(
   () => props.subMessage.config.is_collapsed,
   (newValue) => {
     isCollapsed.value = newValue || false
+  },
+)
+
+watch(
+  () => props.subMessage.file_info,
+  (newInfo, oldInfo) => {
+    if (newInfo && newInfo !== oldInfo && isEditableFile.value && !isImageFile.value) {
+      fileContentLoading.value = true
+      fileContentError.value = false
+      getFileContent(newInfo.id)
+        .then((res) => { fileContent.value = res.content })
+        .catch(() => { fileContentError.value = true })
+        .finally(() => { fileContentLoading.value = false })
+    }
   },
 )
 
@@ -392,6 +644,20 @@ function handleCodeBlockEdit(payload: {
 function handleFileEdit() {
   if (props.subMessage.file_info) {
     emit('edit-file', props.subMessage.file_info)
+  }
+}
+
+function handleFileEditFromCodeBlock() {
+  handleFileEdit()
+}
+
+async function handleCopyFileContent() {
+  try {
+    await copyToClipboard(fileContent.value || '')
+    ElMessage.success(t('chat.message.codeCopied'))
+  } catch (err) {
+    ElMessage.error(t('chat.message.copyFailed'))
+    console.error('Could not copy text: ', err)
   }
 }
 
@@ -487,17 +753,33 @@ function scrollToTop() {
 }
 
 .sub-message-item.is-file {
+  display: inline-flex;
   border: none;
   background-color: transparent;
   padding: 0;
-  max-width: 260px;
+  max-width: 240px;
+  overflow: visible;
+}
+/* 音频/视频文件需要更宽的容器以正确渲染控件 */
+.sub-message-item.is-file:has(.file-audio-player),
+.sub-message-item.is-file:has(.file-video-player) {
+  max-width: 100%;
 }
 .file-display-container {
-  width: 100%;
+  overflow: visible;
+  min-width: 0;
 }
-.file-image-thumbnail {
+/* 音频/视频容器需要明确宽度，避免inline-flex收缩为0 */
+.file-display-container:has(.file-audio-player),
+.file-display-container:has(.file-video-player) {
   width: 100%;
-  height: 160px;
+  min-width: 300px;
+}
+/* el-image 固定展示框，fit="contain" 等比缩放完整显示图片 */
+.file-image-thumbnail {
+  width: 230px;
+  height: 240px;
+  display: block;
   border-radius: 6px;
   border: 1px solid var(--el-border-color-lighter);
   background-color: var(--color-background);
@@ -517,6 +799,18 @@ function scrollToTop() {
 .file-placeholder .el-icon {
   font-size: 32px;
   margin-bottom: 8px;
+}
+.file-audio-player {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+}
+.file-video-player {
+  display: block;
+  width: 100%;
+  max-width: 480px;
+  border-radius: 6px;
+  background-color: #000;
 }
 .file-card {
   display: flex;
@@ -557,6 +851,151 @@ function scrollToTop() {
 }
 .file-card-download {
   flex-shrink: 0;
+}
+
+.editable-file-view {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 6px;
+  overflow: hidden;
+  background-color: var(--el-bg-color);
+}
+.is-user .editable-file-view {
+  background-color: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary-light-8);
+}
+
+.file-content-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 12px;
+  background-color: rgba(0, 0, 0, 0.03);
+  height: 32px;
+  flex-shrink: 0;
+  gap: 8px;
+}
+.is-user .file-content-header {
+  background-color: rgba(64, 158, 255, 0.1);
+}
+
+.file-content-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-grow: 1;
+  min-width: 0;
+  color: var(--el-text-color-secondary);
+}
+
+.file-content-filename {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-content-language-tag {
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.file-content-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.file-content-header-actions .el-button {
+  color: var(--el-text-color-secondary);
+}
+.file-content-header-actions .el-button:hover {
+  color: var(--el-text-color-primary);
+  background-color: rgba(0, 0, 0, 0.05);
+}
+.file-content-header-actions .el-button.wrap-active {
+  color: var(--el-color-primary);
+  background-color: var(--el-color-primary-light-9);
+}
+.file-content-download-link {
+  display: inline-flex;
+  text-decoration: none;
+  color: inherit;
+}
+
+.file-content-loading,
+.file-content-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 16px;
+  color: var(--el-text-color-secondary);
+  font-size: 14px;
+}
+
+.file-message-content {
+  padding: 10px 15px;
+}
+
+.file-code-wrapper {
+  overflow: hidden;
+}
+.file-code-wrapper.collapsed {
+  max-height: 6.5em;
+}
+.file-code-wrapper.wrap-enabled :deep(pre),
+.file-code-wrapper.wrap-enabled :deep(code) {
+  white-space: pre-wrap !important;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+.file-code-wrapper :deep(.code-block-container) {
+  margin: 0;
+  border-radius: 0;
+  border: none;
+}
+
+.file-pending-container {
+  overflow: visible;
+}
+.file-pending-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 6px;
+  background-color: var(--color-background-soft);
+  border: 1px dashed var(--el-border-color);
+}
+.is-user .file-pending-card {
+  background-color: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary-light-5);
+}
+.file-pending-icon {
+  flex-shrink: 0;
+  color: var(--el-text-color-secondary);
+}
+.file-pending-info {
+  flex-grow: 1;
+  min-width: 0;
+}
+.file-pending-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-pending-status {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-top: 2px;
 }
 
 .mcp-tool-content {

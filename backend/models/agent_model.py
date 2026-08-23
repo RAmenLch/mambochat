@@ -27,7 +27,7 @@ class Agent(Base):
     sortOrder = Column(Integer, nullable=False, default=0)
 
     # 核心配置
-    AgentType = Column(String(50), nullable=False, default=AgentTypeEnum.REACT.value)
+    AgentType = Column(String(50), nullable=False, default=AgentTypeEnum.MAMBO.value)
     systemPrompt = Column(TEXT, nullable=True)
     modelParameters = Column(JSON, nullable=True)
 

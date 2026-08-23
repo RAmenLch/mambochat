@@ -65,11 +65,13 @@ if not exist "%PYTHON_EXE%" (
 echo.
 echo [Check] Backend dependencies...
 
-"%PYTHON_EXE%" -c "import uvicorn" >nul 2>&1
+:: mambo-agents 是仅存在于官方 PyPI 的预发布包(国内镜像不同步),且频繁更新。
+:: 校验其已安装版本是否与 pyproject.toml 锁定版本一致,不一致则重新安装。
+"%PYTHON_EXE%" -c "import tomllib,importlib.metadata as m,sys;d=tomllib.load(open(r'%ROOT_DIR%backend\pyproject.toml','rb'))['project']['dependencies'];r=next(x for x in d if x.lower().startswith('mambo-agents'));sys.exit(0 if m.version('mambo-agents')==r.split('==')[-1].strip() else 1)" >nul 2>&1
 if %errorlevel% neq 0 (
-    echo   Installing backend and MCP dependencies...
-    "%PYTHON_EXE%" -m pip install -e "%ROOT_DIR%backend" -i https://pypi.tuna.tsinghua.edu.cn/simple
-    "%PYTHON_EXE%" -m pip install -e "%ROOT_DIR%MCP_SERVER\ddgs" -i https://pypi.tuna.tsinghua.edu.cn/simple
+    echo   Installing backend dependencies...
+    :: 清华镜像为主源(快),官方 PyPI 为补充源(提供 mambo-agents 预发布版)
+    "%PYTHON_EXE%" -m pip install -e "%ROOT_DIR%backend" -i https://pypi.tuna.tsinghua.edu.cn/simple --extra-index-url https://pypi.org/simple/
     echo   [OK] Dependencies installed.
 ) else (
     echo   [OK] Backend dependencies verified.

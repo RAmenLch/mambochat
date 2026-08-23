@@ -70,7 +70,22 @@ class ChatDeepSeek(ChatOpenAI):
             extra_body.update({"thinking": self.thinking})
             payload["extra_body"] = extra_body
 
-        # 3. 遍历 payload 中的消息进行修复
+        # 3. 思考模式与 tool_choice 互斥处理
+        # deepseek 思考模式下，tool_choice 指定具体函数名
+        # （如 {"type": "function", "function": {"name": "SecurityReviewResult"}}）
+        # 会触发 400 报错 "Thinking mode does not support this tool_choice"。
+        # 此处在请求体层面自动关闭思考，保证 structured output / 安全审核等场景正常工作。
+        tool_choice = payload.get("tool_choice")
+        if tool_choice and not isinstance(tool_choice, str):
+            extra_body = payload.get("extra_body", {}) or {}
+            thinking_cfg = extra_body.get("thinking")
+            # thinking_cfg 为 None 时 deepseek 默认开启思考，同样需要显式关闭
+            is_thinking_on = thinking_cfg is None or thinking_cfg.get("type") == "enabled"
+            if is_thinking_on:
+                extra_body["thinking"] = {"type": "disabled"}
+                payload["extra_body"] = extra_body
+
+        # 4. 遍历 payload 中的消息进行修复
         for i, payload_msg in enumerate(payload["messages"]):
 
             # --- 修复 1: 扁平化 content (解决 invalid type: sequence, expected a string) ---

@@ -1,0 +1,163 @@
+# backend/services/generation/worker/deep_agent_chat_worker.py
+#
+# 【DEPRECATED - 已弃用，不再维护】
+# 本文件为 DeepAgent（deepagents 库）专用 ChatWorker。
+# DeepAgent 已被淘汰，前端已无创建入口，本文件仅保留用于兼容存量数据。
+# 新功能请基于 Mambo Agent（UniversalGraphWorker / MamboAgentGraphBuilder）实现。
+#
+# DeepAgent 专用 ChatWorker —— 继承通用 Worker，增加 VFS files 注入。
+"""
+DeepAgent 使用 CompositeBackend + TreeStateBackend 架构，
+需要通过 input_data["files"] 将 skills 文件注入到 VFS 中。
+Mambo Agent 不需要此操作（skills 通过 MamboResourceBackend shortcuts 挂载）。
+
+关于Mambo Agent的修改不要修改本文件
+"""
+
+from typing import AsyncGenerator, Any, Dict, Tuple, List
+
+from langchain_core.runnables import RunnableConfig
+from langgraph.types import Command, Overwrite
+
+from backend.services.generation.core.llm_io import LLMInput, AgentConfig, SummarizationEventInfo
+from backend.services.generation.graph_builders.factory import GraphBuilderFactory
+from backend.services.generation.worker.abstract_worker import StreamEvent
+from backend.services.generation.worker.chat_worker import UniversalGraphWorker
+
+
+class DeepAgentChatWorker(UniversalGraphWorker):
+    """【DEPRECATED - 已弃用，不再维护】DeepAgent 专用 Worker：在通用流程基础上注入 VFS files。
+
+    仅需覆盖 generate() 方法，在构建 input_data 时附加
+    _collect_vfs_files_recursively 收集的 skills 文件内容。
+    """
+
+    def _collect_vfs_files_recursively(self, config: AgentConfig) -> Dict[str, Any]:
+        """递归收集所有 skills 文件，构建 VFS files 注入字典。
+
+        将 SkillConfig.files 中的每个文件映射为 VFS 路径：
+            /skills/{skill_name}/{file_path}
+
+        Returns:
+            {"path": {"content": str, "encoding": "utf-8"}, ...}
+        """
+        files: Dict[str, Any] = {}
+
+        if config.skills:
+            for skill in config.skills:
+                for file_config in skill.files:
+                    if file_config.content is not None:
+                        virtual_path = f"/skills/{skill.name}/{file_config.file_path}"
+                        files[virtual_path] = {
+                            "content": file_config.content,
+                            "encoding": "utf-8",
+                        }
+
+        if config.sub_configs:
+            for sub_config in config.sub_configs:
+                files.update(self._collect_vfs_files_recursively(sub_config))
+
+        return files
+
+    async def generate(
+        self,
+        llm_input: LLMInput,
+    ) -> AsyncGenerator[Tuple[str, StreamEvent], None]:
+        graph_builder = GraphBuilderFactory.get_builder(llm_input.agent_config.agent_type)
+        agent = graph_builder.build(llm_input.agent_config, llm_input.run_time_config)
+
+        thread_config: RunnableConfig = {
+            "configurable": {
+                "thread_id": llm_input.run_time_config.chat_id,
+                "checkpoint_ns": "",
+            }
+        }
+        if llm_input.run_time_config.branch_checkpoint_id:
+            thread_config["configurable"]["checkpoint_id"] = llm_input.run_time_config.branch_checkpoint_id
+
+        if llm_input.agent_config.recover_from_error:
+            input_data = None
+        else:
+            # DeepAgent 特有：收集 skills 文件注入 VFS
+            files_to_inject = self._collect_vfs_files_recursively(llm_input.agent_config)
+
+            # 首条消息重新生成:分支点为 thread 根 checkpoint。根 checkpoint 的
+            # versions_seen 不含真实节点,aupdate_state 无法推导 as_node 会抛
+            # InvalidUpdateError(Ambiguous update);且根状态本就是初始值,
+            # 无需同步 _summarization_event —— 直接 astream 从根 fork。
+            if not llm_input.run_time_config.branch_from_root:
+                await agent.aupdate_state(thread_config, {"_summarization_event": None})
+                await agent.aupdate_state(
+                    thread_config,
+                    {"_summarization_event": llm_input.context.auto_summarization_event},
+                )
+
+            resume_payload = llm_input.agent_config.resume_payload
+            if resume_payload:
+                input_data = Command(resume=resume_payload)
+            else:
+                messages = self._convert_messages(llm_input.context.messages)
+                input_data = {"messages": Overwrite(value=messages)}
+                if files_to_inject:
+                    input_data["files"] = files_to_inject
+
+        async for stream_event in agent.astream(
+            input=input_data,
+            config=thread_config,
+            stream_mode=["messages", "updates", "custom"],
+            version="v2",
+        ):
+            if not isinstance(stream_event, dict):
+                continue
+            mode = stream_event.get("type")
+            event = stream_event.get("data")
+
+            if mode == "updates" and isinstance(event, dict):
+                if "model" in event:
+                    model_update = event["model"]
+                    if isinstance(model_update, dict):
+                        if "_summarization_event" in model_update:
+                            summary = model_update["_summarization_event"]
+                            cutoff_index = summary.get("cutoff_index", 0)
+                            state = await agent.aget_state(thread_config)
+                            state_messages: List = state.values["messages"]
+                            if cutoff_index and state_messages and cutoff_index <= len(state_messages):
+                                last_zip_message = state_messages[cutoff_index - 1]
+                                yield "summarization", SummarizationEventInfo(
+                                    last_zip_message=last_zip_message,
+                                    event=summary,
+                                )
+                        if "messages" in model_update:
+                            for message in model_update["messages"]:
+                                yield mode, message
+                if "tools" in event:
+                    tools_update = event["tools"]
+                    if isinstance(tools_update, dict):
+                        if "_summarization_event" in tools_update:
+                            summary = tools_update["_summarization_event"]
+                            cutoff_index = summary.get("cutoff_index", 0)
+                            state = await agent.aget_state(thread_config)
+                            state_messages: List = state.values["messages"]
+                            if cutoff_index and state_messages and cutoff_index <= len(state_messages):
+                                last_zip_message = state_messages[cutoff_index - 1]
+                                yield "summarization", SummarizationEventInfo(
+                                    last_zip_message=last_zip_message,
+                                    event=summary,
+                                )
+                        if "messages" in tools_update:
+                            for message in tools_update["messages"]:
+                                yield mode, message
+                if "__interrupt__" in event or "HumanInTheLoopMiddleware.after_model" in event:
+                    yield mode, event
+            elif mode == "messages" and isinstance(event, (list, tuple)) and len(event) > 0:
+                msg = event[0]
+                meta = event[1] if len(event) > 1 else {}
+                if isinstance(meta, dict) and meta.get("lc_source") == "summarization":
+                    continue
+                yield mode, msg
+            elif mode == "custom":
+                if isinstance(event, dict) and event.get("type") == "subagent_event":
+                    yield "subagent_event", event
+            else:
+                pass
+

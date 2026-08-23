@@ -27,12 +27,16 @@ class GlobalSettingsUpdate(BaseModel):
     # 全局代理配置
     proxy_enabled: Optional[bool] = Field(None, description="是否全局启用代理")
     proxy_url: Optional[str] = Field(None, description="代理服务器的URL, 例如: http://127.0.0.1:7890")
+    # 网页搜索配置
+    web_search_default_mode: Optional[str] = Field(None, description="默认网页搜索模式: null/disable 不启用, direct_read 仅读取网页, search_and_read 搜索并读取")
+    web_search_use_proxy: Optional[bool] = Field(None, description="网页搜索是否启用全局代理")
     # 全局头像配置 (仅用于API响应)
     user_avatar_url: Optional[str] = Field(None, description="当前用户头像的访问URL")
     ai_avatar_url: Optional[str] = Field(None, description="当前AI助手头像的访问URL")
 
     # 前端与知识库默认配置
     frontend_editor: Optional[str] = Field("simple", description="前端编辑器类型: simple 或 monaco")
+    message_display_mode: Optional[str] = Field("interleaved", description="消息显示模式: stacked(堆叠) 或 interleaved(交错)")
     kb_default_chunk_size: Optional[int] = Field(500, description="知识库默认切片大小")
     kb_default_chunk_overlap: Optional[int] = Field(50, description="知识库默认切片重叠大小")
     send_message_shortcut: Optional[str] = Field("enter", description="发送消息快捷键: enter 或 ctrl_enter")

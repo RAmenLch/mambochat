@@ -15,6 +15,7 @@ from backend.models import resource_model
 from backend.crud import resource_crud
 from backend.services.file_service import FileService
 from backend.services.skill_import_service import SkillImportService
+from backend.services.resource_service import validate_name_uniqueness
 from backend.utils.skills_utils import SkillValidator, build_file_node_tree
 
 router = APIRouter()
@@ -25,7 +26,10 @@ async def create_skill(skill_in: schemas.SkillCreate, db: AsyncSession = Depends
     """
     新建一个 SKILL 文件夹，并自动初始化包含 frontmatter 的 SKILL.md 文件。
     """
-    # 1. 创建 SKILL 文件夹 Resource
+    # 1. 校验同一父文件夹下不允许同名资源
+    await validate_name_uniqueness(db, skill_in.name, skill_in.parentId)
+
+    # 2. 创建 SKILL 文件夹 Resource
     folder_create = schemas.ResourceCreate(
         name=skill_in.name,
         description=skill_in.description,
@@ -141,13 +145,15 @@ async def validate_skill(resource_id: str, db: AsyncSession = Depends(get_db)):
 async def import_skill_file(
     file: UploadFile = File(...),
     parent_id: Optional[str] = Form(None),
+    on_conflict: str = Form("error"),
     db: AsyncSession = Depends(get_db)
 ):
     """
     上传单个 SKILL.md 或包含 Skills 的 ZIP 包进行导入。
+    on_conflict: 同名冲突处理策略 error / overwrite / skip
     """
     import_service = SkillImportService(db)
-    return await import_service.import_from_file(file, parent_id)
+    return await import_service.import_from_file(file, parent_id, on_conflict)
 
 
 @router.post("/import/github", response_model=schemas.SkillImportResponse, summary="从 GitHub 导入 Skill")
@@ -157,6 +163,7 @@ async def import_skill_github(
 ):
     """
     从指定的 GitHub 仓库 URL 导入符合规范的 Skills。
+    on_conflict: 同名冲突处理策略 error / overwrite / skip
     """
     import_service = SkillImportService(db)
-    return await import_service.import_from_github(request.repo_url, request.parent_id)
+    return await import_service.import_from_github(request.repo_url, request.parent_id, request.on_conflict)

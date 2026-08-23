@@ -10,7 +10,7 @@ from backend.services.generation.tools.base_tool_provider import BaseToolProvide
 from backend.services.kb_service import KnowledgeBaseService
 from backend.schemas import enums as schemas_enums
 from backend.schemas.kb import KBSearchRequest
-from backend.schemas.message import McpToolContent
+from backend.schemas.message import McpToolContent, SubMessageConfig
 from backend.models.base_model import generate_uuid
 from backend.crud import kb_crud, resource_crud
 from backend.services.generation.core.instructions import (
@@ -234,7 +234,8 @@ class KBToolProvider(BaseToolProvider):
             tool_call_id: str,
             name: str,
             arguments: Dict[str, Any],
-            tool_def: Optional[BaseTool] = None  # 适配新签名
+            tool_def: Optional[BaseTool] = None,  # 适配新签名
+            run_uuid: Optional[str] = None
     ) -> AsyncGenerator[BaseInstruction, None]:
         # 1. 提取原生工具定义中的 Schema
         input_schema = tool_def.args if tool_def else None
@@ -244,7 +245,8 @@ class KBToolProvider(BaseToolProvider):
             tool_call_id=tool_call_id,
             name=name,
             arguments=arguments,
-            input_schema=input_schema  # 注入 Schema
+            input_schema=input_schema,  # 注入 Schema
+            run_uuid=run_uuid,
         )
 
         # 3. 缓存状态
@@ -259,7 +261,7 @@ class KBToolProvider(BaseToolProvider):
             sortOrder=2,
             status=schemas_enums.MessageStatus.GENERATING,
             initial_content=tool_content.to_json_string(),
-            config={"is_minimal": True}
+            config=SubMessageConfig(is_minimal=True)
         )
 
     async def create_result_instruction(

@@ -13,29 +13,106 @@
         :show-header="false"
         :is-inline="true"
         @edit="(payload) => $emit('edit', group.textSubMessage!, payload)"
+        @edit-file="(file) => $emit('edit-file', file)"
         @copy="$emit('copy', group.textSubMessage)"
       />
     </div>
 
+    <!-- 文件/图片分组区域：多张堆叠为轮播 -->
+    <div class="group-files-wrapper" v-if="group.fileSubMessages && group.fileSubMessages.length > 0">
+      <!-- 单张直接展示 -->
+      <template v-if="group.fileSubMessages.length === 1">
+        <SubMessageItem
+          :sub-message="group.fileSubMessages[0]"
+          :parent-message="parentMessage"
+          :show-header="false"
+          :is-inline="false"
+          :preview-src-list="fileGroupPreviewList"
+          :preview-index="0"
+          @edit-file="(file) => $emit('edit-file', file)"
+        />
+      </template>
+
+      <!-- 多张：轮播 -->
+      <template v-else>
+        <div class="file-carousel">
+          <div class="carousel-viewport">
+            <div
+              class="carousel-track"
+              :style="{ transform: `translateX(-${carouselIndex * 100}%)` }"
+            >
+              <div
+                v-for="(fileMsg, fileIdx) in group.fileSubMessages"
+                :key="fileMsg.id"
+                class="carousel-slide"
+              >
+                <SubMessageItem
+                  :sub-message="fileMsg"
+                  :parent-message="parentMessage"
+                  :show-header="false"
+                  :is-inline="false"
+                  :preview-src-list="fileGroupPreviewList"
+                  :preview-index="fileGroupPreviewIndex(fileIdx)"
+                  @edit-file="(file) => $emit('edit-file', file)"
+                />
+              </div>
+            </div>
+          </div>
+
+          <button class="carousel-arrow carousel-prev" @click.stop="carouselPrev" v-if="group.fileSubMessages.length > 1">
+            <el-icon :size="18"><ArrowLeft /></el-icon>
+          </button>
+          <button class="carousel-arrow carousel-next" @click.stop="carouselNext" v-if="group.fileSubMessages.length > 1">
+            <el-icon :size="18"><ArrowRight /></el-icon>
+          </button>
+
+          <div class="carousel-dots" v-if="group.fileSubMessages.length > 1">
+            <span
+              v-for="(_, dotIdx) in group.fileSubMessages"
+              :key="dotIdx"
+              class="carousel-dot"
+              :class="{ 'is-active': dotIdx === carouselIndex }"
+              @click.stop="carouselIndex = dotIdx"
+            ></span>
+          </div>
+        </div>
+      </template>
+    </div>
+
     <!-- 工具调用内联标签区域 -->
     <div class="group-tools-wrapper" v-if="group.toolSubMessages.length > 0">
-      <div
-        v-for="tool in group.toolSubMessages"
-        :key="tool.id"
-        class="tool-chip"
-        :class="{ 'has-review': tool.type === 'ReviewTool' }"
-        @click.stop="$emit('open-tool-dialog', tool.id)"
-      >
-        <el-icon>
-          <Warning v-if="tool.type === 'ReviewTool'" style="color: var(--el-color-warning)" />
-          <Loading v-else-if="tool.status === 'generating'" class="is-loading" />
-          <CircleClose v-else-if="isToolError(tool)" style="color: var(--el-color-error)" />
-          <CircleCheck v-else style="color: var(--el-color-success)" />
-        </el-icon>
-        <span class="tool-chip-title">
-          {{ getToolName(tool) }}
-        </span>
-      </div>
+      <template v-for="tool in group.toolSubMessages" :key="tool.id">
+        <!-- GoalLoop 轮次边界 get_goal：渲染轮次分隔线（点击仍可打开详情） -->
+        <div
+          v-if="isGoalLoopRoundMarker(tool)"
+          class="goal-round-divider"
+          @click.stop="$emit('open-tool-dialog', tool.id)"
+        >
+          <span class="goal-round-divider-line" />
+          <span class="goal-round-divider-label">{{ goalRoundText(tool) }}</span>
+          <span class="goal-round-divider-line" />
+        </div>
+        <div
+          v-else
+          class="tool-chip"
+          :class="{
+            'has-review': tool.type === 'ReviewTool',
+            'is-mcp-wrapped': isMcpWrapped(tool),
+          }"
+          @click.stop="$emit('open-tool-dialog', tool.id)"
+        >
+          <el-icon>
+            <Warning v-if="tool.type === 'ReviewTool'" style="color: var(--el-color-warning)" />
+            <Loading v-else-if="tool.status === 'generating'" class="is-loading" />
+            <CircleClose v-else-if="isToolError(tool)" style="color: var(--el-color-error)" />
+            <CircleCheck v-else style="color: var(--el-color-success)" />
+          </el-icon>
+          <span class="tool-chip-title">{{ getToolBubbleText(tool) }}</span>
+          <span v-if="getSecurityReviewForTool(tool)" class="security-review-badge" :class="{ 'is-failed': !getSecurityReviewForTool(tool)!.passed }">
+            🛡️ {{ getSecurityReviewForTool(tool)!.passed ? t('agent.securityReviewPassed') : t('agent.securityReviewFailed') }}
+          </span>
+        </div>
+      </template>
     </div>
 
     <!-- 操作菜单插槽 (跟随当前 Group 浮现) -->
@@ -47,10 +124,12 @@
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import type { Message, SubMessage, McpToolContent, ReviewToolContent } from '@/api/types'
+import { computed, ref } from 'vue'
+import type { Message, SubMessage, McpToolContent, ReviewToolContent, SecurityReviewContent, FileResponse } from '@/api/types'
 import SubMessageItem from '../SubMessageItem.vue'
 import type { BubbleSectionGroup } from '@/composables/useAssistantTimeline'
-import { Warning, Loading, CircleClose, CircleCheck } from '@element-plus/icons-vue'
+import { unpackMcpToolCall, getToolArgsSummary, parseGoalLoopRound } from '@/utils/mcpToolUnpack'
+import { Warning, Loading, CircleClose, CircleCheck, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
 
@@ -69,7 +148,20 @@ const emit = defineEmits<{
   (e: 'copy', subMessage: SubMessage): void
   (e: 'open-tool-dialog', subMessageId: string): void
   (e: 'toggle-actions', subMessageId: string): void
+  (e: 'edit-file', file: FileResponse): void
 }>()
+
+const carouselIndex = ref(0)
+
+function carouselPrev() {
+  if (!props.group.fileSubMessages) return
+  carouselIndex.value = (carouselIndex.value - 1 + props.group.fileSubMessages.length) % props.group.fileSubMessages.length
+}
+
+function carouselNext() {
+  if (!props.group.fileSubMessages) return
+  carouselIndex.value = (carouselIndex.value + 1) % props.group.fileSubMessages.length
+}
 
 function getParsedContent(tool: SubMessage): McpToolContent | ReviewToolContent | null {
   try {
@@ -81,13 +173,99 @@ function getParsedContent(tool: SubMessage): McpToolContent | ReviewToolContent 
 
 function getToolName(tool: SubMessage): string {
   const content = getParsedContent(tool)
-  return content?.name || t('chat.message.mcp.unknownTool')
+  if (!content) return t('chat.message.mcp.unknownTool')
+  const unpacked = unpackMcpToolCall(content)
+  return unpacked.displayName
+}
+
+function getToolArgsSummaryText(tool: SubMessage): string {
+  const content = getParsedContent(tool)
+  if (!content) return ''
+  return getToolArgsSummary(content)
+}
+
+function getToolBubbleText(tool: SubMessage): string {
+  const name = getToolName(tool)
+  const args = getToolArgsSummaryText(tool)
+  return args ? `${name} ${args}` : name
+}
+
+/** tool_call_id → SecurityReviewContent 映射 */
+const securityReviewMap = computed(() => {
+  const map = new Map<string, SecurityReviewContent>();
+  for (const sm of props.parentMessage.sub_messages) {
+    if (sm.type === 'SecurityReview') {
+      try {
+        const content = JSON.parse(sm.content) as SecurityReviewContent;
+        map.set(content.tool_call_id, content);
+      } catch { /* ignore */ }
+    }
+  }
+  return map;
+});
+
+function getSecurityReviewForTool(tool: SubMessage): SecurityReviewContent | undefined {
+  try {
+    if (tool.type === 'McpTool') {
+      const content = JSON.parse(tool.content) as McpToolContent;
+      return securityReviewMap.value.get(content.tool_call_id);
+    }
+    if (tool.type === 'ReviewTool') {
+      const content = JSON.parse(tool.content) as ReviewToolContent;
+      return securityReviewMap.value.get(content.tool_call_id);
+    }
+  } catch { /* ignore */ }
+  return undefined;
 }
 
 function isToolError(tool: SubMessage): boolean {
   if (tool.type !== 'McpTool') return false
   const content = getParsedContent(tool) as McpToolContent | null
   return content?.is_error || false
+}
+
+/** 是否为 GoalLoopMiddleware 注入的轮次边界 get_goal（config.is_goal_loop_round 标志） */
+function isGoalLoopRoundMarker(tool: SubMessage): boolean {
+  return tool.type === 'McpTool' && tool.config?.is_goal_loop_round === true
+}
+
+/** 轮次分隔线文案：优先从 result 解析"第 X/Y 轮"，解析不到则显示通用文案 */
+function goalRoundText(tool: SubMessage): string {
+  if (tool.type !== 'McpTool') return ''
+  const content = getParsedContent(tool) as McpToolContent | null
+  const info = content ? parseGoalLoopRound(content.result) : null
+  if (info) {
+    return t('chat.message.goalLoopRound', { round: info.round, max: info.max })
+  }
+  return t('chat.message.goalLoopRoundUnknown')
+}
+
+function isMcpWrapped(tool: SubMessage): boolean {
+  const content = getParsedContent(tool)
+  if (!content) return false
+  return unpackMcpToolCall(content).isMcpWrapped
+}
+
+/** 文件组中所有图片的聚合预览列表（用于键盘导航） */
+const fileGroupPreviewList = computed(() => {
+  if (!props.group.fileSubMessages) return []
+  return props.group.fileSubMessages
+    .filter(sm => sm.type === 'File' && sm.file_info?.mime_type?.startsWith('image/'))
+    .map(sm => sm.file_info!.url)
+})
+
+/** 计算当前图片在聚合预览列表中的索引 */
+function fileGroupPreviewIndex(fileIdx: number): number {
+  if (!props.group.fileSubMessages) return 0
+  let imgIdx = 0
+  for (let i = 0; i <= fileIdx; i++) {
+    const sm = props.group.fileSubMessages[i]
+    if (sm.type === 'File' && sm.file_info?.mime_type?.startsWith('image/')) {
+      if (i === fileIdx) return imgIdx
+      imgIdx++
+    }
+  }
+  return imgIdx
 }
 </script>
 
@@ -118,11 +296,123 @@ function isToolError(tool: SubMessage): boolean {
   position: relative;
 }
 
+.group-files-wrapper {
+  margin-top: 6px;
+}
+
+/* ========== 轮播 ========== */
+.file-carousel {
+  position: relative;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--el-fill-color-lighter);
+}
+
+.carousel-viewport {
+  overflow: hidden;
+  border-radius: 14px;
+}
+
+.carousel-track {
+  display: flex;
+  transition: transform 0.3s ease;
+}
+
+.carousel-slide {
+  min-width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.carousel-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 5;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.file-carousel:active .carousel-arrow,
+.file-carousel:hover .carousel-arrow {
+  opacity: 1;
+}
+
+.carousel-prev {
+  left: 6px;
+}
+.carousel-next {
+  right: 6px;
+}
+
+.carousel-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 0;
+}
+
+.carousel-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--el-border-color);
+  cursor: pointer;
+  transition: background 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.carousel-dot.is-active {
+  background: var(--el-color-primary);
+}
+
 .group-tools-wrapper {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 6px;
+}
+
+/* GoalLoop 轮次边界分隔线：通栏展示，营造"下一轮开始"的轮次感 */
+.goal-round-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 2px 0;
+  padding: 4px 0;
+  cursor: pointer;
+  user-select: none;
+}
+.goal-round-divider-line {
+  flex: 1;
+  height: 1px;
+  background: var(--el-border-color-darker);
+  opacity: 0.45;
+}
+.goal-round-divider-label {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-color-primary);
+  background-color: var(--el-color-primary-light-9);
+  border: 1px solid var(--el-color-primary-light-5);
+  padding: 3px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
 }
 
 .tool-chip {
@@ -147,11 +437,30 @@ function isToolError(tool: SubMessage): boolean {
   background-color: var(--el-color-warning-light-9);
 }
 
+.tool-chip.is-mcp-wrapped {
+  border-color: var(--el-color-primary-light-5);
+  background-color: var(--el-color-primary-light-9);
+}
+
 .tool-chip-title {
   white-space: nowrap;
-  max-width: 150px;
+  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.security-review-badge {
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background-color: var(--el-color-success-light-9);
+  color: var(--el-color-success);
+  white-space: nowrap;
+}
+
+.security-review-badge.is-failed {
+  background-color: var(--el-color-danger-light-9);
+  color: var(--el-color-danger);
 }
 
 .group-actions-container {

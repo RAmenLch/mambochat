@@ -91,6 +91,9 @@
           <el-dropdown-item command="delete" class="delete-item">
             <el-icon><Delete /></el-icon>{{ t('resource.tree.delete') }}
           </el-dropdown-item>
+          <el-dropdown-item v-if="contextMenuItem.itemType === 'folder'" command="exportZip">
+            <el-icon><Download /></el-icon>{{ t('resource.tree.exportZip') }}
+          </el-dropdown-item>
         </template>
       </el-dropdown-menu>
     </template>
@@ -145,8 +148,9 @@ import {
   Reading,
   CircleCheckFilled,
   CircleCloseFilled,
+  Download,
 } from '@element-plus/icons-vue'
-import { ElMessageBox } from 'element-plus'
+import { ElMessageBox, ElMessage } from 'element-plus'
 import type { AllowDropType } from 'element-plus/es/components/tree/src/tree.type'
 
 /** Element Plus Tree 内部节点结构（避免依赖内部路径） */
@@ -160,6 +164,7 @@ interface ElTreeNode {
 import { useResourceStore } from '@/stores/resourceStore'
 import { useProviderStore } from '@/stores/providerStore'
 import { createKnowledgeBase } from '@/api/kbService'
+import { downloadResourceZip } from '@/api/resourceService'
 import {
   useTreeController,
   type DialogPayload,
@@ -291,7 +296,7 @@ const {
   handleNodeExpand,
   handleNodeContextMenu,
   openRootContextMenu,
-  handleMenuCommand,
+  handleMenuCommand: originalHandleMenuCommand,
   onDialogConfirm,
 } = useTreeController<Resource, ResourceCreate, ResourceUpdate>({
   items: resources,
@@ -368,6 +373,22 @@ const {
     return newItem
   },
 })
+
+// --- Custom Context Menu Command ---
+
+const handleMenuCommand = async (command: string) => {
+  if (command === 'exportZip' && contextMenuItem.value) {
+    const target = contextMenuItem.value
+    try {
+      await downloadResourceZip(target.id, target.name)
+      ElMessage.success(t('resource.tree.exportZipSuccess'))
+    } catch {
+      ElMessage.error(t('resource.tree.exportZipFailed'))
+    }
+    return
+  }
+  await originalHandleMenuCommand(command)
+}
 
 // --- Custom Move Handler with Warning ---
 

@@ -1,7 +1,7 @@
 // frontend/mambo/src/stores/chatListStore.ts
 
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { ref, reactive } from 'vue';
 import { ElMessage } from 'element-plus';
 import {
   getChatChildren,
@@ -18,6 +18,7 @@ import { subscribeToGlobalNotifications } from '@/services/notificationService';
 import type { Chat, ChatCreate, ChatUpdate, MoveRequest, GlobalNotification, ChatArchiveRequest } from '@/api/types';
 import { useChatSessionStore } from './chatSessionStore';
 import { useTreeStoreActions } from '@/composables/useTreeStoreActions';
+import { isDefaultChatName } from '@/utils/chatName';
 
 /**
  * 管理会话列表（包括文件夹和聊天）的全局状态。
@@ -26,7 +27,10 @@ import { useTreeStoreActions } from '@/composables/useTreeStoreActions';
 export const useChatListStore = defineStore('chatList', () => {
   // --- State ---
   const chatList = ref<Chat[]>([]);
-  const refreshingTitleChatId = ref<string | null>(null);
+  // 正在进行标题生成的会话 ID 集合（支持多会话并发）
+  const refreshingTitleChatIds = reactive<Set<string>>(new Set());
+  // 标题生成超时兜底定时器：chatId -> timeoutId
+  const titleRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   // --- Actions ---
 
@@ -119,20 +123,57 @@ export const useChatListStore = defineStore('chatList', () => {
   }
 
   /**
+   * 清除指定会话的标题刷新状态与兜底定时器。
+   */
+  function _clearTitleRefresh(chatId: string) {
+    refreshingTitleChatIds.delete(chatId);
+    const timer = titleRefreshTimers.get(chatId);
+    if (timer) {
+      clearTimeout(timer);
+      titleRefreshTimers.delete(chatId);
+    }
+  }
+
+  /**
+   * 主动拉取指定会话的最新名称并写回列表（对账）。
+   */
+  async function _reconcileChatName(chatId: string) {
+    try {
+      const chatData = await getChatWithMessages(chatId);
+      const chatInList = chatList.value.find(c => c.id === chatId);
+      if (chatInList && chatData.name && chatInList.name !== chatData.name) {
+        chatInList.name = chatData.name;
+      }
+    } catch (err) {
+      console.warn(`[TitleRefresh] Failed to reconcile chat name for ${chatId}:`, err);
+    }
+  }
+
+  /**
    * 请求后端为指定会话自动生成标题。
    * @param chatId - 目标会话的ID。
    */
   async function refreshChatTitle(chatId: string) {
-    refreshingTitleChatId.value = chatId;
+    refreshingTitleChatIds.add(chatId);
+
+    // 启动超时兜底：15s 后若仍在刷新，则主动拉取对账，避免 SSE 通知丢失导致永久 loading
+    const existingTimer = titleRefreshTimers.get(chatId);
+    if (existingTimer) clearTimeout(existingTimer);
+    const timer = setTimeout(async () => {
+      if (refreshingTitleChatIds.has(chatId)) {
+        await _reconcileChatName(chatId);
+        _clearTitleRefresh(chatId);
+      }
+    }, 15000);
+    titleRefreshTimers.set(chatId, timer);
+
     try {
       await generateChatTitleAPI(chatId);
-      // 成功后，标题的更新将通过SSE通知来处理，届时会清除refreshingTitleChatId
+      // 成功后，标题的更新将通过SSE通知来处理，届时会清除 refreshingTitleChatIds
     } catch (error) {
       console.error(`Failed to initiate title generation for chat ${chatId}:`, error);
       // 如果请求本身失败，立即清除加载状态
-      if (refreshingTitleChatId.value === chatId) {
-        refreshingTitleChatId.value = null;
-      }
+      _clearTitleRefresh(chatId);
     }
   }
 
@@ -168,9 +209,19 @@ export const useChatListStore = defineStore('chatList', () => {
           const sessionStore = useChatSessionStore();
           const tasksToCheck: string[] = [];
 
-          if (refreshingTitleChatId.value) {
-            tasksToCheck.push(`title-gen-${refreshingTitleChatId.value}`);
-          }
+          // 对所有正在刷新标题的会话做重连对账
+          const pendingTitleChatIds = Array.from(refreshingTitleChatIds);
+          pendingTitleChatIds.forEach(id => {
+            tasksToCheck.push(`title-gen-${id}`);
+          });
+
+          // [增强] 自动标题生成完成后，若 SSE 通知在断线期间丢失，且会话已不在
+          // refreshingTitleChatIds（页面停留列表页场景），重连时对仍为默认标题的
+          // 会话做一次对账，避免列表长期显示默认名。_reconcileChatName 仅在
+          // 名字确实变化时写回，幂等安全。
+          chatList.value
+            .filter(c => c.itemType === 'chat' && isDefaultChatName(c.name))
+            .forEach(c => _reconcileChatName(c.id));
 
           const pendingZipMessages = sessionStore.currentChatMessages.filter(msg =>
             msg.sub_messages.some(sm => sm.type === 'ZipHistory' && sm.status === 'generating')
@@ -184,22 +235,15 @@ export const useChatListStore = defineStore('chatList', () => {
           try {
             const { running_tasks } = await checkTasksStatus(tasksToCheck);
 
-            if (refreshingTitleChatId.value) {
-              const titleTaskId = `title-gen-${refreshingTitleChatId.value}`;
+            // 重连后，标题任务已结束（通知可能丢失）→ 主动对账每个会话
+            pendingTitleChatIds.forEach(id => {
+              const titleTaskId = `title-gen-${id}`;
               if (!running_tasks.includes(titleTaskId)) {
-                const targetChatId = refreshingTitleChatId.value;
-                getChatWithMessages(targetChatId).then(chatData => {
-                  const chatInList = chatList.value.find(c => c.id === targetChatId);
-                  if (chatInList && chatData.name) {
-                    chatInList.name = chatData.name;
-                  }
-                }).finally(() => {
-                  if (refreshingTitleChatId.value === targetChatId) {
-                    refreshingTitleChatId.value = null;
-                  }
+                _reconcileChatName(id).finally(() => {
+                  _clearTitleRefresh(id);
                 });
               }
-            }
+            });
 
             if (pendingZipMessages.length > 0 && sessionStore.currentChatId) {
               let needRefresh = false;
@@ -225,10 +269,11 @@ export const useChatListStore = defineStore('chatList', () => {
           const chatInList = chatList.value.find(c => c.id === id);
           if (chatInList) {
             chatInList.name = name;
+          } else {
+            // 会话未加载进列表（懒加载），主动对账一次，避免标题更新丢失
+            _reconcileChatName(id);
           }
-          if (refreshingTitleChatId.value === id) {
-            refreshingTitleChatId.value = null;
-          }
+          _clearTitleRefresh(id);
         } else if (notification.type === 'zip_history_update') {
           const sessionStore = useChatSessionStore();
           if (sessionStore.currentChatId === notification.payload.chat_id) {
@@ -239,9 +284,7 @@ export const useChatListStore = defineStore('chatList', () => {
           }
         } else if (notification.type === 'notification' && notification.category === 'title_generation_error') {
           const errorChatId = notification.context.chat_id;
-          if (refreshingTitleChatId.value === errorChatId) {
-            refreshingTitleChatId.value = null;
-          }
+          _clearTitleRefresh(errorChatId);
           ElMessage.error(notification.message);
         }
       },
@@ -256,7 +299,7 @@ export const useChatListStore = defineStore('chatList', () => {
     // State
     chatList,
     isChatListLoading,
-    refreshingTitleChatId,
+    refreshingTitleChatIds,
     loadedFolderIds,
     loadingFolders,
 

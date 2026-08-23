@@ -80,6 +80,7 @@ export interface ConnectionRequest {
 export interface ConnectionTestResponse {
   status: string
   message: string
+  code?: string | null
 }
 
 // --- System Config Types ---

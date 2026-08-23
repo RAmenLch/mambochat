@@ -8,6 +8,7 @@ import kb from './kb'
 import editor from './editor'
 import agent from './agent'
 import backend from './backend'
+import agentPackage from './agentPackage'
 
 export default {
   locale: 'zh-CN' as const,
@@ -21,4 +22,5 @@ export default {
   editor,
   agent,
   backend,
+  agentPackage,
 }

@@ -31,9 +31,22 @@ export interface LocalModeConfig {
   gatewayPort: number
 }
 
+export interface ApiClientConfig {
+  /** Backend ID from the remote server (persisted after first registration) */
+  backendId: string
+  /** API key from the remote server */
+  apiKey: string
+  /** Local directory to expose to the remote server */
+  rootDir: string
+  /** Whether to auto-connect when switching to remote mode */
+  autoStart: boolean
+}
+
 export interface RemoteModeConfig {
   /** Full base URL of the remote backend, e.g. "http://192.168.1.100:8000" */
   url: string
+  /** API client settings for registering this PC as a remote backend */
+  apiClient: ApiClientConfig
 }
 
 export interface AppConfig {
@@ -163,6 +176,12 @@ export class AppConfigManager {
       },
       remote: {
         url: partial.remote?.url ?? DEFAULT_CONFIG.remote.url,
+        apiClient: {
+          backendId: partial.remote?.apiClient?.backendId ?? DEFAULT_CONFIG.remote.apiClient.backendId,
+          apiKey: partial.remote?.apiClient?.apiKey ?? DEFAULT_CONFIG.remote.apiClient.apiKey,
+          rootDir: partial.remote?.apiClient?.rootDir ?? DEFAULT_CONFIG.remote.apiClient.rootDir,
+          autoStart: partial.remote?.apiClient?.autoStart ?? DEFAULT_CONFIG.remote.apiClient.autoStart,
+        },
       },
     }
   }

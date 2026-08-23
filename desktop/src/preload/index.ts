@@ -50,6 +50,14 @@ export interface ElectronAPI {
     toggleMaximize: () => Promise<void>
     close: () => Promise<void>
   }
+  // API Client (remote mode)
+  apibackend: {
+    start: () => Promise<{ success: boolean; error?: string }>
+    stop: () => Promise<{ success: boolean }>
+    status: () => Promise<{ running: boolean; connected: boolean; connecting: boolean; backendId?: string; error?: string }>
+    register: (serverUrl: string, rootDir: string) => Promise<{ success: boolean; backendId?: string; apiKey?: string; error?: string }>
+    onStatusChange: (callback: (status: any) => void) => () => void
+  }
 }
 
 const electronAPI: ElectronAPI = {
@@ -106,6 +114,18 @@ const electronAPI: ElectronAPI = {
     unmaximize: () => ipcRenderer.invoke('win:unmaximize'),
     toggleMaximize: () => ipcRenderer.invoke('win:toggleMaximize'),
     close: () => ipcRenderer.invoke('win:close'),
+  },
+
+  apibackend: {
+    start: () => ipcRenderer.invoke('apibackend:start'),
+    stop: () => ipcRenderer.invoke('apibackend:stop'),
+    status: () => ipcRenderer.invoke('apibackend:status'),
+    register: (serverUrl, rootDir) => ipcRenderer.invoke('apibackend:register', serverUrl, rootDir),
+    onStatusChange: (callback) => {
+      const handler = (_event: any, status: any) => callback(status)
+      ipcRenderer.on('apibackend:status', handler)
+      return () => ipcRenderer.removeListener('apibackend:status', handler)
+    },
   },
 }
 

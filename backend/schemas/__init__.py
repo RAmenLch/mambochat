@@ -5,6 +5,7 @@ from .message import (
     SubMessageConfig, SubMessageBase, SubMessageCreate, SubMessageUpdate, SubMessage,
     MessageBase, MessageCreate, MessageUpdate, Message
 )
+from .message import UsageAggregate, ChatUsageStats
 from .provider import (
     AIModelBase, AIModelCreate, AIModelUpdate, AIModel,
     AIProviderBase, AIProviderCreate, AIProviderUpdate, AIProvider,
@@ -31,4 +32,6 @@ from .resource import (Resource, ResourceVersion,
                        SkillCreate,SkillValidationResult,SkillImportResponse,SkillImportResultItem,GithubImportRequest
                        )
 
-from .agent import (AgentBase,AgentCreate,AgentUpdate,AgentResponse,AgentMoveRequest)
+from .agent import (AgentBase,AgentCreate,AgentUpdate,AgentResponse,AgentMoveRequest,SecurityReviewConfigSchema,HitlToolInfo,GoalLoopToolInfo,SummarizationConfigSchema,MamboAgentParametersSchema)
+
+from .chat_export import (ChatExportPackage, ExportChat, ExportMessage, ExportSubMessage, ExportFileRef, ExportBlob, ImportReport)

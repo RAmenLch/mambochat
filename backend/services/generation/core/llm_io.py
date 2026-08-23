@@ -3,12 +3,13 @@
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Union
 
-from deepagents.middleware.summarization import SummarizationEvent
+from mambo_agents.middleware.summarization import SummarizationEvent
 from langchain_core.messages import BaseMessage
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from langchain_core.tools import BaseTool
 
 from backend.schemas.enums import AgentTypeEnum
+from backend.utils.path_safe import validate_path_safe_name
 
 
 # --- 消息结构化 Schema ---
@@ -54,6 +55,11 @@ class SkillConfig(BaseModel):
     name: str = Field(..., description="SKILL 的名称")
     files: List[SkillFileConfig] = Field(default_factory=list, description="该 SKILL 下的所有文件列表")
 
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        return validate_path_safe_name(v, label="Skill 名称")
+
 
 class ModelConfig(BaseModel):
     """
@@ -75,6 +81,11 @@ class ModelConfig(BaseModel):
         description="流式响应 chunk 间超时时间(秒)。为 None 或 0 时禁用。"
                     "对于图片生成等耗时模型，建议设置为较大值（如 600）或 None。"
     )
+    context_length: Optional[int] = Field(
+        None,
+        description="模型最大上下文窗口 (tokens)，用于 summarization fraction 模式。"
+                    "从 AIModel.meta_config.context_length 读取。"
+    )
 
 
 class MessageContext(BaseModel):
@@ -82,9 +93,18 @@ class MessageContext(BaseModel):
     上下文消息配置。
     包含经过过滤、切片、多模态转换后的标准 LLM 消息列表。
     """
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     messages: List[Dict[str, Any]] = Field(
         default_factory=list,
         description="标准化的 LLM 消息列表。要求包含 'role' 和 'content'，可能包含 'tool_calls' 等扩展字段。"
+    )
+
+    auto_summarization_event: Optional[SummarizationEvent] = Field(
+        default=None,
+        description="由 ContextBuilder 重建的自动摘要事件（基于 DB 中 auto ZipHistory 重算 cutoff_index）。"
+                    "Worker 用此值同步 LangGraph state 的 _summarization_event。"
+                    "None 表示无有效自动摘要，应清除 state。"
     )
 
     def set_system_prompt(self, content: str) -> "MessageContext":
@@ -102,6 +122,37 @@ class RunTimeConfig(BaseModel):
         None,
         description="分支起点 checkpoint_id。设置后 LangGraph 会进行时间旅行，从该 checkpoint 分叉",
     )
+    branch_from_root: bool = Field(
+        default=False,
+        description="分支起点是否为 thread 根 checkpoint（首条消息重新生成的兜底分支点）。"
+                    "根 checkpoint 的 versions_seen 不含真实节点，aupdate_state 无法推导 "
+                    "as_node 会抛 Ambiguous update，worker 应跳过 aupdate_state 直接 astream",
+    )
+
+
+class SecurityReviewAgentConfig(BaseModel):
+    """AI 安全审核配置（Mambo Agent 专属）。
+
+    model_id 引用 AIModel 表 ID，在 MamboAgentInitializer 中解析为 ModelConfig，
+    在 MamboAgentGraphBuilder 中通过 ModelFactory 实例化为 BaseChatModel。
+    """
+    enabled: bool = Field(default=False, description="是否启用 AI 安全审核")
+    model_id: Optional[str] = Field(
+        None,
+        description="审核模型的 AIModel ID。None 时复用主 Agent 模型"
+    )
+    system_prompt: Optional[str] = Field(
+        None,
+        description="自定义审核系统提示词。None 时使用内置默认提示词"
+    )
+    review_tools: Optional[List[str]] = Field(
+        None,
+        description="需要 AI 审核的工具名列表。None 或空列表表示审核所有 interrupt_on 工具"
+    )
+    agent_max_steps: Optional[int] = Field(
+        None,
+        description="审核 agent 最大步数（仅 review_mode='agent' 生效）。None 时使用默认值 10"
+    )
 
 
 class AgentConfig(BaseModel):
@@ -111,11 +162,16 @@ class AgentConfig(BaseModel):
     """
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    name: str = Field(default="default-agent", description="Agent 名称")
+    name: str = Field(default="default_agent", description="Agent 名称")
     description: str = Field(default="", description="Agent 描述，用于父代理路由")
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        return validate_path_safe_name(v, label="Agent 名称")
     system_prompt: str = Field(default="", description="Agent 的系统提示词")
 
-    agent_type: AgentTypeEnum = Field(default=AgentTypeEnum.REACT, description="Agent 的类型标识")
+    agent_type: AgentTypeEnum = Field(default=AgentTypeEnum.MAMBO, description="Agent 的类型标识")
     llm_config: Optional[ModelConfig] = Field(default=None, description="该Agent专属的模型配置")
     mounted_backends: Optional[List[Dict[str, Any]]] = Field(
         default=None,
@@ -129,7 +185,13 @@ class AgentConfig(BaseModel):
 
     skills: Optional[List[SkillConfig]] = Field(
         default=None,
-        description="挂载给 Agent 的外部技能包 (SKILL) 列表"
+        description="挂载给 Agent 的外部技能包 (SKILL) 列表（DeepAgent 用于 VFS 注入）"
+    )
+    skill_resource_roots: Optional[Dict[str, str]] = Field(
+        None,
+        description="技能包根资源映射（Mambo Agent）：{skill_name: root_resource_id}。"
+                    "每个 skill 用一个 MamboResourceBackend(resource_id=...) 独立挂载到 "
+                    "HybridWorkspaceBackend 的 /.mambo/skills/{name}/ 虚拟路径"
     )
     sub_configs: Optional[List['AgentConfig']] = Field(
         default=None,
@@ -146,6 +208,69 @@ class AgentConfig(BaseModel):
     recover_from_error: bool = Field(
         False,
         description="是否从错误中恢复（传入 input=None + thread_id 利用 LangGraph checkpoint 继续执行）"
+    )
+
+    # --- Mambo-Agent 专属配置 ---
+    include_general_purpose: bool = Field(
+        default=False,
+        description="是否启用 general-purpose 子代理（仅 Mambo Agent 有效）"
+    )
+    enable_summarization: bool = Field(
+        default=False,
+        description="是否启用对话摘要/压缩（仅 Mambo Agent 有效）"
+    )
+    summarization_config: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="摘要配置（仅 enable_summarization=True 时有效）。"
+                    "结构: {trigger_type, trigger_value, keep_type, keep_value, offload_to_backend}"
+    )
+    enable_planning: bool = Field(
+        default=True,
+        description="是否启用计划任务清单（write_plans 工具，仅 Mambo Agent 有效）"
+    )
+
+    # --- MCP 配置（仅 Mambo Agent） ---
+    mcp_server_configs: Optional[List[Any]] = Field(
+        default=None,
+        description="MCPServerConfig 列表。由 initializer 填充，builder 消费以创建 MCPMiddleware。"
+    )
+    mcp_exclude_tools: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="MCP 排除工具映射 {server_name: frozenset[tool_name]}。"
+    )
+    mcp_direct_tool_threshold: int = Field(
+        default=15,
+        description="MCP 工具数量阈值：低于此值时直接暴露工具，否则使用 meta-tool 包装模式。"
+    )
+    enable_show: bool = Field(
+        default=True,
+        description="是否启用 show 工具（展示文件/图片给用户，仅 Mambo Agent 有效）"
+    )
+    memory_resource_roots: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="长期记忆资源映射（仅 Mambo Agent）：{resource_name: resource_id}。"
+                    "传入后在 builder 中挂载到 /.mambo/memory/<name>/"
+    )
+    security_review_config: Optional[SecurityReviewAgentConfig] = Field(
+        default=None,
+        description="AI 安全审核配置（仅 Mambo Agent 有效）。为 None 时不启用"
+    )
+    security_review_llm_config: Optional[ModelConfig] = Field(
+        default=None,
+        description="安全审核模型的已解析配置（由 Initializer 填充，供 Builder 使用）"
+    )
+    enable_version_control: bool = Field(
+        default=False,
+        description="是否启用版本控制中间件（文件变更历史自动备份，仅 Mambo Agent 有效）"
+    )
+    version_control_config: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="版本控制详细配置，包含 auto_snapshot 等"
+    )
+    goal_loop_config: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="任务循环配置（仅 Mambo Agent 有效）。由 Initializer 填充，Builder 消费以创建 GoalLoopMiddleware。"
+                    "结构: {mode, max_rounds, objective, conditions, blocked_threshold}"
     )
 
 
@@ -168,7 +293,7 @@ class SummarizationEventInfo(BaseModel):
             i.e. ``state_messages[cutoff_index - 1]``.  Used by the manager to
             derive ``target_msg_id`` / ``target_sub_msg_id`` for persisting the
             ``ZipHistory`` sub-message.
-        event: The raw ``SummarizationEvent`` dict produced by the deepagents
+        event: The raw ``SummarizationEvent`` dict produced by the
             summarization middleware, containing ``cutoff_index``,
             ``summary_message``, and ``file_path``.
     """

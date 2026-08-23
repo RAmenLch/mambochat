@@ -302,7 +302,8 @@ export const useChatSessionStore = defineStore('chatSession', () => {
       // 更新chatListStore中的会话数据，以同步最新信息
       const chatIndex = chatListStore.chatList.findIndex(c => c.id === chatId);
       if (chatIndex !== -1) {
-        Object.assign(chatListStore.chatList[chatIndex], chatWithMessages);
+        const { messages: _messages, ...chatMeta } = chatWithMessages;
+        Object.assign(chatListStore.chatList[chatIndex], chatMeta);
       }
       currentChatMessages.value = chatWithMessages.messages.sort((a, b) => a.sortOrder - b.sortOrder);
       currentChatMessages.value.forEach(msg => {

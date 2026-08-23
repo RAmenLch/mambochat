@@ -17,10 +17,10 @@
       </el-form-item>
 
       <el-form-item v-if="showChatMode" :label="t('chat.settings.chatMode')" prop="chatMode">
-        <el-select v-model="form.chatMode" style="width: 100%;">
-          <el-option :label="t('chat.settings.normalMode')" value="normal" />
-          <el-option :label="t('chat.settings.agentMode')" value="agent" />
-        </el-select>
+        <el-radio-group v-model="form.chatMode" class="chat-mode-group">
+          <el-radio-button value="normal">{{ t('chat.settings.normalMode') }}</el-radio-button>
+          <el-radio-button value="agent">{{ t('chat.settings.agentMode') }}</el-radio-button>
+        </el-radio-group>
       </el-form-item>
 
       <el-form-item
@@ -253,3 +253,17 @@ const handleConfirm = async () => {
   });
 };
 </script>
+
+<style scoped>
+.chat-mode-group {
+  width: 100%;
+}
+
+.chat-mode-group :deep(.el-radio-button) {
+  flex: 1;
+}
+
+.chat-mode-group :deep(.el-radio-button__inner) {
+  width: 100%;
+}
+</style>

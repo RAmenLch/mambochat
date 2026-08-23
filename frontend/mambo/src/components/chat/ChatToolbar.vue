@@ -62,6 +62,52 @@
           <el-icon class="token-tooltip-icon"><QuestionFilled /></el-icon>
         </el-tooltip>
       </div>
+      <div v-if="usageStats" class="token-usage-capsule">
+        <el-tooltip placement="top" :show-after="300">
+          <template #content>
+            <div class="usage-capsule-tooltip">
+              <template v-for="(section, index) in usageSections" :key="section.key">
+                <div v-if="index > 0" class="usage-tooltip-divider" />
+                <div class="usage-tooltip-section">
+                  <div class="usage-tooltip-title">{{ section.title }}</div>
+                  <div class="usage-tooltip-row">
+                    <span class="usage-tooltip-label">{{ t('chat.toolbar.usageTotal') }}</span>
+                    <span class="usage-tooltip-value">{{ formatTokens(section.data.total_tokens) }}</span>
+                  </div>
+                  <div class="usage-tooltip-row">
+                    <span class="usage-tooltip-label">{{ t('chat.toolbar.usageCacheHit') }}</span>
+                    <span class="usage-tooltip-value">
+                      {{ formatTokens(section.data.cache_hit_tokens) }}
+                      <span v-if="cacheHitRate(section.data)" class="usage-tooltip-rate">({{ cacheHitRate(section.data) }})</span>
+                    </span>
+                  </div>
+                  <div class="usage-tooltip-row">
+                    <span class="usage-tooltip-label">{{ t('chat.toolbar.usageInput') }}</span>
+                    <span class="usage-tooltip-value">{{ formatTokens(section.data.prompt_tokens) }}</span>
+                  </div>
+                  <div class="usage-tooltip-row">
+                    <span class="usage-tooltip-label">{{ t('chat.toolbar.usageOutput') }}</span>
+                    <span class="usage-tooltip-value">{{ formatTokens(section.data.completion_tokens) }}</span>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+          <div class="capsule-inner">
+            <el-icon><Coin /></el-icon>
+            <span>{{ formatTokens(usageStats.active_path_main_agent.total_tokens) }}</span>
+          </div>
+        </el-tooltip>
+      </div>
+      <el-button
+        v-if="showVersionHistoryBtn"
+        :icon="Timer"
+        size="small"
+        text
+        bg
+        :title="t('chat.toolbar.versionHistory')"
+        @click="$emit('openVersionHistory')"
+      />
     </div>
 
     <div class="actions">
@@ -121,11 +167,10 @@
       </el-popover>
 
       <el-button
-        v-if="currentChat?.chatMode !== 'agent'"
         :icon="Search"
-        :type="isWebSearchEnabled ? 'primary' : ''"
+        :type="webSearchButtonType"
         circle
-        :title="t('chat.toolbar.webSearch')"
+        :title="webSearchTooltip"
         @click="$emit('toggleWebSearch')"
       />
       <el-button
@@ -157,18 +202,19 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive,onMounted } from 'vue';
+import { computed, reactive, ref, watch, onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useI18n } from 'vue-i18n';
 import { useProviderStore } from '@/stores/providerStore';
 import { useMcpStore } from '@/stores/mcpStore';
 import { useAgentStore } from '@/stores/agentStore'; // [新增]
-import type { Chat, Message, McpHealthStatus } from '@/api/types';
+import type { Chat, Message, McpHealthStatus, ChatUsageStats } from '@/api/types';
 import type { PropType } from 'vue';
 import { ElMessage } from 'element-plus';
+import { getChatUsage } from '@/api/chatService';
 import {
   Cpu, Setting, Files, Tickets, Upload, Collection,
-  QuestionFilled, Search, Suitcase, Refresh, User // [新增 User]
+  QuestionFilled, Search, Suitcase, Refresh, User, Timer, Coin // [新增 User, Timer, Coin]
 } from '@element-plus/icons-vue';
 
 const props = defineProps({
@@ -193,7 +239,8 @@ defineEmits([
   'openResourceSelector',
   'jumpToMessage',
   'toggleWebSearch',
-  'toggleMcpTool'
+  'toggleMcpTool',
+  'openVersionHistory',
 ]);
 
 const { t } = useI18n();
@@ -225,14 +272,86 @@ const displayAgentName = computed(() => {
 
   return agent ? agent.name : t('common.status.unknownModel');
 });
+
+// --- 会话 token 用量统计（胶囊展示） ---
+const usageStats = ref<ChatUsageStats | null>(null);
+
+const fetchUsage = async () => {
+  const chatId = props.currentChat?.id;
+  if (!chatId) return;
+  try {
+    usageStats.value = await getChatUsage(chatId);
+  } catch {
+    // 用量统计失败不阻塞工具栏
+  }
+};
+
+watch(
+  () => props.currentChat?.id,
+  () => {
+    usageStats.value = null;
+    fetchUsage();
+  },
+  { immediate: true }
+);
+
+// 消息中出现新的 Usage 子消息（流式生成产生）时刷新统计
+const usageSubMessageCount = computed(() => {
+  const msgs = props.messages || [];
+  let count = 0;
+  for (const msg of msgs) {
+    for (const sm of msg.sub_messages || []) {
+      if (sm.type === 'Usage') count += 1;
+    }
+  }
+  return count;
+});
+watch(usageSubMessageCount, (val, old) => {
+  if (val !== old) fetchUsage();
+});
+
+const formatTokens = (n: number): string => {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M';
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'k';
+  return String(n);
+};
+
+/** 缓存命中率 = 缓存命中量 / 输入量，无输入数据时返回 null */
+const cacheHitRate = (agg: ChatUsageStats['conversation']): string | null => {
+  if (agg.prompt_tokens <= 0) return null;
+  return ((agg.cache_hit_tokens / agg.prompt_tokens) * 100).toFixed(1) + '%';
+};
+
+/** tooltip 中按组渲染的用量数据 */
+const usageSections = computed(() => {
+  if (!usageStats.value) return [];
+  return [
+    { key: 'conversation', title: t('chat.toolbar.usageConversation'), data: usageStats.value.conversation },
+    { key: 'active', title: t('chat.toolbar.usageActivePath'), data: usageStats.value.active_path_main_agent },
+  ];
+});
 /**
- * 检查当前会话是否已启用系统联网搜索工具。
- * 目标 ID: system-ddgs-search
+ * 联网搜索状态：返回当前模式
  */
-const isWebSearchEnabled = computed((): boolean => {
-  const mcpIds = props.currentChat?.enabled_mcp_ids;
-  if (!mcpIds) return false;
-  return mcpIds.includes('system-ddgs-search');
+const webSearchMode = computed((): 'direct_read' | 'search_and_read' | 'disable' | null => {
+  return props.currentChat?.web_search_mode ?? null;
+});
+
+const webSearchButtonType = computed((): '' | 'primary' | 'success' => {
+  if (webSearchMode.value === 'search_and_read') return 'success';
+  if (webSearchMode.value === 'direct_read') return 'primary';
+  return '';
+});
+
+const webSearchTooltip = computed((): string => {
+  switch (webSearchMode.value) {
+    case 'direct_read':
+      return t('chat.toolbar.webSearchDirectRead');
+    case 'search_and_read':
+      return t('chat.toolbar.webSearchSearchAndRead');
+    default:
+      return t('chat.toolbar.webSearchOff');
+  }
 });
 
 /**
@@ -262,6 +381,16 @@ const zipHistoryItems = computed(() => {
   });
 
   return items;
+});
+
+/** 仅在 Agent 模式下且 Agent 启用了版本控制时显示 */
+const showVersionHistoryBtn = computed(() => {
+  if (props.currentChat?.chatMode !== 'agent' || !props.currentChat?.agentId) return false;
+  const agent = agentStore.allAgents.find(a => a.id === props.currentChat!.agentId) ||
+                agentStore.agentList.find(a => a.id === props.currentChat!.agentId);
+  if (!agent) return false;
+  const params = (agent as any).agentParameters;
+  return params?.version_control?.enabled === true;
 });
 
 /**
@@ -322,6 +451,79 @@ const getMcpStatusTitle = (status: McpHealthStatus) => {
   align-items: center;
   font-size: 14px;
   color: var(--el-text-color-secondary);
+}
+
+/* 用量胶囊 */
+.token-usage-capsule {
+  display: flex;
+  align-items: center;
+}
+
+.capsule-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: var(--el-fill-color);
+  border: 1px solid var(--el-border-color-lighter);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--el-text-color-secondary);
+  cursor: default;
+  user-select: none;
+  transition: border-color 0.2s ease;
+}
+
+.capsule-inner:hover {
+  border-color: var(--el-color-primary);
+}
+
+.capsule-inner .el-icon {
+  color: var(--el-color-primary);
+  font-size: 14px;
+}
+
+.usage-capsule-tooltip {
+  font-size: 12px;
+  line-height: 1.7;
+  min-width: 230px;
+}
+
+.usage-tooltip-title {
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 3px;
+}
+
+.usage-tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.usage-tooltip-label {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.usage-tooltip-value {
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-tooltip-rate {
+  color: #7EC8F8;
+  font-weight: 500;
+  margin-left: 4px;
+}
+
+.usage-tooltip-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.2);
+  margin: 6px 0;
 }
 
 .model-display .el-icon,

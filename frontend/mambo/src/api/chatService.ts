@@ -6,6 +6,7 @@ import type {
   ChatCreate,
   ChatWithMessages,
   ChatUpdate,
+  ChatUsageStats,
   Message,
   MoveRequest,
   MessageUpdate,
@@ -20,6 +21,7 @@ import type {
   AskUserAnswerRequest,
   ChatDuplicateRequest,
   ChatArchiveRequest,
+  ImportChatReport,
 } from './types';
 
 /**
@@ -61,6 +63,13 @@ export const getChatWithMessages = (chatId: string): Promise<ChatWithMessages> =
 };
 
 /**
+ * 统计会话的 token 用量（会话总量 + 当前激活路径主 Agent 用量）
+ */
+export const getChatUsage = (chatId: string): Promise<ChatUsageStats> => {
+  return apiClient.get(`/chats/${chatId}/usage`)
+};
+
+/**
  * 更新会话或文件夹设置
  */
 export const updateChatSettings = (itemId: string, settings: ChatUpdate): Promise<Chat> => {
@@ -86,6 +95,26 @@ export const duplicateChat = (chatId: string, payload?: ChatDuplicateRequest): P
  */
 export const archiveChats = (data: ChatArchiveRequest): Promise<Chat> => {
   return apiClient.post('/archive', data);
+};
+
+/**
+ * 导出会话为 JSON（mambochat.chat-export 可导入格式，由后端生成）
+ */
+export const exportChatJson = (chatId: string): Promise<Blob> => {
+  return apiClient.get(`/chats/${chatId}/export`, { responseType: 'blob' });
+};
+
+/**
+ * 导入会话 JSON 文件，创建为新会话（放入根目录）
+ */
+export const importChat = (file: File): Promise<ImportChatReport> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  // 必须显式声明 multipart：apiClient 全局默认 Content-Type 为 application/json，
+  // axios 会把 FormData 序列化为 JSON 导致后端收不到 file 字段（422）
+  return apiClient.post('/chats/import', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
 };
 
 
@@ -115,6 +144,18 @@ export const deleteMessage = (messageId: string): Promise<Message> => {
 };
 
 /**
+ * 获取消息下的 TaskSubStep 子代理追踪步骤（按需加载，可按 task_group_id 过滤）。
+ */
+export const getMessageTaskSubSteps = (
+  messageId: string,
+  taskGroupId?: string,
+): Promise<SubMessage[]> => {
+  return apiClient.get(`/messages/${messageId}/task-substeps`, {
+    params: taskGroupId ? { task_group_id: taskGroupId } : undefined,
+  });
+};
+
+/**
  * 准备并开始生成AI回复。
  * @returns 返回包含新用户消息和AI助手占位符消息的对象。
  */
@@ -124,10 +165,17 @@ export const prepareGenerate = (chatId: string, data: GenerateRequest): Promise<
 
 /**
  * 准备并开始重新生成AI回复。
+ * @param chatId - 会话ID
+ * @param fromMessageId - 重新生成的起点消息ID
+ * @param versionRollback - 可选，版本回滚配置
  * @returns 返回一个状态为 'generating' 的 assistant 消息对象作为占位符。
  */
-export const prepareRegenerate = (chatId: string, fromMessageId: string): Promise<Message> => {
-  return apiClient.post(`/chats/${chatId}/prepare-regenerate/${fromMessageId}`)
+export const prepareRegenerate = (
+  chatId: string,
+  fromMessageId: string,
+  versionRollback?: { files: string[] },
+): Promise<Message> => {
+  return apiClient.post(`/chats/${chatId}/prepare-regenerate/${fromMessageId}`, versionRollback ? { version_rollback: versionRollback } : {})
 };
 
 /**

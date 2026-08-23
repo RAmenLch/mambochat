@@ -145,6 +145,20 @@ class StreamManager:
             self.running_tasks.add(message_id)
             print(f"[StreamManager] Task marked as RUNNING for message '{message_id}'.")
 
+    async def try_mark_task_running(self, message_id: str) -> bool:
+        """原子地尝试将任务标记为运行中。
+
+        若该任务已存在则返回 False（不重复注册），否则注册并返回 True。
+        用于需要去重的后台任务（如标题生成），避免重复调度。
+        """
+        async with self.lock:
+            if message_id in self.running_tasks:
+                print(f"[StreamManager] Task '{message_id}' already RUNNING, skipped duplicate registration.")
+                return False
+            self.running_tasks.add(message_id)
+            print(f"[StreamManager] Task marked as RUNNING for message '{message_id}'.")
+            return True
+
     async def mark_task_completed(self, message_id: str):
         async with self.lock:
             self.running_tasks.discard(message_id)

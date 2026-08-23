@@ -79,6 +79,13 @@ export const reorderResourceVersions = (updates: VersionReorderItem[]): Promise<
 };
 
 /**
+ * 删除指定的资源版本。
+ */
+export const deleteResourceVersion = (versionId: string): Promise<{ message: string }> => {
+  return apiClient.delete(`/resources/versions/${versionId}`);
+};
+
+/**
  * 为指定的资源创建一个新的版本快照。
  */
 export const createResourceVersion = (resourceId: string, data: ResourceVersionCreate): Promise<ResourceVersion> => {
@@ -109,6 +116,31 @@ export const searchResources = (data: ResourceSearchRequest): Promise<ResourceSe
 };
 
 /**
+ * 导出文件夹资源为 ZIP（仅最新版本，剔除资源专属配置）
+ * @param id 文件夹资源ID
+ */
+export const exportResourceZip = (id: string): Promise<Blob> => {
+  return apiClient.get(`/resources/${id}/export`, { responseType: 'blob' });
+};
+
+/**
+ * 导出文件夹资源并触发浏览器下载
+ * @param id 文件夹资源ID
+ * @param name 文件夹名称（作为 zip 文件名）
+ */
+export const downloadResourceZip = async (id: string, name: string): Promise<void> => {
+  const blob = await exportResourceZip(id);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${name || 'resources'}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+/**
  * 创建新的 SKILL 资源
  * 后端会自动创建对应的文件夹和 SKILL.md 文件
  */
@@ -131,13 +163,15 @@ export const validateSkill = (resourceId: string): Promise<SkillValidationResult
  */
 export const importSkillFromFile = (
   file: File,
-  parentId: string | null = null
+  parentId: string | null = null,
+  onConflict: string = 'error'
 ): Promise<SkillImportResponse> => {
   const formData = new FormData()
   formData.append('file', file)
   if (parentId) {
     formData.append('parent_id', parentId)
   }
+  formData.append('on_conflict', onConflict)
   return apiClient.post('/resources/skills/import/file', formData, {
     headers: {
       'Content-Type': 'multipart/form-data'
@@ -149,13 +183,16 @@ export const importSkillFromFile = (
  * 通过 GitHub 仓库导入 Skill
  * @param repoUrl 仓库地址
  * @param parentId 目标父文件夹 ID
+ * @param onConflict 同名冲突处理策略: error / overwrite / skip
  */
 export const importSkillFromGithub = (
   repoUrl: string,
-  parentId: string | null = null
+  parentId: string | null = null,
+  onConflict: string = 'error'
 ): Promise<SkillImportResponse> => {
   return apiClient.post('/resources/skills/import/github', {
     repo_url: repoUrl,
-    parent_id: parentId
+    parent_id: parentId,
+    on_conflict: onConflict
   })
 }

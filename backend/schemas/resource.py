@@ -1,18 +1,24 @@
 # backend/schemas/resource.py
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, field_validator
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 from backend.schemas.message import SubMessageConfig
 from backend.schemas.enums import MoveAction, ResourceItemType, ResourceType
 from backend.schemas.file import File as FileSchema  # 导入 File Schema
+from backend.utils.path_safe import validate_path_safe_name
 
 
 # --- ResourceVersion Schemas ---
 
 class ResourceVersionBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        return validate_path_safe_name(v, label="ResourceVersion 名称")
     commitMessage: Optional[str] = None
     content: Optional[str] = None
     attributes: Optional[Dict[str, Any]] = None
@@ -27,6 +33,13 @@ class ResourceVersionUpdate(BaseModel):
     commitMessage: Optional[str] = None
     content: Optional[str] = None
     attributes: Optional[Dict[str, Any]] = None
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        if v is not None:
+            return validate_path_safe_name(v, label="ResourceVersion 名称")
+        return v
 
 
 class ResourceVersion(ResourceVersionBase):
@@ -47,6 +60,11 @@ class ResourceVersion(ResourceVersionBase):
 
 class ResourceBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        return validate_path_safe_name(v, label="Resource 名称")
     description: Optional[str] = None
 
     itemType: ResourceItemType = Field(ResourceItemType.RESOURCE, description="项目类型: 'resource' 或 'folder'")
@@ -83,6 +101,13 @@ class ResourceUpdate(BaseModel):
     kb_id: Optional[str] = None
     kb_config: Optional[Dict[str, Any]] = None
 
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        if v is not None:
+            return validate_path_safe_name(v, label="Resource 名称")
+        return v
+
 
 class ResourceSimple(ResourceBase):
     """
@@ -104,6 +129,7 @@ class Resource(ResourceSimple):
     完整资源模型，包含 latest_version 信息。
     """
     latest_version: Optional[ResourceVersion] = None
+    latestVersionId: Optional[str] = None
 
 
 class ResourceWithVersions(Resource):
@@ -164,6 +190,11 @@ class SkillCreate(BaseModel):
     description: str = Field(..., min_length=1, max_length=1024, description="Skill 描述")
     parentId: Optional[str] = Field(None, description="父文件夹ID")
 
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        return validate_path_safe_name(v, label="Skill 名称")
+
 
 # --- Skill Import Schemas ---
 
@@ -171,12 +202,13 @@ class GithubImportRequest(BaseModel):
     """GitHub 仓库导入请求"""
     repo_url: str = Field(..., description="GitHub 仓库地址")
     parent_id: Optional[str] = Field(None, description="目标父文件夹ID")
+    on_conflict: str = Field("error", description="同名冲突处理策略: error / overwrite / skip")
 
 
 class SkillImportResultItem(BaseModel):
     """单个 Skill 导入结果"""
     name: str = Field(..., description="Skill 名称")
-    status: str = Field(..., description="导入状态: success 或 failed")
+    status: str = Field(..., description="导入状态: success / failed / skipped")
     resource_id: Optional[str] = Field(None, description="成功时返回的资源ID")
     error: Optional[str] = Field(None, description="失败原因")
 
@@ -186,4 +218,5 @@ class SkillImportResponse(BaseModel):
     total_detected: int = Field(..., description="识别出的 Skill 总数")
     success_count: int = Field(..., description="成功导入数量")
     failed_count: int = Field(..., description="失败数量")
+    skipped_count: int = Field(0, description="跳过数量（同名冲突且策略为 skip 时）")
     details: List[SkillImportResultItem] = Field(default_factory=list, description="详细结果列表")

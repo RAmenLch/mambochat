@@ -89,6 +89,9 @@ def register_custom_functions(dbapi_connection, connection_record):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute("PRAGMA synchronous=NORMAL;")  # 进一步优化写入性能
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_message_chatId ON Message(chatId);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_submessage_messageId ON SubMessage(messageId);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_parentId ON Chat(parentId);")
         cursor.close()
     except Exception as e:
         print(f"Warning: Failed to set WAL mode: {e}")

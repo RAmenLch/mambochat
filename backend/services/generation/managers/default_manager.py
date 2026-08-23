@@ -1,9 +1,7 @@
 # backend/services/generation/managers/default_manager.py
 
 import asyncio
-import json
 import logging
-import re
 import traceback
 from typing import AsyncGenerator, Optional, Dict, List, Set, Tuple, Any
 
@@ -32,10 +30,12 @@ from backend.services.generation.worker.abstract_worker import AbstractGenerateW
 from backend.services.generation.managers.stream_handlers.base_handler import StreamContext, BaseStreamHandler
 from backend.services.generation.managers.stream_handlers.handlers import (
     HitlHandler, TextAndReasoningHandler, RoundClosureHandler,
-    ToolExecutionHandler, ImageAndUsageHandler, FinishReasonMonitorHandler
+    ToolExecutionHandler, ImageAndUsageHandler, FinishReasonMonitorHandler,
+    SubAgentEventHandler, SecurityReviewHandler
 )
 from backend.services.generation.managers.stream_handlers.finish_reason_classifier import FinishReasonClassifier
 from backend.services.generation.core.llm_io import SummarizationEventInfo
+from backend.schemas.message import VersionSnapshotContent, VersionSnapshotFile, SubMessageConfig
 
 logger = logging.getLogger(__name__)
 
@@ -49,17 +49,27 @@ class DefaultGenerateManager(AbstractGenerateManager):
     def __init__(self, db_session: AsyncSession, recover_from_error: bool = False):
         super().__init__(db_session)
 
-        self._final_usage_data: Dict = {}
         self._created_stream_ids: Set[str] = set()
         self._pending_hitl_tool_calls = []
         self._recover_from_error = recover_from_error
         self._last_finish_reason: Optional[str] = None
         self._last_summarization_event: Optional[SummarizationEventInfo] = None
 
+        self._version_snapshots: Dict[str, "VersionSnapshotContent"] = {}
+
+        self._subagent_step_counters: Dict[str, int] = {}
+
+        # 多 ask_user 中断批次追踪：当多个工具并行调用 interrupt() 时，
+        # __interrupt__ 事件按 task 逐个发射，此 ID 在事件间共享同一个 batch_id
+        self._hitl_batch_id: Optional[str] = None
+        self._hitl_interrupt_counter: int = 0
+
         self._handlers: List[BaseStreamHandler] = [
             HitlHandler(),
             TextAndReasoningHandler(),
             RoundClosureHandler(),
+            SubAgentEventHandler(),
+            SecurityReviewHandler(),
             ToolExecutionHandler(),
             ImageAndUsageHandler(),
             FinishReasonMonitorHandler()
@@ -69,34 +79,6 @@ class DefaultGenerateManager(AbstractGenerateManager):
     def _extract_run_uuid(lc_run_id: Optional[str]) -> Optional[str]:
         if not lc_run_id: return None
         return lc_run_id[len("lc_run--"):] if lc_run_id.startswith("lc_run--") else lc_run_id
-
-    @staticmethod
-    def _extract_summary_content(event_info: SummarizationEventInfo) -> Optional[str]:
-        """Extract the pure summary text from a SummarizationEventInfo.
-
-        The summary is embedded in a ``HumanMessage`` whose content follows a
-        structured template::
-
-            You are in the middle of a conversation that has been summarized.
-            ...
-            <summary>
-            {actual summary}
-            </summary>
-
-        This method strips the wrapper and returns only the inner summary.
-        """
-        event = event_info.event
-        summary_msg = event.get("summary_message")
-        if summary_msg is None:
-            return None
-        content = getattr(summary_msg, "content", None)
-        if not isinstance(content, str) or not content:
-            return None
-        match = re.search(r"<summary>\s*(.*?)\s*</summary>", content, re.DOTALL)
-        if match:
-            return match.group(1).strip()
-        # Fallback: return trimmed content if template is absent
-        return content.strip()
 
     async def _resolve_zip_target_ids(
         self,
@@ -180,6 +162,9 @@ class DefaultGenerateManager(AbstractGenerateManager):
             tools = llm_input.agent_config.tools or []
             tool_map: Dict[str, BaseTool] = {t.name: t for t in tools}
 
+        # NOTE: Mambo Agent 使用 MCPMiddleware（graceful degradation），
+        # 不再抛出 McpConnectionError。此 catch 保留作为 DeepAgent / React 等
+        # 仍在使用旧 MCPToolProvider 的 agent 类型的兜底。
         except McpConnectionError as e:
             yield CreateSubMessage(
                 sub_message_id=generate_uuid(), type=schemas_enums.SubMessageType.NORMAL.value,
@@ -198,6 +183,22 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 if mode == "summarization":
                     self._last_summarization_event = event  # last-wins: cumulative final state
                     continue
+                # ── Version snapshot signal ───────────────────────────────
+                if mode == "version_snapshot" and isinstance(event, dict):
+                    cp_id = event.get("checkpoint_id", "")
+                    if cp_id not in self._version_snapshots:
+                        self._version_snapshots[cp_id] = VersionSnapshotContent(
+                            checkpoint_id=cp_id,
+                            timestamp=event.get("timestamp", ""),
+                            files=[],
+                        )
+                    self._version_snapshots[cp_id].files.append(
+                        VersionSnapshotFile(
+                            path=event.get("file_path", ""),
+                            sha256=event.get("sha256", ""),
+                        )
+                    )
+                    continue
                 # ── Normal handler chain ─────────────────────────────────
                 decoder = worker.resolve_decoder(event)
 
@@ -210,7 +211,9 @@ class DefaultGenerateManager(AbstractGenerateManager):
                     providers=providers, tool_map=tool_map, hitl_config=hitl_config,
                     created_stream_ids=self._created_stream_ids,
                     pending_hitl_tool_calls=self._pending_hitl_tool_calls,
-                    final_usage_data=self._final_usage_data
+                    subagent_step_counters=self._subagent_step_counters,
+                    hitl_batch_id=self._hitl_batch_id,
+                    hitl_interrupt_counter=self._hitl_interrupt_counter,
                 )
 
                 for handler in self._handlers:
@@ -224,42 +227,64 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 if context.last_finish_reason:
                     self._last_finish_reason = context.last_finish_reason
 
+                # 同步 ask_user 多中断批次号到 manager（用于后续事件共享同一 batch_id）
+                if context.hitl_batch_id is not None:
+                    self._hitl_batch_id = context.hitl_batch_id
+                    self._hitl_interrupt_counter = context.hitl_interrupt_counter
+
+                # HITL 审核中断（security_review）：应立即 break
+                # ask_user 多中断：不 break，让后续 __interrupt__ 事件继续流入
                 if context.should_interrupt:
                     should_interrupt = True
                     break
         except asyncio.CancelledError:
             raise
 
+        # ask_user 多中断场景：context.should_interrupt 不会被设置（不使用 InterruptGeneration），
+        # 但 self._hitl_batch_id 已被 HitlHandler 设置，表示发生过中断
+        if self._hitl_batch_id is not None:
+            should_interrupt = True
+
         # ── Post-generation: persist summarization as ZipHistory sub-message ──
         if self._last_summarization_event:
             event_info = self._last_summarization_event
-            summary_content = self._extract_summary_content(event_info)
-            if summary_content:
-                # 由 Manager 负责从 last_zip_message 推导 target_msg_id / target_sub_msg_id
-                target_msg_id, target_sub_msg_id = await self._resolve_zip_target_ids(
-                    chat_id, event_info.last_zip_message,
-                )
-                if not target_msg_id or not target_sub_msg_id:
-                    logger.warning(
-                        "DefaultGenerateManager: unable to resolve target_msg_id / target_sub_msg_id "
-                        "from last_zip_message (id=%s, type=%s) — skipping ZipHistory creation",
-                        getattr(event_info.last_zip_message, "id", None),
-                        type(event_info.last_zip_message).__name__,
+            summary_msg = event_info.event.get("summary_message")
+            if summary_msg is not None:
+                summary_content = getattr(summary_msg, "content", None)
+                if isinstance(summary_content, str) and summary_content:
+                    # 由 Manager 负责从 last_zip_message 推导 target_msg_id / target_sub_msg_id
+                    target_msg_id, target_sub_msg_id = await self._resolve_zip_target_ids(
+                        chat_id, event_info.last_zip_message,
                     )
-                else:
-                    yield UpdateZipHistorySubMessage(
-                        sub_message_id=generate_uuid(),
-                        target_message_id=target_msg_id,
-                        target_sub_msg_id=target_sub_msg_id,
-                        content=summary_content,
-                        status=schemas_enums.MessageStatus.COMPLETED,
-                        zip_enable=True,
-                    )
-
+                    if not target_msg_id or not target_sub_msg_id:
+                        logger.warning(
+                            "DefaultGenerateManager: unable to resolve target_msg_id / target_sub_msg_id "
+                            "from last_zip_message (id=%s, type=%s) — skipping ZipHistory creation",
+                            getattr(event_info.last_zip_message, "id", None),
+                            type(event_info.last_zip_message).__name__,
+                        )
+                    else:
+                        yield UpdateZipHistorySubMessage(
+                            sub_message_id=generate_uuid(),
+                            target_message_id=target_msg_id,
+                            target_sub_msg_id=target_sub_msg_id,
+                            content=summary_content,
+                            status=schemas_enums.MessageStatus.COMPLETED,
+                            zip_enable=True,
+                            auto=True,
+                        )
+        #         ── Record version snapshots as submessages ──
+        for snapshot in self._version_snapshots.values():
+            yield CreateSubMessage(
+                sub_message_id=generate_uuid(),
+                type=schemas_enums.SubMessageType.VERSION_SNAPSHOT,
+                sortOrder=50,
+                status=schemas_enums.MessageStatus.COMPLETED,
+                initial_content=snapshot.to_json_string(),
+                config=SubMessageConfig(context_participation_length=0),
+            )
         # ── Record checkpoint_id for branch tracking ──
-        saved = await get_checkpointer().aget_tuple(
-            {"configurable": {"thread_id": chat_id}}
-        )
+        saved = await self._get_interrupt_checkpoint(chat_id)
         if saved:
             yield SetMessageCheckpointId(
                 message_id=assistant_message_id,
@@ -272,16 +297,9 @@ class DefaultGenerateManager(AbstractGenerateManager):
     async def _finalize_generation(self, is_interrupted: bool = False) -> AsyncGenerator[BaseInstruction, None]:
         for sub_id in list(self._created_stream_ids):
             if sub_id.endswith('-R'):
-                yield UpdateSubMessageConfig(sub_message_id=sub_id, config={"is_minimal": True})
+                yield UpdateSubMessageConfig(sub_message_id=sub_id, config=SubMessageConfig(is_minimal=True))
             yield UpdateSubMessageStatus(sub_message_id=sub_id, status=schemas_enums.MessageStatus.COMPLETED)
         self._created_stream_ids.clear()
-
-        if self._final_usage_data:
-            yield CreateSubMessage(
-                sub_message_id=generate_uuid(), type=schemas_enums.SubMessageType.USAGE.value,
-                sortOrder=99, status=schemas_enums.MessageStatus.COMPLETED,
-                initial_content=json.dumps(self._final_usage_data), config={"context_participation_length": 0}
-            )
 
         if not is_interrupted:
             yield SetFinalStatus(status=schemas_enums.MessageStatus.COMPLETED)
@@ -298,9 +316,35 @@ class DefaultGenerateManager(AbstractGenerateManager):
                     sortOrder=97,
                     status=schemas_enums.MessageStatus.COMPLETED,
                     initial_content=error_content.to_json_string(),
-                    config={"context_participation_length": 0}
+                    config=SubMessageConfig(context_participation_length=0)
                 )
             self._last_finish_reason = None
+
+    @staticmethod
+    async def _get_interrupt_checkpoint(chat_id: str):
+        """获取包含 __interrupt__ write 的 checkpoint。
+
+        LangGraph 默认 durability="async" 时，ask_user 工具调用 interrupt()
+        抛出 GraphInterrupt。GraphInterrupt 通过 async generator 的 yield 逃逸
+        到调用方，触发 GeneratorExit 清理 generator。此时 after_tick 提交的
+        checkpoint 保存任务在 BackgroundExecutor 中尚未落盘，直接调用
+        aget_tuple 可能拿到上一步不含 __interrupt__ write 的 checkpoint，
+        导致 resume 时找不到被中断的 task。
+
+        这里重试最多 10 次（每次 0.05s），等待含 __interrupt__ write 的
+        checkpoint 落盘后再返回。
+        """
+        for _ in range(10):
+            saved = await get_checkpointer().aget_tuple(
+                {"configurable": {"thread_id": chat_id}}
+            )
+            if saved and saved.pending_writes and any(
+                w[1] == "__interrupt__" for w in saved.pending_writes
+            ):
+                return saved
+            await asyncio.sleep(0.05)
+        # 超时兜底：返回最后一次 aget_tuple 的结果（即使不含 __interrupt__）
+        return saved
 
     async def _cleanup_on_exception(
             self, assistant_message_id: str, final_status: schemas_enums.MessageStatus,

@@ -6,6 +6,7 @@
       ref="multiPartInputRef"
       :model-value="multiPartDraft"
       :active-index="activePartitionIndex"
+      :completion-agent-id="agentId"
       @update:model-value="(val) => $emit('update:multiPartDraft', val)"
       @update:active-index="(val) => $emit('update:activePartitionIndex', val)"
       class="input-field"
@@ -18,6 +19,7 @@
         :model-value="singlePartDraft"
         @update:model-value="(val) => $emit('update:singlePartDraft', val)"
         :monaco-options="monacoOptions"
+        :completion-agent-id="agentId"
         @submit="$emit('send')"
         @paste-file="(files) => $emit('files-pasted', files)"
       />
@@ -87,7 +89,11 @@ const props = defineProps({
   isPendingReview: {
     type: Boolean,
     default: false,
-  }
+  },
+  agentId: {
+    type: String,
+    default: null,
+  },
 })
 
 const emit = defineEmits<{

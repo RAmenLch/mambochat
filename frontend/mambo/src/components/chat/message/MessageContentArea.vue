@@ -27,6 +27,8 @@
           :index="index + 1"
           :is-minimize-disabled="isLastVisibleSubMessage"
           :is-inactive="isSubMessageInactive(subMessage)"
+          :preview-src-list="getFileGroupPreviewList(group)"
+          :preview-index="getFilePreviewIndex(group, index)"
           @edit="(payload) => $emit('edit', subMessage, payload)"
           @edit-file="(file) => $emit('edit-file', file)"
           @copy="$emit('copy', subMessage)"
@@ -87,6 +89,26 @@ function isSubMessageInactive(subMessage: SubMessage): boolean {
 const isLastVisibleSubMessage = computed(() => props.normalSubMessages.length === 1)
 const firstSubMessage = computed(() => props.normalSubMessages[0])
 
+/** 提取文件组中所有图片的 URL，用于 el-image 的 preview-src-list 实现键盘导航 */
+function getFileGroupPreviewList(group: SubMessageGroup): string[] {
+  return group.sub_messages
+    .filter(sm => sm.type === 'File' && sm.file_info?.mime_type?.startsWith('image/'))
+    .map(sm => sm.file_info!.url)
+}
+
+/** 计算当前图片在预览列表中的索引 */
+function getFilePreviewIndex(group: SubMessageGroup, currentIndex: number): number {
+  let imageIndex = 0
+  for (let i = 0; i <= currentIndex; i++) {
+    const sm = group.sub_messages[i]
+    if (sm.type === 'File' && sm.file_info?.mime_type?.startsWith('image/')) {
+      if (i === currentIndex) return imageIndex
+      imageIndex++
+    }
+  }
+  return imageIndex
+}
+
 const useSinglePartitionView = computed(() => {
   return props.normalSubMessages.length === 1 && firstSubMessage.value?.type === 'Normal'
 })
@@ -98,6 +120,11 @@ const groupedSubMessages = computed((): SubMessageGroup[] => {
   let lastGroup: SubMessageGroup | null = null
 
   for (const subMessage of props.normalSubMessages) {
+    // 跳过 Mini_Avatar / Gal_Avatar 模式的 File（仅在头像或侧边栏展示）
+    if (subMessage.type === 'File' && subMessage.config?.show_tool_mode && ['Mini_Avatar', 'Gal_Avatar'].includes(subMessage.config.show_tool_mode)) {
+      continue
+    }
+
     if (subMessage.type === 'File') {
       if (lastGroup && lastGroup.type === 'file') {
         lastGroup.sub_messages.push(subMessage)

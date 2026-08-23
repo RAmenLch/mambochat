@@ -25,9 +25,22 @@ apiClient.interceptors.response.use(
     let errorMessage = t('common.error.unknown');
 
     if (isAxiosError(error)) {
-      // 优先使用后端返回的业务错误信息
-      if (error.response?.data?.detail) {
-        errorMessage = error.response.data.detail;
+      const responseData = error.response?.data;
+
+      // 优先使用 error_code 进行 i18n 映射
+      if (responseData?.error_code) {
+        const i18nKey = `common.backendError.${responseData.error_code}`;
+        const translated = t(i18nKey);
+        // 若 i18n 中没有对应 key，t() 会返回 key 本身，此时回退到 detail
+        if (translated !== i18nKey) {
+          errorMessage = translated;
+        } else if (responseData?.detail) {
+          errorMessage = responseData.detail;
+        }
+      }
+      // 其次使用后端返回的业务错误信息
+      else if (responseData?.detail) {
+        errorMessage = responseData.detail;
       } else if (error.response) {
         // 如果没有 detail, 但有 response, 则根据状态码提供通用提示
         errorMessage = t('common.error.requestStatus', { status: error.response.status });

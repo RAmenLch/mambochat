@@ -1,20 +1,31 @@
 # backend/routers/chat_interaction.py
 
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+import asyncio
+import json
+import time
+from pathlib import PurePosixPath
+
+from fastapi import APIRouter, Body, Depends, HTTPException, status, BackgroundTasks, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.responses import StreamingResponse
-from typing import List
+from typing import List, Optional
 
 from backend.services import generation_service
 from backend.services.stream_manager_service import stream_manager
 from backend.services.file_service import FileService
+from backend.services import maintenance
 from backend.crud import chat_crud, message_crud, setting_crud
 from backend import schemas
 from backend.models import chat_model
-from backend.database import get_db
+from backend.database import get_db, AsyncSessionLocal
 from backend.routers.chat_management import _apply_default_model_to_chat_object
+from backend.exceptions import AppHTTPException
 from backend.schemas import SubMessageType, MessageStatus
-from backend.schemas.message import ToolApprovalRequest
+from backend.schemas.message import ToolApprovalRequest, SubMessageConfig, SubMessageUpdate
+from backend.schemas.enums import FileManagementType
+
+from mambo_agents.backends.schemas import VirtualPath
+from mambo_agents.backends.protocol import _get_mime_type
 
 from pydantic import BaseModel
 
@@ -29,6 +40,212 @@ class AskUserAnswerRequest(BaseModel):
     sub_message_id: str
     answers: List[str]
     ask_status: str = "answered"
+
+
+# ----------------------------------------------------------------------
+# Pending file (show wait) — 按会话聚合
+# 同一会话的所有待生成文件共享一个轮询任务与一个 backend 实例。
+# 任务生命周期：由首个 wait-for-files 连接启动，所有 pending 文件达到
+# 终态（成功入库 / 超时失败）后结束；客户端断开不影响任务继续运行。
+# ----------------------------------------------------------------------
+
+_chat_pending_tasks: dict[str, asyncio.Task] = {}
+_chat_subscribers: dict[str, set[asyncio.Queue]] = {}
+
+
+async def _broadcast_chat_event(chat_id: str, event: dict) -> None:
+    queues = _chat_subscribers.get(chat_id)
+    if not queues:
+        return
+    for queue in list(queues):
+        try:
+            queue.put_nowait(event)
+        except Exception:
+            pass
+
+
+async def _process_pending_file(
+    backend,
+    sub_message_id: str,
+    path: str,
+) -> dict:
+    """下载 → 稳定性校验 → 入库 → 更新子消息。
+
+    返回 {"type": "file_ready", "file_id", "file_info"} 或
+         {"type": "still_writing"}（文件未写完，等待下一轮）。
+    """
+    r1 = await backend.adownload_files([VirtualPath(path)])
+    size1 = len(r1[0].content) if r1 and r1[0].content else 0
+    if size1 == 0:
+        return {"type": "still_writing"}
+
+    await asyncio.sleep(2)
+    r2 = await backend.adownload_files([VirtualPath(path)])
+    size2 = len(r2[0].content) if r2 and r2[0].content else 0
+    if size1 != size2:
+        return {"type": "still_writing"}
+
+    content = r2[0].content
+    filename = PurePosixPath(path).name
+    mime = _get_mime_type(path)
+
+    if content:
+        sample = content[:8192]
+        try:
+            sample.decode("utf-8")
+            from backend.utils.file_utils import FileUtils
+            mime = FileUtils.correct_mime_type(filename, mime, sample)
+        except (UnicodeDecodeError, ValueError, LookupError):
+            pass
+
+    async with AsyncSessionLocal() as db:
+        fs = FileService(db)
+        db_file = await fs.save_file_from_bytes(
+            data=content or b"",
+            filename=filename,
+            mime_type=mime,
+            management_type=[FileManagementType.SUB_MESSAGE.value],
+            sub_path="chat_attachments",
+        )
+
+        # 保留创建时设置的 show_tool_mode（防止轮询完成时被覆盖）
+        existing_sub = await message_crud.get_sub_message(db, sub_message_id)
+        show_tool_mode = None
+        if existing_sub and existing_sub.config:
+            raw_cfg = existing_sub.config
+            if isinstance(raw_cfg, str):
+                raw_cfg = json.loads(raw_cfg)
+            show_tool_mode = raw_cfg.get("show_tool_mode") if isinstance(raw_cfg, dict) else getattr(raw_cfg, "show_tool_mode", None)
+
+        await message_crud.update_sub_message(
+            db,
+            sub_message_id,
+            SubMessageUpdate(
+                content=db_file.id,
+                status=MessageStatus.COMPLETED,
+                config=SubMessageConfig(
+                    context_participation_length=0,
+                    pending_file_path=None,
+                    pending_file_timeout=None,
+                    show_tool_mode=show_tool_mode,
+                ),
+            ),
+        )
+
+        file_schema = fs.convert_to_schema(db_file)
+        file_info = file_schema.model_dump(mode='json')
+
+    return {
+        "type": "file_ready",
+        "file_id": db_file.id,
+        "file_info": file_info,
+    }
+
+
+async def _scan_chat_pending_sub_messages(
+    db: AsyncSession, chat_id: str,
+) -> dict[str, tuple[str, int]]:
+    """扫描会话下所有等待中的文件子消息，返回 {sub_message_id: (path, timeout)}。"""
+    pending: dict[str, tuple[str, int]] = {}
+    msgs = await message_crud.get_messages_by_chat(db, chat_id=chat_id)
+    for msg in msgs:
+        for sub in msg.sub_messages:
+            if sub.type != SubMessageType.FILE.value or sub.status != MessageStatus.WAITING.value:
+                continue
+            raw_cfg = sub.config
+            if isinstance(raw_cfg, str):
+                try:
+                    raw_cfg = json.loads(raw_cfg)
+                except json.JSONDecodeError:
+                    continue
+            if not isinstance(raw_cfg, dict):
+                continue
+            path = raw_cfg.get("pending_file_path")
+            if not path:
+                continue
+            timeout = raw_cfg.get("pending_file_timeout") or 300
+            pending[sub.id] = (path, int(timeout))
+    return pending
+
+
+async def _poll_chat_pending_files(chat_id: str) -> None:
+    """轮询会话下所有待生成文件，就绪/超时后入库并广播事件。"""
+    from backend.services.generation.agent.backend_factory import (
+        build_backend_from_chat_id,
+    )
+
+    backend = None
+    try:
+        async with AsyncSessionLocal() as db:
+            backend = await build_backend_from_chat_id(db, chat_id)
+
+        # sub_message_id -> (path, timeout, deadline)
+        pending: dict[str, tuple[str, int, float]] = {}
+
+        while True:
+            # 1. 与 DB 同步 pending 集合（新文件自动纳入，已终态移除）
+            async with AsyncSessionLocal() as db:
+                db_pending = await _scan_chat_pending_sub_messages(db, chat_id)
+
+            now = time.monotonic()
+            for sub_id in list(pending.keys()):
+                if sub_id not in db_pending:
+                    del pending[sub_id]
+            for sub_id, (path, timeout) in db_pending.items():
+                if sub_id not in pending:
+                    pending[sub_id] = (path, timeout, now + timeout)
+
+            if not pending:
+                break
+
+            # 2. 逐个处理：超时 → failed；就绪 → 入库 + completed
+            for sub_id, (path, timeout, deadline) in list(pending.items()):
+                if time.monotonic() >= deadline:
+                    async with AsyncSessionLocal() as db:
+                        await message_crud.update_sub_message(
+                            db,
+                            sub_id,
+                            SubMessageUpdate(status=MessageStatus.FAILED),
+                        )
+                    await _broadcast_chat_event(chat_id, {
+                        "type": "file_timeout",
+                        "sub_message_id": sub_id,
+                        "path": path,
+                    })
+                    del pending[sub_id]
+                    continue
+
+                try:
+                    pp = PurePosixPath(path)
+                    glob_result = await backend.aglob(pp.name, VirtualPath(str(pp.parent)))
+                    file_appeared = glob_result.error is None and bool(glob_result.matches)
+                except Exception:
+                    file_appeared = False
+
+                if not file_appeared:
+                    continue
+
+                result = await _process_pending_file(backend, sub_id, path)
+                if result["type"] == "file_ready":
+                    await _broadcast_chat_event(chat_id, {
+                        "type": "file_ready",
+                        "sub_message_id": sub_id,
+                        "file_id": result["file_id"],
+                        "file_info": result["file_info"],
+                    })
+                    del pending[sub_id]
+
+            await asyncio.sleep(3)
+
+        # 3. 所有 pending 终态 → 通知订阅连接正常关闭
+        await _broadcast_chat_event(chat_id, {"type": "__done__"})
+
+    finally:
+        if backend is not None and hasattr(backend, 'aclose'):
+            try:
+                await backend.aclose()
+            except Exception:
+                pass
 
 
 router = APIRouter()
@@ -69,6 +286,11 @@ async def _start_generation_task(
         background_tasks.add_task(generation_service._run_managed_generation_task, chat_id, assistant_message_id)
 
 
+async def _touch_chat_task(chat_id: str):
+    async with AsyncSessionLocal() as db:
+        await chat_crud.touch_chat(db, chat_id)
+
+
 async def _hydrate_and_validate_messages(
         db_messages: List[chat_model.Message],
         db: AsyncSession
@@ -107,10 +329,10 @@ async def _hydrate_and_validate_messages(
     summary="获取单个会话及其消息",
     response_model_exclude_none=True
 )
-async def read_chat_with_messages(chat_id: str, db: AsyncSession = Depends(get_db)):
-    await chat_crud.touch_chat(db, chat_id=chat_id)
+async def read_chat_with_messages(chat_id: str, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+    background_tasks.add_task(_touch_chat_task, chat_id)
 
-    db_chat = await chat_crud.get_chat(db, chat_id=chat_id)
+    db_chat = await chat_crud.get_chat_meta(db, chat_id=chat_id)
     if db_chat is None:
         raise HTTPException(status_code=404, detail="Chat not found")
 
@@ -121,12 +343,29 @@ async def read_chat_with_messages(chat_id: str, db: AsyncSession = Depends(get_d
     default_model_id = default_model_setting.value if default_model_setting else None
     _apply_default_model_to_chat_object(db_chat, default_model_id)
 
-    chat_response = schemas.ChatWithMessages.model_validate(db_chat)
+    chat_data = schemas.Chat.model_validate(db_chat)
+    chat_response = schemas.ChatWithMessages(**chat_data.model_dump())
 
-    active_messages = await message_crud.get_messages_by_chat(db, chat_id=chat_id)
+    active_messages = await message_crud.get_messages_by_chat(db, chat_id=chat_id, latest_usage_only=True)
     chat_response.messages = await _hydrate_and_validate_messages(active_messages, db)
 
     return chat_response
+
+
+@router.get(
+    "/chats/{chat_id}/usage",
+    response_model=schemas.ChatUsageStats,
+    summary="统计会话的 token 用量",
+    response_model_exclude_none=True
+)
+async def get_chat_usage_stats(chat_id: str, db: AsyncSession = Depends(get_db)):
+    db_chat = await chat_crud.get_chat_meta(db, chat_id=chat_id)
+    if db_chat is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    if db_chat.itemType != 'chat':
+        raise HTTPException(status_code=400, detail="Cannot get usage stats for a folder.")
+
+    return await message_crud.get_chat_usage_stats(db, chat_id=chat_id)
 
 
 @router.put(
@@ -152,9 +391,13 @@ async def update_message_and_regenerate(
     )
     new_user_message = await message_crud.create_message(db, message=new_message_create, chat_id=db_message.chatId)
 
+    # Mambo Agent 会话：把用户文件副本写入 /.mambo/chat_user_file/ 并固化标志位
+    from backend.services.generation.agent.user_file_copy_service import process_user_message_files
+    await process_user_message_files(db, db_message.chatId, new_user_message.id)
+
     if not message_update.resend:
         # 修复: 从活跃路径中重新获取，以避免 DetachedInstanceError 并装配 sibling 元数据
-        active_msgs = await message_crud.get_messages_by_chat(db, chat_id=db_message.chatId)
+        active_msgs = await message_crud.get_messages_by_chat(db, chat_id=db_message.chatId, latest_usage_only=True)
         populated_user_msg = next((m for m in active_msgs if m.id == new_user_message.id), new_user_message)
 
         hydrated_user_message = (await _hydrate_and_validate_messages([populated_user_msg], db))[0]
@@ -172,7 +415,7 @@ async def update_message_and_regenerate(
     await _start_generation_task(background_tasks, db_message.chatId, assistant_placeholder.id)
 
     # 修复: 从活跃路径中重新获取，以避免 DetachedInstanceError 并装配 sibling 元数据
-    active_msgs = await message_crud.get_messages_by_chat(db, chat_id=db_message.chatId)
+    active_msgs = await message_crud.get_messages_by_chat(db, chat_id=db_message.chatId, latest_usage_only=True)
     populated_user_msg = next((m for m in active_msgs if m.id == new_user_message.id), new_user_message)
     populated_assistant_msg = next((m for m in active_msgs if m.id == assistant_placeholder.id), assistant_placeholder)
 
@@ -195,8 +438,27 @@ async def activate_message_branch(chat_id: str, message_id: str, db: AsyncSessio
     if not success:
         raise HTTPException(status_code=404, detail="Message not found")
 
-    active_messages = await message_crud.get_messages_by_chat(db, chat_id=chat_id)
+    active_messages = await message_crud.get_messages_by_chat(db, chat_id=chat_id, latest_usage_only=True)
     return await _hydrate_and_validate_messages(active_messages, db)
+
+
+@router.get(
+    "/messages/{message_id}/task-substeps",
+    response_model=List[schemas.SubMessage],
+    summary="获取消息下的 TaskSubStep 子代理追踪步骤",
+    response_model_exclude_none=True
+)
+async def get_message_task_substeps(
+        message_id: str,
+        task_group_id: Optional[str] = Query(None, description="可选：按 task_group_id 过滤"),
+        db: AsyncSession = Depends(get_db),
+):
+    db_message = await message_crud.get_message(db, message_id=message_id)
+    if not db_message:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    subs = await message_crud.get_task_substeps(db, message_id, task_group_id)
+    return [schemas.SubMessage.model_validate(s) for s in subs]
 
 
 @router.delete(
@@ -253,6 +515,8 @@ async def compress_history_above_message(
         background_tasks: BackgroundTasks,
         db: AsyncSession = Depends(get_db)
 ):
+    if not await maintenance.wait_vacuum_finished(timeout=60):
+        raise AppHTTPException(status_code=503, error_code="DB_MAINTENANCE", detail="数据库维护中（VACUUM），请稍后重试。")
     db_message = await message_crud.get_message(db, message_id=message_id)
     if not db_message:
         raise HTTPException(status_code=404, detail="Message not found")
@@ -283,8 +547,10 @@ async def prepare_to_generate(
         background_tasks: BackgroundTasks,
         db: AsyncSession = Depends(get_db)
 ):
+    if not await maintenance.wait_vacuum_finished(timeout=60):
+        raise AppHTTPException(status_code=503, error_code="DB_MAINTENANCE", detail="数据库维护中（VACUUM），请稍后重试。")
     if not await stream_manager.try_acquire_generation_lock(chat_id):
-        raise HTTPException(status_code=409, detail="该会话已有正在进行的生成任务，请等待完成后再试。")
+        raise AppHTTPException(status_code=409, error_code="GENERATION_IN_PROGRESS", detail="该会话已有正在进行的生成任务，请等待完成后再试。")
 
     try:
         user_message, assistant_placeholder = await generation_service.create_user_message_and_prepare_generation(
@@ -318,15 +584,18 @@ async def prepare_to_regenerate(
         chat_id: str,
         from_message_id: str,
         background_tasks: BackgroundTasks,
-        db: AsyncSession = Depends(get_db)
+        db: AsyncSession = Depends(get_db),
 ):
+    if not await maintenance.wait_vacuum_finished(timeout=60):
+        raise AppHTTPException(status_code=503, error_code="DB_MAINTENANCE", detail="数据库维护中（VACUUM），请稍后重试。")
     if not await stream_manager.try_acquire_generation_lock(chat_id):
-        raise HTTPException(status_code=409, detail="该会话已有正在进行的生成任务，请等待完成后再试。")
+        raise AppHTTPException(status_code=409, error_code="GENERATION_IN_PROGRESS", detail="该会话已有正在进行的生成任务，请等待完成后再试。")
 
     try:
         assistant_placeholder = await generation_service.prepare_for_regeneration(
-            db=db, chat_id=chat_id, base_message_id=from_message_id
+            db=db, chat_id=chat_id, base_message_id=from_message_id,
         )
+
         await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id)
 
         # 修复: 从活跃路径中重新获取，以避免 DetachedInstanceError 并装配 sibling 元数据
@@ -351,6 +620,8 @@ async def retry_failed_generation(
         background_tasks: BackgroundTasks,
         db: AsyncSession = Depends(get_db)
 ):
+    if not await maintenance.wait_vacuum_finished(timeout=60):
+        raise AppHTTPException(status_code=503, error_code="DB_MAINTENANCE", detail="数据库维护中（VACUUM），请稍后重试。")
     db_message = await message_crud.get_message(db, message_id=message_id)
     if not db_message:
         raise HTTPException(status_code=404, detail="Message not found")
@@ -363,7 +634,7 @@ async def retry_failed_generation(
         raise HTTPException(status_code=400, detail="Retry is only applicable to failed messages.")
 
     if not await stream_manager.try_acquire_generation_lock(db_message.chatId):
-        raise HTTPException(status_code=409, detail="该会话已有正在进行的生成任务，请等待完成后再试。")
+        raise AppHTTPException(status_code=409, error_code="GENERATION_IN_PROGRESS", detail="该会话已有正在进行的生成任务，请等待完成后再试。")
 
     try:
         await _start_generation_task(background_tasks, db_message.chatId, message_id, is_retry=True)
@@ -428,7 +699,7 @@ async def review_tool_call(
         background_tasks: BackgroundTasks,
         db: AsyncSession = Depends(get_db)
 ):
-    from backend.schemas.message import ReviewToolContent
+    from backend.schemas.message import ReviewToolContent, McpToolContent
 
     db_sub = await message_crud.get_sub_message(db, request.sub_message_id)
     if not db_sub or db_sub.messageId != message_id or db_sub.type != SubMessageType.REVIEW_TOOL.value:
@@ -436,6 +707,24 @@ async def review_tool_call(
 
     review_content = ReviewToolContent.from_json_string(db_sub.content)
     review_content.decision = request.decision
+
+    # 编辑决策时，同步更新 arguments 到 REVIEW_TOOL 和 MCP_TOOL 子消息
+    if request.decision.type == 'edit' and request.decision.edited_action:
+        review_content.arguments = request.decision.edited_action.args
+
+        db_message = await message_crud.get_message(db, message_id=message_id)
+        for sub in db_message.sub_messages:
+            if sub.type == SubMessageType.MCP_TOOL.value:
+                try:
+                    mcp = McpToolContent.from_json_string(sub.content)
+                    if getattr(mcp, 'tool_call_id', None) == review_content.tool_call_id:
+                        mcp.arguments = request.decision.edited_action.args
+                        await message_crud.update_sub_message(
+                            db, sub.id,
+                            schemas.SubMessageUpdate(content=mcp.to_json_string())
+                        )
+                except Exception:
+                    pass
 
     await message_crud.update_sub_message(
         db,
@@ -548,3 +837,96 @@ async def answer_ask_user(
         response_message.status = schemas.MessageStatus.GENERATING
 
     return response_message
+
+
+@router.get(
+    "/chats/{chat_id}/wait-for-files",
+    summary="等待会话中待生成文件就绪（SSE，按会话聚合）",
+)
+async def wait_for_pending_files(chat_id: str, db: AsyncSession = Depends(get_db)):
+    """前端进入会话时建立一条聚合 SSE 连接，等待该会话所有 pending 文件。
+
+    连接建立时先推送已终态（completed/failed）文件的事件；仍有 waiting 文件
+    则启动/复用本会话的轮询任务（共享 backend），全部终态后服务端正常关闭连接。
+    """
+    db_chat = await chat_crud.get_chat_meta(db, chat_id=chat_id)
+    if db_chat is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    msgs = await message_crud.get_messages_by_chat(db, chat_id=chat_id)
+
+    # 1. 状态对齐扫描：已终态立即推送，waiting 纳入轮询
+    file_ids_to_hydrate = {
+        sub.content for m in msgs for sub in m.sub_messages
+        if sub.type == SubMessageType.FILE.value and sub.status == MessageStatus.COMPLETED.value and sub.content
+    }
+    file_info_map = {}
+    if file_ids_to_hydrate:
+        fs = FileService(db)
+        file_records = await fs.batch_get_files(list(file_ids_to_hydrate))
+        for record in file_records:
+            file_info_map[record.id] = fs.convert_to_schema(record).model_dump(mode='json')
+
+    initial_events: list[dict] = []
+    has_pending = False
+    for m in msgs:
+        for sub in m.sub_messages:
+            if sub.type != SubMessageType.FILE.value:
+                continue
+            if sub.status == MessageStatus.COMPLETED.value and sub.content:
+                initial_events.append({
+                    "type": "file_ready",
+                    "sub_message_id": sub.id,
+                    "file_id": sub.content,
+                    "file_info": file_info_map.get(sub.content),
+                })
+            elif sub.status == MessageStatus.FAILED.value:
+                raw_cfg = sub.config
+                if isinstance(raw_cfg, str):
+                    try:
+                        raw_cfg = json.loads(raw_cfg)
+                    except json.JSONDecodeError:
+                        raw_cfg = {}
+                path = raw_cfg.get("pending_file_path") if isinstance(raw_cfg, dict) else None
+                initial_events.append({
+                    "type": "file_timeout",
+                    "sub_message_id": sub.id,
+                    "path": path or "",
+                })
+            elif sub.status == MessageStatus.WAITING.value:
+                raw_cfg = sub.config
+                if isinstance(raw_cfg, str):
+                    try:
+                        raw_cfg = json.loads(raw_cfg)
+                    except json.JSONDecodeError:
+                        raw_cfg = {}
+                path = raw_cfg.get("pending_file_path") if isinstance(raw_cfg, dict) else None
+                if path:
+                    has_pending = True
+
+    # 2. 订阅队列 + 启动/复用轮询任务
+    queue: asyncio.Queue = asyncio.Queue()
+    _chat_subscribers.setdefault(chat_id, set()).add(queue)
+    for event in initial_events:
+        queue.put_nowait(event)
+
+    if has_pending:
+        task = _chat_pending_tasks.get(chat_id)
+        if task is None:
+            task = asyncio.create_task(_poll_chat_pending_files(chat_id))
+            _chat_pending_tasks[chat_id] = task
+            task.add_done_callback(lambda _: _chat_pending_tasks.pop(chat_id, None))
+    else:
+        queue.put_nowait({"type": "__done__"})
+
+    async def event_stream():
+        try:
+            while True:
+                event = await queue.get()
+                if isinstance(event, dict) and event.get("type") == "__done__":
+                    break
+                yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
+        finally:
+            _chat_subscribers.get(chat_id, set()).discard(queue)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")

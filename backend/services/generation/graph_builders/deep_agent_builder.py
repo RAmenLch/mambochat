@@ -1,17 +1,19 @@
 # backend/services/generation/graph_builders/deep_agent_builder.py
+#
+# 【DEPRECATED - 已弃用，不再维护】
+# 本文件为 DeepAgent（deepagents 库）专用图构建器。
+# DeepAgent 已被淘汰，前端已无创建入口，本文件仅保留用于兼容存量数据。
+# 新功能请基于 Mambo Agent（mambo_agents）实现。
 
 from typing import List, Dict, Any
 from langgraph.graph.state import CompiledStateGraph
-from deepagents import create_deep_agent, CompiledSubAgent
 
 from backend.checkpointer import get_checkpointer
 from backend.services.generation.core.llm_io import AgentConfig, RunTimeConfig
 from backend.services.generation.graph_builders.base_builder import BaseGraphBuilder
 from backend.services.generation.graph_builders.model_factory import ModelFactory
 from backend.services.generation.agent.custom_middleware import ToolMessageOrderingMiddleware
-from backend.services.generation.agent.ssh_backend import PureSFTPBackend
 from backend.services.generation.agent.api_backend import APIBackend
-from backend.utils.ssh_utils import get_or_create_system_ssh_key
 from backend.schemas.enums import BackendType
 
 from backend.services.generation.agent.tree_extension import (
@@ -45,6 +47,8 @@ def _create_backend_factory(
             execute_enabled = execute_cfg.get("enabled", False)
 
             if b_type == BackendType.SSH.value:
+                from backend.services.generation.agent.ssh_backend import PureSFTPBackend
+                from backend.utils.ssh_utils import get_or_create_system_ssh_key
                 priv_key_path = None
                 if not config.get("password"):
                     priv_key_path, _ = get_or_create_system_ssh_key()
@@ -98,11 +102,13 @@ def _create_backend_factory(
 
 class DeepAgentGraphBuilder(BaseGraphBuilder):
     """
-    针对 DeepAgent 架构的图构建器。
+    【DEPRECATED - 已弃用，不再维护】DeepAgent 架构的图构建器。
+    请使用 MamboAgentGraphBuilder 替代。
     """
 
     def build(self, agent_config: AgentConfig, run_time_config: RunTimeConfig) -> CompiledStateGraph:
         from backend.services.generation.graph_builders.factory import GraphBuilderFactory
+        from deepagents import create_deep_agent, CompiledSubAgent
 
         model = ModelFactory.create_model(agent_config.llm_config, run_time_config)
 

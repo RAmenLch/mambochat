@@ -1,9 +1,9 @@
 # backend/services/generation/worker/decode.py
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
-from langchain_core.messages import AIMessageChunk, AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, ToolMessage
 
 
 class BaseDecode(ABC):
@@ -28,7 +28,11 @@ class BaseDecode(ABC):
         pass
 
     @abstractmethod
-    def get_hitl_interrupt(self, mode: str, event: Union[BaseMessage, Dict[str, Any]]) -> Optional[Any]:
+    def get_raw_usage(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        pass
+
+    @abstractmethod
+    def get_hitl_interrupt(self, mode: str, event: Union[BaseMessage, Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
         pass
 
     @abstractmethod
@@ -47,12 +51,26 @@ class DefaultLangChainDecode(BaseDecode):
     def get_reasoning_content(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[str]:
         return None
 
+    def get_raw_usage(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not isinstance(message, AIMessage):
+            return None
+        if mode == "messages" and message.usage_metadata:
+            return dict(message.usage_metadata)
+        return None
+
     def get_image_url(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         return None
 
     def get_toolcall_content(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[list]:
         if mode == "updates" and isinstance(message, AIMessage):
             return message.tool_calls or None
+        # if mode == "messages" and isinstance(message, (AIMessage, AIMessageChunk)):
+        #     # 流式场景：优先返回已聚合的 tool_calls，否则回退到 tool_call_chunks
+        #     if message.tool_calls:
+        #         return message.tool_calls
+        #     chunks = getattr(message, "tool_call_chunks", None)
+        #     if chunks:
+        #         return chunks
         return None
 
     def get_toolcall_result(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -65,28 +83,51 @@ class DefaultLangChainDecode(BaseDecode):
             return None
 
         if mode == "messages" and message.usage_metadata:
-            usage = {}
-            if "input_tokens" in message.usage_metadata:
-                usage["prompt_tokens"] = message.usage_metadata.get("input_tokens")
-            if "output_tokens" in message.usage_metadata:
-                usage["completion_tokens"] = message.usage_metadata.get("output_tokens")
-            if "total_tokens" in message.usage_metadata:
-                usage["total_tokens"] = message.usage_metadata.get("total_tokens")
-            if "output_token_details" in message.usage_metadata:
-                usage["completion_tokens_details"] = {}
-                usage["completion_tokens_details"]["reasoning_tokens"] = \
-                    message.usage_metadata.get("output_token_details").get("reasoning")
+            usage: Dict[str, Any] = {}
+            metadata: Dict[str, Any] = dict(message.usage_metadata)
+
+            if "input_tokens" in metadata:
+                usage["prompt_tokens"] = metadata["input_tokens"]
+            if "output_tokens" in metadata:
+                usage["completion_tokens"] = metadata["output_tokens"]
+            if "total_tokens" in metadata:
+                usage["total_tokens"] = metadata["total_tokens"]
+
+            if "output_token_details" in metadata:
+                reasoning = (metadata.get("output_token_details") or {}).get("reasoning")
+                if reasoning is not None:
+                    usage["completion_tokens_details"] = {"reasoning_tokens": reasoning}
+
+            # 缓存命中 = input_token_details.cache_read (LangChain 已统一提取)
+            # 只要 API 返回了缓存字段即输出(即使为 0),便于前端展示"命中 0"。
+            input_details = dict(metadata.get("input_token_details") or {})
+            cache_read = input_details.get("cache_read")
+            if isinstance(cache_read, int):
+                prompt_total = usage.get("prompt_tokens", 0) or 0
+                usage["cache_hit_tokens"] = cache_read
+                usage["cache_miss_tokens"] = max(prompt_total - cache_read, 0)
+
             return usage
         return None
 
-    def get_hitl_interrupt(self, mode: str, event: Union[BaseMessage, Dict[str, Any]]) -> Optional[Any]:
+    def get_hitl_interrupt(self, mode: str, event: Union[BaseMessage, Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+        """返回所有 __interrupt__ 的值和 ID 列表。
+
+        当多个 ask_user 工具并行调用时，__interrupt__ 事件会包含多个中断。
+        每个 entry 包含: {"value": interrupt.value, "id": interrupt.id}
+        interrupt.id 是 LangGraph 为每个中断分配的唯一标识，
+        用于多中断恢复时构造 Command(resume={id: payload})。
+        """
         if mode == "updates" and isinstance(event, dict) and "__interrupt__" in event:
-            return event["__interrupt__"][0].value
+            return [
+                {"value": entry.value, "id": getattr(entry, "id", None)}
+                for entry in event["__interrupt__"]
+            ]
         return None
 
     def get_hitl_middleware_data(self, mode: str, event: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        if mode == "updates" and isinstance(event, dict) and "HumanInTheLoopMiddleware.after_model" in event:
-            data = event["HumanInTheLoopMiddleware.after_model"]
+        if mode == "updates" and isinstance(event, dict):
+            data = event.get("HumanInTheLoopMiddleware.after_model") or event.get("AutoSecurityReviewMiddleware.after_model")
             if not data:
                 return None
 

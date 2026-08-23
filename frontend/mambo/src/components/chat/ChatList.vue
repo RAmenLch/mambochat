@@ -191,6 +191,7 @@ import { useAgentStore } from '@/stores/agentStore';
 
 import { buildChatTree } from '@/utils/treeHelper';
 import type { ChatSortMode } from '@/utils/treeHelper';
+import { isDefaultChatName, DEFAULT_CHAT_TITLE_KEY } from '@/utils/chatName';
 import { useTreeController, type DialogPayload, type DialogConfirmPayload } from '@/composables/useTreeController';
 
 import ExplorerTree from '@/components/common/ExplorerTree.vue';
@@ -223,7 +224,7 @@ const agentStore = useAgentStore();
 const router = useRouter();
 const route = useRoute();
 
-const { chatList, isChatListLoading, loadingFolders, loadedFolderIds, refreshingTitleChatId } = storeToRefs(chatListStore);
+const { chatList, isChatListLoading, loadingFolders, loadedFolderIds, refreshingTitleChatIds } = storeToRefs(chatListStore);
 const { currentChatId, currentChat } = storeToRefs(chatSessionStore);
 const { providers } = storeToRefs(providerStore);
 const { globalSettings } = storeToRefs(settingsStore);
@@ -253,7 +254,25 @@ function toggleSortMode() {
   localStorage.setItem(SORT_MODE_KEY, chatSortMode.value);
 }
 
-const treeData = computed(() => buildChatTree(chatList.value, loadedFolderIds.value, chatSortMode.value) as unknown as BaseTreeItem[]);
+// buildChatTree 已深拷贝数据，此处仅替换显示层副本的 name，
+// 不会污染 store 中的真实会话数据（重命名/右键菜单/路径均基于显示名）
+const treeData = computed(() => {
+  const tree = buildChatTree(chatList.value, loadedFolderIds.value, chatSortMode.value) as unknown as BaseTreeItem[];
+  type TreeNodeWithChildren = BaseTreeItem & { children?: BaseTreeItem[] };
+  const decorateDefaultNames = (nodes: BaseTreeItem[]) => {
+    nodes.forEach(node => {
+      if (node.itemType === 'chat' && isDefaultChatName(node.name)) {
+        node.name = t('chat.sidebar.initChatName');
+      }
+      const children = (node as TreeNodeWithChildren).children;
+      if (children?.length) {
+        decorateDefaultNames(children);
+      }
+    });
+  };
+  decorateDefaultNames(tree);
+  return tree;
+});
 
 const modelOptions = computed((): SelectConfigOption[] => {
   return providerStore.groupedModels
@@ -293,7 +312,7 @@ const getAgentAvatarUrl = (agentId: string | null | undefined): string | null =>
   return agent?.agentAvatarUrl ? (resolveFileUrl(agent.agentAvatarUrl) ?? null) : null;
 };
 
-const isTitleRefreshing = computed(() => refreshingTitleChatId.value === currentChat.value?.id);
+const isTitleRefreshing = computed(() => currentChat.value?.id ? refreshingTitleChatIds.value.has(currentChat.value.id) : false);
 
 const {
   treeRef,
@@ -363,8 +382,11 @@ const {
     let newItem: Chat | null = null;
 
     if (dialogPayload.type === 'newChat') {
+      // 用户未修改默认名（仍是 i18n 提示文本）时，落库为占位 Key，
+      // 由后端在首轮问答完成后自动生成标题
+      const isDefaultName = formPayload.name === t('chat.sidebar.initChatName');
       newItem = await chatListStore.createNewItem({
-        name: formPayload.name,
+        name: isDefaultName ? DEFAULT_CHAT_TITLE_KEY : formPayload.name,
         aiModelId: formPayload.chatMode === 'normal' ? formPayload.selectValue : null,
         chatMode: formPayload.chatMode,
         agentId: formPayload.chatMode === 'agent' ? formPayload.agentId : null,
@@ -495,7 +517,7 @@ function getItemPath(itemId: string): string {
     const item = chatList.value.find(c => c.id === currentId);
     if (!item) break;
 
-    path.unshift(item.name);
+    path.unshift(isDefaultChatName(item.name) ? t('chat.sidebar.initChatName') : item.name);
     currentId = item.parentId;
   }
 

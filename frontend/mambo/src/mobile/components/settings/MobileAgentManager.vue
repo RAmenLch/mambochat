@@ -150,8 +150,11 @@ function handleBackToList() {
 :deep(.mobile-agent-tabs > .el-tabs__header) {
   margin: 0;
   padding: 0 16px;
-  background-color: var(--color-background-soft);
-  border-bottom: 1px solid var(--color-border);
+  padding-top: env(safe-area-inset-top);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 0.5px solid rgba(0, 0, 0, 0.08);
 }
 
 :deep(.mobile-agent-tabs > .el-tabs__content) {
@@ -191,8 +194,10 @@ function handleBackToList() {
 .detail-header {
   height: 50px;
   padding: 0 10px;
-  background-color: var(--color-background-soft);
-  border-bottom: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 0.5px solid rgba(0, 0, 0, 0.08);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -238,5 +243,17 @@ function handleBackToList() {
 }
 .slide-right-enter-from {
   transform: translateX(100%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :deep(.mobile-agent-tabs > .el-tabs__header) {
+    background: rgba(30, 30, 30, 0.72);
+    border-bottom-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .detail-header {
+    background: rgba(30, 30, 30, 0.72);
+    border-bottom-color: rgba(255, 255, 255, 0.08);
+  }
 }
 </style>

@@ -19,7 +19,10 @@
       >
         <div class="tool-detail-container" v-if="getParsedContent(msg)">
           <div class="tool-header">
-            <h3>{{ getParsedContent(msg)?.name }}</h3>
+            <h3>
+              <span v-if="getMcpUnpacked(msg).isMcpWrapped" class="mcp-meta-tag">{{ t('chat.message.mcp.mcpTool') }}</span>
+              {{ getMcpUnpacked(msg).displayName }}
+            </h3>
             <p v-if="getToolDescription(msg)" class="tool-desc">
               {{ getToolDescription(msg) }}
             </p>
@@ -31,10 +34,30 @@
             <!-- Read-only view for completed McpTool -->
             <div v-if="msg.type === 'McpTool'">
               <div v-if="Object.keys(editForms[msg.id] || {}).length > 0" class="readonly-args-box">
-                <div v-for="(val, key) in editForms[msg.id]" :key="key" class="arg-row" :class="{ 'is-multiline': isMultilineValue(val) }">
-                  <span class="arg-key">{{ key }}</span>
-                  <pre class="arg-val" v-if="isMultilineValue(val)">{{ typeof val === 'object' ? JSON.stringify(val, null, 2) : val }}</pre>
-                  <span class="arg-val arg-val-inline" v-else>{{ typeof val === 'object' ? JSON.stringify(val) : val }}</span>
+                <div v-for="entry in getArgEntries(msg.id)" :key="entry.key" class="arg-row" :class="{ 'is-multiline': entry.multiline }">
+                  <span class="arg-key">{{ entry.key }}</span>
+                  <pre class="arg-val" v-if="entry.multiline">{{ entry.displayText }}</pre>
+                  <span class="arg-val arg-val-inline" v-else>{{ entry.displayText }}</span>
+                  <el-button
+                    v-if="entry.truncated"
+                    type="primary"
+                    link
+                    size="small"
+                    class="arg-expand-btn"
+                    @click="toggleArgExpand(msg.id, entry.key)"
+                  >
+                    {{ t('chat.message.mcp.expandFullContent', { count: entry.fullLength }) }}
+                  </el-button>
+                  <el-button
+                    v-else-if="entry.expanded"
+                    type="primary"
+                    link
+                    size="small"
+                    class="arg-expand-btn"
+                    @click="toggleArgExpand(msg.id, entry.key)"
+                  >
+                    {{ t('chat.message.mcp.collapseContent') }}
+                  </el-button>
                 </div>
               </div>
               <div v-else class="no-args">{{ t('chat.message.mcp.noArguments') }}</div>
@@ -61,7 +84,7 @@
                     v-else
                     v-model="(editForms[msg.id][String(propName)] as string)"
                     type="textarea"
-                    autosize
+                    :autosize="{ minRows: 4, maxRows: 20 }"
                   />
                   <div class="prop-desc" v-if="getSchemaProperty(msg, String(propName))?.description">
                     {{ getSchemaProperty(msg, String(propName))?.description }}
@@ -77,8 +100,28 @@
           <div v-if="msg.type === 'McpTool'" class="tool-result">
             <h4>{{ t('chat.message.mcp.result') }}</h4>
             <div class="result-box" :class="{ 'is-error': (getParsedContent(msg) as McpToolContent).is_error }">
-              {{ (getParsedContent(msg) as McpToolContent).result || t('chat.message.mcp.noResult') }}
+              {{ (getParsedContent(msg) as McpToolContent).result ? getResultDisplayText(msg.id, (getParsedContent(msg) as McpToolContent).result || '') : t('chat.message.mcp.noResult') }}
             </div>
+            <el-button
+              v-if="isResultTruncated(msg.id, (getParsedContent(msg) as McpToolContent).result || '')"
+              type="primary"
+              link
+              size="small"
+              class="arg-expand-btn"
+              @click="toggleResultExpand(msg.id)"
+            >
+              {{ t('chat.message.mcp.expandFullContent', { count: getResultFullLength(msg.id, (getParsedContent(msg) as McpToolContent).result || '') }) }}
+            </el-button>
+            <el-button
+              v-else-if="isResultExpanded(msg.id)"
+              type="primary"
+              link
+              size="small"
+              class="arg-expand-btn"
+              @click="toggleResultExpand(msg.id)"
+            >
+              {{ t('chat.message.mcp.collapseContent') }}
+            </el-button>
           </div>
 
           <div v-if="msg.type === 'ReviewTool'" class="tool-actions-wrapper">
@@ -112,6 +155,60 @@
           {{ t('chat.message.mcp.parseError') }}
         </div>
       </el-tab-pane>
+
+      <!-- AI 安全审核 Tab（仅 McpTool + 有对应 SecurityReview 时显示） -->
+      <el-tab-pane
+        v-if="activeSecurityReviewContent"
+        :key="'security_review_' + activeSecurityReviewContent.tool_call_id"
+        :label="'🛡️ ' + $t('agent.securityReviewPassed')"
+        :name="securityReviewTabName"
+      >
+        <div class="tool-detail-container">
+          <div class="tool-header">
+            <h3>{{ activeSecurityReviewContent.tool_name }}</h3>
+            <el-tag
+              :type="activeSecurityReviewContent.passed ? 'success' : 'danger'"
+              size="default"
+              effect="light"
+              class="security-review-status-tag"
+            >
+              {{ activeSecurityReviewContent.passed ? $t('agent.securityReviewPassed') : $t('agent.securityReviewFailed') }}
+            </el-tag>
+            <p class="tool-desc">{{ activeSecurityReviewContent.passed ? $t('agent.securityReviewDesc') : $t('agent.securityReviewFailedDesc') }}</p>
+          </div>
+
+          <el-descriptions :column="1" border size="default" class="security-review-descriptions">
+            <el-descriptions-item :label="$t('agent.securityReviewRiskLevel')">
+              <el-tag
+                :type="riskLevelTagType"
+                size="small"
+                effect="plain"
+              >
+                {{ activeSecurityReviewContent.risk_level.toUpperCase() }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item :label="$t('agent.securityReviewReason')">
+              <div class="security-review-reason">{{ activeSecurityReviewContent.reason }}</div>
+            </el-descriptions-item>
+          </el-descriptions>
+        </div>
+      </el-tab-pane>
+
+      <!-- 子代理追踪 Tab（仅 task 工具 + 有步骤时显示） -->
+      <el-tab-pane
+        v-if="taskSubSteps.length > 0"
+        :key="'subagent_' + taskToolCallId"
+        :label="'🤖 ' + $t('chat.subagent.tracking')"
+        :name="subagentTabName"
+      >
+        <div class="tool-detail-container">
+          <TaskSubAgentPanel
+            :steps="taskSubSteps"
+            :security-review-map="securityReviewMap"
+            :review-tool-map="reviewToolMap"
+          />
+        </div>
+      </el-tab-pane>
     </el-tabs>
     <el-empty v-else :description="t('chat.message.mcp.noToolInfo')" />
 
@@ -130,8 +227,11 @@ import { useI18n } from 'vue-i18n';
 import { useMcpStore } from '@/stores/mcpStore';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { useChatSessionStore } from '@/stores/chatSessionStore';
-import type { SubMessage, McpToolContent, ReviewToolContent, ToolDecision, SchemaProperty } from '@/api/types';
+import { getMessageTaskSubSteps } from '@/api/chatService';
+import type { SubMessage, McpToolContent, ReviewToolContent, ToolDecision, SchemaProperty, TaskSubStepContent, Message, SecurityReviewContent } from '@/api/types';
+import { unpackMcpToolCall } from '@/utils/mcpToolUnpack';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import TaskSubAgentPanel from '../task/TaskSubAgentPanel.vue';
 
 const { t } = useI18n();
 const mcpStore = useMcpStore();
@@ -143,6 +243,8 @@ const props = defineProps<{
   parentMessageId: string | null;
   initialSubMessageId?: string;
   mode?: 'review_all' | 'single';
+  /** 直接传入父消息（用于子代理面板等场景），优先于 parentMessageId 查找 */
+  parentMessage?: Message | null;
 }>();
 
 const emit = defineEmits<{
@@ -195,6 +297,7 @@ onUnmounted(() => {
 });
 
 const liveParentMessage = computed(() => {
+  if (props.parentMessage) return props.parentMessage;
   if (!props.parentMessageId) return null;
   return sessionStore.currentChatMessages.find(m => m.id === props.parentMessageId) || null;
 });
@@ -224,6 +327,157 @@ const toolMessages = computed(() => {
     });
   }
 });
+
+/** 从当前 toolMessages 中找到 task 工具的 tool_call_id（支持拆包后的内层工具名） */
+const taskToolCallId = computed(() => {
+  for (const msg of toolMessages.value) {
+    const content = getParsedContent(msg) as McpToolContent | null;
+    const effectiveName = content ? unpackMcpToolCall(content).effectiveName : '';
+    if ((content?.name === 'task' || effectiveName === 'task') && content?.tool_call_id) {
+      return content.tool_call_id;
+    }
+  }
+  return null;
+});
+
+const subagentTabName = computed(() =>
+  taskToolCallId.value ? `__subagent__` : ''
+);
+
+/** 当前工具对应 SecurityReview 内容（从 toolMessages 的所有 tool_call_id 推导）*/
+const activeSecurityReviewContent = computed(() => {
+  if (props.mode === 'review_all') return null;
+  for (const msg of toolMessages.value) {
+    if (msg.type !== 'McpTool' && msg.type !== 'ReviewTool') continue;
+    try {
+      let toolCallId: string | undefined;
+      if (msg.type === 'McpTool') {
+        toolCallId = (getParsedContent(msg) as McpToolContent | null)?.tool_call_id;
+      } else {
+        toolCallId = (getParsedContent(msg) as ReviewToolContent | null)?.tool_call_id;
+      }
+      if (toolCallId) {
+        const sr = securityReviewMap.value.get(toolCallId);
+        if (sr) return sr;
+      }
+    } catch { /* ignore */ }
+  }
+  return null;
+});
+
+const securityReviewTabName = computed(() =>
+  activeSecurityReviewContent.value ? `__security_review__` : ''
+);
+
+/** 风险等级对应的 el-tag type */
+const riskLevelTagType = computed(() => {
+  const level = activeSecurityReviewContent.value?.risk_level;
+  switch (level) {
+    case 'low': return 'success';
+    case 'medium': return 'warning';
+    case 'high': return 'danger';
+    case 'critical': return 'danger';
+    default: return 'info';
+  }
+});
+
+/** parentMessage 中所有 SecurityReview 子消息的 tool_call_id → content 映射 */
+const securityReviewMap = computed(() => {
+  const map = new Map<string, SecurityReviewContent>();
+  const msg = liveParentMessage.value;
+  if (!msg) return map;
+  for (const sm of msg.sub_messages) {
+    if (sm.type === 'SecurityReview') {
+      try {
+        const content = JSON.parse(sm.content) as SecurityReviewContent;
+        map.set(content.tool_call_id, content);
+      } catch { /* ignore */ }
+    }
+  }
+  return map;
+});
+
+/** ReviewTool 映射条目：携带真实 sub_message_id 以便子代理面板提交审核 */
+interface ReviewToolMapEntry {
+  content: ReviewToolContent;
+  sub_message_id: string;
+}
+
+/** parentMessage 中所有 ReviewTool 子消息的 tool_call_id → {content, sub_message_id} 映射 */
+const reviewToolMap = computed(() => {
+  const map = new Map<string, ReviewToolMapEntry>();
+  const msg = liveParentMessage.value;
+  if (!msg) return map;
+  for (const sm of msg.sub_messages) {
+    if (sm.type === 'ReviewTool') {
+      try {
+        const content = JSON.parse(sm.content) as ReviewToolContent;
+        map.set(content.tool_call_id, { content, sub_message_id: sm.id });
+      } catch { /* ignore */ }
+    }
+  }
+  return map;
+});
+
+/** task 工具对应的子代理追踪步骤（store 优先，缺失时按需拉取） */
+const taskSubSteps = ref<SubMessage[]>([]);
+const taskSubStepsCache = new Map<string, SubMessage[]>();
+
+function sortTaskSubSteps(steps: SubMessage[]): SubMessage[] {
+  return [...steps].sort((a, b) => {
+    try {
+      const ca: TaskSubStepContent = JSON.parse(a.content);
+      const cb: TaskSubStepContent = JSON.parse(b.content);
+      return ca.step_order - cb.step_order;
+    } catch {
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    }
+  });
+}
+
+watch(
+  [() => props.visible, taskToolCallId, () => liveParentMessage.value?.id],
+  async () => {
+    if (!props.visible || !taskToolCallId.value) {
+      taskSubSteps.value = [];
+      return;
+    }
+    const toolCallId = taskToolCallId.value;
+    const parentMsg = liveParentMessage.value;
+
+    // 1) store 中已有（SSE 生成中推送的完整数据）→ 直接用
+    if (parentMsg) {
+      const fromStore = parentMsg.sub_messages.filter(
+        sm => sm.type === 'TaskSubStep' && sm.config?.task_group_id === toolCallId
+      );
+      if (fromStore.length > 0) {
+        taskSubSteps.value = sortTaskSubSteps(fromStore);
+        return;
+      }
+    }
+
+    // 2) store 无数据（刷新后）→ 按需拉取，带组件级缓存
+    const messageId = parentMsg?.id ?? props.parentMessageId;
+    if (!messageId) {
+      taskSubSteps.value = [];
+      return;
+    }
+    const cacheKey = `${messageId}:${toolCallId}`;
+    if (taskSubStepsCache.has(cacheKey)) {
+      taskSubSteps.value = taskSubStepsCache.get(cacheKey)!;
+      return;
+    }
+    try {
+      const fetched = await getMessageTaskSubSteps(messageId, toolCallId);
+      const sorted = sortTaskSubSteps(fetched);
+      taskSubStepsCache.set(cacheKey, sorted);
+      taskSubSteps.value = sorted;
+    } catch (error) {
+      console.error('Failed to fetch task substeps:', error);
+      taskSubSteps.value = [];
+    }
+  },
+);
 
 watch(() => toolMessages.value, (newVal) => {
   if (internalVisible.value && props.mode === 'review_all') {
@@ -256,6 +510,12 @@ function getParsedContent(msg: SubMessage): McpToolContent | ReviewToolContent |
   }
 }
 
+function getMcpUnpacked(msg: SubMessage) {
+  const content = getParsedContent(msg);
+  if (!content) return { displayName: 'Unknown', effectiveName: 'Unknown', isMcpWrapped: false, effectiveArgs: {} as Record<string, unknown> | string, serverName: undefined as string | undefined };
+  return unpackMcpToolCall(content);
+}
+
 function getToolDescription(msg: SubMessage): string {
   const content = getParsedContent(msg);
   if (!content) return '';
@@ -266,9 +526,9 @@ function getToolDescription(msg: SubMessage): string {
 }
 
 function getTabLabel(msg: SubMessage): string {
-  const content = getParsedContent(msg);
-  const name = content?.name || 'Unknown';
-  const prefix = msg.type === 'ReviewTool' ? '⏳' : '🛠️';
+  const unpacked = getMcpUnpacked(msg);
+  const name = unpacked.displayName;
+  const prefix = msg.type === 'ReviewTool' ? '⏳' : (unpacked.isMcpWrapped ? '🛜' : '🛠️');
   return `${prefix} ${name}`;
 }
 
@@ -359,23 +619,29 @@ function initForms() {
   const forms: Record<string, Record<string, unknown>> = {};
   toolMessages.value.forEach(msg => {
     const content = getParsedContent(msg);
+    const unpacked = content ? unpackMcpToolCall(content) : null;
     let argsObj: Record<string, unknown> = {};
 
     if (content) {
       if (msg.type === 'McpTool') {
-        const mcpContent = content as McpToolContent;
-        if (typeof mcpContent.arguments === 'string') {
+        const rawArgs = unpacked?.isMcpWrapped
+          ? unpacked.effectiveArgs
+          : (content as McpToolContent).arguments;
+        if (typeof rawArgs === 'string') {
           try {
-            argsObj = JSON.parse(mcpContent.arguments);
+            argsObj = JSON.parse(rawArgs);
           } catch {
             argsObj = {};
           }
-        } else if (typeof mcpContent.arguments === 'object') {
-          argsObj = mcpContent.arguments;
+        } else if (typeof rawArgs === 'object') {
+          argsObj = rawArgs as Record<string, unknown>;
         }
       } else if (msg.type === 'ReviewTool') {
-        const reviewContent = content as ReviewToolContent;
-        argsObj = reviewContent.arguments || {};
+        if (unpacked?.isMcpWrapped) {
+          argsObj = unpacked.effectiveArgs as Record<string, unknown>;
+        } else {
+          argsObj = (content as ReviewToolContent).arguments || {};
+        }
       }
     }
 
@@ -417,6 +683,77 @@ function isMultilineValue(val: unknown): boolean {
   return false;
 }
 
+/** 只读大文本的预览阈值（字符数），超过则截断展示，可手动展开全文 */
+const ARG_TEXT_PREVIEW_LIMIT = 5000;
+
+/** 参数展开状态：msg.id -> 参数名 -> 是否展开 */
+const expandedArgs = ref<Record<string, Record<string, boolean>>>({});
+/** 结果展开状态：msg.id -> 是否展开 */
+const expandedResults = ref<Record<string, boolean>>({});
+
+interface ArgDisplayEntry {
+  key: string;
+  displayText: string;
+  fullLength: number;
+  truncated: boolean;
+  expanded: boolean;
+  multiline: boolean;
+}
+
+function isArgExpanded(msgId: string, key: string): boolean {
+  return !!expandedArgs.value[msgId]?.[key];
+}
+
+function toggleArgExpand(msgId: string, key: string) {
+  if (!expandedArgs.value[msgId]) expandedArgs.value[msgId] = {};
+  expandedArgs.value[msgId][key] = !expandedArgs.value[msgId][key];
+}
+
+function isResultExpanded(msgId: string): boolean {
+  return !!expandedResults.value[msgId];
+}
+
+function toggleResultExpand(msgId: string) {
+  expandedResults.value[msgId] = !expandedResults.value[msgId];
+}
+
+/** 将参数值转为展示文本：对象转 JSON，超长则截断（展开时返回全文） */
+function toDisplayText(val: unknown): string {
+  return typeof val === 'object' && val !== null ? JSON.stringify(val, null, 2) : String(val);
+}
+
+function getArgEntries(msgId: string): ArgDisplayEntry[] {
+  const args = editForms.value[msgId] || {};
+  return Object.keys(args).map(key => {
+    const full = toDisplayText(args[key]);
+    const expanded = isArgExpanded(msgId, key);
+    const truncated = !expanded && full.length > ARG_TEXT_PREVIEW_LIMIT;
+    return {
+      key,
+      displayText: truncated ? full.slice(0, ARG_TEXT_PREVIEW_LIMIT) + '…' : full,
+      fullLength: full.length,
+      truncated,
+      expanded,
+      multiline: isMultilineValue(args[key]),
+    };
+  });
+}
+
+function getResultDisplayText(msgId: string, result: string): string {
+  const full = String(result ?? '');
+  if (isResultExpanded(msgId) || full.length <= ARG_TEXT_PREVIEW_LIMIT) return full;
+  return full.slice(0, ARG_TEXT_PREVIEW_LIMIT) + '…';
+}
+
+function isResultTruncated(msgId: string, result: string): boolean {
+  if (isResultExpanded(msgId)) return false;
+  return String(result ?? '').length > ARG_TEXT_PREVIEW_LIMIT;
+}
+
+function getResultFullLength(msgId: string, result: string): number {
+  return String(result ?? '').length;
+}
+
 function getDecisionText(decision: ToolDecision | null): string {
   if (!decision) return '';
   switch (decision.type) {
@@ -435,7 +772,7 @@ async function submitDecision(subMessageId: string, type: 'approve' | 'edit' | '
   if (type === 'edit') {
     const msg = toolMessages.value.find(m => m.id === subMessageId);
     const content = msg ? getParsedContent(msg) : null;
-    const toolName = content?.name || 'Unknown';
+    const toolName = content ? unpackMcpToolCall(content).effectiveName : 'Unknown';
 
     decision.edited_action = {
       name: toolName,
@@ -513,6 +850,16 @@ async function submitDecision(subMessageId: string, type: 'approve' | 'edit' | '
 .tool-detail-container {
   padding: 10px;
 }
+.mcp-meta-tag {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background-color: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  font-weight: 500;
+  vertical-align: middle;
+  margin-right: 6px;
+}
 .tool-header h3 {
   margin: 0 0 8px 0;
   font-size: 16px;
@@ -577,6 +924,9 @@ h4 {
   background: var(--el-fill-color-light);
   border-radius: 3px;
 }
+.arg-expand-btn {
+  margin-top: 4px;
+}
 .arg-val:not(.arg-val-inline) {
   background: var(--el-fill-color);
   border: 1px solid var(--el-border-color-lighter);
@@ -626,5 +976,20 @@ h4 {
   padding: 20px;
   text-align: center;
   color: var(--el-color-error);
+}
+
+.security-review-status-tag {
+  margin-bottom: 8px;
+}
+
+.security-review-descriptions {
+  margin-top: 12px;
+}
+
+.security-review-reason {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+  font-size: 13px;
 }
 </style>

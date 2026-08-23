@@ -4,6 +4,34 @@ import apiClient from './index';
 import type { GlobalSettingsUpdate, ProxyTestRequest, ConnectionTestResponse, FileResponse } from './types';
 
 /**
+ * checkpoints.db 清理状态
+ */
+export interface CheckpointCleanupStatus {
+  status: 'idle' | 'running' | 'done' | 'failed' | 'skipped';
+  stage: string;
+  progress: number;
+  message: string;
+  reclaimable_bytes: number;
+  freed_bytes: number;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+/**
+ * 触发 checkpoints.db 清理（VACUUM，后台执行）
+ */
+export const triggerCheckpointCleanup = (): Promise<CheckpointCleanupStatus> => {
+  return apiClient.post('/settings/checkpoints/cleanup')
+};
+
+/**
+ * 查询 checkpoints.db 清理状态与进度
+ */
+export const getCheckpointCleanupStatus = (): Promise<CheckpointCleanupStatus> => {
+  return apiClient.get('/settings/checkpoints/cleanup/status')
+};
+
+/**
  * 获取全局配置
  */
 export const getGlobalSettings = (): Promise<GlobalSettingsUpdate> => {

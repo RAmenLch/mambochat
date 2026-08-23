@@ -1,7 +1,7 @@
 # backend/schemas/message.py
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
-from typing import Optional, List, Union, Dict, Any
+from typing import Optional, List, Union, Dict, Any, Literal
 import json
 
 from backend.schemas.enums import MessageRole, MessageStatus, SubMessageType, ToolDecisionType
@@ -21,6 +21,8 @@ class McpToolContent(BaseModel):
     # 执行结果，None 表示尚未执行
     result: Optional[str] = None
     is_error: bool = False
+    # 所属模型调用轮次（流式 run_id 去掉 "lc_run--" 前缀），用于跨轮次重建时精确还原工具调用归属
+    run_uuid: Optional[str] = None
 
     @property
     def is_executed(self) -> bool:
@@ -80,12 +82,20 @@ class McpToolContent(BaseModel):
             raise ValueError(f"Invalid JSON for McpToolContent: {e}")
 
 class SubMessageConfig(BaseModel):
-    is_collapsed: bool = Field(False, description="分区是否折叠")
-    is_minimal: bool = Field(False, description="分区是否处于最小化状态")
+    is_collapsed: Optional[bool] = Field(None, description="分区是否折叠")
+    is_minimal: Optional[bool] = Field(None, description="分区是否处于最小化状态")
     context_participation_length: Optional[int] = Field(None,
                                                         description="参加上下文长度: None(默认)-参与; 0-不参与; N>0-在倒数N条内参与")
     zip_enable: Optional[bool] = Field(None, description="【仅用于ZipHistory类型】标记此压缩历史是否已启用")
     target_sub_msg_id: Optional[str] = Field(None, description="【仅用于ZipHistory类型】子消息粒度的目标子消息ID")
+    auto_summary: Optional[bool] = Field(None, description="【仅用于ZipHistory类型】是否为自动摘要（True=自动，None/False=手动）")
+    task_group_id: Optional[str] = Field(None, description="【仅用于TaskSubStep类型】子代理任务分组键（= 主代理 task tool_call_id）")
+    pending_file_path: Optional[str] = Field(None, description="【仅用于File类型】标记该分区文件尚待生成，非空时前端应连接 SSE 等待")
+    pending_file_timeout: Optional[int] = Field(None, description="【仅用于File类型】最大等待秒数")
+    show_tool_mode: Optional[str] = Field(None, description="【仅用于File类型】show 工具的 mode 参数透传：Normal / Mini_Avatar / Gal_Avatar / Group")
+    file_copy_status: Optional[str] = Field(None, description="【仅用于File类型】用户文件副本写入 workspace 的状态：ok / failed；None=未处理（非 Mambo Agent 会话或历史消息）")
+    file_copy_error: Optional[str] = Field(None, description="【仅用于File类型】副本写入失败原因（file_copy_status=failed 时）")
+    is_goal_loop_round: Optional[bool] = Field(None, description="【仅用于MCP_TOOL类型·get_goal】是否为 GoalLoopMiddleware 注入的轮次边界 get_goal（tool_call_id 以 goal-loop- 前缀标识）；前端据此渲染轮次分隔线，轮数从 result 文本解析")
 
 
 class SubMessageBase(BaseModel):
@@ -223,6 +233,7 @@ class ReviewToolContent(BaseModel):
     batch_id: str = Field(..., description="中断批次号")
     decision: Optional[ToolDecision] = Field(None, description="用户的决策结果，None 表示尚未做出决策")
     input_schema: Optional[Dict[str, Any]] = None
+    interrupt_id: Optional[str] = Field(None, description="LangGraph 中断 ID，用于多中断恢复场景精确匹配")
 
     def to_json_string(self) -> str:
         """序列化为存储在 DB content 字段的 JSON 字符串"""
@@ -240,6 +251,33 @@ class ReviewToolContent(BaseModel):
             raise ValueError(f"Invalid JSON for ReviewToolContent: {e}")
 
 
+class SecurityReviewContent(BaseModel):
+    """
+    专门用于处理 SubMessageType.SECURITY_REVIEW 的 content 字段结构。
+    当 AI 安全审核通过或拒绝工具调用时产生，不阻断执行，仅供事后核查。
+    """
+    tool_call_id: str = Field(..., description="被审核的工具调用 ID")
+    tool_name: str = Field(..., description="被审核的工具名称")
+    risk_level: str = Field(..., description="AI 评估的风险等级: low / medium / high / critical")
+    reason: str = Field(..., description="AI 审核理由")
+    passed: bool = Field(..., description="True=审核通过自动放行, False=审核不通过升级人工")
+
+    def to_json_string(self) -> str:
+        """序列化为存储在 DB content 字段的 JSON 字符串"""
+        return self.model_dump_json(exclude_none=False)
+
+    @classmethod
+    def from_json_string(cls, json_str: str) -> 'SecurityReviewContent':
+        """从 DB content 字符串反序列化"""
+        if not json_str:
+            raise ValueError("Empty content")
+        try:
+            data = json.loads(json_str)
+            return cls(**data)
+        except (json.JSONDecodeError, TypeError) as e:
+            raise ValueError(f"Invalid JSON for SecurityReviewContent: {e}")
+
+
 class AskUserContent(BaseModel):
     """
     专门用于处理 SubMessageType.ASK_USER 的 content 字段结构。
@@ -251,6 +289,7 @@ class AskUserContent(BaseModel):
     interrupt_index: int = Field(..., description="中断事件中的序号")
     batch_id: str = Field(..., description="中断批次号")
     ask_status: Optional[str] = Field(None, description="回答状态: 'answered' / 'cancelled' / None(待回答)")
+    interrupt_id: Optional[str] = Field(None, description="LangGraph 中断 ID，用于多中断恢复场景精确匹配")
 
     def to_json_string(self) -> str:
         """序列化为存储在 DB content 字段的 JSON 字符串"""
@@ -266,3 +305,94 @@ class AskUserContent(BaseModel):
             return cls(**data)
         except (json.JSONDecodeError, TypeError) as e:
             raise ValueError(f"Invalid JSON for AskUserContent: {e}")
+
+
+# --- Version Snapshot Schemas ---
+
+class VersionSnapshotFile(BaseModel):
+    """单个被备份的文件"""
+    path: str = Field(..., description="文件虚拟路径，如 /workspace/main.py")
+    sha256: str = Field(..., description="文件内容 SHA256 哈希")
+
+
+class RollbackRecord(BaseModel):
+    """回滚操作记录（附在 VERSION_SNAPSHOT 的 content 中）"""
+    target_checkpoint_id: str = Field(..., description="回滚到的目标 checkpoint ID")
+    timestamp: str = Field(..., description="回滚操作时间（ISO-8601）")
+    restored: list[str] = Field(default_factory=list, description="成功恢复的文件路径列表")
+    errors: list[str] = Field(default_factory=list, description="恢复失败的文件及原因")
+
+
+class VersionSnapshotContent(BaseModel):
+    """VERSION_SNAPSHOT 子消息的 content JSON 结构"""
+    checkpoint_id: str = Field(..., description="LangGraph parent checkpoint ID")
+    timestamp: str = Field(..., description="快照创建时间（ISO-8601）")
+    files: list[VersionSnapshotFile] = Field(default_factory=list, description="该快照中变更的文件列表")
+    rollback: Optional[RollbackRecord] = Field(None, description="回滚记录（仅回滚操作时有值）")
+
+    def to_json_string(self) -> str:
+        return self.model_dump_json(exclude_none=False)
+
+    @classmethod
+    def from_json_string(cls, json_str: str) -> 'VersionSnapshotContent':
+        if not json_str:
+            raise ValueError("Empty content")
+        try:
+            data = json.loads(json_str)
+            return cls(**data)
+        except (json.JSONDecodeError, TypeError) as e:
+            raise ValueError(f"Invalid JSON for VersionSnapshotContent: {e}")
+
+
+class TaskSubStepContent(BaseModel):
+    """TaskSubStep 子消息的 content JSON 结构。
+
+    每条子代理内部消息（推理 / 正文 / 工具调用 / 工具结果）对应一个 SubMessage，
+    content 字段存储此模型的 JSON。
+    前端通过 display_type 决定渲染方式：
+      - reasoning → 折叠式思考区
+      - text       → Markdown 正文
+      - tool_call  → 可点击工具调用按钮
+      - tool_result → 工具结果文本
+    """
+    tool_call_id: str = Field(..., description="主代理 task 工具调用的 tool_call_id")
+    subagent_type: str = Field(..., description="子代理类型名称，如 'general-purpose'")
+    display_type: Literal["reasoning", "text", "tool_call", "tool_result"]
+    content: str = ""
+    tool_name: Optional[str] = Field(None, description="工具名（tool_call / tool_result 时）")
+    tool_args: Optional[Dict[str, Any]] = Field(None, description="工具参数（tool_call 时）")
+    step_order: int = Field(0, description="同组内的序号，前端排序用")
+    description: Optional[str] = Field(None, description="task 描述（仅首条 step 携带）")
+    sub_tool_call_id: Optional[str] = Field(None, description="子代理内部工具调用的 tool_call_id，用于绑定 AI 审核/中断审核事件")
+
+    def to_json_string(self) -> str:
+        """序列化为存储在 DB content 字段的 JSON 字符串"""
+        return self.model_dump_json(exclude_none=False)
+
+    @classmethod
+    def from_json_string(cls, json_str: str) -> 'TaskSubStepContent':
+        """从 DB content 字符串反序列化"""
+        if not json_str:
+            raise ValueError("Empty content")
+        try:
+            data = json.loads(json_str)
+            return cls(**data)
+        except (json.JSONDecodeError, TypeError) as e:
+            raise ValueError(f"Invalid JSON for TaskSubStepContent: {e}")
+
+
+# --- Chat Usage Stats Schemas ---
+
+class UsageAggregate(BaseModel):
+    """一组累计 token 用量统计。"""
+    total_tokens: int = Field(0, description="总用量")
+    cache_hit_tokens: int = Field(0, description="缓存命中量")
+    cache_miss_tokens: int = Field(0, description="缓存未命中量")
+    prompt_tokens: int = Field(0, description="输入用量")
+    completion_tokens: int = Field(0, description="输出用量")
+
+
+class ChatUsageStats(BaseModel):
+    """会话 token 用量统计。"""
+    conversation: UsageAggregate = Field(..., description="会话内全部用量（含所有分支）")
+    active_path_main_agent: UsageAggregate = Field(..., description="当前激活路径上主 Agent 的用量")

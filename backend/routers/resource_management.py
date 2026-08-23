@@ -1,10 +1,11 @@
 # backend/routers/resource_management.py
 
 import json
+import urllib.parse
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,12 +13,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend import schemas
 from backend.crud import resource_crud, kb_crud
 from backend.database import get_db, AsyncSessionLocal
+from backend.exceptions import AppHTTPException
 from backend.models import resource_model
 from backend.schemas import kb as kb_schemas
-from backend.schemas.enums import FileManagementType, ResourceType, ResourceItemType, KBFileStatus
+from backend.schemas.enums import FileManagementType, ResourceType, ResourceItemType, KBFileStatus, ErrorCode
 from backend.services import chat_service, resource_service
+from backend.services.resource_service import validate_name_uniqueness
 from backend.services.kb_service import KnowledgeBaseService
 from backend.services.file_service import FileService
+from backend.plugins.sillytavern import is_sillytavern_card_png
 
 router = APIRouter(prefix="/resources", tags=["Resource Management"])
 
@@ -130,13 +134,26 @@ async def create_resource(resource: schemas.ResourceCreate, db: AsyncSession = D
             is_valid_folder = resource.itemType == ResourceItemType.FOLDER and not resource.resourceType
             is_valid_file = resource.itemType == ResourceItemType.RESOURCE and resource.resourceType == ResourceType.FILE
             if not (is_valid_folder or is_valid_file):
-                raise HTTPException(
+                raise AppHTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Only regular folders and files can be created inside a SKILL directory."
+                    error_code=ErrorCode.SKILL_CREATE_RESTRICTION,
                 )
 
         # 预先获取 kb_node
         kb_node = next((res for res in ancestors if res.resourceType == ResourceType.KNOWLEDGE_BASE.value), None)
+
+    # 校验同一父文件夹下不允许同名资源
+    await validate_name_uniqueness(db, resource.name, resource.parentId)
+
+    # 0.5 右键新建文件类型资源时，自动创建空的数据库文本文件，用户可直接编辑无需上传
+    if resource.resourceType == ResourceType.FILE and not resource.initial_content:
+        file_service = FileService(db)
+        auto_file = await file_service.create_empty_text_file(
+            filename=resource.name,
+            management_type=[FileManagementType.RESOURCE.value],
+            auto_commit=False,  # 交由后续 resource_crud.create_resource 统一提交事务
+        )
+        resource.initial_content = auto_file.id
 
     # 1. 先创建资源
     new_resource = await resource_crud.create_resource(db=db, resource=resource)
@@ -175,6 +192,20 @@ async def upload_resource_file(
     if not parent_id and not resource_id:
         raise HTTPException(status_code=400, detail="Either parent_id or resource_id must be provided.")
 
+    # SillyTavern 角色卡分流：新建模式下，若为 PNG 角色卡则拆解为资源树
+    if parent_id:
+        file_content = await file.read()
+        await file.seek(0)
+        if is_sillytavern_card_png(file_content):
+            from backend.plugins.sillytavern import SillyTavernImportService
+            import_service = SillyTavernImportService(db)
+            try:
+                folder_res = await import_service.import_png(file, parent_id)
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"SillyTavern 角色卡导入失败: {e}")
+            await _hydrate_resources([folder_res], db)
+            return folder_res
+
     file_service = FileService(db)
 
     db_file = await file_service.save_file(
@@ -202,6 +233,9 @@ async def upload_resource_file(
                     chunk_size=500,
                     chunk_overlap=50
                 ).model_dump()
+
+        # 校验同一父文件夹下不允许同名资源
+        await validate_name_uniqueness(db, file.filename, parent_id)
 
         resource_create = schemas.ResourceCreate(
             name=file.filename,
@@ -274,6 +308,23 @@ async def move_resources(move_request: schemas.ResourceMoveRequest, db: AsyncSes
     return {"message": "Move successful"}
 
 
+@router.get("/{resource_id}/export", summary="导出文件夹资源为 ZIP")
+async def export_resource_zip(resource_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    将指定文件夹资源的整个子树导出为 ZIP。
+    仅导出最新版本；产物为纯净的文件/文件夹树，剔除资源系统元数据。
+    """
+    from backend.services.resource_export_service import ResourceExporter
+
+    zip_bytes, folder_name = await ResourceExporter(db).export_folder_zip(resource_id)
+
+    quoted_name = urllib.parse.quote(folder_name or "resources")
+    headers = {
+        "Content-Disposition": f"attachment; filename*=UTF-8''{quoted_name}.zip"
+    }
+    return Response(content=zip_bytes, media_type="application/zip", headers=headers)
+
+
 @router.get("/{resource_id}", response_model=schemas.ResourceWithVersions, summary="获取单个资源的详细信息")
 async def read_resource(resource_id: str, db: AsyncSession = Depends(get_db)):
     """
@@ -295,6 +346,13 @@ async def update_resource(resource_id: str, resource_update: schemas.ResourceUpd
     更新资源的基本信息，如名称、描述。
     注意：移动操作请使用 /move 接口。
     """
+    # 如果名称有变更，检查同一父文件夹下是否有同名资源
+    if resource_update.name is not None:
+        existing_resource = await resource_crud.get_resource(db, resource_id)
+        if not existing_resource:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found")
+        await validate_name_uniqueness(db, resource_update.name, existing_resource.parentId, exclude_id=resource_id)
+
     updated_resource = await resource_crud.update_resource(db, resource_id=resource_id, resource_update=resource_update)
     if not updated_resource:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found")
@@ -310,39 +368,7 @@ async def delete_resource(resource_id: str, db: AsyncSession = Depends(get_db)):
     删除指定的资源或文件夹及其所有子内容。
     会自动清理关联的向量数据和知识库切片。
     """
-    # 1. 查找所有需要删除的资源ID（包括子孙节点）
-    cte = select(resource_model.Resource.id, resource_model.Resource.kb_id).where(
-        resource_model.Resource.id == resource_id).cte(name="hierarchy", recursive=True)
-    child = resource_model.Resource
-    cte = cte.union_all(select(child.id, child.kb_id).join(cte, child.parentId == cte.c.id))
-
-    stmt = select(cte.c.id, cte.c.kb_id)
-    result = await db.execute(stmt)
-    rows = result.all()
-
-    # 2. 遍历并清理向量
-    kb_service = KnowledgeBaseService(db)
-
-    for row in rows:
-        target_id = row[0]
-        target_kb_id = row[1]
-
-        if target_kb_id:
-            # 尝试获取 KB 的维度信息以清理向量
-            try:
-                kb_res = await resource_crud.get_resource_with_versions(db, target_kb_id)
-                if kb_res and kb_res.latest_version and kb_res.latest_version.attributes:
-                    dim = kb_res.latest_version.attributes.get("dimension")
-                    if dim:
-                        await kb_service._cleanup_vectors(target_id, dim)
-            except Exception:
-                pass
-
-        # 清理 Chunk 表 (无论是否成功清理向量，都应清理 Chunk)
-        await kb_crud.delete_chunks_by_resource(db, target_id)
-
-    # 3. 执行级联删除
-    deleted_resource = await resource_crud.delete_resource(db, resource_id=resource_id)
+    deleted_resource = await resource_service.delete_resource_tree(db, resource_id)
     if not deleted_resource:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found")
     return deleted_resource
@@ -405,6 +431,23 @@ async def reorder_versions(updates: List[schemas.ResourceVersionReorderItem], db
     return {"message": "Version reorder successful"}
 
 
+@router.delete(
+    "/versions/{version_id}",
+    status_code=status.HTTP_200_OK,
+    summary="删除指定资源版本"
+)
+async def delete_version(version_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    删除指定的资源版本。
+    不能删除当前活跃版本，也不能删除资源的最后一个版本。
+    """
+    deleted_version = await resource_crud.delete_resource_version(db, version_id=version_id)
+    if deleted_version is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Cannot delete active version or version not found")
+    return {"message": "Version deleted successfully"}
+
+
 # --- Search Operations ---
 
 @router.post(
@@ -414,7 +457,7 @@ async def reorder_versions(updates: List[schemas.ResourceVersionReorderItem], db
 )
 async def search_resources(request: schemas.ResourceSearchRequest, db: AsyncSession = Depends(get_db)):
     """
-    在资源标题、描述和最新版本内容中进行全局搜索。
+    在资源标题、描述、最新版本内容以及可写文件（数据库直存）的文本内容中进行全局搜索。
     """
     skip = (request.page_num - 1) * request.page_size
 

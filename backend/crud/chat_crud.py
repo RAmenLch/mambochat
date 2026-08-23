@@ -26,6 +26,18 @@ async def get_chat(db: AsyncSession, chat_id: str) -> Optional[chat_model.Chat]:
     return result.scalars().first()
 
 
+async def get_chat_meta(db: AsyncSession, chat_id: str) -> Optional[chat_model.Chat]:
+    """通过ID获取单个聊天会话（仅含 Chat 元数据和 AI 模型信息，不含 messages）"""
+    result = await db.execute(
+        select(chat_model.Chat)
+        .options(
+            joinedload(chat_model.Chat.ai_model).joinedload(provider_model.AIModel.provider)
+        )
+        .filter(chat_model.Chat.id == chat_id)
+    )
+    return result.scalars().first()
+
+
 async def get_chats(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[chat_model.Chat]:
     """获取会话和文件夹列表（按排序权重升序）"""
     result = await db.execute(
@@ -130,14 +142,14 @@ async def delete_chat(db: AsyncSession, chat_id: str) -> Optional[chat_model.Cha
     return db_chat
 
 
-async def touch_chat(db: AsyncSession, chat_id: str) -> Optional[chat_model.Chat]:
-    """更新会话的 lastOpenedAt 时间戳"""
-    db_chat = await get_chat(db, chat_id=chat_id)
-    if db_chat:
-        db_chat.lastOpenedAt = get_configured_now()
-        await db.commit()
-        await db.refresh(db_chat)
-    return db_chat
+async def touch_chat(db: AsyncSession, chat_id: str) -> None:
+    """更新会话的 lastOpenedAt 时间戳（轻量 UPDATE，不加载 Chat 实体）"""
+    await db.execute(
+        update(chat_model.Chat)
+        .where(chat_model.Chat.id == chat_id)
+        .values(lastOpenedAt=get_configured_now())
+    )
+    await db.commit()
 
 
 async def batch_update_chats_order(db: AsyncSession, updates: List[schemas.ChatReorderItem]) -> bool:

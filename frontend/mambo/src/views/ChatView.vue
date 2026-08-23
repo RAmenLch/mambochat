@@ -23,12 +23,27 @@ import ChatList from '@/components/chat/ChatList.vue'
 import ChatWindow from '@/components/chat/ChatWindow.vue'
 import { useResizablePanels } from '@/composables/useResizablePanels'
 import { useIsMobile } from '@/composables/useIsMobile'
+import { useChatSessionStore } from '@/stores/chatSessionStore'
+
+const props = defineProps<{ chatId?: string }>()
 
 // 异步加载移动端组件，避免在桌面端加载不必要的代码
 const MobileChatView = defineAsyncComponent(() => import('@/mobile/views/ChatView.vue'))
 
 // --- Mobile Detection ---
 const { isMobile } = useIsMobile()
+
+// --- Eagerly load messages as soon as chatId is known ---
+const chatSessionStore = useChatSessionStore()
+watch(
+  () => props.chatId,
+  (chatId) => {
+    if (chatId) {
+      chatSessionStore.selectChat(chatId)
+    }
+  },
+  { immediate: true }
+)
 
 // --- Desktop Logic (Keep existing logic) ---
 const SIDEBAR_WIDTH_KEY = 'mambo_sidebar_width'

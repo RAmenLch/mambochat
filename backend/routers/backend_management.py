@@ -13,6 +13,11 @@ from backend.schemas.backend import (
     SSHPublicKeyResponse,
     SSHTestRequest,
     SSHTestResponse,
+    SSHLsRequest,
+    LocalLsRequest,
+    UnifiedLsRequest,
+    LocalLsResponse,
+    SSHLsEntry,
     PASSWORD_MASK,
     SSHConfigData,
     APIConfigData
@@ -74,9 +79,9 @@ async def _test_ssh_connection(config_dict: Dict[str, Any]) -> SSHTestResponse:
         backend._connect()
         backend.close()
 
-        return SSHTestResponse(success=True, message="连接成功")
+        return SSHTestResponse(success=True, message="连接成功", code="BACKEND_CONNECTION_OK")
     except Exception as e:
-        return SSHTestResponse(success=False, message=f"连接失败: {str(e)}")
+        return SSHTestResponse(success=False, message=f"连接失败: {str(e)}", code="BACKEND_CONNECTION_FAILED")
 
 
 @router.post("/ssh/test", response_model=SSHTestResponse, summary="测试 SSH 连接")
@@ -100,6 +105,189 @@ async def test_ssh_connection(request: SSHTestRequest, db: AsyncSession = Depend
     return await _test_ssh_connection(test_config)
 
 
+async def _ssh_list_dir(request, db: AsyncSession):
+    """
+    列出远程服务器上的目录内容。
+
+    用于前端目录选择器，允许用户在配置 SSH Backend 时浏览远程文件系统，
+    为 edit_whitelist / edit_blacklist 选择路径前缀。
+    """
+    # 密码脱敏合并：如果提供了 backend_id 且密码是掩码，从数据库获取真实密码
+    password = request.password
+    if request.backend_id:
+        db_obj = await backend_crud.get_backend(db, request.backend_id)
+        if db_obj and db_obj.backendType == BackendType.SSH.value:
+            merged = _merge_password(
+                {"password": password}, db_obj.configData
+            )
+            password = merged.get("password")
+    if password == PASSWORD_MASK:
+        password = None
+
+    try:
+        ssh_config = SSHConfigData(
+            hostname=request.hostname,
+            port=request.port,
+            username=request.username,
+            password=password,
+            root_dir=request.root_dir,
+        )
+
+        priv_key_path = None
+        if not ssh_config.password:
+            priv_key_path, _ = get_or_create_system_ssh_key()
+
+        backend = PureSFTPBackend(
+            hostname=ssh_config.hostname,
+            port=ssh_config.port,
+            username=ssh_config.username,
+            password=ssh_config.password,
+            key_filename=priv_key_path,
+            root_dir=ssh_config.root_dir,
+        )
+
+        list_path = request.path or "/"
+        entries = backend.ls_info(list_path)
+
+        # Determine parent path for navigation
+        parent = None
+        if list_path != "/":
+            parent_dir = list_path.rstrip("/")
+            if "/" in parent_dir:
+                parent = parent_dir.rsplit("/", 1)[0] or "/"
+            else:
+                parent = "/"
+
+        backend.close()
+
+        return LocalLsResponse(
+            success=True,
+            message="",
+            entries=[
+                {
+                    "path": e.get("path", ""),
+                    "is_dir": e.get("is_dir", False),
+                    "size": e.get("size", 0),
+                    "modified_at": e.get("modified_at", ""),
+                }
+                for e in entries
+            ],
+            parent_path=parent,
+        )
+    except Exception as e:
+        return LocalLsResponse(success=False, message=f"目录列表失败: {str(e)}")
+
+
+async def _local_list_dir(request: LocalLsRequest):
+    """
+    列出本地服务器上的目录内容。
+
+    用于前端目录选择器，允许用户在配置 Local Backend 时浏览本地文件系统，
+    为 edit_whitelist / edit_blacklist 选择路径前缀。
+    """
+    import os
+    import pathlib
+
+    try:
+        # 展开 ~ 为用户 home 目录
+        root = os.path.expanduser(request.root_dir)
+        root = os.path.normpath(root)
+
+        list_path = (request.path or "/").replace("\\", "/")
+        # 安全：防止路径穿越
+        full_path = os.path.normpath(os.path.join(root, list_path.lstrip("/")))
+        if not full_path.startswith(root):
+            full_path = root
+
+        if not os.path.isdir(full_path):
+            return LocalLsResponse(
+                success=False,
+                message=f"目录不存在: {list_path}",
+            )
+
+        entries: list[SSHLsEntry] = []
+        for name in sorted(os.listdir(full_path)):
+            item_path = os.path.join(full_path, name)
+            try:
+                st = os.stat(item_path)
+            except OSError:
+                continue
+            is_dir = os.path.isdir(item_path)
+            # 虚拟路径
+            vpath = "/" + os.path.relpath(item_path, root).replace("\\", "/")
+            if is_dir:
+                vpath += "/"
+            entries.append(SSHLsEntry(
+                path=vpath,
+                is_dir=is_dir,
+                size=st.st_size,
+                modified_at="",
+            ))
+
+        # 父目录
+        parent = None
+        clean = list_path.rstrip("/")
+        if clean and clean != "/":
+            parent_dir = os.path.dirname(clean).replace("\\", "/")
+            parent = parent_dir if parent_dir else "/"
+
+        return LocalLsResponse(
+            success=True,
+            message="",
+            entries=entries,
+            parent_path=parent,
+        )
+    except Exception as e:
+        return LocalLsResponse(success=False, message=f"目录列表失败: {str(e)}")
+
+
+@router.post("/ls", response_model=LocalLsResponse, summary="统一目录列表（SSH / Local）")
+async def unified_list_directory(request: UnifiedLsRequest, db: AsyncSession = Depends(get_db)):
+    """
+    根据 backend_type 自动分发到 SSH 或 Local 实现。
+
+    - ``backend_type=ssh`` → 使用 SSH/SFTP 列出远程目录
+    - ``backend_type=local`` → 使用 os.listdir 列出本地目录
+    """
+    if request.backend_type == BackendType.SSH:
+        # 重构为 SSHLsRequest 并委托
+        import copy
+        merged = copy.deepcopy(request.model_dump())
+        if request.backend_id:
+            db_obj = await backend_crud.get_backend(db, request.backend_id)
+            if db_obj and db_obj.backendType == BackendType.SSH.value:
+                merged_password = _merge_password(
+                    {"password": request.password}, db_obj.configData
+                )
+                merged["password"] = merged_password.get("password")
+        if merged.get("password") == PASSWORD_MASK:
+            merged["password"] = None
+        ssh_req = SSHLsRequest(
+            path=request.path,
+            hostname=request.hostname or "",
+            port=request.port,
+            username=request.username or "",
+            password=merged.get("password"),
+            root_dir=request.root_dir,
+            backend_id=request.backend_id,
+        )
+        return await _ssh_list_dir(ssh_req, db)
+
+    elif request.backend_type == BackendType.LOCAL:
+        local_req = LocalLsRequest(
+            path=request.path,
+            root_dir=request.root_dir,
+        )
+        return await _local_list_dir(local_req)
+
+    else:
+        # Resource / API 不支持目录列表
+        return LocalLsResponse(
+            success=False,
+            message=f"Backend 类型 '{request.backend_type}' 不支持目录浏览",
+        )
+
+
 @router.get("/ssh/public-key", response_model=SSHPublicKeyResponse, summary="获取系统全局 SSH 公钥")
 async def get_ssh_public_key():
     """获取公钥，以便用户将其配置到远程服务器的 authorized_keys 中实现免密登录"""
@@ -120,6 +308,9 @@ async def create_backend(backend_in: BackendConfigCreate, db: AsyncSession = Dep
     elif backend_in.backendType == BackendType.API.value:
         if backend_in.configData.get("api_key") in [PASSWORD_MASK, ""]:
             backend_in.configData["api_key"] = None
+    elif backend_in.backendType == BackendType.LOCAL.value:
+        if backend_in.configData.get("root_dir") in ["", "~"]:
+            backend_in.configData["root_dir"] = "~"
 
     db_obj = await backend_crud.create_backend(db, backend_in)
     return _mask_password(db_obj)
@@ -164,6 +355,53 @@ async def update_backend(backend_id: str, backend_in: BackendConfigUpdate, db: A
 
     updated_obj = await backend_crud.update_backend(db, backend_id, backend_in)
     return _mask_password(updated_obj)
+
+
+@router.post("/{backend_id}/duplicate", response_model=BackendConfigResponse, status_code=status.HTTP_201_CREATED, summary="复制 Backend（副本）")
+async def duplicate_backend(backend_id: str, db: AsyncSession = Depends(get_db)):
+    """基于现有 Backend 创建一个副本，名称自动添加 ' - 副本' 后缀"""
+    import re
+    import copy
+
+    db_obj = await backend_crud.get_backend(db, backend_id)
+    if not db_obj:
+        raise HTTPException(status_code=404, detail="Backend not found")
+
+    # 解析基准名
+    base_name = db_obj.name
+    match = re.match(r'^(.*?)(?:-副本(?:\d+)?)?$', base_name)
+    if match:
+        base_name = match.group(1).strip()
+
+    # 查找已有副本
+    all_backends = await backend_crud.get_all_backends(db, skip=0, limit=10000)
+    existing_nums: list = []
+    pattern = re.compile(r'^' + re.escape(base_name) + r'-副本(\d+)?$')
+    for b in all_backends:
+        m = pattern.match(b.name)
+        if m:
+            num = int(m.group(1)) if m.group(1) else 1
+            existing_nums.append(num)
+
+    if not existing_nums:
+        new_name = f"{base_name}-副本"
+    else:
+        next_num = max(existing_nums) + 1
+        new_name = f"{base_name}-副本{next_num}"
+
+    # 构造副本配置（完整复制）
+    config_data = copy.deepcopy(db_obj.configData)
+
+    new_backend = BackendConfigCreate(
+        name=new_name,
+        description=db_obj.description,
+        backendType=db_obj.backendType,
+        configData=config_data,
+        tools_config=db_obj.tools_config,
+    )
+
+    db_new = await backend_crud.create_backend(db, new_backend)
+    return _mask_password(db_new)
 
 
 @router.delete("/{backend_id}", status_code=status.HTTP_204_NO_CONTENT)

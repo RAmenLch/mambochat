@@ -57,6 +57,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SubMessage, McpToolContent, ReviewToolContent, AskUserContent } from '@/api/types'
+import { unpackMcpToolCall } from '@/utils/mcpToolUnpack'
 import { Warning, Loading, CircleCheck, CircleClose, Document, QuestionFilled } from '@element-plus/icons-vue'
 
 const props = defineProps<{
@@ -170,14 +171,16 @@ function getMinimizedTooltipContent(subMessage: SubMessage): string {
   if (subMessage.type === 'McpTool' || subMessage.type === 'ReviewTool') {
     try {
       const content = JSON.parse(subMessage.content)
+      const unpacked = unpackMcpToolCall(content)
       let argsStr = ''
-      if (typeof content.arguments === 'string') {
-        argsStr = content.arguments
-      } else if (typeof content.arguments === 'object') {
-        argsStr = JSON.stringify(content.arguments)
+      const rawArgs = unpacked.isMcpWrapped ? unpacked.effectiveArgs : content.arguments
+      if (typeof rawArgs === 'string') {
+        argsStr = rawArgs
+      } else if (typeof rawArgs === 'object') {
+        argsStr = JSON.stringify(rawArgs)
       }
       const args = argsStr ? `Args: ${argsStr}` : ''
-      return `${t('chat.message.toolCall')}: ${content.name || t('common.status.unknown')}\n${args}`.trim()
+      return `${t('chat.message.toolCall')}: ${unpacked.displayName}\n${args}`.trim()
     } catch {
       return t('chat.message.toolCall')
     }

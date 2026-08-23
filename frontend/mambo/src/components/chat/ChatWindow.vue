@@ -15,17 +15,19 @@
         :messages="currentChatMessages"
         @save-title="(newTitle) => chatListStore.updateChatSettings(currentChat!.id, { name: newTitle })"
         @refresh-title="handleRefreshTitle"
+        @imported="handleChatImported"
       />
 
       <div class="scroll-area-wrapper">
         <el-scrollbar ref="scrollbarRef" class="message-list-scrollbar" v-loading="isChatHistoryLoading" @scroll="handleScroll">
-          <div class="message-list-wrapper">
+          <div class="message-list-wrapper" :class="{ 'gal-shifted': galAvatarState.visible }">
             <MessageItem
               v-for="(message, index) in currentChatMessages"
               :key="message.id"
               :id="'msg-' + message.id"
               :message="message"
               :is-last-message="index === currentChatMessages.length - 1"
+              :hide-avatar="galAvatarState.visible && message.role === 'assistant' && hasGalAvatar(message)"
               @suggestion-click="handleSuggestionClick"
               @open-tool-dialog="handleOpenToolDialog"
               @view-logs="handleViewLogs"
@@ -41,6 +43,16 @@
           @jump="handleJumpToMessage"
         />
       </div>
+
+      <transition name="gal-fade">
+        <div v-if="galAvatarState.visible" class="gal-avatar-panel">
+          <div class="gal-avatar-clip">
+            <transition name="gal-img">
+              <img :key="galAvatarState.imageUrl ?? undefined" :src="galAvatarState.imageUrl!" class="gal-avatar-image" />
+            </transition>
+          </div>
+        </div>
+      </transition>
 
       <div
         class="input-container-wrapper"
@@ -73,6 +85,7 @@
           @jump-to-message="handleJumpToMessage"
           @toggle-web-search="handleToggleWebSearch"
           @toggle-mcp-tool="handleToggleMcpTool"
+          @open-version-history="versionHistoryDrawerVisible = true"
         />
 
         <AttachmentPreview
@@ -92,6 +105,7 @@
           :is-generating="isGenerating"
           :is-send-button-disabled="isSendButtonDisabled"
           :is-pending-review="isPendingReview"
+          :agent-id="resourceCompletionAgentId"
           v-model:singlePartDraft="singlePartDraft"
           v-model:multiPartDraft="multiPartDraft"
           :active-partition-index="activePartitionIndex"
@@ -119,6 +133,13 @@
       @save="handleSaveAgentSettings"
     />
 
+    <VersionHistoryDrawer
+      v-model:visible="versionHistoryDrawerVisible"
+      :chat-id="currentChatId"
+      :messages="currentChatMessages"
+      @refreshed="handleVersionHistoryRefreshed"
+    />
+
     <ResourceSelectorDialog
       v-model:visible="resourceSelectorVisible"
       :context="currentChat?.chatMode === 'agent' ? 'agent-toolbar' : 'chat-toolbar'"
@@ -137,8 +158,7 @@
     <AskUserDialog
       v-model:visible="askUserDialogVisible"
       :parent-message-id="askUserDialogMessageId"
-      :sub-message-id="askUserDialogSubMessageId"
-      :ask-user-content="askUserDialogContent"
+      :initial-sub-message-id="askUserDialogInitialSubMessageId"
     />
 
     <LogViewerDialog
@@ -150,14 +170,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, computed, onMounted } from 'vue';
+import { ref, watch, nextTick, computed, onMounted, onBeforeUnmount } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { ElScrollbar, ElMessage } from 'element-plus';
 import { UploadFilled } from '@element-plus/icons-vue';
 import type { Ref } from 'vue';
-import type { ChatUpdate, SubMessageCreate, AIModel, Resource, Message, SubMessage, AskUserContent } from '@/api/types';
+import type { ChatUpdate, SubMessageCreate, AIModel, Resource, Message, SubMessage } from '@/api/types';
 import { uploadFile } from '@/api/fileService';
 import { duplicateChat } from '@/api/chatService';
 
@@ -167,6 +187,7 @@ import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { useProviderStore } from '@/stores/providerStore';
 import { useSystemConfigStore } from '@/stores/systemConfigStore';
 import { useAgentStore } from '@/stores/agentStore';
+import { useBackendStore } from '@/stores/backendStore';
 import { useChatInput } from '@/composables/useChatInput';
 import { useResizablePanels } from '@/composables/useResizablePanels';
 import { useTokenEstimator } from '@/composables/useTokenEstimator';
@@ -183,6 +204,7 @@ import McpToolDialog from './dialogs/McpToolDialog.vue';
 import AskUserDialog from './dialogs/AskUserDialog.vue';
 import LogViewerDialog from './dialogs/LogViewerDialog.vue';
 import ChatNavigator from './ChatNavigator.vue';
+import VersionHistoryDrawer from './dialogs/VersionHistoryDrawer.vue';
 
 interface GroupedModels { label: string; options: AIModel[]; }
 
@@ -199,8 +221,9 @@ const chatInteractionStore = useChatInteractionStore();
 const providerStore = useProviderStore();
 const systemConfigStore = useSystemConfigStore();
 const agentStore = useAgentStore();
+const backendStore = useBackendStore();
 
-const { refreshingTitleChatId } = storeToRefs(chatListStore);
+const { refreshingTitleChatIds } = storeToRefs(chatListStore);
 const {
   currentChat,
   currentChatId,
@@ -276,8 +299,88 @@ const userHasScrolledUp = ref(false);
 const previousPreviewHeight = ref(0);
 const isDraggingOver = ref(false);
 const isSwitchingBranch = ref(false);
+const versionHistoryDrawerVisible = ref(false);
 
 const currentVisibleMessageId = ref<string | null>(null);
+
+/** Gal_Avatar 模式：查找当前活跃的 Gal 头像图片 */
+const galAvatarImageUrl = ref<string | null>(null)
+const galIsScrolledPast = ref(false)
+
+// 所有包含 Gal_Avatar 的消息：messageId → imageUrl
+const galAvatarMap = computed(() => {
+  const map = new Map<string, string>()
+  for (const msg of currentChatMessages.value) {
+    const file = msg.sub_messages.find(
+      sm => sm.type === 'File' &&
+        sm.config?.show_tool_mode === 'Gal_Avatar' &&
+        sm.file_info?.mime_type?.startsWith('image/')
+    )
+    if (file) {
+      map.set(msg.id, file.file_info!.url)
+    }
+  }
+  return map
+})
+
+const galAvatarState = computed(() => ({
+  visible: galAvatarImageUrl.value !== null && !galIsScrolledPast.value,
+  imageUrl: galAvatarImageUrl.value,
+  messageId: null as string | null,
+}))
+
+/** 判断某条消息是否含有 Gal_Avatar（用于隐藏该消息的头像） */
+function hasGalAvatar(msg: Message): boolean {
+  return msg.sub_messages.some(
+    sm => sm.type === 'File' &&
+      sm.config?.show_tool_mode === 'Gal_Avatar' &&
+      sm.file_info?.mime_type?.startsWith('image/')
+  )
+}
+
+/** 根据当前视口内容更新 Gal_Avatar 显隐状态（无滚动事件时也需主动调用） */
+function updateGalAvatarState(): void {
+  const el = scrollbarRef.value?.wrapRef;
+  if (!el) return;
+
+  const containerRect = el.getBoundingClientRect();
+
+  if (galAvatarMap.value.size > 0) {
+    let bestUrl: string | null = null
+
+    for (const [msgId, url] of galAvatarMap.value) {
+      const dom = document.getElementById(`msg-${msgId}`)
+      if (!dom) continue
+      const rect = dom.getBoundingClientRect()
+
+      // 消息在滚动容器内（至少部分可见）→ 显示它的 Gal_Avatar
+      if (rect.bottom > containerRect.top && rect.top < containerRect.bottom) {
+        bestUrl = url
+        break // 优先第一个可见的（从前往后遍历，即最早的消息）
+      }
+    }
+
+    if (bestUrl) {
+      galAvatarImageUrl.value = bestUrl
+      galIsScrolledPast.value = false
+    } else {
+      galIsScrolledPast.value = true
+    }
+  } else {
+    galAvatarImageUrl.value = null
+    galIsScrolledPast.value = true
+  }
+}
+
+// Gal_Avatar 消息集合变化（增删 / 图片就绪）时主动重新检测，
+// 避免内容不足无滚动事件导致立绘不显示或残留
+watch(galAvatarMap, () => {
+  nextTick(() => updateGalAvatarState());
+});
+
+function onWindowResize() {
+  nextTick(() => updateGalAvatarState());
+}
 
 const toolDialogVisible = ref(false);
 const toolDialogMessageId = ref<string | null>(null);
@@ -286,8 +389,8 @@ const toolDialogMode = ref<'review_all' | 'single'>('single');
 
 const askUserDialogVisible = ref(false);
 const askUserDialogMessageId = ref<string | null>(null);
-const askUserDialogSubMessageId = ref<string | null>(null);
-const askUserDialogContent = ref<AskUserContent | null>(null);
+/** 单合模式：指定打开的 subMessageId（时间线点击）；null = 多合模式（所有 pending） */
+const askUserDialogInitialSubMessageId = ref<string | null>(null);
 
 const logDialogVisible = ref(false);
 const logDialogMessageId = ref<string | null>(null);
@@ -297,9 +400,36 @@ onMounted(() => {
   if (agentStore.allAgents.length === 0) {
     agentStore.fetchAllAgents();
   }
+  if (backendStore.backendList.length === 0) {
+    backendStore.fetchBackends();
+  }
+  nextTick(() => updateGalAvatarState());
+  window.addEventListener('resize', onWindowResize);
 });
 
-const isTitleRefreshing = computed(() => refreshingTitleChatId.value === currentChat.value?.id);
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onWindowResize);
+});
+
+// 仅当当前会话 Agent 挂载了 ResourceBackend 时才启用资源补全，
+// 避免未挂载的 Agent 触发补全接口
+const resourceCompletionAgentId = computed(() => {
+  const chat = currentChat.value;
+  if (!chat?.agentId) return null;
+
+  const agent =
+    agentStore.allAgents.find((a) => a.id === chat.agentId) ||
+    agentStore.agentList.find((a) => a.id === chat.agentId);
+  if (!agent?.backendIds || agent.backendIds.length === 0) return null;
+
+  const mountedIds = new Set(agent.backendIds);
+  const hasResourceBackend = backendStore.backendList.some(
+    (b) => b.backendType === 'resource' && mountedIds.has(b.id),
+  );
+  return hasResourceBackend ? chat.agentId : null;
+});
+
+const isTitleRefreshing = computed(() => currentChat.value?.id ? refreshingTitleChatIds.value.has(currentChat.value.id) : false);
 const isSendButtonDisabled = computed(() => isGenerating.value || !isReadyToSend.value);
 
 const attachedKnowledgeBases = computed(() => {
@@ -330,13 +460,8 @@ function handleOpenToolDialog(message: Message, subMessageId: string, mode: 'rev
 }
 
 function handleOpenAskUserDialog(message: Message, subMessage: SubMessage) {
-  try {
-    askUserDialogContent.value = JSON.parse(subMessage.content) as AskUserContent;
-  } catch {
-    askUserDialogContent.value = null;
-  }
   askUserDialogMessageId.value = message.id;
-  askUserDialogSubMessageId.value = subMessage.id;
+  askUserDialogInitialSubMessageId.value = subMessage.id;
   askUserDialogVisible.value = true;
 }
 
@@ -347,13 +472,15 @@ function handleViewLogs(messageId: string) {
 
 function handleOpenReviewFromInput() {
   if (pendingReviewSubMessages.value.length > 0) {
-    const pendingSubMsg = pendingReviewSubMessages.value[0];
-    const parentMsg = currentChatMessages.value.find(m => m.id === pendingSubMsg.messageId);
+    const firstSubMsg = pendingReviewSubMessages.value[0];
+    const parentMsg = currentChatMessages.value.find(m => m.id === firstSubMsg.messageId);
     if (parentMsg) {
-      if (pendingSubMsg.type === 'AskUser') {
-        handleOpenAskUserDialog(parentMsg, pendingSubMsg);
+      if (firstSubMsg.type === 'AskUser') {
+        askUserDialogMessageId.value = parentMsg.id;
+        askUserDialogInitialSubMessageId.value = null;  // 多合模式：显示所有 pending
+        askUserDialogVisible.value = true;
       } else {
-        handleOpenToolDialog(parentMsg, pendingSubMsg.id, 'review_all');
+        handleOpenToolDialog(parentMsg, firstSubMsg.id, 'review_all');
       }
     }
   }
@@ -502,6 +629,12 @@ function handleRefreshTitle() {
   }
 }
 
+async function handleChatImported(chatId: string) {
+  // 刷新会话树并跳转到新导入的会话
+  await chatListStore.initializeList();
+  await chatSessionStore.selectChat(chatId);
+}
+
 async function handleSaveSettings(settings: ChatUpdate) {
   if (!currentChat.value) return;
   const finalSettings = { ...settings };
@@ -532,13 +665,23 @@ function handleOpenSettings() {
 
 async function handleToggleWebSearch() {
   if (!currentChat.value) return;
-  const SEARCH_TOOL_ID = 'system-ddgs-search';
-  const currentIds = currentChat.value.enabled_mcp_ids || [];
-  const newIds = currentIds.includes(SEARCH_TOOL_ID)
-    ? currentIds.filter(id => id !== SEARCH_TOOL_ID)
-    : [...currentIds, SEARCH_TOOL_ID];
-  await chatListStore.updateChatSettings(currentChat.value.id, { enabled_mcp_ids: newIds });
-  ElMessage.success(newIds.includes(SEARCH_TOOL_ID) ? t('chat.toolbar.webSearchEnabled') : t('chat.toolbar.webSearchDisabled'));
+  const currentMode = currentChat.value.web_search_mode;
+  let nextMode: 'direct_read' | 'search_and_read' | 'disable';
+  if (!currentMode || currentMode === 'disable') {
+    nextMode = 'direct_read';
+  } else if (currentMode === 'direct_read') {
+    nextMode = 'search_and_read';
+  } else {
+    nextMode = 'disable';
+  }
+  await chatListStore.updateChatSettings(currentChat.value.id, { web_search_mode: nextMode });
+  if (nextMode === 'direct_read') {
+    ElMessage.success(t('chat.toolbar.webSearchEnabled'));
+  } else if (nextMode === 'search_and_read') {
+    ElMessage.success(t('chat.toolbar.webSearchEnabled'));
+  } else {
+    ElMessage.info(t('chat.toolbar.webSearchDisabled'));
+  }
 }
 
 async function handleToggleMcpTool(mcpId: string) {
@@ -548,6 +691,12 @@ async function handleToggleMcpTool(mcpId: string) {
     ? currentIds.filter(id => id !== mcpId)
     : [...currentIds, mcpId];
   await chatListStore.updateChatSettings(currentChat.value.id, { enabled_mcp_ids: newIds });
+}
+
+function handleVersionHistoryRefreshed() {
+  if (currentChatId.value) {
+    chatSessionStore.selectChat(currentChatId.value, true);
+  }
 }
 
 const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
@@ -582,6 +731,8 @@ const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
   if (activeUserId) {
     currentVisibleMessageId.value = activeUserId;
   }
+
+  updateGalAvatarState();
 };
 
 const scrollToBottom = (force = false) => {
@@ -667,6 +818,7 @@ async function handleDuplicateUpTo(messageId: string) {
   }
 }
 
+
 async function handleSwitchBranch(currentMessageId: string, targetMessageId: string) {
   if (isGenerating.value) return;
 
@@ -728,6 +880,8 @@ watch(
 );
 
 watch(currentChatId, (newId) => {
+  galAvatarImageUrl.value = null;
+  galIsScrolledPast.value = true;
   if (newId) {
     userHasScrolledUp.value = false;
     previousPreviewHeight.value = 0;
@@ -743,6 +897,7 @@ watch(currentChatId, (newId) => {
         }
         nextTick(() => {
             chatInputBoxRef.value?.focus();
+            updateGalAvatarState();
         });
         stopWatch();
       }
@@ -764,6 +919,9 @@ watch(currentChatId, (newId) => {
 
 .message-list-scrollbar { width: 100%; height: 100%; }
 .message-list-wrapper { padding: 20px; }
+.message-list-wrapper.gal-shifted {
+  padding-left: 240px;
+}
 .input-container-wrapper { flex-shrink: 0; position: relative; display: flex; flex-direction: column; border-top: 1px solid var(--color-border); }
 .resize-handle { position: absolute; top: -3px; left: 0; width: 100%; height: 6px; cursor: ns-resize; z-index: 10; }
 
@@ -825,5 +983,64 @@ watch(currentChatId, (newId) => {
 .message-list-scrollbar :deep(.el-scrollbar__bar.is-vertical:hover .el-scrollbar__thumb),
 .message-list-scrollbar :deep(.el-scrollbar__bar.is-vertical:active .el-scrollbar__thumb) {
   width: 14px;
+}
+
+/* ========== Gal_Avatar 模式：左侧固定头像面板 ========== */
+.gal-avatar-panel {
+  position: relative;
+  left: 8px;
+  z-index: 15;
+  height: 0;
+}
+
+/* 210×285 显示窗口：圆角边框，裁剪图片两侧 */
+.gal-avatar-clip {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 210px;
+  height: 285px;
+  overflow: hidden;
+  border-radius: 10px;
+  border: 2px solid var(--el-border-color-light);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+/* 285×285：Chrome 缩放（认可的算法效果），由外层窗口裁到 210 宽 */
+.gal-avatar-image {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 285px;
+  height: 285px;
+}
+
+.gal-fade-enter-active,
+.gal-fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.gal-fade-enter-from {
+  opacity: 0;
+  transform: translateX(-20px);
+}
+
+.gal-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-20px);
+}
+
+/* 相邻 Gal_Avatar 切换：淡入淡出同时进行 */
+.gal-img-enter-active,
+.gal-img-leave-active {
+  transition: opacity 0.15s ease;
+}
+.gal-img-leave-active {
+  position: absolute;
+}
+.gal-img-enter-from,
+.gal-img-leave-to {
+  opacity: 0;
 }
 </style>

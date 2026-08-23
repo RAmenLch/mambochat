@@ -1,9 +1,10 @@
 # backend/services/generation/core/instructions.py
 
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Generic, TypeVar
+from typing import Optional, Generic, TypeVar
 
 from backend.schemas.enums import MessageStatus, SubMessageType, FileManagementType
+from backend.schemas.message import SubMessageConfig
 
 
 class BaseInstruction(BaseModel):
@@ -27,7 +28,7 @@ class CreateSubMessage(BaseInstruction):
     sortOrder: int
     status: MessageStatus = MessageStatus.GENERATING
     initial_content: str = ""
-    config: Optional[Dict] = None
+    config: Optional[SubMessageConfig] = None
 
 
 class AppendToSubMessage(BaseInstruction):
@@ -51,7 +52,7 @@ class UpdateSubMessageStatus(BaseInstruction):
 class UpdateSubMessageConfig(BaseInstruction):
     """指令：更新指定子消息的配置项字典。"""
     sub_message_id: str = Field(..., description="目标子消息UUID")
-    config: Dict = Field(..., description="新的配置字典")
+    config: SubMessageConfig = Field(..., description="新的配置")
 
 
 class SetFinalStatus(BaseInstruction):
@@ -116,6 +117,7 @@ class UpdateZipHistorySubMessage(BaseInstruction):
     content: str
     status: MessageStatus
     zip_enable: bool = Field(default=False, description="是否在下一轮上下文构建时自动启用压缩")
+    auto: bool = Field(default=False, description="是否为自动摘要（由 Agent middleware 触发）")
 
 
 class SetMessageCheckpointId(BaseInstruction):
