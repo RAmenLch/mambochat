@@ -31,6 +31,10 @@ from backend.services.generation.agent.user_file_copy_service import process_use
 
 GENERATION_START_TIMEOUT = timedelta(minutes=10)
 
+# 新建会话的默认标题占位 Key（前端按此 Key 做 i18n 显示）
+# 仅当会话名仍为该 Key 时，首轮问答完成后才自动触发标题生成
+DEFAULT_CHAT_TITLE_KEY = "__DEFAULT_CHAT_TITLE__"
+
 
 async def _calculate_message_status(message: chat_model.Message) -> schemas.MessageStatus:
     """
@@ -270,6 +274,23 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
             await stream_manager.mark_task_completed(assistant_message_id)
             await stream_manager.close_stream(assistant_message_id)
             await stream_manager.release_generation_lock(chat_id)
+            if final_status == MessageStatus.COMPLETED:
+                await maybe_schedule_title_generation(chat_id)
+
+
+async def maybe_schedule_title_generation(chat_id: str) -> None:
+    """
+    首轮问答生成完成后的标题生成调度入口。
+
+    仅当会话名仍为默认占位 Key 时才会触发（生成成功后名字被改写，
+    或用户已手动改名，则不再触发）。任务级去重由
+    run_title_generation_task 内部的原子抢注保证。
+    """
+    async with AsyncSessionLocal() as db:
+        chat = await chat_crud.get_chat(db, chat_id=chat_id)
+        if not chat or chat.name != DEFAULT_CHAT_TITLE_KEY:
+            return
+    asyncio.create_task(run_title_generation_task(chat_id, only_if_default=True))
 
 
 async def _run_retry_generation_task(chat_id: str, assistant_message_id: str):
@@ -338,17 +359,30 @@ async def _run_retry_generation_task(chat_id: str, assistant_message_id: str):
             await stream_manager.mark_task_completed(assistant_message_id)
             await stream_manager.close_stream(assistant_message_id)
             await stream_manager.release_generation_lock(chat_id)
+            if final_status == MessageStatus.COMPLETED:
+                await maybe_schedule_title_generation(chat_id)
 
 
-async def run_title_generation_task(chat_id: str):
+async def run_title_generation_task(chat_id: str, only_if_default: bool = False):
     """
     后台任务：为指定的会话生成并更新标题。
+
+    - 通过原子抢注（try_mark_task_running）保证同一会话同时最多只有一个标题任务，
+      自动触发 / 手动刷新 / 多客户端并发均被去重。
+    - only_if_default=True 时（自动调度路径），任务开始前二次校验会话名仍为默认 Key，
+      防止抢注瞬间名字已被修改导致误生成。
     """
     task_id = f"title-gen-{chat_id}"
-    await stream_manager.mark_task_running(task_id)
+    if not await stream_manager.try_mark_task_running(task_id):
+        return
 
     async with AsyncSessionLocal() as db:
         try:
+            if only_if_default:
+                chat = await chat_crud.get_chat(db, chat_id=chat_id)
+                if not chat or chat.name != DEFAULT_CHAT_TITLE_KEY:
+                    return
+
             worker = SimpleWorker()
 
             manager = TitleGenerateManager(db_session=db)

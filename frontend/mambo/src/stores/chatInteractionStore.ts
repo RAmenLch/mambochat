@@ -17,7 +17,6 @@ import {
 } from '@/api/chatService'
 import { subscribeToMessageStream } from '@/services/sseService';
 import { useChatSessionStore } from './chatSessionStore';
-import { useChatListStore } from './chatListStore';
 import type {
   Message,
   SubMessage,
@@ -34,7 +33,6 @@ import type {
  */
 export const useChatInteractionStore = defineStore('chatInteraction', () => {
   const sessionStore = useChatSessionStore();
-  const listStore = useChatListStore();
 
   /**
    * 订阅指定助手消息的SSE流。
@@ -63,17 +61,6 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
           if (!hasPendingReview) {
             await batchUpdateSubMessagesMinimalState(assistantMessageId, true);
           }
-        }
-        if (
-          sessionStore.currentChat &&
-            (
-                sessionStore.currentChat.name === '新的会话' ||
-                sessionStore.currentChat.name === 'New Chat'
-            )
-            &&
-          sessionStore.currentChatMessages.length === 2
-        ) {
-          listStore.refreshChatTitle(chatId);
         }
       } catch (err) {
         console.error("Failed to fetch final message state, performing a full refresh:", err);

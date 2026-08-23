@@ -27,6 +27,7 @@
     *   **Resource Version Snapshots**: Automatic versioning on file writes/edits/deletes, with rollback at any time.
     *   **Long-term Memory**: Mount a dedicated memory resource so the AI remembers long-term preferences and writes back newly learned content.
     *   **Auto Conversation Compression**: Chain summaries compress conversation history without losing in-progress plans.
+    *   **Task Loop**: the Agent automatically executes over multiple rounds until the goal is met, conditions are satisfied, or the round limit is reached — with both "let AI plan it" and "follow my rules" modes.
     *   **Smart MCP Integration**: Tools are exposed directly when few; automatically switches to on-demand query mode when many.
     *   Agents can be equipped with resources, MCP tools, Skill packs, and collaborate with SSH / Local / Resource / API Backends.
 *   **🔧 LLM Runtime Environments (Backend)**

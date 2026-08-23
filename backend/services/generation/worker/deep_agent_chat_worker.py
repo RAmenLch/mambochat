@@ -81,11 +81,16 @@ class DeepAgentChatWorker(UniversalGraphWorker):
             # DeepAgent 特有：收集 skills 文件注入 VFS
             files_to_inject = self._collect_vfs_files_recursively(llm_input.agent_config)
 
-            await agent.aupdate_state(thread_config, {"_summarization_event": None})
-            await agent.aupdate_state(
-                thread_config,
-                {"_summarization_event": llm_input.context.auto_summarization_event},
-            )
+            # 首条消息重新生成:分支点为 thread 根 checkpoint。根 checkpoint 的
+            # versions_seen 不含真实节点,aupdate_state 无法推导 as_node 会抛
+            # InvalidUpdateError(Ambiguous update);且根状态本就是初始值,
+            # 无需同步 _summarization_event —— 直接 astream 从根 fork。
+            if not llm_input.run_time_config.branch_from_root:
+                await agent.aupdate_state(thread_config, {"_summarization_event": None})
+                await agent.aupdate_state(
+                    thread_config,
+                    {"_summarization_event": llm_input.context.auto_summarization_event},
+                )
 
             resume_payload = llm_input.agent_config.resume_payload
             if resume_payload:

@@ -77,20 +77,28 @@ class UniversalGraphWorker(AbstractGenerateWorker):
             # from being rescheduled, and can re-trigger the model node
             # via _summarization_event channel version bump.
             if not resume_payload:
-                # Sync _summarization_event with context_builder's rebuilt event
-                # - None → clear stale event from previous run
-                # - non-None → overwrite with recalculated cutoff_index from DB
-                updated_config = await agent.aupdate_state(
-                    thread_config,
-                    {"_summarization_event": llm_input.context.auto_summarization_event},
-                )
-                # For time-travel: sync the forked checkpoint_id so astream()
-                # continues from the updated state, not the original replay target.
-                updated_cp_id = updated_config["configurable"].get("checkpoint_id")
-                if updated_cp_id:
-                    thread_config["configurable"]["checkpoint_id"] = updated_cp_id
-                messages = self._convert_messages(llm_input.context.messages)
-                input_data = {"messages": Overwrite(value=messages)}
+                # 首条消息重新生成:分支点为 thread 根 checkpoint。根 checkpoint 的
+                # versions_seen 不含真实节点,aupdate_state 无法推导 as_node 会抛
+                # InvalidUpdateError(Ambiguous update);且根状态本就是初始值,
+                # 无需同步 _summarization_event —— 直接 astream 从根 fork。
+                if llm_input.run_time_config.branch_from_root:
+                    messages = self._convert_messages(llm_input.context.messages)
+                    input_data = {"messages": Overwrite(value=messages)}
+                else:
+                    # Sync _summarization_event with context_builder's rebuilt event
+                    # - None → clear stale event from previous run
+                    # - non-None → overwrite with recalculated cutoff_index from DB
+                    updated_config = await agent.aupdate_state(
+                        thread_config,
+                        {"_summarization_event": llm_input.context.auto_summarization_event},
+                    )
+                    # For time-travel: sync the forked checkpoint_id so astream()
+                    # continues from the updated state, not the original replay target.
+                    updated_cp_id = updated_config["configurable"].get("checkpoint_id")
+                    if updated_cp_id:
+                        thread_config["configurable"]["checkpoint_id"] = updated_cp_id
+                    messages = self._convert_messages(llm_input.context.messages)
+                    input_data = {"messages": Overwrite(value=messages)}
             else:
                 input_data = Command(resume=resume_payload)
 

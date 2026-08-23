@@ -103,6 +103,9 @@
       v-if="usageSubMessage"
       :usage-sub-message="usageSubMessage"
       :max-context-tokens="maxContextTokens"
+      :start-time="message.createdAt"
+      :end-time="usageSubMessage.createdAt"
+      :is-generating="isGenerating"
       class="usage-info-component"
     />
   </div>

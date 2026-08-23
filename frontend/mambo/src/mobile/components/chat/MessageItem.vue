@@ -118,6 +118,9 @@
                 v-if="usageSubMessage"
                 :usage-sub-message="usageSubMessage"
                 :max-context-tokens="maxContextTokens"
+                :start-time="message.createdAt"
+                :end-time="usageSubMessage.createdAt"
+                :is-generating="message.status === 'generating'"
               />
               <button class="action-btn" @click="handleEditSpecific(subMessageId)">
                 <el-icon :size="16"><Edit /></el-icon>

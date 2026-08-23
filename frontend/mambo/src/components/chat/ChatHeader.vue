@@ -15,14 +15,14 @@
       <!-- 竖向编辑模式：使用 Popover -->
       <template v-if="mode === 'vertical'">
         <div class="vertical-title-wrapper">
-          <h3 class="chat-title">{{ currentChat?.name || $t('chat.header.noChat') }}</h3>
+          <h3 class="chat-title">{{ displayTitle || $t('chat.header.noChat') }}</h3>
         </div>
       </template>
 
       <!-- 横向编辑模式：行内 Input 切换 -->
       <template v-else>
         <div v-if="!isEditingTitle && currentChat" class="horizontal-title-display">
-          <h3 class="chat-title">{{ currentChat.name }}</h3>
+          <h3 class="chat-title">{{ displayTitle }}</h3>
           <div class="title-actions">
             <!-- 编辑和刷新保留在标题旁边 -->
             <el-tooltip :content="$t('chat.header.editTitle')" placement="bottom" :show-after="500">
@@ -118,6 +118,7 @@ import { ref, nextTick, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { ElInput } from 'element-plus';
 import { ElMessage } from 'element-plus';
+import { isDefaultChatName } from '@/utils/chatName';
 import { Edit, Refresh, Expand, Download } from '@element-plus/icons-vue';
 import type { Chat, Message } from '@/api/types';
 import { getResourceDetails } from '@/api/resourceService';
@@ -148,6 +149,12 @@ const isPopoverVisible = ref(false);
 const titleInput = ref('');
 const isExporting = ref(false);
 
+// 默认标题占位 Key 渲染为 i18n 文本，其余情况原样显示
+const displayTitle = computed(() => {
+  if (!props.currentChat) return '';
+  return isDefaultChatName(props.currentChat.name) ? t('chat.sidebar.initChatName') : props.currentChat.name;
+});
+
 // Refs
 const titleInputRef = ref<InstanceType<typeof ElInput>>();
 const popoverInputRef = ref<InstanceType<typeof ElInput>>();
@@ -158,13 +165,13 @@ const importInputRef = ref<HTMLInputElement>();
 function startHorizontalEdit() {
   if (!props.currentChat) return;
   isEditingTitle.value = true;
-  titleInput.value = props.currentChat.name;
+  titleInput.value = displayTitle.value;
   nextTick(() => titleInputRef.value?.focus());
 }
 
 function initPopoverInput() {
   if (!props.currentChat) return;
-  titleInput.value = props.currentChat.name;
+  titleInput.value = displayTitle.value;
   nextTick(() => popoverInputRef.value?.focus());
 }
 
@@ -172,7 +179,9 @@ function saveTitle() {
   if (!props.currentChat) return;
 
   const newName = titleInput.value.trim();
-  if (newName && newName !== props.currentChat.name) {
+  // 与显示名比较：默认标题 Key 显示为 i18n 文本，未修改直接保存时保持 Key，
+  // 不覆盖为 i18n 文本，保留后端自动生成标题的机会
+  if (newName && newName !== displayTitle.value) {
     emit('save-title', newName);
   }
 

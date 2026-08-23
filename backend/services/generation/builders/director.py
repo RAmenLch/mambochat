@@ -139,16 +139,28 @@ class LLMInputDirector:
 
     async def _resolve_branch_checkpoint(
         self, target_msg_id: str, history: List[MessageSchema]
-    ) -> Optional[str]:
-        """确定分支起点的 checkpoint_id。"""
+    ) -> Tuple[Optional[str], bool]:
+        """确定分支起点的 checkpoint_id。
+
+        返回 (checkpoint_id, is_root):is_root 为 True 表示分支点是 thread 根
+        checkpoint(首条消息重新生成的兜底)。
+
+        优先级:
+        1. target 自身映射(assistant 消息 retry 恢复用);
+        2. 沿 parentId 链向上查找映射(重新回答命中用户消息/上一轮 assistant 的映射);
+        3. 兜底:首条消息重新生成(链上无 assistant 祖先且无任何映射)时,
+           取 thread 根 checkpoint —— 根在首个 assistant 轮之前,
+           goal 等中间件状态为初始值,时间旅行语义正确。
+        """
         # 1. 查自身
         cp = await checkpoint_map_crud.get_checkpoint_id(self.db, target_msg_id)
         if cp:
-            return cp
+            return cp, False
 
-        # 2. 沿 parentId 链向上查找
+        # 2. 沿 parentId 链向上查找;同时记录链上是否出现 assistant 祖先(兜底判定用)
         history_map: dict = {m.id: m for m in history if m.id}
         current_id: str = target_msg_id
+        saw_assistant_ancestor = False
         while True:
             msg = history_map.get(current_id)
             if not msg:
@@ -156,6 +168,11 @@ class LLMInputDirector:
                 db_msg = await message_crud.get_message(self.db, current_id)
                 if not db_msg or not db_msg.parentId:
                     break
+                if (
+                    current_id != target_msg_id
+                    and db_msg.role == schemas_enums.MessageRole.ASSISTANT.value
+                ):
+                    saw_assistant_ancestor = True
                 current_id = db_msg.parentId
                 continue
             if not msg.parentId:
@@ -163,10 +180,24 @@ class LLMInputDirector:
             parent_id = msg.parentId
             cp = await checkpoint_map_crud.get_checkpoint_id(self.db, parent_id)
             if cp:
-                return cp
+                return cp, False
+            parent_msg = history_map.get(parent_id)
+            if (
+                parent_msg
+                and parent_msg.role == schemas_enums.MessageRole.ASSISTANT.value
+            ):
+                saw_assistant_ancestor = True
             current_id = parent_id
 
-        return None
+        # 3. 兜底:链上无 assistant 祖先,说明目标消息是首条用户消息的直接回复,
+        #    以 thread 根 checkpoint 为分支点(goal 必为初始值);根不存在时维持
+        #    原有行为(回退最新 checkpoint)
+        if not saw_assistant_ancestor:
+            from backend.checkpointer import aget_root_checkpoint_id
+            root_cp = await aget_root_checkpoint_id(self.chat_id)
+            if root_cp:
+                return root_cp, True
+        return None, False
 
     async def build(self) -> LLMInput:
         materials = await GenerationMaterialLoader.load(
@@ -379,8 +410,9 @@ class LLMInputDirector:
 
         # 确定分支 checkpoint（用于 LangGraph 时间旅行，沿 parentId 链查找）
         branch_checkpoint_id: Optional[str] = None
+        branch_from_root = False
         if self._cutoff_message_id and materials.target_msg:
-            branch_checkpoint_id = await self._resolve_branch_checkpoint(
+            branch_checkpoint_id, branch_from_root = await self._resolve_branch_checkpoint(
                 self._cutoff_message_id, materials.history
             )
 
@@ -389,6 +421,7 @@ class LLMInputDirector:
             message_id=self._cutoff_message_id,
             manager_name=self._manager_name,
             branch_checkpoint_id=branch_checkpoint_id,
+            branch_from_root=branch_from_root,
         )
 
         return LLMInput(

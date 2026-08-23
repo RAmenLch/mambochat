@@ -79,17 +79,48 @@ export interface GoalLoopRoundInfo {
 }
 
 /**
- * 从 get_goal 的 result 文本解析轮次信息（"第 X/Y 轮"）。
- * result 是 payload 的 JSON 序列化字符串，在原文上直接正则匹配。
- * 解析失败（结果未到 / mambo_agents 文案变更）返回 null，由调用方降级处理。
+ * 从 get_goal 的 result 文本解析轮次信息。
+ * result 是 get_goal 返回的 JSON 序列化字符串：{"goal": {...}, "message": "..."}，
+ * 恒为合法 JSON（mambo_agents 内部 json.dumps 生成、后端原样存储），因此纯结构化解析、
+ * 不使用正则（正则需全文匹配，容易命中 objective 正文里的"第 X/Y 轮"字样）。
+ *
+ * 轮次来源（全部为结构化字段）：
+ *   - preset 模式（mambo_agents 0.3.0b3+）：goal.current_round 已是展示轮次，直接使用；
+ *   - LLM 模式：goal.rounds 是已完成的轮数，展示轮次 = rounds + 1；
+ *   - 旧版 preset 数据（无 current_round、rounds 恒为 0）无法得出真实轮次，返回 null
+ *     降级为通用文案，避免误显示"第 1 轮"。
+ * 解析失败（goal 缺失 / 非 JSON / 结构变化）返回 null，由调用方降级处理。
  */
 export function parseGoalLoopRound(
   result: string | null | undefined,
 ): GoalLoopRoundInfo | null {
   if (!result) return null
-  const m = result.match(/第\s*(\d+)\s*\/\s*(\d+)\s*轮/)
-  if (!m) return null
-  return { round: Number(m[1]), max: Number(m[2]) }
+
+  let payload: { goal?: { rounds?: unknown; max_rounds?: unknown; current_round?: unknown; created_by?: unknown } | null } | null
+  try {
+    payload = JSON.parse(result) as typeof payload
+  } catch {
+    /* 非 JSON（理论不发生），按无法解析处理 */
+    return null
+  }
+
+  const goal = payload?.goal
+  if (!goal || typeof goal.max_rounds !== 'number' || goal.max_rounds < 1) return null
+
+  // preset 模式：current_round 已是展示轮次（mambo_agents 0.3.0b3+）
+  if (typeof goal.current_round === 'number' && goal.current_round >= 1) {
+    return { round: goal.current_round, max: goal.max_rounds }
+  }
+
+  // 旧版 preset 数据：rounds 恒为 0，无法得出真实轮次
+  if (goal.created_by === 'preset') return null
+
+  // LLM 模式：rounds 是已完成的轮数，展示轮次 = rounds + 1
+  if (typeof goal.rounds === 'number' && goal.rounds >= 0) {
+    return { round: goal.rounds + 1, max: goal.max_rounds }
+  }
+
+  return null
 }
 
 /**

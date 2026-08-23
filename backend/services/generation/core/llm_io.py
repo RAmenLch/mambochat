@@ -122,6 +122,12 @@ class RunTimeConfig(BaseModel):
         None,
         description="分支起点 checkpoint_id。设置后 LangGraph 会进行时间旅行，从该 checkpoint 分叉",
     )
+    branch_from_root: bool = Field(
+        default=False,
+        description="分支起点是否为 thread 根 checkpoint（首条消息重新生成的兜底分支点）。"
+                    "根 checkpoint 的 versions_seen 不含真实节点，aupdate_state 无法推导 "
+                    "as_node 会抛 Ambiguous update，worker 应跳过 aupdate_state 直接 astream",
+    )
 
 
 class SecurityReviewAgentConfig(BaseModel):

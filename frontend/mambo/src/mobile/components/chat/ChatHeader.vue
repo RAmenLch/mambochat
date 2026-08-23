@@ -9,7 +9,7 @@
 
     <div class="header-center">
       <div class="title-wrapper" @click="startEdit" v-if="!isEditing">
-        <span class="mobile-title">{{ currentChat?.name || $t('chat.header.noChat') }}</span>
+        <span class="mobile-title">{{ displayTitle || $t('chat.header.noChat') }}</span>
         <span class="mobile-subtitle" v-if="currentChat && displayModelName">
           {{ displayModelName }}
         </span>
@@ -43,6 +43,7 @@ import { useChatListStore } from '@/stores/chatListStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { useProviderStore } from '@/stores/providerStore'
 import { useAgentStore } from '@/stores/agentStore'
+import { isDefaultChatName } from '@/utils/chatName'
 
 const props = defineProps<{
   currentChat: Chat | null
@@ -63,6 +64,12 @@ const isEditing = ref(false)
 const editName = ref('')
 const inputRef = ref()
 
+// 默认标题占位 Key 渲染为 i18n 文本，其余情况原样显示
+const displayTitle = computed(() => {
+  if (!props.currentChat) return ''
+  return isDefaultChatName(props.currentChat.name) ? t('chat.sidebar.initChatName') : props.currentChat.name
+})
+
 const displayModelName = computed(() => {
   const chat = props.currentChat
   if (chat?.chatMode === 'agent') {
@@ -79,13 +86,14 @@ const displayModelName = computed(() => {
 
 function startEdit() {
   if (!props.currentChat) return
-  editName.value = props.currentChat.name
+  editName.value = displayTitle.value
   isEditing.value = true
   nextTick(() => inputRef.value?.focus())
 }
 
 async function saveTitle() {
-  if (props.currentChat && editName.value.trim() && editName.value !== props.currentChat.name) {
+  // 与显示名比较：默认标题 Key 未修改直接保存时保持 Key，保留后端自动生成机会
+  if (props.currentChat && editName.value.trim() && editName.value !== displayTitle.value) {
     await chatListStore.updateChatSettings(props.currentChat.id, { name: editName.value })
   }
   isEditing.value = false

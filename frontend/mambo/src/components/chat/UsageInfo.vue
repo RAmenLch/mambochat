@@ -99,11 +99,14 @@
         </div>
       </div>
     </el-tooltip>
+
+    <!-- 生成时间与时长 -->
+    <span v-if="timeText" class="usage-time">{{ timeText }}</span>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref, watch, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { SubMessage } from '@/api/types';
 
@@ -121,6 +124,12 @@ const props = defineProps<{
   usageSubMessage: SubMessage;
   /** 模型最大上下文 token 数（来自 meta_config.context_length），> 0 时启用环形图 */
   maxContextTokens?: number;
+  /** 本次生成开始时间（assistant message 创建时间） */
+  startTime?: string;
+  /** 生成结束时间（最后一条 usage 子消息创建时间） */
+  endTime?: string;
+  /** 生成中：时长实时刷新 */
+  isGenerating?: boolean;
 }>();
 
 const { t } = useI18n();
@@ -220,6 +229,60 @@ const barBlocks = computed<BarBlock[]>(() => {
   }
   return blocks;
 });
+
+// ========== 生成时间与时长 ==========
+/** 生成中时每秒刷新，驱动时长实时增长 */
+const now = ref(Date.now());
+let timer: number | undefined;
+watch(
+  () => props.isGenerating,
+  (generating) => {
+    if (generating && !timer) {
+      timer = window.setInterval(() => { now.value = Date.now(); }, 1000);
+    } else if (!generating && timer) {
+      window.clearInterval(timer);
+      timer = undefined;
+    }
+  },
+  { immediate: true },
+);
+onUnmounted(() => {
+  if (timer) window.clearInterval(timer);
+});
+
+const startMillis = computed(() => (props.startTime ? Date.parse(props.startTime) : NaN));
+const endMillis = computed(() => (props.endTime ? Date.parse(props.endTime) : NaN));
+const hasTimeInfo = computed(
+  () => Number.isFinite(startMillis.value) && Number.isFinite(endMillis.value) && endMillis.value >= startMillis.value,
+);
+
+const durationSeconds = computed(() => {
+  if (!hasTimeInfo.value) return undefined;
+  const end = props.isGenerating ? now.value : endMillis.value;
+  return Math.max(end - startMillis.value, 0) / 1000;
+});
+
+function formatClock(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function formatDuration(sec: number): string {
+  if (sec < 60) return `${sec.toFixed(1)}s`;
+  const totalSec = Math.round(sec);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  if (m < 60) return s > 0 ? `${m}m ${s}s` : `${m}m`;
+  const h = Math.floor(m / 60);
+  const restM = m % 60;
+  return restM > 0 ? `${h}h ${restM}m` : `${h}h`;
+}
+
+const timeText = computed(() => {
+  if (!hasTimeInfo.value || durationSeconds.value === undefined) return '';
+  return `${formatClock(startMillis.value)} · ${formatDuration(durationSeconds.value)}`;
+});
 </script>
 
 <style scoped>
@@ -228,6 +291,15 @@ const barBlocks = computed<BarBlock[]>(() => {
   align-items: center;
   user-select: none;
   cursor: pointer;
+}
+
+.usage-time {
+  margin-left: 6px;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--el-text-color-secondary, #909399);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* ========== 环形图 ========== */

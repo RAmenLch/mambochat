@@ -204,6 +204,7 @@ export default {
       'When enabled, AI can ask the user questions to gather necessary information.',
     agent: 'Agent',
     agentInfoPreview: 'Agent Config Preview (Read-only)',
+    modelConfigGlobalTip: 'Model config changes will apply to all chats using this Agent. Continue?',
     bindAgent: 'Bound Agent',
     agentMode: 'Agent Mode',
     chatMode: 'Chat Mode',

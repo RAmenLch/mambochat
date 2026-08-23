@@ -232,6 +232,41 @@
           </template>
         </div>
 
+        <div class="preview-section" v-if="goalLoopPreview">
+          <div class="section-title"><el-icon><Aim /></el-icon> {{ $t('agent.goalLoop.title') }}</div>
+          <div class="info-grid">
+            <div class="info-item">
+              <span class="info-label">{{ $t('agent.goalLoop.mode') }}:</span>
+              <span class="info-value">{{ goalLoopModeLabel }}</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">{{ $t('agent.goalLoop.maxRounds') }}:</span>
+              <span class="info-value">{{ goalLoopPreview.max_rounds }}</span>
+            </div>
+            <div class="info-item" v-if="goalLoopPreview.mode === 'llm' && goalLoopPreview.blocked_threshold != null">
+              <span class="info-label">{{ $t('agent.goalLoop.blockedThreshold') }}:</span>
+              <span class="info-value">{{ goalLoopPreview.blocked_threshold }}</span>
+            </div>
+          </div>
+          <template v-if="goalLoopPreview.mode === 'preset'">
+            <div class="info-item goal-objective-item" v-if="goalLoopPreview.objective">
+              <span class="info-label">{{ $t('agent.goalLoop.objective') }}:</span>
+              <span class="info-value goal-objective">{{ goalLoopPreview.objective }}</span>
+            </div>
+            <div class="ext-item" v-if="goalLoopPreview.conditions && goalLoopPreview.conditions.length > 0" style="margin-top: 12px;">
+              <div class="ext-label">{{ $t('agent.goalLoop.conditions') }}:</div>
+              <div class="ext-tags">
+                <el-tag v-for="(cond, idx) in goalLoopPreview.conditions" :key="idx" size="small" type="primary" effect="light">
+                  {{ cond.tool }} × {{ cond.times }}{{ t('agent.goalLoop.conditionTimesSuffix') }}
+                  <span v-if="cond.args && Object.keys(cond.args).length > 0" class="goal-condition-args">
+                    ({{ Object.entries(cond.args).map(([k, v]) => `${k}=${v}`).join(', ') }})
+                  </span>
+                </el-tag>
+              </div>
+            </div>
+          </template>
+        </div>
+
         <div class="preview-section" v-if="selectedAgent.AgentType === 'Mambo' && securityReviewPreview">
           <div class="section-title"><el-icon><WarningFilled /></el-icon> {{ $t('agent.securityReview') }}</div>
           <div class="info-grid">
@@ -280,14 +315,14 @@
 import { reactive, watch, computed, ref, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { ElMessage } from 'element-plus';
-import { User, Cpu, Document, MagicStick, Connection, Monitor, Setting, WarningFilled, Close } from '@element-plus/icons-vue';
+import { User, Cpu, Document, MagicStick, Connection, Monitor, Setting, WarningFilled, Close, Aim } from '@element-plus/icons-vue';
 
 import { useAgentStore } from '@/stores/agentStore';
 import { useProviderStore } from '@/stores/providerStore';
 import { useMcpStore } from '@/stores/mcpStore';
 import { useBackendStore } from '@/stores/backendStore';
 import { getResourceDetails } from '@/api/resourceService';
-import type { Chat, ChatUpdate, Resource } from '@/api/types';
+import type { Chat, ChatUpdate, Resource, GoalLoopConfig } from '@/api/types';
 import MountedResourceTags from '@/components/common/MountedResourceTags.vue';
 
 const props = defineProps<{
@@ -396,6 +431,18 @@ const securityReviewPreview = computed(() => {
     system_prompt: sr.system_prompt ?? null,
     review_tools: sr.review_tools ?? null,
   };
+});
+
+const goalLoopPreview = computed<GoalLoopConfig | null>(() => {
+  if (!selectedAgent.value || selectedAgent.value.AgentType !== 'Mambo') return null;
+  const params = (selectedAgent.value as any).agentParameters;
+  return params?.goal_loop ?? null;
+});
+
+const goalLoopModeLabel = computed(() => {
+  if (goalLoopPreview.value?.mode === 'llm') return t('agent.goalLoop.modeLlm');
+  if (goalLoopPreview.value?.mode === 'preset') return t('agent.goalLoop.modePreset');
+  return String(goalLoopPreview.value?.mode || '');
 });
 
 const mamboTriggerLabel = computed(() => {
@@ -751,6 +798,20 @@ const handleSaveSettings = () => {
   opacity: 0.5;
   border-style: dashed;
   cursor: default;
+}
+
+.goal-objective-item {
+  grid-column: 1 / -1;
+  margin-top: 12px;
+}
+.goal-objective {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.goal-condition-args {
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  margin-left: 4px;
 }
 
 @media (max-width: 380px) {

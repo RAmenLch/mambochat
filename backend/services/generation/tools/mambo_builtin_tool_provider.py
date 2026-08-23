@@ -68,10 +68,12 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
     def get_system_prompt_injection(self) -> Optional[str]:
         return None
 
+    # GoalLoopMiddleware 在 LLM 模式下注册的三个工具（均可带 tool_prefix，如 "xxx_get_goal"），
+    # 需像 write_plans 等中间件工具一样落库为 MCP_TOOL，保证 DB 与 state 对齐。
+    _GOAL_LOOP_TOOLS = frozenset({"get_goal", "create_goal", "update_goal"})
+
     def matches_tool_name(self, tool_name: str) -> bool:
-        # get_goal 由 GoalLoopMiddleware 注入（可带 tool_prefix，如 "xxx_get_goal"），
-        # 需像 write_plans 等中间件工具一样落库为 MCP_TOOL，保证 DB 与 state 对齐。
-        if tool_name == "get_goal" or tool_name.endswith("get_goal"):
+        if tool_name in self._GOAL_LOOP_TOOLS or tool_name.endswith(tuple(self._GOAL_LOOP_TOOLS)):
             return True
         return tool_name in self.BUILTIN_TOOLS or tool_name in self._extra_tool_names
 

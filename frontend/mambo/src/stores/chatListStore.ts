@@ -18,6 +18,7 @@ import { subscribeToGlobalNotifications } from '@/services/notificationService';
 import type { Chat, ChatCreate, ChatUpdate, MoveRequest, GlobalNotification, ChatArchiveRequest } from '@/api/types';
 import { useChatSessionStore } from './chatSessionStore';
 import { useTreeStoreActions } from '@/composables/useTreeStoreActions';
+import { isDefaultChatName } from '@/utils/chatName';
 
 /**
  * 管理会话列表（包括文件夹和聊天）的全局状态。
@@ -213,6 +214,14 @@ export const useChatListStore = defineStore('chatList', () => {
           pendingTitleChatIds.forEach(id => {
             tasksToCheck.push(`title-gen-${id}`);
           });
+
+          // [增强] 自动标题生成完成后，若 SSE 通知在断线期间丢失，且会话已不在
+          // refreshingTitleChatIds（页面停留列表页场景），重连时对仍为默认标题的
+          // 会话做一次对账，避免列表长期显示默认名。_reconcileChatName 仅在
+          // 名字确实变化时写回，幂等安全。
+          chatList.value
+            .filter(c => c.itemType === 'chat' && isDefaultChatName(c.name))
+            .forEach(c => _reconcileChatName(c.id));
 
           const pendingZipMessages = sessionStore.currentChatMessages.filter(msg =>
             msg.sub_messages.some(sm => sm.type === 'ZipHistory' && sm.status === 'generating')

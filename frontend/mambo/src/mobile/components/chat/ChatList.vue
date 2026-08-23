@@ -200,6 +200,7 @@ import { useChatSessionStore, LAST_ACTIVE_CHAT_KEY } from '@/stores/chatSessionS
 import { useAgentStore } from '@/stores/agentStore' // [新增] 引入 LAST_ACTIVE_CHAT_KEY
 import { buildChatTree } from '@/utils/treeHelper'
 import type { ChatSortMode } from '@/utils/treeHelper'
+import { isDefaultChatName, DEFAULT_CHAT_TITLE_KEY } from '@/utils/chatName'
 import type { BaseTreeItem, ChatNode, MoveRequest } from '@/api/types'
 import { ElMessageBox, ElMessage } from 'element-plus'
 
@@ -242,12 +243,32 @@ function toggleSortMode() {
   localStorage.setItem(SORT_MODE_KEY, chatSortMode.value);
 }
 
+// buildChatTree 已深拷贝数据，此处仅替换显示层副本的 name，不污染 store 真实数据
+const decorateDefaultNames = (nodes: any[]): void => {
+  nodes.forEach(node => {
+    if (node.itemType === 'chat' && isDefaultChatName(node.name)) {
+      node.name = t('chat.sidebar.initChatName')
+    }
+    if (node.children?.length) {
+      decorateDefaultNames(node.children)
+    }
+  })
+}
+
 const treeData = computed(
-  () => buildChatTree(chatList.value, loadedFolderIds.value, chatSortMode.value) as unknown as BaseTreeItem[],
+  () => {
+    const tree = buildChatTree(chatList.value, loadedFolderIds.value, chatSortMode.value) as unknown as BaseTreeItem[]
+    decorateDefaultNames(tree)
+    return tree
+  },
 )
 
 const folderTreeData = computed(
-  () => buildChatTree(chatList.value, loadedFolderIds.value) as ChatNode[],
+  () => {
+    const tree = buildChatTree(chatList.value, loadedFolderIds.value) as ChatNode[]
+    decorateDefaultNames(tree)
+    return tree
+  },
 )
 
 const expandedFolderIds = ref<Set<string>>(new Set())
@@ -384,7 +405,7 @@ const handleNewChat = async (parentId: string | null) => {
     parentId ||
     (selectedContextItem.value?.itemType === 'folder' ? selectedContextItem.value.id : null)
   const newItem = await chatListStore.createNewItem({
-    name: t('chat.sidebar.initChatName'),
+    name: DEFAULT_CHAT_TITLE_KEY,
     itemType: 'chat',
     parentId: finalParentId,
   })
@@ -414,7 +435,7 @@ const handleNewFolder = (parentId: string | null) => {
 const handleNewAgent = async () => {
   const firstAgent = agentStore.allAgents[0]
   const newChat = await chatListStore.createNewItem({
-    name: t('chat.sidebar.initChatName'),
+    name: DEFAULT_CHAT_TITLE_KEY,
     itemType: 'chat',
     chatMode: 'agent',
     agentId: firstAgent?.id ?? null,

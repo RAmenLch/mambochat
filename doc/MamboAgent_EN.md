@@ -25,6 +25,7 @@ Mambo Agent offers the following exclusive capabilities (all can be enabled on d
 - **Version control**: the AI automatically keeps a version every time it writes / modifies / deletes files — rollback at any time
 - **MCP direct tool threshold**: default 15; when the tool count is below the threshold, tools are exposed directly to the AI; above the threshold, it switches to on-demand query mode automatically
 - **AI safety review**: specify a review model (leave empty to reuse the main model) and review scope; the AI pre-reviews tool calls first, and only dangerous operations require your confirmation; custom review prompts are supported
+- **Task Loop**: lets the Agent automatically execute over multiple rounds toward a goal until it is met, all completion conditions are satisfied, or the round limit is reached; supports both "let AI plan it" and "follow my rules" modes (see Section 10 for details)
 
 ## 3. Importing/Exporting Agents
 
@@ -202,3 +203,41 @@ Enable "AI Safety Review" under "Exclusive Configuration" in the Mambo Agent edi
 
 - Add high-risk tools such as deletion and command execution to the "review scope"; read-only tools can be excluded to reduce interruptions
 - Custom review prompts can add your specific security requirements (e.g., forbid access to a directory, forbid certain command classes)
+
+## 10. Task Loop (Goal Loop)
+
+Task Loop lets the Agent **automatically execute over multiple rounds** toward a goal until the goal is met, all completion conditions are satisfied, or the round limit is reached — ideal for long-horizon tasks (batch processing, continuous monitoring, multi-step pipelines). Enable "Task Loop" under "Exclusive Configuration" in the Mambo Agent editor.
+
+![Task_Loop_config](img_en/Task_Loop_config.png)
+
+### Two Loop Modes
+
+| Mode | Description | Use Cases |
+|---|---|---|
+| **Let AI plan it (llm)** | The AI breaks down the goal itself and keeps executing until done, blocked, or the round limit is reached | Long-horizon tasks with a clear goal but unknown steps |
+| **Follow my rules (preset)** | Forces the AI to work toward the configured objective every round; the loop ends once all completion conditions are satisfied | Tasks with a fixed procedure / acceptance criteria |
+
+### Let AI Plan It (llm)
+
+- **Max Rounds**: stops automatically after this many rounds to prevent infinite execution (default: 32)
+- **Blocked Threshold**: minimum rounds the AI must work through before it is allowed to declare itself "blocked" and stop (default: 3)
+
+### Follow My Rules (preset)
+
+- **Per-round Objective**: injected into the AI every round, e.g., "Call the security-check tool first every round, then continue"
+- **Completion Conditions**: all conditions must be satisfied for the loop to end; the round limit also force-stops it
+    - **Tool**: select the tool to count (MCP tools use the `server-name__tool-name` format, e.g., `filesystem__read_file`; you can also type one directly)
+    - **Called at least N time(s)**: the minimum number of calls within the current round
+    - **Argument Match** (optional): specify argument names and values; a call counts only when every specified argument is equal
+
+### Round Display in Chat
+
+During a task loop, the chat interface shows a divider per round ("Round X / Y"), making it easy to follow the Agent's objective and progress in each round.
+
+![Task_Loop_rounds](img_en/Task_Loop_rounds.png)
+
+### Tips
+
+- Use llm mode for exploratory tasks; use preset mode for tasks with clear acceptance criteria (e.g., "check security → execute → verify" every round)
+- Set a sensible round limit based on task complexity to avoid burning tokens on infinite execution
+- Combine with AI safety review and version control for safer long-horizon execution

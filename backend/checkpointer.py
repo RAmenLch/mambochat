@@ -70,3 +70,22 @@ async def adelete_thread(thread_id: str):
     if _checkpointer_instance:
         await _checkpointer_instance.adelete_thread(thread_id)
 
+
+async def aget_root_checkpoint_id(thread_id: str) -> Optional[str]:
+    """查询指定 thread 的根 checkpoint_id(parent_checkpoint_id IS NULL)。
+
+    根 checkpoint 是该 thread 最早的状态(首条用户消息处理完、任何 assistant
+    工作开始之前),goal 等中间件通道必为初始值。首条消息重新生成时以它为
+    分支点进行时间旅行,语义等于完全重新开始。
+    """
+    saver = get_checkpointer()
+    async with saver.lock:
+        async with saver.conn.execute(
+            "SELECT checkpoint_id FROM checkpoints "
+            "WHERE thread_id = ? AND checkpoint_ns = '' "
+            "AND parent_checkpoint_id IS NULL LIMIT 1",
+            (thread_id,),
+        ) as cur:
+            row = await cur.fetchone()
+    return row[0] if row else None
+

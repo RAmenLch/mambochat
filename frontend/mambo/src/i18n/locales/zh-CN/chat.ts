@@ -201,6 +201,7 @@ export default {
     enableAskUserTip: '开启后，AI 可在需要时向用户提问以获取必要信息。',
     agent: 'Agent',
     agentInfoPreview: 'Agent 配置预览 (只读)',
+    modelConfigGlobalTip: '模型配置修改将应用到所有使用该 Agent 的会话，是否继续？',
     bindAgent: '绑定的 Agent',
     agentMode: 'Agent 模式',
     chatMode: '会话模式',

@@ -69,7 +69,7 @@
             <div class="result-header">
               <div class="result-title">
                 <el-icon><ChatDotRound /></el-icon>
-                <span class="chat-name">{{ item.chat_name }}</span>
+                <span class="chat-name">{{ displayChatName(item.chat_name) }}</span>
               </div>
               <el-tag :type="getMatchTypeTagType(item.match_type)" size="small">
                 {{ getMatchTypeText(item.match_type) }}
@@ -117,8 +117,14 @@ import { ElMessage } from 'element-plus';
 import { Search, Loading, DocumentDelete, ChatDotRound, FolderOpened, ArrowRight, Monitor } from '@element-plus/icons-vue';
 import { searchChats } from '@/api/chatService';
 import type { SearchResultItem } from '@/api/types';
+import { isDefaultChatName } from '@/utils/chatName';
 
 const { t, locale } = useI18n();
+
+// 默认标题占位 Key 渲染为 i18n 文本
+function displayChatName(name: string): string {
+  return isDefaultChatName(name) ? t('chat.sidebar.initChatName') : name;
+}
 
 interface Props {
   visible: boolean;
