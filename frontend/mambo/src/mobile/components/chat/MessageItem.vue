@@ -120,7 +120,7 @@
                 :max-context-tokens="maxContextTokens"
                 :start-time="message.createdAt"
                 :end-time="usageSubMessage.createdAt"
-                :is-generating="message.status === 'generating'"
+                :is-generating="false"
               />
               <button class="action-btn" @click="handleEditSpecific(subMessageId)">
                 <el-icon :size="16"><Edit /></el-icon>
