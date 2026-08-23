@@ -488,13 +488,21 @@ const displayMcpList = computed(() => {
   });
 });
 
-const displayBackendList = computed(() => {
-  const bIds = selectedAgent.value?.backendIds || [];
-  return bIds.map(id => {
-    const b = backendStore.backendList.find(x => x.id === id);
-    return b ? { id, name: b.name } : { id, name: t('common.status.unknownBackend') };
-  });
-});
+const displayBackendList = ref<Array<{ id: string; name: string }>>([]);
+
+// [修改] 异步按 ID 兜底解析：缓存未命中时回源拉取，避免新导入的 Backend 显示"未知 Backend"
+watch(
+  () => (selectedAgent.value?.backendIds ? [...selectedAgent.value.backendIds] : []),
+  async (bIds) => {
+    const resolved: Array<{ id: string; name: string }> = [];
+    for (const id of bIds) {
+      const b = backendStore.backendList.find(x => x.id === id) || await backendStore.ensureBackend(id);
+      resolved.push(b ? { id, name: b.name } : { id, name: t('common.status.unknownBackend') });
+    }
+    displayBackendList.value = resolved;
+  },
+  { immediate: true }
+);
 
 const displaySubAgents = computed(() => {
   const subIds = selectedAgent.value?.subAgents || [];

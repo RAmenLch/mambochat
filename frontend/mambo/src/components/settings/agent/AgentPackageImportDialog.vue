@@ -162,6 +162,9 @@ import { Folder, Document } from '@element-plus/icons-vue';
 
 import { useAgentStore } from '@/stores/agentStore';
 import { useResourceStore } from '@/stores/resourceStore';
+import { useBackendStore } from '@/stores/backendStore';
+import { useProviderStore } from '@/stores/providerStore';
+import { useMcpStore } from '@/stores/mcpStore';
 import { importAgent, importAgentPreview, cleanupImportSession } from '@/api/agentPackageService';
 import type { AgentPackageImportReport, AgentPackagePreview } from '@/api/types/agentPackageTypes';
 import type { Agent } from '@/api/types';
@@ -178,6 +181,9 @@ const emit = defineEmits<{
 const { t } = useI18n();
 const agentStore = useAgentStore();
 const resourceStore = useResourceStore();
+const backendStore = useBackendStore();
+const providerStore = useProviderStore();
+const mcpStore = useMcpStore();
 
 const activeStep = ref(1);
 const selectedFile = ref<File | null>(null);
@@ -235,7 +241,15 @@ async function handleImport() {
     report.value = await importAgent(selectedFile.value, targetFolderId.value);
     activeStep.value = 3;
     if (report.value.success) {
-      await Promise.all([agentStore.initializeList(), resourceStore.initializeList()]);
+      // 导入会创建 backend / provider / mcp / resource 等实体，
+      // 需要一并刷新各 store 缓存，避免展示"未知 Backend"/UUID
+      await Promise.all([
+        agentStore.initializeList(),
+        resourceStore.initializeList(),
+        backendStore.fetchBackends(),
+        providerStore.fetchProviders(),
+        mcpStore.fetchAvailableServices(),
+      ]);
       emit('imported', report.value.main_agent_id);
     }
   } catch {

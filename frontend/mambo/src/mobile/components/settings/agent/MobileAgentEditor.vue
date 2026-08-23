@@ -915,7 +915,19 @@ const form = reactive({
 });
 
 const availableBackends = computed(() => backendList.value.filter(b => !form.backendIds.includes(b.id)));
-const mountedBackendList = computed(() => form.backendIds.map(id => backendList.value.find(b => b.id === id) || { id, name: 'Unknown Backend', backendType: 'unknown' }));
+const mountedBackendList = ref<Array<{ id: string; name: string; backendType: string }>>([]);
+
+// [修改] 异步按 ID 兜底解析：缓存未命中时回源拉取，避免新导入的 Backend 显示"未知 Backend"
+watch(() => [...form.backendIds], async (ids) => {
+  const resolved: Array<{ id: string; name: string; backendType: string }> = [];
+  for (const id of ids) {
+    const cached = backendList.value.find(b => b.id === id) || await backendStore.ensureBackend(id);
+    resolved.push(cached
+      ? { id: cached.id, name: cached.name, backendType: cached.backendType }
+      : { id, name: 'Unknown Backend', backendType: 'unknown' });
+  }
+  mountedBackendList.value = resolved;
+}, { immediate: true });
 
 function handleAddBackend(backendId: string) {
   if (!form.backendIds.includes(backendId)) form.backendIds.push(backendId);

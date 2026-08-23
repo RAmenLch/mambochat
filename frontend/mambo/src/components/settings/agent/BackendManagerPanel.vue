@@ -45,7 +45,7 @@
             <div class="api-info">
               <span class="api-label">{{ $t('backend.resource') }}</span>
               <el-tooltip :content="$t('backend.resourceIdTooltip', { id: row.configData.resource_id })" placement="top">
-                <span class="api-id resource-path">{{ resolveResourcePath(row.configData.resource_id) || row.configData.resource_id }}</span>
+                <span class="api-id resource-path">{{ resolvedResourcePaths.get(row.configData.resource_id) || row.configData.resource_id }}</span>
               </el-tooltip>
             </div>
           </template>
@@ -628,7 +628,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue';
+import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { storeToRefs } from 'pinia';
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
@@ -637,6 +637,7 @@ import { useBackendStore } from '@/stores/backendStore';
 import { useResourceStore } from '@/stores/resourceStore';
 import { copyToClipboard } from '@/utils/clipboard';
 import { getClientStatus, listDirectory } from '@/api/backendService';
+import { getResourceDetails } from '@/api/resourceService';
 import type { BackendConfig, BackendCreate, BackendType, SshConfigData, ApiConfigData, ResourceConfigData, LocalConfigData, SshTestRequest, SshLsEntry, UnifiedLsRequest } from '@/api/types/backendTypes';
 import { isSshConfig, defaultToolsConfig } from '@/api/types/backendTypes';
 
@@ -1011,6 +1012,45 @@ function resolveResourcePath(resourceId: string): string {
   }
   return names.length > 0 ? '/' + names.join('/') : '';
 }
+
+// [新增] 路径解析缓存：资源树未加载到对应节点时，按 ID 向 API 回源拼路径，
+// 避免依赖"必须先去资源页面展开过"才能显示路径
+const resolvedResourcePaths = ref(new Map<string, string>());
+const resolvingResourcePaths = ref(new Set<string>());
+
+async function resolveResourcePathAsync(resourceId: string): Promise<void> {
+  if (!resourceId) return;
+  if (resolvedResourcePaths.value.has(resourceId)) return;
+  if (resolvingResourcePaths.value.has(resourceId)) return;
+  resolvingResourcePaths.value.add(resourceId);
+  try {
+    let path = resolveResourcePath(resourceId);
+    if (!path) {
+      const names: string[] = [];
+      const seen = new Set<string>();
+      let currentId = resourceId;
+      while (currentId && !seen.has(currentId)) {
+        seen.add(currentId);
+        const detail = await getResourceDetails(currentId).catch(() => null);
+        if (!detail) break;
+        names.unshift(detail.name);
+        if (!detail.parentId || detail.parentId === 'root') break;
+        currentId = detail.parentId;
+      }
+      path = names.length > 0 ? '/' + names.join('/') : '';
+    }
+    resolvedResourcePaths.value.set(resourceId, path);
+  } finally {
+    resolvingResourcePaths.value.delete(resourceId);
+  }
+}
+
+// backend 列表就绪/变化时，预解析 resource 类型 backend 的资源路径
+watch(backendList, (list) => {
+  list
+    .filter(b => b.backendType === 'resource' && b.configData?.resource_id)
+    .forEach(b => resolveResourcePathAsync(b.configData.resource_id));
+}, { immediate: true });
 
 function collectFolders(nodes: any[]): { id: string; name: string; path: string }[] {
   const folders: { id: string; name: string; path: string }[] = [];
