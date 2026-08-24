@@ -182,7 +182,21 @@
               v-if="!isGenerating && mcpToolContent?.result && !mcpToolContent.is_error && subMessage.type === 'McpTool'"
               class="mcp-tool-result"
             >
-              {{ mcpToolContent.result }}
+              <template v-if="mcpToolContent.media?.length">
+                <div
+                  v-for="m in mcpToolContent.media"
+                  :key="m.file_id"
+                  class="mcp-tool-media"
+                >
+                  <img v-if="m.file_type === 'image'" :src="mcpMediaUrl(m)" alt="" class="mcp-tool-media-img" />
+                  <audio v-else-if="m.file_type === 'audio'" :src="mcpMediaUrl(m)" controls preload="metadata" class="mcp-tool-media-audio"></audio>
+                  <video v-else-if="m.file_type === 'video'" :src="mcpMediaUrl(m)" controls preload="metadata" class="mcp-tool-media-video"></video>
+                  <a v-else-if="m.file_type === 'file'" :href="mcpMediaUrl(m)" target="_blank" rel="noopener" class="mcp-tool-media-file">
+                    {{ m.filename || m.file_type }}
+                  </a>
+                </div>
+              </template>
+              <template v-else>{{ mcpToolContent.result }}</template>
           </div>
         </div>
 
@@ -222,11 +236,12 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { SubMessage, Message, McpToolContent, ReviewToolContent, FileResponse } from '@/api/types'
+import type { SubMessage, Message, McpToolContent, ReviewToolContent, MultimodalMedia, FileResponse } from '@/api/types'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { usePendingFileStore } from '@/stores/pendingFileStore'
 import { getFileContent } from '@/api/fileService'
+import { resolveFileUrl } from '@/services/electronUrl'
 import { unpackMcpToolCall } from '@/utils/mcpToolUnpack'
 import { ElMessage } from 'element-plus'
 import {
@@ -320,6 +335,12 @@ const mcpToolContent = computed((): McpToolContent | null => {
   }
   return null
 })
+
+/** 多模态媒体展示 url（后端已在 media.url 填充下载路径） */
+function mcpMediaUrl(m: MultimodalMedia | null | undefined): string {
+  if (!m?.url) return ''
+  return resolveFileUrl(m.url) || ''
+}
 
 const isReviewDecided = computed(() => {
   if (props.subMessage.type !== 'ReviewTool') return false
@@ -903,6 +924,26 @@ onBeforeUnmount(() => {
   font-size: 12px;
   max-height: 120px;
   overflow-y: auto;
+}
+.mcp-tool-media {
+  margin-top: 6px;
+}
+.mcp-tool-media-img {
+  display: block;
+  max-width: 100%;
+  max-height: 260px;
+  border-radius: 8px;
+}
+.mcp-tool-media-audio,
+.mcp-tool-media-video {
+  display: block;
+  width: 100%;
+  max-width: 400px;
+  margin-top: 4px;
+}
+.mcp-tool-media-file {
+  color: var(--el-color-primary);
+  text-decoration: underline;
 }
 
 .text-warning {

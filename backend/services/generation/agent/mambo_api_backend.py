@@ -33,6 +33,7 @@ from mambo_agents.backends.protocol import (
     GrepMatch,
     GrepResult,
     LsResult,
+    MultimodalDescriber,
     ReadResult,
     UploadFileResult,
     VirtualPath,
@@ -72,10 +73,12 @@ class MamboAPIBackend(BackendProtocol):
         execute_timeout: int = 180,
         max_read_chars: int = 100_000,
         max_grep_matches: int = 1000,
+        multimodal_describer: MultimodalDescriber | None = None,
     ) -> None:
         super().__init__(
             max_read_chars=max_read_chars,
             max_grep_matches=max_grep_matches,
+            multimodal_describer=multimodal_describer,
         )
         self.backend_id = backend_id
         self.backend_name = backend_name or backend_id

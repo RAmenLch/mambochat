@@ -259,6 +259,16 @@ class AgentConfig(BaseModel):
         default=None,
         description="安全审核模型的已解析配置（由 Initializer 填充，供 Builder 使用）"
     )
+    multimodal_describer_models: Optional[Dict[str, ModelConfig]] = Field(
+        default=None,
+        description="多模态描述模型映射 {modality: ModelConfig}，modality ∈ image/audio/video/file。"
+                    "由 Initializer 解析（仅含能力声明匹配的槽位），Builder 消费以创建 MultimodalDescriber。"
+    )
+    main_model_input_modalities: List[str] = Field(
+        default_factory=list,
+        description="主模型原生支持的多模态输入类型（来自 AIModel.meta_config.input_modalities）。"
+                    "空表示视为纯文本模型。"
+    )
     enable_version_control: bool = Field(
         default=False,
         description="是否启用版本控制中间件（文件变更历史自动备份，仅 Mambo Agent 有效）"

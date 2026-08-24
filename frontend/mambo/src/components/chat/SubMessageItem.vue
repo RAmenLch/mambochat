@@ -277,7 +277,44 @@
             v-if="!isGenerating && mcpContent.result && !mcpContent.is_error"
             class="mcp-tool-result"
           >
-            {{ mcpContent.result }}
+            <template v-if="mcpContent.media?.length">
+              <div
+                v-for="m in mcpContent.media"
+                :key="m.file_id"
+                class="mcp-tool-media"
+              >
+                <img
+                  v-if="m.file_type === 'image'"
+                  :src="mediaUrl(m)"
+                  alt=""
+                  class="mcp-tool-media-img"
+                />
+                <audio
+                  v-else-if="m.file_type === 'audio'"
+                  :src="mediaUrl(m)"
+                  controls
+                  preload="metadata"
+                  class="mcp-tool-media-audio"
+                ></audio>
+                <video
+                  v-else-if="m.file_type === 'video'"
+                  :src="mediaUrl(m)"
+                  controls
+                  preload="metadata"
+                  class="mcp-tool-media-video"
+                ></video>
+                <a
+                  v-else-if="m.file_type === 'file'"
+                  :href="mediaUrl(m)"
+                  target="_blank"
+                  rel="noopener"
+                  class="mcp-tool-media-file"
+                >
+                  {{ m.filename || m.file_type }}
+                </a>
+              </div>
+            </template>
+            <template v-else>{{ mcpContent.result }}</template>
           </div>
           <div v-if="!isGenerating && mcpContent.is_error" class="mcp-tool-error-message">
             {{ t('chat.message.mcp.executionError') }}
@@ -341,11 +378,12 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { SubMessage, Message, SubMessageConfig, McpToolContent, FileResponse } from '@/api/types'
+import type { SubMessage, Message, SubMessageConfig, McpToolContent, MultimodalMedia, FileResponse } from '@/api/types'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { usePendingFileStore } from '@/stores/pendingFileStore'
 import { getFileContent } from '@/api/fileService'
+import { resolveFileUrl } from '@/services/electronUrl'
 import { unpackMcpToolCall } from '@/utils/mcpToolUnpack'
 import { ElMessage } from 'element-plus'
 import {
@@ -496,6 +534,12 @@ const mcpSummaryText = computed((): string => {
   }
   return t('chat.message.mcp.searched', { tool: toolName, query })
 })
+
+/** 多模态媒体展示 url（后端已在 media.url 填充下载路径） */
+function mediaUrl(m: MultimodalMedia | null | undefined): string {
+  if (!m?.url) return ''
+  return resolveFileUrl(m.url) || ''
+}
 
 const fileIcon = computed(() => {
   if (props.subMessage.type === 'File' && props.subMessage.file_info) {
@@ -1032,6 +1076,26 @@ function scrollToTop() {
 .mcp-tool-error-message {
   color: var(--el-color-error);
   font-size: 14px;
+}
+.mcp-tool-media {
+  margin-top: 6px;
+}
+.mcp-tool-media-img {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  border-radius: 6px;
+}
+.mcp-tool-media-audio,
+.mcp-tool-media-video {
+  display: block;
+  width: 100%;
+  max-width: 480px;
+  margin-top: 4px;
+}
+.mcp-tool-media-file {
+  color: var(--el-color-primary);
+  text-decoration: underline;
 }
 
 .sub-message-header {

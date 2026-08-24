@@ -303,8 +303,8 @@ async def _hydrate_and_validate_messages(
     }
 
     file_info_map = {}
+    file_service = FileService(db)
     if file_ids_to_hydrate:
-        file_service = FileService(db)
         file_records = await file_service.batch_get_files(list(file_ids_to_hydrate))
         for record in file_records:
             file_info_map[record.id] = file_service.convert_to_schema(record)
@@ -317,6 +317,9 @@ async def _hydrate_and_validate_messages(
         for sub_message_res in message_res.sub_messages:
             if sub_message_res.type == 'File' and sub_message_res.content in file_info_map:
                 sub_message_res.file_info = file_info_map[sub_message_res.content]
+            elif sub_message_res.type == 'McpTool' and sub_message_res.content:
+                # 为多模态 tool 结果填充 media 下载 url，供前端展示媒体
+                sub_message_res.content = await file_service.hydrate_media_content(sub_message_res.content)
 
         message_responses.append(message_res)
 

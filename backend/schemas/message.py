@@ -9,6 +9,22 @@ from backend.schemas.file import File as FileSchema  # 导入文件模型以供�
 
 
 # --- SubMessage Schemas ---
+class MultimodalMedia(BaseModel):
+    """
+    多模态工具结果（如 read 读取图片/音频/视频/PDF）的媒体引用。
+
+    ``file_type`` 必须与 ``mambo_agents.backends.middleware.backend_tools`` 构造的
+    ``content_blocks`` 块 type 一致（``image`` / ``audio`` / ``video`` / ``file``），
+    用于上下文重建时还原出与 ckpt 完全对齐的多模态内容。
+    """
+    file_type: str
+    mime_type: str
+    file_id: str
+    filename: Optional[str] = None
+    size_bytes: Optional[int] = None
+    url: Optional[str] = None  # 由消息组装层填充，供前端展示媒体
+
+
 class McpToolContent(BaseModel):
     """
     专门用于处理 SubMessageType.MCP_TOOL 的 content 字段结构。
@@ -23,11 +39,18 @@ class McpToolContent(BaseModel):
     is_error: bool = False
     # 所属模型调用轮次（流式 run_id 去掉 "lc_run--" 前缀），用于跨轮次重建时精确还原工具调用归属
     run_uuid: Optional[str] = None
+    # 多模态结果引用（read 等内置工具读取图片/音视频/文档时填充）
+    media: Optional[List[MultimodalMedia]] = None
 
     @property
     def is_executed(self) -> bool:
         """判断工具是否已执行完成"""
         return self.result is not None
+
+    @property
+    def is_multimodal(self) -> bool:
+        """判断该工具结果是否为多模态内容（来自 file_type 引用）。"""
+        return bool(self.media)
 
     def get_argument_dict(self) -> Dict[str, Any]:
         """安全地获取参数字典"""

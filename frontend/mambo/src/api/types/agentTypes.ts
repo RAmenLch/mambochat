@@ -18,6 +18,15 @@ export interface SecurityReviewConfig {
   review_tools?: string[] | null
 }
 
+/** 多模态描述配置：为每个模态独立绑定一个支持该模态的模型 */
+export interface MultimodalDescriberConfig {
+  enabled: boolean
+  image_model_id?: string | null
+  audio_model_id?: string | null
+  video_model_id?: string | null
+  file_model_id?: string | null
+}
+
 export interface VersionControlConfig {
   enabled: boolean
   auto_snapshot: boolean
@@ -48,6 +57,7 @@ export interface MamboAgentParameters {
   memory_resource_ids: string[]
   summarization_config?: SummarizationConfig | null
   security_review?: SecurityReviewConfig | null
+  multimodal_describer?: MultimodalDescriberConfig | null
   version_control?: VersionControlConfig | null
   goal_loop?: GoalLoopConfig | null
   mcp_direct_tool_threshold: number
@@ -96,6 +106,7 @@ export interface AgentCreate {
   // 转运字段（Router 层合并进 agentParameters）
   memoryResourceIds?: string[] | null;
   securityReviewConfig?: SecurityReviewConfig | null;
+  multimodalDescriberConfig?: MultimodalDescriberConfig | null;
 }
 
 export type AgentUpdate = Partial<AgentCreate>

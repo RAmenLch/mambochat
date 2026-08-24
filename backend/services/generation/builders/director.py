@@ -345,12 +345,14 @@ class LLMInputDirector:
         agent_config, extended_prompt = await initializer.initialize()
 
         agent_config.llm_config = llm_config
+        agent_config.main_model_input_modalities = self._resolve_input_modalities(model)
 
         # 向没有自己模型的子 agent 继承父 agent 的 llm_config
         if agent_config.sub_configs:
             for sub in agent_config.sub_configs:
                 if sub.llm_config is None:
                     sub.llm_config = llm_config
+                    sub.main_model_input_modalities = agent_config.main_model_input_modalities
 
         self._providers = initializer.get_providers()
 
@@ -495,6 +497,17 @@ class LLMInputDirector:
             return False
         input_modalities = meta.get('input_modalities') or []
         return 'file' in input_modalities or 'document' in input_modalities
+
+    def _resolve_input_modalities(self, model: AIModel) -> List[str]:
+        """返回模型声明的多模态输入类型（block type 维度）。
+
+        能力未声明时视为纯文本模型，返回空列表。``document`` 归一化为 ``file``。
+        """
+        meta = self._parse_meta_config(model)
+        if not meta:
+            return []
+        raw = meta.get('input_modalities') or []
+        return sorted({('file' if m == 'document' else m) for m in raw})
 
     def _extract_resume_payload(self, target_msg: Optional[MessageSchema]) -> Optional[Dict[str, Any]]:
         if not (self._cutoff_message_id and self._enable_tools and target_msg):

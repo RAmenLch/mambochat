@@ -201,6 +201,15 @@ export interface McpService {
   is_active: boolean
 }
 
+export interface MultimodalMedia {
+  /** 媒体类型：image / audio / video / file（与后端 backend_tools content_blocks 块 type 一致） */
+  file_type: string
+  mime_type: string
+  file_id: string
+  filename?: string | null
+  size_bytes?: number | null
+}
+
 export interface McpToolContent {
   tool_call_id: string
   name: string
@@ -208,6 +217,8 @@ export interface McpToolContent {
   result: string | null
   is_error: boolean,
   input_schema?: Record<string, SchemaProperty>
+  /** 多模态工具结果（例如 read 读取图片/音频/视频/文档），用于气泡与弹窗渲染媒体 */
+  media?: MultimodalMedia[] | null
 }
 
 export interface ReviewToolContent {

@@ -192,6 +192,10 @@ async def update_agent_settings(
         base = agent_update.agentParameters or schemas.MamboAgentParametersSchema()
         agent_update.agentParameters = base.model_copy(update={"security_review": agent_update.securityReviewConfig})
 
+    if agent_update.multimodalDescriberConfig is not None:
+        base = agent_update.agentParameters or schemas.MamboAgentParametersSchema()
+        agent_update.agentParameters = base.model_copy(update={"multimodal_describer": agent_update.multimodalDescriberConfig})
+
     try:
         updated_agent = await agent_crud.update_agent(db, agent_id=agent_id, agent_update=agent_update)
         if updated_agent is None:

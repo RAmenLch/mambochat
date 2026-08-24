@@ -146,7 +146,8 @@ class MCPToolProvider(BaseToolProvider):
             self,
             tool_call_id: str,
             result_text: str,
-            is_error: bool
+            is_error: bool,
+            media: Optional[List[Dict[str, Any]]] = None
     ) -> AsyncGenerator[BaseInstruction, None]:
         # 检查该 tool_call_id 是否属于本 Provider 管理
         sub_id = self._tool_sub_msg_map.get(tool_call_id)

@@ -883,6 +883,50 @@
           </template>
         </el-card>
 
+        <!-- 多模态描述 -->
+        <el-card class="config-card" shadow="never">
+          <template #header>
+            <div class="card-title">
+              <el-icon class="label-icon"><MagicStick /></el-icon>
+              <span>{{ $t('agent.multimodalDescriber') }}</span>
+            </div>
+          </template>
+
+          <el-row :gutter="32" class="settings-row">
+            <el-col :span="24">
+              <el-form-item>
+                <template #label>
+                  <span>{{ $t('agent.multimodalDescriberEnable') }}</span>
+                  <el-tooltip effect="dark" :content="$t('agent.multimodalDescriberEnableDesc')" placement="top">
+                    <el-icon class="label-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-switch v-model="form.mambo_multimodal_enabled" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+
+          <template v-if="form.mambo_multimodal_enabled">
+            <el-row :gutter="32" class="settings-row" v-for="slot in multimodalSlots" :key="slot.modality">
+              <el-col :span="12">
+                <el-form-item :label="$t(slot.labelKey)">
+                  <el-select
+                    v-model="form[slot.formKey]"
+                    :placeholder="$t('agent.multimodalDescriberModelPlaceholder')"
+                    style="width: 100%"
+                    clearable
+                    :no-data-text="$t('agent.multimodalDescriberEmpty')"
+                  >
+                    <el-option-group v-for="group in multimodalModelOptions(slot.modality)" :key="group.label" :label="group.label">
+                      <el-option v-for="item in group.options" :key="item.id" :label="item.name" :value="item.id" />
+                    </el-option-group>
+                  </el-select>
+                </el-form-item>
+              </el-col>
+            </el-row>
+          </template>
+        </el-card>
+
 
       </el-form>
     </el-scrollbar>
@@ -1149,6 +1193,13 @@ const form = reactive({
   mambo_security_review_system_prompt: '',
   mambo_security_review_tools: [] as string[],
 
+  // Mambo 多模态描述（4 个模态槽位）
+  mambo_multimodal_enabled: false,
+  mambo_multimodal_image_model_id: null as string | null,
+  mambo_multimodal_audio_model_id: null as string | null,
+  mambo_multimodal_video_model_id: null as string | null,
+  mambo_multimodal_file_model_id: null as string | null,
+
   // Mambo 版本控制
   mambo_version_control_enabled: false,
 
@@ -1225,6 +1276,29 @@ const filteredGroupedModels = computed(() => {
     .filter(group => group.options.length > 0);
 });
 
+// 多模态描述：4 个模态槽位定义
+const multimodalSlots = [
+  { modality: 'image', formKey: 'mambo_multimodal_image_model_id', labelKey: 'agent.multimodalDescriberImageLabel' },
+  { modality: 'audio', formKey: 'mambo_multimodal_audio_model_id', labelKey: 'agent.multimodalDescriberAudioLabel' },
+  { modality: 'video', formKey: 'mambo_multimodal_video_model_id', labelKey: 'agent.multimodalDescriberVideoLabel' },
+  { modality: 'file', formKey: 'mambo_multimodal_file_model_id', labelKey: 'agent.multimodalDescriberFileLabel' },
+] as const;
+
+// 按模态能力过滤模型（能力未声明的模型视为纯文本，不展示）
+function multimodalModelOptions(modality: string) {
+  const accepts = (mods: string[] | null | undefined): boolean => {
+    if (!mods) return false;
+    if (modality === 'file') return mods.includes('file') || mods.includes('document');
+    return mods.includes(modality);
+  };
+  return filteredGroupedModels.value
+    .map(group => ({
+      label: group.label,
+      options: group.options.filter(m => accepts(m.meta_config?.input_modalities)),
+    }))
+    .filter(group => group.options.length > 0);
+}
+
 const dynamicParameters = computed(() => {
   if (!form.aiModelId) return [];
   const currentModel = allModels.value.find(m => m.id === form.aiModelId);
@@ -1277,6 +1351,7 @@ watch(agentData, async (newVal) => {
       memory_resource_ids: [],
       summarization_config: null,
       security_review: null,
+      multimodal_describer: null,
       mcp_direct_tool_threshold: 15,
     };
     form.mambo_general_purpose = mamboParams.include_general_purpose ?? false;
@@ -1311,6 +1386,22 @@ watch(agentData, async (newVal) => {
       form.mambo_security_review_model_id = null;
       form.mambo_security_review_system_prompt = '';
       form.mambo_security_review_tools = [];
+    }
+
+    // 多模态描述配置还原
+    const mmCfg = mamboParams.multimodal_describer;
+    if (mmCfg && mmCfg.enabled) {
+      form.mambo_multimodal_enabled = true;
+      form.mambo_multimodal_image_model_id = mmCfg.image_model_id || null;
+      form.mambo_multimodal_audio_model_id = mmCfg.audio_model_id || null;
+      form.mambo_multimodal_video_model_id = mmCfg.video_model_id || null;
+      form.mambo_multimodal_file_model_id = mmCfg.file_model_id || null;
+    } else {
+      form.mambo_multimodal_enabled = false;
+      form.mambo_multimodal_image_model_id = null;
+      form.mambo_multimodal_audio_model_id = null;
+      form.mambo_multimodal_video_model_id = null;
+      form.mambo_multimodal_file_model_id = null;
     }
 
     // 版本控制配置还原
@@ -1646,6 +1737,15 @@ function buildMamboAgentParameters(): MamboAgentParameters | null {
           review_tools: form.mambo_security_review_tools.length > 0 ? [...form.mambo_security_review_tools] : null,
         }
       : null,
+    multimodal_describer: form.mambo_multimodal_enabled
+      ? {
+          enabled: true,
+          image_model_id: form.mambo_multimodal_image_model_id || null,
+          audio_model_id: form.mambo_multimodal_audio_model_id || null,
+          video_model_id: form.mambo_multimodal_video_model_id || null,
+          file_model_id: form.mambo_multimodal_file_model_id || null,
+        }
+      : null,
     version_control: form.mambo_version_control_enabled ? {
       enabled: true,
       auto_snapshot: true,
@@ -1734,6 +1834,16 @@ async function handleSave() {
             model_id: form.mambo_security_review_model_id || null,
             system_prompt: form.mambo_security_review_system_prompt || null,
             review_tools: form.mambo_security_review_tools.length > 0 ? [...form.mambo_security_review_tools] : null,
+          }
+        : null,
+
+      multimodalDescriberConfig: form.AgentType === 'Mambo' && form.mambo_multimodal_enabled
+        ? {
+            enabled: true,
+            image_model_id: form.mambo_multimodal_image_model_id || null,
+            audio_model_id: form.mambo_multimodal_audio_model_id || null,
+            video_model_id: form.mambo_multimodal_video_model_id || null,
+            file_model_id: form.mambo_multimodal_file_model_id || null,
           }
         : null,
 

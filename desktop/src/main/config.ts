@@ -74,6 +74,12 @@ const DEFAULT_CONFIG: AppConfig = {
   },
   remote: {
     url: 'http://127.0.0.1:8000',
+    apiClient: {
+      backendId: '',
+      apiKey: '',
+      rootDir: '',
+      autoStart: false,
+    },
   },
 }
 

@@ -485,6 +485,14 @@ async def subscribe_to_stream(
             if sm_data.get('type') == 'File' and sm_data.get('content') in file_map:
                 sm_data['file_info'] = file_map[sm_data['content']]
 
+    # 为多模态 MCP_TOOL 结果填充 media 下载 url，供前端展示媒体
+    if any(sm.get('type') == 'McpTool' and sm.get('content') for sm in sub_messages_data):
+        from backend.services.file_service import FileService
+        file_service = FileService(db)
+        for sm_data in sub_messages_data:
+            if sm_data.get('type') == 'McpTool' and sm_data.get('content'):
+                sm_data['content'] = await file_service.hydrate_media_content(sm_data['content'])
+
     initial_event_data = {
         "type": "replace",
         "sub_messages": sub_messages_data,

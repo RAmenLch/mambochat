@@ -15,10 +15,12 @@ class ChatDeepSeek(ChatOpenAI):
     自定义 DeepSeek Chat 模型（支持 V4）。
     功能说明：
     1. 思考模式(Reasoning)下工具调用(Tool Call)时，回传 reasoning_content。
-    2. 强制将 ToolMessage 和 AIMessage 的 content 转换为字符串，避免 API 报错 "expected a string"。
-    3. 支持 DeepSeek V4 的 thinking 参数和 reasoning_effort 参数。
+    2. 支持 DeepSeek V4 的 thinking 参数和 reasoning_effort 参数。
        - thinking: {"type": "enabled"/"disabled"} 控制思考模式开关
        - reasoning_effort: "high"/"max" 控制思考强度
+    3. 不对 tool/assistant 消息的 content 做扁平化：DeepSeek 现版本已接受 list content
+       （含纯文本块与 image_url 图片块，实测通过），扁平化会剥离 tool 消息中的
+       image_url 块，导致 vision 模型（deepseek-v4-flash-vision-exp）无法识图。
     """
 
     # 默认配置
@@ -88,22 +90,7 @@ class ChatDeepSeek(ChatOpenAI):
         # 4. 遍历 payload 中的消息进行修复
         for i, payload_msg in enumerate(payload["messages"]):
 
-            # --- 修复 1: 扁平化 content (解决 invalid type: sequence, expected a string) ---
-            # DeepSeek 对于 tool 和 assistant 消息，content 必须是字符串，不能是 list[dict]
-            if payload_msg.get("role") in ["tool", "assistant"]:
-                content = payload_msg.get("content")
-                if isinstance(content, list):
-                    # 如果是列表，提取所有 type='text' 的内容拼接
-                    text_content = ""
-                    for block in content:
-                        if isinstance(block, dict):
-                            if block.get("type") == "text":
-                                text_content += block.get("text", "")
-                        elif isinstance(block, str):
-                            text_content += block
-                    payload_msg["content"] = text_content
-
-            # --- 修复 2: 回传 reasoning_content (解决 400 错误) ---
+            # --- 修复: 回传 reasoning_content (解决 400 错误) ---
             # 找到对应的 LangChain 原始消息
             if i < len(input_):
                 lc_msg = input_[i]

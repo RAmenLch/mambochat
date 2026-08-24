@@ -92,6 +92,16 @@
             <!-- Result (McpTool only) -->
             <div v-if="activeMsg?.type === 'McpTool'" class="tool-section">
               <div class="section-label">结果</div>
+              <template v-if="mcpTool?.media?.length">
+                <div v-for="m in mcpTool.media" :key="m.file_id" class="mcp-tool-media">
+                  <img v-if="m.file_type === 'image'" :src="mcpMediaUrl(m)" alt="" class="mcp-tool-media-img" />
+                  <audio v-else-if="m.file_type === 'audio'" :src="mcpMediaUrl(m)" controls preload="metadata" class="mcp-tool-media-audio"></audio>
+                  <video v-else-if="m.file_type === 'video'" :src="mcpMediaUrl(m)" controls preload="metadata" class="mcp-tool-media-video"></video>
+                  <a v-else-if="m.file_type === 'file'" :href="mcpMediaUrl(m)" target="_blank" rel="noopener" class="mcp-tool-media-file">
+                    {{ m.filename || m.file_type }}
+                  </a>
+                </div>
+              </template>
               <div class="result-box" :class="{ 'is-error': mcpTool?.is_error }">
                 {{ mcpTool?.result || '无结果' }}
               </div>
@@ -147,11 +157,12 @@
 
 <script setup lang="ts">
 import { computed, ref, watch, reactive } from 'vue'
-import type { Message, SubMessage, McpToolContent, ReviewToolContent, SecurityReviewContent, ToolDecision } from '@/api/types'
+import type { Message, SubMessage, McpToolContent, ReviewToolContent, SecurityReviewContent, ToolDecision, MultimodalMedia } from '@/api/types'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { useMcpStore } from '@/stores/mcpStore'
 import { unpackMcpToolCall } from '@/utils/mcpToolUnpack'
+import { resolveFileUrl } from '@/services/electronUrl'
 import { ElMessage } from 'element-plus'
 import { Warning, Loading, CircleClose, CircleCheck, Close, Edit, Select } from '@element-plus/icons-vue'
 
@@ -216,6 +227,12 @@ const mcpTool = computed((): McpToolContent | null => {
   if (activeMsg.value?.type !== 'McpTool') return null
   return currentTool.value as McpToolContent
 })
+
+/** 多模态媒体展示 url（后端已在 media.url 填充下载路径） */
+function mcpMediaUrl(m: MultimodalMedia | null | undefined): string {
+  if (!m?.url) return ''
+  return resolveFileUrl(m.url) || ''
+}
 
 const currentArgs = computed(() => {
   if (!currentTool.value) return null
@@ -532,6 +549,11 @@ async function handleEditAndApprove() {
   background: var(--el-color-danger-light-9); color: var(--el-color-danger);
   border: 1px solid var(--el-color-danger-light-5);
 }
+.mcp-tool-media { margin-top: 8px; }
+.mcp-tool-media-img { display: block; max-width: 100%; max-height: 260px; border-radius: 8px; }
+.mcp-tool-media-audio,
+.mcp-tool-media-video { display: block; width: 100%; max-width: 400px; margin-top: 4px; }
+.mcp-tool-media-file { color: var(--el-color-primary); text-decoration: underline; }
 
 .security-section { border-radius: 8px; padding: 10px 12px; background: var(--el-color-success-light-9); }
 

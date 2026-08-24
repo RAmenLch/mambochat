@@ -57,7 +57,8 @@ class BaseToolProvider(ABC):
         self,
         tool_call_id: str,
         result_text: str,
-        is_error: bool
+        is_error: bool,
+        media: Optional[List[Dict[str, Any]]] = None
     ) -> AsyncGenerator[BaseInstruction, None]:
         """
         当工具执行完毕获得结果时，生成对应的 UI 更新指令。

@@ -1,6 +1,7 @@
 # backend/services/generation/tools/mambo_builtin_tool_provider.py
 
 import json
+import mimetypes
 from typing import List, Optional, Dict, Any, AsyncGenerator
 
 from langchain_core.tools import BaseTool
@@ -9,11 +10,12 @@ from backend.services.generation.tools.base_tool_provider import BaseToolProvide
 from backend.services.generation.core.instructions import (
     BaseInstruction,
     CreateSubMessage,
+    SaveAndPersistFile,
     UpdateSubMessageContent,
     UpdateSubMessageStatus,
 )
 from backend.schemas import enums as schemas_enums
-from backend.schemas.message import McpToolContent, SubMessageConfig
+from backend.schemas.message import McpToolContent, MultimodalMedia, SubMessageConfig
 from backend.models.base_model import generate_uuid
 
 
@@ -126,6 +128,7 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
         tool_call_id: str,
         result_text: str,
         is_error: bool,
+        media: Optional[List[Dict[str, Any]]] = None,
     ) -> AsyncGenerator[BaseInstruction, None]:
 
         sub_id = self._tool_sub_msg_map.get(tool_call_id)
@@ -167,9 +170,38 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
             except (json.JSONDecodeError, KeyError, TypeError):
                 pass
 
+        # --- 多模态工具结果：保存媒体并写入 media 引用 ---
+        if cached_content and media:
+            media_refs: List[MultimodalMedia] = []
+            for idx, blk in enumerate(media):
+                if not isinstance(blk, dict) or not blk.get("base64"):
+                    continue
+                file_id = generate_uuid()
+                file_type = str(blk.get("type") or "file")
+                mime_type = str(blk.get("mime_type") or "application/octet-stream")
+                filename = self._make_media_filename(cached_content, file_type, mime_type, idx)
+                base64_data = str(blk["base64"])
+                yield SaveAndPersistFile(
+                    file_id=file_id,
+                    filename=filename,
+                    base64_data=base64_data,
+                    mime_type=mime_type,
+                )
+                media_refs.append(MultimodalMedia(
+                    file_type=file_type,
+                    mime_type=mime_type,
+                    file_id=file_id,
+                    filename=filename,
+                    size_bytes=int(len(base64_data) * 3 / 4),
+                ))
+            if media_refs:
+                cached_content.media = media_refs
+                cached_content.result = self._build_media_summary(cached_content, media_refs)
+
         # --- 通用 MCP_TOOL 结果更新 ---
         if sub_id and cached_content:
-            cached_content.result = result_text
+            if not cached_content.is_multimodal:
+                cached_content.result = result_text
             cached_content.is_error = is_error
 
             yield UpdateSubMessageContent(
@@ -187,3 +219,69 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
         self._tool_sub_msg_map[tool_call_id] = sub_message_id
         if isinstance(tool_content, McpToolContent):
             self._tool_info_cache[tool_call_id] = tool_content
+
+    _MEDIA_EXTENSIONS = {
+        "image": {".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".heif"},
+        "audio": {".wav", ".mp3", ".aiff", ".aac", ".ogg", ".flac"},
+        "video": {".mp4", ".mpeg", ".mov", ".avi", ".flv", ".webm", ".wmv"},
+        "file": {".pdf", ".ppt", ".pptx"},
+    }
+
+    @staticmethod
+    def _make_media_filename(
+        cached_content: McpToolContent, file_type: str, mime_type: str, idx: int
+    ) -> str:
+        """从 read 工具参数 file_path 派生一个可读文件名，并保证扩展名合法。"""
+        base = ""
+        try:
+            args_dict = cached_content.get_argument_dict()
+        except Exception:
+            args_dict = {}
+        if isinstance(args_dict, dict):
+            raw_path = str(
+                (args_dict.get("file_path") if isinstance(args_dict.get("file_path"), str) else "")
+                or (args_dict.get("path") if isinstance(args_dict.get("path"), str) else "")
+            )
+            if raw_path:
+                base = raw_path.replace("\\", "/").rstrip("/").split("/")[-1]
+        if not base:
+            ext_guess = mimetypes.guess_extension(mime_type) or ""
+            base = f"tool_{file_type}{ext_guess}"
+
+        allowed = MamboAgentBuiltinToolProvider._MEDIA_EXTENSIONS.get(file_type, set())
+        lower = base.lower()
+        if allowed and not any(lower.endswith(ext) for ext in allowed):
+            default_ext = ".png" if file_type == "image" else (
+                ".mp3" if file_type == "audio" else (
+                    ".mp4" if file_type == "video" else ".bin"
+                )
+            )
+            base = f"{base}{default_ext}"
+
+        if idx > 0:
+            if "." in base:
+                stem, ext = base.rsplit(".", 1)
+                base = f"{stem}_{idx}.{ext}"
+            else:
+                base = f"{base}_{idx}"
+        return base
+
+    @staticmethod
+    def _build_media_summary(cached_content: McpToolContent, refs: List[MultimodalMedia]) -> str:
+        """为多模态工具结果生成人类可读摘要（写入 result 供气泡/弹窗展示）。"""
+        labels = {"image": "图片", "audio": "音频", "video": "视频", "file": "文档"}
+        parts = []
+        for r in refs:
+            label = labels.get(r.file_type, "文件")
+            fn = r.filename or ""
+            size = r.size_bytes or 0
+            size_str = ""
+            if size:
+                if size < 1024:
+                    size_str = f"{size} B"
+                elif size < 1024 * 1024:
+                    size_str = f"{size / 1024:.1f} KB"
+                else:
+                    size_str = f"{size / (1024 * 1024):.1f} MB"
+            parts.append(f"{label}{' ' + fn if fn else ''}{' (' + size_str + ')' if size_str else ''}")
+        return "读取到" + "、".join(parts)

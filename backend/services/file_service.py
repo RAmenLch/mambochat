@@ -345,6 +345,28 @@ class FileService:
     def get_url(self, storage_path: str) -> str:
         return f"/api/files/download/{storage_path}"
 
+    async def hydrate_media_content(self, content: str) -> str:
+        """为 MCP_TOOL content 中的多模态 media 填充下载 url，供前端展示。
+
+        仅当 content 是合法的 McpToolContent 且含 media 时才改写；其余原样返回。
+        只在消息组装层修改内存对象，不落库，因此不影响上下文重建 / 缓存对齐。
+        """
+        from backend.schemas.message import McpToolContent
+
+        try:
+            obj = McpToolContent.from_json_string(content)
+        except (ValueError, TypeError):
+            return content
+        if not obj.is_multimodal:
+            return content
+        for m in obj.media or []:
+            if not m or not m.file_id:
+                continue
+            record = await self.get_file(m.file_id)
+            if record and record.storage_path:
+                m.url = self.get_url(record.storage_path)
+        return obj.to_json_string()
+
     async def update_management_type(self, file_id: str, new_type: str, merge: bool = True) -> Optional[File]:
         return await file_crud.update_file_management_type(self.db, file_id, new_type, merge)
 

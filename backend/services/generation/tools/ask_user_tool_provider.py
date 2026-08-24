@@ -258,7 +258,8 @@ class AskUserToolProvider(BaseToolProvider):
             self,
             tool_call_id: str,
             result_text: str,
-            is_error: bool
+            is_error: bool,
+            media: Optional[List[Dict[str, Any]]] = None
     ) -> AsyncGenerator[BaseInstruction, None]:
         """
         更新 McpTool 子消息的执行结果和状态。
