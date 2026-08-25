@@ -25,6 +25,8 @@ export interface MultimodalDescriberConfig {
   audio_model_id?: string | null
   video_model_id?: string | null
   file_model_id?: string | null
+  /** 启用多模态描述后 read 工具的额外超时（秒），总超时 = 60 + read_timeout */
+  read_timeout?: number | null
 }
 
 export interface VersionControlConfig {

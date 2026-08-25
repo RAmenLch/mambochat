@@ -924,6 +924,27 @@
                 </el-form-item>
               </el-col>
             </el-row>
+
+            <el-row :gutter="32" class="settings-row">
+              <el-col :span="12">
+                <el-form-item>
+                  <template #label>
+                    <span>{{ $t('agent.multimodalDescriberReadTimeout') }}</span>
+                    <el-tooltip effect="dark" :content="$t('agent.multimodalDescriberReadTimeoutDesc')" placement="top">
+                      <el-icon class="label-icon"><QuestionFilled /></el-icon>
+                    </el-tooltip>
+                  </template>
+                  <el-input-number
+                    v-model="form.mambo_multimodal_read_timeout"
+                    :min="0"
+                    :max="600"
+                    :step="10"
+                    :controls="false"
+                    style="width: 100%"
+                  />
+                </el-form-item>
+              </el-col>
+            </el-row>
           </template>
         </el-card>
 
@@ -1199,6 +1220,7 @@ const form = reactive({
   mambo_multimodal_audio_model_id: null as string | null,
   mambo_multimodal_video_model_id: null as string | null,
   mambo_multimodal_file_model_id: null as string | null,
+  mambo_multimodal_read_timeout: 60,
 
   // Mambo 版本控制
   mambo_version_control_enabled: false,
@@ -1396,12 +1418,14 @@ watch(agentData, async (newVal) => {
       form.mambo_multimodal_audio_model_id = mmCfg.audio_model_id || null;
       form.mambo_multimodal_video_model_id = mmCfg.video_model_id || null;
       form.mambo_multimodal_file_model_id = mmCfg.file_model_id || null;
+      form.mambo_multimodal_read_timeout = mmCfg.read_timeout ?? 60;
     } else {
       form.mambo_multimodal_enabled = false;
       form.mambo_multimodal_image_model_id = null;
       form.mambo_multimodal_audio_model_id = null;
       form.mambo_multimodal_video_model_id = null;
       form.mambo_multimodal_file_model_id = null;
+      form.mambo_multimodal_read_timeout = 60;
     }
 
     // 版本控制配置还原
@@ -1744,6 +1768,7 @@ function buildMamboAgentParameters(): MamboAgentParameters | null {
           audio_model_id: form.mambo_multimodal_audio_model_id || null,
           video_model_id: form.mambo_multimodal_video_model_id || null,
           file_model_id: form.mambo_multimodal_file_model_id || null,
+          read_timeout: form.mambo_multimodal_read_timeout ?? 60,
         }
       : null,
     version_control: form.mambo_version_control_enabled ? {
@@ -1844,6 +1869,7 @@ async function handleSave() {
             audio_model_id: form.mambo_multimodal_audio_model_id || null,
             video_model_id: form.mambo_multimodal_video_model_id || null,
             file_model_id: form.mambo_multimodal_file_model_id || null,
+            read_timeout: form.mambo_multimodal_read_timeout ?? 60,
           }
         : null,
 

@@ -97,7 +97,7 @@ async function bootstrap(): Promise<void> {
 
   // Set up persistent data directories (junctions) before anything else.
   // This ensures DB/uploads survive uninstalls. No-op in dev mode.
-  setupDataDirectories()
+  setupDataDirectories(config.local.dataDir)
 
   // NOTE: Connection: close for Docker port forwarding is handled inside
   // the gateway's proxyRequest() — NOT here. Modifying request headers

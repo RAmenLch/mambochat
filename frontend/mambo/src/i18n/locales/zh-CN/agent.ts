@@ -115,6 +115,8 @@ export default {
   multimodalDescriberFileLabel: '文档描述模型',
   multimodalDescriberModelPlaceholder: '选择支持该模态的模型',
   multimodalDescriberEmpty: '当前没有声明支持该模态的模型',
+  multimodalDescriberReadTimeout: 'Read 额外超时（秒）',
+  multimodalDescriberReadTimeoutDesc: '启用多模态描述后，read 工具超时 = 60s + 该值（默认 60s，总计 120s）。对 Agent 的所有 read 生效。',
   subAgentDeleted: '[已删除] {id}',
   duplicateSubAgentName: '子 Agent 名称重复："{name}"。挂载的子 Agent 不允许同名。',
   duplicateMountResource: '挂载资源名称重复："{name}"。同名资源不能同时挂载。',

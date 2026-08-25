@@ -6,13 +6,15 @@
  * This page does NOT depend on the Vue app or the backend being available.
  */
 
-import { BrowserWindow, ipcMain } from 'electron'
-import { join } from 'path'
+import { BrowserWindow, ipcMain, dialog } from 'electron'
+import { join, resolve, sep } from 'path'
+import { existsSync, readdirSync } from 'fs'
 import http from 'http'
 import os from 'os'
 import { AppConfigManager } from './config'
 import type { AppConfig } from './config'
 import { getDesktopLocale, translate, translations } from './i18n'
+import { getDefaultDataDirectory, migrateDataDirectory } from './paths'
 import log from './log'
 
 let settingsWindow: BrowserWindow | null = null
@@ -159,6 +161,20 @@ function getSettingsHtml(): string {
   }
   .port-range input { width: 100px; }
   .port-range .sep { color: #909399; font-weight: 500; }
+  .data-dir-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .data-dir-row input { flex: 1; }
+  .data-dir-row .btn { flex-shrink: 0; }
+  .data-dir-current {
+    font-size: 12px;
+    color: #909399;
+    margin-top: 6px;
+    word-break: break-all;
+    line-height: 1.5;
+  }
   .status-bar {
     display: flex;
     align-items: center;
@@ -477,6 +493,17 @@ function getSettingsHtml(): string {
         <div class="form-hint">${translate(locale, 'local.pythonPath.hint')}</div>
       </div>
 
+      <!-- Data Directory -->
+      <div class="form-group">
+        <label class="form-label">${translate(locale, 'local.dataDir')}</label>
+        <div class="data-dir-row">
+          <input type="text" id="dataDir" placeholder="${translate(locale, 'local.dataDir.placeholder')}">
+          <button class="btn btn-default" onclick="selectDataDir()">${translate(locale, 'local.dataDir.browse')}</button>
+        </div>
+        <div class="form-hint">${translate(locale, 'local.dataDir.hint')}</div>
+        <div class="data-dir-current" id="dataDirCurrent"></div>
+      </div>
+
       <!-- External Access -->
       <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #ebeef5;">
         <label class="switch-label">
@@ -626,12 +653,21 @@ function gatherConfig() {
       portEnd: parseInt(document.getElementById('portEnd').value, 10) || 8010,
       allowExternalAccess: document.getElementById('allowExternal').checked,
       gatewayPort: parseInt(document.getElementById('gatewayPort').value, 10) || 5173,
+      dataDir: document.getElementById('dataDir').value.trim(),
     },
     remote: {
       url: document.getElementById('remoteUrl').value.replace(/\\/+$/, ''),
       apiClients: collectApiClientsFromDom(),
     },
   };
+}
+
+// --- Data Directory ---
+async function selectDataDir() {
+  const path = await api.data.selectDir();
+  if (path) {
+    document.getElementById('dataDir').value = path;
+  }
 }
 
 function applyConfigToUI(config) {
@@ -644,6 +680,7 @@ function applyConfigToUI(config) {
   document.getElementById('pythonPath').value = config.local.pythonPath;
   document.getElementById('allowExternal').checked = !!config.local.allowExternalAccess;
   document.getElementById('gatewayPort').value = config.local.gatewayPort || 5173;
+  document.getElementById('dataDir').value = config.local.dataDir || '';
   document.getElementById('remoteUrl').value = config.remote.url;
   renderApiClientCards();
   updateNetworkVisibility();
@@ -657,6 +694,46 @@ async function saveConfig() {
   try {
     const prevConfig = currentConfig;
     const prevMode = prevConfig.mode;
+
+    // If the data directory changed, handle migration BEFORE persisting the
+    // new config so the main process still resolves the old directory.
+    const dataDirChanged = (config.local.dataDir || '') !== (prevConfig.local.dataDir || '');
+    if (config.mode === 'local' && dataDirChanged) {
+      // Stop the backend first so SQLite files are not locked during migration
+      const statusBefore = await api.backend.status();
+      if (statusBefore.running) {
+        await api.backend.stop();
+      }
+      const newDir = (config.local.dataDir || '').trim();
+      if (newDir) {
+        const action = await api.data.chooseMigration(newDir);
+        if (action === 'cancel') {
+          showToast(t('dataDir.cancelled'), 'info');
+          if (statusBefore.running) await api.backend.start();
+          return;
+        }
+        if (action === 'useTarget') {
+          // Point to the existing dataset in the target without migrating
+          showToast(t('dataDir.usingTarget'), 'info');
+        } else {
+          const deleteOld = action === 'migrateAndDelete';
+          const migrateResult = await api.data.migrate(newDir, deleteOld);
+          if (!migrateResult.success) {
+            showToast(t('dataDir.migrateFailed') + ': ' + (migrateResult.error || 'Unknown'), 'error');
+            if (statusBefore.running) await api.backend.start();
+            return;
+          }
+          if (migrateResult.copied > 0) {
+            showToast(t('dataDir.migrated', {from: migrateResult.from, to: migrateResult.to}), 'success');
+          } else {
+            showToast(t('dataDir.noData'), 'info');
+          }
+        }
+      } else {
+        showToast(t('dataDir.revertedDefault'), 'info');
+      }
+    }
+
     await api.config.update(config);
     currentConfig = config;
 
@@ -668,7 +745,8 @@ async function saveConfig() {
         config.local.host !== prevConfig.local.host ||
         config.local.portStart !== prevConfig.local.portStart ||
         config.local.portEnd !== prevConfig.local.portEnd ||
-        config.local.pythonPath !== prevConfig.local.pythonPath;
+        config.local.pythonPath !== prevConfig.local.pythonPath ||
+        dataDirChanged;
 
       // Restart gateway if external access or gateway port changed
       if (externalChanged || gatewayPortChanged) {
@@ -1185,6 +1263,14 @@ async function init() {
     const path = await api.config.getPath();
     document.getElementById('configPath').textContent = t('config.path') + ': ' + path;
 
+    // Show the currently active data directory
+    try {
+      const dataPath = await api.data.getPath();
+      document.getElementById('dataDirCurrent').textContent = t('dataDir.current') + ': ' + dataPath;
+    } catch (e) {
+      log.error('[Settings] Failed to get data directory:', e);
+    }
+
     // Subscribe to backend status changes
     statusCleanup = api.backend.onStatusChange(status => updateStatusUI(status));
 
@@ -1290,6 +1376,136 @@ export function setupDesktopSettingsIpc(
 
   ipcMain.handle('config:getPath', () => {
     return configManager.getConfigPath()
+  })
+
+  // --- Data directory ---
+
+  // Resolve the currently active data root (custom config or default)
+  const getCurrentDataRoot = (): string => {
+    const cfg = configManager.load()
+    if (cfg.local?.dataDir?.trim()) {
+      return cfg.local.dataDir.trim()
+    }
+    return getDefaultDataDirectory()
+  }
+
+  ipcMain.handle('data:getPath', () => {
+    return getCurrentDataRoot()
+  })
+
+  ipcMain.handle('data:selectDir', async () => {
+    const options: Electron.OpenDialogOptions = {
+      title: translate(getDesktopLocale(), 'dataDir.selectTitle'),
+      buttonLabel: translate(getDesktopLocale(), 'dataDir.selectButton'),
+      properties: ['openDirectory', 'createDirectory'],
+    }
+    const result = settingsWindow && !settingsWindow.isDestroyed()
+      ? await dialog.showOpenDialog(settingsWindow, options)
+      : await dialog.showOpenDialog(options)
+    if (result.canceled || result.filePaths.length === 0) {
+      return null
+    }
+    return result.filePaths[0]
+  })
+
+  // Classify the target directory so the migration dialog can warn about
+  // conflicts instead of silently overwriting existing data.
+  const inspectTargetDir = (from: string, to: string): 'empty' | 'unrelated' | 'existing' | 'parent' => {
+    const fromResolved = resolve(from)
+    const toResolved = resolve(to)
+    if (fromResolved === toResolved) {
+      return 'empty'
+    }
+    // Target already contains MamboChat data (definitive marker)
+    if (existsSync(join(toResolved, 'DB', 'mambo.dat'))) {
+      return 'existing'
+    }
+    // Target is an ancestor of the current data root (messy layout)
+    if (fromResolved.startsWith(toResolved + sep)) {
+      return 'parent'
+    }
+    // Non-empty directory without MamboChat data — harmless, we only create
+    // DB/ + uploads/ subdirectories inside it
+    if (existsSync(toResolved) && readdirSync(toResolved).length > 0) {
+      return 'unrelated'
+    }
+    return 'empty'
+  }
+
+  // Ask the user how to handle existing data when the data directory changes
+  ipcMain.handle('data:chooseMigration', async (_event, to: string) => {
+    const from = getCurrentDataRoot()
+    const locale = getDesktopLocale()
+    const kind = inspectTargetDir(from, to)
+
+    let buttons: string[]
+    let defaultId: number
+    if (kind === 'existing') {
+      buttons = [
+        translate(locale, 'dataDir.useTarget'),
+        translate(locale, 'dataDir.migrateAndDelete'),
+        translate(locale, 'dataDir.migrate'),
+        translate(locale, 'dataDir.cancel'),
+      ]
+      defaultId = 0
+    } else {
+      buttons = [
+        translate(locale, 'dataDir.migrateAndDelete'),
+        translate(locale, 'dataDir.migrate'),
+        translate(locale, 'dataDir.cancel'),
+      ]
+      defaultId = 1
+    }
+    const cancelId = buttons.length - 1
+
+    let detail = `${from}\n  →  ${to}`
+    if (kind === 'unrelated') detail += '\n\n' + translate(locale, 'dataDir.nonEmptyNote')
+    if (kind === 'existing') detail += '\n\n' + translate(locale, 'dataDir.existingNote')
+    if (kind === 'parent') detail += '\n\n' + translate(locale, 'dataDir.parentNote')
+
+    const { response } = settingsWindow && !settingsWindow.isDestroyed()
+      ? await dialog.showMessageBox(settingsWindow, {
+          type: 'question',
+          title: translate(locale, 'dataDir.migrateTitle'),
+          message: translate(locale, 'dataDir.migrateMessage'),
+          detail,
+          buttons,
+          defaultId,
+          cancelId,
+          noLink: true,
+        })
+      : await dialog.showMessageBox({
+          type: 'question',
+          title: translate(locale, 'dataDir.migrateTitle'),
+          message: translate(locale, 'dataDir.migrateMessage'),
+          detail,
+          buttons,
+          defaultId,
+          cancelId,
+          noLink: true,
+        })
+
+    if (kind === 'existing') {
+      if (response === 0) return 'useTarget'
+      if (response === 1) return 'migrateAndDelete'
+      if (response === 2) return 'migrate'
+      return 'cancel'
+    }
+    if (response === 0) return 'migrateAndDelete'
+    if (response === 1) return 'migrate'
+    return 'cancel'
+  })
+
+  // Migrate existing data into the new data directory
+  ipcMain.handle('data:migrate', async (_event, to: string, deleteOld: boolean) => {
+    try {
+      const from = getCurrentDataRoot()
+      const result = await migrateDataDirectory(from, to, deleteOld)
+      return { success: true, ...result }
+    } catch (error) {
+      log.error('[DataDir] Migration failed:', error)
+      return { success: false, error: String(error) }
+    }
   })
 
   ipcMain.handle('get-network-addresses', () => {

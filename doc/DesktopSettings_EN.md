@@ -38,6 +38,39 @@ After selecting **Local Mode**, you can configure the following options:
 - **Host (Address)**: Backend listening address, defaults to `127.0.0.1` (localhost only)
 - **Port Range**: Defaults to `8000 — 8010`. If the starting port is occupied, the system automatically tries the next port
 - **Python Path**: Path to the embedded Python interpreter; usually no need to change this
+- **Data Directory**: Storage location for the databases and uploads. Defaults to `%AppData%\mambochat-desktop\data` (usually on the C: drive). Because the databases can grow quite large, we recommend pointing this to a drive with plenty of free space to avoid filling up the system drive.
+
+**When changing the data directory:**
+
+1. Click **Browse…** or type a path manually (leave empty to restore the default location)
+2. Click **Save & Apply**. The backend stops first, and depending on the **state of the target directory** you are asked how to proceed:
+
+**① Target directory is empty or does not exist (most common)**
+
+| Option | Description |
+|--------|-------------|
+| **Migrate & delete old data** | Copies `DB` and `uploads` completely into the new directory, then removes the old one to free disk space (recommended — but only after a successful copy) |
+| **Migrate only** | Copies data to the new directory; the old directory is kept |
+| **Cancel** | Aborts the change; the data directory stays unchanged |
+
+**② Target directory already contains MamboChat data (`DB/mambo.dat` detected)**
+
+| Option | Description |
+|--------|-------------|
+| **Use existing data in target** | No migration — switch directly to the dataset already present in the target (useful for switching between multiple datasets) |
+| **Migrate & delete old data** | Overwrites the target with the current data, then deletes the old directory |
+| **Migrate only** | Overwrites the target with the current data; the old directory is kept |
+| **Cancel** | Aborts the change |
+
+> ⚠️ Choosing "Migrate" **overwrites** the MamboChat data already present in the target directory. Proceed with caution.
+
+**③ Target directory is non-empty but has no MamboChat data**
+
+Allowed, with a note: only `DB/` and `uploads/` subdirectories will be created inside it; existing unrelated files are left untouched.
+
+3. After migration, the backend restarts automatically using the new directory. Chat history and uploaded files are unaffected.
+
+> **Note**: Migration copies potentially large amounts of data depending on database size — do not close the app during the process. It is recommended to stop the backend first (or let the save flow do it automatically).
 
 **External Access (Optional)**
 

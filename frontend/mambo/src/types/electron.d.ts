@@ -28,6 +28,12 @@ export interface ElectronAPI {
     status: () => Promise<GatewayStatus>
     restart: (host: string, port: number) => Promise<{ success: boolean; port?: number; error?: string }>
   }
+  data: {
+    selectDir: () => Promise<string | null>
+    getPath: () => Promise<string>
+    chooseMigration: (to: string) => Promise<'migrate' | 'migrateAndDelete' | 'useTarget' | 'cancel'>
+    migrate: (to: string, deleteOld: boolean) => Promise<{ success: boolean; from?: string; to?: string; copied?: number; error?: string }>
+  }
   app: {
     getVersion: () => Promise<string>
     getPlatform: () => Promise<string>
@@ -50,6 +56,9 @@ export interface AppConfig {
     host: string
     portStart: number
     portEnd: number
+    allowExternalAccess?: boolean
+    gatewayPort?: number
+    dataDir?: string
   }
   remote: {
     url: string

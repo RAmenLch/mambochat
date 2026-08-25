@@ -115,6 +115,8 @@ export default {
   multimodalDescriberFileLabel: 'Document Describer Model',
   multimodalDescriberModelPlaceholder: 'Select a model supporting this modality',
   multimodalDescriberEmpty: 'No model declares support for this modality',
+  multimodalDescriberReadTimeout: 'Read Extra Timeout (s)',
+  multimodalDescriberReadTimeoutDesc: 'When multimodal description is enabled, the read tool timeout becomes 60s + this value (default 60s → 120s total). Applies to all reads at the agent level.',
   subAgentDeleted: '[Deleted] {id}',
   duplicateSubAgentName: 'Duplicate sub-agent name: "{name}". Sub-agents must have unique names.',
   duplicateMountResource: 'Duplicate mounted resource name: "{name}". Resources with the same name cannot be mounted together.',

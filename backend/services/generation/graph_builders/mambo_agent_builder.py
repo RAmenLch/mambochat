@@ -25,7 +25,7 @@ from mambo_agents import (
     HybridWorkspaceBackend,
     StoreBackend,
 )
-from mambo_agents.backends.protocol import MultimodalDescriber
+from mambo_agents.backends.protocol import MultimodalDescriber, ToolTimeouts
 from mambo_agents.backends.schemas import VirtualPath
 from mambo_agents.backends.local import LocalBackend
 from mambo_agents.middleware.security_review import SecurityReviewConfig
@@ -123,7 +123,7 @@ def _build_multimodal_describer(
 
     # describer 优先：只要配置了槽位模型就装配，不再排除主模型原生支持的模态
     per_type: List[MultimodalDescriber] = [
-        _MODALITY_FACTORIES[m](model)
+        _MODALITY_FACTORIES[m](model,max_chars=100000)
         for m, model in bound_models.items()
         if m in _MODALITY_FACTORIES
     ]
@@ -144,6 +144,7 @@ def _build_mambo_backend(
     store: "AsyncSqliteStore | None" = None,
     thread_id: str | None = None,
     multimodal_describer: MultimodalDescriber | None = None,
+    tool_timeouts: ToolTimeouts | None = None,
 ) -> BackendProtocol | None:
     """构建 Mambo Agent 的完整 Backend 体系。
 
@@ -205,6 +206,7 @@ def _build_mambo_backend(
             max_read_chars=_READ_CHARS,
             max_grep_matches=_GREP_MATCHES,
             multimodal_describer=multimodal_describer,
+            tool_timeouts=tool_timeouts,
         )
 
     # ---- 1. 确定 real_backend：default_backend_id > 列表第一位 ----
@@ -275,6 +277,7 @@ def _build_mambo_backend(
         max_read_chars=_READ_CHARS,
         max_grep_matches=_GREP_MATCHES,
         multimodal_describer=multimodal_describer,
+        tool_timeouts=tool_timeouts,
     )
 
 
@@ -479,8 +482,18 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
                 for modality, cfg in mm_models.items()
             },
         )
+        # read 工具超时：启用多模态描述时总超时 = 60s（默认）+ multimodal_read_timeout。
+        # describer 为 None（未启用 / 主模型全模态无绑定）或 extra<=0 时不调整，保持库默认 60s。
+        tool_timeouts = None
+        if describer is not None:
+            extra = float(getattr(agent_config, "multimodal_read_timeout", None) or 0.0)
+            if extra > 0:
+                tool_timeouts = ToolTimeouts(read=60.0 + extra)
         backend = _build_mambo_backend(
-            agent_config, store=store, multimodal_describer=describer
+            agent_config,
+            store=store,
+            multimodal_describer=describer,
+            tool_timeouts=tool_timeouts,
         )
 
         # --- Tools ---

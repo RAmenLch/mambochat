@@ -47,6 +47,10 @@ class MultimodalDescriberConfigSchema(BaseModel):
     audio_model_id: Optional[str] = Field(None, description="音频描述模型 ID")
     video_model_id: Optional[str] = Field(None, description="视频描述模型 ID")
     file_model_id: Optional[str] = Field(None, description="文档(PDF/PPT等)描述模型 ID")
+    read_timeout: Optional[float] = Field(
+        60.0,
+        description="启用多模态描述后 read 工具的额外超时（秒），总超时 = 60 + read_timeout",
+    )
 
 
 class GoalLoopConditionSchema(BaseModel):

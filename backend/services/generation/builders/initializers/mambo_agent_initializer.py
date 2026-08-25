@@ -433,6 +433,8 @@ class MamboAgentInitializer(AbstractAgentInitializer):
         # 纯文本模型，不参与描述；主模型原生支持的模态在 Builder 中透传。
         multimodal_describer_models: Dict[str, ModelConfig] = {}
         mm = mambo_params.multimodal_describer
+        # read 工具额外超时：仅启用多模态描述时生效（read 总超时 = 60 + read_timeout）
+        multimodal_read_timeout = mm.read_timeout if (mm and mm.enabled) else None
         if mm and mm.enabled:
             mm_slots: Dict[str, Optional[str]] = {
                 "image": mm.image_model_id,
@@ -534,6 +536,7 @@ class MamboAgentInitializer(AbstractAgentInitializer):
             security_review_config=security_review_config,
             security_review_llm_config=security_review_llm_config,
             multimodal_describer_models=multimodal_describer_models or None,
+            multimodal_read_timeout=multimodal_read_timeout,
             enable_version_control=enable_vc,
             version_control_config=vc_config,
             goal_loop_config=goal_loop_config,

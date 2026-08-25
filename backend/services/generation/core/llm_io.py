@@ -264,6 +264,12 @@ class AgentConfig(BaseModel):
         description="多模态描述模型映射 {modality: ModelConfig}，modality ∈ image/audio/video/file。"
                     "由 Initializer 解析（仅含能力声明匹配的槽位），Builder 消费以创建 MultimodalDescriber。"
     )
+    multimodal_read_timeout: Optional[float] = Field(
+        default=None,
+        description="启用多模态描述后 read 工具的额外超时（秒），总超时 = 60 + multimodal_read_timeout。"
+                    "由 Initializer 从 multimodal_describer.read_timeout 解析，Builder 消费以构造 ToolTimeouts。"
+                    "None 表示不调整（保持默认 60s）。"
+    )
     main_model_input_modalities: List[str] = Field(
         default_factory=list,
         description="主模型原生支持的多模态输入类型（来自 AIModel.meta_config.input_modalities）。"

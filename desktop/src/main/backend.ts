@@ -109,7 +109,7 @@ export class BackendProcessManager {
         : ['-m', 'uvicorn', 'backend.main:app', '--host', bindHost, '--port', String(port)]
 
       // Append data-directory arguments (packaged only)
-      const dataDir = getDataDirectory()
+      const dataDir = getDataDirectory(config.local.dataDir)
       if (dataDir) {
         args.push('--data-dir', dataDir)
         args.push('--storage-path', join(dataDir, 'uploads'))

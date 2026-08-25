@@ -29,6 +29,12 @@ export interface LocalModeConfig {
   allowExternalAccess: boolean
   /** Port for the embedded gateway server */
   gatewayPort: number
+  /**
+   * Custom data directory (DB + uploads). Empty string means the default
+   * location under the Electron userData dir (e.g. %AppData%/mambochat-desktop/data).
+   * Lets users place the potentially large databases on another drive.
+   */
+  dataDir: string
 }
 
 export interface ApiClientConfig {
@@ -73,6 +79,7 @@ const DEFAULT_CONFIG: AppConfig = {
     portEnd: 8010,
     allowExternalAccess: false,
     gatewayPort: 5173,
+    dataDir: '',
   },
   remote: {
     url: 'http://127.0.0.1:8000',
@@ -176,6 +183,7 @@ export class AppConfigManager {
         portEnd: partial.local?.portEnd ?? DEFAULT_CONFIG.local.portEnd,
         allowExternalAccess: partial.local?.allowExternalAccess ?? DEFAULT_CONFIG.local.allowExternalAccess,
         gatewayPort: partial.local?.gatewayPort ?? DEFAULT_CONFIG.local.gatewayPort,
+        dataDir: partial.local?.dataDir ?? DEFAULT_CONFIG.local.dataDir,
       },
       remote: {
         url: partial.remote?.url ?? DEFAULT_CONFIG.remote.url,

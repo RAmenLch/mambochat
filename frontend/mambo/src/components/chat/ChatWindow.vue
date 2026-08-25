@@ -20,7 +20,7 @@
 
       <div class="scroll-area-wrapper">
         <el-scrollbar ref="scrollbarRef" class="message-list-scrollbar" v-loading="isChatHistoryLoading" @scroll="handleScroll">
-          <div class="message-list-wrapper" :class="{ 'gal-shifted': galAvatarState.visible }">
+          <div class="message-list-wrapper" :style="galPaddingStyle">
             <MessageItem
               v-for="(message, index) in currentChatMessages"
               :key="message.id"
@@ -46,7 +46,11 @@
 
       <transition name="gal-fade">
         <div v-if="galAvatarState.visible" class="gal-avatar-panel">
-          <div class="gal-avatar-clip">
+          <div
+            class="gal-avatar-clip"
+            :class="{ 'gal-no-frame': galDisplay.transparent }"
+            :style="{ width: `${galDisplay.clipW}px`, height: `${galDisplay.clipH}px` }"
+          >
             <transition name="gal-img">
               <img :key="galAvatarState.imageUrl ?? undefined" :src="galAvatarState.imageUrl!" class="gal-avatar-image" />
             </transition>
@@ -180,6 +184,7 @@ import type { Ref } from 'vue';
 import type { ChatUpdate, SubMessageCreate, AIModel, Resource, Message, SubMessage } from '@/api/types';
 import { uploadFile } from '@/api/fileService';
 import { duplicateChat } from '@/api/chatService';
+import { resolveFileUrl } from '@/services/electronUrl';
 
 import { useChatListStore } from '@/stores/chatListStore';
 import { useChatSessionStore } from '@/stores/chatSessionStore';
@@ -317,7 +322,8 @@ const galAvatarMap = computed(() => {
         sm.file_info?.mime_type?.startsWith('image/')
     )
     if (file) {
-      map.set(msg.id, file.file_info!.url)
+      const url = resolveFileUrl(file.file_info!.url) ?? file.file_info!.url
+      map.set(msg.id, url)
     }
   }
   return map
@@ -328,6 +334,78 @@ const galAvatarState = computed(() => ({
   imageUrl: galAvatarImageUrl.value,
   messageId: null as string | null,
 }))
+
+const GAL_MAX_SIZE = 285
+
+/** 图片检测结果缓存：url → { 原始尺寸, 是否含透明通道 } */
+const galImageMetaCache = new Map<string, { width: number; height: number; transparent: boolean }>()
+
+/** 当前活跃立绘的显示参数（clip 尺寸 + 是否透明） */
+const galDisplay = ref({ clipW: GAL_MAX_SIZE, clipH: GAL_MAX_SIZE, transparent: false })
+
+/** 等比缩放到高 GAL_MAX_SIZE，宽度超出 285 时由 clip 裁两侧 */
+function computeGalSize(w: number, h: number) {
+  if (!w || !h) return { clipW: GAL_MAX_SIZE, clipH: GAL_MAX_SIZE }
+  const scaledW = Math.round((w * GAL_MAX_SIZE) / h)
+  return { clipW: Math.min(scaledW, GAL_MAX_SIZE), clipH: GAL_MAX_SIZE }
+}
+
+/** 加载图片并检测透明通道（降采样扫描 alpha，带缓存；失败时回退为不透明） */
+async function inspectGalImage(url: string) {
+  const cached = galImageMetaCache.get(url)
+  if (cached) return cached
+
+  const src = resolveFileUrl(url) ?? url
+  const img = new Image()
+  img.crossOrigin = 'anonymous'
+  img.src = src
+  try {
+    await img.decode()
+  } catch {
+    return { width: GAL_MAX_SIZE, height: GAL_MAX_SIZE, transparent: false }
+  }
+
+  const w = img.naturalWidth || GAL_MAX_SIZE
+  const h = img.naturalHeight || GAL_MAX_SIZE
+  let transparent = false
+  try {
+    const scale = Math.min(1, 256 / Math.max(w, h))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(w * scale))
+    canvas.height = Math.max(1, Math.round(h * scale))
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })!
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] < 255) { transparent = true; break }
+    }
+  } catch {
+    // canvas 读取失败（非位图 / 跨域）→ 视为不透明，保留外框
+  }
+
+  const meta = { width: w, height: h, transparent }
+  galImageMetaCache.set(url, meta)
+  return meta
+}
+
+// 活跃立绘变化时检测尺寸与透明度，驱动外框与避让
+watch(galAvatarImageUrl, async (url) => {
+  if (!url) {
+    galDisplay.value = { clipW: GAL_MAX_SIZE, clipH: GAL_MAX_SIZE, transparent: false }
+    return
+  }
+  const meta = await inspectGalImage(url)
+  galDisplay.value = { ...computeGalSize(meta.width, meta.height), transparent: meta.transparent }
+}, { immediate: true })
+
+// 消息区左侧避让：跟随立绘实际宽度（含边框宽度）
+const GAL_PANEL_LEFT = 8
+const GAL_PANEL_GAP = 16
+const galPaddingStyle = computed(() => {
+  if (!galAvatarState.value.visible) return {}
+  const extra = galDisplay.value.transparent ? 0 : 4 // 非透明时的 2px×2 边框
+  return { paddingLeft: `${GAL_PANEL_LEFT + galDisplay.value.clipW + extra + GAL_PANEL_GAP}px` }
+})
 
 /** 判断某条消息是否含有 Gal_Avatar（用于隐藏该消息的头像） */
 function hasGalAvatar(msg: Message): boolean {
@@ -918,10 +996,7 @@ watch(currentChatId, (newId) => {
 }
 
 .message-list-scrollbar { width: 100%; height: 100%; }
-.message-list-wrapper { padding: 20px; }
-.message-list-wrapper.gal-shifted {
-  padding-left: 240px;
-}
+.message-list-wrapper { padding: 20px; transition: padding-left 0.2s ease; }
 .input-container-wrapper { flex-shrink: 0; position: relative; display: flex; flex-direction: column; border-top: 1px solid var(--color-border); }
 .resize-handle { position: absolute; top: -3px; left: 0; width: 100%; height: 6px; cursor: ns-resize; z-index: 10; }
 
@@ -993,27 +1068,29 @@ watch(currentChatId, (newId) => {
   height: 0;
 }
 
-/* 210×285 显示窗口：圆角边框，裁剪图片两侧 */
+/* 显示窗口：尺寸由内联样式按长宽比控制，圆角边框，超宽时裁图片两侧 */
 .gal-avatar-clip {
   position: absolute;
   bottom: 0;
   left: 0;
-  width: 210px;
-  height: 285px;
   overflow: hidden;
   border-radius: 10px;
   border: 2px solid var(--el-border-color-light);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
 }
 
-/* 285×285：Chrome 缩放（认可的算法效果），由外层窗口裁到 210 宽 */
+/* 透明背景立绘：不显示外框 */
+.gal-avatar-clip.gal-no-frame {
+  border: none;
+  box-shadow: none;
+}
+
+/* 图片等比铺满窗口：宽度不超时完整显示，超宽时由 clip 裁两侧 */
 .gal-avatar-image {
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 285px;
-  height: 285px;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .gal-fade-enter-active,
@@ -1038,6 +1115,7 @@ watch(currentChatId, (newId) => {
 }
 .gal-img-leave-active {
   position: absolute;
+  inset: 0;
 }
 .gal-img-enter-from,
 .gal-img-leave-to {

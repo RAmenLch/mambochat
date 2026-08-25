@@ -34,6 +34,17 @@ export interface ElectronAPI {
     status: () => Promise<{ running: boolean; port?: number; host?: string; mode?: string }>
     restart: (host: string, port: number) => Promise<{ success: boolean; port?: number; error?: string }>
   }
+  // Data directory (local mode)
+  data: {
+    /** Open a native folder picker; returns the chosen path or null if cancelled */
+    selectDir: () => Promise<string | null>
+    /** Returns the currently active data root */
+    getPath: () => Promise<string>
+    /** Ask how to handle existing data when the data directory changes */
+    chooseMigration: (to: string) => Promise<'migrate' | 'migrateAndDelete' | 'useTarget' | 'cancel'>
+    /** Copy existing data into the new directory (optionally delete the old one) */
+    migrate: (to: string, deleteOld: boolean) => Promise<{ success: boolean; from?: string; to?: string; copied?: number; error?: string }>
+  }
   // App
   app: {
     getVersion: () => Promise<string>
@@ -101,6 +112,13 @@ const electronAPI: ElectronAPI = {
   gateway: {
     status: () => ipcRenderer.invoke('gateway:status'),
     restart: (host, port) => ipcRenderer.invoke('gateway:restart', host, port),
+  },
+
+  data: {
+    selectDir: () => ipcRenderer.invoke('data:selectDir'),
+    getPath: () => ipcRenderer.invoke('data:getPath'),
+    chooseMigration: (to) => ipcRenderer.invoke('data:chooseMigration', to),
+    migrate: (to, deleteOld) => ipcRenderer.invoke('data:migrate', to, deleteOld),
   },
 
   app: {
