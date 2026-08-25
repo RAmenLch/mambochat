@@ -1,6 +1,6 @@
 {
   "name": "mambochat-desktop",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "private": true,
   "description": "MamboChat Desktop Application",
   "main": "dist/main/index.js",
@@ -13,8 +13,8 @@
     "build:frontend": "cd ../frontend/mambo && npm run build",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
-    "dist:win": "node scripts/pack-runtime.js && npm run build && electron-builder --win",
-    "dist:portable": "node scripts/pack-runtime.js && npm run build && electron-builder --win portable",
+    "dist:win": "node scripts/sync-version.js && node scripts/pack-runtime.js && npm run build && electron-builder --win",
+    "dist:portable": "node scripts/sync-version.js && node scripts/pack-runtime.js && npm run build && electron-builder --win portable",
     "pack:runtime": "node scripts/pack-runtime.js"
   },
   "dependencies": {

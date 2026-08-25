@@ -67,7 +67,7 @@
         <h2 class="about-title">
           {{ t('settings.about.title') }} <span class="about-subtitle">| {{ t('settings.about.subtitle') }}</span>
         </h2>
-        <el-tag type="info" size="small" effect="plain" class="version-tag">v1.3.0</el-tag>
+        <el-tag type="info" size="small" effect="plain" class="version-tag">v{{ appVersion }}</el-tag>
 
         <p class="about-desc">
           {{ t('settings.about.desc') }}
@@ -117,6 +117,7 @@ const { t } = useI18n()
 
 const activeTab = ref(route.query.tab?.toString() || 'providerModel')
 const aboutDialogVisible = ref(false)
+const appVersion = __APP_VERSION__
 
 watch(activeTab, (newTab) => {
   router.replace({ query: { ...route.query, tab: newTab } })

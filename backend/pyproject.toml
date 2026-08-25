@@ -6,9 +6,12 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = ["*"]
 
+[tool.setuptools.dynamic]
+version = { attr = "backend._version.__version__" }
+
 [project]
 name = "mambo-chat-backend"
-version = "1.3.0"
+dynamic = ["version"]
 description = "The backend service for the LLM-API Client project."
 requires-python = ">=3.11"
 

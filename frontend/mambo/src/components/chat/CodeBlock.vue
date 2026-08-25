@@ -120,10 +120,10 @@ import { useI18n } from 'vue-i18n'
 import { ElImageViewer } from 'element-plus'
 import type { PropType } from 'vue'
 import { Edit, CopyDocument, ArrowUpBold, ArrowDownBold, Sort } from '@element-plus/icons-vue'
-import hljs from 'highlight.js'
+// highlight.js 的 JS 改为按需加载（见 utils/heavyModules.ts），仅保留其样式（不引入 JS）
 import 'highlight.js/styles/github-dark.css'
-import mermaid from 'mermaid'
 import DOMPurify from 'dompurify'
+import { loadHighlightJs, loadMermaid } from '@/utils/heavyModules'
 
 interface CodeBlockRange {
   start: number
@@ -246,6 +246,7 @@ const renderMermaid = async () => {
 
   try {
     mermaidError.value = ''
+    const { default: mermaid } = await loadMermaid()
     mermaid.initialize({
       startOnLoad: false,
       theme: 'default',
@@ -264,12 +265,18 @@ onMounted(() => {
   if (isMermaid.value) {
     renderMermaid()
   }
+  applyHighlight()
 })
 
 watch(() => props.code, () => {
   if (isMermaid.value && (props.closed || !props.isGenerating)) {
     renderMermaid()
   }
+  applyHighlight()
+})
+
+watch(() => props.language, () => {
+  applyHighlight()
 })
 
 watch(() => props.isGenerating, (generating) => {
@@ -284,20 +291,46 @@ watch(() => props.closed, (closed) => {
   }
 })
 
-const highlightedCode = computed(() => {
-  const lang = props.language || 'plaintext'
-  if (lang && hljs.getLanguage(lang)) {
-    try {
-      return hljs.highlight(props.code, {
-        language: lang,
-        ignoreIllegals: true,
-      }).value
-    } catch (e) {
-      console.error(e)
+// highlight.js 改为按需加载后，高亮结果从同步 computed 变为异步 ref。
+// 初始值用纯文本转义占位，避免高亮库加载完成前出现空白；加载失败同样回退。
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+const highlightedCode = ref<string>(escapeHtml(props.code))
+let highlightSeq = 0
+
+const applyHighlight = async () => {
+  const seq = ++highlightSeq
+  try {
+    const { default: hljs } = await loadHighlightJs()
+    if (seq !== highlightSeq) return
+    const lang = props.language || 'plaintext'
+    let value: string
+    if (lang && hljs.getLanguage(lang)) {
+      try {
+        value = hljs.highlight(props.code, {
+          language: lang,
+          ignoreIllegals: true,
+        }).value
+      } catch (e) {
+        console.error(e)
+        value = hljs.highlight(props.code, { language: 'plaintext', ignoreIllegals: true }).value
+      }
+    } else {
+      value = hljs.highlight(props.code, { language: 'plaintext', ignoreIllegals: true }).value
     }
+    if (seq === highlightSeq) highlightedCode.value = value
+  } catch (e) {
+    // 高亮库加载失败时回退为纯文本转义，保证代码可读
+    if (seq === highlightSeq) highlightedCode.value = escapeHtml(props.code)
   }
-  return hljs.highlight(props.code, { language: 'plaintext', ignoreIllegals: true }).value
-})
+}
 
 watch(
   () => props.isGenerating,

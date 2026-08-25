@@ -27,6 +27,7 @@ export interface ElectronAPI {
   // Runtime extraction
   runtime: {
     onExtractionProgress: (callback: (progress: any) => void) => () => void
+    isExtractionReady: () => Promise<boolean>
   }
   // Gateway
   gateway: {
@@ -50,13 +51,16 @@ export interface ElectronAPI {
     toggleMaximize: () => Promise<void>
     close: () => Promise<void>
   }
-  // API Client (remote mode)
+  // API Client (remote mode) — multiple clients supported
   apibackend: {
     start: () => Promise<{ success: boolean; error?: string }>
+    startOne: (backendId: string) => Promise<{ success: boolean; error?: string }>
     stop: () => Promise<{ success: boolean }>
-    status: () => Promise<{ running: boolean; connected: boolean; connecting: boolean; backendId?: string; error?: string }>
-    register: (serverUrl: string, rootDir: string) => Promise<{ success: boolean; backendId?: string; apiKey?: string; error?: string }>
-    onStatusChange: (callback: (status: any) => void) => () => void
+    stopOne: (backendId: string) => Promise<{ success: boolean }>
+    remove: (backendId: string) => Promise<{ success: boolean }>
+    status: () => Promise<Array<{ running: boolean; connected: boolean; connecting: boolean; backendId?: string; name?: string; rootDir?: string; error?: string }>>
+    register: (serverUrl: string, rootDir: string, name?: string) => Promise<{ success: boolean; backendId?: string; apiKey?: string; error?: string }>
+    onStatusChange: (callback: (statuses: any[]) => void) => () => void
   }
 }
 
@@ -91,6 +95,7 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.on('runtime:extraction-progress', handler)
       return () => ipcRenderer.removeListener('runtime:extraction-progress', handler)
     },
+    isExtractionReady: () => ipcRenderer.invoke('runtime:is-extraction-ready'),
   },
 
   gateway: {
@@ -118,11 +123,14 @@ const electronAPI: ElectronAPI = {
 
   apibackend: {
     start: () => ipcRenderer.invoke('apibackend:start'),
+    startOne: (backendId) => ipcRenderer.invoke('apibackend:startOne', backendId),
     stop: () => ipcRenderer.invoke('apibackend:stop'),
+    stopOne: (backendId) => ipcRenderer.invoke('apibackend:stopOne', backendId),
+    remove: (backendId) => ipcRenderer.invoke('apibackend:remove', backendId),
     status: () => ipcRenderer.invoke('apibackend:status'),
-    register: (serverUrl, rootDir) => ipcRenderer.invoke('apibackend:register', serverUrl, rootDir),
+    register: (serverUrl, rootDir, name) => ipcRenderer.invoke('apibackend:register', serverUrl, rootDir, name),
     onStatusChange: (callback) => {
-      const handler = (_event: any, status: any) => callback(status)
+      const handler = (_event: any, statuses: any[]) => callback(statuses)
       ipcRenderer.on('apibackend:status', handler)
       return () => ipcRenderer.removeListener('apibackend:status', handler)
     },

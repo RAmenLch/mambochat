@@ -3,4 +3,4 @@
 通过 HTTP 调用后端 REST API，提供 provider / model / settings 管理能力。
 """
 
-__version__ = "1.3.0"
+from backend._version import __version__

@@ -1,4 +1,5 @@
 import { fileURLToPath, URL } from 'node:url'
+import { readFileSync } from 'node:fs'
 
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
@@ -12,8 +13,14 @@ import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 const backendPort = process.env.BACKEND_PORT || '8000'
 const backendTarget = `http://127.0.0.1:${backendPort}`
 
+// 版本号唯一来源：package.json 的 version 字段，构建期注入为 __APP_VERSION__
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8'))
+
 // https://vitejs.dev/config/
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   plugins: [
     vue(),
     AutoImport({

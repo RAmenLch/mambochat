@@ -9,12 +9,6 @@ import traceback
 from backend.database import get_db
 from backend.schemas.mcp import McpServerCreate, McpServerUpdate, McpServerResponse, McpToolResponse, McpToolUpdate
 from backend.crud import mcp_crud, mcp_tool_crud
-from backend.services import mcp_service
-from backend.services.mcp_connection_manager import (
-    McpConnectionManager,
-    McpConnectionError,
-    _apply_http_proxy,
-)
 from backend.crud import setting_crud
 
 router = APIRouter()
@@ -26,6 +20,8 @@ async def list_mcp_servers(db: AsyncSession = Depends(get_db)):
     获取所有配置的 MCP 服务器。
     结果包含系统内置工具（只读）和数据库自定义工具（可编辑）。
     """
+    # 延迟导入：mcp_service 连带加载 mcp 客户端栈（langchain_mcp_adapters 等）
+    from backend.services import mcp_service
     return await mcp_service.get_all_merged_mcp_configs(db)
 
 
@@ -36,6 +32,13 @@ async def test_mcp_config(server: McpServerCreate, db: AsyncSession = Depends(ge
     适用于新建或编辑时在保存前验证配置是否正确。
     无论成功或失败，HTTP 状态码均为 200，请通过响应体中的 status 字段判断结果。
     """
+    # 延迟导入：mcp_connection_manager 连带加载 mcp 客户端栈（langchain_mcp_adapters 等）
+    from backend.services.mcp_connection_manager import (
+        McpConnectionManager,
+        McpConnectionError,
+        _apply_http_proxy,
+    )
+
     import uuid
 
     # 构建 MultiServerMCPClient 所需的配置字典
@@ -121,6 +124,8 @@ async def get_mcp_server(server_id: str, db: AsyncSession = Depends(get_db)):
     """
     根据 ID 获取 MCP 服务器详情，支持系统内置 ID 和数据库 ID。
     """
+    # 延迟导入：mcp_service 连带加载 mcp 客户端栈
+    from backend.services import mcp_service
     server = await mcp_service.load_mcp_config_by_id(db, server_id)
     if not server:
         raise HTTPException(status_code=404, detail="MCP Server not found")
@@ -180,6 +185,13 @@ async def test_mcp_server(server_id: str, db: AsyncSession = Depends(get_db)):
     测试指定的 MCP 服务器连接状态。
     无论成功或失败，HTTP 状态码均为 200，请通过响应体中的 status 字段判断结果。
     """
+    # 延迟导入：mcp_service / mcp_connection_manager 连带加载 mcp 客户端栈
+    from backend.services import mcp_service
+    from backend.services.mcp_connection_manager import (
+        McpConnectionManager,
+        McpConnectionError,
+    )
+
     # 确认服务存在
     server = await mcp_service.load_mcp_config_by_id(db, server_id)
     if not server:
@@ -218,6 +230,10 @@ async def sync_mcp_tools(server_id: str, db: AsyncSession = Depends(get_db)):
     """
     从 MCP 服务端获取最新工具列表，并同步到数据库中。
     """
+    # 延迟导入：mcp_service / mcp_connection_manager 连带加载 mcp 客户端栈
+    from backend.services import mcp_service
+    from backend.services.mcp_connection_manager import McpConnectionError
+
     try:
         return await mcp_service.sync_server_tools(db, server_id)
     except McpConnectionError as e:

@@ -20,6 +20,7 @@ export interface ElectronAPI {
   }
   runtime: {
     onExtractionProgress: (callback: (progress: ExtractionProgress) => void) => () => void
+    isExtractionReady: () => Promise<boolean>
   }
   gateway: {
     status: () => Promise<GatewayStatus>

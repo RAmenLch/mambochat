@@ -1250,7 +1250,7 @@ wheels = [
 
 [[package]]
 name = "mambo-agents"
-version = "0.3.0"
+version = "0.4.1b1"
 source = { registry = "https://pypi.org/simple/" }
 dependencies = [
     { name = "langchain" },
@@ -1269,14 +1269,13 @@ dependencies = [
     { name = "tree-sitter-typescript" },
     { name = "wcmatch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/34/be/0f8f1f8a925741fc297796d0fcafff549f2e7cf8a92c46df963c5aef3373/mambo_agents-0.3.0.tar.gz", hash = "sha256:51be7f370536460b21379779d104a4364415eb183cae5d98cc5dbe46df75cf72", size = 517611, upload-time = "2026-08-23T15:17:35.052Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cc/4d/026a6bafac1da356a8388d8519619ba6b16196f293c19f36c77047059ecf/mambo_agents-0.4.1b1.tar.gz", hash = "sha256:6c8d985fbe426ae2a8c1278f2abcc34f64e955091f039fe4f224adaf464c8913", size = 564573, upload-time = "2026-08-24T10:17:00.124Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d5/24/ab07d0af5b4d71a3c14963486c46847e8cae310bf31121926c6da3097731/mambo_agents-0.3.0-py3-none-any.whl", hash = "sha256:fbae0354aef96319c84f93910ce5db8d20579a069069fdf3613be1cae1e1456a", size = 226281, upload-time = "2026-08-23T15:17:37.558Z" },
+    { url = "https://files.pythonhosted.org/packages/10/65/e0a2e044088e07b13a3a98f9800fb9469862d6dccd7b29496f1e23ad1b70/mambo_agents-0.4.1b1-py3-none-any.whl", hash = "sha256:6a8779c7d19182caed811603843bb9da09bfb5cfb109e73e779924836dbfc916", size = 231951, upload-time = "2026-08-24T10:17:10.451Z" },
 ]
 
 [[package]]
 name = "mambo-chat-backend"
-version = "1.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
@@ -1343,7 +1342,7 @@ requires-dist = [
     { name = "langgraph-checkpoint-sqlite", specifier = ">=3.0.3,<4" },
     { name = "langgraph-prebuilt", specifier = ">=1.0.8,<1.0.11" },
     { name = "lxml", specifier = ">=5.2.0" },
-    { name = "mambo-agents", specifier = "==0.3.0", index = "https://pypi.org/simple/" },
+    { name = "mambo-agents", specifier = "==0.4.1b1", index = "https://pypi.org/simple/" },
     { name = "mcp", specifier = ">=1.2,<1.25" },
     { name = "openai", specifier = ">=2.15.0" },
     { name = "paramiko", specifier = ">=4.0.0" },

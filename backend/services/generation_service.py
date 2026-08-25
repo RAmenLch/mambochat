@@ -1,4 +1,5 @@
 # backend/services/generation_service.py
+from __future__ import annotations
 
 import json
 import asyncio
@@ -7,27 +8,15 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import AsyncGenerator, Tuple, Optional, Type, Dict
 
-from backend.services.generation.executor.dispatcher import InstructionDispatcher
 from backend.services.stream_manager_service import stream_manager
 from backend.crud import chat_crud, message_crud, resource_crud, setting_crud
 from backend import schemas
 from backend.models import chat_model
 from backend.database import AsyncSessionLocal
 from backend.models.base_model import generate_uuid
-from backend.services.generation.managers.default_manager import DefaultGenerateManager
-from backend.services.generation.managers.title_manager import TitleGenerateManager
-from backend.services.generation.managers.zip_history_manager import ZipHistoryGenerateManager
-
-from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
-from backend.services.generation.worker.chat_worker import UniversalGraphWorker
-from backend.services.generation.worker.deep_agent_chat_worker import DeepAgentChatWorker
-from backend.services.generation.worker.simple_worker import SimpleWorker
 
 from backend.schemas.enums import FileManagementType, MessageStatus, MessageRole, SubMessageType, ProviderWorkerType, AgentTypeEnum, ChatMode
-from backend.schemas.message import ErrorContent
 from backend.config.timezone_config import get_configured_now, TZ
-from backend.services.file_service import FileService
-from backend.services.generation.agent.user_file_copy_service import process_user_message_files
 
 GENERATION_START_TIMEOUT = timedelta(minutes=10)
 
@@ -134,6 +123,10 @@ async def create_user_message_and_prepare_generation(
     处理发送新消息的场景：创建用户消息，然后准备生成AI回复。
     返回一个元组 (新创建的用户消息, AI占位符消息)。
     """
+    # 延迟导入：file_service / user_file_copy_service 依赖较重的后端模块
+    from backend.services.file_service import FileService
+    from backend.services.generation.agent.user_file_copy_service import process_user_message_files
+
     injected_sub_messages = []
     if request.attachedSubmessageResourceIds:
         for resource_id in request.attachedSubmessageResourceIds:
@@ -198,6 +191,8 @@ async def _ensure_chat_model_configured(db: AsyncSession, chat_id: str) -> None:
 
 
 def _create_worker_instance(worker_type: str) -> AbstractGenerateWorker:
+    # 延迟导入：chat_worker 会连带加载 graph_builders / deepagents 等重依赖
+    from backend.services.generation.worker.chat_worker import UniversalGraphWorker
     return UniversalGraphWorker()
 
 
@@ -208,6 +203,9 @@ async def _get_worker_for_chat(db: AsyncSession, chat_id: str) -> AbstractGenera
     - 其他（ReAct / Mambo / 无 Agent）→ UniversalGraphWorker
     """
     from backend.crud import agent_crud
+    # 延迟导入：worker 模块连带加载 graph_builders / deepagents 等重依赖
+    from backend.services.generation.worker.deep_agent_chat_worker import DeepAgentChatWorker
+    from backend.services.generation.worker.chat_worker import UniversalGraphWorker
 
     db_chat = await chat_crud.get_chat(db, chat_id=chat_id)
 
@@ -229,6 +227,10 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
     """
     后台任务：协调整个生成过程。
     """
+    # 延迟导入：managers / dispatcher 连带加载 langchain_anthropic 等重依赖
+    from backend.services.generation.managers.default_manager import DefaultGenerateManager
+    from backend.services.generation.executor.dispatcher import InstructionDispatcher
+
     async with AsyncSessionLocal() as db:
         final_status = None
         try:
@@ -254,6 +256,7 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
             await db.rollback()
 
             try:
+                from backend.schemas.message import ErrorContent
                 error_content = ErrorContent(
                     message=f"生成流程发生异常: {e}",
                     stack_trace=tb.format_exc()
@@ -319,6 +322,10 @@ async def _run_retry_generation_task(chat_id: str, assistant_message_id: str):
                             await db.delete(sub)
                     await db.commit()
 
+            # 延迟导入：managers / dispatcher 连带加载 langchain_anthropic 等重依赖
+            from backend.services.generation.managers.default_manager import DefaultGenerateManager
+            from backend.services.generation.executor.dispatcher import InstructionDispatcher
+
             worker = await _get_worker_for_chat(db, chat_id)
             manager = DefaultGenerateManager(db_session=db, recover_from_error=True)
             executor = InstructionDispatcher(db_session=db)
@@ -339,6 +346,7 @@ async def _run_retry_generation_task(chat_id: str, assistant_message_id: str):
             await db.rollback()
 
             try:
+                from backend.schemas.message import ErrorContent
                 error_content = ErrorContent(
                     message=f"重试生成流程发生异常: {e}",
                     stack_trace=tb.format_exc()
@@ -383,6 +391,11 @@ async def run_title_generation_task(chat_id: str, only_if_default: bool = False)
                 if not chat or chat.name != DEFAULT_CHAT_TITLE_KEY:
                     return
 
+            # 延迟导入：标题生成依赖 simple_worker / title_manager / dispatcher
+            from backend.services.generation.worker.simple_worker import SimpleWorker
+            from backend.services.generation.managers.title_manager import TitleGenerateManager
+            from backend.services.generation.executor.dispatcher import InstructionDispatcher
+
             worker = SimpleWorker()
 
             manager = TitleGenerateManager(db_session=db)
@@ -423,6 +436,11 @@ async def run_zip_history_generation_task(chat_id: str, target_message_id: str):
 
     async with AsyncSessionLocal() as db:
         try:
+            # 延迟导入：压缩摘要生成依赖 simple_worker / zip_history_manager / dispatcher
+            from backend.services.generation.worker.simple_worker import SimpleWorker
+            from backend.services.generation.managers.zip_history_manager import ZipHistoryGenerateManager
+            from backend.services.generation.executor.dispatcher import InstructionDispatcher
+
             worker = SimpleWorker()
             manager = ZipHistoryGenerateManager(db_session=db)
             executor = InstructionDispatcher(db_session=db)

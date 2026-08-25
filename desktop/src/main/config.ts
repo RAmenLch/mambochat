@@ -32,6 +32,8 @@ export interface LocalModeConfig {
 }
 
 export interface ApiClientConfig {
+  /** Optional friendly label for this client */
+  name: string
   /** Backend ID from the remote server (persisted after first registration) */
   backendId: string
   /** API key from the remote server */
@@ -45,8 +47,8 @@ export interface ApiClientConfig {
 export interface RemoteModeConfig {
   /** Full base URL of the remote backend, e.g. "http://192.168.1.100:8000" */
   url: string
-  /** API client settings for registering this PC as a remote backend */
-  apiClient: ApiClientConfig
+  /** API client settings for registering this PC as a remote backend (multiple allowed) */
+  apiClients: ApiClientConfig[]
 }
 
 export interface AppConfig {
@@ -74,12 +76,7 @@ const DEFAULT_CONFIG: AppConfig = {
   },
   remote: {
     url: 'http://127.0.0.1:8000',
-    apiClient: {
-      backendId: '',
-      apiKey: '',
-      rootDir: '',
-      autoStart: false,
-    },
+    apiClients: [],
   },
 }
 
@@ -182,13 +179,28 @@ export class AppConfigManager {
       },
       remote: {
         url: partial.remote?.url ?? DEFAULT_CONFIG.remote.url,
-        apiClient: {
-          backendId: partial.remote?.apiClient?.backendId ?? DEFAULT_CONFIG.remote.apiClient.backendId,
-          apiKey: partial.remote?.apiClient?.apiKey ?? DEFAULT_CONFIG.remote.apiClient.apiKey,
-          rootDir: partial.remote?.apiClient?.rootDir ?? DEFAULT_CONFIG.remote.apiClient.rootDir,
-          autoStart: partial.remote?.apiClient?.autoStart ?? DEFAULT_CONFIG.remote.apiClient.autoStart,
-        },
+        apiClients: this.mergeApiClients(partial.remote),
       },
     }
+  }
+
+  /**
+   * Merge the api client list with defaults.
+   * Also migrates the legacy single `remote.apiClient` object into the array.
+   */
+  private mergeApiClients(partialRemote: Partial<RemoteModeConfig> | undefined): ApiClientConfig[] {
+    // Legacy single-client config (pre-1.4) used `remote.apiClient`.
+    const legacy = (partialRemote as { apiClient?: ApiClientConfig } | undefined)?.apiClient
+    const list = (partialRemote?.apiClients && partialRemote.apiClients.length > 0)
+      ? partialRemote.apiClients
+      : (legacy ? [legacy] : DEFAULT_CONFIG.remote.apiClients)
+
+    return list.map((c) => ({
+      name: c?.name ?? '',
+      backendId: c?.backendId ?? '',
+      apiKey: c?.apiKey ?? '',
+      rootDir: c?.rootDir ?? '',
+      autoStart: !!c?.autoStart,
+    }))
   }
 }

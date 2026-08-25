@@ -22,9 +22,6 @@ from backend.schemas.backend import (
     SSHConfigData,
     APIConfigData
 )
-from backend.utils.ssh_utils import get_or_create_system_ssh_key
-from backend.services.generation.agent.ssh_backend import PureSFTPBackend
-
 router = APIRouter(prefix="/backends", tags=["Backends"])
 
 
@@ -57,6 +54,10 @@ def _merge_password(incoming_config: Dict[str, Any], existing_config: Dict[str, 
 # --- 核心测试逻辑 ---
 async def _test_ssh_connection(config_dict: Dict[str, Any]) -> SSHTestResponse:
     try:
+        # 延迟导入：ssh_backend / ssh_utils 依赖 paramiko、deepagents 等重模块
+        from backend.utils.ssh_utils import get_or_create_system_ssh_key
+        from backend.services.generation.agent.ssh_backend import PureSFTPBackend
+
         # 1. 结构化校验
         ssh_config = SSHConfigData(**config_dict)
 
@@ -112,6 +113,10 @@ async def _ssh_list_dir(request, db: AsyncSession):
     用于前端目录选择器，允许用户在配置 SSH Backend 时浏览远程文件系统，
     为 edit_whitelist / edit_blacklist 选择路径前缀。
     """
+    # 延迟导入：ssh_backend / ssh_utils 依赖 paramiko、deepagents 等重模块
+    from backend.utils.ssh_utils import get_or_create_system_ssh_key
+    from backend.services.generation.agent.ssh_backend import PureSFTPBackend
+
     # 密码脱敏合并：如果提供了 backend_id 且密码是掩码，从数据库获取真实密码
     password = request.password
     if request.backend_id:
@@ -291,6 +296,8 @@ async def unified_list_directory(request: UnifiedLsRequest, db: AsyncSession = D
 @router.get("/ssh/public-key", response_model=SSHPublicKeyResponse, summary="获取系统全局 SSH 公钥")
 async def get_ssh_public_key():
     """获取公钥，以便用户将其配置到远程服务器的 authorized_keys 中实现免密登录"""
+    # 延迟导入：ssh_utils 依赖 paramiko
+    from backend.utils.ssh_utils import get_or_create_system_ssh_key
     _, pub_key = get_or_create_system_ssh_key()
     return {"public_key": pub_key}
 

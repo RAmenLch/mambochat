@@ -11,6 +11,7 @@ import en from 'element-plus/es/locale/lang/en'
 import { useI18n } from 'vue-i18n'
 // 1. 引入新建的提醒模块
 import { usePageAlert } from '@/composables/usePageAlert'
+import { warmUpHeavyModules } from '@/utils/heavyModules'
 
 const chatListStore = useChatListStore()
 const mcpStore = useMcpStore()
@@ -37,6 +38,9 @@ watch(
 )
 
 onMounted(async () => {
+  // 空闲期预热聊天渲染的重依赖（mermaid/highlight.js），不占首屏关键路径
+  warmUpHeavyModules()
+
   // 1. 优先获取全局配置，确保语言环境正确加载
   await settingsStore.fetchGlobalSettings()
   // 确保在异步获取配置后，如果 watch 没有触发（例如初始值与默认值相同），手动同步一次

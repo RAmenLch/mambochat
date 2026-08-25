@@ -94,6 +94,21 @@ function isPythonReady(pythonDir: string, pythonExe: string): boolean {
 }
 
 /**
+ * Whether the bundled python runtime is already fully extracted.
+ * Returns true in dev mode (nothing to extract) and in packaged builds
+ * after a completed extraction (stamp file present).
+ * Used by the renderer to skip waiting for extraction events on every
+ * start/refresh — extraction only ever happens on the very first launch.
+ */
+export function isRuntimeExtracted(): boolean {
+  if (!app.isPackaged) return true
+  const resourcesPath = process.resourcesPath
+  const pythonDir = join(resourcesPath, 'runtime', 'python')
+  const pythonExe = join(pythonDir, 'python.exe')
+  return isPythonReady(pythonDir, pythonExe)
+}
+
+/**
  * Compute SHA-256 of a file and return it as a hex string.
  * Used to verify the tar archive hasn't been tampered with.
  */

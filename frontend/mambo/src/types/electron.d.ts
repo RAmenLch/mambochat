@@ -22,6 +22,7 @@ export interface ElectronAPI {
   }
   runtime: {
     onExtractionProgress: (callback: (progress: ExtractionProgress) => void) => () => void
+    isExtractionReady: () => Promise<boolean>
   }
   gateway: {
     status: () => Promise<GatewayStatus>
@@ -57,6 +58,7 @@ export interface AppConfig {
 
 export interface BackendStatus {
   running: boolean
+  starting?: boolean
   port?: number
   pid?: number
   error?: string

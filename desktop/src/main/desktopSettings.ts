@@ -222,6 +222,45 @@ function getSettingsHtml(): string {
   .btn-default { background: #fff; color: #606266; border: 1px solid #dcdfe6; }
   .btn-default:hover:not(:disabled) { color: #409eff; border-color: #c6e2ff; background: #ecf5ff; }
   .btn-block { width: 100%; justify-content: center; }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+  .api-client-card {
+    border: 1px solid #ebeef5;
+    border-radius: 6px;
+    padding: 14px;
+    margin-bottom: 12px;
+    background: #fafbfc;
+  }
+  .api-client-card:last-child { margin-bottom: 0; }
+  .api-client-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .api-client-header .api-client-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #303133;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .api-client-empty {
+    text-align: center;
+    color: #909399;
+    font-size: 13px;
+    padding: 20px 0;
+    border: 1px dashed #dcdfe6;
+    border-radius: 6px;
+  }
+  .api-client-id {
+    font-size: 12px;
+    color: #909399;
+    margin-bottom: 10px;
+    word-break: break-all;
+  }
+  .api-client-id.registered { color: #67c23a; }
   .btn-loading .btn-text::after {
     content: '';
     display: inline-block;
@@ -496,32 +535,9 @@ function getSettingsHtml(): string {
       <div class="card-title">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
         ${translate(locale, 'apiClient.title')}
+        <button class="btn btn-success btn-sm" id="btnApiClientAdd" onclick="addApiClientCard()" style="margin-left:auto;">+ ${translate(locale, 'apiClient.add')}</button>
       </div>
-      <div class="form-group">
-        <label class="form-label">${translate(locale, 'apiClient.rootDir')}</label>
-        <input type="text" id="apiClientRootDir" placeholder="C:\\Users\\xxx\\projects" onchange="saveApiClientRootDir()">
-        <div class="form-hint">${translate(locale, 'apiClient.rootDir.hint')}</div>
-      </div>
-      <div class="form-group">
-        <label class="switch-label">
-          <span class="switch">
-            <input type="checkbox" id="apiClientAutoStart" onchange="toggleApiClientAutoStart()">
-            <span class="switch-slider"></span>
-          </span>
-          <span>${translate(locale, 'apiClient.autoStart')}</span>
-        </label>
-      </div>
-      <div class="status-bar stopped" id="apiClientStatusBar">
-        <span class="dot"></span>
-        <span id="apiClientStatusText">${translate(locale, 'apiClient.status.disconnected')}</span>
-      </div>
-      <div id="apiClientRegisteredId" style="font-size:12px;color:#909399;margin-bottom:12px;display:none;"></div>
-      <div class="btn-row">
-        <button class="btn btn-primary" id="btnApiClientStart" onclick="startApiClient()">${translate(locale, 'apiClient.start')}</button>
-        <button class="btn btn-danger" id="btnApiClientStop" onclick="stopApiClient()" style="display:none;">${translate(locale, 'apiClient.stop')}</button>
-        <button class="btn btn-default" id="btnApiClientRestart" onclick="restartApiClient()" style="display:none;">${translate(locale, 'apiClient.restart')}</button>
-        <button class="btn btn-success" id="btnApiClientRegister" onclick="registerApiClient()">${translate(locale, 'apiClient.register')}</button>
-      </div>
+      <div id="apiClientList"></div>
     </div>
   </div>
 
@@ -584,6 +600,22 @@ function getMode() {
 }
 
 // --- Config ---
+function collectApiClientsFromDom() {
+  const cards = document.querySelectorAll('.api-client-card');
+  const clients = [];
+  cards.forEach((card, i) => {
+    const existing = (currentConfig?.remote?.apiClients && currentConfig.remote.apiClients[i]) || {};
+    clients.push({
+      name: document.getElementById('apiClientName_' + i)?.value || '',
+      backendId: existing.backendId || '',
+      apiKey: existing.apiKey || '',
+      rootDir: document.getElementById('apiClientRootDir_' + i)?.value || '',
+      autoStart: !!(document.getElementById('apiClientAutoStart_' + i)?.checked),
+    });
+  });
+  return clients;
+}
+
 function gatherConfig() {
   return {
     mode: getMode(),
@@ -597,12 +629,7 @@ function gatherConfig() {
     },
     remote: {
       url: document.getElementById('remoteUrl').value.replace(/\\/+$/, ''),
-      apiClient: {
-        backendId: currentConfig?.remote?.apiClient?.backendId || '',
-        apiKey: currentConfig?.remote?.apiClient?.apiKey || '',
-        rootDir: document.getElementById('apiClientRootDir').value,
-        autoStart: document.getElementById('apiClientAutoStart').checked,
-      },
+      apiClients: collectApiClientsFromDom(),
     },
   };
 }
@@ -618,10 +645,8 @@ function applyConfigToUI(config) {
   document.getElementById('allowExternal').checked = !!config.local.allowExternalAccess;
   document.getElementById('gatewayPort').value = config.local.gatewayPort || 5173;
   document.getElementById('remoteUrl').value = config.remote.url;
-  document.getElementById('apiClientRootDir').value = config.remote.apiClient?.rootDir || '';
-  document.getElementById('apiClientAutoStart').checked = !!config.remote.apiClient?.autoStart;
+  renderApiClientCards();
   updateNetworkVisibility();
-  updateApiClientRegisteredId();
 }
 
 async function saveConfig() {
@@ -678,24 +703,28 @@ async function saveConfig() {
         await api.gateway.restart('127.0.0.1', gatewayPort);
       } catch (e) { log.error('Gateway restart failed:', e); }
 
-      // Handle API client: stop if switching from remote with different config
-      const apiClientChanged = prevMode !== 'remote' ||
-        config.remote.apiClient?.backendId !== prevConfig.remote.apiClient?.backendId ||
-        config.remote.apiClient?.rootDir !== prevConfig.remote.apiClient?.rootDir;
+      // Handle API clients: when the client list changed (or switching to
+      // remote), stop everything and start the auto-start set.
+      const clientSig = (list) => (list || [])
+        .map(c => (c.backendId || '') + '|' + (c.rootDir || '') + '|' + (c.autoStart ? 1 : 0))
+        .join(';');
+      const clientsChanged = prevMode !== 'remote' ||
+        clientSig(config.remote.apiClients) !== clientSig(prevConfig.remote.apiClients);
 
-      if (apiClientChanged && config.remote.apiClient?.autoStart && config.remote.apiClient?.backendId) {
-        // Stop previous client first (if running), then start with new config
+      if (clientsChanged) {
+        // Stop previous clients first (if running), then start the auto-start ones
         try { await api.apibackend.stop(); } catch (e) { /* ignore */ }
-        const result = await api.apibackend.start();
-        if (result.success) {
-          showToast(t('toast.remoteActive') + ' - ' + t('apiClient.status.connected'), 'success');
+        const autoStartClients = (config.remote.apiClients || []).filter(c => c.autoStart && c.backendId && c.apiKey);
+        if (autoStartClients.length > 0) {
+          const result = await api.apibackend.start();
+          if (result.success) {
+            showToast(t('toast.remoteActive') + ' - ' + t('apiClient.status.connected'), 'success');
+          } else {
+            showToast(t('toast.remoteActive') + ' - ' + t('apiClient.status.error') + ': ' + (result.error || ''), 'warning');
+          }
         } else {
-          showToast(t('toast.remoteActive') + ' - ' + t('apiClient.status.error') + ': ' + (result.error || ''), 'warning');
+          showToast(t('toast.remoteActive'), 'success');
         }
-      } else if (prevConfig.remote.apiClient?.autoStart && !config.remote.apiClient?.autoStart) {
-        // User disabled auto-start — disconnect if running
-        try { await api.apibackend.stop(); } catch (e) { /* ignore */ }
-        showToast(t('toast.remoteActive'), 'success');
       } else {
         showToast(t('toast.remoteActive'), 'success');
       }
@@ -880,12 +909,115 @@ async function testConnection() {
   }
 }
 
-// --- API Client ---
-async function startApiClient() {
-  const btn = document.getElementById('btnApiClientStart');
+// --- API Clients (multiple) ---
+
+function escapeHtml(str) {
+  return String(str == null ? '' : str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function apiClientCardHtml(index, client) {
+  const id = client?.backendId || '';
+  const label = escapeHtml(client?.name || ('Client ' + (index + 1)));
+  return '' +
+    '<div class="api-client-card" data-index="' + index + '" data-backend-id="' + escapeHtml(id) + '">' +
+      '<div class="api-client-header">' +
+        '<span class="api-client-title">' + label + '</span>' +
+        '<button class="btn btn-danger btn-sm" onclick="removeApiClientCard(' + index + ')">' + t('apiClient.remove') + '</button>' +
+      '</div>' +
+      '<div class="form-group">' +
+        '<label class="form-label">' + t('apiClient.name') + '</label>' +
+        '<input type="text" id="apiClientName_' + index + '" data-field="name" value="' + escapeHtml(client?.name || '') + '" placeholder="' + t('apiClient.name.placeholder') + '" onchange="saveApiClientField(this, this.value)">' +
+      '</div>' +
+      '<div class="form-group">' +
+        '<label class="form-label">' + t('apiClient.rootDir') + '</label>' +
+        '<input type="text" id="apiClientRootDir_' + index + '" data-field="rootDir" value="' + escapeHtml(client?.rootDir || '') + '" placeholder="C:\\\\Users\\\\xxx\\\\projects" onchange="saveApiClientField(this, this.value)">' +
+        '<div class="form-hint">' + t('apiClient.rootDir.hint') + '</div>' +
+      '</div>' +
+      '<div class="form-group">' +
+        '<label class="switch-label">' +
+          '<span class="switch">' +
+            '<input type="checkbox" id="apiClientAutoStart_' + index + '" data-field="autoStart"' + (client?.autoStart ? ' checked' : '') + ' onchange="saveApiClientField(this, this.checked)">' +
+            '<span class="switch-slider"></span>' +
+          '</span>' +
+          '<span>' + t('apiClient.autoStart') + '</span>' +
+        '</label>' +
+      '</div>' +
+      '<div class="status-bar stopped" id="apiClientStatusBar_' + index + '">' +
+        '<span class="dot"></span>' +
+        '<span id="apiClientStatusText_' + index + '">' + t('apiClient.status.disconnected') + '</span>' +
+      '</div>' +
+      '<div class="api-client-id" id="apiClientRegisteredId_' + index + '"></div>' +
+      '<div class="btn-row">' +
+        '<button class="btn btn-primary" id="btnApiClientStart_' + index + '" onclick="startApiClient(' + index + ')">' + t('apiClient.start') + '</button>' +
+        '<button class="btn btn-danger" id="btnApiClientStop_' + index + '" onclick="stopApiClient(' + index + ')" style="display:none;">' + t('apiClient.stop') + '</button>' +
+        '<button class="btn btn-default" id="btnApiClientRestart_' + index + '" onclick="restartApiClient(' + index + ')" style="display:none;">' + t('apiClient.restart') + '</button>' +
+        '<button class="btn btn-success" id="btnApiClientRegister_' + index + '" onclick="registerApiClient(' + index + ')">' + t('apiClient.register') + '</button>' +
+      '</div>' +
+    '</div>';
+}
+
+function renderApiClientCards() {
+  const container = document.getElementById('apiClientList');
+  if (!container) return;
+  const clients = currentConfig?.remote?.apiClients || [];
+  if (clients.length === 0) {
+    container.innerHTML = '<div class="api-client-empty">' + t('apiClient.empty') + '</div>';
+    return;
+  }
+  container.innerHTML = clients.map((c, i) => apiClientCardHtml(i, c)).join('');
+  clients.forEach((c, i) => updateApiClientCardRegistered(i, c));
+  refreshApiClientStatus();
+}
+
+function addApiClientCard() {
+  if (!currentConfig) return;
+  if (!currentConfig.remote) currentConfig.remote = {};
+  if (!currentConfig.remote.apiClients) currentConfig.remote.apiClients = [];
+  currentConfig.remote.apiClients.push({ name: '', backendId: '', apiKey: '', rootDir: '', autoStart: false });
+  api.config.update(currentConfig);
+  renderApiClientCards();
+}
+
+async function removeApiClientCard(index) {
+  if (!currentConfig?.remote?.apiClients) return;
+  const client = currentConfig.remote.apiClients[index];
+  if (!client) return;
+  if (client.backendId) {
+    try { await api.apibackend.remove(client.backendId); } catch (e) { /* ignore */ }
+  }
+  currentConfig.remote.apiClients.splice(index, 1);
+  await api.config.update(currentConfig);
+  renderApiClientCards();
+  showToast(t('apiClient.removed'), 'info');
+}
+
+function saveApiClientField(input, value) {
+  if (!currentConfig?.remote?.apiClients) return;
+  const card = input.closest('.api-client-card');
+  if (!card) return;
+  const index = parseInt(card.getAttribute('data-index'), 10);
+  const field = input.getAttribute('data-field');
+  const client = currentConfig.remote.apiClients[index];
+  if (!client || !field) return;
+  client[field] = value;
+  api.config.update(currentConfig);
+}
+
+async function startApiClient(index) {
+  const client = currentConfig?.remote?.apiClients?.[index];
+  if (!client) return;
+  if (!client.backendId) {
+    showToast(t('apiClient.notRegistered'), 'warning');
+    return;
+  }
+  const btn = document.getElementById('btnApiClientStart_' + index);
   btn.disabled = true;
   try {
-    const result = await api.apibackend.start();
+    // Persist card fields so the main process uses the latest config
+    await api.config.update(currentConfig);
+    const result = await api.apibackend.startOne(client.backendId);
     if (result.success) {
       showToast(t('apiClient.status.connected'), 'success');
     } else {
@@ -899,11 +1031,13 @@ async function startApiClient() {
   }
 }
 
-async function stopApiClient() {
-  const btn = document.getElementById('btnApiClientStop');
+async function stopApiClient(index) {
+  const client = currentConfig?.remote?.apiClients?.[index];
+  if (!client) return;
+  const btn = document.getElementById('btnApiClientStop_' + index);
   btn.disabled = true;
   try {
-    await api.apibackend.stop();
+    await api.apibackend.stopOne(client.backendId);
     showToast(t('apiClient.status.disconnected'), 'info');
     refreshApiClientStatus();
   } catch (e) {
@@ -913,12 +1047,19 @@ async function stopApiClient() {
   }
 }
 
-async function restartApiClient() {
-  const btn = document.getElementById('btnApiClientRestart');
+async function restartApiClient(index) {
+  const client = currentConfig?.remote?.apiClients?.[index];
+  if (!client) return;
+  if (!client.backendId) {
+    showToast(t('apiClient.notRegistered'), 'warning');
+    return;
+  }
+  const btn = document.getElementById('btnApiClientRestart_' + index);
   btn.disabled = true;
   try {
-    await api.apibackend.stop();
-    const result = await api.apibackend.start();
+    await api.config.update(currentConfig);
+    await api.apibackend.stopOne(client.backendId);
+    const result = await api.apibackend.startOne(client.backendId);
     if (result.success) {
       showToast(t('apiClient.status.connected'), 'success');
     } else {
@@ -932,27 +1073,34 @@ async function restartApiClient() {
   }
 }
 
-async function registerApiClient() {
-  const btn = document.getElementById('btnApiClientRegister');
+async function registerApiClient(index) {
+  const client = currentConfig?.remote?.apiClients?.[index];
+  if (!client) return;
+  const btn = document.getElementById('btnApiClientRegister_' + index);
   btn.disabled = true;
   btn.classList.add('btn-loading');
   try {
     const url = document.getElementById('remoteUrl').value.replace(/\\/+$/, '');
-    const rootDir = document.getElementById('apiClientRootDir').value;
-    const result = await api.apibackend.register(url, rootDir);
+    const rootDir = document.getElementById('apiClientRootDir_' + index).value;
+    const name = document.getElementById('apiClientName_' + index).value;
+    const result = await api.apibackend.register(url, rootDir, name);
     if (result.success) {
       // Update currentConfig so gatherConfig picks up the new credentials
       if (!currentConfig) currentConfig = {};
       if (!currentConfig.remote) currentConfig.remote = {};
-      if (!currentConfig.remote.apiClient) currentConfig.remote.apiClient = {};
-      currentConfig.remote.apiClient.backendId = result.backendId;
-      currentConfig.remote.apiClient.apiKey = result.apiKey;
-      currentConfig.remote.apiClient.rootDir = rootDir;
+      if (!currentConfig.remote.apiClients) currentConfig.remote.apiClients = [];
+      const target = currentConfig.remote.apiClients[index];
+      if (target) {
+        target.backendId = result.backendId;
+        target.apiKey = result.apiKey;
+        target.rootDir = rootDir;
+        target.name = name || '';
+      }
 
       // Also persist the updated config to disk immediately
       await api.config.update(currentConfig);
 
-      updateApiClientRegisteredId();
+      renderApiClientCards();
       showToast(t('apiClient.registered', {id: result.backendId}), 'success');
     } else {
       showToast(t('apiClient.registerFailed') + ': ' + (result.error || 'Unknown'), 'error');
@@ -966,70 +1114,65 @@ async function registerApiClient() {
 }
 
 function refreshApiClientStatus() {
-  api.apibackend.status().then(status => {
-    updateApiClientStatusUI(status);
+  api.apibackend.status().then(statuses => {
+    updateApiClientStatusUI(statuses);
   }).catch(e => {
     log.error('[Settings] Failed to get API client status:', e);
   });
 }
 
-function updateApiClientStatusUI(status) {
-  const bar = document.getElementById('apiClientStatusBar');
-  const text = document.getElementById('apiClientStatusText');
-  const btnStart = document.getElementById('btnApiClientStart');
-  const btnStop = document.getElementById('btnApiClientStop');
-  const btnRestart = document.getElementById('btnApiClientRestart');
+function updateApiClientStatusUI(statuses) {
+  if (!Array.isArray(statuses)) statuses = [statuses];
+  statuses.forEach(status => {
+    if (!status || !status.backendId) return;
+    const card = document.querySelector('.api-client-card[data-backend-id="' + status.backendId + '"]');
+    if (!card) return;
+    const idx = card.getAttribute('data-index');
+    const bar = document.getElementById('apiClientStatusBar_' + idx);
+    const text = document.getElementById('apiClientStatusText_' + idx);
+    const btnStart = document.getElementById('btnApiClientStart_' + idx);
+    const btnStop = document.getElementById('btnApiClientStop_' + idx);
+    const btnRestart = document.getElementById('btnApiClientRestart_' + idx);
+    if (!bar || !text || !btnStart || !btnStop || !btnRestart) return;
 
-  if (status.connecting) {
-    bar.className = 'status-bar starting';
-    text.textContent = t('apiClient.status.connecting');
-    btnStart.style.display = 'none';
-    btnStop.style.display = 'none';
-    btnRestart.style.display = 'none';
-    return;
-  }
+    if (status.connecting) {
+      bar.className = 'status-bar starting';
+      text.textContent = t('apiClient.status.connecting');
+      btnStart.style.display = 'none';
+      btnStop.style.display = 'none';
+      btnRestart.style.display = 'none';
+      return;
+    }
 
-  if (status.connected) {
-    bar.className = 'status-bar running';
-    text.textContent = t('apiClient.status.connected') + (status.backendId ? ' (backend: ' + status.backendId.substring(0, 8) + '...)' : '');
-    btnStart.style.display = 'none';
-    btnStop.style.display = '';
-    btnRestart.style.display = '';
+    if (status.connected) {
+      bar.className = 'status-bar running';
+      text.textContent = t('apiClient.status.connected');
+      btnStart.style.display = 'none';
+      btnStop.style.display = '';
+      btnRestart.style.display = '';
+    } else {
+      bar.className = 'status-bar ' + (status.error && status.error !== 'Not connected' ? 'error' : 'stopped');
+      text.textContent = status.error && status.error !== 'Not connected' ? status.error : t('apiClient.status.disconnected');
+      btnStart.style.display = '';
+      btnStop.style.display = 'none';
+      btnRestart.style.display = 'none';
+    }
+  });
+}
+
+function updateApiClientCardRegistered(index, client) {
+  const el = document.getElementById('apiClientRegisteredId_' + index);
+  if (!el) return;
+  const btn = document.getElementById('btnApiClientRegister_' + index);
+  if (client && client.backendId) {
+    el.className = 'api-client-id registered';
+    el.textContent = t('apiClient.registered', {id: client.backendId});
+    if (btn) btn.style.display = 'none';
   } else {
-    bar.className = 'status-bar ' + (status.error && status.error !== 'Not connected' ? 'error' : 'stopped');
-    text.textContent = status.error && status.error !== 'Not connected' ? status.error : t('apiClient.status.disconnected');
-    btnStart.style.display = '';
-    btnStop.style.display = 'none';
-    btnRestart.style.display = 'none';
+    el.className = 'api-client-id';
+    el.textContent = t('apiClient.notRegistered');
+    if (btn) btn.style.display = '';
   }
-}
-
-function updateApiClientRegisteredId() {
-  const el = document.getElementById('apiClientRegisteredId');
-  if (currentConfig?.remote?.apiClient?.backendId) {
-    el.style.display = 'block';
-    el.textContent = t('apiClient.registered', {id: currentConfig.remote.apiClient.backendId});
-  } else {
-    el.style.display = 'none';
-  }
-}
-
-function toggleApiClientAutoStart() {
-  if (!currentConfig) return;
-  const checked = document.getElementById('apiClientAutoStart').checked;
-  if (!currentConfig.remote) currentConfig.remote = {};
-  if (!currentConfig.remote.apiClient) currentConfig.remote.apiClient = {};
-  currentConfig.remote.apiClient.autoStart = checked;
-  api.config.update(currentConfig);
-}
-
-async function saveApiClientRootDir() {
-  if (!currentConfig) return;
-  const rootDir = document.getElementById('apiClientRootDir').value;
-  if (!currentConfig.remote) currentConfig.remote = {};
-  if (!currentConfig.remote.apiClient) currentConfig.remote.apiClient = {};
-  currentConfig.remote.apiClient.rootDir = rootDir;
-  await api.config.update(currentConfig);
 }
 
 // --- Init ---

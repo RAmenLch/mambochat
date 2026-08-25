@@ -208,6 +208,8 @@ export interface MultimodalMedia {
   file_id: string
   filename?: string | null
   size_bytes?: number | null
+  /** 由消息组装层填充的下载路径（如 /api/files/download/...），供前端展示媒体 */
+  url?: string | null
 }
 
 export interface McpToolContent {

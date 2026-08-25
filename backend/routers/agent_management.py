@@ -12,12 +12,15 @@ from backend.services.file_service import FileService
 from backend.services.resource_service import validate_mounted_resources, validate_memory_resources
 from backend.schemas.enums import FileManagementType, ToolReviewMode, BackendType
 
-try:
-    from mambo_agents.middleware.mcp import mcp_tool_name
-except ImportError:  # 运行时环境缺少 mambo_agents 时退化实现（与 mcp_tool_name 同规则）
-    import re as _re
-    _TOOL_NAME_SAFE_RE = _re.compile(r"[^a-zA-Z0-9_-]")
-    def mcp_tool_name(server_name: str, tool_name: str) -> str:
+
+def _mcp_tool_name(server_name: str, tool_name: str) -> str:
+    # 延迟导入：mambo_agents.middleware.mcp 连带加载 mcp 客户端栈等重依赖
+    try:
+        from mambo_agents.middleware.mcp import mcp_tool_name
+        return mcp_tool_name(server_name, tool_name)
+    except ImportError:  # 运行时环境缺少 mambo_agents 时退化实现（与 mcp_tool_name 同规则）
+        import re as _re
+        _TOOL_NAME_SAFE_RE = _re.compile(r"[^a-zA-Z0-9_-]")
         return f"{server_name}__{_TOOL_NAME_SAFE_RE.sub('_', tool_name)}"
 
 router = APIRouter()
@@ -317,7 +320,7 @@ async def get_agent_goal_loop_tools(agent_id: str, db: AsyncSession = Depends(ge
                     continue
                 _append_tool(
                     tools, seen,
-                    name=mcp_tool_name(sname, tool.name),
+                    name=_mcp_tool_name(sname, tool.name),
                     source="mcp",
                     args=_extract_tool_args(tool.input_schema),
                 )

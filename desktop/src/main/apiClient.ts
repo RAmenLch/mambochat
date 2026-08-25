@@ -1,7 +1,9 @@
 /**
- * API Client Manager — WebSocket client that connects to a remote MamboChat
- * server and registers the local filesystem as an API backend.
+ * API Client Manager — WebSocket clients that connect to a remote MamboChat
+ * server and register the local filesystem as API backends.
  *
+ * Supports multiple simultaneous clients: each client is an independent
+ * WebSocket connection with its own backend ID, API key and root directory.
  * Runs entirely in the Electron main process using Node.js built-in WebSocket.
  * No Python subprocess needed.
  */
@@ -35,6 +37,14 @@ const DEFAULT_IGNORE_DIRS = [
 /** Hard cap on files visited by a single recursive scan (anti-freeze guard). */
 const MAX_WALK_FILES = 100000
 
+/** Convert http:// to ws:// and https:// to wss:// */
+function httpToWs(url: string): string {
+  const clean = url.replace(/\/+$/, '')
+  if (clean.startsWith('https://')) return clean.replace('https://', 'wss://')
+  if (clean.startsWith('http://')) return clean.replace('http://', 'ws://')
+  return clean
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -44,6 +54,8 @@ export interface ApiClientStatus {
   connected: boolean
   connecting: boolean
   backendId?: string
+  name?: string
+  rootDir?: string
   error?: string
 }
 
@@ -55,11 +67,14 @@ interface ClientCommand {
 }
 
 // ---------------------------------------------------------------------------
-// ApiClientManager (Singleton)
+// ApiClientConnection — one WebSocket connection (one backend on the server)
 // ---------------------------------------------------------------------------
 
-export class ApiClientManager {
-  private static instance: ApiClientManager | null = null
+class ApiClientConnection {
+  readonly backendId: string
+  readonly apiKey: string
+  rootDir: string
+  name: string
 
   private ws: WebSocket | null = null
   private stopping = false
@@ -67,11 +82,9 @@ export class ApiClientManager {
   private _connecting = false
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectDelay = 5000
-  private currentBackendId = ''
-  private currentRootDir = ''
+  private lastError: string | null = null
   private editWhitelist: string[] = []
   private editBlacklist: string[] = []
-  private lastConfig: AppConfig | null = null
 
   private readonly FILE_TYPE_MAP: Record<string, string> = {
     '.png': 'image', '.jpeg': 'image', '.jpg': 'image', '.webp': 'image',
@@ -95,57 +108,63 @@ export class ApiClientManager {
     '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   }
 
-  private constructor() {}
-
-  static getInstance(): ApiClientManager {
-    if (!ApiClientManager.instance) {
-      ApiClientManager.instance = new ApiClientManager()
-    }
-    return ApiClientManager.instance
+  constructor(backendId: string, apiKey: string, rootDir: string, name = '') {
+    this.backendId = backendId
+    this.apiKey = apiKey
+    this.rootDir = rootDir || os.homedir()
+    this.name = name
   }
 
-  // ---------------------------------------------------------------------------
-  // Public API
-  // ---------------------------------------------------------------------------
+  /** Update mutable config (root dir / label) before (re)connecting. */
+  configure(rootDir: string, name = ''): void {
+    this.rootDir = rootDir || os.homedir()
+    this.name = name
+  }
 
-  /** Start the API client — connect WebSocket to the remote server. */
-  async start(config: AppConfig): Promise<void> {
+  getStatus(): ApiClientStatus {
+    return {
+      running: !!this.ws || this._connecting,
+      connected: this._connected,
+      connecting: this._connecting,
+      backendId: this.backendId,
+      name: this.name || undefined,
+      rootDir: this.rootDir || undefined,
+      error: this._connected ? undefined : (this._connecting ? undefined : (this.lastError || 'Not connected')),
+    }
+  }
+
+  /** Connect the WebSocket to the remote server. */
+  async connect(serverUrl: string): Promise<void> {
     if (this.ws && (this._connected || this._connecting)) {
       return
     }
 
-    const { url, apiClient } = config.remote
-    if (!apiClient.backendId || !apiClient.apiKey) {
-      throw new Error('Backend ID or API key is missing. Register with the server first.')
-    }
-
     this.stopping = false
-    this.lastConfig = config
-    this.currentBackendId = apiClient.backendId
-    this.currentRootDir = apiClient.rootDir || os.homedir()
+    this.lastError = null
 
-    const wsUrl = this.httpToWs(url)
-    const fullUrl = `${wsUrl}/api/api-client/ws/${apiClient.backendId}`
+    const wsUrl = httpToWs(serverUrl)
+    const fullUrl = `${wsUrl}/api/api-client/ws/${this.backendId}`
 
     log.info(`[ApiClient] Connecting to ${fullUrl} ...`)
     this._connecting = true
     this.broadcastStatus()
 
     try {
-      await this.connect(fullUrl, apiClient.apiKey)
+      await this.openSocket(fullUrl, serverUrl)
       this.reconnectDelay = 5000
     } catch (err) {
       this._connecting = false
+      this.lastError = String(err)
       this.broadcastStatus()
       if (!this.stopping) {
-        this.scheduleReconnect(config)
+        this.scheduleReconnect(serverUrl)
       }
       throw err
     }
   }
 
-  /** Stop the API client. */
-  async stop(): Promise<void> {
+  /** Stop this client. */
+  async disconnect(): Promise<void> {
     this.stopping = true
     this._connecting = false
     if (this.reconnectTimer) {
@@ -158,75 +177,10 @@ export class ApiClientManager {
     }
     this._connected = false
     this.broadcastStatus()
-    log.info('[ApiClient] Stopped')
+    log.info(`[ApiClient] Stopped backend=${this.backendId}`)
   }
 
-  /** Get current status. */
-  getStatus(): ApiClientStatus {
-    return {
-      running: !!this.ws || this._connecting,
-      connected: this._connected,
-      connecting: this._connecting,
-      backendId: this.currentBackendId || undefined,
-      error: this._connected ? undefined : (this._connecting ? undefined : 'Not connected'),
-    }
-  }
-
-  /**
-   * Register this PC as an API backend on the remote server.
-   * Idempotent — if already registered (backendId exists locally and on server),
-   * returns the existing credentials.
-   */
-  async register(serverUrl: string, rootDir: string): Promise<{ backendId: string; apiKey: string }> {
-    const cleanUrl = serverUrl.replace(/\/+$/, '')
-    const configManager = AppConfigManager.getInstance()
-    const config = configManager.load()
-    const existingId = config.remote.apiClient.backendId
-    const existingKey = config.remote.apiClient.apiKey
-
-    // If we have existing credentials, verify they still work on the server.
-    // If the stored key is masked (from a previous bug), force re-registration.
-    if (existingId && existingKey && existingKey !== '********') {
-      const exists = await this.checkBackendExists(cleanUrl, existingId)
-      if (exists) {
-        log.info(`[ApiClient] Backend ${existingId} already exists on server, reusing`)
-        return { backendId: existingId, apiKey: existingKey }
-      }
-      log.info(`[ApiClient] Backend ${existingId} no longer exists on server, re-registering`)
-    }
-
-    // Create a new API backend on the server
-    const hostname = os.hostname()
-    const newApiKey = crypto.randomUUID()
-    const body = JSON.stringify({
-      name: `Desktop-${hostname}`,
-      backendType: 'api',
-      configData: {
-        api_key: newApiKey,
-      },
-    })
-
-    const result = await this.httpRequest(cleanUrl, 'POST', '/api/backends/', body)
-    const data = JSON.parse(result)
-
-    const backendId = data.id as string
-    // Server always masks api_key in response (returns "********"), so use the
-    // key we generated. Only trust the response if it differs from the mask.
-    const returnedKey = data.configData?.api_key as string | undefined
-    const apiKey = (returnedKey && returnedKey !== '********') ? returnedKey : newApiKey
-    if (!backendId) {
-      throw new Error('Server did not return backend ID')
-    }
-
-    log.info(`[ApiClient] Registered backend: ${backendId}`)
-    return { backendId, apiKey }
-  }
-
-  // ---------------------------------------------------------------------------
-  // WebSocket connection
-  // ---------------------------------------------------------------------------
-
-  private connect(url: string, apiKey: string): Promise<void> {
+  private openSocket(url: string, serverUrl: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(url)
       this.ws = ws
@@ -240,8 +194,8 @@ export class ApiClientManager {
       }, 15000)
 
       ws.onopen = () => {
-        log.info('[ApiClient] WebSocket opened, sending auth')
-        ws.send(JSON.stringify({ type: 'auth', api_key: apiKey }))
+        log.info(`[ApiClient] WebSocket opened (backend=${this.backendId}), sending auth`)
+        ws.send(JSON.stringify({ type: 'auth', api_key: this.apiKey }))
       }
 
       ws.onmessage = (event) => {
@@ -255,13 +209,13 @@ export class ApiClientManager {
             this._connecting = false
             this._connected = true
             this.reconnectDelay = 5000
-            log.info('[ApiClient] Authenticated successfully')
+            log.info(`[ApiClient] Authenticated successfully (backend=${this.backendId})`)
 
             // Send client info
             ws.send(JSON.stringify({
               type: 'register_info',
               info: {
-                root_dir: this.currentRootDir,
+                root_dir: this.rootDir,
                 hostname: os.hostname(),
                 platform: os.platform(),
                 pid: process.pid,
@@ -271,7 +225,7 @@ export class ApiClientManager {
             this.broadcastStatus()
             resolve()
           } else if (msgType === 'welcome') {
-            log.info(`[ApiClient] Server: ${msg.message || 'welcome'}`)
+            log.info(`[ApiClient] Server (backend=${this.backendId}): ${msg.message || 'welcome'}`)
           } else if (msgType === 'command') {
             this.handleCommand(ws, msg as ClientCommand)
           } else {
@@ -283,7 +237,7 @@ export class ApiClientManager {
       }
 
       ws.onerror = (event) => {
-        log.error('[ApiClient] WebSocket error:', event)
+        log.error(`[ApiClient] WebSocket error (backend=${this.backendId}):`, event)
         clearTimeout(timeout)
         if (!authDone) {
           this._connecting = false
@@ -293,7 +247,7 @@ export class ApiClientManager {
       }
 
       ws.onclose = (event) => {
-        log.info(`[ApiClient] WebSocket closed (code=${event.code}, reason=${event.reason})`)
+        log.info(`[ApiClient] WebSocket closed (backend=${this.backendId}, code=${event.code}, reason=${event.reason})`)
         clearTimeout(timeout)
         const wasConnected = this._connected
         this.ws = null
@@ -306,25 +260,30 @@ export class ApiClientManager {
         }
 
         // Auto-reconnect if connection drops after being established
-        if (wasConnected && !this.stopping && this.lastConfig) {
-          this.scheduleReconnect(this.lastConfig)
+        if (wasConnected && !this.stopping) {
+          this.scheduleReconnect(serverUrl)
         }
       }
     })
   }
 
-  private scheduleReconnect(config: AppConfig): void {
+  private scheduleReconnect(serverUrl: string): void {
     if (this.stopping || this.reconnectTimer) return
 
-    log.info(`[ApiClient] Reconnecting in ${this.reconnectDelay / 1000}s ...`)
+    log.info(`[ApiClient] Reconnecting backend=${this.backendId} in ${this.reconnectDelay / 1000}s ...`)
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
       if (!this.stopping) {
-        this.start(config).catch(() => {
+        this.connect(serverUrl).catch(() => {
           this.reconnectDelay = Math.min(this.reconnectDelay * 2, 60000)
         })
       }
     }, this.reconnectDelay)
+  }
+
+  private broadcastStatus(): void {
+    // Delegate to the manager-level broadcast (reads config for full list).
+    ApiClientManager.getInstance().broadcastStatus()
   }
 
   // ---------------------------------------------------------------------------
@@ -898,7 +857,7 @@ export class ApiClientManager {
     }
 
     if (fs.existsSync(base) && fs.statSync(base).isFile()) {
-      const displayPath = '/workspace/' + path.relative(this.currentRootDir, base).replace(/\\/g, '/')
+      const displayPath = '/workspace/' + path.relative(this.rootDir, base).replace(/\\/g, '/')
       await searchFile(base, displayPath)
     } else if (fs.existsSync(base) && fs.statSync(base).isDirectory()) {
       for await (const [fp, isDir] of this.walkDir(base, -1, 1, mergedIgnore)) {
@@ -907,7 +866,7 @@ export class ApiClientManager {
         if (++scannedCount % 128 === 0) {
           await new Promise<void>(resolve => setImmediate(resolve))
         }
-        const relPath = '/workspace/' + path.relative(this.currentRootDir, fp).replace(/\\/g, '/')
+        const relPath = '/workspace/' + path.relative(this.rootDir, fp).replace(/\\/g, '/')
         await searchFile(fp, relPath)
       }
     }
@@ -943,7 +902,7 @@ export class ApiClientManager {
       if (!this.fnmatch(rel, effectivePattern)) continue
       try {
         const stat = await fs.promises.stat(fp)
-        const vp = '/workspace/' + path.relative(this.currentRootDir, fp).replace(/\\/g, '/')
+        const vp = '/workspace/' + path.relative(this.rootDir, fp).replace(/\\/g, '/')
         results.push({
           path: vp,
           is_dir: false,
@@ -1034,7 +993,7 @@ export class ApiClientManager {
       const execOpts = {
         timeout: timeoutMs,
         maxBuffer: 100 * 1024 * 1024,
-        cwd: this.currentRootDir,
+        cwd: this.rootDir,
         encoding: 'buffer' as const,
       }
       const { stdout, stderr } = process.platform === 'win32'
@@ -1159,15 +1118,15 @@ export class ApiClientManager {
     }
 
     if (requestedPath === '/') {
-      return path.normalize(this.currentRootDir)
+      return path.normalize(this.rootDir)
     }
 
     const segments = requestedPath.split('/').filter(s => s && s !== '.' && s !== '..')
-    const resolved = path.join(this.currentRootDir, ...segments)
+    const resolved = path.join(this.rootDir, ...segments)
     const normalized = path.normalize(resolved)
 
     // Prevent path traversal
-    if (!normalized.startsWith(path.normalize(this.currentRootDir))) {
+    if (!normalized.startsWith(path.normalize(this.rootDir))) {
       throw new Error(`Path traversal not allowed: ${requestedPath}`)
     }
     return normalized
@@ -1281,7 +1240,7 @@ export class ApiClientManager {
           const lt = (pdata.lines?.text || '').replace(/\n$/, '')
           if (ln == null) continue
 
-          const relPath = path.relative(this.currentRootDir, ftext).replace(/\\/g, '/')
+          const relPath = path.relative(this.rootDir, ftext).replace(/\\/g, '/')
           matches.push({
             path: '/workspace/' + relPath,
             line: ln,
@@ -1346,14 +1305,178 @@ export class ApiClientManager {
     const regex = new RegExp('^' + re + '$')
     return regex.test(name)
   }
+}
 
-  /** Convert http:// to ws:// and https:// to wss:// */
-  private httpToWs(url: string): string {
-    const clean = url.replace(/\/+$/, '')
-    if (clean.startsWith('https://')) return clean.replace('https://', 'wss://')
-    if (clean.startsWith('http://')) return clean.replace('http://', 'ws://')
-    return clean
+// ---------------------------------------------------------------------------
+// ApiClientManager (Singleton) — manages multiple API client connections
+// ---------------------------------------------------------------------------
+
+export class ApiClientManager {
+  private static instance: ApiClientManager | null = null
+
+  private connections = new Map<string, ApiClientConnection>()
+
+  private constructor() {}
+
+  static getInstance(): ApiClientManager {
+    if (!ApiClientManager.instance) {
+      ApiClientManager.instance = new ApiClientManager()
+    }
+    return ApiClientManager.instance
   }
+
+  // ---------------------------------------------------------------------------
+  // Public API
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Start all API clients that have autoStart enabled and are registered.
+   * Tolerant of individual failures — only throws if every client failed.
+   */
+  async start(config: AppConfig): Promise<void> {
+    const clients = (config.remote?.apiClients ?? [])
+      .filter(c => c.autoStart && c.backendId && c.apiKey)
+
+    let firstError: Error | null = null
+    let anyStarted = false
+    for (const c of clients) {
+      try {
+        await this.startOne(config, c.backendId)
+        anyStarted = true
+      } catch (err) {
+        if (!firstError) firstError = err instanceof Error ? err : new Error(String(err))
+        log.warn(`[ApiClient] Failed to auto-start backend=${c.backendId}:`, err)
+      }
+    }
+    if (!anyStarted && firstError && clients.length > 0) {
+      throw firstError
+    }
+  }
+
+  /** Start a single API client by backend ID. */
+  async startOne(config: AppConfig, backendId: string): Promise<void> {
+    const client = (config.remote?.apiClients ?? []).find(c => c.backendId === backendId)
+    if (!client) {
+      throw new Error(`API client '${backendId}' not found in config`)
+    }
+    if (!client.apiKey) {
+      throw new Error(`API client '${backendId}' is missing an API key. Register with the server first.`)
+    }
+
+    let conn = this.connections.get(backendId)
+    if (!conn) {
+      conn = new ApiClientConnection(client.backendId, client.apiKey, client.rootDir || os.homedir(), client.name)
+      this.connections.set(backendId, conn)
+    } else {
+      conn.configure(client.rootDir || os.homedir(), client.name)
+    }
+
+    await conn.connect(config.remote.url)
+  }
+
+  /** Stop all API clients. */
+  async stop(): Promise<void> {
+    await Promise.all([...this.connections.values()].map(c => c.disconnect()))
+  }
+
+  /** Stop a single API client by backend ID. */
+  async stopOne(backendId: string): Promise<void> {
+    const conn = this.connections.get(backendId)
+    if (conn) {
+      await conn.disconnect()
+    }
+  }
+
+  /** Stop and forget a client (e.g. removed from config). */
+  async remove(backendId: string): Promise<void> {
+    const conn = this.connections.get(backendId)
+    if (conn) {
+      await conn.disconnect()
+    }
+    this.connections.delete(backendId)
+  }
+
+  /** Get status for every configured API client (aligned with config order). */
+  getStatus(config?: AppConfig): ApiClientStatus[] {
+    const list = config?.remote?.apiClients ?? []
+    if (list.length === 0) {
+      // Fallback: report live connections only
+      return [...this.connections.values()].map(c => c.getStatus())
+    }
+    return list.map(c => {
+      const conn = c.backendId ? this.connections.get(c.backendId) : undefined
+      if (conn) {
+        return conn.getStatus()
+      }
+      return {
+        running: false,
+        connected: false,
+        connecting: false,
+        backendId: c.backendId || undefined,
+        name: c.name || undefined,
+        rootDir: c.rootDir || undefined,
+        error: c.backendId ? 'Not connected' : undefined,
+      }
+    })
+  }
+
+  /**
+   * Register this PC as a new API backend on the remote server.
+   * Always creates a fresh backend (the settings UI calls this per new card).
+   */
+  async register(serverUrl: string, rootDir: string, name?: string): Promise<{ backendId: string; apiKey: string }> {
+    const cleanUrl = serverUrl.replace(/\/+$/, '')
+    const hostname = os.hostname()
+    const newApiKey = crypto.randomUUID()
+    const label = (name || '').trim()
+    const baseName = label ? `Desktop-${hostname}-${label}` : `Desktop-${hostname}`
+
+    let backendId = ''
+    let apiKey: string = newApiKey
+    let lastErr: unknown = null
+
+    // The server enforces unique backend names — retry with a suffix on collision.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const candidate = attempt === 0 ? baseName : `${baseName}-${attempt + 1}`
+      const body = JSON.stringify({
+        name: candidate,
+        backendType: 'api',
+        configData: {
+          api_key: newApiKey,
+        },
+      })
+      try {
+        const result = await this.httpRequest(cleanUrl, 'POST', '/api/backends/', body)
+        const data = JSON.parse(result)
+        backendId = data.id as string
+        // Server always masks api_key in response (returns "********"), so use
+        // the key we generated. Only trust the response if it differs from the mask.
+        const returnedKey = data.configData?.api_key as string | undefined
+        apiKey = (returnedKey && returnedKey !== '********') ? returnedKey : newApiKey
+        if (!backendId) {
+          throw new Error('Server did not return backend ID')
+        }
+        log.info(`[ApiClient] Registered backend: ${backendId} (name=${candidate})`)
+        break
+      } catch (e) {
+        lastErr = e
+        const msg = String((e as Error)?.message || e)
+        if (msg.includes('already exists') || msg.includes('Backend name already exists')) {
+          continue
+        }
+        throw e
+      }
+    }
+
+    if (!backendId) {
+      throw new Error(`Failed to register backend: ${String(lastErr)}`)
+    }
+    return { backendId, apiKey }
+  }
+
+  // ---------------------------------------------------------------------------
+  // HTTP helpers
+  // ---------------------------------------------------------------------------
 
   /** Make an HTTP request to the remote server. */
   private httpRequest(baseUrl: string, method: string, urlPath: string, body?: string): Promise<string> {
@@ -1401,22 +1524,13 @@ export class ApiClientManager {
     })
   }
 
-  /** Check if a backend exists on the remote server. */
-  private async checkBackendExists(serverUrl: string, backendId: string): Promise<boolean> {
-    try {
-      await this.httpRequest(serverUrl, 'GET', `/api/backends/${backendId}`)
-      return true
-    } catch {
-      return false
-    }
-  }
-
-  /** Broadcast status change to all renderer windows. */
-  private broadcastStatus(): void {
-    const status = this.getStatus()
+  /** Broadcast status changes to all renderer windows. */
+  broadcastStatus(): void {
+    const config = AppConfigManager.getInstance().load()
+    const statuses = this.getStatus(config)
     BrowserWindow.getAllWindows().forEach(win => {
       if (!win.isDestroyed()) {
-        win.webContents.send('apibackend:status', status)
+        win.webContents.send('apibackend:status', statuses)
       }
     })
   }
