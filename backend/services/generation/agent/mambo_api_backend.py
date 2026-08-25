@@ -660,6 +660,8 @@ class MamboAPIBackend(BackendProtocol):
             ))
 
     async def aglob(self, pattern: str, path: VirtualPath = VirtualPath("/workspace")) -> GlobResult:
+        if not pattern:
+            return GlobResult(error=BackendError(code=ErrorCode.INVALID, message="搜索模式不能为空"))
         norm = self._normalize_path(path)
         result = await self._run_ws_call(
             "glob",

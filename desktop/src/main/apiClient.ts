@@ -20,6 +20,7 @@ import https from 'https'
 import type { AppConfig } from './config'
 import { AppConfigManager } from './config'
 import log from './log'
+import fg from 'fast-glob'
 
 const execFileAsync = promisify(execFileCb)
 const execAsync = promisify(execCb)
@@ -881,8 +882,14 @@ class ApiClientConnection {
   }
 
   private async handleGlobFiles(params: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const pattern = (params.pattern as string) || '*'
+    const pattern = (params.pattern as string) || ''
     const vpath = (params.path as string) || '/workspace'
+
+    // 空 pattern 直接拒绝（对齐 local.py 与 handleGrepFiles：INVALID，而非默认 '*' 返回根目录）
+    if (!pattern) {
+      return { error: `搜索模式不能为空`, error_code: 'INVALID' }
+    }
+
     const base = this.resolvePath(vpath)
 
     if (!fs.existsSync(base)) {
@@ -895,21 +902,47 @@ class ApiClientConnection {
     const results: object[] = []
     const effectivePattern = pattern.replace(/^\//, '')
 
-    // Default ignore dirs are applied as an anti-freeze guard on huge trees.
-    for await (const [fp, isDir] of this.walkDir(base, -1, 1, DEFAULT_IGNORE_DIRS)) {
-      if (isDir) continue
-      const rel = path.relative(base, fp).replace(/\\/g, '/')
-      if (!this.fnmatch(rel, effectivePattern)) continue
+    // fast-glob：与 pathlib.Path.glob() 语义对齐（本地后端 local.py 即为 pathlib 实现）。
+    //  - dot:true        使 * 匹配隐藏项（pathlib 的 fnmatch 无点文件特判）
+    //  - onlyFiles:false 目录也作为匹配结果返回
+    //  - ignore          剪枝巨型依赖/虚拟目录（对应原 walkDir 的 DEFAULT_IGNORE_DIRS 防冻结剪枝）
+    const entries = await fg(effectivePattern, {
+      cwd: base,
+      onlyFiles: false,
+      dot: true,
+      unique: true,
+      followSymbolicLinks: false,
+      suppressErrors: true,
+      ignore: DEFAULT_IGNORE_DIRS.flatMap(d => [`**/${d}`, `**/${d}/**`]),
+    })
+
+    // pathlib 桥接：末尾 '**' 只匹配目录（fast-glob 的 '**' 是 globstar、含文件）；
+    // 裸 '**' 还额外包含基准目录自身（pathlib 返回 '.'）。
+    let rels = entries.map(e => e.split('\\').join('/'))
+    const dirOnly = effectivePattern === '**' || effectivePattern.endsWith('/**')
+    if (dirOnly) {
+      rels = rels.filter(r => {
+        try { return fs.statSync(path.join(base, r)).isDirectory() } catch { return false }
+      })
+    }
+    if (effectivePattern === '**') {
+      rels = ['.', ...rels]
+    }
+
+    for (const rel of rels) {
+      if (results.length >= MAX_WALK_FILES) break
       try {
-        const stat = await fs.promises.stat(fp)
-        const vp = '/workspace/' + path.relative(this.rootDir, fp).replace(/\\/g, '/')
+        const physical = path.join(base, rel)
+        const stat = await fs.promises.stat(physical)
+        const isDir = stat.isDirectory()
+        const vp = '/workspace/' + path.relative(this.rootDir, physical).replace(/\\/g, '/')
         results.push({
           path: vp,
-          is_dir: false,
-          size: stat.size,
+          is_dir: isDir,
+          size: isDir ? 0 : stat.size,
           modified_at: stat.mtime.toISOString(),
         })
-      } catch { /* skip */ }
+      } catch { /* skip unreadable entries */ }
     }
 
     results.sort((a: any, b: any) => a.path.localeCompare(b.path))
