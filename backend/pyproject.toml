@@ -7,7 +7,9 @@ where = ["."]
 include = ["*"]
 
 [tool.setuptools.dynamic]
-version = { attr = "backend._version.__version__" }
+# 版本号从 _version.txt 文件读取（路径相对 pyproject.toml），构建时无需 import 任何模块，
+# 避免 uv editable 构建（PEP 660）cwd 不在源码目录时找不到 backend 包
+version = { file = ["_version.txt"] }
 
 [project]
 name = "mambo-chat-backend"
