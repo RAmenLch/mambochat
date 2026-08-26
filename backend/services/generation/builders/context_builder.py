@@ -818,4 +818,9 @@ class MessageContextBuilder:
                 additional_kwargs={"lc_source": "summarization"},
             ),
             "file_path": None,
+            # 重建事件仅用于同步 LangGraph state,下游 middleware 只消费
+            # cutoff_index 和 summary_message;last_summarized_message 是
+            # 实时压缩时用于落库 ZipHistory 定位的,此处无从恢复,补 None 满足
+            # SummarizationEvent(TypedDict) 的必填校验。
+            "last_summarized_message": None,
         }

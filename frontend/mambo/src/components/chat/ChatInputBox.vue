@@ -7,6 +7,7 @@
       :model-value="multiPartDraft"
       :active-index="activePartitionIndex"
       :completion-agent-id="agentId"
+      :content-enabled="contentEnabled"
       @update:model-value="(val) => $emit('update:multiPartDraft', val)"
       @update:active-index="(val) => $emit('update:activePartitionIndex', val)"
       class="input-field"
@@ -20,6 +21,7 @@
         @update:model-value="(val) => $emit('update:singlePartDraft', val)"
         :monaco-options="monacoOptions"
         :completion-agent-id="agentId"
+        :content-enabled="contentEnabled"
         @submit="$emit('send')"
         @paste-file="(files) => $emit('files-pasted', files)"
       />
@@ -93,6 +95,10 @@ const props = defineProps({
   agentId: {
     type: String,
     default: null,
+  },
+  contentEnabled: {
+    type: Boolean,
+    default: true,
   },
 })
 

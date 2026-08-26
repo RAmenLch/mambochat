@@ -109,7 +109,8 @@
           :is-generating="isGenerating"
           :is-send-button-disabled="isSendButtonDisabled"
           :is-pending-review="isPendingReview"
-          :agent-id="resourceCompletionAgentId"
+          :agent-id="completionAgentId"
+          :content-enabled="contentCompletionEnabled"
           v-model:singlePartDraft="singlePartDraft"
           v-model:multiPartDraft="multiPartDraft"
           :active-partition-index="activePartitionIndex"
@@ -489,9 +490,9 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', onWindowResize);
 });
 
-// 仅当当前会话 Agent 挂载了 ResourceBackend 时才启用资源补全，
+// 当前会话 Agent 挂载了可补全 Backend（resource/local/ssh/api）时启用路径补全，
 // 避免未挂载的 Agent 触发补全接口
-const resourceCompletionAgentId = computed(() => {
+const completionAgentId = computed(() => {
   const chat = currentChat.value;
   if (!chat?.agentId) return null;
 
@@ -501,10 +502,32 @@ const resourceCompletionAgentId = computed(() => {
   if (!agent?.backendIds || agent.backendIds.length === 0) return null;
 
   const mountedIds = new Set(agent.backendIds);
-  const hasResourceBackend = backendStore.backendList.some(
-    (b) => b.backendType === 'resource' && mountedIds.has(b.id),
+  const hasPathBackend = backendStore.backendList.some(
+    (b) =>
+      ['resource', 'local', 'ssh', 'api'].includes(b.backendType) &&
+      mountedIds.has(b.id),
   );
-  return hasResourceBackend ? chat.agentId : null;
+  return hasPathBackend ? chat.agentId : null;
+});
+
+// 内容续写仅 real backend 为 resource 时可用（与后端分派规则一致），
+// local/ssh/api 只做路径补全，避免每次击键白打 content 接口
+const contentCompletionEnabled = computed(() => {
+  const chat = currentChat.value;
+  if (!chat?.agentId) return false;
+
+  const agent =
+    agentStore.allAgents.find((a) => a.id === chat.agentId) ||
+    agentStore.agentList.find((a) => a.id === chat.agentId);
+  if (!agent?.backendIds || agent.backendIds.length === 0) return false;
+
+  const mountedIds = new Set(agent.backendIds);
+  const mountedBackends = backendStore.backendList.filter((b) => mountedIds.has(b.id));
+  if (mountedBackends.length === 0) return false;
+
+  const realBackend =
+    mountedBackends.find((b) => b.id === agent.defaultBackendId) || mountedBackends[0];
+  return realBackend?.backendType === 'resource';
 });
 
 const isTitleRefreshing = computed(() => currentChat.value?.id ? refreshingTitleChatIds.value.has(currentChat.value.id) : false);
