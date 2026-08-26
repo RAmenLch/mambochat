@@ -222,13 +222,20 @@ async def fetch_models_from_provider(
             if context_length is not None: meta_dict['context_length'] = context_length
             if max_output_tokens is not None: meta_dict['max_output_tokens'] = max_output_tokens
 
-            # 过滤服务商返回的参数列表，仅保留系统支持的参数
-            if supported_parameters and isinstance(supported_parameters, list):
-                filtered_parameters = [
-                    key for key in supported_parameters if key in valid_parameter_keys
-                ]
-                if filtered_parameters:
-                    meta_dict['supported_parameters'] = filtered_parameters
+            # 过滤服务商返回的参数列表，仅保留系统支持的参数。
+            # 兼容两种格式：list（普通 /models）与 dict 描述符（images/models 风格，取键名）
+            if supported_parameters:
+                raw_keys = []
+                if isinstance(supported_parameters, list):
+                    raw_keys = supported_parameters
+                elif isinstance(supported_parameters, dict):
+                    raw_keys = list(supported_parameters.keys())
+                if raw_keys:
+                    filtered_parameters = [
+                        key for key in raw_keys if key in valid_parameter_keys
+                    ]
+                    if filtered_parameters:
+                        meta_dict['supported_parameters'] = filtered_parameters
 
             # 仅当 meta_dict 非空时才创建 meta_config 对象
             meta_config_obj = schemas.AIModelMetaConfig(**meta_dict) if meta_dict else None

@@ -18,7 +18,6 @@ from backend.schemas.enums import FileManagementType, ResourceType
 from backend.services.file_service import FileService
 from backend.services.stream_manager_service import stream_manager
 from backend.services import maintenance
-from backend.checkpointer import CHECKPOINTER_DB_FILE
 from backend.config.timezone_config import get_configured_now
 
 logging.basicConfig(level=logging.INFO)
@@ -44,6 +43,8 @@ _checkpoint_cleanup_state = {
 def _probe_checkpoints_freelist_bytes() -> int:
     """探测 checkpoints.db 当前可回收的空闲字节数（不执行 VACUUM）。"""
     try:
+        # 延迟导入：checkpointer 连带加载 langgraph 等重依赖
+        from backend.checkpointer import CHECKPOINTER_DB_FILE
         conn = sqlite3.connect(str(CHECKPOINTER_DB_FILE.resolve()), timeout=2, isolation_level=None)
         try:
             page_size = conn.execute("PRAGMA page_size").fetchone()[0]
@@ -347,6 +348,8 @@ def _vacuum_checkpoints_db_sync(db_path: str, progress_cb=None) -> bool:
 
 async def _run_vacuum_background() -> None:
     """后台执行 checkpoints.db VACUUM 并维护清理状态（供手动/自动共用）。"""
+    # 延迟导入：checkpointer 连带加载 langgraph 等重依赖
+    from backend.checkpointer import CHECKPOINTER_DB_FILE
     db_path = str(CHECKPOINTER_DB_FILE.resolve())
     size_before = os.path.getsize(db_path)
     try:

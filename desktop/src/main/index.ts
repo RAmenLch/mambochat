@@ -16,6 +16,7 @@ import { openDesktopSettings, setupDesktopSettingsIpc } from './desktopSettings'
 import {DesktopLocale, getDesktopLocale, translate} from './i18n'
 import log, { getLogPath } from './log'
 import { setupDataDirectories } from './paths'
+import { isRuntimeExtracted } from './runtime-extract'
 
 // Remove the default Electron application menu
 Menu.setApplicationMenu(null)
@@ -96,7 +97,7 @@ async function bootstrap(): Promise<void> {
 
   // Set up persistent data directories (junctions) before anything else.
   // This ensures DB/uploads survive uninstalls. No-op in dev mode.
-  setupDataDirectories()
+  setupDataDirectories(config.local.dataDir)
 
   // NOTE: Connection: close for Docker port forwarding is handled inside
   // the gateway's proxyRequest() — NOT here. Modifying request headers
@@ -129,6 +130,19 @@ async function bootstrap(): Promise<void> {
     // Backend target will be set once backend starts
   }
 
+  // Start the local backend as early as possible so its boot (runtime
+  // extraction, python startup) overlaps with window creation and frontend
+  // loading instead of being serialized after them.
+  if (config.mode === 'local') {
+    startLocalBackend(config)
+  }
+
+  // When the backend crashes unexpectedly, open the settings window so the
+  // user can see what happened (registered before the backend can exit).
+  BackendProcessManager.getInstance().onUnexpectedExit = () => {
+    openDesktopSettings()
+  }
+
   // Create main window
   mainWindow = await createMainWindow()
 
@@ -142,19 +156,11 @@ async function bootstrap(): Promise<void> {
     openDesktopSettings()
   })
 
-  // Start local backend if configured (non-blocking for window display)
-  if (config.mode === 'local') {
-    startLocalBackend(config)
-  } else if (config.mode === 'remote' && config.remote.apiClient.autoStart && config.remote.apiClient.backendId) {
-    // Start API client in remote mode if auto-start is enabled and registered
+  // Start API clients in remote mode if auto-start is enabled and registered
+  if (config.mode === 'remote' && (config.remote.apiClients ?? []).some(c => c.autoStart && c.backendId && c.apiKey)) {
     ApiClientManager.getInstance().start(config).catch(err => {
       log.warn('[Main] API client auto-start failed:', err)
     })
-  }
-
-  // When the backend crashes unexpectedly, open the settings window so the user can see what happened
-  BackendProcessManager.getInstance().onUnexpectedExit = () => {
-    openDesktopSettings()
   }
 }
 
@@ -294,6 +300,12 @@ function setupIpcHandlers(configManager: AppConfigManager, locale: DesktopLocale
   ipcMain.handle('app:getPlatform', () => process.platform)
   ipcMain.handle('app:getLogPath', () => getLogPath())
 
+  // Whether the bundled python runtime is already extracted (definitive answer,
+  // lets the renderer skip the 2s extraction-wait safety timeout on start/refresh)
+  ipcMain.handle('runtime:is-extraction-ready', () => {
+    return isRuntimeExtracted()
+  })
+
   // Gateway control
   ipcMain.handle('gateway:status', () => {
     return GatewayServer.getInstance().getStatus()
@@ -332,11 +344,21 @@ function setupIpcHandlers(configManager: AppConfigManager, locale: DesktopLocale
     }
   })
 
-  // API Client control
+  // API Client control (multiple clients supported)
   ipcMain.handle('apibackend:start', async () => {
     const config = configManager.load()
     try {
       await ApiClientManager.getInstance().start(config)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('apibackend:startOne', async (_event, backendId: string) => {
+    const config = configManager.load()
+    try {
+      await ApiClientManager.getInstance().startOne(config, backendId)
       return { success: true }
     } catch (error) {
       return { success: false, error: String(error) }
@@ -348,18 +370,34 @@ function setupIpcHandlers(configManager: AppConfigManager, locale: DesktopLocale
     return { success: true }
   })
 
-  ipcMain.handle('apibackend:status', () => {
-    return ApiClientManager.getInstance().getStatus()
+  ipcMain.handle('apibackend:stopOne', async (_event, backendId: string) => {
+    await ApiClientManager.getInstance().stopOne(backendId)
+    return { success: true }
   })
 
-  ipcMain.handle('apibackend:register', async (_event, serverUrl: string, rootDir: string) => {
+  ipcMain.handle('apibackend:remove', async (_event, backendId: string) => {
+    await ApiClientManager.getInstance().remove(backendId)
+    return { success: true }
+  })
+
+  ipcMain.handle('apibackend:status', () => {
+    const config = configManager.load()
+    return ApiClientManager.getInstance().getStatus(config)
+  })
+
+  ipcMain.handle('apibackend:register', async (_event, serverUrl: string, rootDir: string, name?: string) => {
     try {
-      const result = await ApiClientManager.getInstance().register(serverUrl, rootDir)
-      // Save credentials to config
+      const result = await ApiClientManager.getInstance().register(serverUrl, rootDir, name)
+      // Append new credentials to the config client list
       const config = configManager.load()
-      config.remote.apiClient.backendId = result.backendId
-      config.remote.apiClient.apiKey = result.apiKey
-      config.remote.apiClient.rootDir = rootDir
+      if (!config.remote.apiClients) config.remote.apiClients = []
+      config.remote.apiClients.push({
+        name: name || '',
+        backendId: result.backendId,
+        apiKey: result.apiKey,
+        rootDir: rootDir,
+        autoStart: false,
+      })
       configManager.save(config)
       return { success: true, backendId: result.backendId, apiKey: result.apiKey }
     } catch (error) {

@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
 from backend.config.timezone_config import get_configured_now
+from backend._version import __version__
 from backend.crud import agent_crud, backend_crud, mcp_crud, provider_crud, resource_crud
 from backend.crud import file_crud
 from backend.exceptions import AppHTTPException
@@ -64,7 +65,7 @@ from backend.utils.path_safe import validate_path_safe_name
 
 FORMAT = "mambochat.agent-package"
 SUPPORTED_FORMAT_VERSION = "1.3.0"
-MAMBOCHAT_VERSION = "1.3.0"
+MAMBOCHAT_VERSION = __version__
 SCHEMA_REF = "./agent_package_schema_v1.json"
 
 MAX_PACKAGE_FILE_SIZE = 100 * 1024 * 1024        # 100 MB：包文件本身

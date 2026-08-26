@@ -98,7 +98,8 @@ class DeepAgentBuiltinToolProvider(BaseToolProvider):
             self,
             tool_call_id: str,
             result_text: str,
-            is_error: bool
+            is_error: bool,
+            media: Optional[List[Dict[str, Any]]] = None
     ) -> AsyncGenerator[BaseInstruction, None]:
 
         sub_id = self._tool_sub_msg_map.get(tool_call_id)

@@ -22,8 +22,6 @@ from backend.exceptions import AppHTTPException
 from backend.routers.settings import get_global_settings
 from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 from backend.schemas.enums import ResourceItemType, ResourceType
-from backend.checkpointer import adelete_thread
-from backend.store import adelete_thread_store
 
 logger = logging.getLogger(__name__)
 
@@ -345,6 +343,9 @@ async def delete_chat(chat_id: str, db: AsyncSession = Depends(get_db)):
     if db_chat is None:
         raise HTTPException(status_code=404, detail="Item not found")
     # 清理所有相关会话的 LangGraph checkpoint 与 Store 数据
+    # 延迟导入：checkpointer / store 连带加载 langgraph 等重依赖
+    from backend.checkpointer import adelete_thread
+    from backend.store import adelete_thread_store
     for cid in chat_ids_to_cleanup:
         try:
             await adelete_thread(cid)

@@ -173,6 +173,7 @@ import type { Chat, ChatUpdate, AIModel, Resource, LLMParameterDefinition } from
 import ResourceSelectorDialog from '../common/dialogs/ResourceSelectorDialog.vue';
 import MountedResourceTags from '@/components/common/MountedResourceTags.vue';
 import { useChatListStore } from '@/stores/chatListStore';
+import { isDefaultChatName } from '@/utils/chatName';
 const chatListStore = useChatListStore();
 const { scrollToTopIfStarred } = useModelSelectScroll();
 const modelSelectRef = ref();
@@ -293,7 +294,7 @@ const chatConfigSnapshot = computed(() => {
 
 watch(chatConfigSnapshot, async (newConfig, oldConfig) => {
   if (newConfig) {
-    chatSettingsForm.name = newConfig.name;
+    chatSettingsForm.name = isDefaultChatName(newConfig.name) ? t('chat.sidebar.initChatName') : newConfig.name;
     chatSettingsForm.aiModelId = newConfig.aiModelId;
     chatSettingsForm.systemPrompt = newConfig.systemPrompt;
 
@@ -443,13 +444,18 @@ function handleSaveSettings() {
   // 3. 合并生成最终的 resource_prompt_list
   const resourcePromptList = [...drawerResourceIds, ...currentKbIds];
 
-  emit('save', {
-    name: chatSettingsForm.name,
+  const payload: ChatUpdate = {
     aiModelId: chatSettingsForm.aiModelId,
     systemPrompt: chatSettingsForm.systemPrompt,
     modelParameters: finalModelParameters,
     resource_prompt_list: resourcePromptList.length > 0 ? resourcePromptList : null,
-  });
+  };
+  // 与 header 一致:输入等于当前显示标题 = 未修改 → 不提交 name,保留后端默认 Key
+  const displayTitle = isDefaultChatName(props.chatData.name) ? t('chat.sidebar.initChatName') : props.chatData.name;
+  if (chatSettingsForm.name && chatSettingsForm.name.trim() !== displayTitle) {
+    payload.name = chatSettingsForm.name.trim();
+  }
+  emit('save', payload);
 }
 async function handleMountKnowledgeBase(resources: Resource[]) {
   if (!props.chatData) return;

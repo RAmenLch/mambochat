@@ -13,6 +13,8 @@ from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import text, select
 
+from backend._version import __version__
+
 # --- Alembic 导入 ---
 from alembic.config import Config
 from alembic import command
@@ -20,8 +22,6 @@ from alembic import command
 from backend.config.timezone_config import TZ, get_configured_now
 from backend.database import engine, AsyncSessionLocal
 from backend.models.base_model import Base
-from backend.checkpointer import init_checkpointer, close_checkpointer
-from backend.store import init_store, close_store
 from backend.routers import (
     chat_management,
     chat_interaction,
@@ -92,7 +92,12 @@ _PRELOAD_MODULES = [
     "langchain_google_genai",
     "deepagents",
     "mambo_agents.backends.ssh",
+    "mambo_agents.backends.schemas",
+    "mambo_agents.backends.protocol",
+    "backend.utils.ssh_utils",
     "backend.services.generation.agent.ssh_backend",
+    "backend.services.mcp_connection_manager",
+    "backend.services.mcp_service",
     "jieba",
 ]
 
@@ -201,6 +206,9 @@ async def lifespan(app: FastAPI):
         await seed_builtin_agents(db)
 
     # 初始化底层持久化 Checkpointer
+    # 延迟导入：checkpointer / store 连带加载 langgraph 等重依赖
+    from backend.checkpointer import init_checkpointer, close_checkpointer
+    from backend.store import init_store, close_store
     await init_checkpointer()
 
     # 初始化共享 LangGraph Store（StoreBackend + VersionStore 共用）
@@ -225,7 +233,7 @@ async def lifespan(app: FastAPI):
     await close_store()
 
 
-app = FastAPI(lifespan=lifespan, version="1.3.0")
+app = FastAPI(lifespan=lifespan, version=__version__)
 
 # --- 注册自定义异常处理器（必须在路由挂载前注册） ---
 # AppHTTPException 携带 error_code，前端拦截器据此查找 i18n 翻译

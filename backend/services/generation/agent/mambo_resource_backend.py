@@ -68,6 +68,7 @@ from mambo_agents.backends.protocol import (
     GrepMatch,
     GrepResult,
     LsResult,
+    MultimodalDescriber,
     ReadResult,
     ReadSummarizer,
     Result,
@@ -268,12 +269,14 @@ class MamboResourceBackend(BackendProtocol):
         max_read_chars: int = 100_000,
         max_grep_matches: int = 1000,
         summarizer: ReadSummarizer | None = None,
+        multimodal_describer: MultimodalDescriber | None = None,
         enable_version_editing: bool = True,
     ) -> None:
         super().__init__(
             max_read_chars=max_read_chars,
             max_grep_matches=max_grep_matches,
             summarizer=summarizer,
+            multimodal_describer=multimodal_describer,
         )
 
         if edit_whitelist is not None and edit_blacklist is not None:
@@ -771,6 +774,7 @@ class MamboResourceBackend(BackendProtocol):
         if _apply_max_chars:
             result = self._apply_read_limit(result, file_path)
         result = validate_multimodal_content(result, file_path)
+        result = self._maybe_describe(result, file_path)
         return result
 
     async def _aread_raw_impl(

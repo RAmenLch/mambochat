@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 from typing import Tuple, List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_core.tools import BaseTool
@@ -30,6 +31,8 @@ from backend.services.generation.tools.mambo_builtin_tool_provider import (
 from backend.services.generation.tools.web_search_tool_provider import WebSearchToolProvider
 from backend.schemas.enums import WebSearchMode
 from backend.services.file_service import FileService
+
+logger = logging.getLogger(__name__)
 
 
 class MamboAgentInitializer(AbstractAgentInitializer):
@@ -308,6 +311,9 @@ class MamboAgentInitializer(AbstractAgentInitializer):
                             stream_chunk_timeout=sub_model_stream_chunk_timeout,
                             context_length=sub_model_context_length,
                         )
+                        sub_config.main_model_input_modalities = sorted(
+                            self._parse_input_modalities(sub_model)
+                        )
 
                 sub_configs.append(sub_config)
                 # 排除子代理的 MamboMCPToolProvider——子代理工具调用走
@@ -422,6 +428,76 @@ class MamboAgentInitializer(AbstractAgentInitializer):
                         context_length=sr_context_length,
                     )
 
+        # --- 多模态描述配置解析 ---
+        # 每个模态槽位可独立绑定一个支持该模态的模型。能力未声明的模型视为
+        # 纯文本模型，不参与描述；主模型原生支持的模态在 Builder 中透传。
+        multimodal_describer_models: Dict[str, ModelConfig] = {}
+        mm = mambo_params.multimodal_describer
+        # read 工具额外超时：仅启用多模态描述时生效（read 总超时 = 60 + read_timeout）
+        multimodal_read_timeout = mm.read_timeout if (mm and mm.enabled) else None
+        if mm and mm.enabled:
+            mm_slots: Dict[str, Optional[str]] = {
+                "image": mm.image_model_id,
+                "audio": mm.audio_model_id,
+                "video": mm.video_model_id,
+                "file": mm.file_model_id,
+            }
+            for modality, model_id in mm_slots.items():
+                if not model_id:
+                    continue
+                d_model = await provider_crud.get_model(self.db, model_id)
+                if not d_model or not d_model.provider:
+                    logger.warning(
+                        "多模态描述：模态 %s 的模型 %s 不存在或无服务商，已跳过",
+                        modality, model_id,
+                    )
+                    continue
+                # 能力未声明 → 视为纯文本模型；声明中不含该模态 → 槽位无效
+                if modality not in self._parse_input_modalities(d_model):
+                    logger.warning(
+                        "多模态描述：模型 %s(%s) 不支持模态 %s（能力未声明或声明不含该模态），已跳过",
+                        d_model.modelId, d_model.name, modality,
+                    )
+                    continue
+                proxy_url = None
+                if d_model.provider.use_proxy and is_proxy_enabled:
+                    proxy_url = global_proxy_url
+                api_params = map_model_parameters({})
+                api_params["_worker_type"] = d_model.provider.worker_type
+
+                d_max_retries = global_max_retries
+                d_timeout = global_default_timeout
+                d_stream_chunk_timeout = None
+                d_context_length: Optional[int] = None
+                if d_model.meta_config:
+                    try:
+                        meta = (
+                            json.loads(d_model.meta_config)
+                            if isinstance(d_model.meta_config, str)
+                            else d_model.meta_config
+                        )
+                        d_max_retries = int(meta.get("max_retries", global_max_retries))
+                        raw_t = meta.get("timeout")
+                        d_timeout = int(raw_t) if raw_t is not None else global_default_timeout
+                        raw_sct = meta.get("stream_chunk_timeout")
+                        d_stream_chunk_timeout = float(raw_sct) if raw_sct is not None else None
+                        raw_cl = meta.get("context_length")
+                        d_context_length = int(raw_cl) if raw_cl is not None else None
+                    except (json.JSONDecodeError, ValueError, TypeError):
+                        pass
+
+                multimodal_describer_models[modality] = ModelConfig(
+                    model_id=d_model.modelId,
+                    api_host=d_model.provider.apiHost,
+                    api_key=d_model.provider.apiKey,
+                    proxy_url=proxy_url,
+                    parameters=api_params,
+                    max_retries=d_max_retries,
+                    timeout=d_timeout,
+                    stream_chunk_timeout=d_stream_chunk_timeout,
+                    context_length=d_context_length,
+                )
+
         # --- 任务循环配置解析 (GoalLoopMiddleware) ---
         goal_loop_config: Optional[Dict[str, Any]] = None
         gl = mambo_params.goal_loop
@@ -459,6 +535,8 @@ class MamboAgentInitializer(AbstractAgentInitializer):
             memory_resource_roots=memory_roots if memory_roots else None,
             security_review_config=security_review_config,
             security_review_llm_config=security_review_llm_config,
+            multimodal_describer_models=multimodal_describer_models or None,
+            multimodal_read_timeout=multimodal_read_timeout,
             enable_version_control=enable_vc,
             version_control_config=vc_config,
             goal_loop_config=goal_loop_config,
@@ -487,6 +565,30 @@ class MamboAgentInitializer(AbstractAgentInitializer):
                 continue
             roots[res.name] = res.id
         return roots
+
+    @staticmethod
+    def _parse_input_modalities(model: Any) -> set[str]:
+        """解析模型声明的多模态输入能力。
+
+        能力未声明（meta_config 缺失或无 input_modalities）→ 视为纯文本模型，
+        返回空集。``document`` 归一化为 ``file``（与 mambo_agents 统一 block type 一致）。
+        """
+        meta = model.meta_config
+        if isinstance(meta, str):
+            try:
+                meta = json.loads(meta)
+            except (json.JSONDecodeError, TypeError):
+                return set()
+        if not meta or not isinstance(meta, dict):
+            return set()
+        modalities = meta.get("input_modalities") or []
+        normalized = set()
+        for m in modalities:
+            if m == "document":
+                normalized.add("file")
+            else:
+                normalized.add(m)
+        return normalized
 
     @staticmethod
     def _register_backend_tools(builtin_provider: "MamboAgentBuiltinToolProvider", mounted_backends: List[Dict[str, Any]]) -> None:

@@ -109,7 +109,7 @@ export class BackendProcessManager {
         : ['-m', 'uvicorn', 'backend.main:app', '--host', bindHost, '--port', String(port)]
 
       // Append data-directory arguments (packaged only)
-      const dataDir = getDataDirectory()
+      const dataDir = getDataDirectory(config.local.dataDir)
       if (dataDir) {
         args.push('--data-dir', dataDir)
         args.push('--storage-path', join(dataDir, 'uploads'))
@@ -431,15 +431,15 @@ export class BackendProcessManager {
             resolve()
           })
           .on('error', () => {
-            setTimeout(poll, 1000)
+            setTimeout(poll, 300)
           })
           .on('timeout', () => {
-            setTimeout(poll, 1000)
+            setTimeout(poll, 300)
           })
       }
 
       // Start polling after a short delay to let the process initialize
-      setTimeout(poll, 500)
+      setTimeout(poll, 100)
     })
   }
 }

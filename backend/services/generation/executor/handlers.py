@@ -77,12 +77,18 @@ async def handle_update_sub_message_content(
     await message_crud.update_sub_message(
         db, instruction.sub_message_id, schemas.message.SubMessageUpdate(content=instruction.content)
     )
+    # 若为多模态 MCP_TOOL 结果，填充 media 下载 url 供前端展示（展示层，不落库）
+    publish_content = instruction.content
+    if publish_content:
+        from backend.services.file_service import FileService
+        file_service = FileService(db)
+        publish_content = await file_service.hydrate_media_content(publish_content)
     await stream_manager.publish(
         assistant_message_id,
         {
             "type": "content_update",
             "sub_message_id": instruction.sub_message_id,
-            "content": instruction.content
+            "content": publish_content
         }
     )
 

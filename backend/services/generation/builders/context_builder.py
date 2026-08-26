@@ -331,6 +331,35 @@ class MessageContextBuilder:
             return sid[:-2]
         return None
 
+    async def _build_tool_media_content(
+        self, media_list: Optional[List[Any]]
+    ) -> List[Dict[str, Any]]:
+        """将多模态工具的媒体引用还原为与 ckpt 一致的 content 块结构。
+
+        块结构必须与 ``mambo_agents`` backend_tools 构造的 ``content_blocks`` 一致：
+        ``{"type": <image/audio/video/file>, "base64": ..., "mime_type": ...}``，
+        否则重建的 tool result 与 ckpt 中的 ToolMessage 不一致，会破坏上下文缓存。
+        注意：不能复用 ``_process_file_part_legacy`` 的 ``image_url`` API 格式。
+        """
+        file_service = FileService(self.db)
+        blocks: List[Dict[str, Any]] = []
+        for m in media_list or []:
+            if m is None:
+                continue
+            file_id = getattr(m, "file_id", None)
+            if not file_id:
+                continue
+            try:
+                raw = await file_service.get_file_content(file_id)
+            except Exception:
+                continue
+            blocks.append({
+                "type": getattr(m, "file_type", "file"),
+                "base64": base64.b64encode(raw).decode("utf-8"),
+                "mime_type": getattr(m, "mime_type", "application/octet-stream"),
+            })
+        return blocks
+
     async def _convert_assistant_to_rounds(self, msg: MessageSchema, recency_rank: int) -> List[Dict[str, Any]]:
         # 按 createdAt 排序，保证时间顺序
         sorted_subs = sorted(
@@ -368,6 +397,8 @@ class MessageContextBuilder:
                         result_msg = tool_content.to_openai_tool_result_message()
                         if result_msg:
                             result_msg["id"] = sub.id
+                            if tool_content.is_multimodal:
+                                result_msg["content"] = await self._build_tool_media_content(tool_content.media)
                             current_round["tool_results"].append(result_msg)
                         current_round["last_sub_id"] = sub.id
                         if not current_round["run_uuid"] and sub_run_uuid:
@@ -787,4 +818,9 @@ class MessageContextBuilder:
                 additional_kwargs={"lc_source": "summarization"},
             ),
             "file_path": None,
+            # 重建事件仅用于同步 LangGraph state,下游 middleware 只消费
+            # cutoff_index 和 summary_message;last_summarized_message 是
+            # 实时压缩时用于落库 ZipHistory 定位的,此处无从恢复,补 None 满足
+            # SummarizationEvent(TypedDict) 的必填校验。
+            "last_summarized_message": None,
         }

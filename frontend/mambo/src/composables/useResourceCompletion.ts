@@ -22,8 +22,13 @@ let monacoInstance: any = null
 let providerRegistered = false
 let providerDisposable: IDisposable | null = null
 
-/** editor 实例 → 绑定的 agentId（未绑定的编辑器不触发补全） */
-const agentByEditor = new WeakMap<editor.IStandaloneCodeEditor, string>()
+/** editor 实例 → 绑定的补全配置（未绑定的编辑器不触发补全） */
+interface CompletionBinding {
+  agentId: string
+  /** 内容续写开关：仅 real backend 为 resource 的 Agent 为 true（local/ssh/api 只做路径补全） */
+  contentEnabled: boolean
+}
+const agentByEditor = new WeakMap<editor.IStandaloneCodeEditor, CompletionBinding>()
 
 /** 已完成注册（provider + Tab 绑定）的编辑器集合，保证幂等 */
 const registeredEditors = new WeakSet<editor.IStandaloneCodeEditor>()
@@ -139,8 +144,8 @@ const provider: languages.CompletionItemProvider = {
     const editor = monaco.editor
       .getEditors()
       .find((e: editor.IStandaloneCodeEditor) => e.getModel() === model)
-    const agentId = editor ? agentByEditor.get(editor) : undefined
-    if (!agentId) return { suggestions: [] }
+    const binding = editor ? agentByEditor.get(editor) : undefined
+    if (!binding) return { suggestions: [] }
 
     const lineText = model.getValueInRange({
       startLineNumber: position.lineNumber,
@@ -156,6 +161,7 @@ const provider: languages.CompletionItemProvider = {
     if (seq !== requestSeq) return { suggestions: [] }
 
     const candidates = generatePrefixCandidates(fullPrefix)
+    const { agentId, contentEnabled } = binding
 
     let pathResp: ResourceCompletePathResponse | null = null
     let contentResp: ResourceContentCompleteResponse | null = null
@@ -165,7 +171,7 @@ const provider: languages.CompletionItemProvider = {
       const isPath = cand.includes('/')
       const [pResp, cResp] = await Promise.all([
         fetchPath(agentId, cand),
-        isPath ? Promise.resolve(null) : fetchContent(agentId, cand),
+        isPath || !contentEnabled ? Promise.resolve(null) : fetchContent(agentId, cand),
       ])
       if (seq !== requestSeq) return { suggestions: [] }
 
@@ -248,9 +254,13 @@ function registerTabTrigger(ed: editor.IStandaloneCodeEditor) {
 
 // --- 对外 API ---
 
-/** 将编辑器与 agentId 绑定，确保补全 provider 已注册（全局仅注册一次），并绑定 Tab 触发。 */
-export function registerResourceCompletion(editor: editor.IStandaloneCodeEditor, agentId: string) {
-  agentByEditor.set(editor, agentId)
+/** 将编辑器与补全配置绑定，确保补全 provider 已注册（全局仅注册一次），并绑定 Tab 触发。 */
+export function registerResourceCompletion(
+  editor: editor.IStandaloneCodeEditor,
+  agentId: string,
+  contentEnabled = true,
+) {
+  agentByEditor.set(editor, { agentId, contentEnabled })
   if (registeredEditors.has(editor)) return
   registeredEditors.add(editor)
 

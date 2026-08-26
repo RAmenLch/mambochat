@@ -211,7 +211,12 @@ class ToolExecutionHandler(BaseStreamHandler):
         tool_result = context.decode.get_toolcall_result(context.mode, context.event)
         if tool_result:
             for provider in context.providers:
-                async for inst in provider.create_result_instruction(tool_result.get("id"), tool_result.get("text"), tool_result.get("is_error", False)):
+                async for inst in provider.create_result_instruction(
+                    tool_result.get("id"),
+                    tool_result.get("text"),
+                    tool_result.get("is_error", False),
+                    tool_result.get("media"),
+                ):
                     yield inst
 
 

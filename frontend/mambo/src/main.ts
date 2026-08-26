@@ -9,7 +9,7 @@ import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router'
 import i18n from './i18n'
-import { initElectronAdapter, isElectronMode, backendMode } from './services/electronAdapter'
+import { initElectronAdapter, isElectronMode, backendMode, remoteReachability } from './services/electronAdapter'
 
 /**
  * Apply i18n translations to the Electron custom titlebar buttons and splash text.
@@ -77,6 +77,15 @@ const bootstrap = async (): Promise<void> => {
 
   // Dismiss splash screen
   dismissSplash()
+
+  // Remote mode: the connectivity probe runs in the background (non-blocking).
+  // If the remote server is unreachable, open the settings window so the user
+  // can fix the URL — without delaying the app mount.
+  if (backendMode === 'remote' && remoteReachability) {
+    remoteReachability.then((ok) => {
+      if (!ok) window.electronAPI?.app?.openDesktopSettings()
+    })
+  }
 }
 
 bootstrap()

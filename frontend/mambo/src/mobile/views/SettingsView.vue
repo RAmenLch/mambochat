@@ -79,7 +79,7 @@
                 {{ t('settings.about.title') }}
                 <span class="about-subtitle">| {{ t('settings.about.subtitle') }}</span>
               </h2>
-              <el-tag type="info" size="small" effect="plain" class="version-tag">v1.3.0</el-tag>
+              <el-tag type="info" size="small" effect="plain" class="version-tag">v{{ appVersion }}</el-tag>
               <p class="about-desc">{{ t('settings.about.desc') }}</p>
               <div class="about-links">
                 <a href="https://github.com/RAmenLch/mambochat" target="_blank" class="link-item">
@@ -122,6 +122,7 @@ const CACHE_KEY = 'mambo_settings_last_section'
 
 const activeSection = ref('')
 const aboutSheetVisible = ref(false)
+const appVersion = __APP_VERSION__
 
 onMounted(() => {
   const cachedSection = localStorage.getItem(CACHE_KEY)

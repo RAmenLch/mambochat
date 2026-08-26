@@ -99,6 +99,20 @@
 
           <div v-if="msg.type === 'McpTool'" class="tool-result">
             <h4>{{ t('chat.message.mcp.result') }}</h4>
+            <template v-if="(getParsedContent(msg) as McpToolContent).media?.length">
+              <div
+                v-for="m in (getParsedContent(msg) as McpToolContent).media"
+                :key="m.file_id"
+                class="mcp-tool-media"
+              >
+                <img v-if="m.file_type === 'image'" :src="mediaUrl(m)" alt="" class="mcp-tool-media-img" />
+                <audio v-else-if="m.file_type === 'audio'" :src="mediaUrl(m)" controls preload="metadata" class="mcp-tool-media-audio"></audio>
+                <video v-else-if="m.file_type === 'video'" :src="mediaUrl(m)" controls preload="metadata" class="mcp-tool-media-video"></video>
+                <a v-else-if="m.file_type === 'file'" :href="mediaUrl(m)" target="_blank" rel="noopener" class="mcp-tool-media-file">
+                  {{ m.filename || m.file_type }}
+                </a>
+              </div>
+            </template>
             <div class="result-box" :class="{ 'is-error': (getParsedContent(msg) as McpToolContent).is_error }">
               {{ (getParsedContent(msg) as McpToolContent).result ? getResultDisplayText(msg.id, (getParsedContent(msg) as McpToolContent).result || '') : t('chat.message.mcp.noResult') }}
             </div>
@@ -228,8 +242,9 @@ import { useMcpStore } from '@/stores/mcpStore';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { useChatSessionStore } from '@/stores/chatSessionStore';
 import { getMessageTaskSubSteps } from '@/api/chatService';
-import type { SubMessage, McpToolContent, ReviewToolContent, ToolDecision, SchemaProperty, TaskSubStepContent, Message, SecurityReviewContent } from '@/api/types';
+import type { SubMessage, McpToolContent, ReviewToolContent, ToolDecision, SchemaProperty, TaskSubStepContent, Message, SecurityReviewContent, MultimodalMedia } from '@/api/types';
 import { unpackMcpToolCall } from '@/utils/mcpToolUnpack';
+import { resolveFileUrl } from '@/services/electronUrl';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import TaskSubAgentPanel from '../task/TaskSubAgentPanel.vue';
 
@@ -508,6 +523,12 @@ function getParsedContent(msg: SubMessage): McpToolContent | ReviewToolContent |
   } catch {
     return null;
   }
+}
+
+/** 多模态媒体展示 url（后端已在 media.url 填充下载路径） */
+function mediaUrl(m: MultimodalMedia | null | undefined): string {
+  if (!m?.url) return ''
+  return resolveFileUrl(m.url) || ''
 }
 
 function getMcpUnpacked(msg: SubMessage) {
@@ -952,6 +973,26 @@ h4 {
 .result-box.is-error {
   color: var(--el-color-error);
   background-color: var(--el-color-error-light-9);
+}
+.mcp-tool-media {
+  margin-top: 8px;
+}
+.mcp-tool-media-img {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  border-radius: 6px;
+}
+.mcp-tool-media-audio,
+.mcp-tool-media-video {
+  display: block;
+  width: 100%;
+  max-width: 480px;
+  margin-top: 4px;
+}
+.mcp-tool-media-file {
+  color: var(--el-color-primary);
+  text-decoration: underline;
 }
 .tool-actions-wrapper {
   margin-top: 24px;

@@ -14,6 +14,7 @@ from backend.services.generation.worker.abstract_worker import AbstractGenerateW
 from backend.services.generation.core.llm_io import LLMInput
 from backend.services.generation.graph_builders.factory import GraphBuilderFactory
 from backend.services.generation.core.llm_io import SummarizationEventInfo
+from backend.services.generation.worker.internal_markers import INTERNAL_LC_SOURCES
 
 # GoalLoopMiddleware 注入的 get_goal 工具调用 ID 前缀
 # （对应 mambo_agents.middleware.goal_loop._INJECT_PREFIX = "goal-loop-"）。
@@ -182,8 +183,9 @@ class UniversalGraphWorker(AbstractGenerateWorker):
             elif mode == "messages" and isinstance(event, (list, tuple)) and len(event) > 0:
                 msg = event[0]
                 meta = event[1] if len(event) > 1 else {}
-                # Filter out summarization model outputs (both chunks and final messages)
-                if isinstance(meta, dict) and meta.get("lc_source") == "summarization":
+                # 过滤内部辅助模型输出（summarization / multimodal_describer 的
+                # chunks 与最终消息），避免思考内容等被误消费、渲染成主 Agent 消息
+                if isinstance(meta, dict) and meta.get("lc_source") in INTERNAL_LC_SOURCES:
                     continue
                 yield mode, msg
             elif mode == "custom":

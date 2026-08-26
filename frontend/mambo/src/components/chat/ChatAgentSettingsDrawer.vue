@@ -386,6 +386,7 @@ import { getResourceDetails } from '@/api/resourceService';
 import { updateAgent } from '@/api/agentService';
 import type { Chat, ChatUpdate, Resource, Agent, GoalLoopConfig, LLMParameterDefinition } from '@/api/types';
 import MountedResourceTags from '@/components/common/MountedResourceTags.vue';
+import { isDefaultChatName } from '@/utils/chatName';
 
 const props = defineProps<{
   visible: boolean;
@@ -596,7 +597,7 @@ onMounted(() => {
 
 watch(() => props.chatData, (newData) => {
   if (newData) {
-    form.name = newData.name;
+    form.name = isDefaultChatName(newData.name) ? t('chat.sidebar.initChatName') : newData.name;
     form.agentId = newData.agentId || null;
   }
 }, { immediate: true, deep: true });
@@ -774,10 +775,13 @@ async function handleSaveSettings() {
     }
   }
 
-  emit('save', {
-    name: form.name,
-    agentId: form.agentId,
-  });
+  const payload: ChatUpdate = { agentId: form.agentId };
+  // 与 header 一致:输入等于当前显示标题 = 未修改 → 不提交 name,保留后端默认 Key
+  const displayTitle = isDefaultChatName(props.chatData.name) ? t('chat.sidebar.initChatName') : props.chatData.name;
+  if (form.name && form.name.trim() !== displayTitle) {
+    payload.name = form.name.trim();
+  }
+  emit('save', payload);
 };
 
 const openAgentSettings = (agentId: string) => {

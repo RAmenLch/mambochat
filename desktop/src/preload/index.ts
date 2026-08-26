@@ -27,11 +27,23 @@ export interface ElectronAPI {
   // Runtime extraction
   runtime: {
     onExtractionProgress: (callback: (progress: any) => void) => () => void
+    isExtractionReady: () => Promise<boolean>
   }
   // Gateway
   gateway: {
     status: () => Promise<{ running: boolean; port?: number; host?: string; mode?: string }>
     restart: (host: string, port: number) => Promise<{ success: boolean; port?: number; error?: string }>
+  }
+  // Data directory (local mode)
+  data: {
+    /** Open a native folder picker; returns the chosen path or null if cancelled */
+    selectDir: () => Promise<string | null>
+    /** Returns the currently active data root */
+    getPath: () => Promise<string>
+    /** Ask how to handle existing data when the data directory changes */
+    chooseMigration: (to: string) => Promise<'migrate' | 'migrateAndDelete' | 'useTarget' | 'cancel'>
+    /** Copy existing data into the new directory (optionally delete the old one) */
+    migrate: (to: string, deleteOld: boolean) => Promise<{ success: boolean; from?: string; to?: string; copied?: number; error?: string }>
   }
   // App
   app: {
@@ -50,13 +62,16 @@ export interface ElectronAPI {
     toggleMaximize: () => Promise<void>
     close: () => Promise<void>
   }
-  // API Client (remote mode)
+  // API Client (remote mode) — multiple clients supported
   apibackend: {
     start: () => Promise<{ success: boolean; error?: string }>
+    startOne: (backendId: string) => Promise<{ success: boolean; error?: string }>
     stop: () => Promise<{ success: boolean }>
-    status: () => Promise<{ running: boolean; connected: boolean; connecting: boolean; backendId?: string; error?: string }>
-    register: (serverUrl: string, rootDir: string) => Promise<{ success: boolean; backendId?: string; apiKey?: string; error?: string }>
-    onStatusChange: (callback: (status: any) => void) => () => void
+    stopOne: (backendId: string) => Promise<{ success: boolean }>
+    remove: (backendId: string) => Promise<{ success: boolean }>
+    status: () => Promise<Array<{ running: boolean; connected: boolean; connecting: boolean; backendId?: string; name?: string; rootDir?: string; error?: string }>>
+    register: (serverUrl: string, rootDir: string, name?: string) => Promise<{ success: boolean; backendId?: string; apiKey?: string; error?: string }>
+    onStatusChange: (callback: (statuses: any[]) => void) => () => void
   }
 }
 
@@ -91,11 +106,19 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.on('runtime:extraction-progress', handler)
       return () => ipcRenderer.removeListener('runtime:extraction-progress', handler)
     },
+    isExtractionReady: () => ipcRenderer.invoke('runtime:is-extraction-ready'),
   },
 
   gateway: {
     status: () => ipcRenderer.invoke('gateway:status'),
     restart: (host, port) => ipcRenderer.invoke('gateway:restart', host, port),
+  },
+
+  data: {
+    selectDir: () => ipcRenderer.invoke('data:selectDir'),
+    getPath: () => ipcRenderer.invoke('data:getPath'),
+    chooseMigration: (to) => ipcRenderer.invoke('data:chooseMigration', to),
+    migrate: (to, deleteOld) => ipcRenderer.invoke('data:migrate', to, deleteOld),
   },
 
   app: {
@@ -118,11 +141,14 @@ const electronAPI: ElectronAPI = {
 
   apibackend: {
     start: () => ipcRenderer.invoke('apibackend:start'),
+    startOne: (backendId) => ipcRenderer.invoke('apibackend:startOne', backendId),
     stop: () => ipcRenderer.invoke('apibackend:stop'),
+    stopOne: (backendId) => ipcRenderer.invoke('apibackend:stopOne', backendId),
+    remove: (backendId) => ipcRenderer.invoke('apibackend:remove', backendId),
     status: () => ipcRenderer.invoke('apibackend:status'),
-    register: (serverUrl, rootDir) => ipcRenderer.invoke('apibackend:register', serverUrl, rootDir),
+    register: (serverUrl, rootDir, name) => ipcRenderer.invoke('apibackend:register', serverUrl, rootDir, name),
     onStatusChange: (callback) => {
-      const handler = (_event: any, status: any) => callback(status)
+      const handler = (_event: any, statuses: any[]) => callback(statuses)
       ipcRenderer.on('apibackend:status', handler)
       return () => ipcRenderer.removeListener('apibackend:status', handler)
     },

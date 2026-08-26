@@ -22,10 +22,17 @@ export interface ElectronAPI {
   }
   runtime: {
     onExtractionProgress: (callback: (progress: ExtractionProgress) => void) => () => void
+    isExtractionReady: () => Promise<boolean>
   }
   gateway: {
     status: () => Promise<GatewayStatus>
     restart: (host: string, port: number) => Promise<{ success: boolean; port?: number; error?: string }>
+  }
+  data: {
+    selectDir: () => Promise<string | null>
+    getPath: () => Promise<string>
+    chooseMigration: (to: string) => Promise<'migrate' | 'migrateAndDelete' | 'useTarget' | 'cancel'>
+    migrate: (to: string, deleteOld: boolean) => Promise<{ success: boolean; from?: string; to?: string; copied?: number; error?: string }>
   }
   app: {
     getVersion: () => Promise<string>
@@ -49,6 +56,9 @@ export interface AppConfig {
     host: string
     portStart: number
     portEnd: number
+    allowExternalAccess?: boolean
+    gatewayPort?: number
+    dataDir?: string
   }
   remote: {
     url: string
@@ -57,6 +67,7 @@ export interface AppConfig {
 
 export interface BackendStatus {
   running: boolean
+  starting?: boolean
   port?: number
   pid?: number
   error?: string

@@ -25,9 +25,18 @@ from mambo_agents import (
     HybridWorkspaceBackend,
     StoreBackend,
 )
+from mambo_agents.backends.protocol import MultimodalDescriber, ToolTimeouts
 from mambo_agents.backends.schemas import VirtualPath
 from mambo_agents.backends.local import LocalBackend
 from mambo_agents.middleware.security_review import SecurityReviewConfig
+from mambo_agents.multimodal_describers import (
+    audio_describer,
+    composite_multimodal_describer,
+    document_describer,
+    image_describer,
+    reject_multimodal_describer,
+    video_describer,
+)
 
 from backend.checkpointer import get_checkpointer
 from backend.store import get_store
@@ -57,6 +66,7 @@ def _make_session_factory() -> Callable[[], AsyncSession]:
 def _make_store_backend(
     store: "AsyncSqliteStore | None",
     thread_id: str | None,
+    multimodal_describer: MultimodalDescriber | None = None,
 ) -> StoreBackend:
     """构造共享参数的 StoreBackend（real backend 与默认 /.mambo/ 空间共用）。
 
@@ -68,13 +78,73 @@ def _make_store_backend(
         thread_id=thread_id,
         max_read_chars=_READ_CHARS,
         max_grep_matches=_GREP_MATCHES,
+        multimodal_describer=multimodal_describer,
     )
+
+
+# 模态 block type → 对应 per-type describer 工厂
+_MODALITY_FACTORIES: Dict[str, Callable[..., MultimodalDescriber]] = {
+    "image": image_describer,
+    "video": video_describer,
+    "audio": audio_describer,
+    "file": document_describer,
+}
+_ALL_MODALITIES = frozenset(_MODALITY_FACTORIES)
+
+
+def _build_multimodal_describer(
+    main_supported: frozenset[str],
+    bound_models: Dict[str, Any],
+) -> MultimodalDescriber | None:
+    """构建多模态描述器，装配到所有 Backend 上。
+
+    规则（对应配置页 4 个模态槽位）：
+    - 已绑定 describer 模型的模态（无论主模型是否原生支持）→ 由对应槽位模型
+      生成描述文本，describer 优先于主模型直读；
+    - 未绑定 describer 且主模型原生支持的模态 → 透传，保留原始多模态 block；
+    - 其余未覆盖模态 → 返回显式拒绝文本，避免多模态内容直通模型 API 报错。
+
+    装配方式：per-type describer 与 reject 一起组成 composite 链（reject 为链尾
+    兜底）。reject 的 allow 只含主模型能力，不含绑定模态——describer 失败时，
+    主模型支持的模态经 reject 返回 None 透传直读，不支持的模态返回拒绝文本，
+    裸 base64 block 永远不会透传给主模型。
+
+    Args:
+        main_supported: 主模型原生支持的 block type 集合（image/video/audio/file）。
+        bound_models: {modality: 已实例化的 BaseChatModel}，仅含能力校验通过的槽位。
+
+    Returns:
+        装配到 Backend 的 MultimodalDescriber；主模型全模态且无绑定时返回 None（不干预）。
+    """
+    pass_through = main_supported & _ALL_MODALITIES
+
+    if not bound_models and pass_through == _ALL_MODALITIES:
+        return None
+
+    # describer 优先：只要配置了槽位模型就装配，不再排除主模型原生支持的模态
+    per_type: List[MultimodalDescriber] = [
+        _MODALITY_FACTORIES[m](model,max_chars=100000)
+        for m, model in bound_models.items()
+        if m in _MODALITY_FACTORIES
+    ]
+    reject = reject_multimodal_describer(allow=pass_through)
+
+    if not per_type:
+        return reject
+
+    # composite 链：per-type 按 mime 自选类型依次尝试，reject 作为链尾兜底
+    # （返回 None 表示主模型支持的模态 → 透传；返回文本表示拒绝）。
+    # fallback=None：仅当 reject 也返回 None（主模型支持 + describer 失败/放弃）
+    # 时命中，语义即回退到主模型直读原始多模态 block。
+    return composite_multimodal_describer([*per_type, reject], fallback=None)
 
 
 def _build_mambo_backend(
     agent_config: AgentConfig,
     store: "AsyncSqliteStore | None" = None,
     thread_id: str | None = None,
+    multimodal_describer: MultimodalDescriber | None = None,
+    tool_timeouts: ToolTimeouts | None = None,
 ) -> BackendProtocol | None:
     """构建 Mambo Agent 的完整 Backend 体系。
 
@@ -89,6 +159,7 @@ def _build_mambo_backend(
         thread_id: 可选，显式指定 StoreBackend 的会话隔离键（thread_id）。
             图构建路径不传（运行时从 graph config 解析）；独立场景
             （如消息创建时写入副本）必须传 chat_id，避免落到 __default__ namespace。
+        multimodal_describer: 多模态描述器，装配到所有后端（含 Hybrid 层兜底）。
 
     Returns:
         HybridWorkspaceBackend 或 None（交给 create_mambo_agent 用默认 StoreBackend）
@@ -108,6 +179,7 @@ def _build_mambo_backend(
                 workspace_root=VirtualPath("/workspace"),
                 max_read_chars=_READ_CHARS,
                 max_grep_matches=_GREP_MATCHES,
+                multimodal_describer=multimodal_describer,
             )
         if agent_config.memory_resource_roots:
             virtual_workspaces["memory"] = MamboResourceBackend(
@@ -118,25 +190,32 @@ def _build_mambo_backend(
                 enable_version_editing=False,
                 max_read_chars=_READ_CHARS,
                 max_grep_matches=_GREP_MATCHES,
+                multimodal_describer=multimodal_describer,
             )
         # 始终使用 persisted StoreBackend，避免 create_mambo_agent 内部
         # 用 store=None 创建无持久化的 StoreBackend 兜底
         if thread_id is not None:
             # 图外场景（如消息创建时写入副本）：覆盖默认 /.mambo/ StoreBackend，
             # 使其写入目标会话的 namespace
-            virtual_workspaces["."] = _make_store_backend(store, thread_id)
+            virtual_workspaces["."] = _make_store_backend(
+                store, thread_id, multimodal_describer
+            )
         return HybridWorkspaceBackend(
-            real_backend=_make_store_backend(store, thread_id),
+            real_backend=_make_store_backend(store, thread_id, multimodal_describer),
             virtual_workspaces=virtual_workspaces if virtual_workspaces else None,
             max_read_chars=_READ_CHARS,
             max_grep_matches=_GREP_MATCHES,
+            multimodal_describer=multimodal_describer,
+            tool_timeouts=tool_timeouts,
         )
 
     # ---- 1. 确定 real_backend：default_backend_id > 列表第一位 ----
     real_be: BackendProtocol | None = None
     target_mb = _pick_default(mounted, agent_config.default_backend_id)
     if target_mb:
-        real_be = _build_any_backend(target_mb, session_factory)
+        real_be = _build_any_backend(
+            target_mb, session_factory, multimodal_describer=multimodal_describer
+        )
 
     # ---- 2. 其余所有后端 → virtual_workspaces[name] ----
     real_id = _resolve_real_backend_id(mounted, agent_config.default_backend_id)
@@ -146,7 +225,9 @@ def _build_mambo_backend(
         name = mb.get("name", "")
         if not name:
             continue
-        be = _build_any_backend(mb, session_factory)
+        be = _build_any_backend(
+            mb, session_factory, multimodal_describer=multimodal_describer
+        )
         if be:
             virtual_workspaces[name] = be
 
@@ -162,6 +243,7 @@ def _build_mambo_backend(
             enable_version_editing=False,
             max_read_chars=_READ_CHARS,
             max_grep_matches=_GREP_MATCHES,
+            multimodal_describer=multimodal_describer,
         )
 
     # ---- 4. Memory（长期记忆） ----
@@ -176,29 +258,35 @@ def _build_mambo_backend(
             enable_version_editing=False,
             max_read_chars=_READ_CHARS,
             max_grep_matches=_GREP_MATCHES,
+            multimodal_describer=multimodal_describer,
         )
 
     # ---- 5. 组装 ----
     if real_be is None:
-        real_be = _make_store_backend(store, thread_id)
+        real_be = _make_store_backend(store, thread_id, multimodal_describer)
 
     if thread_id is not None:
         # 图外场景：覆盖默认 /.mambo/ StoreBackend，写入目标会话的 namespace
-        virtual_workspaces["."] = _make_store_backend(store, thread_id)
+        virtual_workspaces["."] = _make_store_backend(
+            store, thread_id, multimodal_describer
+        )
 
     return HybridWorkspaceBackend(
         real_backend=real_be,
         virtual_workspaces=virtual_workspaces if virtual_workspaces else None,
         max_read_chars=_READ_CHARS,
         max_grep_matches=_GREP_MATCHES,
+        multimodal_describer=multimodal_describer,
+        tool_timeouts=tool_timeouts,
     )
 
 
 def _build_any_backend(
     mb: Dict[str, Any],
     session_factory: Callable[[], AsyncSession],
+    multimodal_describer: MultimodalDescriber | None = None,
 ) -> BackendProtocol | None:
-    """构建任意类型的 Backend 实例（SSH / API / RESOURCE）。"""
+    """构建任意类型的 Backend 实例（SSH / API / RESOURCE / LOCAL）。"""
     b_type = mb.get("backendType")
     b_id = mb.get("id")
     b_name = mb.get("name", "")
@@ -227,6 +315,7 @@ def _build_any_backend(
             ignore_dirs=_to_frozenset(config.get("ignore_dirs")),
             max_read_chars=_READ_CHARS,
             max_grep_matches=_GREP_MATCHES,
+            multimodal_describer=multimodal_describer,
         )
 
     elif b_type == BackendType.API.value:
@@ -242,6 +331,7 @@ def _build_any_backend(
             enable_execute=execute_enabled,
             max_read_chars=_READ_CHARS,
             max_grep_matches=_GREP_MATCHES,
+            multimodal_describer=multimodal_describer,
         )
 
     elif b_type == BackendType.RESOURCE.value:
@@ -253,6 +343,7 @@ def _build_any_backend(
             enable_version_editing=config.get("enable_version_editing", True),
             max_read_chars=_READ_CHARS,
             max_grep_matches=_GREP_MATCHES,
+            multimodal_describer=multimodal_describer,
         )
 
     elif b_type == BackendType.LOCAL.value:
@@ -271,6 +362,7 @@ def _build_any_backend(
             ignore_dirs=_to_frozenset(config.get("ignore_dirs")),
             max_read_chars=_READ_CHARS,
             max_grep_matches=_GREP_MATCHES,
+            multimodal_describer=multimodal_describer,
         )
 
     return None
@@ -376,8 +468,33 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
             )
 
         # --- Build backend（统一入口：资源挂载 + SSH/API + Skills shortcuts）---
+        # 多模态描述器：由 initializer 解析的多模态描述模型 + 主模型能力集装配。
+        # 未配置/未启用时 describer 为 None（保持原行为）。
         store = get_store()
-        backend = _build_mambo_backend(agent_config, store=store)
+        mm_models = getattr(agent_config, "multimodal_describer_models", None) or {}
+        main_modalities = (
+            getattr(agent_config, "main_model_input_modalities", None) or []
+        )
+        describer = _build_multimodal_describer(
+            main_supported=frozenset(main_modalities),
+            bound_models={
+                modality: ModelFactory.create_model(cfg, run_time_config)
+                for modality, cfg in mm_models.items()
+            },
+        )
+        # read 工具超时：启用多模态描述时总超时 = 60s（默认）+ multimodal_read_timeout。
+        # describer 为 None（未启用 / 主模型全模态无绑定）或 extra<=0 时不调整，保持库默认 60s。
+        tool_timeouts = None
+        if describer is not None:
+            extra = float(getattr(agent_config, "multimodal_read_timeout", None) or 0.0)
+            if extra > 0:
+                tool_timeouts = ToolTimeouts(read=60.0 + extra)
+        backend = _build_mambo_backend(
+            agent_config,
+            store=store,
+            multimodal_describer=describer,
+            tool_timeouts=tool_timeouts,
+        )
 
         # --- Tools ---
         tools = [t for t in agent_config.tools] if agent_config.tools else []

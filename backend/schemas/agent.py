@@ -35,6 +35,24 @@ class VersionControlConfigSchema(BaseModel):
     auto_snapshot: bool = Field(True, description="是否自动在文件写入/编辑/删除时创建快照")
 
 
+class MultimodalDescriberConfigSchema(BaseModel):
+    """多模态描述配置：为每个模态独立绑定一个支持该模态的模型。
+
+    主模型原生支持的模态会透传（不经过描述模型）；绑定模型后，主模型不支持的
+    对应模态文件会先由描述模型生成描述文本；未绑定任何模型的模态将返回显式
+    拒绝文本，避免多模态内容直通模型 API 报错。
+    """
+    enabled: bool = Field(False, description="是否启用多模态描述")
+    image_model_id: Optional[str] = Field(None, description="图片描述模型 ID")
+    audio_model_id: Optional[str] = Field(None, description="音频描述模型 ID")
+    video_model_id: Optional[str] = Field(None, description="视频描述模型 ID")
+    file_model_id: Optional[str] = Field(None, description="文档(PDF/PPT等)描述模型 ID")
+    read_timeout: Optional[float] = Field(
+        60.0,
+        description="启用多模态描述后 read 工具的额外超时（秒），总超时 = 60 + read_timeout",
+    )
+
+
 class GoalLoopConditionSchema(BaseModel):
     """任务循环完成条件：某工具在当前轮内至少调用 times 次，且参数全部匹配才算一次有效调用"""
     tool: str = Field(..., description="工具名")
@@ -79,6 +97,7 @@ class MamboAgentParametersSchema(BaseModel):
     memory_resource_ids: List[str] = Field(default_factory=list, description="记忆资源ID列表")
     summarization_config: Optional[SummarizationConfigSchema] = Field(None, description="摘要详细配置")
     security_review: Optional[SecurityReviewConfigSchema] = Field(None, description="AI 安全审核配置")
+    multimodal_describer: Optional[MultimodalDescriberConfigSchema] = Field(None, description="多模态描述配置")
     version_control: Optional[VersionControlConfigSchema] = Field(None, description="版本控制配置")
     goal_loop: Optional[GoalLoopConfigSchema] = Field(None, description="任务循环配置")
     mcp_direct_tool_threshold: int = Field(15, description="MCP 工具数量阈值：低于此值时直接暴露工具，否则使用 meta-tool 包装模式")
@@ -165,6 +184,7 @@ class AgentUpdate(BaseModel):
     # 以下为"转运字段"——Router 层会合并进 agentParameters，不直接落库
     memoryResourceIds: Optional[List[str]] = None
     securityReviewConfig: Optional[SecurityReviewConfigSchema] = None
+    multimodalDescriberConfig: Optional[MultimodalDescriberConfigSchema] = None
 
 class AgentResponse(AgentBase):
     """用于 API 响应的 Agent Schema，包含系统生成的标识和时间戳"""

@@ -90,7 +90,8 @@ class SuggestToolProvider(BaseToolProvider):
             self,
             tool_call_id: str,
             result_text: str,
-            is_error: bool
+            is_error: bool,
+            media: Optional[List[Dict[str, Any]]] = None
     ) -> AsyncGenerator[BaseInstruction, None]:
         # Suggest 工具不需要在 UI 上展示执行结果（"ok"），也不需要更新状态
         # 因为 CreateSubMessage 时状态已经是 COMPLETED

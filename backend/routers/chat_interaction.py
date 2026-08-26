@@ -24,9 +24,6 @@ from backend.schemas import SubMessageType, MessageStatus
 from backend.schemas.message import ToolApprovalRequest, SubMessageConfig, SubMessageUpdate
 from backend.schemas.enums import FileManagementType
 
-from mambo_agents.backends.schemas import VirtualPath
-from mambo_agents.backends.protocol import _get_mime_type
-
 from pydantic import BaseModel
 
 class TaskStatusRequest(BaseModel):
@@ -74,6 +71,10 @@ async def _process_pending_file(
     返回 {"type": "file_ready", "file_id", "file_info"} 或
          {"type": "still_writing"}（文件未写完，等待下一轮）。
     """
+    # 延迟导入：mambo_agents.backends 依赖较重，仅在处理挂起文件时加载
+    from mambo_agents.backends.schemas import VirtualPath
+    from mambo_agents.backends.protocol import _get_mime_type
+
     r1 = await backend.adownload_files([VirtualPath(path)])
     size1 = len(r1[0].content) if r1 and r1[0].content else 0
     if size1 == 0:
@@ -173,6 +174,8 @@ async def _poll_chat_pending_files(chat_id: str) -> None:
     from backend.services.generation.agent.backend_factory import (
         build_backend_from_chat_id,
     )
+    # 延迟导入：mambo_agents.backends 依赖较重
+    from mambo_agents.backends.schemas import VirtualPath
 
     backend = None
     try:
@@ -303,8 +306,8 @@ async def _hydrate_and_validate_messages(
     }
 
     file_info_map = {}
+    file_service = FileService(db)
     if file_ids_to_hydrate:
-        file_service = FileService(db)
         file_records = await file_service.batch_get_files(list(file_ids_to_hydrate))
         for record in file_records:
             file_info_map[record.id] = file_service.convert_to_schema(record)
@@ -317,6 +320,9 @@ async def _hydrate_and_validate_messages(
         for sub_message_res in message_res.sub_messages:
             if sub_message_res.type == 'File' and sub_message_res.content in file_info_map:
                 sub_message_res.file_info = file_info_map[sub_message_res.content]
+            elif sub_message_res.type == 'McpTool' and sub_message_res.content:
+                # 为多模态 tool 结果填充 media 下载 url，供前端展示媒体
+                sub_message_res.content = await file_service.hydrate_media_content(sub_message_res.content)
 
         message_responses.append(message_res)
 

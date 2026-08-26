@@ -51,6 +51,7 @@ const props = withDefaults(
     monacoOptions?: editor.IStandaloneEditorConstructionOptions
     enableShortcuts?: boolean
     completionAgentId?: string | null
+    contentEnabled?: boolean
   }>(),
   {
     language: 'markdown',
@@ -59,6 +60,7 @@ const props = withDefaults(
     monacoOptions: () => ({}),
     enableShortcuts: true,
     completionAgentId: null,
+    contentEnabled: true,
   },
 )
 
@@ -106,7 +108,7 @@ const handleMonacoMounted = async (instance: editor.IStandaloneCodeEditor) => {
   emit('editor-mounted', instance)
 
   if (props.completionAgentId) {
-    registerResourceCompletion(instance, props.completionAgentId)
+    registerResourceCompletion(instance, props.completionAgentId, props.contentEnabled)
   }
 
   if (props.enableShortcuts) {
@@ -120,7 +122,7 @@ watch(
   (newAgentId) => {
     if (!monacoInstance) return
     if (newAgentId) {
-      registerResourceCompletion(monacoInstance, newAgentId)
+      registerResourceCompletion(monacoInstance, newAgentId, props.contentEnabled)
     } else {
       unregisterResourceCompletion(monacoInstance)
     }

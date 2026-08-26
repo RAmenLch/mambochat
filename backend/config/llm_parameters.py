@@ -138,11 +138,65 @@ SUPPORTED_LLM_PARAMETERS: List[LLMParameter] = [
     LLMParameter(
         key="openrouter::image_config.aspect_ratio",
         label="Image Aspect Ratio (OpenRouter)",
-        path=["image_config", "aspect_ratio"],
-        description="用于图像生成模型，控制生成图像的宽高比。",
+        path=["extra_body", "image_config", "aspect_ratio"],
+        description="用于图像生成模型，控制生成图像的宽高比。传 auto 由服务商自动选择，或指定具体比例（如 16:9、9:16）。服务商会收敛到其支持的子集。",
         type="string",
-        limit=["1:1","2:3","3:2","3:4","4:3","4:5","5:4","16:9","9:16","21:9"],
+        limit=["auto","1:1","1:2","2:1","1:4","4:1","1:8","8:1","2:3","3:2","3:4","4:3","4:5","5:4","16:9","9:16","9:21","21:9"],
         default_value="1:1",
+        default_activate=False
+    ),
+
+    # --- OpenRouter 图像生成参数（经 extra_body.image_config 传递）---
+    # key 使用 OpenRouter 原始参数名，使其在 fetch_models 时能被服务商返回的
+    # supported_parameters 自动匹配挂载到图片模型上。
+    LLMParameter(
+        key="quality",
+        label="Image Quality (OpenRouter)",
+        path=["extra_body", "image_config", "quality"],
+        description="图像生成质量等级。auto 由服务商自动选择；low/medium/high 指定质量。不支持质量档位的服务商会忽略此参数。",
+        type="string",
+        limit=["auto", "low", "medium", "high"],
+        default_value="auto",
+        default_activate=False
+    ),
+    LLMParameter(
+        key="output_format",
+        label="Image Output Format (OpenRouter)",
+        path=["extra_body", "image_config", "output_format"],
+        description="图像输出格式：png / jpeg / webp / svg（svg 仅矢量模型支持）。省略时使用服务商默认格式。",
+        type="string",
+        limit=["png", "jpeg", "webp", "svg"],
+        default_value="png",
+        default_activate=False
+    ),
+    LLMParameter(
+        key="background",
+        label="Image Background (OpenRouter)",
+        path=["extra_body", "image_config", "background"],
+        description="图像背景处理：transparent 需要支持透明通道的格式（png/webp），opaque 为不透明背景。",
+        type="string",
+        limit=["auto", "transparent", "opaque"],
+        default_value="auto",
+        default_activate=False
+    ),
+    LLMParameter(
+        key="output_compression",
+        label="Image Compression (OpenRouter)",
+        path=["extra_body", "image_config", "output_compression"],
+        description="webp/jpeg 格式的压缩级别（0-100），数值越低质量越高文件越大；png 忽略此参数。",
+        type="integer",
+        limit={"min": 0, "max": 100},
+        default_value=90,
+        default_activate=False
+    ),
+    LLMParameter(
+        key="size",
+        label="Image Size (OpenRouter)",
+        path=["extra_body", "image_config", "size"],
+        description="图像尺寸简写：分辨率档位（如 2K）或显式像素（如 2048x2048）。显式像素为最终尺寸，勿与 aspect_ratio 同时设置。",
+        type="string",
+        limit=None,
+        default_value=None,
         default_activate=False
     ),
     LLMParameter(

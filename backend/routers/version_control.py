@@ -13,11 +13,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mambo_agents.backends.schemas import VirtualPath
-from mambo_agents.middleware.version_control import VersionStore
-
 from backend.database import AsyncSessionLocal
-from backend.store import get_store as get_shared_store
 
 from backend.schemas.version_control import (
     VersionFileContentResponse,
@@ -55,6 +51,9 @@ class RestoreResponse(BaseModel):
 
 
 def _get_store() -> VersionStore:
+    # 延迟导入：mambo_agents.middleware / backend.store 依赖较重，仅在版本历史功能使用时加载
+    from backend.store import get_store as get_shared_store
+    from mambo_agents.middleware.version_control import VersionStore
     return VersionStore(store=get_shared_store())
 
 
@@ -115,6 +114,9 @@ async def get_file_diff(
     path: str,
     checkpoint_id: str = Query(..., description="目标 checkpoint ID"),
 ):
+    # 延迟导入：mambo_agents.backends 依赖较重
+    from mambo_agents.backends.schemas import VirtualPath
+
     store = _get_store()
     old_content = await store.aget_file(chat_id, checkpoint_id, f"/{path}")
 
@@ -189,6 +191,9 @@ async def restore_files(chat_id: str, body: RestoreRequest):
 
     restored: list[str] = []
     errors: list[str] = []
+
+    # 延迟导入：mambo_agents.backends 依赖较重
+    from mambo_agents.backends.schemas import VirtualPath
 
     for file_path in file_list:
         content = await store.aget_file(chat_id, body.checkpoint_id, file_path)

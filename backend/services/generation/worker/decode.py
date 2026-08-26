@@ -75,6 +75,27 @@ class DefaultLangChainDecode(BaseDecode):
 
     def get_toolcall_result(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         if mode == "updates" and isinstance(message, ToolMessage):
+            content = message.content
+            if isinstance(content, list):
+                text_blocks: List[str] = []
+                media_blocks: List[Dict[str, Any]] = []
+                for blk in content:
+                    if isinstance(blk, str):
+                        text_blocks.append(blk)
+                    elif isinstance(blk, dict):
+                        btype = blk.get("type")
+                        if btype == "text" and isinstance(blk.get("text"), str):
+                            text_blocks.append(blk["text"])
+                        elif btype not in ("text",) and blk.get("base64"):
+                            media_blocks.append(blk)
+                result: Dict[str, Any] = {
+                    "id": message.tool_call_id,
+                    "text": "".join(text_blocks),
+                }
+                if media_blocks:
+                    # 多模态结果：透传给 provider 落库，避免 str(message.text) 丢弃 base64 内容
+                    result["media"] = media_blocks
+                return result
             return {"id": message.tool_call_id, "text": str(message.text)}
         return None
 

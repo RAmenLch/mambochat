@@ -22,6 +22,13 @@ const CONNECTION_TIMEOUT_MS = 60_000
 let isElectron = false
 /** The detected app mode ('local' | 'remote'), available after initElectronAdapter() */
 export let backendMode: string | null = null
+/**
+ * Background connectivity probe for remote mode (non-blocking).
+ * Set during initElectronAdapter() when the app runs in remote mode with a
+ * configured URL; resolves `true` if the remote server is reachable.
+ * `null` when not in remote mode or the probe was never started.
+ */
+export let remoteReachability: Promise<boolean> | null = null
 
 export function detectElectron(): boolean {
   return !!(window.electronAPI)
@@ -91,7 +98,23 @@ export async function initElectronAdapter(): Promise<boolean> {
   // Wait for runtime extraction to complete before starting the connection timeout.
   // The extraction progress is shown in the splash screen; we only start timing
   // the backend connection once extraction is done.
-  await extractionDone
+  //
+  // Remote mode never starts the local backend, so runtime extraction can never
+  // happen — the 2s safety timeout inside waitForExtractionDone() would always
+  // fire on every start/refresh, adding a fixed delay. Skip the wait entirely
+  // in remote mode.
+  //
+  // Local mode: the main process answers authoritatively whether the python
+  // runtime is already extracted (stamp file). On start/refresh after the
+  // first launch it is — and no extraction events are ever broadcast, so the
+  // 2s safety timeout would otherwise fire for nothing. Only wait when the
+  // runtime is NOT yet extracted (very first launch, extraction in progress).
+  if (backendMode !== 'remote') {
+    const extractionReady = await api.runtime.isExtractionReady?.().catch(() => false) ?? false
+    if (!extractionReady) {
+      await extractionDone
+    }
+  }
 
   // Attempt to verify backend connectivity through the gateway
   const connected = await waitForBackendConnection(api, config)
@@ -207,16 +230,20 @@ function waitForBackendConnection(
 ): Promise<boolean> {
   return new Promise((resolve) => {
     if (!config || config.mode === 'remote') {
-      // For remote mode, test via main process IPC (avoids Chromium connection issues)
+      // Remote mode: don't block app mount on a connectivity pre-check —
+      // the gateway proxies every /api/* request and surfaces failures as
+      // HTTP errors anyway. Resolve immediately and run the probe in the
+      // background so an unreachable server can still open the settings window.
       const url = config?.remote?.url
       if (!url) { resolve(false); return }
       if (api.testConnection) {
-        api.testConnection(url).then((result) => {
-          resolve(result.ok)
-        }).catch(() => resolve(false))
+        remoteReachability = api.testConnection(url)
+          .then((result) => result.ok)
+          .catch(() => false)
       } else {
-        resolve(false)
+        remoteReachability = Promise.resolve(false)
       }
+      resolve(true)
       return
     }
 
@@ -237,7 +264,7 @@ function waitForBackendConnection(
       } catch {
         // ignore
       }
-      setTimeout(poll, 1000)
+      setTimeout(poll, 300)
     }
     poll()
   })

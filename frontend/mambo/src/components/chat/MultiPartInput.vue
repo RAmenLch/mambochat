@@ -32,6 +32,7 @@
           v-model="localPartitions[activeIndex].content"
           :monaco-options="editorOptions"
           :completion-agent-id="completionAgentId"
+          :content-enabled="contentEnabled"
           @submit="$emit('send')"
         />
       </div>
@@ -60,6 +61,7 @@ const props = defineProps<{
   modelValue: Partition[]
   activeIndex: number
   completionAgentId?: string | null
+  contentEnabled?: boolean
 }>()
 
 // 定义组件可发出的事件
