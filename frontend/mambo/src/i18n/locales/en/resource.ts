@@ -82,6 +82,10 @@ export default {
     cannotDeleteActive: 'Cannot delete the active version',
     cannotDeleteLast: 'Cannot delete the last version',
     deleteSuccess: 'Version deleted',
+    selected: 'Selected {count}',
+    deleteSelected: 'Delete Selected ({count})',
+    confirmDeleteBatch: 'Are you sure you want to delete the selected {count} versions? This action cannot be undone.',
+    deleteBatchSuccess: 'Deleted {count} versions',
   },
   dialog: {
     saveAsNewTitle: 'Save as New Version',

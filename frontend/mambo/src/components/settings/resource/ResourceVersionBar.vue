@@ -3,6 +3,9 @@
   <div class="version-top-bar">
     <div class="version-bar-header">
       <span class="version-bar-title">{{ t('resource.version.history') }}</span>
+      <span v-if="selectedVersionIds.length > 0" class="version-bar-selected-count">
+        {{ t('resource.version.selected', { count: selectedVersionIds.length }) }}
+      </span>
     </div>
     <el-scrollbar ref="scrollbarRef">
       <transition-group name="version-drag" tag="div" class="version-list-horizontal">
@@ -31,9 +34,10 @@
               'is-active': activeVersionId === version.id,
               'is-viewing': viewMode === 'editor' && viewingVersionId === version.id,
               'is-dragging': draggedVersionId === version.id,
+              'is-selected': isSelected(version.id),
             }"
             draggable="true"
-            @click="$emit('select-version', version)"
+            @click="handleCardClick(version, $event)"
             @contextmenu.prevent="handleContextMenu(version, $event)"
             @dragstart="handleDragStart(version.id, $event)"
             @dragover.prevent="handleDragOver($event)"
@@ -83,7 +87,12 @@
           @click="handleDeleteClick"
         >
           <el-icon :size="14"><Delete /></el-icon>
-          <span>{{ t('resource.version.delete') }}</span>
+          <span>
+            <template v-if="contextMenu.isBatch">
+              {{ t('resource.version.deleteSelected', { count: contextMenu.targetIds.length }) }}
+            </template>
+            <template v-else>{{ t('resource.version.delete') }}</template>
+          </span>
         </div>
       </div>
     </teleport>
@@ -91,7 +100,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, nextTick, onMounted } from 'vue'
+import { ref, reactive, watch, nextTick, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElScrollbar } from 'element-plus'
 import { Setting, Delete } from '@element-plus/icons-vue'
@@ -111,6 +120,7 @@ const emit = defineEmits<{
   (e: 'toggle-kb-view'): void
   (e: 'reorder-versions', reorderedVersions: ResourceVersion[]): void
   (e: 'delete-version', versionId: string): void
+  (e: 'delete-versions', versionIds: string[]): void
 }>()
 
 const { t } = useI18n()
@@ -128,11 +138,85 @@ const contextMenu = reactive({
   y: 0,
   versionId: null as string | null,
   disableDelete: false,
+  isBatch: false,
+  targetIds: [] as string[],
 })
 
+// --- Multi-select state (Shift-click range selection) ---
+// Keep selection as a Set of version ids; only store ids that still exist.
+const selectedIds = ref<Set<string>>(new Set())
+
+const selectedVersionIds = computed(() => props.versions.filter(v => selectedIds.value.has(v.id)))
+
+// Anchor used as the starting point for Shift-click range selection.
+const lastClickedId = ref<string | null>(null)
+
+watch(
+  () => props.versions,
+  () => {
+    // prune selection for versions that no longer exist
+    const validIds = new Set(props.versions.map(v => v.id))
+    let changed = false
+    for (const id of selectedIds.value) {
+      if (!validIds.has(id)) {
+        selectedIds.value.delete(id)
+        changed = true
+      }
+    }
+    if (lastClickedId.value && !validIds.has(lastClickedId.value)) {
+      lastClickedId.value = null
+      changed = true
+    }
+    if (changed) selectedIds.value = new Set(selectedIds.value)
+  },
+  { immediate: true }
+)
+
+function isSelected(versionId: string): boolean {
+  return selectedIds.value.has(versionId)
+}
+
+/**
+ * Handle a click on a version card:
+ * - Shift+click: select the contiguous range between the anchor (last clicked)
+ *   and the clicked version (following the current list order).
+ * - Plain click: clear selection and load the version into the editor.
+ */
+function handleCardClick(version: ResourceVersion, event: MouseEvent) {
+  if (event.shiftKey) {
+    const anchorId = lastClickedId.value ?? version.id
+    const order = props.versions.map(v => v.id)
+    const anchorIndex = order.indexOf(anchorId)
+    const clickIndex = order.indexOf(version.id)
+    if (anchorIndex !== -1 && clickIndex !== -1) {
+      const start = Math.min(anchorIndex, clickIndex)
+      const end = Math.max(anchorIndex, clickIndex)
+      const range = props.versions.slice(start, end + 1)
+      for (const v of range) selectedIds.value.add(v.id)
+      selectedIds.value = new Set(selectedIds.value)
+    }
+    // Do not alter the anchor, so repeated shift-clicks extend from the same start.
+    return
+  }
+
+  // Plain click: reset multi-selection and view the version.
+  selectedIds.value = new Set([version.id])
+  lastClickedId.value = version.id
+  emit('select-version', version)
+}
+
 function handleContextMenu(version: ResourceVersion, event: MouseEvent) {
-  const isActive = props.activeVersionId === version.id
-  const isLastOne = props.versions.length <= 1
+  // If right-clicking on a version that is part of the current multi-selection,
+  // operate on the whole selection; otherwise treat it as a single version.
+  const isPartOfSelection = selectedIds.value.has(version.id)
+  let targetIds = isPartOfSelection ? [...selectedIds.value] : [version.id]
+
+  // Never allow deleting the active version.
+  if (props.activeVersionId) {
+    targetIds = targetIds.filter(id => id !== props.activeVersionId)
+  }
+
+  const disableDelete = targetIds.length === 0 || props.versions.length <= 1
 
   // Clamp position to viewport
   const menuWidth = 160
@@ -151,18 +235,28 @@ function handleContextMenu(version: ResourceVersion, event: MouseEvent) {
   contextMenu.x = posX
   contextMenu.y = posY
   contextMenu.versionId = version.id
-  contextMenu.disableDelete = isActive || isLastOne
+  contextMenu.disableDelete = disableDelete
+  contextMenu.isBatch = targetIds.length > 1
+  contextMenu.targetIds = targetIds
 }
 
 function closeContextMenu() {
   contextMenu.visible = false
   contextMenu.versionId = null
+  contextMenu.isBatch = false
+  contextMenu.targetIds = []
 }
 
 function handleDeleteClick() {
-  if (contextMenu.disableDelete || !contextMenu.versionId) return
+  if (contextMenu.disableDelete) return
 
-  emit('delete-version', contextMenu.versionId)
+  if (contextMenu.isBatch) {
+    if (contextMenu.targetIds.length > 0) {
+      emit('delete-versions', contextMenu.targetIds)
+    }
+  } else if (contextMenu.versionId) {
+    emit('delete-version', contextMenu.versionId)
+  }
   closeContextMenu()
 }
 
@@ -276,6 +370,16 @@ watch(() => props.versions, scheduleScrollToActive)
   font-weight: 600;
   color: var(--el-text-color-secondary);
   text-transform: uppercase;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.version-bar-selected-count {
+  text-transform: none;
+  font-weight: 600;
+  color: var(--el-color-primary);
 }
 
 .version-list-horizontal {
@@ -313,6 +417,11 @@ watch(() => props.versions, scheduleScrollToActive)
 .version-card-horizontal.is-viewing {
   border-color: var(--el-color-primary);
   box-shadow: 0 0 0 1px var(--el-color-primary);
+}
+
+.version-card-horizontal.is-selected {
+  border-color: var(--el-color-primary);
+  background-color: var(--el-color-primary-light-9);
 }
 
 .draggable-version-card {

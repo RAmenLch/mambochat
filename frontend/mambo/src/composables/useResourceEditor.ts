@@ -311,6 +311,28 @@ export function useResourceEditor(props: {
     }
   }
 
+  async function handleDeleteVersions(versionIds: string[]) {
+    if (!props.resource || versionIds.length === 0) return
+
+    try {
+      await ElMessageBox.confirm(
+        t('resource.version.confirmDeleteBatch', { count: versionIds.length }),
+        t('resource.version.batchDelete'),
+        {
+          type: 'warning',
+          confirmButtonText: t('common.action.confirm'),
+          cancelButtonText: t('common.action.cancel'),
+        }
+      )
+      for (const versionId of versionIds) {
+        await resourceStore.deleteVersion(props.resource.id, versionId)
+      }
+      ElMessage.success(t('resource.version.deleteBatchSuccess', { count: versionIds.length }))
+    } catch {
+      /* User canceled */
+    }
+  }
+
   // --- Watchers ---
   watch(
     () => props.resource,
@@ -365,6 +387,7 @@ export function useResourceEditor(props: {
     handleSetActiveVersion,
     handleReorderVersions,
     handleDeleteVersion,
+    handleDeleteVersions,
     openNewVersionDialog,
     handleConfirmNewVersion,
   }

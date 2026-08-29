@@ -80,6 +80,10 @@ export default {
     cannotDeleteActive: '无法删除当前活跃版本',
     cannotDeleteLast: '无法删除最后一个版本',
     deleteSuccess: '版本已删除',
+    selected: '已选 {count} 项',
+    deleteSelected: '删除所选 ({count})',
+    confirmDeleteBatch: '确定要删除选中的 {count} 个版本吗？此操作不可撤销。',
+    deleteBatchSuccess: '已删除 {count} 个版本',
   },
   dialog: {
     saveAsNewTitle: '另存为新版本',
