@@ -1412,12 +1412,28 @@ class MamboResourceBackend(BackendProtocol):
 
             if target.id == "__ws_root__":
                 if not self._root_resource_id:
-                    return GrepResult(matches=[])
-                root_id = self._root_resource_id
+                    if not self._shortcuts:
+                        return GrepResult(matches=[])
+                    pairs = []
+                    for name, rid in self._shortcuts.items():
+                        try:
+                            child_res = await resource_crud.get_resource(db, rid)
+                        except Exception:
+                            continue
+                        if child_res is None:
+                            continue
+                        shortcut_vpath = f"{norm.rstrip('/')}/{name}"
+                        if child_res.itemType == ResourceItemType.FOLDER.value:
+                            sub_pairs = await self._load_subtree_with_paths(db, rid, shortcut_vpath)
+                            pairs.extend(sub_pairs)
+                        else:
+                            pairs.append((shortcut_vpath, child_res))
+                else:
+                    root_id = self._root_resource_id
+                    pairs = await self._load_subtree_with_paths(db, root_id, norm)
             else:
                 root_id = target.id
-
-            pairs = await self._load_subtree_with_paths(db, root_id, norm)
+                pairs = await self._load_subtree_with_paths(db, root_id, norm)
 
             matches: list[GrepMatch] = []
             file_id_pairs: list[tuple[str, str, str]] = []  # (vpath, file_id, name)
@@ -1527,13 +1543,31 @@ class MamboResourceBackend(BackendProtocol):
 
             if target.id == "__ws_root__":
                 if not self._root_resource_id:
-                    return GlobResult(matches=[])
-                root_id = self._root_resource_id
+                    if not self._shortcuts:
+                        return GlobResult(matches=[])
+                    pairs = []
+                    for name, rid in self._shortcuts.items():
+                        try:
+                            child_res = await resource_crud.get_resource(db, rid)
+                        except Exception:
+                            continue
+                        if child_res is None:
+                            continue
+                        shortcut_vpath = f"{norm.rstrip('/')}/{name}"
+                        if child_res.itemType == ResourceItemType.FOLDER.value:
+                            sub_pairs = await self._load_subtree_with_paths(db, rid, shortcut_vpath)
+                            pairs.extend(sub_pairs)
+                        else:
+                            pairs.append((shortcut_vpath, child_res))
+                    size_map = await self._resolve_file_sizes_batch(db, pairs)
+                else:
+                    root_id = self._root_resource_id
+                    pairs = await self._load_subtree_with_paths(db, root_id, norm)
+                    size_map = await self._resolve_file_sizes_batch(db, pairs)
             else:
                 root_id = target.id
-
-            pairs = await self._load_subtree_with_paths(db, root_id, norm)
-            size_map = await self._resolve_file_sizes_batch(db, pairs)
+                pairs = await self._load_subtree_with_paths(db, root_id, norm)
+                size_map = await self._resolve_file_sizes_batch(db, pairs)
 
             matched: list[FileInfo] = []
             for vpath, res in pairs:
