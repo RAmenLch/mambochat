@@ -1049,15 +1049,18 @@ class ApiClientConnection {
       if (e.killed) {
         return { output: `Command timed out after ${timeout} seconds`, exit_code: -1, truncated: false }
       }
-      const errOut: Buffer | undefined =
-        (e.stdout && e.stdout.length > 0) ? e.stdout
-        : (e.stderr && e.stderr.length > 0) ? e.stderr
-        : undefined
-      return {
-        output: errOut ? decode(errOut) : `Error executing command: ${e.message}`,
-        exit_code: e.code ?? -1,
-        truncated: false,
+      // Command failed (non-zero exit). Python writes tracebacks to stderr,
+      // so both streams must be merged (same as the success branch) — picking
+      // only one would drop the traceback and leave LLMs with just an exit code.
+      const parts: string[] = []
+      const appendStream = (buf: unknown) => {
+        if (Buffer.isBuffer(buf) && buf.length > 0) parts.push(decode(buf).trimEnd())
       }
+      appendStream(e.stdout)
+      appendStream(e.stderr)
+      const output = parts.join('\n') || `Error executing command: ${e.message}`
+      const exitCode = typeof e.code === 'number' ? e.code : -1
+      return { output, exit_code: exitCode, truncated: false }
     }
   }
 
