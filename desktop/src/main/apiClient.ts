@@ -13,7 +13,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import * as crypto from 'crypto'
-import { exec as execCb, execFile as execFileCb } from 'child_process'
+import { execFile as execFileCb, spawn, type ChildProcess } from 'child_process'
 import { promisify, TextDecoder } from 'util'
 import http from 'http'
 import https from 'https'
@@ -23,7 +23,6 @@ import log from './log'
 import fg from 'fast-glob'
 
 const execFileAsync = promisify(execFileCb)
-const execAsync = promisify(execCb)
 
 /**
  * Directories skipped by default during recursive scans (grep / glob / tree)
@@ -307,7 +306,8 @@ class ApiClientConnection {
         case 'glob_files':    result = await this.handleGlobFiles(params); break
         case 'upload_files':  result = await this.handleUploadFiles(params); break
         case 'download_files':result = await this.handleDownloadFiles(params); break
-        case 'execute':       result = await this.handleExecute(params); break
+        case 'execute':       result = await this.handleExecute(params, request_id); break
+        case 'abort':         this.handleAbort(params); return  // 单向通知：不回复响应
         case 'delete_file':   result = await this.handleDelete(params); break
         default:              result = { error: `Unknown method: ${method}`, error_code: 'UNKNOWN_METHOD' }
       }
@@ -992,14 +992,46 @@ class ApiClientConnection {
     return { results }
   }
 
-  private async handleExecute(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+  private runningExecs = new Map<string, ChildProcess>()
+
+  /** Kill the whole process tree rooted at *child* (not just the shell wrapper):
+   *  - Windows: taskkill /T /F terminates cmd.exe and all descendants.
+   *  - POSIX: detached:true makes the shell a process-group leader, so a
+   *    negative pid kills the entire group (shell + children).
+   */
+  private killProcessTree(child: ChildProcess): void {
+    if (!child.pid) return
+    try {
+      if (process.platform === 'win32') {
+        spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+      } else {
+        process.kill(-child.pid, 'SIGKILL')
+      }
+    } catch {
+      // Process already exited — nothing to kill.
+    }
+  }
+
+  /** Abort a running execute command (single-direction notification). */
+  private handleAbort(params: Record<string, unknown>): void {
+    const requestId = (params.request_id as string) || ''
+    const child = this.runningExecs.get(requestId)
+    if (!child) {
+      log.info(`[ApiClient] Abort ignored: no running exec for request_id=${requestId}`)
+      return
+    }
+    log.info(`[ApiClient] Aborting exec request_id=${requestId} pid=${child.pid}`)
+    this.killProcessTree(child)
+  }
+
+  private async handleExecute(params: Record<string, unknown>, requestId: string): Promise<Record<string, unknown>> {
     const command = (params.command as string) || ''
     // The server sends the timeout in SECONDS (aligned with the Python backends'
-    // subprocess.run semantics), but Node's child_process timeout option is in
-    // MILLISECONDS — convert, otherwise a 150s timeout becomes 150ms and fast
-    // commands are killed randomly.
+    // subprocess.run semantics), but Node's timer is in MILLISECONDS — convert,
+    // otherwise a 150s timeout becomes 150ms and fast commands are killed randomly.
     const timeout = (params.timeout as number) || 120
     const timeoutMs = timeout * 1000
+    const maxBuffer = 100 * 1024 * 1024
 
     // Decode raw bytes with UTF-8 first: modern CLIs emit UTF-8 by default,
     // and UTF-8 strict decoding rejects most non-UTF-8 byte streams.  GBK
@@ -1015,53 +1047,77 @@ class ApiClientConnection {
       }
     }
 
-    try {
-      // On Windows, use exec() — it runs `cmd.exe /d /s /c "<command>"` and the
-      // /s flag strips only the outermost quotes, so the command string reaches
-      // cmd.exe verbatim (inner quotes survive, mirrors LocalBackend's
-      // shell=True). execFile(['/c', command]) would rebuild the command line
-      // via libuv argv quoting, escaping " as \" — cmd.exe has no backslash
-      // escaping, so quoted arguments (e.g. findstr "a b c") get mangled.
-      // POSIX keeps the list form: execve passes argv directly, no escaping.
-      const execOpts = {
-        timeout: timeoutMs,
-        maxBuffer: 100 * 1024 * 1024,
-        cwd: this.rootDir,
-        encoding: 'buffer' as const,
-      }
-      const { stdout, stderr } = process.platform === 'win32'
-        ? await execAsync(command, execOpts)
-        : await execFileAsync('/bin/sh', ['-c', command], execOpts)
-      const outputParts: string[] = []
-      if (stdout && stdout.length > 0) outputParts.push(decode(stdout).trimEnd())
-      if (stderr && stderr.length > 0) {
-        for (const line of decode(stderr).trimEnd().split('\n')) {
-          outputParts.push(`[stderr] ${line}`)
+    return await new Promise<Record<string, unknown>>((resolve) => {
+      let stdout = Buffer.alloc(0)
+      let stderr = Buffer.alloc(0)
+      let timedOut = false
+      let truncated = false
+
+      // On Windows, use cmd.exe /d /s /c "<command>": the /s flag strips only
+      // the outermost quotes, so the command string reaches cmd.exe verbatim
+      // (inner quotes survive, mirrors LocalBackend's shell=True). execFile
+      // would rebuild the command line via libuv argv quoting, escaping " as
+      // \" — cmd.exe has no backslash escaping, so quoted arguments (e.g.
+      // findstr "a b c") get mangled. POSIX keeps the list form: execve
+      // passes argv directly, no escaping. detached:true makes the child a
+      // process-group leader (POSIX setsid) so the whole tree can be killed.
+      const child = spawn(
+        process.platform === 'win32' ? 'cmd.exe' : '/bin/sh',
+        process.platform === 'win32' ? ['/d', '/s', '/c', command] : ['-c', command],
+        { detached: true, windowsHide: true, cwd: this.rootDir, stdio: ['ignore', 'pipe', 'pipe'] },
+      )
+      this.runningExecs.set(requestId, child)
+
+      const timer = setTimeout(() => {
+        timedOut = true
+        this.killProcessTree(child)
+      }, timeoutMs)
+
+      const append = (buf: Buffer, isErr: boolean): void => {
+        if (truncated) return
+        const next = Buffer.concat([isErr ? stderr : stdout, buf])
+        if (next.length > maxBuffer) {
+          truncated = true
+          this.killProcessTree(child)
+          return
         }
+        if (isErr) stderr = next
+        else stdout = next
       }
-      let output = outputParts.join('\n') || '<no output>'
+      child.stdout?.on('data', (d: Buffer) => append(d, false))
+      child.stderr?.on('data', (d: Buffer) => append(d, true))
 
-      const truncated = output.length > 100000
-      if (truncated) output = output.slice(0, 100000) + '\n... (output truncated)'
+      const finish = (): void => {
+        clearTimeout(timer)
+        this.runningExecs.delete(requestId)
+      }
 
-      return { output, exit_code: 0, truncated }
-    } catch (e: any) {
-      if (e.killed) {
-        return { output: `Command timed out after ${timeout} seconds`, exit_code: -1, truncated: false }
-      }
-      // Command failed (non-zero exit). Python writes tracebacks to stderr,
-      // so both streams must be merged (same as the success branch) — picking
-      // only one would drop the traceback and leave LLMs with just an exit code.
-      const parts: string[] = []
-      const appendStream = (buf: unknown) => {
-        if (Buffer.isBuffer(buf) && buf.length > 0) parts.push(decode(buf).trimEnd())
-      }
-      appendStream(e.stdout)
-      appendStream(e.stderr)
-      const output = parts.join('\n') || `Error executing command: ${e.message}`
-      const exitCode = typeof e.code === 'number' ? e.code : -1
-      return { output, exit_code: exitCode, truncated: false }
-    }
+      child.on('close', (code) => {
+        finish()
+        if (timedOut) {
+          resolve({ output: `Command timed out after ${timeout} seconds`, exit_code: -1, truncated: false })
+          return
+        }
+        const outputParts: string[] = []
+        if (stdout.length > 0) outputParts.push(decode(stdout).trimEnd())
+        if (stderr.length > 0) {
+          for (const line of decode(stderr).trimEnd().split('\n')) {
+            outputParts.push(`[stderr] ${line}`)
+          }
+        }
+        let output = outputParts.join('\n') || '<no output>'
+        if (truncated || output.length > 100000) {
+          output = output.slice(0, 100000) + '\n... (output truncated)'
+          truncated = true
+        }
+        resolve({ output, exit_code: code ?? -1, truncated })
+      })
+
+      child.on('error', (err) => {
+        finish()
+        resolve({ output: `Error executing command: ${err.message}`, exit_code: -1, truncated: false })
+      })
+    })
   }
 
   private async handleDelete(params: Record<string, unknown>): Promise<Record<string, unknown>> {

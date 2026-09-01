@@ -58,6 +58,23 @@ def get_client_info(backend_id: str) -> Dict[str, Any]:
     return _client_info.get(backend_id, {})
 
 
+async def _send_abort(ws: WebSocket, request_id: str, method: str) -> None:
+    """Fire-and-forget: 通知客户端中止 *request_id* 对应的执行进程。
+
+    超时 / 取消时调用——调用方已放弃等待响应,因此不期待客户端回复。
+    """
+    try:
+        await ws.send_json({
+            "type": "command",
+            "request_id": request_id,
+            "method": "abort",
+            "params": {"request_id": request_id},
+        })
+        logger.info("[ROUTER] send_command: sent abort for %s method=%s", request_id, method)
+    except Exception:
+        logger.warning("[ROUTER] send_command: failed to send abort for %s", request_id, exc_info=True)
+
+
 async def send_command(backend_id: str, method: str, params: dict, timeout: float = 60.0) -> dict:
     """Send a command through WebSocket and wait for the client's response.
 
@@ -100,7 +117,14 @@ async def send_command(backend_id: str, method: str, params: dict, timeout: floa
         return result
     except asyncio.TimeoutError:
         logger.error("[ROUTER] send_command: TIMEOUT for %s method=%s after %ss", request_id, method, timeout)
+        await _send_abort(ws, request_id, method)
         raise TimeoutError(f"API client for backend '{backend_id}' timed out on method '{method}'")
+    except asyncio.CancelledError:
+        # 上游被取消(用户中止生成 / 工具层超时):客户端进程仍在运行,
+        # 补发 abort 通知客户端杀掉进程树,避免残留孤儿进程。
+        logger.info("[ROUTER] send_command: CANCELLED for %s method=%s, sending abort", request_id, method)
+        await _send_abort(ws, request_id, method)
+        raise
     except WebSocketDisconnect:
         _connections.pop(backend_id, None)
         _client_info.pop(backend_id, None)
