@@ -8,7 +8,7 @@ from langchain_core.tools import BaseTool, tool
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
 from backend.services.generation.core.instructions import (
     BaseInstruction,
-    CreateSubMessage, InterruptGeneration
+    CreateSubMessage, FinishRound
 )
 from backend.schemas import enums as schemas_enums
 from backend.schemas.message import SubMessageConfig
@@ -84,7 +84,7 @@ class SuggestToolProvider(BaseToolProvider):
             initial_content=content_json,
             config=SubMessageConfig(context_participation_length=0)
         )
-        yield InterruptGeneration()
+        yield FinishRound()
 
     async def create_result_instruction(
             self,

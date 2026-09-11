@@ -21,6 +21,17 @@ class InterruptGeneration(BaseInstruction):
     pass
 
 
+class FinishRound(BaseInstruction):
+    """
+    指令：正常收尾当前轮次生成 (Control Flow)。
+    与 InterruptGeneration（真实中断，图进入 paused 状态）不同，本指令表示本轮为
+    正常结束（如模型已通过 suggest 工具输出回复建议），仅需停止接收 Worker 的后续
+    事件并进入 finalize 流程；finalize 时按正常完成处理（照常发出 COMPLETED 最终状态）。
+    此指令通常由 Manager 内部消费，不应传递给 Executor。
+    """
+    pass
+
+
 class CreateSubMessage(BaseInstruction):
     """指令：创建一个新的子消息。"""
     sub_message_id: str = Field(..., description="预生成的子消息UUID")

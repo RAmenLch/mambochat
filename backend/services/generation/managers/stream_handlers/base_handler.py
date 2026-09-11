@@ -30,6 +30,8 @@ class StreamContext:
     created_stream_ids: Set[str]
     pending_hitl_tool_calls: list
     should_interrupt: bool = False
+    # 轮次正常收尾标记（如 suggest 输出完毕）：停止消费后续事件，但不算中断
+    should_finish_round: bool = False
     last_finish_reason: Optional[str] = None
 
     # 新增：subagent_event 相关追踪字段

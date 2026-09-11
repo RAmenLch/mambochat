@@ -17,7 +17,7 @@ from backend.services.mcp_connection_manager import McpConnectionError
 
 from backend.services.generation.core.instructions import (
     BaseInstruction, CreateSubMessage, AppendToSubMessage,
-    SetFinalStatus, InterruptGeneration, FailSubMessagesByMessage,
+    SetFinalStatus, InterruptGeneration, FinishRound, FailSubMessagesByMessage,
     UpdateSubMessageConfig, UpdateSubMessageStatus, UpdateZipHistorySubMessage,
     SetMessageCheckpointId
 )
@@ -221,6 +221,9 @@ class DefaultGenerateManager(AbstractGenerateManager):
                         if isinstance(instruction, InterruptGeneration):
                             context.should_interrupt = True
                             continue
+                        if isinstance(instruction, FinishRound):
+                            context.should_finish_round = True
+                            continue
                         yield instruction
 
                 # 从 Handler 链中提取最后一轮 finish_reason (last-wins)
@@ -236,6 +239,10 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 # ask_user 多中断：不 break，让后续 __interrupt__ 事件继续流入
                 if context.should_interrupt:
                     should_interrupt = True
+                    break
+
+                # 轮次正常收尾（如 suggest 已输出建议）：停止消费后续事件，但不算中断
+                if context.should_finish_round:
                     break
         except asyncio.CancelledError:
             raise
