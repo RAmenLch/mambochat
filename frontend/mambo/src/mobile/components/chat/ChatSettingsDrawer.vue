@@ -188,6 +188,7 @@ import { getResourceDetails } from '@/api/resourceService'
 import type { Chat, ChatUpdate, AIModel, Resource, LLMParameterDefinition } from '@/api/types'
 import ResourceSelectorDialog from './dialogs/ResourceSelectorDialog.vue'
 import { useModelSelectScroll } from '@/composables/useModelSelectScroll'
+import { isDefaultChatName } from '@/utils/chatName'
 
 interface GroupedModels {
   label: string
