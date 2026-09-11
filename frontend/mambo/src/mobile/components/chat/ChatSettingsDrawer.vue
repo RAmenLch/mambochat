@@ -281,7 +281,7 @@ watch(
   () => props.chatData,
   async (newVal) => {
     if (!newVal) return
-    chatSettingsForm.name = newVal.name
+    chatSettingsForm.name = isDefaultChatName(newVal.name) ? t('chat.sidebar.initChatName') : newVal.name
     chatSettingsForm.aiModelId = newVal.aiModelId
     chatSettingsForm.systemPrompt = newVal.systemPrompt
 
@@ -381,13 +381,18 @@ function handleSaveSettings() {
 
   const resourcePromptList = [...drawerResourceIds, ...currentKbIds]
 
-  emit('save', {
-    name: chatSettingsForm.name,
+  const payload: ChatUpdate = {
     aiModelId: chatSettingsForm.aiModelId,
     systemPrompt: chatSettingsForm.systemPrompt,
     modelParameters: finalModelParameters,
     resource_prompt_list: resourcePromptList.length > 0 ? resourcePromptList : null,
-  })
+  }
+  // 与 header 一致:输入等于当前显示标题 = 未修改 → 不提交 name,保留后端默认 Key
+  const displayTitle = isDefaultChatName(props.chatData.name) ? t('chat.sidebar.initChatName') : props.chatData.name
+  if (chatSettingsForm.name && chatSettingsForm.name.trim() !== displayTitle) {
+    payload.name = chatSettingsForm.name.trim()
+  }
+  emit('save', payload)
 }
 </script>
 

@@ -341,15 +341,21 @@ async function loadResourcePreview(resourceId: string, currentSelection: Resourc
   try {
     await resourceStore.fetchResourceDetails(resourceId);
     const updatedResource = resources.value.find(r => r.id === resourceId);
-    if (updatedResource) {
-      const index = currentSelection.findIndex(r => r.id === resourceId);
-      if (index !== -1) {
-        currentSelection.splice(index, 1, updatedResource);
-        if (isMultiSelectMode.value && currentSelection.length === 1) selectionType.value = updatedResource.resourceType;
-      } else if (currentSelection.length === 0 && !isMultiSelectMode.value) {
-        currentSelection = [updatedResource];
+    if (!updatedResource) return;
+    // 详情加载期间该资源可能已被取消选择，避免回填已取消的项
+    if (!props.selectedResources.some(r => r.id === resourceId)) return;
+
+    const index = currentSelection.findIndex(r => r.id === resourceId);
+    // 必须 emit 新数组：原地 splice 后 emit 同一引用不会触发响应式更新
+    if (index !== -1) {
+      const nextSelection = [...currentSelection];
+      nextSelection.splice(index, 1, updatedResource);
+      if (isMultiSelectMode.value && nextSelection.length === 1) {
+        selectionType.value = updatedResource.resourceType;
       }
-      emit('update:selectedResources', currentSelection);
+      emit('update:selectedResources', nextSelection);
+    } else if (currentSelection.length === 0 && !isMultiSelectMode.value) {
+      emit('update:selectedResources', [updatedResource]);
     }
   } catch(e) {
     console.error("Failed to load resource content", e);

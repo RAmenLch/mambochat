@@ -13,6 +13,8 @@ export default {
     exportZip: '导出为 ZIP',
     exportZipSuccess: '导出成功',
     exportZipFailed: '导出失败',
+    collapse: '折叠资源列表',
+    expand: '展开资源列表',
   },
   explorer: {
     uploadingCount: '正在上传 {count} 个文件...',
@@ -47,6 +49,8 @@ export default {
   },
   meta: {
     title: '基本信息',
+    collapse: '折叠信息栏',
+    expand: '展开信息栏',
     name: '名称',
     description: '描述',
     namePlaceholder: '资源名称',
@@ -120,6 +124,7 @@ export default {
     multiPreview: '已选择 {count} 个项目 (合并预览)',
     kbContainer: '知识库容器 (不支持预览内容)',
     noFile: '无文件内容',
+    loadingContent: '正在加载文件内容...',
   },
   action: {
     mountKbSearch: '提供给AI助手检索',

@@ -1,9 +1,22 @@
 <!-- frontend/mambo/src/components/settings/resource/ResourceMetaSidebar.vue -->
 <template>
-  <div class="meta-column">
-    <el-scrollbar>
+  <div class="meta-column" :class="{ 'is-collapsed': isCollapsed }">
+    <div v-show="isCollapsed" class="collapsed-rail">
+      <el-tooltip :content="t('resource.meta.expand')" placement="left">
+        <el-button text :icon="Expand" @click="toggleCollapse" />
+      </el-tooltip>
+      <span class="collapsed-title">{{ t('resource.meta.title') }}</span>
+    </div>
+
+    <div v-show="!isCollapsed" class="meta-topbar">
+      <span class="meta-topbar-title">{{ t('resource.meta.title') }}</span>
+      <el-tooltip :content="t('resource.meta.collapse')" placement="bottom">
+        <el-button text circle size="small" :icon="Fold" @click="toggleCollapse" />
+      </el-tooltip>
+    </div>
+
+    <el-scrollbar v-show="!isCollapsed">
       <div class="meta-content-wrapper">
-        <div class="meta-header">{{ t('resource.meta.title') }}</div>
         <el-form-item :label="t('resource.meta.name')" prop="name">
           <el-input
             :model-value="name"
@@ -134,9 +147,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { QuestionFilled } from '@element-plus/icons-vue'
+import { QuestionFilled, Fold, Expand } from '@element-plus/icons-vue'
 import type { ResourceWithVersions } from '@/api/types'
 
 // --- Local Type Definitions ---
@@ -165,6 +178,19 @@ defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+// --- Collapse State ---
+const META_COLLAPSED_KEY = 'mambo_resource_meta_collapsed'
+
+const isCollapsed = ref(localStorage.getItem(META_COLLAPSED_KEY) === 'true')
+
+const toggleCollapse = () => {
+  isCollapsed.value = !isCollapsed.value
+}
+
+watch(isCollapsed, (collapsed) => {
+  localStorage.setItem(META_COLLAPSED_KEY, String(collapsed))
+})
 
 // --- Computed Properties ---
 const displayResourceType = computed(() => {
@@ -195,6 +221,51 @@ const displayResourceType = computed(() => {
   display: flex; /* Use flexbox to manage scrollbar */
   flex-direction: column;
   overflow: hidden; /* Hide default overflow, let el-scrollbar handle it */
+  transition: width 0.25s cubic-bezier(0.25, 0.8, 0.5, 1);
+}
+
+.meta-column.is-collapsed {
+  width: 48px;
+}
+
+.meta-topbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 8px 8px 20px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.meta-topbar-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  text-transform: uppercase;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.collapsed-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.collapsed-title {
+  writing-mode: vertical-rl;
+  font-size: 13px;
+  letter-spacing: 4px;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+  user-select: none;
 }
 
 .meta-content-wrapper {
@@ -237,9 +308,10 @@ const displayResourceType = computed(() => {
   cursor: help;
 }
 
-/* Ensure el-scrollbar takes full height */
+/* Ensure el-scrollbar takes the remaining height */
 :deep(.el-scrollbar) {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 :deep(.el-scrollbar__wrap) {
   overflow-x: hidden;

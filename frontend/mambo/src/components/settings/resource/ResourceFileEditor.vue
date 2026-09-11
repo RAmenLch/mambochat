@@ -182,6 +182,7 @@ const onFileChange = (uploadFile: UploadFile) => {
 
 .file-uploader-area.is-editable-layout {
   padding: 20px;
+  container-type: inline-size;
 }
 
 .editable-file-layout {
@@ -193,7 +194,9 @@ const onFileChange = (uploadFile: UploadFile) => {
 }
 
 .file-info-compact {
-  flex: 0 0 260px;
+  flex: 0 1 240px;
+  min-width: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -230,7 +233,7 @@ const onFileChange = (uploadFile: UploadFile) => {
 }
 
 .file-editor-wrapper {
-  flex: 1;
+  flex: 1 1 420px;
   min-width: 0;
   border: 1px solid var(--el-border-color);
   border-radius: 4px;
@@ -330,5 +333,81 @@ const onFileChange = (uploadFile: UploadFile) => {
   font-size: 12px;
   flex-direction: column;
   gap: 8px;
+}
+
+/* 窄容器（查询的是编辑器可用宽度，而非视口宽度）：
+   布局改为纵向堆叠，信息卡压缩成一条横向信息栏，宽度与高度都让给编辑器 */
+@container (max-width: 620px) {
+  .editable-file-layout {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .file-info-compact {
+    flex: 0 0 auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 14px;
+  }
+
+  .file-preview-icon.compact {
+    width: 44px;
+    height: 44px;
+    margin-bottom: 0;
+    flex: 0 0 auto;
+  }
+
+  .file-preview-icon.compact > :deep(.el-icon) {
+    font-size: 30px !important;
+  }
+
+  .editable-badge {
+    width: 18px;
+    height: 18px;
+  }
+
+  .file-meta-content {
+    flex: 1 1 160px;
+    min-width: 0;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .file-name {
+    max-width: 100%;
+    font-size: 14px;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    word-break: normal;
+  }
+
+  .file-details {
+    justify-content: flex-start;
+  }
+
+  .file-details .el-tag {
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .compact-divider {
+    display: none;
+  }
+
+  .compact-upload {
+    flex: 0 0 auto;
+    margin-left: auto;
+  }
+
+  .file-editor-wrapper {
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 240px;
+  }
 }
 </style>

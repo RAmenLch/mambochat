@@ -1,7 +1,15 @@
 <!-- frontend/mambo/src/components/settings/resource/ResourceTreePanel.vue -->
 <template>
-  <el-aside width="300px" class="resource-tree-panel">
+  <el-aside :width="isCollapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH" class="resource-tree-panel">
+    <div v-show="isCollapsed" class="collapsed-rail">
+      <el-tooltip :content="t('resource.tree.expand')" placement="right">
+        <el-button text :icon="Expand" @click="toggleCollapse" />
+      </el-tooltip>
+      <span class="collapsed-title">{{ t('resource.tree.title') }}</span>
+    </div>
+
     <ExplorerTree
+      v-show="!isCollapsed"
       ref="treeRef"
       :data="data"
       :current-id="currentId"
@@ -20,6 +28,9 @@
       <template #header>
         <div class="panel-header">
           <h4>{{ t('resource.tree.title') }}</h4>
+          <el-tooltip :content="t('resource.tree.collapse')" placement="bottom">
+            <el-button text circle size="small" :icon="Fold" @click="toggleCollapse" />
+          </el-tooltip>
         </div>
       </template>
 
@@ -132,7 +143,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { onMounted, computed, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import {
@@ -149,6 +160,8 @@ import {
   CircleCheckFilled,
   CircleCloseFilled,
   Download,
+  Fold,
+  Expand,
 } from '@element-plus/icons-vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import type { AllowDropType } from 'element-plus/es/components/tree/src/tree.type'
@@ -205,6 +218,21 @@ const emit = defineEmits<{
   (e: 'item-deleted', id: string): void
   (e: 'move-success', item_ids: string[]): void
 }>()
+
+// --- Collapse State ---
+const TREE_COLLAPSED_KEY = 'mambo_resource_tree_collapsed'
+const EXPANDED_WIDTH = '300px'
+const COLLAPSED_WIDTH = '48px'
+
+const isCollapsed = ref(localStorage.getItem(TREE_COLLAPSED_KEY) === 'true')
+
+const toggleCollapse = () => {
+  isCollapsed.value = !isCollapsed.value
+}
+
+watch(isCollapsed, (collapsed) => {
+  localStorage.setItem(TREE_COLLAPSED_KEY, String(collapsed))
+})
 
 // --- Store ---
 const resourceStore = useResourceStore()
@@ -534,10 +562,16 @@ function handleNodeClick(data: BaseTreeItem) {
   flex-direction: column;
   border-right: 1px solid var(--el-border-color);
   background-color: var(--color-background-soft);
+  overflow: hidden;
+  transition: width 0.25s cubic-bezier(0.25, 0.8, 0.5, 1);
 }
 
 .panel-header {
-  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 8px 8px 16px;
   flex-shrink: 0;
   border-bottom: 1px solid var(--el-border-color-lighter);
   cursor: default;
@@ -546,6 +580,29 @@ function handleNodeClick(data: BaseTreeItem) {
 .panel-header h4 {
   margin: 0;
   font-size: 16px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.collapsed-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.collapsed-title {
+  writing-mode: vertical-rl;
+  font-size: 13px;
+  letter-spacing: 4px;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+  user-select: none;
 }
 
 .delete-item {

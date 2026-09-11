@@ -14,6 +14,8 @@ export default {
     exportZip: 'Export as ZIP',
     exportZipSuccess: 'Export succeeded',
     exportZipFailed: 'Export failed',
+    collapse: 'Collapse resource list',
+    expand: 'Expand resource list',
   },
   explorer: {
     uploadingCount: 'Uploading {count} files...',
@@ -49,6 +51,8 @@ export default {
   },
   meta: {
     title: 'Basic Info',
+    collapse: 'Collapse info panel',
+    expand: 'Expand info panel',
     name: 'Name',
     description: 'Description',
     namePlaceholder: 'Resource name',
@@ -123,6 +127,7 @@ export default {
     multiPreview: 'Selected {count} items (Merged Preview)',
     kbContainer: 'KB Container (No content preview)',
     noFile: 'No file content',
+    loadingContent: 'Loading file content...',
   },
   action: {
     mountKbSearch: 'Provide to AI',

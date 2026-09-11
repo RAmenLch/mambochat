@@ -56,6 +56,24 @@
                 </template>
               </el-image>
             </div>
+
+            <!-- 可在线编辑的文本文件：直接预览文件内容 -->
+            <template v-else-if="isTextPreviewable(selectedResources[0])">
+              <div class="file-text-header">
+                <el-icon><Document /></el-icon>
+                <span class="file-name" :title="currentFileInfo.filename">{{ currentFileInfo.filename }}</span>
+                <span class="file-size">{{ formatFileSize(currentFileInfo.size) }}</span>
+                <a :href="currentFileInfo.url" target="_blank" class="download-link">
+                  <el-button type="primary" link icon="Download">{{ $t('resource.editor.downloadFile') }}</el-button>
+                </a>
+              </div>
+              <pre v-if="getFileText(selectedResources[0]) !== undefined" class="preview-content">{{ getFileText(selectedResources[0]) }}</pre>
+              <div v-else class="file-text-state">
+                <el-icon v-if="!isFileTextFailed(selectedResources[0])" class="is-loading"><Loading /></el-icon>
+                <span>{{ isFileTextFailed(selectedResources[0]) ? $t('resource.selector.noFileContent') : $t('resource.selector.loadingContent') }}</span>
+              </div>
+            </template>
+
             <div v-else class="file-generic">
               <el-icon :size="48"><Document /></el-icon>
               <div class="file-meta">
@@ -66,6 +84,10 @@
                 <el-button type="primary" link icon="Download">{{ $t('resource.editor.downloadFile') }}</el-button>
               </a>
             </div>
+          </div>
+          <div v-else-if="isPreviewLoading" class="file-empty-state">
+            <el-icon :size="48" class="is-loading"><Loading /></el-icon>
+            <p>{{ $t('resource.selector.loadingContent') }}</p>
           </div>
           <div v-else class="file-empty-state">
             <el-icon :size="48"><Document /></el-icon>
@@ -97,16 +119,33 @@
           </template>
 
           <template v-else-if="res.resourceType === 'file'">
-            <div v-if="res.latest_version?.file_info" class="file-preview-wrapper mini">
-              <div v-if="isResourceImage(res)" class="file-preview-image mini">
+            <div v-if="isResourceImage(res) && res.latest_version?.file_info" class="file-preview-wrapper mini">
+              <div class="file-preview-image mini">
                 <el-image :src="res.latest_version.file_info.url" :preview-src-list="[res.latest_version.file_info.url]" fit="contain" style="width: 100%; height: 100%;" />
               </div>
-              <div v-else class="file-generic mini">
-                <el-icon><Document /></el-icon>
-                <span>{{ res.latest_version.file_info.filename }}</span>
-              </div>
             </div>
-            <div v-else class="mini-empty">{{ $t('resource.selector.noFile') }}</div>
+
+            <!-- 可在线编辑的文本文件：与文本资源一致地展示内容 -->
+            <template v-else-if="isTextPreviewable(res)">
+              <div class="file-text-header mini">
+                <el-icon><Document /></el-icon>
+                <span class="file-name" :title="fileInfoOf(res)?.filename || ''">{{ fileInfoOf(res)?.filename }}</span>
+                <span class="file-size">{{ formatFileSize(fileInfoOf(res)?.size || 0) }}</span>
+              </div>
+              <pre v-if="getFileText(res) !== undefined" class="preview-content">{{ getFileText(res) }}</pre>
+              <div v-else class="file-text-state">
+                <el-icon v-if="!isFileTextFailed(res)" class="is-loading"><Loading /></el-icon>
+                <span>{{ isFileTextFailed(res) ? $t('resource.selector.noFileContent') : $t('resource.selector.loadingContent') }}</span>
+              </div>
+            </template>
+
+            <div v-else-if="res.latest_version?.file_info" class="file-generic mini">
+              <el-icon><Document /></el-icon>
+              <span>{{ res.latest_version.file_info.filename }}</span>
+            </div>
+            <div v-else class="mini-empty">
+              {{ isPreviewLoading ? $t('resource.selector.loadingContent') : $t('resource.selector.noFile') }}
+            </div>
           </template>
 
           <pre v-else class="preview-content">{{ res.latest_version?.content || $t('resource.selector.noContent') }}</pre>
@@ -119,9 +158,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
-import { Document, Picture, Collection, Reading } from '@element-plus/icons-vue';
-import type { Resource } from '@/api/types';
+import { computed, ref, watch } from 'vue';
+import { Document, Picture, Collection, Reading, Loading } from '@element-plus/icons-vue';
+import type { FileResponse, Resource } from '@/api/types';
+import { getFileContent } from '@/api/fileService';
 
 const props = defineProps<{
   selectedResources: Resource[];
@@ -138,6 +178,71 @@ const isResourceImage = (resource: Resource): boolean => {
   const mime = resource.latest_version?.file_info?.mime_type;
   return mime ? mime.startsWith('image/') : false;
 };
+
+const fileInfoOf = (resource: Resource): FileResponse | null =>
+  resource.latest_version?.file_info || null;
+
+/** 仅 DB 存储的可编辑文本文件（非图片）支持内容预览 */
+const isTextPreviewable = (resource: Resource): boolean => {
+  const info = fileInfoOf(resource);
+  return resource.resourceType === 'file' && !!info && info.editable && !isResourceImage(resource);
+};
+
+// --- 可编辑文件内容 ---
+// 注意：File 资源的 version.content 存的是 file_id，不是文本，
+// 因此这里直接调用文件内容接口，只在组件内缓存，避免污染 store 数据。
+const fileTexts = ref<Record<string, string>>({});
+const fileTextErrors = ref<Record<string, boolean>>({});
+const pendingIds = new Set<string>();
+
+const getFileText = (resource: Resource): string | undefined => fileTexts.value[resource.id];
+const isFileTextFailed = (resource: Resource): boolean => !!fileTextErrors.value[resource.id];
+
+const loadFileText = async (resource: Resource) => {
+  const info = fileInfoOf(resource);
+  if (!info || !isTextPreviewable(resource)) return;
+  if (getFileText(resource) !== undefined || isFileTextFailed(resource) || pendingIds.has(resource.id)) return;
+
+  pendingIds.add(resource.id);
+  try {
+    const { content } = await getFileContent(info.id);
+    fileTexts.value = { ...fileTexts.value, [resource.id]: content };
+  } catch (error) {
+    console.error(`Failed to load preview content for file ${info.id}:`, error);
+    fileTextErrors.value = { ...fileTextErrors.value, [resource.id]: true };
+  } finally {
+    pendingIds.delete(resource.id);
+  }
+};
+
+const previewableFileIds = computed(() =>
+  props.selectedResources
+    .filter((resource) => isTextPreviewable(resource))
+    .map((resource) => resource.id)
+    .join('|'),
+);
+
+watch(
+  previewableFileIds,
+  () => {
+    // 取消选择 / 关闭弹窗后清理缓存，避免下次打开时展示旧内容
+    const currentIds = new Set(props.selectedResources.map((resource) => resource.id));
+
+    const retainedTexts: Record<string, string> = {};
+    const retainedErrors: Record<string, boolean> = {};
+    Object.keys(fileTexts.value).forEach((id) => {
+      if (currentIds.has(id)) retainedTexts[id] = fileTexts.value[id];
+    });
+    Object.keys(fileTextErrors.value).forEach((id) => {
+      if (currentIds.has(id)) retainedErrors[id] = fileTextErrors.value[id];
+    });
+    fileTexts.value = retainedTexts;
+    fileTextErrors.value = retainedErrors;
+
+    props.selectedResources.forEach((resource) => void loadFileText(resource));
+  },
+  { immediate: true },
+);
 
 const formatFileSize = (bytes: number): string => {
   if (bytes === 0) return '0 B';
@@ -317,6 +422,54 @@ const formatFileSize = (bytes: number): string => {
   border: none;
   gap: 8px;
   font-size: 13px;
+}
+
+.file-text-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background-color: var(--el-fill-color-lighter);
+}
+
+.file-text-header.mini {
+  padding: 6px 12px;
+  margin-bottom: 8px;
+}
+
+.file-text-header .file-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  font-size: 13px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.file-text-header .file-size,
+.file-text-header .download-link {
+  flex-shrink: 0;
+}
+
+.file-text-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 32px 0;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+.file-preview-wrapper .preview-content {
+  width: 100%;
 }
 
 .mini-empty {
