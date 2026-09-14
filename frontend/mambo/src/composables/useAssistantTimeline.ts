@@ -69,6 +69,10 @@ export function useAssistantTimeline(message: Ref<Message>, messageDisplayMode?:
       if (sm.type === 'File' && sm.config?.show_tool_mode && ['Mini_Avatar', 'Gal_Avatar'].includes(sm.config.show_tool_mode)) {
         return false;
       }
+      // 排除尾部工具汇总子消息（config.is_tail_tool）：不进入正文 / 时间线，改由底部折叠面板单独渲染
+      if (sm.config?.is_tail_tool === true) {
+        return false;
+      }
       return true;
     }).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   });
@@ -257,6 +261,16 @@ export function useAssistantTimeline(message: Ref<Message>, messageDisplayMode?:
     message.value.sub_messages.filter(sm => sm.type === 'Usage')
   );
 
+  /**
+   * 尾部工具汇总子消息（config.is_tail_tool）：不参与正文 / 时间线，
+   * 仅在助手消息底部的折叠面板中渲染（见 TailToolPanel.vue）
+   */
+  const tailToolSubMessages = computed(() =>
+    message.value.sub_messages
+      .filter(sm => sm.type === 'Normal' && sm.config?.is_tail_tool === true)
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+  );
+
   const zipHistorySubMessage = computed(() =>
     message.value.sub_messages.find(sm => sm.type === 'ZipHistory') || null
   );
@@ -389,6 +403,7 @@ export function useAssistantTimeline(message: Ref<Message>, messageDisplayMode?:
     interleavedSections,
     isSectionMinimized,
     usageSubMessages,
+    tailToolSubMessages,
     zipHistorySubMessage,
     zipCoverageGroupIds,
     suggestSubMessage,

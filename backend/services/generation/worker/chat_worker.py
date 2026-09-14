@@ -27,6 +27,10 @@ _GOAL_LOOP_INJECT_PREFIX = "goal-loop-"
 # 使 get_goal 像 write_plans 等中间件工具一样落库为 MCP_TOOL 子消息，与 state 对齐。
 _GOAL_LOOP_AFTER_AGENT_NODE = "GoalLoopMiddleware.after_agent"
 
+# TailToolMiddleware.after_agent 节点名。其输出含 _tail_tool_event（尾部任务的调用/结果），
+# 提取后交给 Manager 落成子消息（cpl=0、is_tail_tool=true；不进正文,底部折叠展示）。
+_TAIL_TOOL_AFTER_AGENT_NODE = "TailToolMiddleware.after_agent"
+
 
 class UniversalGraphWorker(AbstractGenerateWorker):
     """通用 Graph Worker：适用于不需要 VFS 文件注入的 Agent（React / Mambo）。
@@ -117,6 +121,13 @@ class UniversalGraphWorker(AbstractGenerateWorker):
             event = stream_event.get("data")
 
             if mode == "updates" and isinstance(event, dict):
+                # TailToolMiddleware.after_agent：其输出含 _tail_tool_event（尾部任务的调用/结果），
+                # 提取后交给 Manager 落成子消息（cpl=0、is_tail_tool=true，不进正文）。
+                if _TAIL_TOOL_AFTER_AGENT_NODE in event:
+                    _tail = event[_TAIL_TOOL_AFTER_AGENT_NODE]
+                    if isinstance(_tail, dict) and _tail.get("_tail_tool_event"):
+                        yield "tail_tool", _tail["_tail_tool_event"]
+                    continue
                 # GoalLoopMiddleware.after_agent：其 messages 是"模型 AIMessage 的原地替换副本"
                 # （同一 id，追加了注入的 get_goal 调用）。正文在 updates 模式下不会重复落库
                 # （provider decoder 的 get_text_content 在 updates 模式返回 None），因此只需

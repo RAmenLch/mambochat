@@ -14,8 +14,8 @@ from backend.services.generation.builders.resource_dispatcher import ResourceDis
 
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
 from backend.services.generation.tools.mcp_tool_provider import MCPToolProvider
-from backend.services.generation.tools.suggest_tool_provider import SuggestToolProvider
 from backend.services.generation.tools.ask_user_tool_provider import AskUserToolProvider
+from backend.services.generation.tools.tail_tool_provider import TailToolProvider
 from backend.services.generation.tools.kb_tool_provider import KBToolProvider
 from backend.services.generation.tools.web_search_tool_provider import WebSearchToolProvider
 from backend.schemas.enums import WebSearchMode
@@ -73,6 +73,7 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
             self.providers.append(KBToolProvider(self.db, knowledge_bases))
 
         # 2. 外部工具挂载 (MCP & Suggest & WebSearch)
+        enable_suggest = False
         if self.enable_tools:
             params = self.chat.parsed_model_parameters
 
@@ -92,10 +93,10 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
             if ws_mode is not None:
                 self.providers.append(WebSearchToolProvider(ws_mode, proxy_url=self.web_search_proxy_url))
 
-            # Suggest 建议工具 (从 Chat 的 modelParameters 中读取)
+            # Suggest 建议 (从 Chat 的 modelParameters 中读取;改由 Builder 挂尾部工具,不再用 Provider)
             enable_suggest = params.get("enable_suggest", False)
             if enable_suggest:
-                self.providers.append(SuggestToolProvider(enable_suggest=True))
+                self.providers.append(TailToolProvider())
 
             # AskUser 提问工具 (从 Chat 的 modelParameters 中读取)
             enable_ask_user = params.get("enable_ask_user", False)
@@ -129,7 +130,8 @@ class ChatBasedReActInitializer(AbstractAgentInitializer):
             skills=skills if skills else None,
             sub_configs=None, # Chat 模式没有子代理
             hitl_interrupt_on=self.hitl_interrupt_on,
-            resume_payload=self.resume_payload
+            resume_payload=self.resume_payload,
+            enable_suggest=enable_suggest,
         )
 
         return agent_config, additional_system_prompt

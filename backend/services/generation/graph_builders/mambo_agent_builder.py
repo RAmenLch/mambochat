@@ -63,6 +63,27 @@ def _make_session_factory() -> Callable[[], AsyncSession]:
     return lambda: AsyncSessionLocal()
 
 
+def _resolve_tail_task_tools(tt_cfg: dict, agent_tools) -> None:
+    """把 ``tt_cfg['tasks']`` 中按名绑定的工具,从 ``agent_tools`` 解析为可执行对象补进 ``tt_cfg['tools']``。
+
+    仅能解析确实存在于 ``agent_config.tools`` 的工具(如 KB / ask_user / 外部工具);
+    内置工具(ls/read/…)由 BackendToolsMiddleware 提供、MCP 工具默认 wrapped 模式,构建期取不到
+    独立对象,故不会被解析(它们仍会作为尾部任务出现在触发语中,但执行时会被跳过)。
+    """
+    tasks = tt_cfg.get("tasks") or []
+    if not tasks:
+        return
+    by_name = {t.name: t for t in (agent_tools or [])}
+    tools = list(tt_cfg.get("tools") or [])
+    existing = {t.name for t in tools}
+    for task in tasks:
+        tool = by_name.get(task.get("name"))
+        if tool is not None and tool.name not in existing:
+            tools.append(tool)
+            existing.add(tool.name)
+    tt_cfg["tools"] = tools
+
+
 def _make_store_backend(
     store: "AsyncSqliteStore | None",
     thread_id: str | None,
@@ -610,6 +631,25 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
                 session_factory=_make_session_factory(),
             )
 
+        # --- Tail tool middleware (opt-in; enable_suggest 时注入 suggest 尾部工具) ---
+        _tail_tool_middleware = None
+        tt_cfg = dict(getattr(agent_config, 'tail_tool_config', None) or {})
+        if getattr(agent_config, 'enable_suggest', False):
+            from backend.services.generation.agent.suggest_tail_tool import (
+                merge_suggest_into_tail_config,
+            )
+            tt_cfg = merge_suggest_into_tail_config(
+                tt_cfg,
+                session_factory=_make_session_factory(),
+                message_id=run_time_config.message_id,
+            )
+        if tt_cfg:
+            _resolve_tail_task_tools(tt_cfg, agent_config.tools)
+            from backend.services.generation.agent.tail_tool_middleware import (
+                build_tail_tool_middleware,
+            )
+            _tail_tool_middleware = build_tail_tool_middleware(tt_cfg)
+
         # --- Merge middlewares ---
         _middlewares: list = []
         if _plan_middleware:
@@ -618,6 +658,13 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
             _middlewares.append(_version_control_middleware)
         if _show_middleware:
             _middlewares.append(_show_middleware)
+        # goal_loop 显式排到尾部中间件之前：wrap_model_call 由外到内，靠后者的 request
+        # 已包含靠前者的 system 注入，使尾部中间件捕获的 request 与主调用完全一致。
+        if goal_loop is not None:
+            _middlewares.append(goal_loop.build_middleware())
+            goal_loop = None
+        if _tail_tool_middleware:
+            _middlewares.append(_tail_tool_middleware)
 
         # --- MCP middleware（插到最前面，让 system prompt 尽早注入）---
         if mcp_middleware is not None:

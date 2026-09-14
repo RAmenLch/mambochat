@@ -87,6 +87,26 @@ class GoalLoopConfigSchema(BaseModel):
         return self
 
 
+class TailToolTaskSchema(BaseModel):
+    """尾部工具调用任务：名称 + 具体使用说明（可选参数结构/示例）。"""
+    name: str = Field(..., description="任务名（尾部工具调用的 task 取值）")
+    instruction: Optional[str] = Field(None, description="具体使用说明")
+    args_schema: Optional[Dict[str, Any]] = Field(None, description="arguments 的 JSON Schema")
+    example: Optional[str] = Field(None, description="arguments 示例")
+
+
+class TailToolConfigSchema(BaseModel):
+    """通用尾部工具调用配置（TailToolMiddleware）。
+
+    每轮收尾后,用与主调用一致的上下文/参数再调一次模型,让模型调用通用工具
+    ``tail_tool`` 产出若干尾部任务;结果不进正文上下文。
+    """
+    enabled: bool = Field(False, description="是否启用尾部工具调用")
+    fail_mode: Literal["silent", "message"] = Field("silent", description="模型未调用时的行为")
+    fail_message: Optional[str] = Field(None, description="fail_mode='message' 时的失败文案")
+    tasks: Optional[List[TailToolTaskSchema]] = Field(None, description="尾部任务清单")
+
+
 class MamboAgentParametersSchema(BaseModel):
     """Mambo Agent 专属参数（持久化到 Agent.agentParameters JSON 列）"""
     include_general_purpose: bool = Field(False, description="是否启用通用子代理")
@@ -100,6 +120,7 @@ class MamboAgentParametersSchema(BaseModel):
     multimodal_describer: Optional[MultimodalDescriberConfigSchema] = Field(None, description="多模态描述配置")
     version_control: Optional[VersionControlConfigSchema] = Field(None, description="版本控制配置")
     goal_loop: Optional[GoalLoopConfigSchema] = Field(None, description="任务循环配置")
+    tail_tool: Optional[TailToolConfigSchema] = Field(None, description="通用尾部工具调用配置")
     mcp_direct_tool_threshold: int = Field(15, description="MCP 工具数量阈值：低于此值时直接暴露工具，否则使用 meta-tool 包装模式")
 
 

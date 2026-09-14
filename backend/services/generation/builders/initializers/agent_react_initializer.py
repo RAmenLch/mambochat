@@ -14,8 +14,8 @@ from backend.services.generation.builders.resource_dispatcher import ResourceDis
 
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
 from backend.services.generation.tools.mcp_tool_provider import MCPToolProvider
-from backend.services.generation.tools.suggest_tool_provider import SuggestToolProvider
 from backend.services.generation.tools.ask_user_tool_provider import AskUserToolProvider
+from backend.services.generation.tools.tail_tool_provider import TailToolProvider
 from backend.services.generation.tools.kb_tool_provider import KBToolProvider
 from backend.services.generation.tools.web_search_tool_provider import WebSearchToolProvider
 from backend.schemas.enums import WebSearchMode
@@ -62,6 +62,7 @@ class AgentBasedReActInitializer(AbstractAgentInitializer):
         if knowledge_bases:
             self.providers.append(KBToolProvider(self.db, knowledge_bases))
 
+        enable_suggest = False
         if self.enable_tools:
             params = self.agent.parsed_model_parameters
 
@@ -78,9 +79,10 @@ class AgentBasedReActInitializer(AbstractAgentInitializer):
             if self.web_search_mode is not None:
                 self.providers.append(WebSearchToolProvider(self.web_search_mode, proxy_url=self.web_search_proxy_url))
 
+            # Suggest 建议 (改由 Builder 挂尾部工具,不再用 Provider)
             enable_suggest = params.get("enable_suggest", False)
             if enable_suggest:
-                self.providers.append(SuggestToolProvider(enable_suggest=True))
+                self.providers.append(TailToolProvider())
 
             enable_ask_user = params.get("enable_ask_user", False)
             if enable_ask_user:
@@ -108,7 +110,8 @@ class AgentBasedReActInitializer(AbstractAgentInitializer):
             tools=all_tools if all_tools else None,
             skills=skills if skills else None,
             hitl_interrupt_on=self.hitl_interrupt_on,
-            resume_payload=self.resume_payload
+            resume_payload=self.resume_payload,
+            enable_suggest=enable_suggest,
         )
 
         return agent_config, additional_system_prompt

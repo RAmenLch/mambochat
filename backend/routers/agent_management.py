@@ -1,5 +1,7 @@
 # backend/routers/agent_management.py
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Dict, Any, Optional
@@ -24,6 +26,8 @@ def _mcp_tool_name(server_name: str, tool_name: str) -> str:
         return f"{server_name}__{_TOOL_NAME_SAFE_RE.sub('_', tool_name)}"
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 
 # ─────────────────── 任务循环「我的规则」工具建议常量 ───────────────────
@@ -282,6 +286,38 @@ async def get_agent_hitl_tools(agent_id: str, db: AsyncSession = Depends(get_db)
                     break
 
     return tools
+
+
+@router.get(
+    "/agents/{agent_id}/tail-tool-tools",
+    response_model=List[schemas.GoalLoopToolInfo],
+    summary="获取 Agent 可用于尾部工具绑定的工具列表（运行态 agent_config.tools）"
+)
+async def get_agent_tail_tool_tools(agent_id: str, db: AsyncSession = Depends(get_db)):
+    """返回该 Agent 运行态 ``agent_config.tools`` 的工具名——即尾部工具调用**可绑定且可执行**的工具。
+
+    只包含确实存在于 ``agent_config.tools`` 的工具（如 KB / 外部工具等）；
+    内置工具与 wrapped 模式 MCP 工具不在其中（尾部工具不处理它们）。
+    """
+    db_agent = await agent_crud.get_agent(db, agent_id=agent_id)
+    if db_agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    try:
+        from backend.services.generation.builders.initializers.mambo_agent_initializer import (
+            MamboAgentInitializer,
+        )
+        initializer = MamboAgentInitializer(
+            db, db_agent, enable_tools=True, enable_resource_merge=True
+        )
+        agent_config, _ = await initializer.initialize()
+        tools = getattr(agent_config, "tools", None) or []
+        return [
+            schemas.GoalLoopToolInfo(name=t.name, source="agent", args=[])
+            for t in tools
+        ]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("tail-tool-tools failed for agent %s: %s", agent_id, exc)
+        return []
 
 
 @router.get(

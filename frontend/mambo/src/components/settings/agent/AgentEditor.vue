@@ -779,6 +779,86 @@
             </template>
           </div>
 
+          <!-- 通用尾部工具调用 -->
+          <div class="goal-loop-section">
+            <div class="goal-loop-header">
+              <div class="goal-loop-header-left">
+                <div class="goal-loop-header-icon">
+                  <el-icon><RefreshRight /></el-icon>
+                </div>
+                <div class="goal-loop-header-text">
+                  <div class="goal-loop-header-title">
+                    <span>{{ $t('agent.tailTool.title') }}</span>
+                    <el-tooltip effect="dark" :content="$t('agent.tailTool.enableDesc')" placement="top">
+                      <el-icon class="label-icon"><QuestionFilled /></el-icon>
+                    </el-tooltip>
+                  </div>
+                  <div class="goal-loop-header-desc">{{ $t('agent.tailTool.enableDesc') }}</div>
+                </div>
+              </div>
+              <el-switch v-model="form.mambo_tail_tool_enabled" />
+            </div>
+
+            <template v-if="form.mambo_tail_tool_enabled">
+              <div class="goal-loop-panel">
+                <div class="goal-loop-panel-grid">
+                  <div class="goal-loop-field">
+                    <div class="goal-loop-field-label">
+                      <el-icon><Odometer /></el-icon>
+                      <span>{{ $t('agent.tailTool.failMode') }}</span>
+                    </div>
+                    <el-select v-model="form.mambo_tail_tool_fail_mode" style="width: 100%">
+                      <el-option :label="$t('agent.tailTool.failModeSilent')" value="silent" />
+                      <el-option :label="$t('agent.tailTool.failModeMessage')" value="message" />
+                    </el-select>
+                    <div class="goal-loop-field-desc">{{ $t('agent.tailTool.failModeDesc') }}</div>
+                  </div>
+                  <div class="goal-loop-field" v-if="form.mambo_tail_tool_fail_mode === 'message'">
+                    <div class="goal-loop-field-label">
+                      <el-icon><EditPen /></el-icon>
+                      <span>{{ $t('agent.tailTool.failMessage') }}</span>
+                    </div>
+                    <el-input v-model="form.mambo_tail_tool_fail_message" :placeholder="$t('agent.tailTool.failMessagePlaceholder')" />
+                  </div>
+                </div>
+
+                <div class="goal-loop-field">
+                  <div class="goal-loop-field-label">
+                    <el-icon><List /></el-icon>
+                    <span>{{ $t('agent.tailTool.tasks') }}</span>
+                    <el-tooltip effect="dark" :content="$t('agent.tailTool.tasksDesc')" placement="top">
+                      <el-icon class="label-icon"><QuestionFilled /></el-icon>
+                    </el-tooltip>
+                  </div>
+                  <div
+                    v-for="(task, idx) in form.mambo_tail_tool_tasks"
+                    :key="idx"
+                    class="goal-loop-condition"
+                    style="margin-bottom: 8px"
+                  >
+                    <el-select
+                      v-model="task.name"
+                      filterable
+                      allow-create
+                      default-first-option
+                      :placeholder="$t('agent.tailTool.taskNamePlaceholder')"
+                      style="width: 220px"
+                    >
+                      <el-option v-for="tool in tailToolOptions" :key="tool.name" :label="tool.name" :value="tool.name">
+                        <span>{{ tool.name }}</span>
+                        <span style="float: right; color: var(--el-text-color-secondary); font-size: 12px">{{ goalLoopToolSourceLabel(tool.source) }}</span>
+                      </el-option>
+                    </el-select>
+                    <el-input v-model="task.instruction" :placeholder="$t('agent.tailTool.taskInstructionPlaceholder')" />
+                    <el-button link type="danger" @click="removeTailToolTask(idx)">{{ $t('agent.tailTool.removeTask') }}</el-button>
+                  </div>
+                  <el-button link type="primary" @click="addTailToolTask">{{ $t('agent.tailTool.addTask') }}</el-button>
+                  <div class="goal-loop-field-desc">{{ $t('agent.tailTool.tasksDesc') }}</div>
+                </div>
+              </div>
+            </template>
+          </div>
+
           <el-divider />
 
           <!-- MCP 工具阈值 -->
@@ -992,9 +1072,9 @@ import { useSystemConfigStore } from '@/stores/systemConfigStore';
 import { useMcpStore } from '@/stores/mcpStore';
 import { useBackendStore } from '@/stores/backendStore'; // [新增] 引入 BackendStore
 
-import { uploadAgentAvatar, deleteAgentAvatar, getAgent, getAgentHitlTools, getGoalLoopTools } from '@/api/agentService';
+import { uploadAgentAvatar, deleteAgentAvatar, getAgent, getAgentHitlTools, getGoalLoopTools, getTailToolTools } from '@/api/agentService';
 import { getResourceDetails } from '@/api/resourceService';
-import type { Resource, Agent, HitlToolInfo, GoalLoopToolInfo, MamboAgentParameters, GoalLoopConfig } from '@/api/types';
+import type { Resource, Agent, HitlToolInfo, GoalLoopToolInfo, MamboAgentParameters, GoalLoopConfig, TailToolConfig } from '@/api/types';
 
 import AvatarUploader from '../AvatarUploader.vue';
 import ResourceSelectorDialog from '@/components/common/dialogs/ResourceSelectorDialog.vue';
@@ -1060,6 +1140,9 @@ const hitlToolOptionsLoaded = ref(false);
 const goalLoopToolOptions = ref<GoalLoopToolInfo[]>([]);
 const goalLoopToolOptionsLoaded = ref(false);
 
+/** 尾部工具调用可绑定的工具（运行态 agent_config.tools） */
+const tailToolOptions = ref<GoalLoopToolInfo[]>([]);
+
 /** 某条件已选工具对应的参数名建议列表 */
 function goalLoopToolArgs(toolName: string): string[] {
   const found = goalLoopToolOptions.value.find(t => t.name === toolName);
@@ -1085,6 +1168,11 @@ function removeReviewTool(toolName: string) {
 }
 
 // --- 任务循环 (GoalLoop) ---
+interface TailToolTaskRow {
+  name: string;
+  instruction: string;
+}
+
 interface GoalLoopConditionRow {
   tool: string;
   times: number;
@@ -1103,6 +1191,31 @@ function parseArgValue(raw: string): any {
   if (trimmed === 'null') return null;
   if (/^-?\d+(\.\d+)?$/.test(trimmed)) return Number(trimmed);
   return trimmed;
+}
+
+function buildTailToolConfig(): TailToolConfig {
+  return {
+    enabled: true,
+    fail_mode: form.mambo_tail_tool_fail_mode,
+    fail_message: form.mambo_tail_tool_fail_message || null,
+    tasks: form.mambo_tail_tool_tasks
+      .filter(t => t.name.trim())
+      .map(t => ({ name: t.name.trim(), instruction: t.instruction.trim() || null })),
+  };
+}
+
+function resetTailToolForm() {
+  form.mambo_tail_tool_fail_mode = 'silent';
+  form.mambo_tail_tool_fail_message = '';
+  form.mambo_tail_tool_tasks = [];
+}
+
+function addTailToolTask() {
+  form.mambo_tail_tool_tasks.push({ name: '', instruction: '' });
+}
+
+function removeTailToolTask(idx: number) {
+  form.mambo_tail_tool_tasks.splice(idx, 1);
 }
 
 function buildGoalLoopConfig(): GoalLoopConfig {
@@ -1232,6 +1345,12 @@ const form = reactive({
   mambo_goal_loop_blocked_threshold: 3,
   mambo_goal_loop_objective: '',
   mambo_goal_loop_conditions: [] as GoalLoopConditionRow[],
+
+  // Mambo 尾部工具调用
+  mambo_tail_tool_enabled: false,
+  mambo_tail_tool_fail_mode: 'silent' as 'silent' | 'message',
+  mambo_tail_tool_fail_message: '',
+  mambo_tail_tool_tasks: [] as TailToolTaskRow[],
 
   // Mambo MCP 工具阈值
   mambo_mcp_threshold: 15,
@@ -1455,6 +1574,21 @@ watch(agentData, async (newVal) => {
       resetGoalLoopForm();
     }
 
+    // 尾部工具调用配置还原
+    const ttCfg = mamboParams.tail_tool;
+    if (ttCfg) {
+      form.mambo_tail_tool_enabled = true;
+      form.mambo_tail_tool_fail_mode = ttCfg.fail_mode === 'message' ? 'message' : 'silent';
+      form.mambo_tail_tool_fail_message = ttCfg.fail_message || '';
+      form.mambo_tail_tool_tasks = (ttCfg.tasks || []).map(t => ({
+        name: t.name,
+        instruction: t.instruction || '',
+      }));
+    } else {
+      form.mambo_tail_tool_enabled = false;
+      resetTailToolForm();
+    }
+
     // MCP 工具阈值
     form.mambo_mcp_threshold = mamboParams.mcp_direct_tool_threshold ?? 15;
 
@@ -1462,6 +1596,8 @@ watch(agentData, async (newVal) => {
     fetchHitlTools(newVal.id);
     // 加载任务循环「我的规则」工具/参数建议列表
     fetchGoalLoopTools(newVal.id);
+    // 加载尾部工具调用可绑定的工具列表
+    fetchTailToolTools(newVal.id);
 
     if (newVal.resourcePromptList && newVal.resourcePromptList.length > 0) {
       const rpList = newVal.resourcePromptList;
@@ -1687,6 +1823,14 @@ async function fetchHitlTools(agentId: string) {
   }
 }
 
+async function fetchTailToolTools(agentId: string) {
+  try {
+    tailToolOptions.value = await getTailToolTools(agentId);
+  } catch {
+    tailToolOptions.value = [];
+  }
+}
+
 async function fetchGoalLoopTools(agentId: string) {
   goalLoopToolOptionsLoaded.value = false;
   try {
@@ -1776,6 +1920,7 @@ function buildMamboAgentParameters(): MamboAgentParameters | null {
       auto_snapshot: true,
     } : null,
     goal_loop: form.mambo_goal_loop_enabled ? buildGoalLoopConfig() : null,
+    tail_tool: form.mambo_tail_tool_enabled ? buildTailToolConfig() : null,
     mcp_direct_tool_threshold: form.mambo_mcp_threshold,
   };
   return params;

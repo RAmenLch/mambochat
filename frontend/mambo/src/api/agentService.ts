@@ -59,6 +59,11 @@ export const getGoalLoopTools = (agentId: string): Promise<GoalLoopToolInfo[]> =
   return apiClient.get(`/agents/${agentId}/goal-loop-tools`);
 };
 
+// [新增] 获取 Agent 可用于尾部工具绑定的工具列表（运行态 agent_config.tools）
+export const getTailToolTools = (agentId: string): Promise<GoalLoopToolInfo[]> => {
+  return apiClient.get(`/agents/${agentId}/tail-tool-tools`);
+};
+
 // [新增] 复制 Agent（副本）
 export const duplicateAgent = (agentId: string): Promise<Agent> => {
   return apiClient.post(`/agents/${agentId}/duplicate`);

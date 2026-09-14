@@ -183,7 +183,7 @@ const displayableSubMessages = computed(() =>
 
 const normalSubMessages = computed(() =>
   displayableSubMessages.value.filter((sm) =>
-    !sm.config?.is_minimal && sm.type !== 'McpTool' && sm.type !== 'ReviewTool'
+    !sm.config?.is_minimal && sm.config?.is_tail_tool !== true && sm.type !== 'McpTool' && sm.type !== 'ReviewTool'
   ),
 )
 

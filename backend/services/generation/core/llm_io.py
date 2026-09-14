@@ -288,6 +288,17 @@ class AgentConfig(BaseModel):
         description="任务循环配置（仅 Mambo Agent 有效）。由 Initializer 填充，Builder 消费以创建 GoalLoopMiddleware。"
                     "结构: {mode, max_rounds, objective, conditions, blocked_threshold}"
     )
+    tail_tool_config: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="尾部工具调用配置（TailToolMiddleware）。由 Initializer 填充，Builder 消费。"
+                    "结构: {enabled, tasks: [{name, instruction, args_schema, example}], tools: [工具], "
+                    "fail_mode, fail_message, trigger_prompt, execute_tools}"
+    )
+    enable_suggest: bool = Field(
+        default=False,
+        description="是否启用回复建议。启用后由 Builder 构造 suggest 尾部工具"
+                    "（TailToolMiddleware 在每轮收尾后调用），不再挂载 SuggestToolProvider。"
+    )
 
 
 class LLMInput(BaseModel):

@@ -1,6 +1,7 @@
 # backend/services/generation/managers/default_manager.py
 
 import asyncio
+import json
 import logging
 import traceback
 from typing import AsyncGenerator, Optional, Dict, List, Set, Tuple, Any
@@ -54,6 +55,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
         self._recover_from_error = recover_from_error
         self._last_finish_reason: Optional[str] = None
         self._last_summarization_event: Optional[SummarizationEventInfo] = None
+        self._last_tail_tool_event: Optional[dict] = None
 
         self._version_snapshots: Dict[str, "VersionSnapshotContent"] = {}
 
@@ -183,6 +185,10 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 if mode == "summarization":
                     self._last_summarization_event = event  # last-wins: cumulative final state
                     continue
+                # ── Tail tool signal ──────────────────────────────────────
+                if mode == "tail_tool":
+                    self._last_tail_tool_event = event
+                    continue
                 # ── Version snapshot signal ───────────────────────────────
                 if mode == "version_snapshot" and isinstance(event, dict):
                     cp_id = event.get("checkpoint_id", "")
@@ -289,6 +295,16 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 status=schemas_enums.MessageStatus.COMPLETED,
                 initial_content=snapshot.to_json_string(),
                 config=SubMessageConfig(context_participation_length=0),
+            )
+        # ── Record tail tool submessage (TailToolMiddleware) ──
+        if self._last_tail_tool_event:
+            yield CreateSubMessage(
+                sub_message_id=generate_uuid(),
+                type=schemas_enums.SubMessageType.NORMAL.value,
+                sortOrder=100,
+                status=schemas_enums.MessageStatus.COMPLETED,
+                initial_content=json.dumps(self._last_tail_tool_event, ensure_ascii=False),
+                config=SubMessageConfig(context_participation_length=0, is_tail_tool=True),
             )
         # ── Record checkpoint_id for branch tracking ──
         saved = await self._get_interrupt_checkpoint(chat_id)

@@ -135,6 +135,14 @@ export default {
     zipCoverageTip: 'History summary covers everything above this section (inclusive)',
     goalLoopRound: 'Round {round} / {max}',
     goalLoopRoundUnknown: 'Round',
+    tailToolPanel: {
+      title: 'Tail Tools',
+      taskCount: '{n} task(s)',
+      status: 'Status',
+      arguments: 'Arguments',
+      output: 'Output',
+      error: 'Error',
+    },
     mcp: {
       invalidCall: 'Invalid tool call',
       unknownTool: 'Unknown tool',

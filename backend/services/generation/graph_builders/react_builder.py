@@ -30,6 +30,25 @@ class ReactGraphBuilder(BaseGraphBuilder):
             ))
             middlewares.append(ToolMessageOrderingMiddleware())
 
+        tt_cfg = dict(getattr(agent_config, 'tail_tool_config', None) or {})
+        if getattr(agent_config, 'enable_suggest', False):
+            from backend.database import AsyncSessionLocal
+            from backend.services.generation.agent.suggest_tail_tool import (
+                merge_suggest_into_tail_config,
+            )
+            tt_cfg = merge_suggest_into_tail_config(
+                tt_cfg,
+                session_factory=lambda: AsyncSessionLocal(),
+                message_id=run_time_config.message_id,
+            )
+        if tt_cfg:
+            from backend.services.generation.agent.tail_tool_middleware import (
+                build_tail_tool_middleware,
+            )
+            _tail_tool_middleware = build_tail_tool_middleware(tt_cfg)
+            if _tail_tool_middleware:
+                middlewares.append(_tail_tool_middleware)
+
         return create_agent(
             name =agent_config.name,
             model=model,

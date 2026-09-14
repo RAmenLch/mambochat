@@ -9,5 +9,5 @@ Worker 消费消息流（``mode == "messages"``）时，必须按此集合过滤
 输出）会被误消费、渲染成主 Agent 的内部消息。
 """
 
-INTERNAL_LC_SOURCES = frozenset({"summarization", "multimodal_describer"})
+INTERNAL_LC_SOURCES = frozenset({"summarization", "multimodal_describer", "tail_tool"})
 """内部辅助模型调用的 lc_source 标记集合。"""

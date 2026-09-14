@@ -125,6 +125,11 @@ const groupedSubMessages = computed((): SubMessageGroup[] => {
       continue
     }
 
+    // 跳过尾部工具汇总子消息（config.is_tail_tool）：仅由助手消息底部的折叠面板展示
+    if (subMessage.config?.is_tail_tool === true) {
+      continue
+    }
+
     if (subMessage.type === 'File') {
       if (lastGroup && lastGroup.type === 'file') {
         lastGroup.sub_messages.push(subMessage)

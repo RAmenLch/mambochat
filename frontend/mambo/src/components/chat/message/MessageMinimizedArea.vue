@@ -137,7 +137,9 @@ const minimizedSubMessages = computed(() => {
   })
 
   const normalMinimized = allSubMessages.filter(sm =>
-    sm.config?.is_minimal === true && sm.type !== 'McpTool' && sm.type !== 'ReviewTool' && sm.type !== 'AskUser'
+    sm.config?.is_minimal === true &&
+    sm.config?.is_tail_tool !== true &&
+    sm.type !== 'McpTool' && sm.type !== 'ReviewTool' && sm.type !== 'AskUser'
   )
 
   return [...normalMinimized, ...deduplicatedTools].sort((a, b) => a.sortOrder - b.sortOrder)

@@ -209,6 +209,12 @@
         </div>
       </div>
 
+      <!-- 尾部工具汇总面板（config.is_tail_tool，不参与正文/时间线；默认折叠） -->
+      <TailToolPanel
+        v-if="tailToolSubMessages.length > 0"
+        :sub-messages="tailToolSubMessages"
+      />
+
     </div>
   </div>
 </template>
@@ -224,9 +230,11 @@ import { useChatSessionStore } from '@/stores/chatSessionStore';
 import { useAgentStore } from '@/stores/agentStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import BubbleSectionGroupComponent from './BubbleSectionGroup.vue';
+import TailToolPanelComponent from './TailToolPanel.vue';
 import { Cpu, Minus, FullScreen, ArrowUpBold, ArrowDownBold, ArrowRight, ArrowDown, Loading, Warning, Check, Opportunity, View, RefreshRight } from '@element-plus/icons-vue';
 
 const BubbleSectionGroup = BubbleSectionGroupComponent;
+const TailToolPanel = TailToolPanelComponent;
 
 const props = defineProps<{
   message: Message;
@@ -263,6 +271,7 @@ const {
   hasSparkMode,
   isSparkCollapsed,
   toggleSpark,
+  tailToolSubMessages,
 } = useAssistantTimeline(messageRef, messageDisplayMode);
 
 const isBubbleCollapsed = ref(false);

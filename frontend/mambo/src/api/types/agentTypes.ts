@@ -50,6 +50,22 @@ export interface GoalLoopConfig {
   blocked_threshold?: number | null
 }
 
+/** 尾部工具调用任务：名称 + 具体使用说明（可选参数结构/示例） */
+export interface TailToolTask {
+  name: string
+  instruction?: string | null
+  args_schema?: Record<string, any> | null
+  example?: string | null
+}
+
+/** 通用尾部工具调用配置（TailToolMiddleware） */
+export interface TailToolConfig {
+  enabled: boolean
+  fail_mode: 'silent' | 'message'
+  fail_message?: string | null
+  tasks?: TailToolTask[] | null
+}
+
 export interface MamboAgentParameters {
   include_general_purpose: boolean
   enable_planning: boolean
@@ -62,6 +78,7 @@ export interface MamboAgentParameters {
   multimodal_describer?: MultimodalDescriberConfig | null
   version_control?: VersionControlConfig | null
   goal_loop?: GoalLoopConfig | null
+  tail_tool?: TailToolConfig | null
   mcp_direct_tool_threshold: number
 }
 

@@ -35,6 +35,11 @@ export interface SubMessageConfig {
   show_tool_mode?: string | null
   /** get_goal MCP_TOOL 轮次边界标志（GoalLoopMiddleware 注入），前端据此渲染轮次分隔线 */
   is_goal_loop_round?: boolean | null
+  /**
+   * 尾部工具汇总标志：该子消息承载"一轮末尾工具调用"的结果，
+   * 不参与正文 / 时间线渲染，仅在助手消息底部以折叠面板展示
+   */
+  is_tail_tool?: boolean | null
 }
 
 export interface SubMessage {

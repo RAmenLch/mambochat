@@ -135,6 +135,14 @@ export default {
     zipCoverageTip: '历史摘要自此往上覆盖（含本分区）',
     goalLoopRound: '第 {round} 轮 / 共 {max} 轮',
     goalLoopRoundUnknown: '轮次',
+    tailToolPanel: {
+      title: '尾部工具',
+      taskCount: '{n} 个任务',
+      status: '状态',
+      arguments: '参数',
+      output: '输出',
+      error: '错误',
+    },
     mcp: {
       invalidCall: '无效的工具调用',
       unknownTool: '未知工具',

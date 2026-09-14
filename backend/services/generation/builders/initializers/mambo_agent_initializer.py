@@ -22,8 +22,8 @@ from mambo_agents.middleware.mcp import mcp_tool_name
 
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
 from backend.services.generation.tools.mambo_mcp_tool_provider import MamboMCPToolProvider
-from backend.services.generation.tools.suggest_tool_provider import SuggestToolProvider
 from backend.services.generation.tools.ask_user_tool_provider import AskUserToolProvider
+from backend.services.generation.tools.tail_tool_provider import TailToolProvider
 from backend.services.generation.tools.kb_tool_provider import KBToolProvider
 from backend.services.generation.tools.mambo_builtin_tool_provider import (
     MamboAgentBuiltinToolProvider,
@@ -108,6 +108,7 @@ class MamboAgentInitializer(AbstractAgentInitializer):
         mcp_server_configs = None
         mcp_exclude_tools = None
 
+        enable_suggest = False
         if self.enable_tools:
             params = self.agent.parsed_model_parameters
 
@@ -133,9 +134,8 @@ class MamboAgentInitializer(AbstractAgentInitializer):
             if self.web_search_mode is not None:
                 self.providers.append(WebSearchToolProvider(self.web_search_mode, proxy_url=self.web_search_proxy_url))
 
+            # Suggest 建议 (改由 Builder 挂尾部工具,不再用 Provider)
             enable_suggest = params.get("enable_suggest", False)
-            if enable_suggest:
-                self.providers.append(SuggestToolProvider(enable_suggest=True))
 
             enable_ask_user = params.get("enable_ask_user", False)
             if enable_ask_user:
@@ -364,6 +364,10 @@ class MamboAgentInitializer(AbstractAgentInitializer):
         enable_show = mambo_params.enable_show
         memory_resource_ids = mambo_params.memory_resource_ids
 
+        # 尾部工具调用：注册 tail_tool 的追踪 provider（正文误调用时落库，避免其后内容缓存失效）
+        if enable_suggest or (mambo_params.tail_tool is not None and mambo_params.tail_tool.enabled):
+            self.providers.append(TailToolProvider())
+
         # 构建 memory_resource_roots（类似 skill_resource_roots）
         memory_roots: Dict[str, str] = {}
         if enable_memory and memory_resource_ids:
@@ -514,6 +518,17 @@ class MamboAgentInitializer(AbstractAgentInitializer):
                 "blocked_threshold": gl.blocked_threshold,
             }
 
+        # --- 通用尾部工具调用配置 (TailToolMiddleware) ---
+        tail_tool_config: Optional[Dict[str, Any]] = None
+        tt = mambo_params.tail_tool
+        if tt is not None and tt.enabled:
+            tail_tool_config = {
+                "enabled": True,
+                "fail_mode": tt.fail_mode,
+                "fail_message": tt.fail_message or "",
+                "tasks": [t.model_dump(exclude_none=True) for t in (tt.tasks or [])],
+            }
+
         agent_config = AgentConfig(
             name=self.agent.name,
             description=self.agent.description or "",
@@ -540,9 +555,11 @@ class MamboAgentInitializer(AbstractAgentInitializer):
             enable_version_control=enable_vc,
             version_control_config=vc_config,
             goal_loop_config=goal_loop_config,
+            tail_tool_config=tail_tool_config,
             mcp_server_configs=mcp_server_configs,
             mcp_exclude_tools=mcp_exclude_tools,
             mcp_direct_tool_threshold=mambo_params.mcp_direct_tool_threshold,
+            enable_suggest=enable_suggest,
         )
 
         return agent_config, additional_system_prompt

@@ -164,6 +164,12 @@
         <span></span><span></span><span></span>
       </div>
     </template>
+
+    <!-- 尾部工具汇总面板（config.is_tail_tool，不参与正文/时间线；默认折叠） -->
+    <TailToolPanel
+      v-if="tailToolSubMessages.length > 0"
+      :sub-messages="tailToolSubMessages"
+    />
   </div>
 </template>
 
@@ -176,6 +182,7 @@ import { useAssistantTimeline, type BubbleSectionGroup } from '@/composables/use
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import MobileBubbleSectionGroup from './MobileBubbleSectionGroup.vue'
+import TailToolPanel from '@/components/chat/message/TailToolPanel.vue'
 import { Loading, Warning, Check, ArrowUp, ArrowRight, ArrowDown } from '@element-plus/icons-vue'
 
 const props = defineProps<{
@@ -206,7 +213,8 @@ const {
   interleavedSections,
   isSectionMinimized,
   isReasoningMinimized,
-  hasPendingReviews
+  hasPendingReviews,
+  tailToolSubMessages
 } = useAssistantTimeline(messageRef, messageDisplayMode)
 
 function toggleReasoningMinimize() {
