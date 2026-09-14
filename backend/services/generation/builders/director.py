@@ -381,6 +381,13 @@ class LLMInputDirector:
         if self._enable_max_context_messages:
             max_context_messages = active_params.get("max_context_messages")
 
+        # 摘要中间件要求重建消息的 response_metadata.model_provider 与所用模型的
+        # ls_provider 一致，才能命中 reported-token 兜底判定。
+        try:
+            usage_model_provider = model._get_ls_params().get("ls_provider")
+        except Exception:
+            usage_model_provider = None
+
         context_builder = MessageContextBuilder(
             db=self.db,
             type_filter=self._type_filter,
@@ -397,7 +404,8 @@ class LLMInputDirector:
             max_context_messages=max_context_messages,
             slice_range=self._slice_range,
             head_tail=self._head_tail,
-            language=materials.settings.get("language")
+            language=materials.settings.get("language"),
+            usage_model_provider=usage_model_provider
         )
 
         # DeepSeek 等需要回传 reasoning_content 的模型，将 REASONING 加入 type_filter

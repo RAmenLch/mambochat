@@ -47,6 +47,17 @@ class AbstractGenerateWorker(ABC):
                 if reasoning_content:
                     additional_kwargs["reasoning_content"] = reasoning_content
 
+                # 重建消息携带的 provider 上报用量：透传给 AIMessage，供摘要中间件按真实
+                # token 数触发压缩（usage_metadata/response_metadata 不会被序列化进 API
+                # 请求体，不影响实际发送内容，也不改变上下文缓存前缀）。
+                ai_extra: Dict[str, Any] = {}
+                usage_metadata = msg.get("usage_metadata")
+                if usage_metadata:
+                    ai_extra["usage_metadata"] = usage_metadata
+                response_metadata = msg.get("response_metadata")
+                if response_metadata:
+                    ai_extra["response_metadata"] = response_metadata
+
                 if raw_tool_calls and isinstance(raw_tool_calls, list):
                     for tc in raw_tool_calls:
                         if "function" in tc:
@@ -69,9 +80,9 @@ class AbstractGenerateWorker(ABC):
                             })
 
                 if lc_tool_calls:
-                    lc_messages.append(AIMessage(id = id,content=content, name=name, tool_calls=lc_tool_calls, additional_kwargs=additional_kwargs))
+                    lc_messages.append(AIMessage(id = id,content=content, name=name, tool_calls=lc_tool_calls, additional_kwargs=additional_kwargs, **ai_extra))
                 else:
-                    lc_messages.append(AIMessage(id = id,content=content, name=name, additional_kwargs=additional_kwargs))
+                    lc_messages.append(AIMessage(id = id,content=content, name=name, additional_kwargs=additional_kwargs, **ai_extra))
 
             elif role == "tool":
                 tool_call_id = msg.get("tool_call_id")

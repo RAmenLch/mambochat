@@ -59,7 +59,8 @@ class MessageContextBuilder:
             max_context_messages: Optional[int] = None,
             slice_range: Optional[slice] = None,
             head_tail: Optional[Tuple[int, int]] = None,
-            language: Optional[str] = None
+            language: Optional[str] = None,
+            usage_model_provider: Optional[str] = None
     ):
         self.db = db
 
@@ -79,6 +80,9 @@ class MessageContextBuilder:
         self.slice_range = slice_range
         self.head_tail = head_tail
         self.language = language
+        # 重建 AIMessage 时用于回填 usage 的 provider 标记（须与摘要中间件所用模型的
+        # ls_provider 一致，供 LCSummarizationMiddleware 的 reported-token 兜底判定）。
+        self.usage_model_provider = usage_model_provider
 
         # 内部缓存，防止同一文件在单次装配中重复读取
         self._file_content_cache: Dict[Any, Any] = {}
@@ -360,6 +364,29 @@ class MessageContextBuilder:
             })
         return blocks
 
+    @staticmethod
+    def _parse_usage_record(content: Any) -> Optional[Dict[str, Any]]:
+        """解析 Usage 子消息 content，转为 LangChain 的 usage_metadata 结构。
+
+        返回 ``{input_tokens, output_tokens, total_tokens}``；解析失败返回 ``None``。
+        """
+        try:
+            data = json.loads(content) if isinstance(content, str) else content
+        except (json.JSONDecodeError, TypeError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        prompt = data.get("prompt_tokens")
+        completion = data.get("completion_tokens")
+        total = data.get("total_tokens")
+        if not (isinstance(prompt, int) and isinstance(completion, int) and isinstance(total, int)):
+            return None
+        return {
+            "input_tokens": prompt,
+            "output_tokens": completion,
+            "total_tokens": total,
+        }
+
     async def _convert_assistant_to_rounds(self, msg: MessageSchema, recency_rank: int) -> List[Dict[str, Any]]:
         # 按 createdAt 排序，保证时间顺序
         sorted_subs = sorted(
@@ -370,6 +397,15 @@ class MessageContextBuilder:
         rounds: List[Dict[str, List]] = []
         current_round: Dict[str, List] = {"content_parts": [], "tool_calls": [], "tool_results": [], "last_sub_id": None, "run_uuid": None}
         seen_tool_in_round = False
+
+        # 收集 Usage 子消息（每次模型调用落一条），按 createdAt 顺序与 rounds 一一对应，
+        # 供重建 AIMessage 时回填 usage_metadata，使摘要中间件能按 provider 上报的
+        # 真实 token 数触发（见 LCSummarizationMiddleware 的 reported-token 兜底）。
+        usage_records: List[Optional[Dict[str, Any]]] = []
+        if self.usage_model_provider is not None:
+            for sub in sorted_subs:
+                if sub.type == schemas_enums.SubMessageType.USAGE.value:
+                    usage_records.append(self._parse_usage_record(sub.content))
 
         for sub in sorted_subs:
             is_mcp_tool = (sub.type == schemas_enums.SubMessageType.MCP_TOOL.value)
@@ -421,8 +457,11 @@ class MessageContextBuilder:
         if current_round["content_parts"] or current_round["tool_calls"]:
             rounds.append(current_round)
 
+        # Usage 与 round 一一对应（每次模型调用各一条），仅在数量吻合时回填，避免错位
+        usage_aligned = self.usage_model_provider is not None and len(usage_records) == len(rounds)
+
         result = []
-        for round_data in rounds:
+        for round_index, round_data in enumerate(rounds):
             assistant_msg: Dict[str, Any] = {"role": "assistant"}
             last_id = round_data.get("last_sub_id")
             if last_id:
@@ -452,6 +491,13 @@ class MessageContextBuilder:
             # 将 REASONING 内容放入独立字段（仅在有内容时添加，不影响其他模型）
             if reasoning_texts:
                 assistant_msg["reasoning_content"] = "".join(reasoning_texts)
+
+            # 回填该轮模型调用的真实 usage（provider 计数），供摘要中间件兜底判定与估算校正
+            if usage_aligned:
+                record = usage_records[round_index]
+                if record is not None:
+                    assistant_msg["usage_metadata"] = record
+                    assistant_msg["response_metadata"] = {"model_provider": self.usage_model_provider}
 
             result.append(assistant_msg)
             result.extend(round_data["tool_results"])
