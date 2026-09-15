@@ -296,16 +296,8 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 initial_content=snapshot.to_json_string(),
                 config=SubMessageConfig(context_participation_length=0),
             )
-        # ── Record tail tool submessage (TailToolMiddleware) ──
-        if self._last_tail_tool_event:
-            yield CreateSubMessage(
-                sub_message_id=generate_uuid(),
-                type=schemas_enums.SubMessageType.NORMAL.value,
-                sortOrder=100,
-                status=schemas_enums.MessageStatus.COMPLETED,
-                initial_content=json.dumps(self._last_tail_tool_event, ensure_ascii=False),
-                config=SubMessageConfig(context_participation_length=0, is_tail_tool=True),
-            )
+        # ── 尾部工具调用(TailToolMiddleware)已由中间件直接落库为 is_tail_tool 子消息,
+        #    此处不再重复产出汇总子消息(见 tail_tool_middleware._persist_tail_round)。──
         # ── Record checkpoint_id for branch tracking ──
         saved = await self._get_interrupt_checkpoint(chat_id)
         if saved:

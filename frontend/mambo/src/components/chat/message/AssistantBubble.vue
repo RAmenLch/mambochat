@@ -213,6 +213,8 @@
       <TailToolPanel
         v-if="tailToolSubMessages.length > 0"
         :sub-messages="tailToolSubMessages"
+        :parent-message="message"
+        @open-tool-dialog="(toolId) => $emit('open-tool-dialog', toolId)"
       />
 
     </div>

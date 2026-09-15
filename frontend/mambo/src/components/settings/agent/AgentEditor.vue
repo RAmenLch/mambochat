@@ -813,6 +813,17 @@
                     </el-select>
                     <div class="goal-loop-field-desc">{{ $t('agent.tailTool.failModeDesc') }}</div>
                   </div>
+                  <div class="goal-loop-field">
+                    <div class="goal-loop-field-label">
+                      <el-icon><Timer /></el-icon>
+                      <span>{{ $t('agent.tailTool.maxRounds') }}</span>
+                      <el-tooltip effect="dark" :content="$t('agent.tailTool.maxRoundsDesc')" placement="top">
+                        <el-icon class="label-icon"><QuestionFilled /></el-icon>
+                      </el-tooltip>
+                    </div>
+                    <el-input-number v-model="form.mambo_tail_tool_max_rounds" :min="1" :max="20" style="width: 100%" />
+                    <div class="goal-loop-field-desc">{{ $t('agent.tailTool.maxRoundsDesc') }}</div>
+                  </div>
                   <div class="goal-loop-field" v-if="form.mambo_tail_tool_fail_mode === 'message'">
                     <div class="goal-loop-field-label">
                       <el-icon><EditPen /></el-icon>
@@ -849,7 +860,13 @@
                         <span style="float: right; color: var(--el-text-color-secondary); font-size: 12px">{{ goalLoopToolSourceLabel(tool.source) }}</span>
                       </el-option>
                     </el-select>
-                    <el-input v-model="task.instruction" :placeholder="$t('agent.tailTool.taskInstructionPlaceholder')" />
+                    <el-input
+                      v-model="task.instruction"
+                      type="textarea"
+                      :autosize="{ minRows: 1, maxRows: 8 }"
+                      resize="vertical"
+                      :placeholder="$t('agent.tailTool.taskInstructionPlaceholder')"
+                    />
                     <el-button link type="danger" @click="removeTailToolTask(idx)">{{ $t('agent.tailTool.removeTask') }}</el-button>
                   </div>
                   <el-button link type="primary" @click="addTailToolTask">{{ $t('agent.tailTool.addTask') }}</el-button>
@@ -1201,6 +1218,7 @@ function buildTailToolConfig(): TailToolConfig {
     tasks: form.mambo_tail_tool_tasks
       .filter(t => t.name.trim())
       .map(t => ({ name: t.name.trim(), instruction: t.instruction.trim() || null })),
+    max_rounds: form.mambo_tail_tool_max_rounds || 1,
   };
 }
 
@@ -1208,6 +1226,7 @@ function resetTailToolForm() {
   form.mambo_tail_tool_fail_mode = 'silent';
   form.mambo_tail_tool_fail_message = '';
   form.mambo_tail_tool_tasks = [];
+  form.mambo_tail_tool_max_rounds = 1;
 }
 
 function addTailToolTask() {
@@ -1351,6 +1370,7 @@ const form = reactive({
   mambo_tail_tool_fail_mode: 'silent' as 'silent' | 'message',
   mambo_tail_tool_fail_message: '',
   mambo_tail_tool_tasks: [] as TailToolTaskRow[],
+  mambo_tail_tool_max_rounds: 1,
 
   // Mambo MCP 工具阈值
   mambo_mcp_threshold: 15,
@@ -1584,6 +1604,7 @@ watch(agentData, async (newVal) => {
         name: t.name,
         instruction: t.instruction || '',
       }));
+      form.mambo_tail_tool_max_rounds = ttCfg.max_rounds ?? 1;
     } else {
       form.mambo_tail_tool_enabled = false;
       resetTailToolForm();

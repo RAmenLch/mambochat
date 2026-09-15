@@ -153,6 +153,7 @@ export default {
       parseError: '无法解析工具调用内容',
       toolCallTitle: '工具调用: {name}',
       mcpTool: 'MCP',
+      tailTool: '尾部',
       batchReview: '批量审核工具',
       arguments: '参数',
       noArguments: '无参数配置',

@@ -20,6 +20,7 @@ from backend.services.generation.core.llm_io import LLMInput, ModelConfig, RunTi
 from backend.services.generation.builders.material_loader import GenerationMaterialLoader, GenerationMaterials
 from backend.services.generation.builders.param_utils import map_model_parameters
 from backend.services.generation.builders.context_builder import MessageContextBuilder
+from backend.services.generation.graph_builders.model_factory import ModelFactory
 from backend.services.generation.builders.initializers.chat_react_initializer import ChatBasedReActInitializer
 from backend.services.generation.builders.initializers.agent_react_initializer import AgentBasedReActInitializer
 from backend.services.generation.builders.initializers.deep_agent_initializer import DeepAgentInitializer
@@ -381,12 +382,11 @@ class LLMInputDirector:
         if self._enable_max_context_messages:
             max_context_messages = active_params.get("max_context_messages")
 
-        # 摘要中间件要求重建消息的 response_metadata.model_provider 与所用模型的
-        # ls_provider 一致，才能命中 reported-token 兜底判定。
-        try:
-            usage_model_provider = model._get_ls_params().get("ls_provider")
-        except Exception:
-            usage_model_provider = None
+        # 摘要中间件要求重建消息的 response_metadata.model_provider 与所用 LangChain
+        # 模型的 ls_provider 一致，才能命中 reported-token 兜底判定。此处 model 是
+        # ORM AIModel（没有 _get_ls_params），故按 worker_type 映射（与 ModelFactory
+        # 的模型类选择保持一致）。
+        usage_model_provider = ModelFactory.ls_provider_for_worker(provider.worker_type)
 
         context_builder = MessageContextBuilder(
             db=self.db,

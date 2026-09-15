@@ -97,4 +97,6 @@ def merge_suggest_into_tail_config(
     tools.append(build_suggest_tool(session_factory=session_factory, message_id=message_id))
     cfg["tasks"] = tasks
     cfg["tools"] = tools
+    # suggest 为一次性产出型任务:多轮无意义,强制单轮(suggest 启用时阈值恒为 1)。
+    cfg["max_rounds"] = 1
     return cfg

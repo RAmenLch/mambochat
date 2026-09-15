@@ -18,6 +18,11 @@ class SummarizationConfigSchema(BaseModel):
     keep_type: Literal["fraction", "tokens", "messages"] = Field("messages", description="保留类型")
     keep_value: float = Field(20.0, description="保留数量")
     offload_to_backend: bool = Field(False, description="是否卸载到 Backend")
+    include_reasoning: Optional[bool] = Field(
+        None,
+        description="是否把 reasoning（思维链）计入摘要触发的本地 token 预估。"
+                    "None=按模型自动判定（仅对会把 reasoning 回传 provider 的模型计入，如 DeepSeek）。"
+    )
 
 
 class SecurityReviewConfigSchema(BaseModel):
@@ -88,11 +93,9 @@ class GoalLoopConfigSchema(BaseModel):
 
 
 class TailToolTaskSchema(BaseModel):
-    """尾部工具调用任务：名称 + 具体使用说明（可选参数结构/示例）。"""
+    """尾部工具调用任务：名称 + 具体使用说明。"""
     name: str = Field(..., description="任务名（尾部工具调用的 task 取值）")
     instruction: Optional[str] = Field(None, description="具体使用说明")
-    args_schema: Optional[Dict[str, Any]] = Field(None, description="arguments 的 JSON Schema")
-    example: Optional[str] = Field(None, description="arguments 示例")
 
 
 class TailToolConfigSchema(BaseModel):
@@ -105,6 +108,7 @@ class TailToolConfigSchema(BaseModel):
     fail_mode: Literal["silent", "message"] = Field("silent", description="模型未调用时的行为")
     fail_message: Optional[str] = Field(None, description="fail_mode='message' 时的失败文案")
     tasks: Optional[List[TailToolTaskSchema]] = Field(None, description="尾部任务清单")
+    max_rounds: int = Field(1, description="尾部工具执行的最大轮数(阈值);1=单轮。suggest 启用时强制为 1")
 
 
 class MamboAgentParametersSchema(BaseModel):

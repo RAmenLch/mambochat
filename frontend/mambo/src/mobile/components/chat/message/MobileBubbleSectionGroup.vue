@@ -97,7 +97,7 @@
           class="tool-chip"
           :class="{
             'has-review': tool.type === 'ReviewTool',
-            'is-mcp-wrapped': isMcpWrapped(tool),
+            'is-mcp-wrapped': isWrappedTool(tool),
           }"
           @click.stop="$emit('open-tool-dialog', tool.id)"
         >
@@ -240,10 +240,10 @@ function goalRoundText(tool: SubMessage): string {
   return t('chat.message.goalLoopRoundUnknown')
 }
 
-function isMcpWrapped(tool: SubMessage): boolean {
+function isWrappedTool(tool: SubMessage): boolean {
   const content = getParsedContent(tool)
   if (!content) return false
-  return unpackMcpToolCall(content).isMcpWrapped
+  return unpackMcpToolCall(content).isWrapped
 }
 
 /** 文件组中所有图片的聚合预览列表（用于键盘导航） */

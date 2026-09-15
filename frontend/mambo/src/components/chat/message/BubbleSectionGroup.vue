@@ -117,7 +117,7 @@
           :class="{
             'has-review': tool.type === 'ReviewTool',
             'has-ask-user': tool.type === 'AskUser',
-            'is-mcp-wrapped': isMcpWrapped(tool),
+            'is-mcp-wrapped': isWrappedTool(tool),
           }"
           @click="$emit('open-tool-dialog', tool.id)"
         >
@@ -330,11 +330,11 @@ function getToolBubbleText(tool: SubMessage): string {
   return args ? `${name} ${args}` : name;
 }
 
-function isMcpWrapped(tool: SubMessage): boolean {
+function isWrappedTool(tool: SubMessage): boolean {
   if (tool.type === 'AskUser') return false;
   const content = getParsedContent(tool);
   if (!content) return false;
-  return unpackMcpToolCall(content).isMcpWrapped;
+  return unpackMcpToolCall(content).isWrapped;
 }
 
 /** tool_call_id → SecurityReviewContent 映射 */

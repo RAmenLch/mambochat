@@ -1,5 +1,7 @@
 # backend/services/generation/graph_builders/model_factory.py
 
+from typing import Optional
+
 from langchain_core.language_models import BaseChatModel
 
 from backend.schemas.enums import ProviderWorkerType
@@ -13,6 +15,42 @@ class ModelFactory:
     负责根据 ModelConfig 动态实例化对应的 LangChain ChatModel。
     """
     DEFAULT_MAX_RETRIES = 3
+
+    #: worker_type -> LangChain 模型类的 ls_provider（须与下方 create_model 的类选择保持一致）。
+    _LS_PROVIDER_BY_WORKER = {
+        ProviderWorkerType.ANTHROPIC.value: "anthropic",
+        ProviderWorkerType.GOOGLE.value: "google_genai",
+        ProviderWorkerType.DEEPSEEK.value: "openai",   # ChatDeepSeek 继承 ChatOpenAI
+        ProviderWorkerType.OPENAI.value: "openai",
+    }
+
+    @staticmethod
+    def ls_provider_for_worker(worker_type: Optional[str]) -> str:
+        """返回该 worker_type 对应 LangChain 模型类的 ``ls_provider``。
+
+        用于把重建消息的 ``response_metadata["model_provider"]`` 对齐到摘要中间件
+        实际使用的模型（其 ``_get_ls_params()["ls_provider"]``），从而命中
+        ``LCSummarizationMiddleware`` 的 reported-token 兜底判定。
+        未知类型回退为 OpenAI 兼容（``ExtendedChatOpenAI``）。
+        """
+        return ModelFactory._LS_PROVIDER_BY_WORKER.get(worker_type, "openai")
+
+    #: worker_type -> 该适配器是否会把 reasoning 重新回传给 provider。
+    #: ChatDeepSeek 会在请求体里显式加回 reasoning_content；ChatOpenAI（含
+    #: ExtendedChatOpenAI）的 _convert_message_to_dict 不会转发 reasoning_content。
+    _RESENDS_REASONING_BY_WORKER = {
+        ProviderWorkerType.DEEPSEEK.value: True,
+    }
+
+    @staticmethod
+    def resends_reasoning(worker_type: Optional[str]) -> bool:
+        """该 worker_type 的模型是否会把 reasoning 重新发给 provider。
+
+        用于决定摘要触发的本地 token 预估是否需计入 reasoning（mambo_agents 的
+        ``SummarizationConfig.include_reasoning``）：只有会回传 reasoning 的模型
+        才应计入，否则会高估 token 导致过早压缩。
+        """
+        return ModelFactory._RESENDS_REASONING_BY_WORKER.get(worker_type, False)
 
     @staticmethod
     def create_model(model_config: ModelConfig, run_time_config: RunTimeConfig) -> BaseChatModel:

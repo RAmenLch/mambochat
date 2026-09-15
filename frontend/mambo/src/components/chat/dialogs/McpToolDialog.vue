@@ -20,7 +20,7 @@
         <div class="tool-detail-container" v-if="getParsedContent(msg)">
           <div class="tool-header">
             <h3>
-              <span v-if="getMcpUnpacked(msg).isMcpWrapped" class="mcp-meta-tag">{{ t('chat.message.mcp.mcpTool') }}</span>
+              <span v-if="getMcpMetaTag(msg)" class="mcp-meta-tag">{{ getMcpMetaTag(msg) }}</span>
               {{ getMcpUnpacked(msg).displayName }}
             </h3>
             <p v-if="getToolDescription(msg)" class="tool-desc">
@@ -533,8 +533,16 @@ function mediaUrl(m: MultimodalMedia | null | undefined): string {
 
 function getMcpUnpacked(msg: SubMessage) {
   const content = getParsedContent(msg);
-  if (!content) return { displayName: 'Unknown', effectiveName: 'Unknown', isMcpWrapped: false, effectiveArgs: {} as Record<string, unknown> | string, serverName: undefined as string | undefined };
+  if (!content) return { displayName: 'Unknown', effectiveName: 'Unknown', isMcpWrapped: false, isTailTool: false, isWrapped: false, effectiveArgs: {} as Record<string, unknown> | string, serverName: undefined as string | undefined };
   return unpackMcpToolCall(content);
+}
+
+/** 详情弹窗头部的包装标签：tail_tool → “尾部”；mcp_call_tool → “MCP”；否则不显示 */
+function getMcpMetaTag(msg: SubMessage): string {
+  const unpacked = getMcpUnpacked(msg);
+  if (unpacked.isTailTool) return t('chat.message.mcp.tailTool');
+  if (unpacked.isMcpWrapped) return t('chat.message.mcp.mcpTool');
+  return '';
 }
 
 function getToolDescription(msg: SubMessage): string {
@@ -549,7 +557,7 @@ function getToolDescription(msg: SubMessage): string {
 function getTabLabel(msg: SubMessage): string {
   const unpacked = getMcpUnpacked(msg);
   const name = unpacked.displayName;
-  const prefix = msg.type === 'ReviewTool' ? '⏳' : (unpacked.isMcpWrapped ? '🛜' : '🛠️');
+  const prefix = msg.type === 'ReviewTool' ? '⏳' : (unpacked.isWrapped ? '🛜' : '🛠️');
   return `${prefix} ${name}`;
 }
 
@@ -645,7 +653,7 @@ function initForms() {
 
     if (content) {
       if (msg.type === 'McpTool') {
-        const rawArgs = unpacked?.isMcpWrapped
+        const rawArgs = unpacked?.isWrapped
           ? unpacked.effectiveArgs
           : (content as McpToolContent).arguments;
         if (typeof rawArgs === 'string') {
@@ -658,7 +666,7 @@ function initForms() {
           argsObj = rawArgs as Record<string, unknown>;
         }
       } else if (msg.type === 'ReviewTool') {
-        if (unpacked?.isMcpWrapped) {
+        if (unpacked?.isWrapped) {
           argsObj = unpacked.effectiveArgs as Record<string, unknown>;
         } else {
           argsObj = (content as ReviewToolContent).arguments || {};

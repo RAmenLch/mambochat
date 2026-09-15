@@ -170,6 +170,8 @@ export default {
     taskInstructionPlaceholder: 'Specific usage instruction (e.g. give 3-5 suggestions)',
     addTask: 'Add Task',
     removeTask: 'Remove',
+    maxRounds: 'Max Rounds',
+    maxRoundsDesc: 'Maximum rounds the tail tools may execute: 1 = single round (default). Above 1, the middleware loops "call model → run tools → feed results back → call again" until the model stops or the limit is reached. Fixed to 1 when suggest is enabled',
   },
   mcpThreshold: 'MCP Direct Tool Threshold',
   mcpThresholdDesc: 'When total MCP tool count is below this threshold, tools are directly exposed to the LLM. Above this, a compact meta-tool (mcp_call_tool) wrapper is used to save context. Default: 15',

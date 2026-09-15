@@ -219,7 +219,7 @@ const currentTool = computed((): McpToolContent | ReviewToolContent | null => {
 })
 
 const currentUnpacked = computed(() => {
-  if (!currentTool.value) return { displayName: 'Tool', effectiveName: 'Tool', isMcpWrapped: false, effectiveArgs: {} as Record<string, unknown>, serverName: undefined as string | undefined }
+  if (!currentTool.value) return { displayName: 'Tool', effectiveName: 'Tool', isMcpWrapped: false, isTailTool: false, isWrapped: false, effectiveArgs: {} as Record<string, unknown>, serverName: undefined as string | undefined }
   return unpackMcpToolCall(currentTool.value)
 })
 
@@ -237,7 +237,7 @@ function mcpMediaUrl(m: MultimodalMedia | null | undefined): string {
 const currentArgs = computed(() => {
   if (!currentTool.value) return null
   const unpacked = currentUnpacked.value
-  if (unpacked.isMcpWrapped) {
+  if (unpacked.isWrapped) {
     return unpacked.effectiveArgs as Record<string, unknown>
   }
   const args = (currentTool.value as any).arguments

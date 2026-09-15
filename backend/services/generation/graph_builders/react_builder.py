@@ -42,10 +42,15 @@ class ReactGraphBuilder(BaseGraphBuilder):
                 message_id=run_time_config.message_id,
             )
         if tt_cfg:
+            from backend.database import AsyncSessionLocal
             from backend.services.generation.agent.tail_tool_middleware import (
                 build_tail_tool_middleware,
             )
-            _tail_tool_middleware = build_tail_tool_middleware(tt_cfg)
+            _tail_tool_middleware = build_tail_tool_middleware(
+                tt_cfg,
+                session_factory=lambda: AsyncSessionLocal(),
+                message_id=run_time_config.message_id,
+            )
             if _tail_tool_middleware:
                 middlewares.append(_tail_tool_middleware)
 

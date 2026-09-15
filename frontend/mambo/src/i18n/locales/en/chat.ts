@@ -153,6 +153,7 @@ export default {
       parseError: 'Failed to parse tool call content',
       toolCallTitle: 'Tool Call: {name}',
       mcpTool: 'MCP',
+      tailTool: 'Tail',
       batchReview: 'Batch Review Tools',
       arguments: 'Arguments',
       noArguments: 'No arguments',

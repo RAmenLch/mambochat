@@ -170,6 +170,8 @@ export default {
     taskInstructionPlaceholder: '具体使用说明（如：给出 3~5 条建议）',
     addTask: '添加任务',
     removeTask: '删除',
+    maxRounds: '最大轮数',
+    maxRoundsDesc: '尾部工具可执行的最大轮数：1=单轮（默认）。大于 1 时循环“调用模型→执行工具→回灌结果→再调用”，直到模型不再调用或达到该轮数。启用 suggest 时固定为 1',
   },
   mcpThreshold: 'MCP 直连工具阈值',
   mcpThresholdDesc: '当 MCP 工具总数低于此阈值时，工具直接暴露给 LLM；超过时使用紧凑的 meta-tool（mcp_call_tool）包装以节省上下文。默认：15',

@@ -50,12 +50,10 @@ export interface GoalLoopConfig {
   blocked_threshold?: number | null
 }
 
-/** 尾部工具调用任务：名称 + 具体使用说明（可选参数结构/示例） */
+/** 尾部工具调用任务：名称 + 具体使用说明 */
 export interface TailToolTask {
   name: string
   instruction?: string | null
-  args_schema?: Record<string, any> | null
-  example?: string | null
 }
 
 /** 通用尾部工具调用配置（TailToolMiddleware） */
@@ -64,6 +62,8 @@ export interface TailToolConfig {
   fail_mode: 'silent' | 'message'
   fail_message?: string | null
   tasks?: TailToolTask[] | null
+  /** 尾部工具执行的最大轮数（阈值）；1=单轮。suggest 启用时后端强制为 1 */
+  max_rounds?: number | null
 }
 
 export interface MamboAgentParameters {

@@ -267,7 +267,7 @@ export function useAssistantTimeline(message: Ref<Message>, messageDisplayMode?:
    */
   const tailToolSubMessages = computed(() =>
     message.value.sub_messages
-      .filter(sm => sm.type === 'Normal' && sm.config?.is_tail_tool === true)
+      .filter(sm => sm.config?.is_tail_tool === true)
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
   );
 

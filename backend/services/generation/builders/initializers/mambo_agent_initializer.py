@@ -3,7 +3,7 @@
 import asyncio
 import json
 import logging
-from typing import Tuple, List, Dict, Any, Optional
+from typing import Tuple, List, Dict, Any, Optional, Literal
 from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_core.tools import BaseTool
 
@@ -387,12 +387,18 @@ class MamboAgentInitializer(AbstractAgentInitializer):
         security_review_llm_config: Optional[ModelConfig] = None
         sr = mambo_params.security_review
         if sr and sr.enabled:
+            lang_setting = await setting_crud.get_setting(self.db, "language")
+            system_language = lang_setting.value if lang_setting else "zh-CN"
+            review_language: Literal["zh", "en"] = (
+                "zh" if system_language.startswith("zh") else "en"
+            )
             security_review_config = SecurityReviewAgentConfig(
                 enabled=True,
                 model_id=sr.model_id,
                 system_prompt=sr.system_prompt,
                 review_tools=sr.review_tools,
                 agent_max_steps=sr.agent_max_steps,
+                language=review_language,
             )
             if security_review_config.model_id:
                 sr_model = await provider_crud.get_model(self.db, security_review_config.model_id)
@@ -527,6 +533,7 @@ class MamboAgentInitializer(AbstractAgentInitializer):
                 "fail_mode": tt.fail_mode,
                 "fail_message": tt.fail_message or "",
                 "tasks": [t.model_dump(exclude_none=True) for t in (tt.tasks or [])],
+                "max_rounds": tt.max_rounds,
             }
 
         agent_config = AgentConfig(

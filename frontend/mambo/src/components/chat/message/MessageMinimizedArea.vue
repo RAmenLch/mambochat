@@ -175,7 +175,7 @@ function getMinimizedTooltipContent(subMessage: SubMessage): string {
       const content = JSON.parse(subMessage.content)
       const unpacked = unpackMcpToolCall(content)
       let argsStr = ''
-      const rawArgs = unpacked.isMcpWrapped ? unpacked.effectiveArgs : content.arguments
+      const rawArgs = unpacked.isWrapped ? unpacked.effectiveArgs : content.arguments
       if (typeof rawArgs === 'string') {
         argsStr = rawArgs
       } else if (typeof rawArgs === 'object') {

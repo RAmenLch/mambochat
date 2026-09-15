@@ -537,10 +537,17 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
         summarization = None
         if getattr(agent_config, 'enable_summarization', False) and agent_config.summarization_config:
             cfg = agent_config.summarization_config
+            # 仅对会把 reasoning 重新回传 provider 的模型（如 DeepSeek）把 reasoning 计入
+            # 本地预估，否则会高估 token 导致过早压缩。cfg 显式指定时以其为准，否则按 worker_type 判定。
+            include_reasoning = cfg.get("include_reasoning")
+            if include_reasoning is None:
+                _worker_type = (getattr(agent_config.llm_config, "parameters", None) or {}).get("_worker_type")
+                include_reasoning = ModelFactory.resends_reasoning(_worker_type)
             summarization = {
                 "trigger": (cfg["trigger_type"], cfg["trigger_value"]),
                 "keep": (cfg["keep_type"], cfg["keep_value"]),
                 "offload_to_backend": cfg.get("offload_to_backend", False),
+                "include_reasoning": include_reasoning,
             }
 
         # --- Planning (opt-in, default on) ---
@@ -575,6 +582,7 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
                 review_mode="agent",
                 agent_max_steps=sr_config.agent_max_steps or 10,
                 tool_unpackers=tool_unpackers,
+                language=getattr(sr_config, "language", None),
             )
 
         # --- Memory sources（长期记忆） ---
@@ -644,11 +652,14 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
                 message_id=run_time_config.message_id,
             )
         if tt_cfg:
-            _resolve_tail_task_tools(tt_cfg, agent_config.tools)
             from backend.services.generation.agent.tail_tool_middleware import (
                 build_tail_tool_middleware,
             )
-            _tail_tool_middleware = build_tail_tool_middleware(tt_cfg)
+            _tail_tool_middleware = build_tail_tool_middleware(
+                tt_cfg,
+                session_factory=_make_session_factory(),
+                message_id=run_time_config.message_id,
+            )
 
         # --- Merge middlewares ---
         _middlewares: list = []

@@ -1,7 +1,7 @@
 # backend/services/generation/core/llm_io.py
 
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Literal
 
 from mambo_agents.middleware.summarization import SummarizationEvent
 from langchain_core.messages import BaseMessage
@@ -153,6 +153,11 @@ class SecurityReviewAgentConfig(BaseModel):
         None,
         description="审核 agent 最大步数（仅 review_mode='agent' 生效）。None 时使用默认值 10"
     )
+    language: Optional[Literal["zh", "en"]] = Field(
+        None,
+        description="审核解释文本语言（zh/en），由 Initializer 从系统语言设置映射填充。"
+                    "None 时使用中间件内置提示词语言"
+    )
 
 
 class AgentConfig(BaseModel):
@@ -291,7 +296,7 @@ class AgentConfig(BaseModel):
     tail_tool_config: Optional[Dict[str, Any]] = Field(
         default=None,
         description="尾部工具调用配置（TailToolMiddleware）。由 Initializer 填充，Builder 消费。"
-                    "结构: {enabled, tasks: [{name, instruction, args_schema, example}], tools: [工具], "
+                    "结构: {enabled, tasks: [{name, instruction}], tools: [工具], "
                     "fail_mode, fail_message, trigger_prompt, execute_tools}"
     )
     enable_suggest: bool = Field(

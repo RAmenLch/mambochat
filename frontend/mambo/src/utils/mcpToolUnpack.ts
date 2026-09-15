@@ -1,37 +1,45 @@
 import type { McpToolContent, ReviewToolContent } from '@/api/types'
 
 export interface UnpackedToolCall {
-  /** 显示用的工具名称：mcp_call_tool → "serverName/toolName"，否则原样 */
+  /** 显示用的工具名称：mcp_call_tool → "serverName/toolName"，tail_tool → 内层任务名，否则原样 */
   displayName: string
-  /** 内层工具名（mcp_call_tool 时为 tool_name） */
+  /** 内层工具名（mcp_call_tool 时为 tool_name；tail_tool 时为 task） */
   effectiveName: string
   /** MCP server 名，仅 mcp_call_tool 时有值 */
   serverName?: string
-  /** 内层参数（mcp_call_tool 时为 arguments.arguments） */
+  /** 内层参数（mcp_call_tool / tail_tool 时为内层 arguments） */
   effectiveArgs: Record<string, unknown> | string
   /** 是否为 mcp_call_tool 包装调用 */
   isMcpWrapped: boolean
+  /** 是否为 tail_tool（尾部工具）包装调用 */
+  isTailTool: boolean
+  /** 是否为任一种包装调用（mcp_call_tool / tail_tool）——参数需按内层展开 */
+  isWrapped: boolean
+}
+
+/** 安全解析 arguments（可能是 JSON 字符串或已解析对象）为普通对象 */
+function parseToolArgs(raw: Record<string, unknown> | string): Record<string, unknown> {
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw) as Record<string, unknown>
+    } catch {
+      return {}
+    }
+  }
+  if (raw && typeof raw === 'object') return raw as Record<string, unknown>
+  return {}
 }
 
 /**
- * 拆包 mcp_call_tool：将包装层的 server_name / tool_name / arguments 展开，
- * 返回内层工具的真实名称和参数。
+ * 拆包包装调用：
+ * - mcp_call_tool：展开 server_name / tool_name / arguments，返回内层工具的真实名称和参数；
+ * - tail_tool（尾部通用工具）：展开 task / arguments，返回内层任务名和参数。
  */
 export function unpackMcpToolCall(
   content: McpToolContent | ReviewToolContent,
 ): UnpackedToolCall {
   if (content.name === 'mcp_call_tool') {
-    let args: Record<string, unknown> = {}
-    if (typeof content.arguments === 'string') {
-      try {
-        args = JSON.parse(content.arguments)
-      } catch {
-        /* keep empty */
-      }
-    } else if (content.arguments && typeof content.arguments === 'object') {
-      args = content.arguments as Record<string, unknown>
-    }
-
+    const args = parseToolArgs(content.arguments)
     const serverName = (args.server_name as string) || 'MCP'
     const toolName = (args.tool_name as string) || 'unknown'
     const innerArgs = (args.arguments as Record<string, unknown>) || {}
@@ -42,6 +50,23 @@ export function unpackMcpToolCall(
       serverName,
       effectiveArgs: innerArgs,
       isMcpWrapped: true,
+      isTailTool: false,
+      isWrapped: true,
+    }
+  }
+
+  if (content.name === 'tail_tool') {
+    const args = parseToolArgs(content.arguments)
+    const task = (args.task as string) || 'unknown'
+    const innerArgs = (args.arguments as Record<string, unknown>) || {}
+
+    return {
+      displayName: task,
+      effectiveName: task,
+      effectiveArgs: innerArgs,
+      isMcpWrapped: false,
+      isTailTool: true,
+      isWrapped: true,
     }
   }
 
@@ -50,6 +75,8 @@ export function unpackMcpToolCall(
     effectiveName: content.name,
     effectiveArgs: content.arguments,
     isMcpWrapped: false,
+    isTailTool: false,
+    isWrapped: false,
   }
 }
 
