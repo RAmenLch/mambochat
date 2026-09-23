@@ -1,4 +1,10 @@
-from typing import Any, Dict, List, Optional, Union
+import asyncio
+import base64
+import hashlib
+import logging
+import time
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from langchain_core.messages import (
     AIMessage,
@@ -8,6 +14,48 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_core.utils import from_env, secret_from_env
 from langchain_openai import ChatOpenAI
 from pydantic import Field, SecretStr, ConfigDict
+
+from backend.config.timezone_config import TZ
+
+logger = logging.getLogger(__name__)
+
+#: DeepSeek Files API 文件有效期（30 天），与 deepseek_file_service.FILE_TTL_SECONDS 一致。
+_FILE_TTL_SECONDS = 30 * 24 * 3600
+
+#: 进程内 file_id 缓存：cache_key(provider_key:sha256) -> (file_id, 过期时间戳)。
+#: 跨请求复用，避免同一张图被反复上传。
+_FILE_ID_CACHE: Dict[str, Tuple[str, float]] = {}
+_CACHE_LOCK = asyncio.Lock()
+
+
+def _svc():
+    """延迟导入上传缓存服务，避免模块级循环依赖。"""
+    from backend.services import deepseek_file_service
+    return deepseek_file_service
+
+
+def _to_epoch(dt: Optional[datetime]) -> float:
+    """datetime -> epoch 秒；naive 时间按配置时区视为本地时间。"""
+    if dt is None:
+        return 0.0
+    if dt.tzinfo is None:
+        dt = TZ.localize(dt)
+    return dt.timestamp()
+
+
+def _cache_get(cache_key: str) -> Optional[str]:
+    entry = _FILE_ID_CACHE.get(cache_key)
+    if not entry:
+        return None
+    file_id, expires_ts = entry
+    if expires_ts and time.time() >= expires_ts:
+        _FILE_ID_CACHE.pop(cache_key, None)
+        return None
+    return file_id
+
+
+def _cache_set(cache_key: str, file_id: str, expires_ts: float) -> None:
+    _FILE_ID_CACHE[cache_key] = (file_id, expires_ts)
 
 
 class ChatDeepSeek(ChatOpenAI):
@@ -101,7 +149,197 @@ class ChatDeepSeek(ChatOpenAI):
                         # 显式将 reasoning_content 加回发送给 API 的字典中
                         payload_msg["reasoning_content"] = reasoning
 
+        # 5. 将命中内存缓存的图片块替换为 Files API 的 file_id 引用（未命中保持内联）
+        self._apply_cached_file_ids(payload)
+
         return payload
+
+    # ------------------------------------------------------------------
+    # DeepSeek Files API：把内联 base64 图片改为 file_id 引用
+    #
+    # 动机：内联图片会计入请求体大小（48 MiB）与单图（32 MiB）限制，大图会导致
+    # "Failed to buffer the request body: length limit exceeded"。
+    #
+    # 分工：async 入口（_astream / _agenerate）做“预取上传”（await，让出事件循环，
+    # 不阻塞页面）；同步的 _get_request_payload 只查内存缓存做替换。二者都基于同一份
+    # 归一化 payload（user 图与 tool 图都归一为 image_url / file 块），因此覆盖一致。
+    # 上传或查库失败一律回退内联。
+    # ------------------------------------------------------------------
+
+    def _provider_key(self) -> str:
+        """``api_base + api_key`` 的哈希，用于隔离不同 key（DeepSeek 文件归属上传它的 key）。"""
+        try:
+            key = self.openai_api_key.get_secret_value() if self.openai_api_key is not None else ""
+        except Exception:
+            key = str(self.openai_api_key or "")
+        return hashlib.sha256(f"{self.openai_api_base or ''}|{key}".encode("utf-8")).hexdigest()[:32]
+
+    @staticmethod
+    def _decode_image_data_url(url: Any) -> Optional[Tuple[str, bytes]]:
+        """将 ``data:image/...;base64,...`` 解码为 ``(mime, raw_bytes)``，非图片返回 None。"""
+        if not isinstance(url, str) or not url.startswith("data:image/"):
+            return None
+        try:
+            header, b64 = url.split(",", 1)
+        except ValueError:
+            return None
+        if ";base64" not in header:
+            return None
+        mime = header[len("data:"):].split(";", 1)[0]
+        try:
+            raw = base64.b64decode(b64)
+        except Exception:
+            return None
+        return mime, raw
+
+    @classmethod
+    def _extract_image(cls, block: Dict[str, Any]) -> Optional[Tuple[str, bytes]]:
+        """从 payload 内容块提取图片原始字节。
+
+        支持两种归一化后的块：``image_url``（内联 data URL）与 ``file``（``file_data``
+        为图片 data URL）。分别是用户图与工具图经 langchain 归一化后的形态。
+        """
+        block_type = block.get("type")
+        if block_type == "image_url":
+            inner = block.get("image_url")
+            url = inner.get("url") if isinstance(inner, dict) else None
+            return cls._decode_image_data_url(url)
+        if block_type == "file":
+            inner = block.get("file")
+            if isinstance(inner, dict):
+                return cls._decode_image_data_url(inner.get("file_data"))
+        return None
+
+    @staticmethod
+    def _iter_content_blocks(payload: Dict[str, Any]):
+        for msg in (payload or {}).get("messages", []) or []:
+            if not isinstance(msg, dict):
+                continue
+            content = msg.get("content")
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict):
+                        yield block
+
+    @staticmethod
+    def _messages_may_have_images(messages: List[BaseMessage]) -> bool:
+        """廉价预判是否含图片块，避免纯文本请求也重复构建 payload。"""
+        for msg in messages or []:
+            content = getattr(msg, "content", None)
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if isinstance(block, dict) and block.get("type") in ("image", "image_url"):
+                    return True
+        return False
+
+    async def _safe_prefetch(self, messages: List[BaseMessage]) -> None:
+        try:
+            await self._prefetch_images(messages)
+        except Exception as e:
+            logger.warning(f"[deepseek-files] 图片预取失败，回退内联: {e}")
+
+    async def _prefetch_images(self, messages: List[BaseMessage]) -> None:
+        """扫描归一化消息中的图片并逐个解析（内存 → DB → 上传）。"""
+        if not self._messages_may_have_images(messages):
+            return
+        payload = super()._get_request_payload(messages)
+        seen: set = set()
+        for block in self._iter_content_blocks(payload):
+            info = self._extract_image(block)
+            if not info:
+                continue
+            mime, raw = info
+            digest = hashlib.sha256(raw).hexdigest()
+            if digest in seen:
+                continue
+            seen.add(digest)
+            await self._resolve_image(mime, raw)
+
+    async def _resolve_image(self, mime: str, raw: bytes) -> Optional[str]:
+        """返回图片的 DeepSeek file_id；失败返回 None（调用方保持内联）。"""
+        provider_key = self._provider_key()
+        digest = hashlib.sha256(raw).hexdigest()
+        cache_key = f"{provider_key}:{digest}"
+
+        hit = _cache_get(cache_key)
+        if hit:
+            return hit
+
+        async with _CACHE_LOCK:
+            hit = _cache_get(cache_key)
+            if hit:
+                return hit
+
+            svc = _svc()
+            cached = await svc.get_valid_file_id(provider_key, digest)
+            if cached:
+                file_id, expires_at = cached
+                _cache_set(cache_key, file_id, _to_epoch(expires_at))
+                return file_id
+
+            file_id = await self._upload_image_ref(raw, mime)
+            if not file_id:
+                return None
+
+            ext = (mime.split("/")[-1] or "bin").split("+")[0]
+            expires_at = await svc.save_file_id(
+                provider_key, digest, file_id, mime, f"image.{ext}", len(raw)
+            )
+            _cache_set(
+                cache_key,
+                file_id,
+                _to_epoch(expires_at) if expires_at else time.time() + _FILE_TTL_SECONDS,
+            )
+            return file_id
+
+    async def _upload_image_ref(self, raw: bytes, mime: str) -> Optional[str]:
+        """调用 DeepSeek Files API 上传图片，返回 file_id；失败返回 None。"""
+        ext = (mime.split("/")[-1] or "bin").split("+")[0]
+        try:
+            uploaded = await self.root_async_client.files.create(
+                file=(f"image.{ext}", raw, mime),
+                purpose="user_data",
+                expires_after={"anchor": "created_at", "seconds": _FILE_TTL_SECONDS},
+            )
+            return uploaded.id
+        except Exception as e:
+            logger.warning(f"[deepseek-files] 上传图片失败，回退内联: {e}")
+            return None
+
+    def _apply_cached_file_ids(self, payload: Dict[str, Any]) -> None:
+        """把 payload 中命中内存缓存的图片块就地替换为 ``{"type": "file", "file_id": ...}``。"""
+        provider_key = self._provider_key()
+        for block in self._iter_content_blocks(payload):
+            info = self._extract_image(block)
+            if not info:
+                continue
+            _, raw = info
+            file_id = _cache_get(f"{provider_key}:{hashlib.sha256(raw).hexdigest()}")
+            if file_id:
+                block.clear()
+                block.update({"type": "file", "file_id": file_id})
+
+    async def _astream(
+        self,
+        messages: List[BaseMessage],
+        stop: Optional[List[str]] = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ):
+        await self._safe_prefetch(messages)
+        async for chunk in super()._astream(messages, stop=stop, run_manager=run_manager, **kwargs):
+            yield chunk
+
+    async def _agenerate(
+        self,
+        messages: List[BaseMessage],
+        stop: Optional[List[str]] = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        await self._safe_prefetch(messages)
+        return await super()._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
 
     def _create_chat_result(
             self, response: Union[Dict, Any], generation_info: Optional[Dict] = None
