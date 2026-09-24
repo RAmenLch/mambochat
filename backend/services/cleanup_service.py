@@ -1,12 +1,14 @@
 # backend/services/cleanup_service.py
 
 import asyncio
+import json
 import logging
 import os
 import sqlite3
 import threading
 import time as _time
 from datetime import timedelta
+from typing import Set
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -93,14 +95,50 @@ async def _cleanup_temporary_files(db: AsyncSession):
             logger.error(f"处理临时文件 {f.id} 时出错: {e}")
 
 
+def _extract_mcp_media_file_ids(content: str) -> Set[str]:
+    """从 McpTool 子消息 content(JSON) 中提取多模态 media 的 file_id。
+
+    工具（read 等）读取图片/音视频/文档时会生成 File 记录，并被 McpTool 子消息的
+    ``media[].file_id`` 引用（而**不是** ``File`` 型子消息）。这类引用同样属于“活跃引用”，
+    否则会被孤儿清理误删，导致前端工具图片不显示（hydrate 找不到 File -> 无下载 url）。
+    """
+    if not content:
+        return set()
+    try:
+        obj = json.loads(content)
+    except (json.JSONDecodeError, TypeError):
+        return set()
+    media = obj.get("media") if isinstance(obj, dict) else None
+    if not isinstance(media, list):
+        return set()
+    file_ids: Set[str] = set()
+    for item in media:
+        if isinstance(item, dict):
+            file_id = item.get("file_id")
+            if file_id:
+                file_ids.add(file_id)
+    return file_ids
+
+
 async def _cleanup_sub_message_files(db: AsyncSession):
     """清理与任何 SubMessage 都不再关联的文件"""
-    # 获取所有正在被 SubMessage 引用的文件ID
+    # 1) 收集所有正在被 SubMessage 引用的文件ID
+    #    (a) File 型子消息：content 即文件ID
     stmt_active = select(chat_model.SubMessage.content).where(
         chat_model.SubMessage.type == 'File'
     ).distinct()
     result_active = await db.execute(stmt_active)
     active_file_ids = {row[0] for row in result_active}
+
+    #    (b) McpTool 型子消息：多模态工具结果通过 media[].file_id 引用文件
+    #        （如 read 工具读取的图片/音视频/文档）。遗漏这里会把工具媒体误判为孤儿删除。
+    stmt_mcp_media = select(chat_model.SubMessage.content).where(
+        chat_model.SubMessage.type == 'McpTool',
+        chat_model.SubMessage.content.contains('"file_id"'),
+    )
+    result_mcp_media = await db.execute(stmt_mcp_media)
+    for (content,) in result_mcp_media:
+        active_file_ids.update(_extract_mcp_media_file_ids(content))
 
     # 获取所有包含 sub_message 类型的文件ID
     stmt_managed = select(file_model.File.id).where(
