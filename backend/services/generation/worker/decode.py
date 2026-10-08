@@ -6,6 +6,24 @@ from typing import Any, Dict, List, Optional, Union
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, ToolMessage
 
 
+def _restore_uploaded_media_block(blk: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """把预上传引用块（``{"type": "file", "file_id": ...}``）还原为内联媒体块。
+
+    ``read`` 工具启用图片预上传钩子后，工具结果以 file_id 引用块进入 ToolMessage
+    （checkpoint / 请求体不再携带 base64）；此处按 file_id 取回暂存的原始内容并还原为
+    ``{"type", "base64", "mime_type"}``，使前端展示与 SaveAndPersistFile /
+    MultimodalMedia 落库管道保持原有行为。找不到暂存（如进程重启、条目被淘汰）
+    返回 None，调用方跳过该块。
+    """
+    try:
+        from backend.services.generation.worker.deepseek_file_uploader import (
+            restore_media_block,
+        )
+        return restore_media_block(blk)
+    except Exception:
+        return None
+
+
 class BaseDecode(ABC):
     @abstractmethod
     def get_text_content(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[str]:
@@ -88,6 +106,11 @@ class DefaultLangChainDecode(BaseDecode):
                             text_blocks.append(blk["text"])
                         elif btype not in ("text",) and blk.get("base64"):
                             media_blocks.append(blk)
+                        elif btype not in ("text",):
+                            # 预上传引用块（file_id）：还原为内联媒体块后仍走 media 管道
+                            restored = _restore_uploaded_media_block(blk)
+                            if restored:
+                                media_blocks.append(restored)
                 result: Dict[str, Any] = {
                     "id": message.tool_call_id,
                     "text": "".join(text_blocks),

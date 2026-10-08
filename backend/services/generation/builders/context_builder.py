@@ -2,6 +2,7 @@
 
 import json
 import base64
+import hashlib
 from datetime import datetime as dt
 from typing import List, Dict, Any, Optional, Set, Tuple, Union
 
@@ -60,7 +61,8 @@ class MessageContextBuilder:
             slice_range: Optional[slice] = None,
             head_tail: Optional[Tuple[int, int]] = None,
             language: Optional[str] = None,
-            usage_model_provider: Optional[str] = None
+            usage_model_provider: Optional[str] = None,
+            deepseek_provider_key: Optional[str] = None
     ):
         self.db = db
 
@@ -83,6 +85,9 @@ class MessageContextBuilder:
         # 重建 AIMessage 时用于回填 usage 的 provider 标记（须与摘要中间件所用模型的
         # ls_provider 一致，供 LCSummarizationMiddleware 的 reported-token 兜底判定）。
         self.usage_model_provider = usage_model_provider
+        # DeepSeek 运行时的上传缓存 provider_key：历史重建时据此把已上传图片还原为
+        # file_id 引用块（与 read 预上传钩子产出一致），避免 base64 回灌 ckpt。
+        self.deepseek_provider_key = deepseek_provider_key
 
         # 内部缓存，防止同一文件在单次装配中重复读取
         self._file_content_cache: Dict[Any, Any] = {}
@@ -344,6 +349,10 @@ class MessageContextBuilder:
         ``{"type": <image/audio/video/file>, "base64": ..., "mime_type": ...}``，
         否则重建的 tool result 与 ckpt 中的 ToolMessage 不一致，会破坏上下文缓存。
         注意：不能复用 ``_process_file_part_legacy`` 的 ``image_url`` API 格式。
+
+        DeepSeek 运行时（``deepseek_provider_key`` 非 None）优先把已上传过的图片还原为
+        read 预上传钩子产出的 ``{"type": "file", "file_id": ...}`` 引用块；查询未命中
+        回退内联 base64（请求期由模型层补传，下一轮重建自愈）。
         """
         file_service = FileService(self.db)
         blocks: List[Dict[str, Any]] = []
@@ -357,12 +366,37 @@ class MessageContextBuilder:
                 raw = await file_service.get_file_content(file_id)
             except Exception:
                 continue
+
+            file_type = getattr(m, "file_type", "file")
+            if self.deepseek_provider_key and file_type == "image":
+                ref = await self._resolve_uploaded_ref(self.deepseek_provider_key, raw)
+                if ref is not None:
+                    blocks.append(ref)
+                    continue
+
             blocks.append({
-                "type": getattr(m, "file_type", "file"),
+                "type": file_type,
                 "base64": base64.b64encode(raw).decode("utf-8"),
                 "mime_type": getattr(m, "mime_type", "application/octet-stream"),
             })
         return blocks
+
+    @staticmethod
+    async def _resolve_uploaded_ref(
+        provider_key: str, raw: bytes
+    ) -> Optional[Dict[str, Any]]:
+        """按内容摘要查询 DeepSeek 上传缓存；命中且未过期返回与 read 钩子一致的引用块。"""
+        try:
+            from backend.services import deepseek_file_service
+            cached = await deepseek_file_service.get_valid_file_id(
+                provider_key, hashlib.sha256(raw).hexdigest()
+            )
+        except Exception:
+            return None
+        if not cached:
+            return None
+        file_id, _expires_at = cached
+        return {"type": "file", "file_id": file_id}
 
     @staticmethod
     def _parse_usage_record(content: Any) -> Optional[Dict[str, Any]]:

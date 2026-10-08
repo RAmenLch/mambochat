@@ -25,7 +25,7 @@ from mambo_agents import (
     HybridWorkspaceBackend,
     StoreBackend,
 )
-from mambo_agents.backends.protocol import MultimodalDescriber, ToolTimeouts
+from mambo_agents.backends.protocol import FileUploader, MultimodalDescriber, ToolTimeouts
 from mambo_agents.backends.schemas import VirtualPath
 from mambo_agents.backends.local import LocalBackend
 from mambo_agents.middleware.security_review import SecurityReviewConfig
@@ -166,6 +166,7 @@ def _build_mambo_backend(
     thread_id: str | None = None,
     multimodal_describer: MultimodalDescriber | None = None,
     tool_timeouts: ToolTimeouts | None = None,
+    file_uploader: FileUploader | None = None,
 ) -> BackendProtocol | None:
     """构建 Mambo Agent 的完整 Backend 体系。
 
@@ -181,6 +182,8 @@ def _build_mambo_backend(
             图构建路径不传（运行时从 graph config 解析）；独立场景
             （如消息创建时写入副本）必须传 chat_id，避免落到 __default__ namespace。
         multimodal_describer: 多模态描述器，装配到所有后端（含 Hybrid 层兜底）。
+        file_uploader: read 工具预上传钩子（仅 DeepSeek 模型装配）；None 表示不启用，
+            多模态结果保持内联 base64。
 
     Returns:
         HybridWorkspaceBackend 或 None（交给 create_mambo_agent 用默认 StoreBackend）
@@ -228,6 +231,7 @@ def _build_mambo_backend(
             max_grep_matches=_GREP_MATCHES,
             multimodal_describer=multimodal_describer,
             tool_timeouts=tool_timeouts,
+            file_uploader=file_uploader,
         )
 
     # ---- 1. 确定 real_backend：default_backend_id > 列表第一位 ----
@@ -299,6 +303,7 @@ def _build_mambo_backend(
         max_grep_matches=_GREP_MATCHES,
         multimodal_describer=multimodal_describer,
         tool_timeouts=tool_timeouts,
+        file_uploader=file_uploader,
     )
 
 
@@ -461,6 +466,13 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
 
         model = ModelFactory.create_model(agent_config.llm_config, run_time_config)
 
+        # DeepSeek：为 read 工具装配图片预上传钩子（Files API file_id 引用块进入
+        # checkpoint / 请求体，替代内联 base64）；其他 provider 返回 None（不启用）。
+        from backend.services.generation.worker.deepseek_file_uploader import (
+            build_file_uploader_for_model,
+        )
+        file_uploader = build_file_uploader_for_model(model)
+
         # --- Build subagents ---
         compiled_subagents: List[SubAgent | CompiledSubAgent] = []
 
@@ -515,6 +527,7 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
             store=store,
             multimodal_describer=describer,
             tool_timeouts=tool_timeouts,
+            file_uploader=file_uploader,
         )
 
         # --- Tools ---

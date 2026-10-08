@@ -21,6 +21,7 @@ from backend.services.generation.builders.material_loader import GenerationMater
 from backend.services.generation.builders.param_utils import map_model_parameters
 from backend.services.generation.builders.context_builder import MessageContextBuilder
 from backend.services.generation.graph_builders.model_factory import ModelFactory
+from backend.services.generation.worker.deepseek_file_uploader import provider_key_of
 from backend.services.generation.builders.initializers.chat_react_initializer import ChatBasedReActInitializer
 from backend.services.generation.builders.initializers.agent_react_initializer import AgentBasedReActInitializer
 from backend.services.generation.builders.initializers.deep_agent_initializer import DeepAgentInitializer
@@ -388,6 +389,15 @@ class LLMInputDirector:
         # 的模型类选择保持一致）。
         usage_model_provider = ModelFactory.ls_provider_for_worker(provider.worker_type)
 
+        # DeepSeek：read 预上传的图片在 ckpt 中以 file_id 引用块存在，历史重建时用同一
+        # provider_key（api_host 与模型构造时的 base_url 同源）查询上传缓存，命中则还原为
+        # 同样的引用块（避免 base64 回灌 ckpt / 破坏上下文缓存）；非 DeepSeek 不启用。
+        deepseek_provider_key: Optional[str] = None
+        if provider.worker_type == schemas_enums.ProviderWorkerType.DEEPSEEK.value:
+            deepseek_provider_key = provider_key_of(
+                (llm_config.api_host or "").rstrip("/"), llm_config.api_key or ""
+            )
+
         context_builder = MessageContextBuilder(
             db=self.db,
             type_filter=self._type_filter,
@@ -405,7 +415,8 @@ class LLMInputDirector:
             slice_range=self._slice_range,
             head_tail=self._head_tail,
             language=materials.settings.get("language"),
-            usage_model_provider=usage_model_provider
+            usage_model_provider=usage_model_provider,
+            deepseek_provider_key=deepseek_provider_key
         )
 
         # DeepSeek 等需要回传 reasoning_content 的模型，将 REASONING 加入 type_filter

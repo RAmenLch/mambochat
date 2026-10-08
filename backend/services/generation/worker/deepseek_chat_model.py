@@ -1,9 +1,6 @@
-import asyncio
 import base64
 import hashlib
 import logging
-import time
-from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from langchain_core.messages import (
@@ -15,47 +12,14 @@ from langchain_core.utils import from_env, secret_from_env
 from langchain_openai import ChatOpenAI
 from pydantic import Field, SecretStr, ConfigDict
 
-from backend.config.timezone_config import TZ
+from backend.services.generation.worker.deepseek_file_uploader import (
+    cache_key_of,
+    get_cached_file_id,
+    provider_key_of,
+    resolve_file_id,
+)
 
 logger = logging.getLogger(__name__)
-
-#: DeepSeek Files API 文件有效期（30 天），与 deepseek_file_service.FILE_TTL_SECONDS 一致。
-_FILE_TTL_SECONDS = 30 * 24 * 3600
-
-#: 进程内 file_id 缓存：cache_key(provider_key:sha256) -> (file_id, 过期时间戳)。
-#: 跨请求复用，避免同一张图被反复上传。
-_FILE_ID_CACHE: Dict[str, Tuple[str, float]] = {}
-_CACHE_LOCK = asyncio.Lock()
-
-
-def _svc():
-    """延迟导入上传缓存服务，避免模块级循环依赖。"""
-    from backend.services import deepseek_file_service
-    return deepseek_file_service
-
-
-def _to_epoch(dt: Optional[datetime]) -> float:
-    """datetime -> epoch 秒；naive 时间按配置时区视为本地时间。"""
-    if dt is None:
-        return 0.0
-    if dt.tzinfo is None:
-        dt = TZ.localize(dt)
-    return dt.timestamp()
-
-
-def _cache_get(cache_key: str) -> Optional[str]:
-    entry = _FILE_ID_CACHE.get(cache_key)
-    if not entry:
-        return None
-    file_id, expires_ts = entry
-    if expires_ts and time.time() >= expires_ts:
-        _FILE_ID_CACHE.pop(cache_key, None)
-        return None
-    return file_id
-
-
-def _cache_set(cache_key: str, file_id: str, expires_ts: float) -> None:
-    _FILE_ID_CACHE[cache_key] = (file_id, expires_ts)
 
 
 class ChatDeepSeek(ChatOpenAI):
@@ -174,7 +138,7 @@ class ChatDeepSeek(ChatOpenAI):
             key = self.openai_api_key.get_secret_value() if self.openai_api_key is not None else ""
         except Exception:
             key = str(self.openai_api_key or "")
-        return hashlib.sha256(f"{self.openai_api_base or ''}|{key}".encode("utf-8")).hexdigest()[:32]
+        return provider_key_of(self.openai_api_base or "", key)
 
     @staticmethod
     def _decode_image_data_url(url: Any) -> Optional[Tuple[str, bytes]]:
@@ -212,10 +176,6 @@ class ChatDeepSeek(ChatOpenAI):
                 return cls._decode_image_data_url(inner.get("file_data"))
             return cls._decode_image_data_url(block.get("file_data"))
         return None
-
-    @staticmethod
-    def _cache_key(provider_key: str, raw: bytes) -> str:
-        return f"{provider_key}:{hashlib.sha256(raw).hexdigest()}"
 
     @staticmethod
     def _mime_from_data_url(data_url: Any) -> Optional[str]:
@@ -308,54 +268,7 @@ class ChatDeepSeek(ChatOpenAI):
 
     async def _resolve_image(self, mime: str, raw: bytes) -> Optional[str]:
         """返回图片的 DeepSeek file_id；失败返回 None（调用方保持内联）。"""
-        provider_key = self._provider_key()
-        digest = hashlib.sha256(raw).hexdigest()
-        cache_key = f"{provider_key}:{digest}"
-
-        hit = _cache_get(cache_key)
-        if hit:
-            return hit
-
-        async with _CACHE_LOCK:
-            hit = _cache_get(cache_key)
-            if hit:
-                return hit
-
-            svc = _svc()
-            cached = await svc.get_valid_file_id(provider_key, digest)
-            if cached:
-                file_id, expires_at = cached
-                _cache_set(cache_key, file_id, _to_epoch(expires_at))
-                return file_id
-
-            file_id = await self._upload_image_ref(raw, mime)
-            if not file_id:
-                return None
-
-            ext = (mime.split("/")[-1] or "bin").split("+")[0]
-            expires_at = await svc.save_file_id(
-                provider_key, digest, file_id, mime, f"image.{ext}", len(raw)
-            )
-            _cache_set(
-                cache_key,
-                file_id,
-                _to_epoch(expires_at) if expires_at else time.time() + _FILE_TTL_SECONDS,
-            )
-            return file_id
-
-    async def _upload_image_ref(self, raw: bytes, mime: str) -> Optional[str]:
-        """调用 DeepSeek Files API 上传图片，返回 file_id；失败返回 None。"""
-        ext = (mime.split("/")[-1] or "bin").split("+")[0]
-        try:
-            uploaded = await self.root_async_client.files.create(
-                file=(f"image.{ext}", raw, mime),
-                purpose="user_data",
-                expires_after={"anchor": "created_at", "seconds": _FILE_TTL_SECONDS},
-            )
-            return uploaded.id
-        except Exception as e:
-            logger.warning(f"[deepseek-files] 上传图片失败，回退内联: {e}")
-            return None
+        return await resolve_file_id(self.root_async_client, self._provider_key(), mime, raw)
 
     @staticmethod
     def _iter_content_lists(payload: Dict[str, Any]):
@@ -402,7 +315,7 @@ class ChatDeepSeek(ChatOpenAI):
                 inner.get("url") if isinstance(inner, dict) else None
             )
             if info:
-                file_id = _cache_get(self._cache_key(provider_key, info[1]))
+                file_id = get_cached_file_id(cache_key_of(provider_key, info[1]))
                 if file_id:
                     return {"type": "file", "file_id": file_id}
             return None
@@ -433,7 +346,7 @@ class ChatDeepSeek(ChatOpenAI):
         """扁平 file_data：图片则用 file_id 或扁平内联；非图片转文本占位。"""
         info = self._decode_image_data_url(file_data)
         if info:
-            file_id = _cache_get(self._cache_key(provider_key, info[1]))
+            file_id = get_cached_file_id(cache_key_of(provider_key, info[1]))
             if file_id:
                 return {"type": "file", "file_id": file_id}
             flat: Dict[str, Any] = {"type": "file", "file_data": file_data}
