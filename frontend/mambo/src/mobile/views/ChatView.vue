@@ -12,17 +12,28 @@
     </el-drawer>
 
     <div class="mobile-main">
-      <ChatWindow @toggle-drawer="drawerVisible = true" />
+      <template v-if="isGroupSelected">
+        <div class="group-mobile-bar">
+          <el-button :icon="Menu" text @click="drawerVisible = true" />
+        </div>
+        <GroupChatWindow />
+      </template>
+      <ChatWindow v-else @toggle-drawer="drawerVisible = true" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { storeToRefs } from 'pinia'
+import { Menu } from '@element-plus/icons-vue'
 import ChatList from '@/mobile/components/chat/ChatList.vue'
 import ChatWindow from '@/mobile/components/chat/ChatWindow.vue'
+import GroupChatWindow from '@/components/chat/group/GroupChatWindow.vue'
+import { useChatSessionStore } from '@/stores/chatSessionStore'
 
 const drawerVisible = ref(false)
+const { isGroupSelected } = storeToRefs(useChatSessionStore())
 </script>
 
 <style scoped>
@@ -36,6 +47,15 @@ const drawerVisible = ref(false)
 .mobile-main {
   height: 100%;
   width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.group-mobile-bar {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--color-border);
 }
 
 /* 样式穿透调整 Drawer 样式 */

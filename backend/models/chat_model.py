@@ -1,7 +1,7 @@
 # backend/models/chat_model.py
 
 import json
-from sqlalchemy import Column, String, TEXT, DateTime, ForeignKey, func, Integer, JSON
+from sqlalchemy import Column, String, TEXT, DateTime, ForeignKey, func, Integer, JSON, UniqueConstraint
 from sqlalchemy.orm import relationship
 from backend.models.base_model import Base, generate_uuid
 from backend.schemas.enums import MessageStatus, SubMessageType
@@ -12,6 +12,11 @@ from typing import Dict, Any
 
 class Chat(Base):
     __tablename__ = "Chat"
+
+    __table_args__ = (
+        # 群成员的邮箱地址在群内唯一；普通节点 memberAlias 为 NULL，SQLite 允许多个 NULL，不影响普通会话
+        UniqueConstraint("parentId", "memberAlias", name="uq_chat_parent_member_alias"),
+    )
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
     name = Column(String(100), nullable=False)
@@ -39,6 +44,11 @@ class Chat(Base):
     aiModelId = Column(String(36), ForeignKey("AIModel.id"), nullable=True)
     chatMode = Column(String(20), nullable=False, default=ChatMode.NORMAL.value)
     agentId = Column(String(36), ForeignKey("Agent.id", ondelete="SET NULL"), nullable=True)
+
+    # 群组相关：普通节点为空；群组父节点 folderType='group' 且 itemType 必须为 folder
+    folderType = Column(String(20), nullable=True)
+    # 群组成员的邮箱地址/别名；非成员为空。邮箱地址即成员别名，不是 UUID 或外部邮箱
+    memberAlias = Column(String(64), nullable=True)
 
     # 关系: 反向引用到 Agent
     agent = relationship("Agent")

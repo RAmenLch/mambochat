@@ -36,6 +36,7 @@ from backend.services.generation.managers.stream_handlers.handlers import (
 )
 from backend.services.generation.managers.stream_handlers.finish_reason_classifier import FinishReasonClassifier
 from backend.services.generation.core.llm_io import SummarizationEventInfo
+from backend.services.generation.core.outcome import GenerationOutcome
 from backend.schemas.message import VersionSnapshotContent, VersionSnapshotFile, SubMessageConfig
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,8 @@ class DefaultGenerateManager(AbstractGenerateManager):
         self._pending_hitl_tool_calls = []
         self._recover_from_error = recover_from_error
         self._last_finish_reason: Optional[str] = None
+        # 独立业务结束结果（供群组邮箱提交判断）；None 表示尚未得出结论
+        self.outcome: Optional[GenerationOutcome] = None
         self._last_summarization_event: Optional[SummarizationEventInfo] = None
         self._last_tail_tool_event: Optional[dict] = None
 
@@ -174,6 +177,7 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 initial_content=f"**生成已终止**：检测到配置的 MCP 服务不可用。\n\n错误信息：{e.error_message}"
             )
             yield SetFinalStatus(status=schemas_enums.MessageStatus.FAILED)
+            self.outcome = GenerationOutcome.FAILED
             return
 
         should_interrupt = False
@@ -305,6 +309,24 @@ class DefaultGenerateManager(AbstractGenerateManager):
                 message_id=assistant_message_id,
                 checkpoint_id=saved.checkpoint["id"],
             )
+
+        # ── 计算独立业务结束结果（供群组邮箱提交判断）──
+        abnormal_finish = False
+        if self._last_finish_reason:
+            try:
+                abnormal_finish = bool(FinishReasonClassifier.get_user_message(self._last_finish_reason))
+            except Exception:
+                abnormal_finish = False
+        if should_interrupt:
+            self.outcome = (
+                GenerationOutcome.WAITING_USER
+                if self._hitl_batch_id is not None
+                else GenerationOutcome.WAITING_REVIEW
+            )
+        elif abnormal_finish:
+            self.outcome = GenerationOutcome.FAILED
+        else:
+            self.outcome = GenerationOutcome.NORMAL_COMPLETED
 
         async for instruction in self._finalize_generation(is_interrupted=should_interrupt):
             yield instruction

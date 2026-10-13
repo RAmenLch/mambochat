@@ -123,6 +123,10 @@ export interface Chat {
   web_search_mode?: 'direct_read' | 'search_and_read' | 'disable' | null
   chatMode?: ChatMode
   agentId?: string | null
+  /** 群组父节点为 'group'；普通节点为 null。itemType 必须为 'folder' 时才有意义 */
+  folderType?: 'group' | null
+  /** 群成员的邮箱地址/别名；非成员为空 */
+  memberAlias?: string | null
 }
 
 export type ChatNode = Chat & { children?: ChatNode[] }
@@ -139,6 +143,8 @@ export interface ChatCreate {
   web_search_mode?: 'direct_read' | 'search_and_read' | 'disable' | null
   chatMode?: ChatMode
   agentId?: string | null
+  folderType?: 'group' | null
+  memberAlias?: string | null
 }
 
 export interface ChatUpdate {

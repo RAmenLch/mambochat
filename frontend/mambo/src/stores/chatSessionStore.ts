@@ -19,6 +19,7 @@ export const LAST_ACTIVE_CHAT_KEY = 'mambo_last_active_chat_id';
 export const useChatSessionStore = defineStore('chatSession', () => {
   // --- State ---
   const currentChatId = ref<string | null>(null);
+  const currentGroupId = ref<string | null>(null);
   const currentChatMessages = ref<Message[]>([]);
   const isChatHistoryLoading = ref(false);
   const activeSubscriptions = new Map<string, AbortController>();
@@ -41,6 +42,18 @@ export const useChatSessionStore = defineStore('chatSession', () => {
     const chat = chatListStore.chatList.find(c => c.id === currentChatId.value);
     return chat?.itemType === 'chat' ? chat : null;
   });
+
+  /**
+   * 当前选中的群组父节点（itemType=folder 且 folderType=group）。
+   */
+  const currentGroup = computed((): Chat | null => {
+    const chatListStore = useChatListStore();
+    if (!currentGroupId.value) return null;
+    const chat = chatListStore.chatList.find(c => c.id === currentGroupId.value);
+    return chat && chat.folderType === 'group' ? chat : null;
+  });
+
+  const isGroupSelected = computed((): boolean => currentGroupId.value !== null);
 
   /**
    * 判断当前会话是否正在生成消息。
@@ -281,11 +294,28 @@ export const useChatSessionStore = defineStore('chatSession', () => {
 
     // 如果选择的是文件夹或无效项，则清空会话
     if (!item || item.itemType === 'folder') {
+      // 群组父节点：进入群页面，不请求普通消息
+      if (item && item.folderType === 'group') {
+        currentGroupId.value = chatId;
+        currentChatId.value = chatId;
+        currentChatMessages.value = [];
+        isChatHistoryLoading.value = false;
+        try {
+          const { useGroupChatStore } = await import('./groupChatStore');
+          await useGroupChatStore().refresh(chatId, true);
+        } catch (error) {
+          console.error(`Failed to load group ${chatId}:`, error);
+        }
+        return;
+      }
+      currentGroupId.value = null;
       clearSession();
       // 仍然设置ID以保持列表高亮
       currentChatId.value = item ? chatId : null;
       return;
     }
+
+    currentGroupId.value = null;
 
     // 记录最后一次活跃的会话ID，用于页面刷新后恢复上下文
     localStorage.setItem(LAST_ACTIVE_CHAT_KEY, chatId);
@@ -328,6 +358,7 @@ export const useChatSessionStore = defineStore('chatSession', () => {
    */
   function clearSession() {
     currentChatId.value = null;
+    currentGroupId.value = null;
     currentChatMessages.value = [];
     isChatHistoryLoading.value = false;
     searchTargetSubMessageId.value = null;
@@ -486,6 +517,7 @@ export const useChatSessionStore = defineStore('chatSession', () => {
   return {
     // State
     currentChatId,
+    currentGroupId,
     currentChatMessages,
     isChatHistoryLoading,
     activeSubscriptions,
@@ -493,6 +525,8 @@ export const useChatSessionStore = defineStore('chatSession', () => {
 
     // Getters
     currentChat,
+    currentGroup,
+    isGroupSelected,
     isGenerating,
     pendingReviewSubMessages,
     isPendingReview,

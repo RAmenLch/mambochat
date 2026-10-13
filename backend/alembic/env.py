@@ -20,7 +20,7 @@ from backend.models.base_model import Base
 # 确保导入了所有模型
 from backend.models import (file_model, chat_model, kb_model, mcp_model,
                             provider_model, resource_model, setting_model,agent_model,log_model,backend_model,
-                            deepseek_file_model)
+                            deepseek_file_model, group_chat_model)
 
 from backend.database import DATABASE_URL
 

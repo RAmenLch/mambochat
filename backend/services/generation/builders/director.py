@@ -358,6 +358,23 @@ class LLMInputDirector:
 
         self._providers = initializer.get_providers()
 
+        # 群成员主对话轮次：注入群邮箱工具（仅主 Agent，不进入 sub_configs/subagent）。
+        # 群上下文由调度器/桥接通过 ContextVar 安装；群外会话此处为空，行为不变。
+        from backend.services.group_chat.runtime import get_group_context
+        group_ctx = get_group_context()
+        if group_ctx is not None:
+            from backend.services.generation.tools.group_mail_tool_provider import GroupMailToolProvider
+            group_provider = GroupMailToolProvider(self.db, group_ctx)
+            self._providers.append(group_provider)
+            group_tools = await group_provider.get_tools()
+            if group_tools:
+                agent_config.tools = list(agent_config.tools or []) + group_tools
+            group_injection = group_provider.get_system_prompt_injection()
+            if group_injection:
+                extended_prompt = (
+                    extended_prompt + "\n\n" + group_injection if extended_prompt else group_injection
+                )
+
         if self._cutoff_message_id and materials.target_msg:
             for sub in materials.target_msg.sub_messages:
                 if sub.type == schemas_enums.SubMessageType.MCP_TOOL.value:

@@ -46,6 +46,10 @@ class Chat(ChatBase):
     id: str
     createdAt: datetime
     lastOpenedAt: Optional[datetime] = None
+    # 群组相关（只读输出）：群父节点 folderType='group'；群成员 memberAlias 为邮箱地址。
+    # 普通创建/更新接口不暴露这两个字段，防止客户端任意构造群标记。
+    folderType: Optional[str] = None
+    memberAlias: Optional[str] = None
 
     class Config:
         from_attributes = True

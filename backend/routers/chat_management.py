@@ -11,6 +11,8 @@ from typing import List, Optional, Dict, Any
 
 from backend.crud import chat_crud, setting_crud, provider_crud, resource_crud, agent_crud, checkpoint_map_crud
 from backend.services import chat_service
+from backend.services.group_chat import guards as group_guards
+from backend.services.group_chat import service as group_service
 from backend.services.resource_service import validate_mounted_resources
 from backend.services.chat_export_service import ChatExporter
 from backend.services.chat_import_service import ChatImporter, MAX_PACKAGE_SIZE
@@ -21,7 +23,7 @@ from backend.database import get_db
 from backend.exceptions import AppHTTPException
 from backend.routers.settings import get_global_settings
 from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
-from backend.schemas.enums import ResourceItemType, ResourceType
+from backend.schemas.enums import ResourceItemType, ResourceType, FolderType
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +147,7 @@ async def create_chat(chat: schemas.ChatCreate, db: AsyncSession = Depends(get_d
         if chat.resource_prompt_list is not None:
             await validate_mounted_resources(db, chat.resource_prompt_list)
 
+    await group_guards.assert_parent_allows_creation(db, chat.parentId)
     return await chat_crud.create_chat(db=db, chat=chat)
 
 
@@ -158,6 +161,7 @@ async def reorder_chats(updates: List[schemas.ChatReorderItem], db: AsyncSession
     Receives a list of items with ID, new parent ID, and new sort order to perform a batch update.
     Note: This endpoint is deprecated in favor of /chats/move.
     """
+    await group_guards.assert_reorder_allowed(db, updates)
     await chat_crud.batch_update_chats_order(db, updates=updates)
     return {"message": "Reorder successful"}
 
@@ -171,6 +175,7 @@ async def move_chats(move_request: schemas.ChatMoveRequest, db: AsyncSession = D
     """
     移动会话或文件夹到指定位置（Inside, Before, After）。
     """
+    await group_guards.assert_move_allowed(db, move_request)
     success = await chat_crud.move_chats(db, move_request=move_request)
     if not success:
         raise HTTPException(status_code=400, detail="Move operation failed")
@@ -318,6 +323,7 @@ async def update_chat_settings(
     if chat_update.resource_prompt_list is not None:
         await validate_mounted_resources(db, chat_update.resource_prompt_list)
 
+    await group_guards.assert_update_allowed(db, chat_id, chat_update)
     updated_chat = await chat_crud.update_chat(db, chat_id=chat_id, chat_update=chat_update)
 
     if updated_chat is None:
@@ -338,10 +344,18 @@ async def delete_chat(chat_id: str, db: AsyncSession = Depends(get_db)):
         )
     )
     chat_ids_to_cleanup = list(result.scalars().all())
-    # 执行删除（ORM cascade 会自动删除子会话和消息）
-    db_chat = await chat_crud.delete_chat(db, chat_id=chat_id)
+    # 群组走生命周期整组删除；普通节点先清理其后代群组业务数据再删除
+    db_chat = await chat_crud.get_chat_meta(db, chat_id=chat_id)
     if db_chat is None:
         raise HTTPException(status_code=404, detail="Item not found")
+    if db_chat.folderType == FolderType.GROUP.value:
+        await group_service.delete_group(db, chat_id)
+    else:
+        group_ids = await group_guards.collect_descendant_group_ids(db, chat_id)
+        for gid in group_ids:
+            await group_guards.purge_group_business_data(db, gid)
+        await db.commit()
+        await chat_crud.delete_chat(db, chat_id=chat_id)
     # 清理所有相关会话的 LangGraph checkpoint 与 Store 数据
     # 延迟导入：checkpointer / store 连带加载 langgraph 等重依赖
     from backend.checkpointer import adelete_thread
@@ -376,6 +390,7 @@ async def duplicate_chat_endpoint(
     """
     复制会话。如果不传参数，则全量复制；如果传入 up_to_message_id，则触发截断复制。
     """
+    await group_guards.assert_duplicate_allowed(db, chat_id)
     new_chat = await chat_service.duplicate_chat_with_messages(
         db,
         chat_id=chat_id,
@@ -398,6 +413,7 @@ async def archive_chats_endpoint(
     """
     接收一个名称和一组项目ID，创建一个新文件夹并将这些项目全部归档到入其中。
     """
+    await group_guards.assert_archive_allowed(db, request.item_ids, request.parent_id)
     new_folder = await chat_service.archive_chats_to_new_folder(db, request=request)
     if not new_folder:
         raise HTTPException(status_code=400, detail="Failed to archive chats. Ensure requested items exist.")
@@ -413,6 +429,7 @@ async def export_chat_json(chat_id: str, db: AsyncSession = Depends(get_db)):
     按 doc/chat-export-spec.md 导出单个会话：活跃线性路径消息 + 文件 blob。
     导出的文件可被 /chats/import 重新导入为新会话。
     """
+    await group_guards.assert_export_allowed(db, chat_id)
     exporter = ChatExporter(db)
     pkg = await exporter.export(chat_id)
     data = pkg.model_dump_json(indent=2)

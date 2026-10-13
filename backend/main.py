@@ -42,9 +42,11 @@ from backend.routers import (
     system_log,  # <-- 新增：导入系统日志路由
     agent_package,  # <-- 新增：Agent 导出包路由
     resource_completion,  # <-- 新增：资源补全路由
+    group_chat,  # <-- 新增：群组会话路由
 )
 from backend.services.cleanup_service import cleanup_zombie_files
 from backend.services.builtin_agent_seed import seed_builtin_agents
+from backend.services.group_chat.scheduler import group_scheduler
 from backend.services.kb_service import SUP_DIM
 from backend.services.vec_migration import ensure_vec_tables
 from backend.exceptions import AppHTTPException, app_http_exception_handler
@@ -222,12 +224,17 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(cleanup_zombie_files, 'interval', hours=1)
     scheduler.start()
 
+    # 群组调度器：启动恢复（running 标记 interrupted、ready_to_commit 补提交）并开始调度
+    await group_scheduler.start()
+
     # 后台线程预热延迟导入的重依赖，不阻塞启动
     asyncio.create_task(asyncio.to_thread(_preload_heavy_modules))
 
     yield
 
     # --- 应用关闭时执行 ---
+    # 先停止群组调度与任务，再关闭底层资源
+    await group_scheduler.stop()
     scheduler.shutdown()
     await close_checkpointer()
     await close_store()
@@ -287,6 +294,7 @@ app.include_router(file_management.router)
 app.include_router(backend_management.router,prefix="/api",tags=["Backend Management"])
 app.include_router(api_client_router.router, prefix="/api", tags=["API Client"])
 app.include_router(version_control.router, prefix="/api", tags=["Version Control"])
+app.include_router(group_chat.router, prefix="/api", tags=["Group Chat"])
 
 @app.get("/")
 async def root():

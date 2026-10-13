@@ -9,6 +9,7 @@ import editor from './editor'
 import agent from './agent'
 import backend from './backend'
 import agentPackage from './agentPackage'
+import groupChat from './groupChat'
 
 export default {
   locale: 'en' as const,
@@ -23,4 +24,5 @@ export default {
   agent,
   backend,
   agentPackage,
+  groupChat,
 }

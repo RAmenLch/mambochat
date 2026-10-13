@@ -37,7 +37,13 @@
         </template>
 
         <template #item-icon="{ data }">
-          <el-icon v-if="data.itemType === 'folder'">
+          <el-icon
+            v-if="data.itemType === 'folder' && data.folderType === 'group'"
+            color="var(--el-color-primary)"
+          >
+            <UserFilled />
+          </el-icon>
+          <el-icon v-else-if="data.itemType === 'folder'">
             <Folder />
           </el-icon>
           <template v-else-if="data.chatMode === 'agent' && data.agentId">
@@ -84,6 +90,12 @@
                 command="newFolder"
               >
                 <el-icon><FolderAdd /></el-icon>{{ $t('chat.sidebar.newFolder') }}
+              </el-dropdown-item>
+              <el-dropdown-item
+                v-if="!contextMenuItem || contextMenuItem?.itemType === 'folder'"
+                command="newGroup"
+              >
+                <el-icon><UserFilled /></el-icon>{{ $t('groupChat.menu.newGroup') }}
               </el-dropdown-item>
 
               <template v-if="contextMenuItem">
@@ -147,6 +159,12 @@
       @select-result="handleSearchResultSelect"
     />
 
+    <GroupChatCreateDialog
+      v-model:visible="groupDialogVisible"
+      :parent-id="groupDialogParentId"
+      @created="onGroupCreated"
+    />
+
     <el-dialog
       v-model="archiveDialogVisible"
       :title="$t('chat.sidebar.archiveTitle')"
@@ -170,7 +188,7 @@ import { onMounted, computed, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRouter, useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, EditPen, CopyDocument, Search, FolderChecked, Sort, User } from '@element-plus/icons-vue';
+import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, EditPen, CopyDocument, Search, FolderChecked, Sort, User, UserFilled } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import type { AllowDropType } from 'element-plus/es/components/tree/src/tree.type';
 /** Element Plus Tree 内部节点结构（避免依赖内部路径） */
@@ -198,6 +216,8 @@ import ExplorerTree from '@/components/common/ExplorerTree.vue';
 import EntityFormDialog, { type SelectConfigOption, type ConfirmPayload } from '@/components/common/EntityFormDialog.vue';
 import SearchDialog from '@/components/chat/dialogs/SearchDialog.vue';
 import ChatHeader from '@/components/chat/ChatHeader.vue';
+import GroupChatCreateDialog from '@/components/chat/group/GroupChatCreateDialog.vue';
+import type { GroupCreatedResponse } from '@/api/types/groupChatTypes';
 
 const props = defineProps<{
   isCollapsed: boolean;
@@ -410,6 +430,16 @@ const {
 // 记录当前选中的节点数量，用于判断是否展示多选右键菜单
 const selectedNodeCount = ref(0);
 
+// --- 群组创建 ---
+const groupDialogVisible = ref(false);
+const groupDialogParentId = ref<string | null>(null);
+
+function onGroupCreated(detail: GroupCreatedResponse) {
+  chatListStore.mergeCreatedGroup(detail);
+  treeRef.value?.expandNode(detail.groupId);
+  handleSelectChat(detail.groupId);
+}
+
 const onNodeContextMenu = (event: MouseEvent, data: BaseTreeItem, node: any) => {
   selectedNodeCount.value = treeRef.value?.selectedIds?.size || 0;
   handleNodeContextMenu(event, data, node);
@@ -475,18 +505,24 @@ watch(
   }
 );
 
+/** 群组父节点：itemType 为 folder，但 folderType 标记为 group */
+const isGroupNode = (data: BaseTreeItem): boolean =>
+  data.itemType === 'folder' &&
+  (data as { folderType?: string | null }).folderType === 'group';
+
 const handleNodeClick = (data: BaseTreeItem) => {
-  if (data.itemType === 'chat') {
+  // 群组父节点也可被选中（进入群页面）；普通文件夹仍然只做展开/折叠
+  if (data.itemType === 'chat' || isGroupNode(data)) {
     handleSelectChat(data.id);
   }
 };
 
 const handleSelectChat = async (chatId: string) => {
   await chatSessionStore.selectChat(chatId);
-  if (chatSessionStore.currentChat) {
-    if (route.params.id !== chatId) {
-      router.push(`/chat/${chatId}`);
-    }
+  // 普通会话与群组父节点都同步路由（便于刷新/前进后退）；普通文件夹不同步
+  const selectable = !!chatSessionStore.currentChat || chatSessionStore.isGroupSelected;
+  if (selectable && route.params.id !== chatId) {
+    router.push(`/chat/${chatId}`);
   }
 };
 
@@ -553,6 +589,13 @@ async function handleMenuCommand(command: string) {
   if (command === 'archive') {
     archiveFolderName.value = t('chat.sidebar.newArchiveFolder');
     archiveDialogVisible.value = true;
+    return;
+  }
+
+  if (command === 'newGroup') {
+    const target = contextMenuItem.value;
+    groupDialogParentId.value = target && target.itemType === 'folder' ? target.id : null;
+    groupDialogVisible.value = true;
     return;
   }
 

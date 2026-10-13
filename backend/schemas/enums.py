@@ -157,3 +157,57 @@ class ErrorCode(str, Enum):
     前端 i18n key 映射规则: backendError.<error_code_lowercase>
     """
     SKILL_CREATE_RESTRICTION = "SKILL_CREATE_RESTRICTION"
+
+
+# --- 群组会话（Group Chat）专用枚举 ---
+
+class FolderType(str, Enum):
+    """Chat.itemType 为 folder 时的细分类型"""
+    GROUP = "group"  # 群组父节点
+
+
+class GroupStatus(str, Enum):
+    """群组调度状态"""
+    READY = "ready"        # 可调度
+    PAUSED = "paused"      # 已暂停（具体原因见 pauseReason）
+    DELETING = "deleting"  # 正在删除
+
+
+class GroupPauseReason(str, Enum):
+    """群组暂停原因"""
+    MANUAL = "manual"
+    REVIEW = "review"
+    ASK_USER = "ask_user"
+    FAILURE = "failure"
+    CANCELLED = "cancelled"
+    RESTART = "restart"
+    ROUND_LIMIT = "round_limit"
+
+
+class GroupTaskKind(str, Enum):
+    """群组任务类型"""
+    USER_MESSAGE = "user_message"
+    MAIL_NOTICE = "mail_notice"
+    REGENERATE = "regenerate"
+    EDIT_REGENERATE = "edit_regenerate"
+
+
+class GroupTaskState(str, Enum):
+    """群组任务状态（区分业务成功与消息展示状态）"""
+    QUEUED = "queued"
+    RUNNING = "running"
+    WAITING_REVIEW = "waiting_review"
+    WAITING_USER = "waiting_user"
+    READY_TO_COMMIT = "ready_to_commit"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    INTERRUPTED = "interrupted"
+    SKIPPED = "skipped"
+
+
+class GroupMailState(str, Enum):
+    """群组邮件状态"""
+    STAGED = "staged"
+    SENT = "sent"
+    DISCARDED = "discarded"

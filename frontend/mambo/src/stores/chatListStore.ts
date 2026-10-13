@@ -16,7 +16,9 @@ import {
 } from '@/api/chatService';
 import { subscribeToGlobalNotifications } from '@/services/notificationService';
 import type { Chat, ChatCreate, ChatUpdate, MoveRequest, GlobalNotification, ChatArchiveRequest } from '@/api/types';
+import type { GroupCreatedResponse } from '@/api/types/groupChatTypes';
 import { useChatSessionStore } from './chatSessionStore';
+import { useGroupChatStore } from './groupChatStore';
 import { useTreeStoreActions } from '@/composables/useTreeStoreActions';
 import { isDefaultChatName } from '@/utils/chatName';
 
@@ -198,6 +200,57 @@ export const useChatListStore = defineStore('chatList', () => {
   }
 
   /**
+   * 原子建群结果合并：把群父节点与全部成员子会话写入列表，
+   * 并标记父级与群节点为已加载，避免"新建文件夹默认已加载且为空"的误判。
+   */
+  function mergeCreatedGroup(detail: GroupCreatedResponse) {
+    const now = new Date().toISOString();
+    const groupNode: Chat = {
+      id: detail.groupId,
+      name: detail.name,
+      createdAt: now,
+      systemPrompt: null,
+      modelParameters: null,
+      aiModelId: null,
+      itemType: 'folder',
+      parentId: detail.parentId ?? null,
+      sortOrder: 0,
+      lastOpenedAt: null,
+      folderType: 'group',
+      memberAlias: null,
+    };
+    const groupIndex = chatList.value.findIndex(c => c.id === detail.groupId);
+    if (groupIndex === -1) chatList.value.push(groupNode);
+    else Object.assign(chatList.value[groupIndex], groupNode);
+
+    for (const m of detail.members) {
+      const memberNode: Chat = {
+        id: m.chatId,
+        name: m.name,
+        createdAt: now,
+        systemPrompt: null,
+        modelParameters: null,
+        aiModelId: null,
+        itemType: 'chat',
+        parentId: detail.groupId,
+        sortOrder: m.sortOrder,
+        lastOpenedAt: null,
+        chatMode: 'agent',
+        agentId: m.agentId ?? null,
+        folderType: null,
+        memberAlias: m.memberAlias,
+      };
+      const mi = chatList.value.findIndex(c => c.id === m.chatId);
+      if (mi === -1) chatList.value.push(memberNode);
+      else Object.assign(chatList.value[mi], memberNode);
+    }
+
+    loadedFolderIds.value.add(detail.groupId);
+    const parentKey = detail.parentId ?? 'root';
+    loadedFolderIds.value.add(parentKey);
+  }
+
+  /**
    * 初始化并监听来自服务器的全局通知（SSE）。
    * 用于实时更新会话标题、接收历史压缩结果以及处理异步任务错误。
    */
@@ -286,6 +339,22 @@ export const useChatListStore = defineStore('chatList', () => {
           const errorChatId = notification.context.chat_id;
           _clearTitleRefresh(errorChatId);
           ElMessage.error(notification.message);
+        } else if (
+          notification.type === 'notification' &&
+          (notification.category === 'group_created' ||
+            notification.category === 'group_state_changed' ||
+            notification.category === 'group_task_changed' ||
+            notification.category === 'group_mail_sent' ||
+            notification.category === 'group_deleted')
+        ) {
+          const groupStore = useGroupChatStore();
+          if (notification.category === 'group_deleted') {
+            const gid = notification.context.groupId;
+            const idx = chatList.value.findIndex(c => c.id === gid);
+            if (idx !== -1) chatList.value.splice(idx, 1);
+            return;
+          }
+          await groupStore.applyNotification(notification.context);
         }
       },
       onError: (error: unknown) => {
@@ -313,6 +382,7 @@ export const useChatListStore = defineStore('chatList', () => {
     duplicateChat,
     resolvePath,
     archiveItems,
+    mergeCreatedGroup,
 
     // Store-specific Actions
     refreshChatTitle,

@@ -281,6 +281,63 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
                 await maybe_schedule_title_generation(chat_id)
 
 
+async def run_group_member_generation(chat_id: str, assistant_message_id: str, recover_from_error: bool = False):
+    """
+    群成员主对话逻辑轮次：运行托管生成并返回独立业务结束结果 GenerationOutcome。
+
+    与 _run_managed_generation_task 的区别：
+    - 返回 GenerationOutcome 而非仅依赖 MessageStatus（取消与正常完成都会被折叠为 COMPLETED）；
+    - 不触发自动标题生成（群成员身份不参与群轮次）；
+    - 群工具上下文由调用方（调度器/桥接）通过 ContextVar 安装。
+    """
+    from backend.services.generation.managers.default_manager import DefaultGenerateManager
+    from backend.services.generation.executor.dispatcher import InstructionDispatcher
+    from backend.services.generation.core.outcome import GenerationOutcome
+
+    async with AsyncSessionLocal() as db:
+        try:
+            await _ensure_chat_model_configured(db, chat_id)
+
+            worker = await _get_worker_for_chat(db, chat_id)
+            manager = DefaultGenerateManager(db_session=db, recover_from_error=recover_from_error)
+            executor = InstructionDispatcher(db_session=db)
+
+            async for instruction in manager.run(worker, chat_id, assistant_message_id):
+                await executor.execute(instruction, chat_id, assistant_message_id)
+
+            return manager.outcome or GenerationOutcome.FAILED
+
+        except asyncio.CancelledError:
+            print(f"[Group Generation] Task cancelled for message '{assistant_message_id}'.")
+            return GenerationOutcome.CANCELLED
+        except Exception as e:
+            print(f"[Group Generation Error] for message {assistant_message_id}: {e}")
+            import traceback as tb
+            await db.rollback()
+            try:
+                from backend.schemas.message import ErrorContent
+                error_content = ErrorContent(
+                    message=f"群组生成流程发生异常: {e}",
+                    stack_trace=tb.format_exc()
+                )
+                error_sub_message_create = schemas.SubMessageCreate(
+                    id=generate_uuid(),
+                    content=error_content.to_json_string(),
+                    sortOrder=98,
+                    type=SubMessageType.ERROR,
+                    status=MessageStatus.FAILED
+                )
+                await message_crud.create_sub_message(db, assistant_message_id, error_sub_message_create)
+                await db.commit()
+            except Exception as inner_e:
+                print(f"Failed to create an error message for {assistant_message_id}: {inner_e}")
+            return GenerationOutcome.FAILED
+        finally:
+            await stream_manager.mark_task_completed(assistant_message_id)
+            await stream_manager.close_stream(assistant_message_id)
+            await stream_manager.release_generation_lock(chat_id)
+
+
 async def maybe_schedule_title_generation(chat_id: str) -> None:
     """
     首轮问答生成完成后的标题生成调度入口。

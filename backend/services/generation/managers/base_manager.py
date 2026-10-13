@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.generation.worker.abstract_worker import AbstractGenerateWorker
 from backend.services.generation.core.instructions import BaseInstruction
+from backend.services.generation.core.outcome import GenerationOutcome
 from backend.schemas import enums as schemas_enums
 
 
@@ -21,6 +22,8 @@ class AbstractGenerateManager(ABC):
 
     def __init__(self, db_session: AsyncSession):
         self.db_session = db_session
+        # 独立业务结束结果；子类在执行结束时会写入最终值
+        self.outcome: Optional[GenerationOutcome] = None
 
     async def run(
             self,
@@ -50,10 +53,12 @@ class AbstractGenerateManager(ABC):
             if isinstance(e, asyncio.CancelledError):
                 print(f"[AbstractGenerateManager] Task cancelled for message '{assistant_message_id}'.")
                 overall_status = schemas_enums.MessageStatus.COMPLETED
+                self.outcome = GenerationOutcome.CANCELLED
             else:
                 print(f"[AbstractGenerateManager] Unhandled error in run loop for message '{assistant_message_id}': {e}")
                 traceback.print_exc()
                 overall_status = schemas_enums.MessageStatus.FAILED
+                self.outcome = GenerationOutcome.FAILED
 
             # 调用子类的清理逻辑
             async for instruction in self._cleanup_on_exception(assistant_message_id, overall_status, e, chat_id):

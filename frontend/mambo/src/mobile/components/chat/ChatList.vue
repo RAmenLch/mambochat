@@ -27,8 +27,9 @@
         @node-expand="handleNodeExpand"
       >
         <template #item-icon="{ data }">
-          <el-icon :size="18">
-            <Folder v-if="data.itemType === 'folder'" />
+          <el-icon :size="18" :color="data.itemType === 'folder' && data.folderType === 'group' ? 'var(--el-color-primary)' : undefined">
+            <UserFilled v-if="data.itemType === 'folder' && data.folderType === 'group'" />
+            <Folder v-else-if="data.itemType === 'folder'" />
             <ChatDotRound v-else />
           </el-icon>
         </template>
@@ -56,6 +57,10 @@
             <button class="fab-menu-btn" @click="handleNewChat(null); showFabMenu = false">
               <el-icon :size="18"><ChatDotRound /></el-icon>
               <span>新建聊天</span>
+            </button>
+            <button class="fab-menu-btn" @click="handleNewGroup(null); showFabMenu = false">
+              <el-icon :size="18"><UserFilled /></el-icon>
+              <span>{{ $t('groupChat.menu.newGroup') }}</span>
             </button>
           </div>
         </Transition>
@@ -117,6 +122,10 @@
                   <el-icon :size="20"><FolderAdd /></el-icon>
                   <span>{{ $t('chat.sidebar.newFolder') }}</span>
                 </button>
+                <button class="sheet-item" @click="handleNewGroup(selectedContextItem.id)">
+                  <el-icon :size="20"><UserFilled /></el-icon>
+                  <span>{{ $t('groupChat.menu.newGroup') }}</span>
+                </button>
                 <div class="sheet-divider"></div>
               </template>
 
@@ -158,6 +167,12 @@
       :root-id="searchRootId"
       @select-result="handleSearchResultSelect"
     />
+
+    <GroupChatCreateDialog
+      v-model:visible="groupDialogVisible"
+      :parent-id="groupDialogParentId"
+      @created="onGroupCreated"
+    />
   </div>
 </template>
 
@@ -182,6 +197,7 @@ import {
   Fold,
   Sort,
   Service,
+  UserFilled,
 } from '@element-plus/icons-vue'
 import type { AllowDropType } from 'element-plus/es/components/tree/src/tree.type'
 /** Element Plus Tree 内部节点结构（避免依赖内部路径） */
@@ -195,6 +211,8 @@ import ExplorerTree from '@/components/common/ExplorerTree.vue'
 import EntityFormDialog from '@/components/common/EntityFormDialog.vue'
 import MoveTargetDialog from './dialogs/MoveTargetDialog.vue'
 import SearchDialog from './dialogs/SearchDialog.vue'
+import GroupChatCreateDialog from '@/components/chat/group/GroupChatCreateDialog.vue'
+import type { GroupCreatedResponse } from '@/api/types/groupChatTypes'
 import { useChatListStore } from '@/stores/chatListStore'
 import { useChatSessionStore, LAST_ACTIVE_CHAT_KEY } from '@/stores/chatSessionStore'
 import { useAgentStore } from '@/stores/agentStore' // [新增] 引入 LAST_ACTIVE_CHAT_KEY
@@ -276,6 +294,8 @@ const expandedFolderIds = ref<Set<string>>(new Set())
 // Context Menu State
 const contextMenuVisible = ref(false)
 const selectedContextItem = ref<BaseTreeItem | null>(null)
+const groupDialogVisible = ref(false)
+const groupDialogParentId = ref<string | null>(null)
 
 // Dialog State
 const dialogState = { visible: ref(false) }
@@ -371,9 +391,18 @@ const handleExpandFolder = () => {
   contextMenuVisible.value = false
 }
 
+/** 群组父节点：itemType 为 folder，但 folderType 标记为 group */
+const isGroupNode = (data: BaseTreeItem): boolean =>
+  data.itemType === 'folder' &&
+  (data as { folderType?: string | null }).folderType === 'group'
+
 const handleNodeClick = async (data: BaseTreeItem) => {
   if (data.itemType === 'chat') {
     // [修改] 使用统一的选中方法，包含路由跳转
+    await handleSelectChat(data.id)
+    emit('close-drawer')
+  } else if (isGroupNode(data)) {
+    // 群组父节点：进入群页面，而不是当作普通文件夹只做展开/折叠
     await handleSelectChat(data.id)
     emit('close-drawer')
   } else if (data.itemType === 'folder') {
@@ -430,6 +459,20 @@ const handleNewFolder = (parentId: string | null) => {
   ;(dialogProps.value as any).parentId = finalParentId
   dialogState.visible.value = true
   contextMenuVisible.value = false
+}
+
+const handleNewGroup = (parentId: string | null) => {
+  groupDialogParentId.value =
+    parentId ||
+    (selectedContextItem.value?.itemType === 'folder' ? selectedContextItem.value.id : null)
+  groupDialogVisible.value = true
+  contextMenuVisible.value = false
+}
+
+async function onGroupCreated(detail: GroupCreatedResponse) {
+  chatListStore.mergeCreatedGroup(detail)
+  await handleSelectChat(detail.groupId)
+  emit('close-drawer')
 }
 
 const handleNewAgent = async () => {

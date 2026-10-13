@@ -4,6 +4,7 @@ import type {
   ChatUpdateNotificationPayload, TitleGenerationErrorContext,
   ZipHistoryUpdateNotificationPayload
 } from "@/api/types/chatTypes.ts";
+import type { GroupNotificationContext } from "@/api/types/groupChatTypes.ts";
 
 export type MoveAction = 'before' | 'after' | 'inside'
 
@@ -58,6 +59,18 @@ export type GlobalNotification =
       type: 'notification'
       category: 'title_generation_error'
       context: TitleGenerationErrorContext
+      level: string
+      message: string
+    }
+  | {
+      type: 'notification'
+      category:
+        | 'group_created'
+        | 'group_state_changed'
+        | 'group_task_changed'
+        | 'group_mail_sent'
+        | 'group_deleted'
+      context: GroupNotificationContext
       level: string
       message: string
     }

@@ -13,6 +13,7 @@ from backend.database import get_db
 from backend.services.file_service import FileService
 from backend.services.resource_service import validate_mounted_resources, validate_memory_resources
 from backend.schemas.enums import FileManagementType, ToolReviewMode, BackendType
+from backend.services.group_chat import guards as group_guards
 
 
 def _mcp_tool_name(server_name: str, tool_name: str) -> str:
@@ -218,6 +219,7 @@ async def update_agent_settings(
     summary="删除 Agent 或文件夹"
 )
 async def delete_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
+    await group_guards.assert_agents_deletable(db, agent_id)
     db_agent = await agent_crud.delete_agent(db, agent_id=agent_id)
     if db_agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")

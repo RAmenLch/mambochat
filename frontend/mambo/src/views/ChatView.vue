@@ -12,7 +12,8 @@
     <div class="resizer" @mousedown.prevent="startResize"></div>
 
     <el-main class="chat-main">
-      <ChatWindow :is-sidebar-collapsed="isSidebarCollapsed" />
+      <GroupChatWindow v-if="isGroupSelected" />
+      <ChatWindow v-else :is-sidebar-collapsed="isSidebarCollapsed" />
     </el-main>
   </el-container>
 </template>
@@ -21,9 +22,11 @@
 import { ref, watch, defineAsyncComponent } from 'vue'
 import ChatList from '@/components/chat/ChatList.vue'
 import ChatWindow from '@/components/chat/ChatWindow.vue'
+import GroupChatWindow from '@/components/chat/group/GroupChatWindow.vue'
 import { useResizablePanels } from '@/composables/useResizablePanels'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
+import { storeToRefs } from 'pinia'
 
 const props = defineProps<{ chatId?: string }>()
 
@@ -35,6 +38,7 @@ const { isMobile } = useIsMobile()
 
 // --- Eagerly load messages as soon as chatId is known ---
 const chatSessionStore = useChatSessionStore()
+const { isGroupSelected } = storeToRefs(chatSessionStore)
 watch(
   () => props.chatId,
   (chatId) => {

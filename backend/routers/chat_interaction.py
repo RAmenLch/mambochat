@@ -14,6 +14,8 @@ from backend.services import generation_service
 from backend.services.stream_manager_service import stream_manager
 from backend.services.file_service import FileService
 from backend.services import maintenance
+from backend.services.group_chat import service as group_service
+from backend.services.group_chat import generation_bridge
 from backend.crud import chat_crud, message_crud, setting_crud
 from backend import schemas
 from backend.models import chat_model
@@ -22,7 +24,7 @@ from backend.routers.chat_management import _apply_default_model_to_chat_object
 from backend.exceptions import AppHTTPException
 from backend.schemas import SubMessageType, MessageStatus
 from backend.schemas.message import ToolApprovalRequest, SubMessageConfig, SubMessageUpdate
-from backend.schemas.enums import FileManagementType
+from backend.schemas.enums import FileManagementType, GroupTaskKind
 
 from pydantic import BaseModel
 
@@ -280,8 +282,25 @@ async def _start_generation_task(
         background_tasks: BackgroundTasks,
         chat_id: str,
         assistant_message_id: str,
-        is_retry: bool = False
+        is_retry: bool = False,
+        db: Optional[AsyncSession] = None,
 ):
+    # 群成员子会话：统一交给群调度器排队，不直接后台生成。
+    # 消息（用户消息 / assistant 占位）已由此前的入口创建，桥接按既有 assistantMessageId 执行。
+    if db is not None:
+        group_id = await group_service.resolve_group_id_for_member(db, chat_id)
+        if group_id:
+            await stream_manager.release_generation_lock(chat_id)
+            await generation_bridge.enqueue_member_turn(
+                db,
+                group_id=group_id,
+                member_chat_id=chat_id,
+                kind=GroupTaskKind.USER_MESSAGE.value,
+                payload={"recover_from_error": True} if is_retry else {},
+                assistant_message_id=assistant_message_id,
+            )
+            return
+
     await stream_manager.mark_task_running(assistant_message_id)
     if is_retry:
         background_tasks.add_task(generation_service._run_retry_generation_task, chat_id, assistant_message_id)
@@ -418,7 +437,7 @@ async def update_message_and_regenerate(
     assistant_placeholder = await generation_service.prepare_for_regeneration(
         db=db, chat_id=db_message.chatId, base_message_id=new_user_message.id
     )
-    await _start_generation_task(background_tasks, db_message.chatId, assistant_placeholder.id)
+    await _start_generation_task(background_tasks, db_message.chatId, assistant_placeholder.id, db=db)
 
     # 修复: 从活跃路径中重新获取，以避免 DetachedInstanceError 并装配 sibling 元数据
     active_msgs = await message_crud.get_messages_by_chat(db, chat_id=db_message.chatId, latest_usage_only=True)
@@ -562,7 +581,7 @@ async def prepare_to_generate(
         user_message, assistant_placeholder = await generation_service.create_user_message_and_prepare_generation(
             db=db, chat_id=chat_id, request=request
         )
-        await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id)
+        await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id, db=db)
 
         # 修复: 从活跃路径中重新获取，以避免 DetachedInstanceError 并装配 sibling 元数据
         active_msgs = await message_crud.get_messages_by_chat(db, chat_id=chat_id)
@@ -602,7 +621,7 @@ async def prepare_to_regenerate(
             db=db, chat_id=chat_id, base_message_id=from_message_id,
         )
 
-        await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id)
+        await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id, db=db)
 
         # 修复: 从活跃路径中重新获取，以避免 DetachedInstanceError 并装配 sibling 元数据
         active_msgs = await message_crud.get_messages_by_chat(db, chat_id=chat_id)
@@ -643,7 +662,7 @@ async def retry_failed_generation(
         raise AppHTTPException(status_code=409, error_code="GENERATION_IN_PROGRESS", detail="该会话已有正在进行的生成任务，请等待完成后再试。")
 
     try:
-        await _start_generation_task(background_tasks, db_message.chatId, message_id, is_retry=True)
+        await _start_generation_task(background_tasks, db_message.chatId, message_id, is_retry=True, db=db)
 
         active_msgs = await message_crud.get_messages_by_chat(db, chat_id=db_message.chatId)
         populated_msg = next((m for m in active_msgs if m.id == message_id), db_message)
@@ -760,7 +779,7 @@ async def review_tool_call(
         )
 
         if affected_rows == len(sub_ids):
-            await _start_generation_task(background_tasks, db_message.chatId, message_id)
+            await _start_generation_task(background_tasks, db_message.chatId, message_id, db=db)
             is_resuming = True
 
     # 修复: 从活跃路径中重新获取，以装配 sibling 元数据
@@ -830,7 +849,7 @@ async def answer_ask_user(
         )
 
         if affected_rows == len(sub_ids):
-            await _start_generation_task(background_tasks, db_message.chatId, message_id)
+            await _start_generation_task(background_tasks, db_message.chatId, message_id, db=db)
             is_resuming = True
 
     active_msgs = await message_crud.get_messages_by_chat(db, chat_id=db_message.chatId)
