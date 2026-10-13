@@ -8,6 +8,9 @@ import type {
   GroupMail,
   GroupTask,
   GroupNotificationContext,
+  GroupSettingsUpdate,
+  GroupMailReview,
+  GroupMailDecision,
 } from '@/api/types/groupChatTypes';
 
 /**
@@ -20,6 +23,7 @@ export const useGroupChatStore = defineStore('groupChat', () => {
   const mailCursor = ref<Record<string, number | null>>({});
   const mailHasMore = ref<Record<string, boolean>>({});
   const tasks = ref<Record<string, GroupTask[]>>({});
+  const mailReviews = ref<Record<string, GroupMailReview>>({});
   const loading = ref<Record<string, boolean>>({});
 
   function ensure(groupId: string) {
@@ -33,14 +37,17 @@ export const useGroupChatStore = defineStore('groupChat', () => {
     return detail;
   }
 
-  async function loadMails(groupId: string, reset = false): Promise<void> {
+  async function loadMails(groupId: string, reset = false, force = false): Promise<void> {
     ensure(groupId);
     if (reset) {
       mails.value[groupId] = [];
       mailCursor.value[groupId] = null;
       mailHasMore.value[groupId] = true;
     }
-    if (mailHasMore.value[groupId] === false) return;
+    // hasMore=false 只说明上一页未取满，不代表没有新邮件；
+    // 实时对账（force=true）时必须忽略该标记，按游标继续向后拉取，
+    // 否则新投递的邮件不可见，只能靠刷新页面。
+    if (!force && mailHasMore.value[groupId] === false) return;
     const after = mailCursor.value[groupId] ?? null;
     const page = await groupApi.listGroupMails(groupId, after);
     // 去重合并，维持 sequence 稳定顺序
@@ -59,10 +66,20 @@ export const useGroupChatStore = defineStore('groupChat', () => {
     tasks.value[groupId] = res.items;
   }
 
+  /** 审核模式：拉取待审核邮件与已决策邮件 */
+  async function loadMailReviews(groupId: string): Promise<void> {
+    mailReviews.value[groupId] = await groupApi.listMailReviews(groupId);
+  }
+
   async function refresh(groupId: string, resetMails = false): Promise<void> {
     loading.value[groupId] = true;
     try {
-      await Promise.all([loadDetail(groupId), loadMails(groupId, resetMails), loadTasks(groupId)]);
+      await Promise.all([
+        loadDetail(groupId),
+        loadMails(groupId, resetMails, true),
+        loadTasks(groupId),
+        loadMailReviews(groupId),
+      ]);
     } finally {
       loading.value[groupId] = false;
     }
@@ -95,6 +112,31 @@ export const useGroupChatStore = defineStore('groupChat', () => {
     return res;
   }
 
+  /** 修改群设置（自动轮次上限 / 重置本次额度周期的已用轮次 / 邮件投递模式） */
+  async function updateSettings(groupId: string, data: GroupSettingsUpdate) {
+    const res = await groupApi.updateGroupSettings(groupId, data);
+    await loadDetail(groupId);
+    return res;
+  }
+
+  /** 审核模式：同意投递一封待审核邮件 */
+  async function approveMail(groupId: string, mailId: string): Promise<GroupMailDecision> {
+    const res = await groupApi.approveMail(groupId, mailId);
+    await Promise.all([loadMailReviews(groupId), loadDetail(groupId), loadTasks(groupId)]);
+    return res;
+  }
+
+  /** 审核模式：拒绝投递一封待审核邮件（需填写原因） */
+  async function rejectMail(
+    groupId: string,
+    mailId: string,
+    reason: string,
+  ): Promise<GroupMailDecision> {
+    const res = await groupApi.rejectMail(groupId, mailId, reason);
+    await Promise.all([loadMailReviews(groupId), loadDetail(groupId), loadTasks(groupId)]);
+    return res;
+  }
+
   async function retryTask(groupId: string, taskId: string) {
     const res = await groupApi.retryGroupTask(groupId, taskId);
     await refresh(groupId);
@@ -119,14 +161,30 @@ export const useGroupChatStore = defineStore('groupChat', () => {
     return res;
   }
 
-  /** 全局通知对账：仅轻量刷新受影响群，不重复广播邮件正文。 */
-  async function applyNotification(ctx: GroupNotificationContext): Promise<void> {
+  /**
+   * 全局通知对账：仅轻量刷新受影响群，不重复广播邮件正文。
+   * `category` 用于放宽判定：邮件投递只保证 mailId/sequence，不保证 version 一定推进，
+   * 因此邮件事件以及「版本未推进」的情况都要按游标补拉一次邮件。
+   */
+  async function applyNotification(
+    ctx: GroupNotificationContext,
+    category?: string,
+  ): Promise<void> {
     if (!ctx?.groupId) return;
-    const current = details.value[ctx.groupId];
-    if (ctx.version !== undefined && current && ctx.version <= current.version) {
+    const gid = ctx.groupId;
+    const current = details.value[gid];
+    const isMailEvent = category === 'group_mail_sent';
+    if (!isMailEvent && ctx.version !== undefined && current && ctx.version <= current.version) {
+      // 版本未推进：至少把游标之后的新邮件拉回来，避免整条事件被丢弃
+      await loadMails(gid, false, true);
       return;
     }
-    await Promise.all([loadDetail(ctx.groupId), loadMails(ctx.groupId), loadTasks(ctx.groupId)]);
+    await Promise.all([
+      loadDetail(gid),
+      loadMails(gid, false, true),
+      loadTasks(gid),
+      loadMailReviews(gid),
+    ]);
   }
 
   return {
@@ -135,14 +193,19 @@ export const useGroupChatStore = defineStore('groupChat', () => {
     mailCursor,
     mailHasMore,
     tasks,
+    mailReviews,
     loading,
     loadDetail,
     loadMails,
     loadTasks,
+    loadMailReviews,
     refresh,
     sendMessage,
     pause,
     resume,
+    updateSettings,
+    approveMail,
+    rejectMail,
     retryTask,
     cancelTask,
     discardTask,

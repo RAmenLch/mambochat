@@ -8,7 +8,7 @@ from typing import Optional, List, Any, Dict
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from backend.schemas.enums import (
-    GroupStatus, GroupPauseReason, GroupTaskKind, GroupTaskState, GroupMailState,
+    GroupMailMode, GroupStatus, GroupPauseReason, GroupTaskKind, GroupTaskState, GroupMailState,
 )
 
 
@@ -54,6 +54,9 @@ class GroupChatCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     parentId: Optional[str] = Field(None, description="群组父节点所在的父文件夹；None/root 表示根目录")
     autoRoundLimit: int = Field(50, ge=1, description="自动邮件轮次上限，正整数")
+    mailMode: GroupMailMode = Field(
+        GroupMailMode.AUTO, description="邮件投递模式：auto=自动投递；review=需用户逐封审核"
+    )
     members: List[GroupMemberCreate] = Field(..., min_length=3, description="成员列表，N > 2")
 
     @model_validator(mode="after")
@@ -89,12 +92,34 @@ class GroupMailResponse(BaseModel):
     sequence: Optional[int] = None
     createdAt: datetime
     sentAt: Optional[datetime] = None
+    # 审核模式：用户审核时间与拒绝原因
+    reviewedAt: Optional[datetime] = None
+    rejectReason: Optional[str] = None
 
 
 class GroupMailListResponse(BaseModel):
     items: List[GroupMailResponse] = Field(default_factory=list)
     nextAfterSequence: Optional[int] = None
     hasMore: bool = False
+
+
+class GroupMailReviewResponse(BaseModel):
+    """审核模式的邮件审批视图：待审核 + 已决策（被拒 / 已同意待投递）。"""
+    pending: List[GroupMailResponse] = Field(default_factory=list)
+    decided: List[GroupMailResponse] = Field(default_factory=list)
+
+
+class GroupMailRejectRequest(BaseModel):
+    reason: str = Field(..., min_length=1, description="拒绝原因，必填")
+
+
+class GroupMailDecisionResponse(BaseModel):
+    groupId: str
+    mailId: str
+    state: GroupMailState
+    pendingCount: int = 0
+    finalized: bool = False
+    version: int = 0
 
 
 class GroupTaskResponse(BaseModel):
@@ -128,6 +153,8 @@ class GroupDetailResponse(BaseModel):
     pauseReason: Optional[GroupPauseReason] = None
     autoRoundLimit: int
     autoRoundCount: int
+    # 群累计实际启动过的自动邮件轮次（跨额度周期，仅用于展示）
+    totalAutoRoundCount: int = 0
     version: int
     activeTaskId: Optional[str] = None
     members: List[GroupMemberResponse] = Field(default_factory=list)
@@ -163,6 +190,9 @@ class GroupTaskAccepted(BaseModel):
 class GroupSettingsUpdate(BaseModel):
     autoRoundLimit: Optional[int] = Field(None, ge=1)
     resetAutoRoundCount: bool = Field(False, description="显式请求才重置自动轮次计数")
+    mailMode: Optional[GroupMailMode] = Field(
+        None, description="切换邮件投递模式：只对之后的轮次生效"
+    )
 
 
 class GroupControlResponse(BaseModel):

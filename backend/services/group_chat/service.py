@@ -17,7 +17,8 @@ from backend import schemas
 from backend.models import chat_model, agent_model, group_chat_model
 from backend.crud import group_chat_crud
 from backend.schemas.enums import (
-    FolderType, GroupStatus, GroupPauseReason, GroupMailState, GroupTaskState, AgentItemType,
+    FolderType, GroupMailMode, GroupMailState, GroupStatus, GroupPauseReason, GroupTaskKind,
+    GroupTaskState, AgentItemType,
 )
 from backend.schemas.group_chat import (
     GroupChatCreate, GroupSettingsUpdate, normalize_member_alias,
@@ -25,6 +26,7 @@ from backend.schemas.group_chat import (
 )
 from backend.exceptions import AppHTTPException
 from backend.config.timezone_config import get_configured_now
+from backend.services.group_chat import events, generation_bridge, mail_service
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +156,7 @@ async def create_group_chat(
             status=GroupStatus.READY.value,
             autoRoundLimit=payload.autoRoundLimit,
             autoRoundCount=0,
+            mailMode=payload.mailMode.value,
             nextTaskSeq=0,
             nextMailSeq=0,
             version=0,
@@ -197,6 +200,18 @@ async def create_group_chat(
         raise _bad(GroupErrorCode.STRUCTURE_INVALID, "group_creation_failed", 500)
 
 
+async def _total_auto_rounds(db: AsyncSession, group_id: str) -> int:
+    """群累计实际启动过的自动邮件轮次（跨额度周期，仅用于展示）。"""
+    result = await db.execute(
+        select(func.count(group_chat_model.GroupTask.id)).filter(
+            group_chat_model.GroupTask.groupId == group_id,
+            group_chat_model.GroupTask.kind == GroupTaskKind.MAIL_NOTICE.value,
+            group_chat_model.GroupTask.startedAt.is_not(None),
+        )
+    )
+    return int(result.scalar() or 0)
+
+
 def _build_detail(
     group_node: chat_model.Chat,
     state: group_chat_model.GroupState,
@@ -204,6 +219,7 @@ def _build_detail(
     agent_names: Dict[str, str],
     unread_map: Dict[str, int],
     queued_map: Dict[str, int],
+    total_auto_rounds: int = 0,
 ) -> schemas.GroupCreatedResponse:
     members = [
         schemas.GroupMemberResponse(
@@ -228,6 +244,8 @@ def _build_detail(
         pauseReason=state.pauseReason,
         autoRoundLimit=state.autoRoundLimit,
         autoRoundCount=state.autoRoundCount,
+        mailMode=GroupMailMode(state.mailMode or GroupMailMode.AUTO.value),
+        totalAutoRoundCount=total_auto_rounds,
         version=state.version,
         activeTaskId=state.activeTaskId,
         members=members,
@@ -302,8 +320,9 @@ async def get_group_detail(db: AsyncSession, group_id: str) -> schemas.GroupDeta
 
     unread_map = await _unread_counts(db, group_id)
     queued_map = await _queued_counts(db, group_id)
+    total_auto_rounds = await _total_auto_rounds(db, group_id)
     return _build_detail(
-        group_node, state, member_nodes, agent_names, unread_map, queued_map
+        group_node, state, member_nodes, agent_names, unread_map, queued_map, total_auto_rounds
     )
 
 
@@ -316,8 +335,15 @@ async def update_group_settings(
 
     if payload.autoRoundLimit is not None:
         state.autoRoundLimit = payload.autoRoundLimit
+    if payload.mailMode is not None:
+        # 只影响之后的轮次：当前若已有待审核批次，仍由用户逐封决定
+        state.mailMode = payload.mailMode.value
     if payload.resetAutoRoundCount:
         state.autoRoundCount = 0
+        # 因达到轮次上限而暂停的群：重置即为继续执行，同步解除该暂停
+        if state.pauseReason == GroupPauseReason.ROUND_LIMIT.value:
+            state.status = GroupStatus.READY.value
+            state.pauseReason = None
     state.version = (state.version or 0) + 1
     state.updatedAt = get_configured_now()
     await db.commit()
@@ -433,3 +459,92 @@ async def delete_group(db: AsyncSession, group_id: str) -> None:
         delete(chat_model.Chat).where(chat_model.Chat.id == group_id)
     )
     await db.commit()
+
+
+# ──────────────────────────────────────────────
+# 审核模式：邮件审批
+# ──────────────────────────────────────────────
+
+def mail_to_response(mail: group_chat_model.GroupMail) -> schemas.GroupMailResponse:
+    return schemas.GroupMailResponse(
+        id=mail.id,
+        groupId=mail.groupId,
+        sourceTaskId=mail.sourceTaskId,
+        senderChatId=mail.senderChatId,
+        senderAliasSnapshot=mail.senderAliasSnapshot,
+        recipientSnapshot=mail.recipientSnapshot or [],
+        title=mail.title,
+        content=mail.content,
+        state=mail.state,
+        sequence=mail.sequence,
+        createdAt=mail.createdAt,
+        sentAt=mail.sentAt,
+        reviewedAt=mail.reviewedAt,
+        rejectReason=mail.rejectReason,
+    )
+
+
+async def get_group_mail_reviews(
+    db: AsyncSession, group_id: str
+) -> schemas.GroupMailReviewResponse:
+    """审核视图：待审核邮件 + 已决策邮件（被拒 / 已同意待投递）。"""
+    node = await group_chat_crud.get_group_chat(db, group_id)
+    if not node:
+        raise _bad(GroupErrorCode.NOT_FOUND, "group_not_found", 404)
+    pending, decided = await mail_service.list_review_queue(db, group_id)
+    return schemas.GroupMailReviewResponse(
+        pending=[mail_to_response(m) for m in pending],
+        decided=[mail_to_response(m) for m in decided],
+    )
+
+
+async def decide_group_mail(
+    db: AsyncSession,
+    group_id: str,
+    mail_id: str,
+    approve: bool,
+    reason: Optional[str] = None,
+) -> schemas.GroupMailDecisionResponse:
+    """
+    用户审核一封待投递邮件（同意 / 拒绝，拒绝原因必填）。
+    同批（同一次轮次）最后一封处理完时定稿：
+    - 无拒绝：立即正常投递（同自动模式），并顺带投递该发件人此前 deferred 的邮件；
+    - 存在拒绝：同意的邮件转 deferred（本轮不投递、不触发收件人），并向发信人注入结果消息、触发其再生成一次。
+    """
+    if approve:
+        outcome = await mail_service.approve_mail(db, group_id, mail_id)
+        decided_state = GroupMailState.STAGED.value
+    else:
+        outcome = await mail_service.reject_mail(db, group_id, mail_id, reason or "")
+        decided_state = GroupMailState.REJECTED.value
+
+    if outcome.finalized:
+        if outcome.decision_text and outcome.sender_chat_id:
+            # 结果消息作为 user message 注入发信人子会话，并驱动其下一轮
+            await generation_bridge.enqueue_member_turn(
+                db,
+                group_id=group_id,
+                member_chat_id=outcome.sender_chat_id,
+                kind=GroupTaskKind.USER_MESSAGE.value,
+                payload={"content": outcome.decision_text},
+            )
+
+    state = await group_chat_crud.get_group_state(db, group_id)
+    version = state.version if state else 0
+    if outcome.finalized and state is not None:
+        await events.publish_group_state_changed(
+            group_id, state.version, state.status, state.pauseReason
+        )
+        for sent_mail_id, sequence in outcome.delivered:
+            await events.publish_group_mail_sent(
+                group_id, sent_mail_id, sequence, version=state.version
+            )
+
+    return schemas.GroupMailDecisionResponse(
+        groupId=group_id,
+        mailId=mail_id,
+        state=GroupMailState(decided_state),
+        pendingCount=outcome.pending,
+        finalized=outcome.finalized,
+        version=version,
+    )

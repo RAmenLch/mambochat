@@ -26,6 +26,8 @@ class GroupState(Base):
     autoRoundLimit = Column(Integer, nullable=False, default=50)
     # 实际启动的自动邮件逻辑轮次次数（同轮恢复不重复增加）
     autoRoundCount = Column(Integer, nullable=False, default=0)
+    # 邮件投递模式：auto=轮次正常结束后自动投递；review=需用户逐封审核后才投递
+    mailMode = Column(String(20), nullable=False, default="auto")
     # 群内 FIFO 队列序号分配
     nextTaskSeq = Column(Integer, nullable=False, default=0)
     # 已投递邮件的严格展示顺序分配
@@ -124,10 +126,14 @@ class GroupMail(Base):
     # 本轮工具调用的稳定顺序
     toolCallOrder = Column(Integer, nullable=False, default=0)
 
-    # staged / sent / discarded
+    # staged / reviewing / deferred / sent / rejected / discarded
     state = Column(String(20), nullable=False, default=GroupMailState.STAGED.value)
     # 真正投递时分配
     sequence = Column(Integer, nullable=True)
+
+    # 审核模式：用户审核时间与拒绝原因
+    reviewedAt = Column(DateTime, nullable=True)
+    rejectReason = Column(TEXT, nullable=True)
 
     createdAt = Column(DateTime, nullable=False, default=get_configured_now)
     sentAt = Column(DateTime, nullable=True)

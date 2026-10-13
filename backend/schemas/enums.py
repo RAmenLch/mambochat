@@ -176,7 +176,8 @@ class GroupStatus(str, Enum):
 class GroupPauseReason(str, Enum):
     """群组暂停原因"""
     MANUAL = "manual"
-    REVIEW = "review"
+    REVIEW = "review"              # 等待 MCP 工具审核
+    MAIL_REVIEW = "mail_review"    # 等待用户审核本轮的待投递邮件
     ASK_USER = "ask_user"
     FAILURE = "failure"
     CANCELLED = "cancelled"
@@ -208,6 +209,15 @@ class GroupTaskState(str, Enum):
 
 class GroupMailState(str, Enum):
     """群组邮件状态"""
-    STAGED = "staged"
-    SENT = "sent"
-    DISCARDED = "discarded"
+    STAGED = "staged"          # 本轮暂存（auto 模式：待投递）
+    REVIEWING = "reviewing"    # 审核模式：等待用户审核
+    DEFERRED = "deferred"      # 审核模式：已同意，但同批存在拒绝，留待发信人下一轮成功提交时一并投递
+    SENT = "sent"              # 已投递
+    REJECTED = "rejected"      # 用户拒绝（拒绝原因见 rejectReason）
+    DISCARDED = "discarded"    # 放弃该轮时丢弃
+
+
+class GroupMailMode(str, Enum):
+    """群组邮件投递模式"""
+    AUTO = "auto"      # 生成完毕自动投递（默认）
+    REVIEW = "review"  # 生成完毕后等待用户逐封审核

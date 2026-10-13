@@ -11,6 +11,8 @@ import type {
   GroupTaskAccepted,
   GroupSettingsUpdate,
   GroupControlResponse,
+  GroupMailReview,
+  GroupMailDecision,
 } from './types/groupChatTypes';
 
 /** 原子创建群组会话 */
@@ -87,4 +89,23 @@ export const processMemberUnread = (
   memberChatId: string,
 ): Promise<GroupTaskAccepted> => {
   return apiClient.post(`/group-chats/${groupId}/members/${memberChatId}/process-unread`);
+};
+
+/** 审核模式：待审核邮件 + 已决策邮件（被拒 / 已同意待投递） */
+export const listMailReviews = (groupId: string): Promise<GroupMailReview> => {
+  return apiClient.get(`/group-chats/${groupId}/mail-reviews`);
+};
+
+/** 审核模式：同意投递该邮件 */
+export const approveMail = (groupId: string, mailId: string): Promise<GroupMailDecision> => {
+  return apiClient.post(`/group-chats/${groupId}/mails/${mailId}/approve`);
+};
+
+/** 审核模式：拒绝投递该邮件（拒绝原因必填） */
+export const rejectMail = (
+  groupId: string,
+  mailId: string,
+  reason: string,
+): Promise<GroupMailDecision> => {
+  return apiClient.post(`/group-chats/${groupId}/mails/${mailId}/reject`, { reason });
 };

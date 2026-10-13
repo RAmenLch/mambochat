@@ -136,6 +136,42 @@ async def list_group_mails(
     )
 
 
+@router.get(
+    "/group-chats/{group_id}/mail-reviews",
+    response_model=schemas.GroupMailReviewResponse,
+    summary="审核模式：待审核邮件与已决策邮件（被拒 / 已同意待投递）",
+)
+async def list_group_mail_reviews(group_id: str, db: AsyncSession = Depends(get_db)):
+    return await group_service.get_group_mail_reviews(db, group_id)
+
+
+@router.post(
+    "/group-chats/{group_id}/mails/{mail_id}/approve",
+    response_model=schemas.GroupMailDecisionResponse,
+    summary="审核模式：同意投递该邮件",
+)
+async def approve_group_mail(
+    group_id: str, mail_id: str, db: AsyncSession = Depends(get_db)
+):
+    return await group_service.decide_group_mail(db, group_id, mail_id, approve=True)
+
+
+@router.post(
+    "/group-chats/{group_id}/mails/{mail_id}/reject",
+    response_model=schemas.GroupMailDecisionResponse,
+    summary="审核模式：拒绝投递该邮件（拒绝原因必填）",
+)
+async def reject_group_mail(
+    group_id: str,
+    mail_id: str,
+    payload: schemas.GroupMailRejectRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    return await group_service.decide_group_mail(
+        db, group_id, mail_id, approve=False, reason=payload.reason
+    )
+
+
 def _task_to_response(task: group_chat_model.GroupTask) -> schemas.GroupTaskResponse:
     return schemas.GroupTaskResponse(
         id=task.id,

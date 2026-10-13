@@ -41,4 +41,5 @@ from .group_chat import (
     GroupMailListResponse, GroupTaskResponse, GroupTaskListResponse, GroupDetailResponse,
     GroupCreatedResponse, GroupMessageSendRequest, GroupTaskAccepted, GroupSettingsUpdate,
     GroupControlResponse, GroupSendMailItem, GroupSendMailRequest, normalize_member_alias,
+    GroupMailReviewResponse, GroupMailRejectRequest, GroupMailDecisionResponse,
 )

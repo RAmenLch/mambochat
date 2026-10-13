@@ -284,6 +284,7 @@ async def _start_generation_task(
         assistant_message_id: str,
         is_retry: bool = False,
         db: Optional[AsyncSession] = None,
+        new_user_turn: bool = False,
 ):
     # 群成员子会话：统一交给群调度器排队，不直接后台生成。
     # 消息（用户消息 / assistant 占位）已由此前的入口创建，桥接按既有 assistantMessageId 执行。
@@ -298,6 +299,8 @@ async def _start_generation_task(
                 kind=GroupTaskKind.USER_MESSAGE.value,
                 payload={"recover_from_error": True} if is_retry else {},
                 assistant_message_id=assistant_message_id,
+                # 仅「用户在该子会话新发一条消息」算新一次发起沟通；重试/重生成/编辑重发/恢复沿用当前额度
+                new_episode=new_user_turn,
             )
             return
 
@@ -581,7 +584,9 @@ async def prepare_to_generate(
         user_message, assistant_placeholder = await generation_service.create_user_message_and_prepare_generation(
             db=db, chat_id=chat_id, request=request
         )
-        await _start_generation_task(background_tasks, chat_id, assistant_placeholder.id, db=db)
+        await _start_generation_task(
+            background_tasks, chat_id, assistant_placeholder.id, db=db, new_user_turn=True
+        )
 
         # 修复: 从活跃路径中重新获取，以避免 DetachedInstanceError 并装配 sibling 元数据
         active_msgs = await message_crud.get_messages_by_chat(db, chat_id=chat_id)

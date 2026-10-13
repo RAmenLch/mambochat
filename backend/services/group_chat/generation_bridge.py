@@ -24,7 +24,7 @@ from backend.models import chat_model, group_chat_model
 from backend.crud import group_chat_crud, message_crud
 from backend.schemas.enums import (
     MessageRole, MessageStatus, SubMessageType,
-    GroupStatus, GroupPauseReason, GroupTaskKind, GroupTaskState, GroupMailState,
+    GroupMailMode, GroupStatus, GroupPauseReason, GroupTaskKind, GroupTaskState, GroupMailState,
 )
 from backend.schemas.group_chat import normalize_member_alias
 from backend.config.timezone_config import get_configured_now
@@ -141,6 +141,8 @@ async def enqueue_user_turn(
         created_ids.append(task.id)
 
     state.version = (state.version or 0) + 1
+    # 单次发起沟通：新的用户群输入开启新的额度周期，自动邮件轮次计数清零
+    state.autoRoundCount = 0
     await db.commit()
 
     for tid in created_ids:
@@ -159,10 +161,12 @@ async def enqueue_member_turn(
     base_message_id: Optional[str] = None,
     assistant_message_id: Optional[str] = None,
     request_id: Optional[str] = None,
+    new_episode: bool = False,
 ) -> str:
     """
     为单个成员入队一个任务（用于子会话页直接发起、重生成、编辑重发、恢复）。
     恢复/重试复用既有 assistant 消息时不新建轮次。
+    `new_episode=True` 表示用户在该子会话直接发起新一轮对话，会开启新的自动轮次额度周期。
     """
     state = await group_chat_crud.get_group_state(db, group_id)
     if not state:
@@ -222,6 +226,9 @@ async def enqueue_member_turn(
     state.status = GroupStatus.READY.value
     state.pauseReason = None
     state.activeTaskId = None
+    if new_episode:
+        # 直接发起新对话：开启新的自动轮次额度周期
+        state.autoRoundCount = 0
     state.version = (state.version or 0) + 1
     await db.commit()
     await events.publish_group_task_changed(
@@ -367,6 +374,20 @@ async def _finalize_task(group_id: str, task_id: str, outcome: GenerationOutcome
         now = get_configured_now()
 
         if outcome is GenerationOutcome.NORMAL_COMPLETED:
+            if (state.mailMode or GroupMailMode.AUTO.value) == GroupMailMode.REVIEW.value:
+                # 审核模式：本轮不投递，邮件转待审核并暂停整群，等待用户逐封决定
+                held = await mail_service.hold_for_review(db, task, state)
+                logger.info(
+                    "[GroupBridge] task %s held for mail review (%s mails)", task.id, held
+                )
+                await events.publish_group_task_changed(
+                    group_id, task.id, task.memberChatId, task.state,
+                    version=state.version, assistant_message_id=task.assistantMessageId,
+                )
+                await events.publish_group_state_changed(
+                    group_id, state.version, state.status, state.pauseReason
+                )
+                return
             task.state = GroupTaskState.READY_TO_COMMIT.value
             task.finishedAt = now
             await db.commit()
@@ -416,6 +437,7 @@ async def run_group_task(group_id: str, task_id: str) -> GenerationOutcome:
             if task is None:
                 return GenerationOutcome.FAILED
             member = await db.get(chat_model.Chat, task.memberChatId)
+            task_state = await group_chat_crud.get_group_state(db, group_id)
             lock_chat_id = task.memberChatId
             recover_from_error = bool((task.payload or {}).get("recover_from_error"))
             ctx = GroupExecutionContext(
@@ -424,6 +446,10 @@ async def run_group_task(group_id: str, task_id: str) -> GenerationOutcome:
                 member_chat_id=task.memberChatId,
                 member_alias=(member.memberAlias if member else "") or "",
                 assistant_message_id=task.assistantMessageId,
+                mail_mode=(
+                    (task_state.mailMode if task_state else None)
+                    or GroupMailMode.AUTO.value
+                ),
             )
         token = set_group_context(ctx)
 
@@ -508,7 +534,9 @@ async def discard_task(db: AsyncSession, group_id: str, task_id: str) -> None:
         update(group_chat_model.GroupMail)
         .where(
             group_chat_model.GroupMail.sourceTaskId == task_id,
-            group_chat_model.GroupMail.state == GroupMailState.STAGED.value,
+            group_chat_model.GroupMail.state.in_(
+                [GroupMailState.STAGED.value, GroupMailState.REVIEWING.value]
+            ),
         )
         .values(state=GroupMailState.DISCARDED.value)
     )

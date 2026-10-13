@@ -25,7 +25,16 @@ export type GroupTaskState =
   | 'interrupted'
   | 'skipped'
 
-export type GroupMailState = 'staged' | 'sent' | 'discarded'
+export type GroupMailState =
+  | 'staged'
+  | 'reviewing'
+  | 'deferred'
+  | 'sent'
+  | 'rejected'
+  | 'discarded'
+
+/** 邮件投递模式：auto=生成完毕自动投递；review=需用户逐封审核 */
+export type GroupMailMode = 'auto' | 'review'
 
 export interface GroupMemberCreate {
   agentId: string
@@ -36,6 +45,7 @@ export interface GroupChatCreate {
   name: string
   parentId?: string | null
   autoRoundLimit?: number
+  mailMode?: GroupMailMode
   members: GroupMemberCreate[]
 }
 
@@ -58,6 +68,10 @@ export interface GroupDetail {
   pauseReason?: GroupPauseReason | null
   autoRoundLimit: number
   autoRoundCount: number
+  /** 邮件投递模式：auto=生成完毕即投递；review=需用户逐封审核后投递 */
+  mailMode?: GroupMailMode
+  /** 群累计实际启动过的自动邮件轮次（跨额度周期，仅用于展示） */
+  totalAutoRoundCount?: number
   version: number
   activeTaskId?: string | null
   members: GroupMember[]
@@ -85,12 +99,30 @@ export interface GroupMail {
   sequence?: number | null
   createdAt: string
   sentAt?: string | null
+  /** 审核模式：用户审核时间与拒绝原因 */
+  reviewedAt?: string | null
+  rejectReason?: string | null
 }
 
 export interface GroupMailList {
   items: GroupMail[]
   nextAfterSequence?: number | null
   hasMore: boolean
+}
+
+/** 审核模式的邮件审批视图 */
+export interface GroupMailReview {
+  pending: GroupMail[]
+  decided: GroupMail[]
+}
+
+export interface GroupMailDecision {
+  groupId: string
+  mailId: string
+  state: GroupMailState
+  pendingCount: number
+  finalized: boolean
+  version: number
 }
 
 export interface GroupTask {
@@ -132,6 +164,8 @@ export interface GroupTaskAccepted {
 export interface GroupSettingsUpdate {
   autoRoundLimit?: number
   resetAutoRoundCount?: boolean
+  /** 切换邮件投递模式：只对之后的轮次生效 */
+  mailMode?: GroupMailMode
 }
 
 export interface GroupControlResponse {

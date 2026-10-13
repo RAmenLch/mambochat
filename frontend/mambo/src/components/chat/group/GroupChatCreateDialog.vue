@@ -15,6 +15,13 @@
         <el-input-number v-model="autoRoundLimit" :min="1" :max="100000" />
       </el-form-item>
 
+      <el-form-item :label="$t('groupChat.create.mailMode')">
+        <el-select v-model="mailMode" class="mail-mode-select">
+          <el-option :label="$t('groupChat.create.mailModeAuto')" value="auto" />
+          <el-option :label="$t('groupChat.create.mailModeReview')" value="review" />
+        </el-select>
+      </el-form-item>
+
       <el-form-item :label="$t('groupChat.create.members')">
         <div class="member-rows">
           <div v-for="(row, idx) in members" :key="idx" class="member-row">
@@ -76,7 +83,7 @@ import { ElMessage } from 'element-plus';
 import { useI18n } from 'vue-i18n';
 import { storeToRefs } from 'pinia';
 import { createGroupChat } from '@/api/groupChatService';
-import type { GroupCreatedResponse } from '@/api/types/groupChatTypes';
+import type { GroupCreatedResponse, GroupMailMode } from '@/api/types/groupChatTypes';
 import { useAgentStore } from '@/stores/agentStore';
 
 const props = defineProps<{
@@ -124,7 +131,7 @@ function uniqueAlias(base: string, selfIdx: number): string {
       .map((m) => sanitizeAlias(m.memberAlias))
       .filter(Boolean),
   );
-  const fallback = base || '成员';
+  const fallback = base || t('groupChat.create.defaultMemberAlias');
   let candidate = fallback;
   let n = 2;
   while (used.has(candidate)) {
@@ -153,6 +160,7 @@ function onAliasInput(idx: number) {
 
 const name = ref('');
 const autoRoundLimit = ref(50);
+const mailMode = ref<GroupMailMode>('auto');
 const submitting = ref(false);
 
 interface MemberRow {
@@ -174,6 +182,7 @@ watch(
     if (v) {
       name.value = '';
       autoRoundLimit.value = 50;
+      mailMode.value = 'auto';
       submitting.value = false;
       members.value = [emptyMember(), emptyMember(), emptyMember()];
       if (agentStore.allAgents.length === 0) {
@@ -220,12 +229,13 @@ async function submit() {
       name: name.value.trim(),
       parentId: props.parentId ?? null,
       autoRoundLimit: autoRoundLimit.value,
+      mailMode: mailMode.value,
       members: members.value.map((m) => ({
         agentId: m.agentId as string,
         memberAlias: m.memberAlias.trim(),
       })),
     });
-    ElMessage.success(t('common.msg.operationSuccess'));
+    ElMessage.success(t('common.msg.createSuccess'));
     emit('created', detail);
     emit('update:visible', false);
   } catch (error) {
@@ -242,6 +252,9 @@ async function submit() {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  width: 100%;
+}
+.mail-mode-select {
   width: 100%;
 }
 .member-row {

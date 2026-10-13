@@ -20,6 +20,8 @@ class GroupExecutionContext:
     member_chat_id: str
     member_alias: str
     assistant_message_id: Optional[str] = None
+    # 邮件投递模式：auto=轮次正常结束后自动投递；review=需用户逐封审核后投递
+    mail_mode: str = "auto"
 
 
 _current_group_context: ContextVar[Optional[GroupExecutionContext]] = ContextVar(

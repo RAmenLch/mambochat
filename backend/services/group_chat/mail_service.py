@@ -12,12 +12,19 @@
 import logging
 from typing import List, Optional, Sequence, Tuple, Dict, Any
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models import chat_model, group_chat_model
 from backend.crud import group_chat_crud
-from backend.schemas.enums import GroupMailState, GroupTaskKind, GroupTaskState
+from backend.schemas.enums import (
+    GroupMailMode,
+    GroupMailState,
+    GroupPauseReason,
+    GroupStatus,
+    GroupTaskKind,
+    GroupTaskState,
+)
 from backend.schemas.group_chat import normalize_member_alias
 from backend.exceptions import AppHTTPException
 from backend.config.timezone_config import get_configured_now
@@ -31,6 +38,9 @@ class MailErrorCode:
     UNKNOWN_RECIPIENT = "GROUP_MAIL_UNKNOWN_RECIPIENT"
     IDEMPOTENCY_CONFLICT = "GROUP_MAIL_IDEMPOTENCY_CONFLICT"
     NO_CONTEXT = "GROUP_MAIL_NO_CONTEXT"
+    MAIL_NOT_FOUND = "GROUP_MAIL_NOT_FOUND"
+    INVALID_STATE = "GROUP_MAIL_INVALID_STATE"
+    REJECT_REASON_REQUIRED = "GROUP_MAIL_REJECT_REASON_REQUIRED"
 
 
 def _bad(code: str, detail: str, status: int = 400) -> AppHTTPException:
@@ -314,14 +324,26 @@ async def commit_group_turn(
                 receipt.readAt = now
                 receipt.readByTaskId = task.id
 
-    # 2. 提交暂存邮件（按 toolCallOrder）
+    # 2. 提交待投递邮件：本轮暂存的 + 该发件人此前“已同意但同批存在拒绝而暂缓”的（deferred）
     result = await db.execute(
         select(group_chat_model.GroupMail)
         .filter(
-            group_chat_model.GroupMail.sourceTaskId == task.id,
-            group_chat_model.GroupMail.state == GroupMailState.STAGED.value,
+            group_chat_model.GroupMail.groupId == group_state.groupId,
+            or_(
+                and_(
+                    group_chat_model.GroupMail.sourceTaskId == task.id,
+                    group_chat_model.GroupMail.state == GroupMailState.STAGED.value,
+                ),
+                and_(
+                    group_chat_model.GroupMail.senderChatId == task.memberChatId,
+                    group_chat_model.GroupMail.state == GroupMailState.DEFERRED.value,
+                ),
+            ),
         )
-        .order_by(group_chat_model.GroupMail.toolCallOrder.asc())
+        .order_by(
+            group_chat_model.GroupMail.createdAt.asc(),
+            group_chat_model.GroupMail.toolCallOrder.asc(),
+        )
     )
     staged_mails = list(result.scalars().all())
 
@@ -358,3 +380,211 @@ async def commit_group_turn(
 
     await db.commit()
     return sent
+
+
+# ──────────────────────────────────────────────
+# 审核模式（mail_review）
+# ──────────────────────────────────────────────
+
+class ReviewOutcome:
+    """审核批次定稿结果。pending>0 表示该批仍有邮件待用户审核。"""
+
+    def __init__(
+        self,
+        pending: int = 0,
+        finalized: bool = False,
+        delivered: Optional[List[Tuple[str, Optional[int]]]] = None,
+        decision_text: Optional[str] = None,
+        sender_chat_id: Optional[str] = None,
+    ) -> None:
+        self.pending = pending
+        self.finalized = finalized
+        self.delivered = delivered or []
+        self.decision_text = decision_text
+        self.sender_chat_id = sender_chat_id
+
+
+async def _task_mails(
+    db: AsyncSession, task_id: str, states: Sequence[str]
+) -> List[group_chat_model.GroupMail]:
+    result = await db.execute(
+        select(group_chat_model.GroupMail)
+        .filter(
+            group_chat_model.GroupMail.sourceTaskId == task_id,
+            group_chat_model.GroupMail.state.in_(list(states)),
+        )
+        .order_by(group_chat_model.GroupMail.toolCallOrder.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def hold_for_review(
+    db: AsyncSession,
+    task: group_chat_model.GroupTask,
+    group_state: group_chat_model.GroupState,
+) -> int:
+    """
+    审核模式：轮次正常结束后不投递，把本轮 staged 邮件转入 reviewing，并暂停整群等待用户逐封审核。
+    该轮任务停在 ready_to_commit（邮件提交尚未完成），activeTaskId 保留；期间不触发任何收件成员。
+    既无 staged 也无 reviewing 邮件时（含重启恢复场景）按正常结束处理。
+    返回进入待审核的邮件数。
+    """
+    now = get_configured_now()
+    staged = await _task_mails(db, task.id, [GroupMailState.STAGED.value])
+    reviewing = await _task_mails(db, task.id, [GroupMailState.REVIEWING.value])
+    if not staged and not reviewing:
+        await commit_group_turn(db, task, group_state)
+        return 0
+
+    for mail in staged:
+        mail.state = GroupMailState.REVIEWING.value
+
+    task.state = GroupTaskState.READY_TO_COMMIT.value
+    task.finishedAt = now
+    group_state.status = GroupStatus.PAUSED.value
+    group_state.pauseReason = GroupPauseReason.MAIL_REVIEW.value
+    group_state.version = (group_state.version or 0) + 1
+    group_state.updatedAt = now
+    await db.commit()
+    return len(staged) + len(reviewing)
+
+
+async def list_review_queue(
+    db: AsyncSession, group_id: str, decided_limit: int = 50
+) -> Tuple[List[group_chat_model.GroupMail], List[group_chat_model.GroupMail]]:
+    """返回 (待审核邮件, 已决策邮件)。已决策含 rejected（被拒）与 deferred（已同意、待下一轮一并投递）。"""
+    pending_result = await db.execute(
+        select(group_chat_model.GroupMail)
+        .filter(
+            group_chat_model.GroupMail.groupId == group_id,
+            group_chat_model.GroupMail.state == GroupMailState.REVIEWING.value,
+        )
+        .order_by(group_chat_model.GroupMail.createdAt.asc())
+    )
+    decided_result = await db.execute(
+        select(group_chat_model.GroupMail)
+        .filter(
+            group_chat_model.GroupMail.groupId == group_id,
+            group_chat_model.GroupMail.state.in_(
+                [GroupMailState.REJECTED.value, GroupMailState.DEFERRED.value]
+            ),
+        )
+        .order_by(group_chat_model.GroupMail.createdAt.desc())
+        .limit(decided_limit)
+    )
+    return list(pending_result.scalars().all()), list(decided_result.scalars().all())
+
+
+async def get_group_mail(
+    db: AsyncSession, group_id: str, mail_id: str
+) -> group_chat_model.GroupMail:
+    result = await db.execute(
+        select(group_chat_model.GroupMail).filter(
+            group_chat_model.GroupMail.id == mail_id,
+            group_chat_model.GroupMail.groupId == group_id,
+        )
+    )
+    mail = result.scalars().first()
+    if mail is None:
+        raise _bad(MailErrorCode.MAIL_NOT_FOUND, "mail_not_found", 404)
+    return mail
+
+
+def _mail_label(mail: group_chat_model.GroupMail) -> str:
+    title = (mail.title or "").strip()
+    return f"「{title}」" if title else "（无标题邮件）"
+
+
+def build_review_decision_message(
+    rejected: Sequence[group_chat_model.GroupMail],
+    agreed: Sequence[group_chat_model.GroupMail],
+) -> str:
+    """
+    把审批结果整理成注入发信人子会话的 user message。
+    例：[system messages] 用户拒绝「方案A」原因：论据不足；用户同意「方案B」-> 已加入本轮待发箱，将在本轮正常结束后投递。
+    """
+    parts: List[str] = []
+    for mail in rejected:
+        reason = (mail.rejectReason or "").strip() or "未说明"
+        parts.append(f"用户拒绝{_mail_label(mail)}原因：{reason}")
+    if agreed:
+        labels = "、".join(_mail_label(m) for m in agreed)
+        parts.append(f"用户同意{labels}-> 已加入本轮待发箱，将在本轮正常结束后投递。")
+    return "[system messages] " + "；".join(parts)
+
+
+async def approve_mail(db: AsyncSession, group_id: str, mail_id: str) -> ReviewOutcome:
+    """用户同意投递：reviewing -> staged（回到待投递）。"""
+    mail = await get_group_mail(db, group_id, mail_id)
+    if mail.state != GroupMailState.REVIEWING.value:
+        raise _bad(MailErrorCode.INVALID_STATE, "mail_not_reviewing", 409)
+    mail.state = GroupMailState.STAGED.value
+    mail.reviewedAt = get_configured_now()
+    await db.flush()
+    return await _maybe_finalize_review(db, group_id, mail.sourceTaskId)
+
+
+async def reject_mail(
+    db: AsyncSession, group_id: str, mail_id: str, reason: str
+) -> ReviewOutcome:
+    """用户拒绝投递：reviewing -> rejected，记录必填的拒绝原因。"""
+    clean_reason = (reason or "").strip()
+    if not clean_reason:
+        raise _bad(MailErrorCode.REJECT_REASON_REQUIRED, "reject_reason_required", 400)
+    mail = await get_group_mail(db, group_id, mail_id)
+    if mail.state != GroupMailState.REVIEWING.value:
+        raise _bad(MailErrorCode.INVALID_STATE, "mail_not_reviewing", 409)
+    mail.state = GroupMailState.REJECTED.value
+    mail.rejectReason = clean_reason
+    mail.reviewedAt = get_configured_now()
+    await db.flush()
+    return await _maybe_finalize_review(db, group_id, mail.sourceTaskId)
+
+
+async def _maybe_finalize_review(
+    db: AsyncSession, group_id: str, task_id: str
+) -> ReviewOutcome:
+    """
+    同一批（同一次轮次产生的邮件）全部审批完成后定稿：
+    - 无拒绝：立即按正常结束提交投递（与自动模式一致），并顺带投递该发件人此前 deferred 的邮件。
+    - 存在拒绝：同意的邮件转 deferred（本轮不投递、不触发收件人），本轮结束；
+      返回需要注入发信人的「拒绝/同意」结果消息，用于触发发信人再生成一次。
+    """
+    task = await group_chat_crud.get_task(db, task_id)
+    state = await group_chat_crud.get_group_state(db, group_id)
+    if task is None or state is None:
+        raise _bad(MailErrorCode.MAIL_NOT_FOUND, "group_task_not_found", 404)
+
+    remaining = await _task_mails(db, task.id, [GroupMailState.REVIEWING.value])
+    if remaining:
+        return ReviewOutcome(pending=len(remaining))
+
+    now = get_configured_now()
+    rejected = await _task_mails(db, task.id, [GroupMailState.REJECTED.value])
+    agreed = await _task_mails(db, task.id, [GroupMailState.STAGED.value])
+
+    if rejected:
+        for mail in agreed:
+            mail.state = GroupMailState.DEFERRED.value
+        task.state = GroupTaskState.SUCCEEDED.value
+        task.finishedAt = now
+        if state.activeTaskId == task.id:
+            state.activeTaskId = None
+        state.status = GroupStatus.READY.value
+        state.pauseReason = None
+        state.version = (state.version or 0) + 1
+        state.updatedAt = now
+        await db.commit()
+        return ReviewOutcome(
+            finalized=True,
+            decision_text=build_review_decision_message(rejected, agreed),
+            sender_chat_id=task.memberChatId,
+        )
+
+    # 全部同意
+    state.status = GroupStatus.READY.value
+    state.pauseReason = None
+    delivered = await commit_group_turn(db, task, state)
+    return ReviewOutcome(
+        finalized=True, delivered=delivered, sender_chat_id=task.memberChatId
+    )

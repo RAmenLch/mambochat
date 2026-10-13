@@ -22,7 +22,7 @@ from backend.database import AsyncSessionLocal
 from backend.models import group_chat_model
 from backend.crud import group_chat_crud
 from backend.schemas.enums import (
-    GroupStatus, GroupPauseReason, GroupTaskKind, GroupTaskState,
+    GroupMailMode, GroupStatus, GroupPauseReason, GroupTaskKind, GroupTaskState,
 )
 from backend.config.timezone_config import get_configured_now
 from backend.services.group_chat import generation_bridge, mail_service, events
@@ -157,6 +157,13 @@ class GroupScheduler:
                 if state is None:
                     continue
                 try:
+                    if (state.mailMode or GroupMailMode.AUTO.value) == GroupMailMode.REVIEW.value:
+                        # 审核模式：绝不自动投递，重新进入待审核并暂停
+                        await mail_service.hold_for_review(db, task, state)
+                        await events.publish_group_state_changed(
+                            task.groupId, state.version, state.status, state.pauseReason
+                        )
+                        continue
                     sent = await mail_service.commit_group_turn(db, task, state)
                     for mail_id, sequence in sent:
                         await events.publish_group_mail_sent(

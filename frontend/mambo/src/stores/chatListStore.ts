@@ -313,6 +313,14 @@ export const useChatListStore = defineStore('chatList', () => {
               }
             }
 
+            // 群组：断线期间 group_* 通知可能丢失，重连后对当前打开中的群做一次对账
+            const openedGroupId = sessionStore.currentGroupId;
+            if (openedGroupId) {
+              useGroupChatStore()
+                .refresh(openedGroupId)
+                .catch(err => console.error('Failed to reconcile opened group after reconnect:', err));
+            }
+
           } catch (error) {
             console.error('Failed to check tasks status during reconnection:', error);
           }
@@ -354,7 +362,7 @@ export const useChatListStore = defineStore('chatList', () => {
             if (idx !== -1) chatList.value.splice(idx, 1);
             return;
           }
-          await groupStore.applyNotification(notification.context);
+          await groupStore.applyNotification(notification.context, notification.category);
         }
       },
       onError: (error: unknown) => {
