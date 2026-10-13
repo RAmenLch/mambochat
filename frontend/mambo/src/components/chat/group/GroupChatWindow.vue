@@ -521,7 +521,8 @@ async function onRejectAllMails(reason: string) {
 .group-window {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   box-sizing: border-box;
   overflow: hidden;
 }
@@ -564,6 +565,7 @@ async function onRejectAllMails(reason: string) {
 }
 .group-body {
   flex: 1;
+  min-height: 0;
   display: flex;
   gap: 16px;
   overflow: hidden;
@@ -657,3 +659,4 @@ async function onRejectAllMails(reason: string) {
   color: var(--el-text-color-secondary);
 }
 </style>
+yle>

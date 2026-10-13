@@ -46,6 +46,7 @@ const { isGroupSelected } = storeToRefs(useChatSessionStore())
 
 .mobile-main {
   height: 100%;
+  min-height: 0;
   width: 100%;
   display: flex;
   flex-direction: column;
@@ -54,6 +55,7 @@ const { isGroupSelected } = storeToRefs(useChatSessionStore())
 .group-mobile-bar {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
   padding: 4px 8px;
   border-bottom: 1px solid var(--color-border);
 }
