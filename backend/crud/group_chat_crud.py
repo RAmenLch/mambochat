@@ -87,13 +87,27 @@ async def get_mail(db: AsyncSession, mail_id: str) -> Optional[group_chat_model.
 
 
 async def list_sent_mail_page(
-    db: AsyncSession, group_id: str, after_sequence: Optional[int], limit: int
+    db: AsyncSession,
+    group_id: str,
+    after_sequence: Optional[int],
+    limit: int,
+    sender_aliases: Optional[Sequence[str]] = None,
+    recipient_chat_ids: Optional[Sequence[str]] = None,
 ) -> List[group_chat_model.GroupMail]:
-    """按已投递邮件的 sequence 游标分页（含游标之后，升序）。"""
+    """按已投递邮件的 sequence 游标分页（含游标之后，升序）；可按发信人 / 收信人过滤。"""
     stmt = select(group_chat_model.GroupMail).filter(
         group_chat_model.GroupMail.groupId == group_id,
         group_chat_model.GroupMail.state == GroupMailState.SENT.value,
     )
+    if sender_aliases:
+        stmt = stmt.filter(
+            group_chat_model.GroupMail.senderAliasSnapshot.in_(list(sender_aliases))
+        )
+    if recipient_chat_ids:
+        receipt_mail_ids = select(group_chat_model.GroupMailReceipt.mailId).filter(
+            group_chat_model.GroupMailReceipt.recipientChatId.in_(list(recipient_chat_ids))
+        )
+        stmt = stmt.filter(group_chat_model.GroupMail.id.in_(receipt_mail_ids))
     if after_sequence is not None:
         stmt = stmt.filter(group_chat_model.GroupMail.sequence > after_sequence)
     stmt = stmt.order_by(group_chat_model.GroupMail.sequence.asc()).limit(limit)

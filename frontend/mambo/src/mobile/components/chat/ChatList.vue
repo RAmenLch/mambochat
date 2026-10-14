@@ -217,6 +217,7 @@ import { useChatListStore } from '@/stores/chatListStore'
 import { useChatSessionStore, LAST_ACTIVE_CHAT_KEY } from '@/stores/chatSessionStore'
 import { useAgentStore } from '@/stores/agentStore' // [新增] 引入 LAST_ACTIVE_CHAT_KEY
 import { buildChatTree } from '@/utils/treeHelper'
+import { MASTER_MEMBER_ALIAS } from '@/api/types/groupChatTypes'
 import type { ChatSortMode } from '@/utils/treeHelper'
 import { isDefaultChatName, DEFAULT_CHAT_TITLE_KEY } from '@/utils/chatName'
 import type { BaseTreeItem, ChatNode, MoveRequest } from '@/api/types'
@@ -275,7 +276,11 @@ const decorateDefaultNames = (nodes: any[]): void => {
 
 const treeData = computed(
   () => {
-    const tree = buildChatTree(chatList.value, loadedFolderIds.value, chatSortMode.value) as unknown as BaseTreeItem[]
+    // 群保留成员 Master 代表用户本人，不作为可打开的普通子会话出现在会话树中
+    const visibleList = chatList.value.filter(
+      c => !(c.itemType === 'chat' && c.memberAlias === MASTER_MEMBER_ALIAS),
+    )
+    const tree = buildChatTree(visibleList, loadedFolderIds.value, chatSortMode.value) as unknown as BaseTreeItem[]
     decorateDefaultNames(tree)
     return tree
   },
@@ -283,7 +288,10 @@ const treeData = computed(
 
 const folderTreeData = computed(
   () => {
-    const tree = buildChatTree(chatList.value, loadedFolderIds.value) as ChatNode[]
+    const visibleList = chatList.value.filter(
+      c => !(c.itemType === 'chat' && c.memberAlias === MASTER_MEMBER_ALIAS),
+    )
+    const tree = buildChatTree(visibleList, loadedFolderIds.value) as ChatNode[]
     decorateDefaultNames(tree)
     return tree
   },

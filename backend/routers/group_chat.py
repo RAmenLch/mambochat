@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import APIRouter, Depends, status, Query
 from sqlalchemy import select
@@ -124,9 +124,38 @@ async def list_group_mails(
     group_id: str,
     afterSequence: Optional[int] = Query(None, description="游标：返回 sequence 大于该值的邮件"),
     limit: int = Query(50, ge=1, le=200),
+    sender: Optional[str] = Query(None, description="发信人别名，逗号分隔，多个取并集"),
+    recipient: Optional[str] = Query(None, description="收信人别名，逗号分隔，多个取并集；Master 表示用户本人"),
     db: AsyncSession = Depends(get_db),
 ):
-    rows = await group_chat_crud.list_sent_mail_page(db, group_id, afterSequence, limit)
+    sender_aliases = [a.strip() for a in (sender or "").split(",") if a.strip()]
+    recipient_aliases = [a.strip() for a in (recipient or "").split(",") if a.strip()]
+
+    recipient_chat_ids: List[str] = []
+    if recipient_aliases:
+        # 先确保用户成员 Master 存在，保证「收件人=用户」可被解析
+        group_node = await group_chat_crud.get_group_chat(db, group_id)
+        if group_node is not None:
+            _, master_created = await group_service.ensure_master_member(db, group_id)
+            if master_created:
+                await db.commit()
+            for alias in recipient_aliases:
+                member = await group_chat_crud.find_member_by_alias(db, group_id, alias)
+                if member is not None:
+                    recipient_chat_ids.append(member.id)
+
+    # 指定了收件人过滤但无一可解析：结果必然为空，避免退化为“不过滤”
+    if recipient_aliases and not recipient_chat_ids:
+        return schemas.GroupMailListResponse(items=[], nextAfterSequence=afterSequence, hasMore=False)
+
+    rows = await group_chat_crud.list_sent_mail_page(
+        db,
+        group_id,
+        afterSequence,
+        limit,
+        sender_aliases=sender_aliases or None,
+        recipient_chat_ids=recipient_chat_ids or None,
+    )
     items = [_mail_to_response(m) for m in rows]
     next_after = items[-1].sequence if items else afterSequence
     return schemas.GroupMailListResponse(

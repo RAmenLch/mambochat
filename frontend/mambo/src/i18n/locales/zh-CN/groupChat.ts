@@ -16,6 +16,7 @@ export default {
     aliasPlaceholder: '群内唯一，例如：分析员',
     aliasHint: '同一 Agent 可重复选择；邮箱地址即成员别名，选择 Agent 后自动按 Agent 名称填充。',
     aliasDuplicateHint: '群内别名重复：{aliases}，请修改后再创建。',
+    aliasReservedHint: '“{alias}” 是保留成员（用户本人），不能用作成员别名。',
     minMembersHint: '至少需要 3 个成员。',
     defaultMemberAlias: '成员',
     submit: '创建',
@@ -43,8 +44,14 @@ export default {
     title: '成员',
     unread: '未读',
     pending: '排队',
+    userTag: '用户',
     openSubSession: '打开子会话',
     processUnread: '处理未读邮件',
+  },
+  filter: {
+    sender: '发信人',
+    recipient: '收信人',
+    empty: '没有符合筛选条件的邮件。',
   },
   recovery: {
     taskLine: '{alias} · {kind} · {state}',

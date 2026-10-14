@@ -8,7 +8,7 @@
 """
 
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,7 +22,7 @@ from backend.schemas.enums import (
 )
 from backend.schemas.group_chat import (
     GroupChatCreate, GroupSettingsUpdate, normalize_member_alias,
-    MEMBER_ALIAS_MAX_LEN,
+    MEMBER_ALIAS_MAX_LEN, MASTER_ALIAS, MASTER_SORT_ORDER,
 )
 from backend.exceptions import AppHTTPException
 from backend.config.timezone_config import get_configured_now
@@ -38,6 +38,7 @@ class GroupErrorCode:
     MEMBER_COUNT_INVALID = "GROUP_MEMBER_COUNT_INVALID"
     ALIAS_DUPLICATE = "GROUP_ALIAS_DUPLICATE"
     ALIAS_INVALID = "GROUP_ALIAS_INVALID"
+    ALIAS_RESERVED = "GROUP_ALIAS_RESERVED"
     AGENT_NOT_FOUND = "GROUP_AGENT_NOT_FOUND"
     PARENT_INVALID = "GROUP_PARENT_INVALID"
     STRUCTURE_INVALID = "GROUP_STRUCTURE_INVALID"
@@ -82,6 +83,35 @@ async def _next_sort_order(db: AsyncSession, parent_id: Optional[str]) -> int:
     return (max_order if max_order is not None else -1) + 1
 
 
+def is_master_member(chat: Optional[chat_model.Chat]) -> bool:
+    """判断成员是否为保留的用户成员 Master。"""
+    return bool(chat is not None and chat.memberAlias == MASTER_ALIAS)
+
+
+async def ensure_master_member(
+    db: AsyncSession, group_id: str
+) -> Tuple[chat_model.Chat, bool]:
+    """
+    确保群内存在保留成员 Master（= 用户本人），不存在则补建。
+    返回 (Master 成员节点, 是否本次新建)。只 flush，不 commit，事务由调用方持有。
+    """
+    existing = await group_chat_crud.find_member_by_alias(db, group_id, MASTER_ALIAS)
+    if existing is not None:
+        return existing, False
+    node = chat_model.Chat(
+        name=MASTER_ALIAS,
+        itemType="chat",
+        chatMode="agent",
+        agentId=None,
+        parentId=group_id,
+        memberAlias=MASTER_ALIAS,
+        sortOrder=MASTER_SORT_ORDER,
+    )
+    db.add(node)
+    await db.flush()
+    return node, True
+
+
 async def _validate_parent(db: AsyncSession, parent_id: Optional[str]) -> Optional[str]:
     """校验群组父节点位置；返回规范化后的 parentId（None 表示根目录）。"""
     if parent_id in (None, "", "root"):
@@ -121,8 +151,12 @@ async def create_group_chat(
             raise _bad(GroupErrorCode.ALIAS_INVALID, str(e))
         if alias in seen:
             raise _bad(GroupErrorCode.ALIAS_DUPLICATE, f"duplicate alias: {alias}")
+        if alias == MASTER_ALIAS:
+            raise _bad(GroupErrorCode.ALIAS_RESERVED, f"reserved alias: {MASTER_ALIAS}")
         seen.add(alias)
         normalized_aliases.append(alias)
+    # 保留别名先占位，避免与自动追加的 Master 成员冲突
+    seen.add(MASTER_ALIAS)
 
     parent_id = await _validate_parent(db, payload.parentId)
 
@@ -164,6 +198,18 @@ async def create_group_chat(
         db.add(state)
 
         member_nodes: List[chat_model.Chat] = []
+        # 保留成员 Master（= 用户本人），无 Agent、不参与生成调度
+        master_node = chat_model.Chat(
+            name=MASTER_ALIAS,
+            itemType="chat",
+            chatMode="agent",
+            agentId=None,
+            parentId=group_node.id,
+            memberAlias=MASTER_ALIAS,
+            sortOrder=MASTER_SORT_ORDER,
+        )
+        db.add(master_node)
+        member_nodes.append(master_node)
         for index, member in enumerate(members):
             alias = normalized_aliases[index]
             member_node = chat_model.Chat(
@@ -221,21 +267,25 @@ def _build_detail(
     queued_map: Dict[str, int],
     total_auto_rounds: int = 0,
 ) -> schemas.GroupCreatedResponse:
-    members = [
-        schemas.GroupMemberResponse(
-            chatId=m.id,
-            memberAlias=m.memberAlias,
-            agentId=m.agentId,
-            agentName=agent_names.get(m.agentId) if m.agentId else None,
-            name=m.name,
-            sortOrder=m.sortOrder,
-            unreadCount=unread_map.get(m.id, 0),
-            pendingCount=queued_map.get(m.id, 0),
+    members = []
+    for m in member_nodes:
+        is_user = m.memberAlias == MASTER_ALIAS
+        members.append(
+            schemas.GroupMemberResponse(
+                chatId=m.id,
+                memberAlias=m.memberAlias,
+                agentId=m.agentId,
+                agentName=agent_names.get(m.agentId) if m.agentId else None,
+                name=m.name,
+                sortOrder=m.sortOrder,
+                # 用户成员不参与生成调度，未读/排队对自身无意义，恒为 0
+                unreadCount=0 if is_user else unread_map.get(m.id, 0),
+                pendingCount=0 if is_user else queued_map.get(m.id, 0),
+                isUser=is_user,
+            )
         )
-        for m in member_nodes
-    ]
-    total_unread = sum(unread_map.values())
-    total_queued = sum(queued_map.values())
+    total_unread = sum(mm.unreadCount for mm in members)
+    total_queued = sum(mm.pendingCount for mm in members)
     return schemas.GroupCreatedResponse(
         groupId=group_node.id,
         name=group_node.name,
@@ -305,6 +355,11 @@ async def get_group_detail(db: AsyncSession, group_id: str) -> schemas.GroupDeta
     state = await group_chat_crud.get_group_state(db, group_id)
     if not state:
         raise _bad(GroupErrorCode.STRUCTURE_INVALID, "group_state_missing", 500)
+
+    # 确保保留成员 Master（= 用户本人）存在；存量群按需补建（不强制迁移）
+    _, master_created = await ensure_master_member(db, group_id)
+    if master_created:
+        await db.commit()
 
     member_nodes = await group_chat_crud.list_member_chats(db, group_id)
 
@@ -399,7 +454,9 @@ async def validate_group_structure(db: AsyncSession, group_id: str) -> None:
     存量异常引用在执行前检测到时应暂停群组，而非降级为普通会话。
     """
     members = await group_chat_crud.list_member_chats(db, group_id)
-    if len(members) < MIN_GROUP_MEMBERS:
+    # 保留成员 Master（用户本人）不计入最少成员数，也不要求绑定 Agent
+    agent_members = [m for m in members if m.memberAlias != MASTER_ALIAS]
+    if len(agent_members) < MIN_GROUP_MEMBERS:
         raise _bad(GroupErrorCode.STRUCTURE_INVALID, "member_count_below_minimum")
     aliases = set()
     for m in members:
@@ -410,6 +467,8 @@ async def validate_group_structure(db: AsyncSession, group_id: str) -> None:
         if m.memberAlias in aliases:
             raise _bad(GroupErrorCode.STRUCTURE_INVALID, f"member_alias_dup:{m.memberAlias}")
         aliases.add(m.memberAlias)
+        if m.memberAlias == MASTER_ALIAS:
+            continue
         if not m.agentId:
             raise _bad(GroupErrorCode.STRUCTURE_INVALID, f"member_missing_agent:{m.id}")
         agent = await db.get(agent_model.Agent, m.agentId)

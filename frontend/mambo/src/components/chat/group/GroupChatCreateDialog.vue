@@ -61,6 +61,9 @@
         <div v-if="duplicateAliases.length" class="hint warn">
           {{ $t('groupChat.create.aliasDuplicateHint', { aliases: duplicateAliases.join('、') }) }}
         </div>
+        <div v-if="reservedAliases.length" class="hint warn">
+          {{ $t('groupChat.create.aliasReservedHint', { alias: MASTER_MEMBER_ALIAS }) }}
+        </div>
         <div v-if="members.length < 3" class="hint warn">
           {{ $t('groupChat.create.minMembersHint') }}
         </div>
@@ -84,6 +87,7 @@ import { useI18n } from 'vue-i18n';
 import { storeToRefs } from 'pinia';
 import { createGroupChat } from '@/api/groupChatService';
 import type { GroupCreatedResponse, GroupMailMode } from '@/api/types/groupChatTypes';
+import { MASTER_MEMBER_ALIAS } from '@/api/types/groupChatTypes';
 import { useAgentStore } from '@/stores/agentStore';
 
 const props = defineProps<{
@@ -214,10 +218,18 @@ const duplicateAliases = computed(() => {
     .map(([alias]) => alias);
 });
 
+/** 使用了保留别名（Master = 用户本人） */
+const reservedAliases = computed(() =>
+  members.value
+    .map((m) => sanitizeAlias(m.memberAlias))
+    .filter((alias) => alias === MASTER_MEMBER_ALIAS),
+);
+
 const canSubmit = computed(() => {
   if (!name.value.trim()) return false;
   if (members.value.length < 3) return false;
   if (duplicateAliases.value.length > 0) return false;
+  if (reservedAliases.value.length > 0) return false;
   return members.value.every((m) => !!m.agentId && !!m.memberAlias.trim());
 });
 

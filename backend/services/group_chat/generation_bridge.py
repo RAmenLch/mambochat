@@ -26,7 +26,7 @@ from backend.schemas.enums import (
     MessageRole, MessageStatus, SubMessageType,
     GroupMailMode, GroupStatus, GroupPauseReason, GroupTaskKind, GroupTaskState, GroupMailState,
 )
-from backend.schemas.group_chat import normalize_member_alias
+from backend.schemas.group_chat import normalize_member_alias, MASTER_ALIAS
 from backend.config.timezone_config import get_configured_now
 from backend.exceptions import AppHTTPException
 from backend.services.stream_manager_service import stream_manager
@@ -95,6 +95,8 @@ async def enqueue_user_turn(
 
     members = await group_chat_crud.list_member_chats(db, group_id)
     member_by_alias = {m.memberAlias: m for m in members if m.memberAlias}
+    # 保留成员 Master（= 用户本人）不是生成目标：广播与显式 @ 都排除
+    agent_members = [m for m in members if m.memberAlias != MASTER_ALIAS]
 
     if recipient_names:
         resolved: List[chat_model.Chat] = []
@@ -104,6 +106,8 @@ async def enqueue_user_turn(
                 alias = normalize_member_alias(raw)
             except ValueError as e:
                 raise _bad(BridgeErrorCode.UNKNOWN_RECIPIENT, f"invalid_recipient:{e}")
+            if alias == MASTER_ALIAS:
+                raise _bad(BridgeErrorCode.UNKNOWN_RECIPIENT, "cannot_target_user")
             member = member_by_alias.get(alias)
             if member is None:
                 raise _bad(BridgeErrorCode.UNKNOWN_RECIPIENT, f"unknown_recipient:{alias}")
@@ -113,13 +117,16 @@ async def enqueue_user_turn(
             resolved.append(member)
         targets = resolved
     else:
-        targets = members
+        targets = agent_members
 
     if not targets:
         raise _bad(BridgeErrorCode.NOT_RUNNABLE, "no_target_members")
 
     # 当前成员 sortOrder、id 排序后按 sequence FIFO
     targets = sorted(targets, key=lambda m: (m.sortOrder, m.id))
+
+    # 确保用户成员 Master 存在，用于把本次用户发言记为「来自 Master 的邮件」
+    master, _ = await group_service.ensure_master_member(db, group_id)
 
     created_ids: List[str] = []
     for member in targets:
@@ -140,6 +147,9 @@ async def enqueue_user_turn(
         await db.flush()
         created_ids.append(task.id)
 
+    # 用户本人发言 → 记为一封来自 Master 的已投递邮件（sender=用户）
+    user_mail = await mail_service.record_user_mail(db, state, master, targets, content)
+
     state.version = (state.version or 0) + 1
     # 单次发起沟通：新的用户群输入开启新的额度周期，自动邮件轮次计数清零
     state.autoRoundCount = 0
@@ -149,6 +159,9 @@ async def enqueue_user_turn(
         await events.publish_group_task_changed(
             group_id, tid, "", GroupTaskState.QUEUED.value, version=state.version
         )
+    await events.publish_group_mail_sent(
+        group_id, user_mail.id, user_mail.sequence, version=state.version
+    )
     return schemas.GroupTaskAccepted(groupId=group_id, taskIds=created_ids)
 
 

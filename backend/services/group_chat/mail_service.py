@@ -16,6 +16,7 @@ from sqlalchemy import select, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models import chat_model, group_chat_model
+from backend.models.base_model import generate_uuid
 from backend.crud import group_chat_crud
 from backend.schemas.enums import (
     GroupMailMode,
@@ -25,7 +26,7 @@ from backend.schemas.enums import (
     GroupTaskKind,
     GroupTaskState,
 )
-from backend.schemas.group_chat import normalize_member_alias
+from backend.schemas.group_chat import normalize_member_alias, MASTER_ALIAS
 from backend.exceptions import AppHTTPException
 from backend.config.timezone_config import get_configured_now
 from backend.services.group_chat.runtime import GroupExecutionContext
@@ -154,6 +155,57 @@ async def stage_mail(
         createdAt=get_configured_now(),
     )
     db.add(mail)
+    await db.flush()
+    return mail
+
+
+async def record_user_mail(
+    db: AsyncSession,
+    group_state: group_chat_model.GroupState,
+    master_chat: chat_model.Chat,
+    recipients: Sequence[chat_model.Chat],
+    content: str,
+    title: Optional[str] = None,
+) -> group_chat_model.GroupMail:
+    """
+    把用户本人的群发言记为「一封来自 Master 的邮件」直接投递到邮件流。
+    - 立即投递（sent），不受审核模式影响（用户即审核者）。
+    - 生成收件记录并直接标记已读：用户消息已由 user_message 任务驱动收件人，
+      此处不再登记 mail_notice，避免重复触发收件人再生成。
+    """
+    now = get_configured_now()
+    seq = group_state.nextMailSeq or 0
+    group_state.nextMailSeq = seq + 1
+
+    mail = group_chat_model.GroupMail(
+        groupId=group_state.groupId,
+        sourceTaskId=generate_uuid(),
+        senderChatId=master_chat.id,
+        senderAliasSnapshot=MASTER_ALIAS,
+        recipientSnapshot=[
+            {"memberChatId": r.id, "memberName": r.memberAlias} for r in recipients
+        ],
+        title=title,
+        content=content,
+        toolCallId=generate_uuid(),
+        toolCallOrder=0,
+        state=GroupMailState.SENT.value,
+        sequence=seq,
+        createdAt=now,
+        sentAt=now,
+    )
+    db.add(mail)
+    await db.flush()
+
+    for r in recipients:
+        db.add(
+            group_chat_model.GroupMailReceipt(
+                mailId=mail.id,
+                recipientChatId=r.id,
+                readAt=now,
+                createdAt=now,
+            )
+        )
     await db.flush()
     return mail
 
@@ -310,6 +362,10 @@ async def commit_group_turn(
 
     now = get_configured_now()
 
+    # 保留成员 Master（= 用户本人）不执行生成，投递时不为其登记邮件通知任务
+    master = await group_chat_crud.find_member_by_alias(db, group_state.groupId, MASTER_ALIAS)
+    master_chat_id = master.id if master else None
+
     # 1. 确认已读（仅快照内）
     if task.mailReadRequested:
         receipt_ids = list(task.snapshotReceiptIds or [])
@@ -368,7 +424,8 @@ async def commit_group_turn(
             )
             db.add(receipt)
             await db.flush()
-            await enqueue_mail_notice(db, group_state, recipient_chat_id, receipt)
+            if recipient_chat_id != master_chat_id:
+                await enqueue_mail_notice(db, group_state, recipient_chat_id, receipt)
 
     # 3. 结束轮次
     task.state = GroupTaskState.SUCCEEDED.value

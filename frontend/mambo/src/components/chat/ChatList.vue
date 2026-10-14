@@ -37,12 +37,19 @@
         </template>
 
         <template #item-icon="{ data }">
-          <el-icon
-            v-if="data.itemType === 'folder' && data.folderType === 'group'"
-            color="var(--el-color-primary)"
-          >
-            <UserFilled />
-          </el-icon>
+          <template v-if="data.itemType === 'folder' && data.folderType === 'group'">
+            <div v-if="getGroupMemberAvatars(data.id).length" class="tree-group-avatar">
+              <el-avatar
+                v-for="(url, i) in getGroupMemberAvatars(data.id).slice(0, 3)"
+                :key="i"
+                :size="14"
+                :src="url"
+                class="tree-group-avatar-item"
+                :style="{ zIndex: 3 - i }"
+              />
+            </div>
+            <el-icon v-else color="var(--el-color-primary)"><UserFilled /></el-icon>
+          </template>
           <el-icon v-else-if="data.itemType === 'folder'">
             <Folder />
           </el-icon>
@@ -206,8 +213,10 @@ import { useChatSessionStore, LAST_ACTIVE_CHAT_KEY } from '@/stores/chatSessionS
 import { useProviderStore } from '@/stores/providerStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useAgentStore } from '@/stores/agentStore';
+import { useGroupChatStore } from '@/stores/groupChatStore';
 
 import { buildChatTree } from '@/utils/treeHelper';
+import { MASTER_MEMBER_ALIAS } from '@/api/types/groupChatTypes';
 import type { ChatSortMode } from '@/utils/treeHelper';
 import { isDefaultChatName, DEFAULT_CHAT_TITLE_KEY } from '@/utils/chatName';
 import { useTreeController, type DialogPayload, type DialogConfirmPayload } from '@/composables/useTreeController';
@@ -277,7 +286,11 @@ function toggleSortMode() {
 // buildChatTree 已深拷贝数据，此处仅替换显示层副本的 name，
 // 不会污染 store 中的真实会话数据（重命名/右键菜单/路径均基于显示名）
 const treeData = computed(() => {
-  const tree = buildChatTree(chatList.value, loadedFolderIds.value, chatSortMode.value) as unknown as BaseTreeItem[];
+  // 群保留成员 Master 代表用户本人，不作为可打开的普通子会话出现在会话树中
+  const visibleList = chatList.value.filter(
+    c => !(c.itemType === 'chat' && c.memberAlias === MASTER_MEMBER_ALIAS),
+  );
+  const tree = buildChatTree(visibleList, loadedFolderIds.value, chatSortMode.value) as unknown as BaseTreeItem[];
   type TreeNodeWithChildren = BaseTreeItem & { children?: BaseTreeItem[] };
   const decorateDefaultNames = (nodes: BaseTreeItem[]) => {
     nodes.forEach(node => {
@@ -331,6 +344,50 @@ const getAgentAvatarUrl = (agentId: string | null | undefined): string | null =>
   const agent = agentStore.allAgents.find(a => a.id === agentId);
   return agent?.agentAvatarUrl ? (resolveFileUrl(agent.agentAvatarUrl) ?? null) : null;
 };
+
+// 群组节点头像：把成员 Agent 的头像叠在一起，营造"群"的感觉
+const groupChatStore = useGroupChatStore();
+
+const groupMemberAvatars = computed<Record<string, string[]>>(() => {
+  const map: Record<string, string[]> = {};
+  const groups = chatList.value.filter(c => c.itemType === 'folder' && c.folderType === 'group');
+  for (const group of groups) {
+    const urls: string[] = [];
+    // 来源1：会话列表中已加载的群成员子会话
+    for (const child of chatList.value) {
+      if (child.parentId === group.id && child.itemType === 'chat' && child.agentId) {
+        const url = getAgentAvatarUrl(child.agentId);
+        if (url) urls.push(url);
+      }
+    }
+    // 来源2：已打开的群详情
+    if (urls.length === 0) {
+      for (const member of groupChatStore.details[group.id]?.members ?? []) {
+        const url = getAgentAvatarUrl(member.agentId);
+        if (url) urls.push(url);
+      }
+    }
+    if (urls.length) map[group.id] = urls;
+  }
+  return map;
+});
+
+const getGroupMemberAvatars = (groupId: string): string[] => groupMemberAvatars.value[groupId] ?? [];
+
+/** 为列表中尚未取得成员头像的群节点补拉一次群详情（失败时退化为默认群图标） */
+async function ensureGroupMemberAvatars() {
+  const groups = chatList.value.filter(c => c.itemType === 'folder' && c.folderType === 'group');
+  await Promise.all(
+    groups.map(async group => {
+      if (groupMemberAvatars.value[group.id]) return;
+      try {
+        await groupChatStore.loadDetail(group.id);
+      } catch {
+        // ignore
+      }
+    }),
+  );
+}
 
 const isTitleRefreshing = computed(() => currentChat.value?.id ? refreshingTitleChatIds.value.has(currentChat.value.id) : false);
 
@@ -456,6 +513,7 @@ onMounted(async () => {
   await providerStore.fetchProviders();
   await agentStore.fetchAllAgents();
   await chatListStore.initializeList();
+  ensureGroupMemberAvatars();
   await router.isReady();
 
   let targetChatId = route.params.id as string;
@@ -701,6 +759,20 @@ async function handleSearchResultSelect(data: { chatId: string; subMessageId: st
 :deep(.tree-agent-avatar) {
   background-color: var(--el-fill-color-light);
   color: var(--el-text-color-secondary);
+}
+
+:deep(.tree-group-avatar) {
+  display: flex;
+  align-items: center;
+}
+
+:deep(.tree-group-avatar-item) {
+  background-color: var(--el-fill-color-light);
+  box-shadow: 0 0 0 1.5px var(--el-bg-color);
+}
+
+:deep(.tree-group-avatar-item + .tree-group-avatar-item) {
+  margin-left: -6px;
 }
 
 .el-divider {

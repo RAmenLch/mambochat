@@ -17,6 +17,12 @@ from backend.schemas.enums import (
 MEMBER_ALIAS_MIN_LEN = 1
 MEMBER_ALIAS_MAX_LEN = 64
 
+# 群组保留成员：Master 代表「用户本人」，不是 Agent。成员给 Master 发信即为给用户发信；
+# 用户本人的群发言会记为一封来自 Master 的邮件。该别名不允许被普通成员占用。
+MASTER_ALIAS = "Master"
+# Master 成员在成员列表中的排序权重（置顶）
+MASTER_SORT_ORDER = -1
+
 # 禁止的控制字符、换行、'@' 和英文逗号
 _FORBIDDEN_ALIAS_CHARS = re.compile(r"[\x00-\x1f\x7f@,]")
 
@@ -77,6 +83,8 @@ class GroupMemberResponse(BaseModel):
     sortOrder: int
     unreadCount: int = 0
     pendingCount: int = 0
+    # 是否为保留的「用户本人」成员（Master）：无 Agent、不参与生成调度
+    isUser: bool = False
 
 
 class GroupMailResponse(BaseModel):

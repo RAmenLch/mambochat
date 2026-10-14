@@ -98,6 +98,44 @@
 
       <div class="group-body">
         <div class="mail-column">
+          <div class="mail-filters">
+            <el-select
+              v-model="senderFilter"
+              multiple
+              collapse-tags
+              collapse-tags-tooltip
+              clearable
+              size="small"
+              class="filter-select"
+              :placeholder="$t('groupChat.filter.sender')"
+              @change="onFilterChange"
+            >
+              <el-option
+                v-for="opt in filterAliasOptions"
+                :key="`s-${opt.value}`"
+                :label="opt.label"
+                :value="opt.value"
+              />
+            </el-select>
+            <el-select
+              v-model="recipientFilter"
+              multiple
+              collapse-tags
+              collapse-tags-tooltip
+              clearable
+              size="small"
+              class="filter-select"
+              :placeholder="$t('groupChat.filter.recipient')"
+              @change="onFilterChange"
+            >
+              <el-option
+                v-for="opt in filterAliasOptions"
+                :key="`r-${opt.value}`"
+                :label="opt.label"
+                :value="opt.value"
+              />
+            </el-select>
+          </div>
           <GroupMailReviewPanel
             :pending="pendingReviewMails"
             :decided="decidedMails"
@@ -112,6 +150,7 @@
             :mails="mails"
             :loading="isLoading"
             :has-more="hasMore"
+            :empty-text="hasActiveFilter ? $t('groupChat.filter.empty') : undefined"
             @load-more="onLoadMore"
           />
         </div>
@@ -160,6 +199,44 @@ const members = computed(() => detail.value?.members ?? []);
 const mails = computed(() => (groupId.value ? groupStore.mails[groupId.value] ?? [] : []));
 const hasMore = computed(() => (groupId.value ? !!groupStore.mailHasMore[groupId.value] : false));
 const isLoading = computed(() => (groupId.value ? !!groupStore.loading[groupId.value] : false));
+
+// ── 邮件筛选：按发信人 / 收信人（含 Master=用户）过滤已投递邮件（服务端过滤） ──
+const senderFilter = ref<string[]>([]);
+const recipientFilter = ref<string[]>([]);
+const filterAliasOptions = computed(() =>
+  members.value
+    .filter((m) => !!m.memberAlias)
+    .map((m) => ({
+      value: m.memberAlias,
+      label: m.isUser
+        ? `${m.memberAlias}（${t('groupChat.member.userTag')}）`
+        : m.memberAlias,
+    })),
+);
+const hasActiveFilter = computed(
+  () => senderFilter.value.length > 0 || recipientFilter.value.length > 0,
+);
+
+function onFilterChange() {
+  const gid = groupId.value;
+  if (!gid) return;
+  groupStore.setMailFilters(gid, {
+    sender: senderFilter.value,
+    recipient: recipientFilter.value,
+  });
+  void groupStore.loadMails(gid, true, true);
+}
+
+// 切群时用该群已保存的筛选条件回填本地态
+watch(
+  groupId,
+  (gid) => {
+    const f = gid ? groupStore.mailFilters[gid] : undefined;
+    senderFilter.value = f?.sender ? [...f.sender] : [];
+    recipientFilter.value = f?.recipient ? [...f.recipient] : [];
+  },
+  { immediate: true },
+);
 
 const statusText = computed(() =>
   detail.value ? t(`groupChat.status.${detail.value.status}`) : '',
@@ -574,6 +651,15 @@ async function onRejectAllMails(reason: string) {
   flex: 1;
   overflow-y: auto;
   min-width: 0;
+}
+.mail-filters {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.mail-filters .filter-select {
+  width: 180px;
 }
 .side-column {
   width: 260px;

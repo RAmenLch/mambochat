@@ -44,8 +44,14 @@ export default {
     title: 'Members',
     unread: 'Unread',
     pending: 'Queued',
+    userTag: 'User',
     openSubSession: 'Open sub-session',
     processUnread: 'Process unread mails',
+  },
+  filter: {
+    sender: 'Sender',
+    recipient: 'Recipient',
+    empty: 'No mails match the filter.',
   },
   recovery: {
     taskLine: '{alias} · {kind} · {state}',

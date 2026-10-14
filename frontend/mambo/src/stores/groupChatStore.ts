@@ -25,10 +25,23 @@ export const useGroupChatStore = defineStore('groupChat', () => {
   const tasks = ref<Record<string, GroupTask[]>>({});
   const mailReviews = ref<Record<string, GroupMailReview>>({});
   const loading = ref<Record<string, boolean>>({});
+  /** 每个群当前生效的邮件筛选条件（发信人/收信人别名） */
+  const mailFilters = ref<Record<string, { sender: string[]; recipient: string[] }>>({});
 
   function ensure(groupId: string) {
     if (!mails.value[groupId]) mails.value[groupId] = [];
     if (!tasks.value[groupId]) tasks.value[groupId] = [];
+  }
+
+  /** 设置某群的邮件筛选条件（调用方随后应 reset 重新拉取） */
+  function setMailFilters(
+    groupId: string,
+    filters: { sender: string[]; recipient: string[] },
+  ): void {
+    mailFilters.value[groupId] = {
+      sender: [...filters.sender],
+      recipient: [...filters.recipient],
+    };
   }
 
   async function loadDetail(groupId: string): Promise<GroupDetail | null> {
@@ -49,7 +62,7 @@ export const useGroupChatStore = defineStore('groupChat', () => {
     // 否则新投递的邮件不可见，只能靠刷新页面。
     if (!force && mailHasMore.value[groupId] === false) return;
     const after = mailCursor.value[groupId] ?? null;
-    const page = await groupApi.listGroupMails(groupId, after);
+    const page = await groupApi.listGroupMails(groupId, after, 50, mailFilters.value[groupId]);
     // 去重合并，维持 sequence 稳定顺序
     const existing = new Map(mails.value[groupId].map((m) => [m.id, m]));
     for (const mail of page.items) existing.set(mail.id, mail);
@@ -195,11 +208,13 @@ export const useGroupChatStore = defineStore('groupChat', () => {
     tasks,
     mailReviews,
     loading,
+    mailFilters,
     loadDetail,
     loadMails,
     loadTasks,
     loadMailReviews,
     refresh,
+    setMailFilters,
     sendMessage,
     pause,
     resume,

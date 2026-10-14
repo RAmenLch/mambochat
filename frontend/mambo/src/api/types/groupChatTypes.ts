@@ -2,6 +2,9 @@
 
 export type GroupStatus = 'ready' | 'paused' | 'deleting'
 
+/** 保留成员别名：Master 代表「用户本人」，无 Agent、不参与生成，也不作为普通子会话出现 */
+export const MASTER_MEMBER_ALIAS = 'Master'
+
 export type GroupPauseReason =
   | 'manual'
   | 'review'
@@ -58,6 +61,8 @@ export interface GroupMember {
   sortOrder: number
   unreadCount: number
   pendingCount: number
+  /** 是否为保留的「用户本人」成员（Master）：无 Agent、不参与生成调度 */
+  isUser?: boolean
 }
 
 export interface GroupDetail {

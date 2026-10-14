@@ -112,7 +112,8 @@ const activeIndex = ref(0);
 const MAX_SUGGESTIONS = 8;
 
 const candidates = computed(() =>
-  props.members.filter((m) => !!(m.memberAlias || '').trim()),
+  // 保留成员 Master（= 用户本人）不是生成目标，不作为 @ 提及候选
+  props.members.filter((m) => !m.isUser && !!(m.memberAlias || '').trim()),
 );
 
 const suggestions = computed(() => {

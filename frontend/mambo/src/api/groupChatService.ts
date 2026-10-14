@@ -46,16 +46,25 @@ export const sendGroupMessage = (
   return apiClient.post(`/group-chats/${groupId}/messages`, data);
 };
 
-/** 按期邮件游标分页 */
+/** 邮件筛选条件：发信人 / 收信人均为成员别名（收信人含 Master=用户），空数组表示不筛选 */
+export interface GroupMailFilters {
+  sender?: string[]
+  recipient?: string[]
+}
+
+/** 按期邮件游标分页（可按发信人 / 收信人过滤；别名为逗号安全集，故用逗号拼接） */
 export const listGroupMails = (
   groupId: string,
   afterSequence?: number | null,
   limit = 50,
+  filters?: GroupMailFilters,
 ): Promise<GroupMailList> => {
   const params: Record<string, unknown> = { limit };
   if (afterSequence !== undefined && afterSequence !== null) {
     params.afterSequence = afterSequence;
   }
+  if (filters?.sender?.length) params.sender = filters.sender.join(',');
+  if (filters?.recipient?.length) params.recipient = filters.recipient.join(',');
   return apiClient.get(`/group-chats/${groupId}/mails`, { params });
 };
 

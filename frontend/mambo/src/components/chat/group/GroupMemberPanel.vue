@@ -13,6 +13,9 @@
         <div class="member-agent">{{ member.agentName || member.name }}</div>
       </div>
       <div class="member-actions">
+        <el-tag v-if="member.isUser" size="small" type="success" effect="plain">
+          {{ $t('groupChat.member.userTag') }}
+        </el-tag>
         <el-tag
           v-if="activeTaskOf(member.chatId)"
           size="small"
@@ -26,33 +29,35 @@
         <el-tag v-if="member.unreadCount > 0" size="small" type="warning">
           {{ $t('groupChat.member.unread') }} {{ member.unreadCount }}
         </el-tag>
-        <el-tooltip :content="$t('groupChat.member.processUnread')" placement="top">
-          <el-button
-            text
-            size="small"
-            :disabled="member.unreadCount === 0"
-            @click="emit('process-unread', member.chatId)"
+        <template v-if="!member.isUser">
+          <el-tooltip :content="$t('groupChat.member.processUnread')" placement="top">
+            <el-button
+              text
+              size="small"
+              :disabled="member.unreadCount === 0"
+              @click="emit('process-unread', member.chatId)"
+            >
+              <el-icon><Message /></el-icon>
+            </el-button>
+          </el-tooltip>
+          <el-tooltip
+            :content="
+              isWaitingHuman(member.chatId)
+                ? $t('groupChat.recovery.openSession')
+                : $t('groupChat.member.openSubSession')
+            "
+            placement="top"
           >
-            <el-icon><Message /></el-icon>
-          </el-button>
-        </el-tooltip>
-        <el-tooltip
-          :content="
-            isWaitingHuman(member.chatId)
-              ? $t('groupChat.recovery.openSession')
-              : $t('groupChat.member.openSubSession')
-          "
-          placement="top"
-        >
-          <el-button
-            text
-            size="small"
-            :type="isWaitingHuman(member.chatId) ? 'warning' : 'default'"
-            @click="emit('open-sub-session', member.chatId)"
-          >
-            <el-icon><Right /></el-icon>
-          </el-button>
-        </el-tooltip>
+            <el-button
+              text
+              size="small"
+              :type="isWaitingHuman(member.chatId) ? 'warning' : 'default'"
+              @click="emit('open-sub-session', member.chatId)"
+            >
+              <el-icon><Right /></el-icon>
+            </el-button>
+          </el-tooltip>
+        </template>
       </div>
     </div>
   </div>
