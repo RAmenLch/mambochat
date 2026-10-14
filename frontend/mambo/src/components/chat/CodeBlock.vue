@@ -1,5 +1,5 @@
 <template>
-  <div class="code-block-container">
+  <div class="code-block-container" ref="containerRef">
     <div v-if="showHeader" class="code-block-header">
       <span class="language-name">{{ language || 'text' }}</span>
       <div class="actions">
@@ -115,7 +115,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElImageViewer } from 'element-plus'
 import type { PropType } from 'vue'
@@ -186,6 +186,13 @@ const mermaidSvg = ref<string>('')
 const mermaidError = ref<string>('')
 const showSvgPreview = ref(false)
 const showMermaidPreview = ref(false)
+
+// 懒高亮：仅在代码块接近视口时才做 highlight.js 分词。
+// 会话中内联渲染的大附件若全量高亮会产生数万 <span>（曾占 DOM 85%），
+// 是滚动卡顿的主因之一。
+const containerRef = ref<HTMLElement | null>(null)
+const codeVisible = ref(false)
+let highlightObserver: IntersectionObserver | null = null
 
 const svgDataUrl = computed(() => {
   if (!isSvg.value || !props.code) return ''
@@ -265,18 +272,30 @@ onMounted(() => {
   if (isMermaid.value) {
     renderMermaid()
   }
-  applyHighlight()
+  setupLazyHighlight()
+})
+
+onBeforeUnmount(() => {
+  if (highlightObserver) {
+    highlightObserver.disconnect()
+    highlightObserver = null
+  }
 })
 
 watch(() => props.code, () => {
   if (isMermaid.value && (props.closed || !props.isGenerating)) {
     renderMermaid()
   }
-  applyHighlight()
+  if (codeVisible.value) {
+    applyHighlight()
+  } else {
+    // 尚未进入视口：保持纯文本占位，等可见时再分词
+    highlightedCode.value = escapeHtml(props.code)
+  }
 })
 
 watch(() => props.language, () => {
-  applyHighlight()
+  if (codeVisible.value) applyHighlight()
 })
 
 watch(() => props.isGenerating, (generating) => {
@@ -330,6 +349,27 @@ const applyHighlight = async () => {
     // 高亮库加载失败时回退为纯文本转义，保证代码可读
     if (seq === highlightSeq) highlightedCode.value = escapeHtml(props.code)
   }
+}
+
+/**
+ * 懒高亮调度：仅在代码块接近视口时执行一次 highlight.js 分词。
+ * 分词后保留结果（不做高亮回落），避免来回滚动时反复重算造成抖动。
+ */
+function setupLazyHighlight() {
+  if (typeof IntersectionObserver === 'undefined' || !containerRef.value) {
+    codeVisible.value = true
+    applyHighlight()
+    return
+  }
+  highlightObserver = new IntersectionObserver((entries) => {
+    if (entries.some((entry) => entry.isIntersecting)) {
+      codeVisible.value = true
+      applyHighlight()
+      highlightObserver?.disconnect()
+      highlightObserver = null
+    }
+  }, { root: null, rootMargin: '400px 0px', threshold: 0 })
+  highlightObserver.observe(containerRef.value)
 }
 
 watch(
@@ -441,6 +481,9 @@ const closeMermaidPreview = () => {
   max-height: 800px;
   overflow: auto;
   transition: max-height 0.25s ease-out;
+  /* 视口外的代码块跳过布局/绘制，滚动时不再为其重排重绘 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 300px;
 }
 
 .code-block-content.collapsed {

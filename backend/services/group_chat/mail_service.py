@@ -557,6 +557,9 @@ async def _maybe_finalize_review(
 
     remaining = await _task_mails(db, task.id, [GroupMailState.REVIEWING.value])
     if remaining:
+        # 本批尚未审完：仅持久化本次单封决策（同意/拒绝），不触发任何后续流程。
+        # 必须提交，否则请求结束时会话回滚，导致决策丢失、同批永远无法定稿。
+        await db.commit()
         return ReviewOutcome(pending=len(remaining))
 
     now = get_configured_now()

@@ -755,6 +755,9 @@ function scrollToTop() {
   --sub-message-bg: var(--el-bg-color);            /* ← 同步 */
   position: relative;
   transition: all 0.3s ease;
+  /* 视口外的子消息跳过布局/绘制，滚动时不再为其重排重绘 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
 }
 
 /* 仅用于内联文本的无边框模式 */
@@ -803,6 +806,8 @@ function scrollToTop() {
   padding: 0;
   max-width: 240px;
   overflow: visible;
+  /* 文件缩略图依赖 overflow: visible，关闭内容包含 */
+  content-visibility: visible;
 }
 /* 音频/视频文件需要更宽的容器以正确渲染控件 */
 .sub-message-item.is-file:has(.file-audio-player),

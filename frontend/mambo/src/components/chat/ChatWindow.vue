@@ -451,6 +451,26 @@ function updateGalAvatarState(): void {
   }
 }
 
+// —— 滚动稳定化 ——
+// 快速滚动时 Gal_Avatar 状态（galAvatarImageUrl / galIsScrolledPast）会频繁翻转，
+// 使带立绘的 assistant 消息反复挂载/卸载 .message-avatar（v-if），在 ~96k px /
+// 30 万布局对象的列表上每次都触发全量重排。改为滚动停止后再提交 Gal 状态。
+let galUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+let scrollRafId = 0;
+
+function scheduleGalAvatarUpdate(): void {
+  if (galUpdateTimer) clearTimeout(galUpdateTimer);
+  galUpdateTimer = setTimeout(() => {
+    galUpdateTimer = null;
+    updateGalAvatarState();
+  }, 120);
+}
+
+onBeforeUnmount(() => {
+  if (galUpdateTimer) { clearTimeout(galUpdateTimer); galUpdateTimer = null; }
+  if (scrollRafId) { cancelAnimationFrame(scrollRafId); scrollRafId = 0; }
+});
+
 // Gal_Avatar 消息集合变化（增删 / 图片就绪）时主动重新检测，
 // 避免内容不足无滚动事件导致立绘不显示或残留
 watch(galAvatarMap, () => {
@@ -806,6 +826,21 @@ const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
 
   userHasScrolledUp.value = el.scrollHeight - el.clientHeight - scrollTop > 20;
 
+  // 每帧最多处理一次，避免高频滚动事件重复做视口检测
+  if (scrollRafId) return;
+  scrollRafId = requestAnimationFrame(() => {
+    scrollRafId = 0;
+    updateActiveUserMessage();
+    // 快速滚动期间不提交 Gal/头像状态，待滚动稳定后再执行，
+    // 防止 .message-avatar 反复挂载/卸载触发全量重排
+    scheduleGalAvatarUpdate();
+  });
+};
+
+function updateActiveUserMessage() {
+  const el = scrollbarRef.value?.wrapRef;
+  if (!el) return;
+
   const containerRect = el.getBoundingClientRect();
   const detectY = containerRect.top + containerRect.height * 0.3;
 
@@ -829,12 +864,10 @@ const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
     activeUserId = userMsgs[0].id;
   }
 
-  if (activeUserId) {
+  if (activeUserId && activeUserId !== currentVisibleMessageId.value) {
     currentVisibleMessageId.value = activeUserId;
   }
-
-  updateGalAvatarState();
-};
+}
 
 const scrollToBottom = (force = false) => {
   if (isSwitchingBranch.value) return;
