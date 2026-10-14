@@ -24,11 +24,12 @@ export default {
   window: {
     empty: 'No sent mails yet.',
     noMemberSelected: 'No member selected; the message will be broadcast to all members.',
-    composerPlaceholder: 'Type a message, use @ to target members, or broadcast to all',
+    // 在 vue-i18n 消息里 '@' 是链接消息语法字符，字面量必须写成 {'@'}
+    composerPlaceholder: "Type a message, use {'@'} to target members, or broadcast to all",
     send: 'Send',
     sendBroadcast: 'Broadcast',
-    broadcastHint: 'Without @, the message is sent to all members.',
-    mentionHint: 'Type @ to complete a member',
+    broadcastHint: "Without {'@'}, the message is sent to all members.",
+    mentionHint: "Type {'@'} to complete a member",
     mentionSuggestTitle: 'Select a member to mention',
     loadMore: 'Load more mails',
     refresh: 'Refresh',

@@ -1,0 +1,24 @@
+# frontend/mambo/.dockerignore
+# 构建上下文（compose 里的 context: ./frontend/mambo）只需要源码。
+# 关键：不要宿主机的 node_modules —— 否则 Windows 上的原生依赖
+# （@esbuild/win32-x64、@rollup/rollup-win32-*）会覆盖 Dockerfile 里
+# 刚在 Linux 装好的依赖，`npm run build` 会直接报平台不匹配而失败。
+
+node_modules
+dist
+dist-ssr
+coverage
+
+# 版本控制 / 编辑器 / 系统文件
+.git
+.gitignore
+.idea
+.vscode
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 日志与本地文件
+*.log
+*.local

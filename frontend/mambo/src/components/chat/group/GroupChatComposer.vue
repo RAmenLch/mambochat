@@ -12,7 +12,7 @@
         <span v-else class="broadcast-hint">{{ $t('groupChat.window.broadcastHint') }}</span>
       </div>
       <span class="mention-tip">
-        <el-icon><At /></el-icon>
+        <span class="mention-at">@</span>
         {{ $t('groupChat.window.mentionHint') }}
       </span>
     </div>
@@ -71,7 +71,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue';
-import { ChatLineRound, Promotion } from '@element-plus/icons-vue';
+import { Promotion } from '@element-plus/icons-vue';
 import { useResizablePanels } from '@/composables/useResizablePanels';
 import type { GroupMember } from '@/api/types/groupChatTypes';
 
@@ -310,6 +310,11 @@ function onSend() {
   font-size: 12px;
   color: var(--el-text-color-secondary);
   flex-shrink: 0;
+}
+/* @ 提及提示前缀（Element Plus 图标库没有“At”图标，用字符代替） */
+.mention-at {
+  font-weight: 600;
+  color: var(--el-color-primary);
 }
 .composer-body {
   flex: 1;

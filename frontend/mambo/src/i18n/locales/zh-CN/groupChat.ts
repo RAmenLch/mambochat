@@ -24,12 +24,13 @@ export default {
   window: {
     empty: '还没有已发送的邮件。',
     noMemberSelected: '未选择成员，将广播给全部成员。',
-    composerPlaceholder: '输入消息，使用 @ 指定成员，或直接广播全部成员',
+    // vue-i18n 消息里 @ 是「链接消息」语法字符，字面量必须写成 {'@'}
+    composerPlaceholder: "输入消息，使用 {'@'} 指定成员，或直接广播全部成员",
     send: '发送',
     sendBroadcast: '广播',
-    broadcastHint: '未使用 @ 时将发送给全部成员。',
-    mentionHint: '输入 @ 可补全成员',
-    mentionSuggestTitle: '选择要 @ 的成员',
+    broadcastHint: "未使用 {'@'} 时将发送给全部成员。",
+    mentionHint: "输入 {'@'} 可补全成员",
+    mentionSuggestTitle: "选择要 {'@'} 的成员",
     loadMore: '加载更多邮件',
     refresh: '刷新',
     messageQueued: '已提交给成员，等待处理',
