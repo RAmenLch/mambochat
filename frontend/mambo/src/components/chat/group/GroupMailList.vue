@@ -18,6 +18,18 @@
         </span>
       </div>
       <div class="mail-content">{{ mail.content }}</div>
+      <div v-if="isRoundLast(mail)" class="mail-actions">
+        <el-tooltip :content="$t('groupChat.duplicate.tooltip')" placement="top" :show-after="500">
+          <el-button
+            size="small"
+            :icon="DocumentCopy"
+            :disabled="duplicateDisabled"
+            @click="emit('duplicate-upto', mail.id)"
+          >
+            {{ $t('groupChat.duplicate.button') }}
+          </el-button>
+        </el-tooltip>
+      </div>
     </div>
     <div v-if="hasMore" class="load-more">
       <el-button text :loading="loading" @click="emit('load-more')">
@@ -28,7 +40,9 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { DocumentCopy } from '@element-plus/icons-vue';
 import type { GroupMail } from '@/api/types/groupChatTypes';
 import { MASTER_MEMBER_ALIAS } from '@/api/types/groupChatTypes';
 
@@ -42,15 +56,35 @@ function displayName(name?: string | null): string {
     : value;
 }
 
-defineProps<{
+const props = defineProps<{
   mails: GroupMail[];
   loading?: boolean;
   hasMore?: boolean;
   /** 空列表提示文案（默认「还没有已发送的邮件」；筛选无结果时由父组件传入） */
   emptyText?: string;
+  /** 群非空闲（有成员在处理）时禁用复制按钮 */
+  duplicateDisabled?: boolean;
 }>();
 
-const emit = defineEmits<{ (e: 'load-more'): void }>();
+const emit = defineEmits<{
+  (e: 'load-more'): void;
+  (e: 'duplicate-upto', mailId: string): void;
+}>();
+
+/**
+ * 每轮只在其最后一封邮件下展示复制按钮。
+ * 同一轮（sourceTaskId 相同）的邮件在列表中按 sequence 相邻，
+ * 末封即该 sourceTaskId 最后一次出现的邮件；Master 来信各自独立成轮。
+ */
+const lastMailIdByRound = computed(() => {
+  const map = new Map<string, string>();
+  for (const m of props.mails) map.set(m.sourceTaskId, m.id);
+  return map;
+});
+
+function isRoundLast(mail: GroupMail): boolean {
+  return lastMailIdByRound.value.get(mail.sourceTaskId) === mail.id;
+}
 </script>
 
 <style scoped>
@@ -99,5 +133,9 @@ const emit = defineEmits<{ (e: 'load-more'): void }>();
 }
 .load-more {
   text-align: center;
+}
+.mail-actions {
+  margin-top: 8px;
+  text-align: right;
 }
 </style>

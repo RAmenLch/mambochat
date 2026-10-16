@@ -151,7 +151,9 @@
             :loading="isLoading"
             :has-more="hasMore"
             :empty-text="hasActiveFilter ? $t('groupChat.filter.empty') : undefined"
+            :duplicate-disabled="duplicateDisabled"
             @load-more="onLoadMore"
+            @duplicate-upto="onDuplicateUpTo"
           />
         </div>
         <div class="side-column">
@@ -179,7 +181,9 @@ import { Refresh, Setting, UserFilled } from '@element-plus/icons-vue';
 import { useI18n } from 'vue-i18n';
 import { useChatSessionStore } from '@/stores/chatSessionStore';
 import { useGroupChatStore } from '@/stores/groupChatStore';
+import { useChatListStore } from '@/stores/chatListStore';
 import type { GroupMailMode, GroupSettingsUpdate, GroupTask } from '@/api/types/groupChatTypes';
+import { duplicateGroupChat } from '@/api/groupChatService';
 import GroupMailList from './GroupMailList.vue';
 import GroupMailReviewPanel from './GroupMailReviewPanel.vue';
 import GroupMemberPanel from './GroupMemberPanel.vue';
@@ -189,12 +193,15 @@ const { t } = useI18n();
 const router = useRouter();
 const sessionStore = useChatSessionStore();
 const groupStore = useGroupChatStore();
+const chatListStore = useChatListStore();
 
 const { currentGroupId } = storeToRefs(sessionStore);
 const { details } = storeToRefs(groupStore);
 
 const groupId = computed(() => currentGroupId.value);
 const detail = computed(() => (groupId.value ? details.value[groupId.value] : undefined));
+// 群非空闲（有正在执行 / 等待人工的轮次）时禁用「复制群聊至此」
+const duplicateDisabled = computed(() => !!detail.value?.activeTaskId);
 const members = computed(() => detail.value?.members ?? []);
 const mails = computed(() => (groupId.value ? groupStore.mails[groupId.value] ?? [] : []));
 const hasMore = computed(() => (groupId.value ? !!groupStore.mailHasMore[groupId.value] : false));
@@ -399,6 +406,20 @@ async function onRefresh() {
 
 async function onLoadMore() {
   if (groupId.value) await groupStore.loadMails(groupId.value);
+}
+
+/** 复制群聊至该邮件所属轮次结束：新建群副本、合并进会话列表并跳转过去 */
+async function onDuplicateUpTo(mailId: string) {
+  if (!groupId.value || duplicateDisabled.value) return;
+  try {
+    const created = await duplicateGroupChat(groupId.value, mailId);
+    chatListStore.mergeCreatedGroup(created);
+    ElMessage.success(t('groupChat.duplicate.success'));
+    await sessionStore.selectChat(created.groupId);
+  } catch (error) {
+    console.error('Failed to duplicate group up to mail:', error);
+    ElMessage.error(t('common.error.operationFailed'));
+  }
 }
 
 async function onSend(payload: { content: string; recipientNames: string[] }) {
@@ -653,10 +674,15 @@ async function onRejectAllMails(reason: string) {
   min-width: 0;
 }
 .mail-filters {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-bottom: 12px;
+  padding: 4px 0 8px;
+  margin-bottom: 4px;
+  background: var(--el-bg-color);
 }
 .mail-filters .filter-select {
   width: 180px;

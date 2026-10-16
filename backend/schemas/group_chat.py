@@ -193,6 +193,13 @@ class GroupTaskAccepted(BaseModel):
     state: GroupTaskState = GroupTaskState.QUEUED
 
 
+# --- 复制群组 ---
+
+class GroupDuplicateRequest(BaseModel):
+    """复制群组到指定邮件为止（粒度=该邮件所属的整轮）。"""
+    upToMailId: str = Field(..., description="点中的邮件 id；复制到该邮件所属轮次结束为止")
+
+
 # --- 控制请求 ---
 
 class GroupSettingsUpdate(BaseModel):

@@ -128,4 +128,10 @@ export default {
   menu: {
     newGroup: '新建群组会话',
   },
+  duplicate: {
+    button: '复制群聊至此',
+    tooltip: '以此邮件所在轮次结束为止，复制出一个新群',
+    success: '已复制为新的群组会话',
+    busy: '群内有成员正在处理，暂时无法复制',
+  },
 }

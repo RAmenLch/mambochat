@@ -46,6 +46,14 @@ export const sendGroupMessage = (
   return apiClient.post(`/group-chats/${groupId}/messages`, data);
 };
 
+/** 复制群组到指定邮件为止（粒度=该邮件所属整轮），返回新群详情 */
+export const duplicateGroupChat = (
+  groupId: string,
+  upToMailId: string,
+): Promise<GroupCreatedResponse> => {
+  return apiClient.post(`/group-chats/${groupId}/duplicate`, { upToMailId });
+};
+
 /** 邮件筛选条件：发信人 / 收信人均为成员别名（收信人含 Master=用户），空数组表示不筛选 */
 export interface GroupMailFilters {
   sender?: string[]

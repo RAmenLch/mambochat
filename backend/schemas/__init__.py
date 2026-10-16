@@ -42,4 +42,5 @@ from .group_chat import (
     GroupCreatedResponse, GroupMessageSendRequest, GroupTaskAccepted, GroupSettingsUpdate,
     GroupControlResponse, GroupSendMailItem, GroupSendMailRequest, normalize_member_alias,
     GroupMailReviewResponse, GroupMailRejectRequest, GroupMailDecisionResponse,
+    GroupDuplicateRequest,
 )

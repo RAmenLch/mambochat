@@ -159,6 +159,11 @@ export interface GroupMessageSendRequest {
   recipientNames: string[]
 }
 
+/** 复制群组到指定邮件为止（粒度=该邮件所属的整轮） */
+export interface GroupDuplicateRequest {
+  upToMailId: string
+}
+
 export interface GroupTaskAccepted {
   kind: 'group_task'
   groupId: string

@@ -47,6 +47,24 @@ async def get_group_chat(group_id: str, db: AsyncSession = Depends(get_db)):
     return await group_service.get_group_detail(db, group_id)
 
 
+@router.post(
+    "/group-chats/{group_id}/duplicate",
+    response_model=schemas.GroupCreatedResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="复制群组到指定邮件为止（粒度=该邮件所属整轮）",
+)
+async def duplicate_group_chat(
+    group_id: str,
+    payload: schemas.GroupDuplicateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    复制群组为干净的新群副本：邮件流复制到目标邮件所属轮次结束，各成员子会话同步截取到该截点，
+    已读状态按截点重建。群非空闲（存在活动轮次）时拒绝。
+    """
+    return await group_service.duplicate_group_chat(db, group_id, payload.upToMailId)
+
+
 @router.patch(
     "/group-chats/{group_id}/settings",
     response_model=schemas.GroupControlResponse,

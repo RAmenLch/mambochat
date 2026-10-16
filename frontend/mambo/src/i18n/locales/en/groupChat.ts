@@ -128,4 +128,10 @@ export default {
   menu: {
     newGroup: 'New group chat',
   },
+  duplicate: {
+    button: 'Duplicate up to here',
+    tooltip: 'Create a new group copied up to the end of this round',
+    success: 'Duplicated as a new group chat',
+    busy: 'A member is busy; cannot duplicate for now',
+  },
 }

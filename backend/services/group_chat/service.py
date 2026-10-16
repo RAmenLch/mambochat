@@ -15,10 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend import schemas
 from backend.models import chat_model, agent_model, group_chat_model
-from backend.crud import group_chat_crud
+from backend.crud import group_chat_crud, message_crud, setting_crud
+from backend.models.base_model import generate_uuid
 from backend.schemas.enums import (
     FolderType, GroupMailMode, GroupMailState, GroupStatus, GroupPauseReason, GroupTaskKind,
-    GroupTaskState, AgentItemType,
+    GroupTaskState, AgentItemType, MessageStatus, SubMessageType,
 )
 from backend.schemas.group_chat import (
     GroupChatCreate, GroupSettingsUpdate, normalize_member_alias,
@@ -379,6 +380,282 @@ async def get_group_detail(db: AsyncSession, group_id: str) -> schemas.GroupDeta
     return _build_detail(
         group_node, state, member_nodes, agent_names, unread_map, queued_map, total_auto_rounds
     )
+
+
+async def _copy_member_messages(
+    db: AsyncSession,
+    src_chat_id: str,
+    dst_chat_id: str,
+    cutoff_time,
+    master_mode: bool = False,
+) -> None:
+    """
+    把成员子会话的活跃路径消息复制到新会话，只保留截点之前的前缀。
+    - master_mode=False（点在成员邮件上）：保留 createdAt <= 截点 的消息（该轮已完成）。
+    - master_mode=True（点在用户本人发出的来信上）：该输入"已送达但尚未被成员回复"，
+      保留到"截点之后第一条 assistant 消息"之前（含用户的广播消息，不含其回复）。
+    复用普通会话复制的清洗规则：丢弃 VERSION_SNAPSHOT、中间态置 FAILED、补回 TaskSubStep。
+    """
+    active_messages = await message_crud.get_messages_by_chat(db, chat_id=src_chat_id)
+    if not active_messages:
+        return
+
+    # master_mode：定位"截点之后第一条 assistant 消息"作为上界（保留其之前的消息）
+    boundary = None
+    if master_mode:
+        for msg in active_messages:
+            if (
+                msg.role == "assistant"
+                and msg.createdAt is not None
+                and msg.createdAt > cutoff_time
+            ):
+                boundary = msg.createdAt
+                break
+
+    # 保留判定应形成路径前缀：遇到第一个越界的消息即停止
+    kept = []
+    for msg in active_messages:
+        if master_mode:
+            if boundary is not None and msg.createdAt is not None and msg.createdAt >= boundary:
+                break
+            kept.append(msg)
+        else:
+            if msg.createdAt is not None and msg.createdAt <= cutoff_time:
+                kept.append(msg)
+            else:
+                break
+    if not kept:
+        return
+
+    task_subs = await message_crud.get_task_substeps_by_message_ids(db, [m.id for m in kept])
+    task_subs_by_msg: Dict[str, List] = {}
+    for sub in task_subs:
+        task_subs_by_msg.setdefault(sub.messageId, []).append(sub)
+
+    last_new_msg_id = None
+    for msg in kept:
+        new_msg = chat_model.Message(
+            role=msg.role,
+            sortOrder=msg.sortOrder,
+            chatId=dst_chat_id,
+            parentId=last_new_msg_id,
+            lastActiveAt=msg.lastActiveAt,
+            createdAt=msg.createdAt,
+        )
+        db.add(new_msg)
+        await db.flush()
+        last_new_msg_id = new_msg.id
+
+        new_sub_messages = []
+        merged_subs = list(msg.sub_messages) + task_subs_by_msg.get(msg.id, [])
+        merged_subs.sort(key=lambda s: (s.sortOrder, s.createdAt))
+        for sub in merged_subs:
+            if sub.type == SubMessageType.VERSION_SNAPSHOT.value:
+                continue
+            safe_status = sub.status
+            if safe_status in (
+                MessageStatus.GENERATING.value,
+                MessageStatus.PENDING_REVIEW.value,
+            ):
+                safe_status = MessageStatus.FAILED.value
+            new_sub_messages.append(
+                chat_model.SubMessage(
+                    content=sub.content,
+                    sortOrder=sub.sortOrder,
+                    type=sub.type,
+                    config=sub.config,
+                    status=safe_status,
+                    messageId=new_msg.id,
+                    createdAt=sub.createdAt,
+                )
+            )
+        db.add_all(new_sub_messages)
+    await db.flush()
+
+
+async def duplicate_group_chat(
+    db: AsyncSession, group_id: str, up_to_mail_id: str
+) -> schemas.GroupCreatedResponse:
+    """
+    复制群组到指定邮件为止，生成一个干净的新群副本。
+
+    - 粒度=轮次：点中某封邮件即选中它所属的整轮；邮件流复制到该轮结束。
+    - 子会话按"时间截点"截取：以目标邮件投递时刻为准，保留在此之前产生的消息。
+      时间戳在副本里原样保留，故副本的副本也能继续复制（不依赖已被丢弃的 GroupTask）。
+    - 已读状态按截点重建：读取时间晚于截点的收件记录置回未读。
+    - 群非空闲（存在活动轮次）时拒绝。
+    """
+    group_node = await group_chat_crud.get_group_chat(db, group_id)
+    if not group_node:
+        raise _bad(GroupErrorCode.NOT_FOUND, "group_not_found", 404)
+
+    state = await group_chat_crud.get_group_state(db, group_id)
+    if not state:
+        raise _bad(GroupErrorCode.STRUCTURE_INVALID, "group_state_missing", 500)
+    if state.status == GroupStatus.DELETING.value:
+        raise _bad(GroupErrorCode.FORBIDDEN_OPERATION, "group_deleting", 409)
+    # 非空闲：有正在执行 / 等待人工的轮次时禁止复制，避免快照落在半截
+    if state.activeTaskId:
+        raise _bad(GroupErrorCode.FORBIDDEN_OPERATION, "group_busy", 409)
+
+    target_mail = await group_chat_crud.get_mail(db, up_to_mail_id)
+    if (
+        not target_mail
+        or target_mail.groupId != group_id
+        or target_mail.state != GroupMailState.SENT.value
+    ):
+        raise _bad(GroupErrorCode.STRUCTURE_INVALID, "mail_not_found_or_not_sent", 404)
+
+    # ── 1. 定位截点 ──
+    # 统一按时间截取：以目标邮件投递时刻为截点。不必依赖 GroupTask，
+    # 时间戳在副本里原样保留，因此"副本的副本"也能继续复制。
+    is_master_mail = target_mail.senderAliasSnapshot == MASTER_ALIAS
+    cutoff_time = target_mail.sentAt or target_mail.createdAt
+    # 整轮：邮件流上界取该邮件所属轮次的最后一封（同 sourceTaskId 的最大 sequence）。
+    # Master 来信每封自成一轮，此查询即返回它自己。
+    upper_res = await db.execute(
+        select(func.max(group_chat_model.GroupMail.sequence)).filter(
+            group_chat_model.GroupMail.groupId == group_id,
+            group_chat_model.GroupMail.sourceTaskId == target_mail.sourceTaskId,
+            group_chat_model.GroupMail.state == GroupMailState.SENT.value,
+        )
+    )
+    mail_upper_seq = upper_res.scalar_one_or_none()
+    if mail_upper_seq is None:
+        mail_upper_seq = target_mail.sequence
+
+    # ── 2. 复制群父节点、状态与成员 ──
+    lang_setting = await setting_crud.get_setting(db, "language")
+    language = lang_setting.value if lang_setting else "zh-CN"
+    copy_suffix = "副本" if language == "zh-CN" else "Copy"
+
+    parent_id = group_node.parentId
+    new_group_node = chat_model.Chat(
+        name=f"{group_node.name} ({copy_suffix})",
+        itemType="folder",
+        folderType=FolderType.GROUP.value,
+        parentId=parent_id,
+        sortOrder=await _next_sort_order(db, parent_id),
+    )
+    db.add(new_group_node)
+    await db.flush()
+
+    new_state = group_chat_model.GroupState(
+        groupId=new_group_node.id,
+        status=GroupStatus.READY.value,
+        autoRoundLimit=state.autoRoundLimit,
+        autoRoundCount=0,
+        mailMode=state.mailMode,
+        nextTaskSeq=0,
+        nextMailSeq=0,
+        version=0,
+    )
+    db.add(new_state)
+
+    old_members = await group_chat_crud.list_member_chats(db, group_id)
+    member_id_map: Dict[str, str] = {}
+    for m in old_members:
+        new_member = chat_model.Chat(
+            name=m.name,
+            itemType="chat",
+            chatMode=m.chatMode,
+            agentId=m.agentId,
+            parentId=new_group_node.id,
+            memberAlias=m.memberAlias,
+            sortOrder=m.sortOrder,
+        )
+        db.add(new_member)
+        await db.flush()
+        member_id_map[m.id] = new_member.id
+
+    # ── 3. 复制邮件（至轮末）与收件记录（已读按截点重建） ──
+    mail_list: List[group_chat_model.GroupMail] = []
+    if mail_upper_seq is not None:
+        mail_res = await db.execute(
+            select(group_chat_model.GroupMail)
+            .filter(
+                group_chat_model.GroupMail.groupId == group_id,
+                group_chat_model.GroupMail.state == GroupMailState.SENT.value,
+                group_chat_model.GroupMail.sequence <= mail_upper_seq,
+            )
+            .order_by(group_chat_model.GroupMail.sequence.asc())
+        )
+        mail_list = list(mail_res.scalars().all())
+
+    receipts_by_mail: Dict[str, List[group_chat_model.GroupMailReceipt]] = {}
+    if mail_list:
+        receipt_res = await db.execute(
+            select(group_chat_model.GroupMailReceipt).filter(
+                group_chat_model.GroupMailReceipt.mailId.in_([m.id for m in mail_list])
+            )
+        )
+        for r in receipt_res.scalars().all():
+            receipts_by_mail.setdefault(r.mailId, []).append(r)
+
+    # 保持同轮邮件在副本里仍属同一"轮"（用合成 id 映射源 sourceTaskId），
+    # 既避免与源邮件 (sourceTaskId, toolCallId) 唯一约束冲突，又保留前端按轮分组的展示。
+    source_task_id_map: Dict[str, str] = {}
+
+    def _new_source_task_id(old_id: str) -> str:
+        if old_id not in source_task_id_map:
+            source_task_id_map[old_id] = generate_uuid()
+        return source_task_id_map[old_id]
+
+    new_seq = 0
+    for mail in mail_list:
+        new_mail = group_chat_model.GroupMail(
+            groupId=new_group_node.id,
+            sourceTaskId=_new_source_task_id(mail.sourceTaskId),
+            senderChatId=member_id_map.get(mail.senderChatId, mail.senderChatId),
+            senderAliasSnapshot=mail.senderAliasSnapshot,
+            recipientSnapshot=[
+                {
+                    "memberChatId": member_id_map.get(
+                        item.get("memberChatId"), item.get("memberChatId")
+                    ),
+                    "memberName": item.get("memberName"),
+                }
+                for item in (mail.recipientSnapshot or [])
+            ],
+            title=mail.title,
+            content=mail.content,
+            toolCallId=mail.toolCallId,
+            toolCallOrder=mail.toolCallOrder,
+            state=GroupMailState.SENT.value,
+            sequence=new_seq,
+            createdAt=mail.createdAt,
+            sentAt=mail.sentAt,
+        )
+        db.add(new_mail)
+        await db.flush()
+        new_seq += 1
+
+        for r in receipts_by_mail.get(mail.id, []):
+            new_recipient = member_id_map.get(r.recipientChatId)
+            if new_recipient is None:
+                continue
+            # 读取时间晚于截点（即截点之后才读的）置回未读
+            keep_read = r.readAt is not None and r.readAt <= cutoff_time
+            db.add(
+                group_chat_model.GroupMailReceipt(
+                    mailId=new_mail.id,
+                    recipientChatId=new_recipient,
+                    readAt=r.readAt if keep_read else None,
+                    createdAt=r.createdAt,
+                )
+            )
+
+    new_state.nextMailSeq = new_seq
+    await db.flush()
+
+    # ── 4. 复制各成员子会话消息（截取到截点） ──
+    for old_member in old_members:
+        await _copy_member_messages(
+            db, old_member.id, member_id_map[old_member.id], cutoff_time, is_master_mail
+        )
+
+    await db.commit()
+    return await get_group_detail(db, new_group_node.id)
 
 
 async def update_group_settings(
