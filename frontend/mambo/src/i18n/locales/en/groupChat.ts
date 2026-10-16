@@ -33,6 +33,7 @@ export default {
     mentionSuggestTitle: 'Select a member to mention',
     loadMore: 'Load more mails',
     refresh: 'Refresh',
+    attach: 'Add attachment',
     messageQueued: 'Submitted to members, waiting to be processed',
     roundThisEpisode: 'This episode',
     roundInfoTip: 'Since your last message, {used}/{limit} auto mail rounds have started in this group (group total {total}). Reaching the limit pauses the group; use "Reset rounds" to allow more.',
@@ -52,6 +53,10 @@ export default {
     sender: 'Sender',
     recipient: 'Recipient',
     empty: 'No mails match the filter.',
+    union: '∪',
+    intersection: '∩',
+    tipUnion: 'Sender and recipient filters are combined as a UNION; click to switch to INTERSECTION',
+    tipIntersection: 'Sender and recipient filters are combined as an INTERSECTION; click to switch to UNION',
   },
   recovery: {
     taskLine: '{alias} · {kind} · {state}',
@@ -124,6 +129,13 @@ export default {
     from: 'From',
     to: 'Recipients',
     noTitle: '(no title)',
+  },
+  attachment: {
+    download: 'Download',
+    noPreview: 'Preview is not available for this file type; please download it.',
+    loadFailed: 'Failed to load the content.',
+    prev: 'Previous',
+    next: 'Next',
   },
   menu: {
     newGroup: 'New group chat',

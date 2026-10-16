@@ -10,6 +10,7 @@
 """
 
 import logging
+from pathlib import PurePosixPath
 from typing import List, Optional, Sequence, Tuple, Dict, Any
 
 from sqlalchemy import select, func, and_, or_
@@ -19,6 +20,7 @@ from backend.models import chat_model, group_chat_model
 from backend.models.base_model import generate_uuid
 from backend.crud import group_chat_crud
 from backend.schemas.enums import (
+    FileManagementType,
     GroupMailMode,
     GroupMailState,
     GroupPauseReason,
@@ -26,6 +28,7 @@ from backend.schemas.enums import (
     GroupTaskKind,
     GroupTaskState,
 )
+from backend.services.file_service import FileService
 from backend.schemas.group_chat import normalize_member_alias, MASTER_ALIAS
 from backend.exceptions import AppHTTPException
 from backend.config.timezone_config import get_configured_now
@@ -46,6 +49,132 @@ class MailErrorCode:
 
 def _bad(code: str, detail: str, status: int = 400) -> AppHTTPException:
     return AppHTTPException(status_code=status, error_code=code, detail=detail)
+
+
+# --- 附件 ---
+
+# 单封邮件允许携带的附件数量上限
+MAX_MAIL_ATTACHMENTS = 10
+
+# 群组邮件附件写入收件成员 backend 工作区的根目录
+GROUP_MAIL_FILE_DIR = "/.mambo/group_mail_file"
+
+
+def normalize_attachment_paths(raw: Any) -> List[dict]:
+    """把 sendMail 的 attachments（发件人工作区路径数组）规范化为去重后的引用列表。
+
+    返回 [{path}]；空/非法项忽略，超过上限截断。
+    """
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        raw = [raw]
+    normalized: List[str] = []
+    seen = set()
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        path = item.strip()
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        normalized.append(path)
+        if len(normalized) >= MAX_MAIL_ATTACHMENTS:
+            break
+    return [{"path": p} for p in normalized]
+
+
+def attachment_paths_of(mail: group_chat_model.GroupMail) -> List[str]:
+    """读取邮件上已固化的原始附件路径（用于幂等比较）。"""
+    return [
+        a.get("path") for a in (mail.attachments or [])
+        if isinstance(a, dict) and a.get("path")
+    ]
+
+
+def resolved_file_ids_of(mail: group_chat_model.GroupMail) -> List[str]:
+    """读取邮件上已解析的附件中心库 fileId 列表。"""
+    return [
+        a.get("fileId") for a in (mail.attachments or [])
+        if isinstance(a, dict) and a.get("fileId")
+    ]
+
+
+async def _download_and_store_attachment(db: AsyncSession, backend, path: str) -> dict:
+    """从发件人 backend 下载工作区文件并入库为中心库文件，返回附件引用。"""
+    from mambo_agents.backends.schemas import VirtualPath
+    from mambo_agents.backends.protocol import _get_mime_type
+
+    results = await backend.adownload_files([VirtualPath(path)])
+    if not results:
+        raise ValueError("download_empty_result")
+    raw = results[0].content
+    if not raw:
+        err = getattr(results[0], "error", None)
+        raise ValueError(f"download_failed:{err or 'empty_file'}")
+
+    filename = PurePosixPath(path.replace("\\", "/")).name or "attachment"
+    mime = _get_mime_type(path) or "application/octet-stream"
+    fs = FileService(db)
+    db_file = await fs.save_file_from_bytes(
+        data=raw,
+        filename=filename,
+        mime_type=mime,
+        management_type=[FileManagementType.GROUP_MAIL_ATTACHMENT.value],
+        sub_path="group_mail_attachments",
+    )
+    return {
+        "fileId": db_file.id,
+        "filename": db_file.filename,
+        "mimeType": db_file.mime_type,
+        "sizeBytes": db_file.size,
+        "path": path,
+    }
+
+
+async def resolve_attachment_refs(
+    db: AsyncSession, sender_chat_id: str, items: Sequence[dict]
+) -> List[dict]:
+    """把 [{path}] 引用解析为中心库文件引用；下载失败降级为 {path, error}。
+
+    同一发件人 backend 只构建一次；已含 fileId 的项原样保留（幂等）。
+    """
+    resolved: List[dict] = []
+    backend = None
+    backend_error: Optional[str] = None
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if item.get("fileId"):
+            resolved.append(item)
+            continue
+        path = item.get("path")
+        if not path:
+            continue
+        if backend is None and backend_error is None:
+            try:
+                from backend.services.generation.agent.backend_factory import (
+                    build_backend_from_chat_id,
+                )
+                backend = await build_backend_from_chat_id(
+                    db, sender_chat_id, thread_id=sender_chat_id
+                )
+            except Exception as e:  # noqa: BLE001 - best-effort，失败不阻断
+                backend_error = f"{type(e).__name__}: {e}"
+                logger.warning(
+                    "[GroupMail] 构建发件人 backend 失败 chat=%s: %s", sender_chat_id, e
+                )
+        if backend is None:
+            resolved.append({"path": path, "error": backend_error or "backend_unavailable"})
+            continue
+        try:
+            resolved.append(await _download_and_store_attachment(db, backend, path))
+        except Exception as e:  # noqa: BLE001 - best-effort，失败不阻断
+            logger.warning(
+                "[GroupMail] 附件下载失败 path=%s chat=%s: %s", path, sender_chat_id, e
+            )
+            resolved.append({"path": path, "error": f"{type(e).__name__}: {e}"[:200]})
+    return resolved
 
 
 # --- 地址解析 ---
@@ -116,11 +245,13 @@ async def stage_mail(
     addresses: Sequence[str],
     title: Optional[str],
     content: str,
+    attachments: Optional[Sequence[str]] = None,
 ) -> group_chat_model.GroupMail:
     """
     暂存一封邮件。同一次工具调用重放返回同一暂存邮件；
     同 key 但参数不同则报幂等冲突，不覆盖原文。
     仅写 staged，不投递、不生成收件记录、不触发任务。
+    attachments：发件人工作区路径数组，暂存时即下载入库为中心库文件引用。
     """
     if ctx is None:
         raise _bad(MailErrorCode.NO_CONTEXT, "group_context_required", 500)
@@ -130,15 +261,23 @@ async def stage_mail(
         {"memberChatId": cid, "memberName": alias} for cid, alias in resolved
     ]
 
+    raw_items = normalize_attachment_paths(attachments)
+
     existing = await _get_mail_by_toolcall(db, ctx.task_id, tool_call_id)
     if existing is not None:
         if (
             _recipient_names(existing) != [alias for _, alias in resolved]
             or (existing.title or "") != (title or "")
             or existing.content != content
+            or attachment_paths_of(existing) != [i["path"] for i in raw_items]
         ):
             raise _bad(MailErrorCode.IDEMPOTENCY_CONFLICT, "tool_call_id_conflict", 409)
         return existing
+
+    attach_refs = (
+        await resolve_attachment_refs(db, ctx.member_chat_id, raw_items)
+        if raw_items else None
+    )
 
     order = await _next_tool_order(db, ctx.task_id)
     mail = group_chat_model.GroupMail(
@@ -149,6 +288,7 @@ async def stage_mail(
         recipientSnapshot=new_snapshot,
         title=title,
         content=content,
+        attachments=attach_refs,
         toolCallId=tool_call_id,
         toolCallOrder=order,
         state=GroupMailState.STAGED.value,
@@ -159,6 +299,62 @@ async def stage_mail(
     return mail
 
 
+async def build_attachment_refs_from_file_ids(
+    db: AsyncSession, file_ids: Optional[Sequence[str]]
+) -> List[dict]:
+    """把用户上传的中心库 fileId 列表整理为邮件附件引用（已解析态）。"""
+    if not file_ids:
+        return []
+    from backend.crud import file_crud
+
+    ordered = list(dict.fromkeys([f for f in file_ids if isinstance(f, str) and f]))
+    files = await file_crud.get_files_by_ids(db, ordered)
+    by_id = {f.id: f for f in files}
+    refs: List[dict] = []
+    for fid in ordered:
+        f = by_id.get(fid)
+        if f is None:
+            continue
+        refs.append({
+            "fileId": f.id,
+            "filename": f.filename,
+            "mimeType": f.mime_type,
+            "sizeBytes": f.size,
+        })
+        if len(refs) >= MAX_MAIL_ATTACHMENTS:
+            break
+    return refs
+
+
+async def mail_attachments_response(
+    db: AsyncSession, mail: group_chat_model.GroupMail
+) -> List[dict]:
+    """把邮件的附件引用整理为响应项（含下载 url），供前端展示。"""
+    raw = [
+        a for a in (mail.attachments or [])
+        if isinstance(a, dict) and a.get("fileId")
+    ]
+    if not raw:
+        return []
+    from backend.crud import file_crud
+
+    file_ids = [a["fileId"] for a in raw]
+    files = await file_crud.get_files_by_ids(db, file_ids)
+    fs = FileService(db)
+    url_by_id = {f.id: fs.get_url(f.storage_path) for f in files}
+    result: List[dict] = []
+    for a in raw:
+        fid = a["fileId"]
+        result.append({
+            "fileId": fid,
+            "filename": a.get("filename"),
+            "mimeType": a.get("mimeType"),
+            "sizeBytes": a.get("sizeBytes"),
+            "url": url_by_id.get(fid),
+        })
+    return result
+
+
 async def record_user_mail(
     db: AsyncSession,
     group_state: group_chat_model.GroupState,
@@ -166,12 +362,16 @@ async def record_user_mail(
     recipients: Sequence[chat_model.Chat],
     content: str,
     title: Optional[str] = None,
-) -> group_chat_model.GroupMail:
+    attachments: Optional[Sequence[dict]] = None,
+    request_id: Optional[str] = None,
+) -> Tuple[group_chat_model.GroupMail, List[group_chat_model.GroupTask]]:
     """
-    把用户本人的群发言记为「一封来自 Master 的邮件」直接投递到邮件流。
+    把用户本人的群发言记为「一封来自 Master 的邮件」投递到邮件流。
     - 立即投递（sent），不受审核模式影响（用户即审核者）。
-    - 生成收件记录并直接标记已读：用户消息已由 user_message 任务驱动收件人，
-      此处不再登记 mail_notice，避免重复触发收件人再生成。
+    - 收件记录保持「未读」，并为每个收件成员登记/合并 mail_notice，
+      由邮件通知驱动收件成员读取（与成员间互发邮件一致），
+      不再向成员子会话直接注入用户消息。
+    返回 (mail, 本次涉及的通知任务列表)。
     """
     now = get_configured_now()
     seq = group_state.nextMailSeq or 0
@@ -187,6 +387,7 @@ async def record_user_mail(
         ],
         title=title,
         content=content,
+        attachments=list(attachments) if attachments else None,
         toolCallId=generate_uuid(),
         toolCallOrder=0,
         state=GroupMailState.SENT.value,
@@ -197,17 +398,24 @@ async def record_user_mail(
     db.add(mail)
     await db.flush()
 
+    notices: List[group_chat_model.GroupTask] = []
+    seen_task_ids = set()
     for r in recipients:
-        db.add(
-            group_chat_model.GroupMailReceipt(
-                mailId=mail.id,
-                recipientChatId=r.id,
-                readAt=now,
-                createdAt=now,
-            )
+        receipt = group_chat_model.GroupMailReceipt(
+            mailId=mail.id,
+            recipientChatId=r.id,
+            createdAt=now,
         )
+        db.add(receipt)
+        await db.flush()
+        task = await enqueue_mail_notice(
+            db, group_state, r.id, receipt, request_id=request_id
+        )
+        if task.id not in seen_task_ids:
+            seen_task_ids.add(task.id)
+            notices.append(task)
     await db.flush()
-    return mail
+    return mail, notices
 
 
 # --- 快照冻结与读取 ---
@@ -242,10 +450,53 @@ async def freeze_snapshot(
     return receipt_ids
 
 
+def _human_size(size: int) -> str:
+    if size < 1024:
+        return f"{size} B"
+    if size < 1024 * 1024:
+        return f"{size / 1024:.1f} KB"
+    return f"{size / (1024 * 1024):.1f} MB"
+
+
+def group_mail_file_path(file_id: str, filename: str, mime_type: str) -> str:
+    """邮件附件在收件成员 backend 工作区中的稳定路径（有扩展名则保留）。"""
+    try:
+        from backend.services.generation.agent.user_file_copy_service import (
+            derive_file_extension,
+        )
+        ext = derive_file_extension(filename or "", mime_type or "")
+    except Exception:  # noqa: BLE001 - 兜底：无扩展名
+        ext = ""
+    target = f"{GROUP_MAIL_FILE_DIR}/{file_id}"
+    if ext:
+        target += f".{ext}"
+    return target
+
+
+def _attachment_manifest(mail: group_chat_model.GroupMail) -> str:
+    items = [a for a in (mail.attachments or []) if isinstance(a, dict)]
+    if not items:
+        return ""
+    lines = ["### 附件（已写入你的工作区，可直接用 read 等工具打开）"]
+    for a in items:
+        if a.get("fileId"):
+            filename = a.get("filename") or a["fileId"]
+            mime = a.get("mimeType") or ""
+            size = a.get("sizeBytes") or 0
+            meta_parts = [p for p in (mime, _human_size(size) if size else "") if p]
+            meta = f"（{'，'.join(meta_parts)}）" if meta_parts else ""
+            target = group_mail_file_path(a["fileId"], filename, mime)
+            lines.append(f"- {filename}{meta} -> {target}")
+        elif a.get("path"):
+            lines.append(f"- {a['path']}（附件读取失败，内容不可用）")
+    return "\n".join(lines)
+
+
 def _format_single_mail(mail: group_chat_model.GroupMail) -> str:
     recipients = "，".join(_recipient_names(mail))
     title = mail.title or ""
-    return (
+    manifest = _attachment_manifest(mail)
+    body = (
         f"## {title}\n"
         f"### 发件人\n"
         f"{mail.senderAliasSnapshot}\n"
@@ -254,6 +505,74 @@ def _format_single_mail(mail: group_chat_model.GroupMail) -> str:
         f"### 内容\n"
         f"{mail.content}"
     )
+    if manifest:
+        body = f"{body}\n\n{manifest}"
+    return body
+
+
+async def list_snapshot_mails(
+    db: AsyncSession, task: group_chat_model.GroupTask
+) -> List[group_chat_model.GroupMail]:
+    """返回本轮冻结快照内的邮件实体（按 sequence 排序），供附件物化使用。"""
+    receipt_ids = list(task.snapshotReceiptIds or [])
+    if not receipt_ids:
+        return []
+    result = await db.execute(
+        select(group_chat_model.GroupMail)
+        .join(
+            group_chat_model.GroupMailReceipt,
+            group_chat_model.GroupMailReceipt.mailId == group_chat_model.GroupMail.id,
+        )
+        .filter(group_chat_model.GroupMailReceipt.id.in_(receipt_ids))
+        .order_by(group_chat_model.GroupMail.sequence.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def materialize_mail_attachments(
+    db: AsyncSession, chat_id: str, file_ids: Sequence[str]
+) -> Dict[str, str]:
+    """把邮件附件的中心库副本写入 chat 对应 backend 的工作区，供收件成员自行读取。
+
+    - 不向该成员会话写入 File 子消息：文件只是"送到工作区"，由成员用 read 等工具自行打开。
+    - best-effort：backend 构建或单个文件写入失败均不抛出，仅记录日志。
+    返回 {fileId: 工作区路径}（仅含成功项）。
+    """
+    ordered = list(dict.fromkeys(
+        f for f in (file_ids or []) if isinstance(f, str) and f
+    ))
+    if not ordered:
+        return {}
+
+    try:
+        from backend.services.generation.agent.backend_factory import (
+            build_backend_from_chat_id,
+        )
+        backend = await build_backend_from_chat_id(db, chat_id, thread_id=chat_id)
+    except Exception as e:  # noqa: BLE001 - best-effort，失败不阻断
+        logger.warning("[GroupMail] 构建收件成员 backend 失败 chat=%s: %s", chat_id, e)
+        return {}
+
+    from mambo_agents.backends.schemas import VirtualPath
+
+    fs = FileService(db)
+    paths: Dict[str, str] = {}
+    for fid in ordered:
+        try:
+            db_file = await fs.get_file(fid)
+            if db_file is None:
+                continue
+            raw = await fs.get_file_content(fid)
+            target = group_mail_file_path(fid, db_file.filename, db_file.mime_type)
+            results = await backend.aupload_files([(VirtualPath(target), raw)])
+            if results and results[0].error is None:
+                paths[fid] = target
+        except Exception as e:  # noqa: BLE001 - best-effort，失败不阻断
+            logger.warning(
+                "[GroupMail] 附件写入收件成员工作区失败 file=%s chat=%s: %s",
+                fid, chat_id, e,
+            )
+    return paths
 
 
 async def read_mails(
@@ -300,10 +619,12 @@ async def ensure_notice_task(
     db: AsyncSession,
     group_state: group_chat_model.GroupState,
     recipient_chat_id: str,
+    request_id: Optional[str] = None,
 ) -> group_chat_model.GroupTask:
     """
     为收件成员登记/复用 queued mail_notice。
     使用唯一 coalesceKey 合并“尚未运行”的同一成员通知。
+    request_id 仅记录在新登记的任务上，用于用户群输入的幂等。
     """
     existing = await _find_coalesced_notice(db, group_state.groupId, recipient_chat_id)
     if existing is not None and existing.state == GroupTaskState.QUEUED.value:
@@ -318,6 +639,7 @@ async def ensure_notice_task(
         sequence=seq,
         kind=GroupTaskKind.MAIL_NOTICE.value,
         state=GroupTaskState.QUEUED.value,
+        requestId=request_id,
         coalesceKey=f"{group_state.groupId}:{recipient_chat_id}",
         payload={"prompt": "[system messages] 存在未读邮件"},
         mailReadRequested=False,
@@ -334,11 +656,14 @@ async def enqueue_mail_notice(
     group_state: group_chat_model.GroupState,
     recipient_chat_id: str,
     receipt: group_chat_model.GroupMailReceipt,
+    request_id: Optional[str] = None,
 ) -> group_chat_model.GroupTask:
     """
     为收件成员登记一个 queued mail_notice，并把该收件记录绑定到任务。
     """
-    task = await ensure_notice_task(db, group_state, recipient_chat_id)
+    task = await ensure_notice_task(
+        db, group_state, recipient_chat_id, request_id=request_id
+    )
     receipt.notificationTaskId = task.id
     return task
 

@@ -87,6 +87,15 @@ class GroupMemberResponse(BaseModel):
     isUser: bool = False
 
 
+class GroupMailAttachment(BaseModel):
+    """群组邮件附件（引用中心库文件）。"""
+    fileId: str
+    filename: Optional[str] = None
+    mimeType: Optional[str] = None
+    sizeBytes: Optional[int] = None
+    url: Optional[str] = Field(None, description="由消息组装层填充的下载地址，供前端展示")
+
+
 class GroupMailResponse(BaseModel):
     id: str
     groupId: str
@@ -96,6 +105,7 @@ class GroupMailResponse(BaseModel):
     recipientSnapshot: List[Dict[str, Any]] = Field(default_factory=list)
     title: Optional[str] = None
     content: str
+    attachments: List[GroupMailAttachment] = Field(default_factory=list)
     state: GroupMailState
     sequence: Optional[int] = None
     createdAt: datetime
@@ -183,6 +193,10 @@ class GroupMessageSendRequest(BaseModel):
     recipientNames: List[str] = Field(
         default_factory=list,
         description="收件成员别名列表；空数组表示广播给全部成员",
+    )
+    attachmentFileIds: List[str] = Field(
+        default_factory=list,
+        description="用户上传的中心库文件 ID 列表，随本轮投递给成员",
     )
 
 

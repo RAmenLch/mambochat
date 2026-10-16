@@ -394,7 +394,7 @@ async def _copy_member_messages(
     - extend_broadcast=False：保留 createdAt <= 截点 的消息（该成员未收到这条邮件）。
     - extend_broadcast=True（该成员是所点邮件的收件成员）：该邮件"已送达但尚未被该成员回复"，
       保留到"截点之后第一条 assistant 消息"之前，即含其收到的用户消息
-      （用户来信对应广播正文；成员回信对应"存在未读邮件"通知），但不含其对它的回复。
+      （用户来信与成员回信均对应"存在未读邮件"通知），但不含其对它的回复。
     复用普通会话复制的清洗规则：丢弃 VERSION_SNAPSHOT、中间态置 FAILED、补回 TaskSubStep。
     """
     active_messages = await message_crud.get_messages_by_chat(db, chat_id=src_chat_id)
@@ -656,7 +656,7 @@ async def duplicate_group_chat(
     await db.flush()
 
     # ── 4. 复制各成员子会话消息（截取到截点） ──
-    # 所点邮件的收件成员：额外保留其"已送达"的用户消息（用户来信=广播正文；成员回信="存在未读邮件"通知），
+    # 所点邮件的收件成员：额外保留其"已送达"的通知（用户来信与成员回信均为"存在未读邮件"），
     # 但不保留其回复；非收件成员按截点前保留。
     for old_member in old_members:
         extend = old_member.id in recipient_ids

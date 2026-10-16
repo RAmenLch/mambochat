@@ -18,6 +18,11 @@
         </span>
       </div>
       <div class="mail-content">{{ mail.content }}</div>
+      <GroupMailAttachments
+        v-if="mail.attachments && mail.attachments.length"
+        :attachments="mail.attachments"
+        @preview="openAttachment"
+      />
       <div v-if="isRoundLast(mail)" class="mail-actions">
         <el-tooltip :content="$t('groupChat.duplicate.tooltip')" placement="top" :show-after="500">
           <el-button
@@ -36,15 +41,23 @@
         {{ $t('groupChat.window.loadMore') }}
       </el-button>
     </div>
+
+    <GroupMailAttachmentViewer
+      v-model:visible="viewerVisible"
+      v-model:index="viewerIndex"
+      :attachments="viewerAttachments"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { DocumentCopy } from '@element-plus/icons-vue';
-import type { GroupMail } from '@/api/types/groupChatTypes';
+import type { GroupMail, GroupMailAttachment } from '@/api/types/groupChatTypes';
 import { MASTER_MEMBER_ALIAS } from '@/api/types/groupChatTypes';
+import GroupMailAttachmentViewer from './GroupMailAttachmentViewer.vue';
+import GroupMailAttachments from './GroupMailAttachments.vue';
 
 const { t } = useI18n();
 
@@ -84,6 +97,16 @@ const lastMailIdByRound = computed(() => {
 
 function isRoundLast(mail: GroupMail): boolean {
   return lastMailIdByRound.value.get(mail.sourceTaskId) === mail.id;
+}
+
+const viewerVisible = ref(false);
+const viewerAttachments = ref<GroupMailAttachment[]>([]);
+const viewerIndex = ref(0);
+
+function openAttachment(list: GroupMailAttachment[], index: number) {
+  viewerAttachments.value = list;
+  viewerIndex.value = index;
+  viewerVisible.value = true;
 }
 </script>
 

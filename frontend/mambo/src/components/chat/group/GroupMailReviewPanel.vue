@@ -1,6 +1,11 @@
 <!-- frontend/mambo/src/components/chat/group/GroupMailReviewPanel.vue -->
 <template>
   <div class="mail-review-panel">
+    <GroupMailAttachmentViewer
+      v-model:visible="viewerVisible"
+      v-model:index="viewerIndex"
+      :attachments="viewerAttachments"
+    />
     <!-- 待审核 -->
     <div v-if="pending.length" class="review-block">
       <div class="block-head">
@@ -44,6 +49,11 @@
           </span>
         </div>
         <div class="card-content">{{ mail.content }}</div>
+        <GroupMailAttachments
+          v-if="mail.attachments && mail.attachments.length"
+          :attachments="mail.attachments"
+          @preview="openAttachment"
+        />
         <div class="card-actions">
           <el-button
             size="small"
@@ -110,6 +120,11 @@
         <div v-if="expandedIds.includes(mail.id)" class="decided-body">
           <div class="card-meta">{{ mail.senderAliasSnapshot }} → {{ recipientsOf(mail) }}</div>
           <div class="card-content">{{ mail.content }}</div>
+          <GroupMailAttachments
+            v-if="mail.attachments && mail.attachments.length"
+            :attachments="mail.attachments"
+            @preview="openAttachment"
+          />
         </div>
       </div>
     </div>
@@ -119,7 +134,9 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { ArrowDown, ArrowUp } from '@element-plus/icons-vue';
-import type { GroupMail } from '@/api/types/groupChatTypes';
+import type { GroupMail, GroupMailAttachment } from '@/api/types/groupChatTypes';
+import GroupMailAttachmentViewer from './GroupMailAttachmentViewer.vue';
+import GroupMailAttachments from './GroupMailAttachments.vue';
 
 const props = defineProps<{
   pending: GroupMail[];
@@ -145,6 +162,16 @@ const expandedIds = ref<string[]>([]);
 
 function recipientsOf(mail: GroupMail): string {
   return (mail.recipientSnapshot || []).map((r) => r.memberName).join('，');
+}
+
+const viewerVisible = ref(false);
+const viewerAttachments = ref<GroupMailAttachment[]>([]);
+const viewerIndex = ref(0);
+
+function openAttachment(list: GroupMailAttachment[], index: number) {
+  viewerAttachments.value = list;
+  viewerIndex.value = index;
+  viewerVisible.value = true;
 }
 
 function openReject(mailId: string) {

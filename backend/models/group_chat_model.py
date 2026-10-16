@@ -122,6 +122,10 @@ class GroupMail(Base):
     title = Column(String(255), nullable=True)
     content = Column(TEXT, nullable=False)
 
+    # 附件引用快照（与群/发件人后端无关，统一指向中心库 File.id）：
+    # [{fileId, filename, mimeType, sizeBytes}]；解析失败项为 [{path, error}]
+    attachments = Column(JSON, nullable=True)
+
     toolCallId = Column(String(100), nullable=False)
     # 本轮工具调用的稳定顺序
     toolCallOrder = Column(Integer, nullable=False, default=0)

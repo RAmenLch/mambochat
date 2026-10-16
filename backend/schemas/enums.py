@@ -53,6 +53,7 @@ class FileManagementType(str, Enum):
     KB_DOCUMENT = "kb_document"      # 旧版知识库文件（保留用于兼容）
     RESOURCE = "resource"            # 通用资源文件，统一管理所有上传到资源中心的文件
     AGENT_AVATAR = "agent_avatar"
+    GROUP_MAIL_ATTACHMENT = "group_mail_attachment"  # 群组邮件附件，被 GroupMail.attachments 引用
 
 class MoveAction(str, Enum):
     """定义节点移动的操作类型"""

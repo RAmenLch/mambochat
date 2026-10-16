@@ -15,8 +15,8 @@ from sqlalchemy import select
 from sqlalchemy import delete as sa_delete, func as sa_func
 
 from backend.database import AsyncSessionLocal
-from backend.models import file_model, chat_model, setting_model, resource_model, agent_model, log_model
-from backend.schemas.enums import FileManagementType, ResourceType
+from backend.models import file_model, chat_model, setting_model, resource_model, agent_model, log_model, group_chat_model
+from backend.schemas.enums import FileManagementType, ResourceType, GroupMailState
 from backend.services.file_service import FileService
 from backend.services.stream_manager_service import stream_manager
 from backend.services import maintenance
@@ -278,6 +278,55 @@ async def _cleanup_agent_avatar_files(db: AsyncSession):
             logger.error(f"处理孤儿 Agent 头像文件 {file_id} 时出错: {e}")
 
 
+async def _cleanup_group_mail_files(db: AsyncSession):
+    """清理不再被任何"活跃"邮件引用的群组邮件附件文件。
+
+    活跃 = 尚未投递完成或已投递的邮件（staged/reviewing/deferred/sent）；
+    被拒绝/丢弃邮件独占引用的附件视为孤儿。
+    """
+    active_states = [
+        GroupMailState.STAGED.value,
+        GroupMailState.REVIEWING.value,
+        GroupMailState.DEFERRED.value,
+        GroupMailState.SENT.value,
+    ]
+    stmt_active = select(group_chat_model.GroupMail.attachments).where(
+        group_chat_model.GroupMail.state.in_(active_states)
+    )
+    result_active = await db.execute(stmt_active)
+    active_file_ids: Set[str] = set()
+    for (attachments,) in result_active:
+        for a in (attachments or []):
+            if isinstance(a, dict) and a.get("fileId"):
+                active_file_ids.add(a["fileId"])
+
+    stmt_managed = select(file_model.File.id).where(
+        file_model.File.management_type.contains(
+            [FileManagementType.GROUP_MAIL_ATTACHMENT.value]
+        )
+    )
+    result_managed = await db.execute(stmt_managed)
+    managed_file_ids = {row[0] for row in result_managed}
+
+    orphan_file_ids = managed_file_ids - active_file_ids
+    if not orphan_file_ids:
+        return
+
+    logger.info(f"发现 {len(orphan_file_ids)} 个孤儿群组邮件附件，准备清理...")
+    file_service = FileService(db)
+    for file_id in orphan_file_ids:
+        try:
+            deleted = await file_service.remove_type_and_cleanup(
+                file_id, FileManagementType.GROUP_MAIL_ATTACHMENT.value
+            )
+            if deleted:
+                logger.info(f"已删除孤儿群组邮件附件 (ID: {file_id})")
+            else:
+                logger.info(f"已移除文件 {file_id} 的 group_mail_attachment 类型标记")
+        except Exception as e:
+            logger.error(f"处理孤儿群组邮件附件 {file_id} 时出错: {e}")
+
+
 async def _cleanup_post_logs(db: AsyncSession):
     """清理过期的 LLM 报文日志：删除已不存在会话的孤儿日志，并保留最新 LOG_MAX_ROWS 条"""
     # 1. 删除 chatId 指向已删除会话的孤儿日志
@@ -466,6 +515,7 @@ async def cleanup_zombie_files():
         ("孤儿 GlobalSetting 文件", _cleanup_global_setting_files),
         ("孤儿 Resource/KB 文件", _cleanup_resource_files),
         ("孤儿 Agent 头像文件", _cleanup_agent_avatar_files),
+        ("孤儿群组邮件附件", _cleanup_group_mail_files),
         ("孤儿/超限会话日志", _cleanup_post_logs),
     ]
 

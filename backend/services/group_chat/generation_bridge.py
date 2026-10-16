@@ -72,10 +72,12 @@ async def enqueue_user_turn(
     content: str,
     recipient_names: Sequence[str],
     request_id: Optional[str] = None,
+    attachment_file_ids: Optional[Sequence[str]] = None,
 ) -> schemas.GroupTaskAccepted:
     """
     用户群输入入队。空收件人=广播全部成员；非空则逐别名验证并去重。
-    一次事务为所有目标成员创建 user_message 任务，失败整体回滚。
+    一次事务登记一封来自 Master 的邮件，并为每个目标成员登记邮件通知任务，失败整体回滚。
+    attachment_file_ids：用户上传的中心库文件 ID，随邮件投递并注入各收件成员工作区。
     """
     state = await group_chat_crud.get_group_state(db, group_id)
     if not state:
@@ -128,41 +130,33 @@ async def enqueue_user_turn(
     # 确保用户成员 Master 存在，用于把本次用户发言记为「来自 Master 的邮件」
     master, _ = await group_service.ensure_master_member(db, group_id)
 
-    created_ids: List[str] = []
-    for member in targets:
-        seq = state.nextTaskSeq or 0
-        state.nextTaskSeq = seq + 1
-        task = group_chat_model.GroupTask(
-            groupId=group_id,
-            memberChatId=member.id,
-            sequence=seq,
-            kind=GroupTaskKind.USER_MESSAGE.value,
-            state=GroupTaskState.QUEUED.value,
-            requestId=request_id,
-            payload={"content": content},
-            attemptCount=0,
-            createdAt=get_configured_now(),
-        )
-        db.add(task)
-        await db.flush()
-        created_ids.append(task.id)
+    # 用户上传的附件（中心库 fileId）：随邮件投递并注入各收件成员工作区
+    file_ids = list(dict.fromkeys(
+        f for f in (attachment_file_ids or []) if isinstance(f, str) and f
+    ))
 
-    # 用户本人发言 → 记为一封来自 Master 的已投递邮件（sender=用户）
-    user_mail = await mail_service.record_user_mail(db, state, master, targets, content)
+    # 用户本人发言 → 记为一封来自 Master 的已投递邮件；
+    # 目标成员不再收到直接用户消息，改由邮件通知驱动（与成员间互发邮件一致）。
+    user_mail, notice_tasks = await mail_service.record_user_mail(
+        db, state, master, targets, content,
+        attachments=await mail_service.build_attachment_refs_from_file_ids(db, file_ids),
+        request_id=request_id,
+    )
 
     state.version = (state.version or 0) + 1
     # 单次发起沟通：新的用户群输入开启新的额度周期，自动邮件轮次计数清零
     state.autoRoundCount = 0
     await db.commit()
 
-    for tid in created_ids:
+    for task in notice_tasks:
         await events.publish_group_task_changed(
-            group_id, tid, "", GroupTaskState.QUEUED.value, version=state.version
+            group_id, task.id, task.memberChatId, GroupTaskState.QUEUED.value,
+            version=state.version,
         )
     await events.publish_group_mail_sent(
         group_id, user_mail.id, user_mail.sequence, version=state.version
     )
-    return schemas.GroupTaskAccepted(groupId=group_id, taskIds=created_ids)
+    return schemas.GroupTaskAccepted(groupId=group_id, taskIds=[t.id for t in notice_tasks])
 
 
 async def enqueue_member_turn(
@@ -316,8 +310,40 @@ async def claim_next_task(
 # 执行
 # ──────────────────────────────────────────────
 
+async def _collect_task_attachment_file_ids(
+    db: AsyncSession, task: group_chat_model.GroupTask
+) -> List[str]:
+    """收集本次轮次要注入到收件人工作区的附件 fileId（去重、保序）。
+
+    - mail_notice：来自本轮冻结快照内邮件的附件；
+    - user_message：来自 payload["attachmentFileIds"]（用户在群输入框上传的文件）。
+    """
+    file_ids: List[str] = []
+    if task.kind == GroupTaskKind.MAIL_NOTICE.value:
+        mails = await mail_service.list_snapshot_mails(db, task)
+        for mail in mails:
+            file_ids.extend(mail_service.resolved_file_ids_of(mail))
+    else:
+        raw = (task.payload or {}).get("attachmentFileIds") or []
+        if isinstance(raw, list):
+            file_ids.extend(f for f in raw if isinstance(f, str) and f)
+
+    seen = set()
+    result: List[str] = []
+    for fid in file_ids:
+        if fid in seen:
+            continue
+        seen.add(fid)
+        result.append(fid)
+    return result
+
+
 async def _ensure_task_messages(task_id: str) -> str:
-    """在受控事务中创建/绑定用户消息与 assistant 占位，返回 assistant 消息 ID。"""
+    """在受控事务中创建/绑定用户消息与 assistant 占位，返回 assistant 消息 ID。
+
+    若本轮携带附件（邮件附件 / 用户上传），把副本写入收件成员的工作区即可；
+    不向该成员会话附加 File 子消息，由成员在需要时用自身工具读取。
+    """
     from backend.services import generation_service
 
     async with AsyncSessionLocal() as db:
@@ -347,6 +373,12 @@ async def _ensure_task_messages(task_id: str) -> str:
                 ),
                 chat_id=chat_id,
             )
+            # 附件已上传到中心库：物化到收件成员 backend 工作区，由成员自行读取。
+            attachment_file_ids = await _collect_task_attachment_file_ids(db, task)
+            if attachment_file_ids:
+                await mail_service.materialize_mail_attachments(
+                    db, chat_id, attachment_file_ids
+                )
             assistant = await generation_service.prepare_for_regeneration(
                 db, chat_id=chat_id, base_message_id=user_message.id
             )

@@ -91,6 +91,16 @@ export interface GroupMailRecipient {
   memberName: string
 }
 
+/** 群组邮件附件（引用中心库文件） */
+export interface GroupMailAttachment {
+  fileId: string
+  filename?: string | null
+  mimeType?: string | null
+  sizeBytes?: number | null
+  /** 下载地址，由后端消息组装层填充 */
+  url?: string | null
+}
+
 export interface GroupMail {
   id: string
   groupId: string
@@ -100,6 +110,7 @@ export interface GroupMail {
   recipientSnapshot: GroupMailRecipient[]
   title?: string | null
   content: string
+  attachments?: GroupMailAttachment[]
   state: GroupMailState
   sequence?: number | null
   createdAt: string
@@ -157,6 +168,8 @@ export interface GroupMessageSendRequest {
   requestId?: string | null
   content: string
   recipientNames: string[]
+  /** 用户上传的中心库文件 ID，随本轮投递并注入各成员工作区 */
+  attachmentFileIds?: string[]
 }
 
 /** 复制群组到指定邮件为止（粒度=该邮件所属的整轮） */

@@ -117,6 +117,11 @@
                 :value="opt.value"
               />
             </el-select>
+            <el-tooltip :content="combineTip" placement="top">
+              <el-button size="small" class="combine-toggle" @click="onToggleCombine">
+                {{ combineMode === 'union' ? $t('groupChat.filter.union') : $t('groupChat.filter.intersection') }}
+              </el-button>
+            </el-tooltip>
             <el-select
               v-model="recipientFilter"
               multiple
@@ -208,8 +213,10 @@ const hasMore = computed(() => (groupId.value ? !!groupStore.mailHasMore[groupId
 const isLoading = computed(() => (groupId.value ? !!groupStore.loading[groupId.value] : false));
 
 // ── 邮件筛选：按发信人 / 收信人（含 Master=用户）过滤已投递邮件（服务端过滤） ──
+// combine 决定发信人条件与收信人条件的组合方式：union=并集（默认），intersection=交集
 const senderFilter = ref<string[]>([]);
 const recipientFilter = ref<string[]>([]);
+const combineMode = ref<'union' | 'intersection'>('union');
 const filterAliasOptions = computed(() =>
   members.value
     .filter((m) => !!m.memberAlias)
@@ -223,6 +230,11 @@ const filterAliasOptions = computed(() =>
 const hasActiveFilter = computed(
   () => senderFilter.value.length > 0 || recipientFilter.value.length > 0,
 );
+const combineTip = computed(() =>
+  combineMode.value === 'union'
+    ? t('groupChat.filter.tipUnion')
+    : t('groupChat.filter.tipIntersection'),
+);
 
 function onFilterChange() {
   const gid = groupId.value;
@@ -230,8 +242,14 @@ function onFilterChange() {
   groupStore.setMailFilters(gid, {
     sender: senderFilter.value,
     recipient: recipientFilter.value,
+    combine: combineMode.value,
   });
   void groupStore.loadMails(gid, true, true);
+}
+
+function onToggleCombine() {
+  combineMode.value = combineMode.value === 'union' ? 'intersection' : 'union';
+  onFilterChange();
 }
 
 // 切群时用该群已保存的筛选条件回填本地态
@@ -241,6 +259,7 @@ watch(
     const f = gid ? groupStore.mailFilters[gid] : undefined;
     senderFilter.value = f?.sender ? [...f.sender] : [];
     recipientFilter.value = f?.recipient ? [...f.recipient] : [];
+    combineMode.value = f?.combine ?? 'union';
   },
   { immediate: true },
 );
@@ -422,10 +441,20 @@ async function onDuplicateUpTo(mailId: string) {
   }
 }
 
-async function onSend(payload: { content: string; recipientNames: string[] }) {
+async function onSend(payload: {
+  content: string;
+  recipientNames: string[];
+  attachmentFileIds?: string[];
+}) {
   if (!groupId.value) return;
   try {
-    await groupStore.sendMessage(groupId.value, payload.content, payload.recipientNames);
+    await groupStore.sendMessage(
+      groupId.value,
+      payload.content,
+      payload.recipientNames,
+      undefined,
+      payload.attachmentFileIds ?? [],
+    );
     markLocalActivity();
     ElMessage.success(t('groupChat.window.messageQueued'));
   } catch (error) {
@@ -686,6 +715,10 @@ async function onRejectAllMails(reason: string) {
 }
 .mail-filters .filter-select {
   width: 180px;
+}
+.mail-filters .combine-toggle {
+  flex: 0 0 auto;
+  padding: 0 10px;
 }
 .side-column {
   width: 260px;

@@ -34,6 +34,7 @@ export default {
     mentionSuggestTitle: "选择要 {'@'} 的成员",
     loadMore: '加载更多邮件',
     refresh: '刷新',
+    attach: '添加附件',
     messageQueued: '已提交给成员，等待处理',
     roundThisEpisode: '本次沟通',
     roundInfoTip: '本次发起沟通以来，群内自动邮件轮次已启动 {used}/{limit}（群累计 {total} 轮）。达到上限会自动暂停，可用「重置轮次」再放行。',
@@ -52,6 +53,10 @@ export default {
     sender: '发信人',
     recipient: '收信人',
     empty: '没有符合筛选条件的邮件。',
+    union: '并',
+    intersection: '交',
+    tipUnion: '发信人与收信人按「并集」筛选，点击切换为「交集」',
+    tipIntersection: '发信人与收信人按「交集」筛选，点击切换为「并集」',
   },
   recovery: {
     taskLine: '{alias} · {kind} · {state}',
@@ -124,6 +129,13 @@ export default {
     from: '发件人',
     to: '收件成员',
     noTitle: '（无标题）',
+  },
+  attachment: {
+    download: '下载',
+    noPreview: '该类型暂不支持在线预览，请下载后查看。',
+    loadFailed: '内容加载失败。',
+    prev: '上一个',
+    next: '下一个',
   },
   menu: {
     newGroup: '新建群组会话',

@@ -10,7 +10,7 @@ from backend.database import get_db
 from backend.models import group_chat_model
 from backend.crud import group_chat_crud
 from backend.services.group_chat import service as group_service
-from backend.services.group_chat import generation_bridge
+from backend.services.group_chat import generation_bridge, mail_service
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +109,7 @@ async def send_group_message(
         content=payload.content,
         recipient_names=payload.recipientNames,
         request_id=payload.requestId,
+        attachment_file_ids=payload.attachmentFileIds,
     )
 
 
@@ -116,7 +117,9 @@ async def send_group_message(
 # 邮件与任务分页
 # ──────────────────────────────────────────────
 
-def _mail_to_response(mail: group_chat_model.GroupMail) -> schemas.GroupMailResponse:
+async def _mail_to_response(
+    db: AsyncSession, mail: group_chat_model.GroupMail
+) -> schemas.GroupMailResponse:
     return schemas.GroupMailResponse(
         id=mail.id,
         groupId=mail.groupId,
@@ -126,6 +129,7 @@ def _mail_to_response(mail: group_chat_model.GroupMail) -> schemas.GroupMailResp
         recipientSnapshot=mail.recipientSnapshot or [],
         title=mail.title,
         content=mail.content,
+        attachments=await mail_service.mail_attachments_response(db, mail),
         state=mail.state,
         sequence=mail.sequence,
         createdAt=mail.createdAt,
@@ -144,10 +148,15 @@ async def list_group_mails(
     limit: int = Query(50, ge=1, le=200),
     sender: Optional[str] = Query(None, description="发信人别名，逗号分隔，多个取并集"),
     recipient: Optional[str] = Query(None, description="收信人别名，逗号分隔，多个取并集；Master 表示用户本人"),
+    combine: str = Query(
+        "union",
+        description="发信人与收信人的组合方式：union=并集（默认），intersection=交集",
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     sender_aliases = [a.strip() for a in (sender or "").split(",") if a.strip()]
     recipient_aliases = [a.strip() for a in (recipient or "").split(",") if a.strip()]
+    combine_mode = combine if combine in ("union", "intersection") else "union"
 
     recipient_chat_ids: List[str] = []
     if recipient_aliases:
@@ -162,19 +171,17 @@ async def list_group_mails(
                 if member is not None:
                     recipient_chat_ids.append(member.id)
 
-    # 指定了收件人过滤但无一可解析：结果必然为空，避免退化为“不过滤”
-    if recipient_aliases and not recipient_chat_ids:
-        return schemas.GroupMailListResponse(items=[], nextAfterSequence=afterSequence, hasMore=False)
-
     rows = await group_chat_crud.list_sent_mail_page(
         db,
         group_id,
         afterSequence,
         limit,
         sender_aliases=sender_aliases or None,
-        recipient_chat_ids=recipient_chat_ids or None,
+        # 启用收信人筛选时传（可能为空的）列表：空列表表示该条件无匹配，而非“不过滤”
+        recipient_chat_ids=recipient_chat_ids if recipient_aliases else None,
+        combine=combine_mode,
     )
-    items = [_mail_to_response(m) for m in rows]
+    items = [await _mail_to_response(db, m) for m in rows]
     next_after = items[-1].sequence if items else afterSequence
     return schemas.GroupMailListResponse(
         items=items,

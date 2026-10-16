@@ -25,8 +25,13 @@ export const useGroupChatStore = defineStore('groupChat', () => {
   const tasks = ref<Record<string, GroupTask[]>>({});
   const mailReviews = ref<Record<string, GroupMailReview>>({});
   const loading = ref<Record<string, boolean>>({});
-  /** 每个群当前生效的邮件筛选条件（发信人/收信人别名） */
-  const mailFilters = ref<Record<string, { sender: string[]; recipient: string[] }>>({});
+  /** 每个群当前生效的邮件筛选条件（发信人/收信人别名 + 并集/交集组合方式） */
+  interface MailFilterState {
+    sender: string[];
+    recipient: string[];
+    combine: 'union' | 'intersection';
+  }
+  const mailFilters = ref<Record<string, MailFilterState>>({});
 
   function ensure(groupId: string) {
     if (!mails.value[groupId]) mails.value[groupId] = [];
@@ -34,13 +39,11 @@ export const useGroupChatStore = defineStore('groupChat', () => {
   }
 
   /** 设置某群的邮件筛选条件（调用方随后应 reset 重新拉取） */
-  function setMailFilters(
-    groupId: string,
-    filters: { sender: string[]; recipient: string[] },
-  ): void {
+  function setMailFilters(groupId: string, filters: MailFilterState): void {
     mailFilters.value[groupId] = {
       sender: [...filters.sender],
       recipient: [...filters.recipient],
+      combine: filters.combine,
     };
   }
 
@@ -103,11 +106,13 @@ export const useGroupChatStore = defineStore('groupChat', () => {
     content: string,
     recipientNames: string[] = [],
     requestId?: string,
+    attachmentFileIds: string[] = [],
   ) {
     const res = await groupApi.sendGroupMessage(groupId, {
       content,
       recipientNames,
       requestId: requestId ?? null,
+      attachmentFileIds,
     });
     await loadTasks(groupId);
     return res;

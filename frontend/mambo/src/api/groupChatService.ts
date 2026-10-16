@@ -58,6 +58,8 @@ export const duplicateGroupChat = (
 export interface GroupMailFilters {
   sender?: string[]
   recipient?: string[]
+  /** 发信人与收信人的组合方式：union=并集（默认），intersection=交集 */
+  combine?: 'union' | 'intersection'
 }
 
 /** 按期邮件游标分页（可按发信人 / 收信人过滤；别名为逗号安全集，故用逗号拼接） */
@@ -73,6 +75,7 @@ export const listGroupMails = (
   }
   if (filters?.sender?.length) params.sender = filters.sender.join(',');
   if (filters?.recipient?.length) params.recipient = filters.recipient.join(',');
+  if (filters?.combine) params.combine = filters.combine;
   return apiClient.get(`/group-chats/${groupId}/mails`, { params });
 };
 

@@ -17,7 +17,52 @@
       </span>
     </div>
 
+    <div v-if="uploadedFiles.length" class="attachment-row">
+      <div v-for="f in uploadedFiles" :key="f.id" class="attachment-chip">
+        <el-image
+          v-if="f.mime_type.startsWith('image/')"
+          :src="f.url"
+          :preview-src-list="uploadedImageUrls"
+          :initial-index="Math.max(0, uploadedImageUrls.indexOf(f.url))"
+          hide-on-click-modal
+          fit="cover"
+          class="chip-thumb"
+          :title="f.filename"
+        >
+          <template #error>
+            <el-icon class="chip-file-icon"><Document /></el-icon>
+          </template>
+        </el-image>
+        <el-icon v-else class="chip-file-icon"><Document /></el-icon>
+        <span class="chip-name" :title="f.filename">{{ f.filename }}</span>
+        <el-button
+          :icon="Close"
+          circle
+          text
+          size="small"
+          class="chip-remove"
+          @click="removeFile(f.id)"
+        />
+      </div>
+    </div>
+
     <div class="composer-body">
+      <el-tooltip :content="$t('groupChat.window.attach')" placement="top">
+        <el-button
+          class="attach-button"
+          :icon="Paperclip"
+          :loading="uploading"
+          :disabled="disabled"
+          @click="pickFiles"
+        />
+      </el-tooltip>
+      <input
+        ref="fileInputRef"
+        type="file"
+        multiple
+        class="hidden-file-input"
+        @change="onFilesSelected"
+      />
       <div class="editor-wrapper">
         <el-input
           ref="textareaRef"
@@ -71,7 +116,9 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue';
-import { Promotion } from '@element-plus/icons-vue';
+import { Close, Document, Paperclip, Promotion } from '@element-plus/icons-vue';
+import { uploadFile } from '@/api/fileService';
+import type { FileResponse } from '@/api/types';
 import { useResizablePanels } from '@/composables/useResizablePanels';
 import type { GroupMember } from '@/api/types/groupChatTypes';
 
@@ -81,10 +128,52 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: 'send', payload: { content: string; recipientNames: string[] }): void;
+  (
+    e: 'send',
+    payload: { content: string; recipientNames: string[]; attachmentFileIds: string[] },
+  ): void;
 }>();
 
 const content = ref('');
+
+// --- 附件上传（与普通会话一致：先上传到中心库，再随群输入携带 fileId） ---
+const fileInputRef = ref<HTMLInputElement | null>(null);
+const uploadedFiles = ref<FileResponse[]>([]);
+const uploading = ref(false);
+
+function pickFiles() {
+  if (props.disabled || uploading.value) return;
+  fileInputRef.value?.click();
+}
+
+async function onFilesSelected(event: Event) {
+  const target = event.target as HTMLInputElement;
+  const files = Array.from(target.files || []);
+  target.value = '';
+  if (!files.length) return;
+  uploading.value = true;
+  try {
+    for (const f of files) {
+      try {
+        const res = await uploadFile(f);
+        uploadedFiles.value.push(res);
+      } catch (err) {
+        console.error('Failed to upload group attachment:', err);
+      }
+    }
+  } finally {
+    uploading.value = false;
+  }
+}
+
+function removeFile(fileId: string) {
+  uploadedFiles.value = uploadedFiles.value.filter((f) => f.id !== fileId);
+}
+
+/** 已上传图片的 URL 列表，用于缩略图之间自由切换预览 */
+const uploadedImageUrls = computed(() =>
+  uploadedFiles.value.filter((f) => f.mime_type.startsWith('image/')).map((f) => f.url),
+);
 const textareaRef = ref();
 
 // --- 高度可拖拽（与普通会话输入区一致的交互与上下限） ---
@@ -255,11 +344,16 @@ const mentionedNames = computed(() => {
 });
 
 function onSend() {
-  if (props.disabled) return;
+  if (props.disabled || uploading.value) return;
   const text = content.value.trim();
   if (!text) return;
-  emit('send', { content: text, recipientNames: mentionedNames.value });
+  emit('send', {
+    content: text,
+    recipientNames: mentionedNames.value,
+    attachmentFileIds: uploadedFiles.value.map((f) => f.id),
+  });
   content.value = '';
+  uploadedFiles.value = [];
   closeMentions();
 }
 </script>
@@ -323,6 +417,58 @@ function onSend() {
   display: flex;
   align-items: stretch;
   gap: 10px;
+}
+.attach-button {
+  align-self: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+}
+.hidden-file-input {
+  display: none;
+}
+.attachment-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0 6px;
+  flex-shrink: 0;
+}
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background-color: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
+  font-size: 12px;
+  max-width: 220px;
+  transition: border-color 0.15s ease;
+}
+.attachment-chip:hover {
+  border-color: var(--el-color-primary-light-5);
+}
+.chip-thumb {
+  width: 30px;
+  height: 30px;
+  border-radius: 5px;
+  flex-shrink: 0;
+  cursor: zoom-in;
+  overflow: hidden;
+}
+.chip-file-icon {
+  font-size: 16px;
+  color: var(--el-text-color-secondary);
+  flex-shrink: 0;
+}
+.chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chip-remove {
+  flex-shrink: 0;
 }
 .editor-wrapper {
   position: relative;
