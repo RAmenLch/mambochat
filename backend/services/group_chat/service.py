@@ -387,22 +387,24 @@ async def _copy_member_messages(
     src_chat_id: str,
     dst_chat_id: str,
     cutoff_time,
-    master_mode: bool = False,
+    extend_broadcast: bool = False,
 ) -> None:
     """
     把成员子会话的活跃路径消息复制到新会话，只保留截点之前的前缀。
-    - master_mode=False（点在成员邮件上）：保留 createdAt <= 截点 的消息（该轮已完成）。
-    - master_mode=True（点在用户本人发出的来信上）：该输入"已送达但尚未被成员回复"，
-      保留到"截点之后第一条 assistant 消息"之前（含用户的广播消息，不含其回复）。
+    - extend_broadcast=False：保留 createdAt <= 截点 的消息。
+    - extend_broadcast=True（点在用户来信上、且该成员是本条来信的收件成员）：
+      该输入"已送达但尚未被成员回复"，保留到"截点之后第一条 assistant 消息"之前
+      （含用户的广播消息，不含其回复）。非收件成员不进入此分支，避免把随后到达的
+      "存在未读邮件"等系统消息一并带入。
     复用普通会话复制的清洗规则：丢弃 VERSION_SNAPSHOT、中间态置 FAILED、补回 TaskSubStep。
     """
     active_messages = await message_crud.get_messages_by_chat(db, chat_id=src_chat_id)
     if not active_messages:
         return
 
-    # master_mode：定位"截点之后第一条 assistant 消息"作为上界（保留其之前的消息）
+    # 需要扩展时：定位"截点之后第一条 assistant 消息"作为上界（保留其之前的消息）
     boundary = None
-    if master_mode:
+    if extend_broadcast:
         for msg in active_messages:
             if (
                 msg.role == "assistant"
@@ -415,7 +417,7 @@ async def _copy_member_messages(
     # 保留判定应形成路径前缀：遇到第一个越界的消息即停止
     kept = []
     for msg in active_messages:
-        if master_mode:
+        if extend_broadcast:
             if boundary is not None and msg.createdAt is not None and msg.createdAt >= boundary:
                 break
             kept.append(msg)
@@ -511,6 +513,12 @@ async def duplicate_group_chat(
     # 时间戳在副本里原样保留，因此"副本的副本"也能继续复制。
     is_master_mail = target_mail.senderAliasSnapshot == MASTER_ALIAS
     cutoff_time = target_mail.sentAt or target_mail.createdAt
+    # 本条来信的收件成员（副本里该快照同样保留，故也支持"副本的副本"）
+    recipient_ids = {
+        item.get("memberChatId")
+        for item in (target_mail.recipientSnapshot or [])
+        if item.get("memberChatId")
+    }
     # 整轮：邮件流上界取该邮件所属轮次的最后一封（同 sourceTaskId 的最大 sequence）。
     # Master 来信每封自成一轮，此查询即返回它自己。
     upper_res = await db.execute(
@@ -619,6 +627,7 @@ async def duplicate_group_chat(
             ],
             title=mail.title,
             content=mail.content,
+            attachments=mail.attachments,
             toolCallId=mail.toolCallId,
             toolCallOrder=mail.toolCallOrder,
             state=GroupMailState.SENT.value,
@@ -649,9 +658,11 @@ async def duplicate_group_chat(
     await db.flush()
 
     # ── 4. 复制各成员子会话消息（截取到截点） ──
+    # 仅当点在用户来信上、且该成员是这条来信的收件成员时，才额外保留其"已送达"的用户消息
     for old_member in old_members:
+        extend = is_master_mail and old_member.id in recipient_ids
         await _copy_member_messages(
-            db, old_member.id, member_id_map[old_member.id], cutoff_time, is_master_mail
+            db, old_member.id, member_id_map[old_member.id], cutoff_time, extend
         )
 
     await db.commit()
@@ -801,7 +812,9 @@ async def delete_group(db: AsyncSession, group_id: str) -> None:
 # 审核模式：邮件审批
 # ──────────────────────────────────────────────
 
-def mail_to_response(mail: group_chat_model.GroupMail) -> schemas.GroupMailResponse:
+async def mail_to_response(
+    db: AsyncSession, mail: group_chat_model.GroupMail
+) -> schemas.GroupMailResponse:
     return schemas.GroupMailResponse(
         id=mail.id,
         groupId=mail.groupId,
@@ -811,6 +824,7 @@ def mail_to_response(mail: group_chat_model.GroupMail) -> schemas.GroupMailRespo
         recipientSnapshot=mail.recipientSnapshot or [],
         title=mail.title,
         content=mail.content,
+        attachments=await mail_service.mail_attachments_response(db, mail),
         state=mail.state,
         sequence=mail.sequence,
         createdAt=mail.createdAt,
@@ -829,8 +843,8 @@ async def get_group_mail_reviews(
         raise _bad(GroupErrorCode.NOT_FOUND, "group_not_found", 404)
     pending, decided = await mail_service.list_review_queue(db, group_id)
     return schemas.GroupMailReviewResponse(
-        pending=[mail_to_response(m) for m in pending],
-        decided=[mail_to_response(m) for m in decided],
+        pending=[await mail_to_response(db, m) for m in pending],
+        decided=[await mail_to_response(db, m) for m in decided],
     )
 
 
