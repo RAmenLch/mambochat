@@ -23,6 +23,11 @@ import httpx
 from bs4 import BeautifulSoup
 import trafilatura
 
+from backend.services.generation.tools.deepseek_web_api import (
+    WebSearchConfig,
+    deepseek_fetch,
+)
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -250,7 +255,32 @@ def get_reader() -> BaseWebReader:
     return _HTML2TEXT
 
 
-async def read_webpage(url: str, proxy_url: Optional[str] = None) -> str:
-    """读取网页内容（通过当前路由策略）。"""
+async def read_webpage(
+    url: str,
+    proxy_url: Optional[str] = None,
+    config: Optional[WebSearchConfig] = None,
+) -> str:
+    """读取网页内容。
+
+    网页读取方式由 config.reader 决定：
+    - auto: 搜索后端为 deepseek 时走 Fetch 接口，否则本地解析
+    - local: 始终本地解析
+    - deepseek: 走 DeepSeek Fetch 接口，失败时回退本地解析
+    """
+    if config is not None and config.uses_deepseek_fetch and config.api_key:
+        try:
+            page = await deepseek_fetch(
+                url,
+                api_base=config.api_base,
+                api_key=config.api_key,
+                proxy_url=proxy_url,
+            )
+            content = _truncate(_clean_text(page.get("content") or ""))
+            if content:
+                return content
+            logger.warning(f"[WEB|deepseek-fetch] {url} 未返回正文，回退本地解析")
+        except Exception as e:
+            logger.warning(f"[WEB|deepseek-fetch] {url} 抓取失败，回退本地解析: {e}")
+
     reader = get_reader()
     return await reader.read(url, proxy_url=proxy_url)

@@ -223,6 +223,29 @@ export interface MultimodalMedia {
   url?: string | null
 }
 
+export interface WebSearchDisplayItem {
+  title: string
+  url: string
+  /** 100~200 字符短摘要，专供列表展示 */
+  snippet: string
+  site_name?: string | null
+  site_icon?: string | null
+  /** RFC3339（UTC），前端格式化为 YYYY-MM-DD */
+  date?: string | null
+  rerank_score?: number | null
+  /** 权威度 0~4，-1 表示未知 */
+  authority?: number | null
+}
+
+/** 后端下发的搜索结果展示快照（仅前端展示，不进入 LLM 上下文） */
+export interface WebSearchDisplay {
+  kind: 'web_search'
+  provider?: string
+  query?: string
+  count?: number
+  items?: WebSearchDisplayItem[]
+}
+
 export interface McpToolContent {
   tool_call_id: string
   name: string
@@ -232,6 +255,8 @@ export interface McpToolContent {
   input_schema?: Record<string, SchemaProperty>
   /** 多模态工具结果（例如 read 读取图片/音频/视频/文档），用于气泡与弹窗渲染媒体 */
   media?: MultimodalMedia[] | null
+  /** 搜索结果展示快照；老消息可能缺失，前端回退解析 result */
+  display?: WebSearchDisplay | null
 }
 
 export interface ReviewToolContent {

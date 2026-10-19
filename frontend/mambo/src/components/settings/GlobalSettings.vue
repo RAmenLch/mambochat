@@ -218,6 +218,72 @@
           </el-tooltip>
         </el-form-item>
 
+        <el-form-item :label="t('settings.global.webSearchProvider')">
+          <el-radio-group v-model="settingsForm.web_search_provider">
+            <el-radio value="duckduckgo">{{ t('settings.global.webSearchProviderDuckduckgo') }}</el-radio>
+            <el-radio value="deepseek">{{ t('settings.global.webSearchProviderDeepseek') }}</el-radio>
+          </el-radio-group>
+          <el-tooltip
+            effect="dark"
+            :content="t('settings.global.webSearchProviderTip')"
+            placement="top"
+          >
+            <el-icon class="label-icon"><QuestionFilled /></el-icon>
+          </el-tooltip>
+        </el-form-item>
+        <template v-if="settingsForm.web_search_provider === 'deepseek'">
+          <el-form-item :label="t('settings.global.webSearchDeepseekProvider')">
+            <el-select
+              v-model="settingsForm.web_search_provider_id"
+              :placeholder="t('settings.global.webSearchDeepseekProviderPlaceholder')"
+              style="width: 100%"
+              filterable
+            >
+              <el-option
+                v-for="p in deepseekProviders"
+                :key="p.id"
+                :label="`${p.name} (${p.apiHost})`"
+                :value="p.id"
+              />
+            </el-select>
+            <div v-if="!deepseekProviders.length" style="width: 100%; font-size: 12px; color: var(--el-text-color-secondary); line-height: 1.5">
+              {{ t('settings.global.webSearchDeepseekProviderEmpty') }}
+            </div>
+            <div v-else-if="!settingsForm.web_search_provider_id" style="width: 100%; font-size: 12px; color: var(--el-color-warning); line-height: 1.5">
+              {{ t('settings.global.webSearchDeepseekProviderRequired') }}
+            </div>
+          </el-form-item>
+          <el-form-item :label="t('settings.global.webSearchResultCount')">
+            <el-input-number
+              v-model="settingsForm.web_search_result_count"
+              :min="1"
+              :max="50"
+              :step="1"
+              controls-position="right"
+              style="width: 100%"
+            />
+          </el-form-item>
+          <el-form-item :label="t('settings.global.webSearchReader')">
+            <el-radio-group v-model="settingsForm.web_search_reader">
+              <el-radio value="deepseek">{{ t('settings.global.webSearchReaderDeepseek') }}</el-radio>
+              <el-radio value="local">{{ t('settings.global.webSearchReaderLocal') }}</el-radio>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item :label="t('settings.global.webSearchNeedContent')">
+            <el-switch
+              :model-value="settingsForm.web_search_need_content ?? false"
+              @update:model-value="(val: string | number | boolean) => (settingsForm.web_search_need_content = val as boolean)"
+            />
+            <el-tooltip
+              effect="dark"
+              :content="t('settings.global.webSearchNeedContentTip')"
+              placement="top"
+            >
+              <el-icon class="label-icon"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </el-form-item>
+        </template>
+
         <el-divider>{{ t('settings.global.historyCompression') }}</el-divider>
         <el-form-item>
           <template #label>
@@ -423,7 +489,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, watch, nextTick, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useProviderStore } from '@/stores/providerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -445,16 +511,32 @@ const settingsStore = useSettingsStore()
 const { groupedModels } = storeToRefs(providerStore)
 const { globalSettings } = storeToRefs(settingsStore)
 
+// DeepSeek 服务商列表（按 apiHost 域名判断，与执行器类型无关）
+const isDeepseekHost = (apiHost: string): boolean => {
+  const raw = (apiHost || '').trim()
+  const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`
+  try {
+    const host = new URL(url).hostname.toLowerCase()
+    return host === 'deepseek.com' || host.endsWith('.deepseek.com')
+  } catch {
+    return false
+  }
+}
+const deepseekProviders = computed(() => providerStore.providers.filter((p) => isDeepseekHost(p.apiHost)))
+
 // 表单数据
 // 显式重写 frontend_editor / message_display_mode / web_search_default_mode 类型为 string，以解决 el-radio-group 不接受 null 的问题
 const settingsForm = reactive<
   Omit<
     GlobalSettingsUpdate,
-    'user_avatar_url' | 'ai_avatar_url' | 'frontend_editor' | 'message_display_mode' | 'web_search_default_mode'
+    'user_avatar_url' | 'ai_avatar_url' | 'frontend_editor' | 'message_display_mode' | 'web_search_default_mode' | 'web_search_provider' | 'web_search_provider_id' | 'web_search_reader'
   > & {
     frontend_editor: string
     message_display_mode: string
     web_search_default_mode: string
+    web_search_provider: string
+    web_search_provider_id: string
+    web_search_reader: string
   }
 >({
   default_model_id: null,
@@ -468,6 +550,11 @@ const settingsForm = reactive<
   proxy_url: null,
   web_search_default_mode: 'disable',
   web_search_use_proxy: false,
+  web_search_provider: 'duckduckgo',
+  web_search_provider_id: '',
+  web_search_result_count: 10,
+  web_search_need_content: false,
+  web_search_reader: 'deepseek',
   zip_history_system_prompt: null,
   frontend_editor: 'simple',
   message_display_mode: 'interleaved',
@@ -572,6 +659,7 @@ function debounce<T extends (...args: any[]) => any>(fn: T, delay: number) {
 
 onMounted(async () => {
   await settingsStore.fetchGlobalSettings()
+  if (!providerStore.providers.length) providerStore.fetchProviders()
   // 初始化 checkpoints 清理状态（显示可回收量；若后端清理进行中则恢复轮询）
   try {
     const status = await getCheckpointCleanupStatus()
@@ -611,6 +699,11 @@ watch(
       proxy_url: newSettings.proxy_url,
       web_search_default_mode: newSettings.web_search_default_mode ?? 'disable',
       web_search_use_proxy: newSettings.web_search_use_proxy ?? false,
+      web_search_provider: newSettings.web_search_provider ?? 'duckduckgo',
+      web_search_provider_id: newSettings.web_search_provider_id ?? '',
+      web_search_result_count: newSettings.web_search_result_count ?? 10,
+      web_search_need_content: newSettings.web_search_need_content ?? false,
+      web_search_reader: newSettings.web_search_reader ?? 'deepseek',
       zip_history_system_prompt: newSettings.zip_history_system_prompt,
       // 确保赋值给 frontend_editor 的值不为 null
       frontend_editor: newSettings.frontend_editor ?? 'simple',
@@ -680,6 +773,17 @@ watch(
     debouncedSave()
   },
   { deep: true },
+)
+
+// 切到 DeepSeek 时自动预选第一个 DeepSeek 服务商，避免「已选 DeepSeek 但未选服务商」的空配置态
+watch(
+  () => settingsForm.web_search_provider,
+  (val) => {
+    if (isSyncingFromStore.value) return
+    if (val === 'deepseek' && !settingsForm.web_search_provider_id && deepseekProviders.value.length) {
+      settingsForm.web_search_provider_id = deepseekProviders.value[0].id
+    }
+  },
 )
 
 const handleUploadAvatar = async (type: AvatarType, file: File) => {

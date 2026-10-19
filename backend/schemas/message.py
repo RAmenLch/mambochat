@@ -25,6 +25,32 @@ class MultimodalMedia(BaseModel):
     url: Optional[str] = None  # 由消息组装层填充，供前端展示媒体
 
 
+class WebSearchDisplayItem(BaseModel):
+    """单条搜索结果的展示信息（仅供前端渲染，不含正文/长摘要）。"""
+    title: str = ""
+    url: str = ""
+    snippet: str = ""
+    site_name: Optional[str] = None
+    site_icon: Optional[str] = None
+    date: Optional[str] = None
+    rerank_score: Optional[float] = None
+    authority: Optional[int] = None
+
+
+class WebSearchDisplay(BaseModel):
+    """
+    搜索工具的完整结果快照，仅供前端展示。
+
+    该字段不参与 ``to_openai_tool_result_message``，因此不会进入 LLM 上下文；
+    它只随子消息 content 落库，用于前端渲染搜索结果卡片（站点图标、权威度、评分等）。
+    """
+    kind: Literal["web_search"] = "web_search"
+    provider: str = "deepseek"
+    query: str = ""
+    count: int = 0
+    items: List[WebSearchDisplayItem] = Field(default_factory=list)
+
+
 class McpToolContent(BaseModel):
     """
     专门用于处理 SubMessageType.MCP_TOOL 的 content 字段结构。
@@ -41,6 +67,9 @@ class McpToolContent(BaseModel):
     run_uuid: Optional[str] = None
     # 多模态结果引用（read 等内置工具读取图片/音视频/文档时填充）
     media: Optional[List[MultimodalMedia]] = None
+    # 【仅前端展示】搜索结果完整快照（snippet / site_icon / authority 等）。
+    # 不参与 to_openai_tool_result_message，永远不会进入 LLM 上下文
+    display: Optional[WebSearchDisplay] = None
 
     @property
     def is_executed(self) -> bool:

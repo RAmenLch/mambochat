@@ -131,6 +131,9 @@ interface CodeBlockRange {
 }
 
 const DEFAULT_COLLAPSE_THRESHOLD = 20
+// 高亮硬上限：超过此规模即使展开也不做高亮，避免单块瞬间生成上万 <span> 造成卡顿
+const HARD_HIGHLIGHT_MAX_LINES = 2000
+const HARD_HIGHLIGHT_MAX_CHARS = 100_000
 
 const props = defineProps({
   code: {
@@ -160,6 +163,11 @@ const props = defineProps({
   showHeader: {
     type: Boolean,
     default: true,
+  },
+  /** 外部（如文件外层容器）控制的折叠状态：折叠时不做高亮，展开后再高亮 */
+  collapsed: {
+    type: Boolean,
+    default: false,
   },
 })
 
@@ -286,16 +294,15 @@ watch(() => props.code, () => {
   if (isMermaid.value && (props.closed || !props.isGenerating)) {
     renderMermaid()
   }
-  if (codeVisible.value) {
-    applyHighlight()
-  } else {
-    // 尚未进入视口：保持纯文本占位，等可见时再分词
-    highlightedCode.value = escapeHtml(props.code)
-  }
+  // 内容变化：重置高亮缓存并回到纯文本占位，再按当前条件决定是否高亮
+  highlightDone = false
+  highlightedCode.value = escapeHtml(props.code)
+  maybeHighlight()
 })
 
 watch(() => props.language, () => {
-  if (codeVisible.value) applyHighlight()
+  highlightDone = false
+  maybeHighlight()
 })
 
 watch(() => props.isGenerating, (generating) => {
@@ -323,6 +330,18 @@ function escapeHtml(text: string): string {
 
 const highlightedCode = ref<string>(escapeHtml(props.code))
 let highlightSeq = 0
+// 当前 code 是否已完成高亮（缓存标记：展开/折叠来回切换不重复分词）
+let highlightDone = false
+
+/** 有效折叠：自身折叠（正文代码块）或外层容器折叠（文件文本块） */
+function isEffectivelyCollapsed(): boolean {
+  return isCollapsed.value || props.collapsed
+}
+
+/** 超过硬上限则放弃高亮，始终用纯文本，避免超大单块生成海量 <span> */
+function exceedsHighlightCap(): boolean {
+  return totalLines.value > HARD_HIGHLIGHT_MAX_LINES || props.code.length > HARD_HIGHLIGHT_MAX_CHARS
+}
 
 const applyHighlight = async () => {
   const seq = ++highlightSeq
@@ -344,7 +363,10 @@ const applyHighlight = async () => {
     } else {
       value = hljs.highlight(props.code, { language: 'plaintext', ignoreIllegals: true }).value
     }
-    if (seq === highlightSeq) highlightedCode.value = value
+    if (seq === highlightSeq) {
+      highlightedCode.value = value
+      highlightDone = true
+    }
   } catch (e) {
     // 高亮库加载失败时回退为纯文本转义，保证代码可读
     if (seq === highlightSeq) highlightedCode.value = escapeHtml(props.code)
@@ -352,25 +374,42 @@ const applyHighlight = async () => {
 }
 
 /**
- * 懒高亮调度：仅在代码块接近视口时执行一次 highlight.js 分词。
- * 分词后保留结果（不做高亮回落），避免来回滚动时反复重算造成抖动。
+ * 统一的高亮入口：仅在「已接近视口 + 未折叠 + 未超硬上限 + 尚未高亮」时执行。
+ * - 折叠态保持纯文本占位（1 个文本节点，开销极低），展开后再高亮 → 大幅减少常驻 <span>。
+ * - highlightDone 作为缓存标记，展开/收起反复切换不重复分词。
+ */
+function maybeHighlight() {
+  if (highlightDone) return
+  if (isMermaid.value || isSvg.value) return
+  if (!codeVisible.value) return
+  if (isEffectivelyCollapsed()) return
+  if (exceedsHighlightCap()) return
+  applyHighlight()
+}
+
+/**
+ * 懒高亮调度：代码块接近视口时记录可见并尝试高亮。
  */
 function setupLazyHighlight() {
   if (typeof IntersectionObserver === 'undefined' || !containerRef.value) {
     codeVisible.value = true
-    applyHighlight()
+    maybeHighlight()
     return
   }
   highlightObserver = new IntersectionObserver((entries) => {
     if (entries.some((entry) => entry.isIntersecting)) {
       codeVisible.value = true
-      applyHighlight()
+      maybeHighlight()
       highlightObserver?.disconnect()
       highlightObserver = null
     }
   }, { root: null, rootMargin: '400px 0px', threshold: 0 })
   highlightObserver.observe(containerRef.value)
 }
+
+// 折叠状态变化（自身或外层）：展开时补做高亮
+watch(isCollapsed, () => maybeHighlight())
+watch(() => props.collapsed, () => maybeHighlight())
 
 watch(
   () => props.isGenerating,
@@ -481,9 +520,8 @@ const closeMermaidPreview = () => {
   max-height: 800px;
   overflow: auto;
   transition: max-height 0.25s ease-out;
-  /* 视口外的代码块跳过布局/绘制，滚动时不再为其重排重绘 */
-  content-visibility: auto;
-  contain-intrinsic-size: auto 300px;
+  /* 隔离代码块内部布局，滚动/内容变化不波及其他块 */
+  contain: layout style;
 }
 
 .code-block-content.collapsed {

@@ -28,6 +28,11 @@ from backend.services.generation.builders.initializers.deep_agent_initializer im
 from backend.services.generation.builders.initializers.mambo_agent_initializer import MamboAgentInitializer
 from backend.schemas.enums import WebSearchMode
 from backend.services.generation.tools.base_tool_provider import BaseToolProvider
+from backend.services.generation.tools.deepseek_web_api import (
+    WebSearchConfig,
+    is_deepseek_host,
+    normalize_deepseek_base,
+)
 
 
 class LLMInputDirector:
@@ -292,6 +297,8 @@ class LLMInputDirector:
         ):
             ws_proxy_url = materials.settings.get("proxy_url")
 
+        web_search_config = await self._resolve_web_search_config(materials, ws_proxy_url)
+
         if is_agent_mode:
             agent_type_str = materials.agent.AgentType
             if hasattr(agent_type_str, 'value'):
@@ -306,7 +313,7 @@ class LLMInputDirector:
                     enable_resource_merge=self._enable_resource_merge,
                     external_tools=self._tools,
                     web_search_mode=ws_mode,
-                    web_search_proxy_url=ws_proxy_url,
+                    web_search_config=web_search_config,
                 )
             elif agent_type_str == AgentTypeEnum.DEEP.value:
                 initializer = DeepAgentInitializer(
@@ -317,7 +324,7 @@ class LLMInputDirector:
                     enable_resource_merge=self._enable_resource_merge,
                     external_tools=self._tools,
                     web_search_mode=ws_mode,
-                    web_search_proxy_url=ws_proxy_url,
+                    web_search_config=web_search_config,
                 )
             else:
                 initializer = AgentBasedReActInitializer(
@@ -328,7 +335,7 @@ class LLMInputDirector:
                     enable_resource_merge=self._enable_resource_merge,
                     external_tools=self._tools,
                     web_search_mode=ws_mode,
-                    web_search_proxy_url=ws_proxy_url,
+                    web_search_config=web_search_config,
                 )
             base_system_prompt = materials.agent.systemPrompt or ""
         else:
@@ -340,7 +347,7 @@ class LLMInputDirector:
                 enable_resource_merge=self._enable_resource_merge,
                 external_tools=self._tools,
                 web_search_mode=ws_mode,
-                web_search_proxy_url=ws_proxy_url,
+                web_search_config=web_search_config,
             )
             base_system_prompt = materials.chat.systemPrompt or ""
 
@@ -470,6 +477,54 @@ class LLMInputDirector:
 
     def get_providers(self) -> List[BaseToolProvider]:
         return self._providers
+
+    async def _resolve_web_search_config(
+        self,
+        materials: GenerationMaterials,
+        proxy_url: Optional[str],
+    ) -> WebSearchConfig:
+        """解析网页搜索后端配置（DuckDuckGo / DeepSeek Search）。"""
+        settings = materials.settings
+
+        provider = (settings.get("web_search_provider") or "duckduckgo").strip().lower()
+        if provider not in ("duckduckgo", "deepseek"):
+            provider = "duckduckgo"
+
+        try:
+            result_count = int(settings.get("web_search_result_count") or 10)
+        except (TypeError, ValueError):
+            result_count = 10
+
+        reader = (settings.get("web_search_reader") or "deepseek").strip().lower()
+        if reader not in ("deepseek", "local"):
+            reader = "deepseek"
+
+        config = WebSearchConfig(
+            provider=provider,
+            result_count=max(1, min(50, result_count)),
+            need_content=str(settings.get("web_search_need_content")).strip().lower() == "true",
+            reader=reader,
+            proxy_url=proxy_url,
+        )
+
+        if provider != "deepseek":
+            return config
+
+        provider_id = (settings.get("web_search_provider_id") or "").strip()
+        if not provider_id:
+            config.error = "网页搜索未配置 DeepSeek 服务商，请在全局配置的网页搜索中选择一个 DeepSeek 服务商"
+            return config
+
+        db_provider = await provider_crud.get_provider(self.db, provider_id=provider_id)
+        if not db_provider or not is_deepseek_host(db_provider.apiHost):
+            config.error = "网页搜索所选服务商的 API 地址不是 DeepSeek 官方域名（api.deepseek.com），请重新选择"
+            return config
+
+        config.api_base = normalize_deepseek_base(db_provider.apiHost)
+        config.api_key = db_provider.apiKey
+        if not config.api_key:
+            config.error = "网页搜索所选的 DeepSeek 服务商缺少 API Key"
+        return config
 
     async def _resolve_model(self, materials: GenerationMaterials) -> AIModel:
         model = None

@@ -28,6 +28,17 @@ SETTING_KEYS = {
         "desc": "默认网页搜索模式",
     },
     "web_search_use_proxy": {"type": "bool", "desc": "网页搜索是否启用代理"},
+    "web_search_provider": {
+        "type": "enum", "choices": ["duckduckgo", "deepseek"],
+        "desc": "网页搜索后端（duckduckgo 内置 / deepseek 接口）",
+    },
+    "web_search_provider_id": {"type": "str", "desc": "DeepSeek 搜索使用的服务商ID（deepseek 后端必填）"},
+    "web_search_result_count": {"type": "int", "min": 1, "desc": "DeepSeek 搜索默认返回条数（1~50）"},
+    "web_search_need_content": {"type": "bool", "desc": "DeepSeek 搜索是否直接返回网页正文"},
+    "web_search_reader": {
+        "type": "enum", "choices": ["deepseek", "local"],
+        "desc": "网页读取方式（deepseek 用 Fetch 接口，local 本地解析）",
+    },
     "zip_history_system_prompt": {"type": "str", "desc": "历史压缩 System Prompt"},
     "frontend_editor": {"type": "enum", "choices": ["simple", "monaco"], "desc": "前端编辑器类型"},
     "kb_default_chunk_size": {"type": "int", "desc": "知识库默认切片大小"},

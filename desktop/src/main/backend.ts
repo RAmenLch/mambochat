@@ -122,7 +122,7 @@ export class BackendProcessManager {
           cwd: appDir,
           env: { ...process.env, ...env },
           stdio: ['pipe', 'pipe', 'pipe'],
-          windowsHide: false,
+          windowsHide: true,
         }
       )
     } catch (err) {

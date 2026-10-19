@@ -402,10 +402,13 @@ watch(galAvatarImageUrl, async (url) => {
 // 消息区左侧避让：跟随立绘实际宽度（含边框宽度）
 const GAL_PANEL_LEFT = 8
 const GAL_PANEL_GAP = 16
+// 立绘避让按最大宽度恒定预留左侧空间：不随“当前所在消息是否可见立绘”变化，
+// 否则滚动中切换立绘/显隐会改变整列表可用宽度 → 全列表重新换行 → 总高度骤变（滚动闪跳）。
+const GAL_RESERVED_WIDTH = GAL_PANEL_LEFT + GAL_MAX_SIZE + 4 + GAL_PANEL_GAP // 4=非透明时的 2px×2 边框
 const galPaddingStyle = computed(() => {
-  if (!galAvatarState.value.visible) return {}
-  const extra = galDisplay.value.transparent ? 0 : 4 // 非透明时的 2px×2 边框
-  return { paddingLeft: `${GAL_PANEL_LEFT + galDisplay.value.clipW + extra + GAL_PANEL_GAP}px` }
+  // 只要该会话存在立绘就恒定预留，保证整段会话可用宽度一致、滚动时高度稳定
+  if (galAvatarMap.value.size === 0) return {}
+  return { paddingLeft: `${GAL_RESERVED_WIDTH}px` }
 })
 
 /** 判断某条消息是否含有 Gal_Avatar（用于隐藏该消息的头像） */
@@ -494,8 +497,72 @@ const askUserDialogInitialSubMessageId = ref<string | null>(null);
 const logDialogVisible = ref(false);
 const logDialogMessageId = ref<string | null>(null);
 
+// ==== 临时滚动诊断埋点（本地）：控制台打印“闪跳”来源，定位后删除 ====
+function startScrollProbe() {
+  let tries = 0;
+  const timer = setInterval(() => {
+    const scroller = scrollbarRef.value?.wrapRef;
+    if (!scroller) { if (++tries > 150) clearInterval(timer); return; }
+    clearInterval(timer);
+    attachScrollProbe(scroller);
+  }, 200);
+}
+
+function attachScrollProbe(el: HTMLElement) {
+  console.info('%c[SCROLL-PROBE] attached', 'color:#0a0;font-weight:bold');
+  const wrapper = document.querySelector('.message-list-wrapper') as HTMLElement | null;
+  const snap = () => ({
+    top: Math.round(el.scrollTop),
+    sh: el.scrollHeight,
+    ch: el.clientHeight,
+    pad: wrapper ? getComputedStyle(wrapper).paddingLeft : '',
+    avatars: document.querySelectorAll('.message-avatar').length,
+    gal: !!document.querySelector('.gal-avatar-panel'),
+  });
+  let prev = snap();
+  el.addEventListener('scroll', () => {
+    const cur = snap();
+    const dTop = cur.top - prev.top;
+    const dSh = cur.sh - prev.sh;
+    if (dSh !== 0 || Math.abs(dTop) > Math.max(250, el.clientHeight)) {
+      console.warn('%c[SCROLL-JUMP]', 'color:#f40;font-weight:bold',
+        { dTop, dSh,
+          from: { top: prev.top, sh: prev.sh, pad: prev.pad, avatars: prev.avatars, gal: prev.gal },
+          to: { top: cur.top, sh: cur.sh, pad: cur.pad, avatars: cur.avatars, gal: cur.gal } });
+    }
+    prev = cur;
+  }, { passive: true });
+  // 停止滚动后（Gal 结算 ~120ms）也可能改变高度：定时采样补抓
+  setInterval(() => {
+    const cur = snap();
+    if (cur.sh !== prev.sh || cur.pad !== prev.pad || cur.avatars !== prev.avatars || cur.gal !== prev.gal) {
+      console.warn('%c[LAYOUT-CHANGE]', 'color:#08f;font-weight:bold',
+        { dSh: cur.sh - prev.sh, dAvatars: cur.avatars - prev.avatars,
+          pad: [prev.pad, cur.pad], gal: [prev.gal, cur.gal],
+          top: [prev.top, cur.top], sh: [prev.sh, cur.sh] });
+      prev = cur;
+    }
+  }, 120);
+  try {
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries() as any[]) {
+        if (e.hadRecentInput) continue;
+        const srcs = (e.sources || []).slice(0, 3).map((s: any) => {
+          const n = s.node;
+          let d = n ? n.nodeName : '?';
+          if (n?.className && typeof n.className === 'string') d += '.' + n.className.trim().split(/\s+/).slice(0, 2).join('.');
+          const dh = s.previousRect && s.currentRect ? Math.round(s.currentRect.height - s.previousRect.height) : 0;
+          return { node: d, dh, inCode: !!(n?.closest && n.closest('.code-block-content')) };
+        });
+        console.warn('%c[LAYOUT-SHIFT]', 'color:#a0f;font-weight:bold', { value: +e.value.toFixed(3), srcs });
+      }
+    }).observe({ type: 'layout-shift' as any });
+  } catch {}
+}
+
 onMounted(() => {
   systemConfigStore.fetchSystemConfig();
+  if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') startScrollProbe();
   if (agentStore.allAgents.length === 0) {
     agentStore.fetchAllAgents();
   }
@@ -820,16 +887,15 @@ function handleVersionHistoryRefreshed() {
   }
 }
 
-const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
-  const el = scrollbarRef.value?.wrapRef;
-  if (!el) return;
-
-  userHasScrolledUp.value = el.scrollHeight - el.clientHeight - scrollTop > 20;
-
-  // 每帧最多处理一次，避免高频滚动事件重复做视口检测
+const handleScroll = () => {
+  // 每个 scroll 事件都读取 scrollHeight 会强制同步布局，长会话（数十万布局对象）下
+  // 这是滚动卡顿的主因。把所有几何查询收敛到每帧一次（rAF）内执行。
   if (scrollRafId) return;
   scrollRafId = requestAnimationFrame(() => {
     scrollRafId = 0;
+    const el = scrollbarRef.value?.wrapRef;
+    if (!el) return;
+    userHasScrolledUp.value = el.scrollHeight - el.clientHeight - el.scrollTop > 20;
     updateActiveUserMessage();
     // 快速滚动期间不提交 Gal/头像状态，待滚动稳定后再执行，
     // 防止 .message-avatar 反复挂载/卸载触发全量重排
@@ -844,27 +910,32 @@ function updateActiveUserMessage() {
   const containerRect = el.getBoundingClientRect();
   const detectY = containerRect.top + containerRect.height * 0.3;
 
-  let activeUserId: string | null = null;
-
+  // user 消息按 DOM 顺序排列、矩形 top 单调递增，用二分查找定位“最后一个
+  // top <= 检测线”的消息，把每帧几何读取从 O(n) 降到 O(log n)。
   const userMsgs = currentChatMessages.value.filter(m => m.role === 'user');
-
-  for (let i = userMsgs.length - 1; i >= 0; i--) {
-    const msg = userMsgs[i];
+  const entries: { id: string; el: HTMLElement }[] = [];
+  for (const msg of userMsgs) {
     const dom = document.getElementById(`msg-${msg.id}`);
-    if (dom) {
-      const rect = dom.getBoundingClientRect();
-      if (rect.top <= detectY) {
-        activeUserId = msg.id;
-        break;
-      }
+    if (dom) entries.push({ id: msg.id, el: dom });
+  }
+  if (entries.length === 0) return;
+
+  let lo = 0;
+  let hi = entries.length - 1;
+  let active: { id: string; el: HTMLElement } | null = null;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (entries[mid].el.getBoundingClientRect().top <= detectY) {
+      active = entries[mid];
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
     }
   }
 
-  if (!activeUserId && userMsgs.length > 0) {
-    activeUserId = userMsgs[0].id;
-  }
-
-  if (activeUserId && activeUserId !== currentVisibleMessageId.value) {
+  // 落到检测线上方（无匹配）时回退到第一条 user 消息，与原逻辑一致
+  const activeUserId = (active ?? entries[0]).id;
+  if (activeUserId !== currentVisibleMessageId.value) {
     currentVisibleMessageId.value = activeUserId;
   }
 }
@@ -1052,7 +1123,7 @@ watch(currentChatId, (newId) => {
 }
 
 .message-list-scrollbar { width: 100%; height: 100%; }
-.message-list-wrapper { padding: 20px; transition: padding-left 0.2s ease; }
+.message-list-wrapper { padding: 20px; }
 .input-container-wrapper { flex-shrink: 0; position: relative; display: flex; flex-direction: column; border-top: 1px solid var(--color-border); }
 .resize-handle { position: absolute; top: -3px; left: 0; width: 100%; height: 6px; cursor: ns-resize; z-index: 10; }
 

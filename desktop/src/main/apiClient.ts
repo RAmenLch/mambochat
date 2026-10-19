@@ -287,6 +287,47 @@ class ApiClientConnection {
   }
 
   // ---------------------------------------------------------------------------
+  // Per-file serialization
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Tail promise per physical file path — serializes read-modify-write
+   * sequences on the same file.  Commands arrive concurrently (`ws.onmessage`
+   * does not await `handleCommand`), so without this two `edit` calls on one
+   * file both read the original content and the second write silently drops
+   * the first change.
+   */
+  private fileLockTail = new Map<string, Promise<unknown>>()
+
+  /** Lock key: canonical physical path, case-folded where the FS is. */
+  private lockKey(physical: string): string {
+    return process.platform === 'win32' ? physical.toLowerCase() : physical
+  }
+
+  /** Run *fn* while holding the lock for *key*; always releases. */
+  private async withFileLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.fileLockTail.get(key) ?? Promise.resolve()
+    const run = prev.then(() => fn())
+    // Tail never rejects, so a failed op does not poison the queue.
+    const tail = run.then(() => {}, () => {})
+    this.fileLockTail.set(key, tail)
+    try {
+      return await run
+    } finally {
+      if (this.fileLockTail.get(key) === tail) this.fileLockTail.delete(key)
+    }
+  }
+
+  /** Best-effort lock key for a command's `path` param (null = unresolvable). */
+  private fileLockKeyFor(params: Record<string, unknown>): string | null {
+    try {
+      return this.lockKey(this.resolvePath((params.path as string) || ''))
+    } catch {
+      return null
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Command dispatch
   // ---------------------------------------------------------------------------
 
@@ -500,6 +541,12 @@ class ApiClientConnection {
   }
 
   private async handleReadFile(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const key = this.fileLockKeyFor(params)
+    if (!key) return this.handleReadFileImpl(params)
+    return this.withFileLock(key, () => this.handleReadFileImpl(params))
+  }
+
+  private async handleReadFileImpl(params: Record<string, unknown>): Promise<Record<string, unknown>> {
     const vpath = (params.path as string) || '/workspace'
     const offset = (params.offset as number) || 0
     const limit = (params.limit != null) ? (params.limit as number) : null
@@ -609,6 +656,12 @@ class ApiClientConnection {
   }
 
   private async handleWriteFile(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const key = this.fileLockKeyFor(params)
+    if (!key) return this.handleWriteFileImpl(params)
+    return this.withFileLock(key, () => this.handleWriteFileImpl(params))
+  }
+
+  private async handleWriteFileImpl(params: Record<string, unknown>): Promise<Record<string, unknown>> {
     const vpath = (params.path as string) || ''
     const content = (params.content as string) || ''
     const overwrite = (params.overwrite as boolean) || false
@@ -661,6 +714,12 @@ class ApiClientConnection {
   }
 
   private async handleEditFile(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const key = this.fileLockKeyFor(params)
+    if (!key) return this.handleEditFileImpl(params)
+    return this.withFileLock(key, () => this.handleEditFileImpl(params))
+  }
+
+  private async handleEditFileImpl(params: Record<string, unknown>): Promise<Record<string, unknown>> {
     const vpath = (params.path as string) || ''
     const oldStr = (params.old_string as string) || ''
     const newStr = (params.new_string as string) || ''
@@ -958,8 +1017,10 @@ class ApiClientConnection {
         this.checkEditPermission(item.path)
         const physical = this.resolvePath(item.path)
         const content = Buffer.from(item.content_b64, 'base64')
-        await fs.promises.mkdir(path.dirname(physical), { recursive: true })
-        await fs.promises.writeFile(physical, content)
+        await this.withFileLock(this.lockKey(physical), async () => {
+          await fs.promises.mkdir(path.dirname(physical), { recursive: true })
+          await fs.promises.writeFile(physical, content)
+        })
         results.push({ path: item.path, error: null })
       } catch (e) {
         results.push({ path: item.path, error: String(e) })
@@ -1059,12 +1120,20 @@ class ApiClientConnection {
       // would rebuild the command line via libuv argv quoting, escaping " as
       // \" — cmd.exe has no backslash escaping, so quoted arguments (e.g.
       // findstr "a b c") get mangled. POSIX keeps the list form: execve
-      // passes argv directly, no escaping. detached:true makes the child a
-      // process-group leader (POSIX setsid) so the whole tree can be killed.
+      // passes argv directly, no escaping. detached is POSIX-only: it makes
+      // the shell a process-group leader (setsid) so kill(-pid) reaps the
+      // whole tree. On Windows it is both unnecessary (taskkill /T walks the
+      // parent-child tree) and harmful — libuv maps it to DETACHED_PROCESS,
+      // which gives every execute call its own visible console window.
       const child = spawn(
         process.platform === 'win32' ? 'cmd.exe' : '/bin/sh',
         process.platform === 'win32' ? ['/d', '/s', '/c', command] : ['-c', command],
-        { detached: true, windowsHide: true, cwd: this.rootDir, stdio: ['ignore', 'pipe', 'pipe'] },
+        {
+          detached: process.platform !== 'win32',
+          windowsHide: true,
+          cwd: this.rootDir,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        },
       )
       this.runningExecs.set(requestId, child)
 
@@ -1121,6 +1190,12 @@ class ApiClientConnection {
   }
 
   private async handleDelete(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const key = this.fileLockKeyFor(params)
+    if (!key) return this.handleDeleteImpl(params)
+    return this.withFileLock(key, () => this.handleDeleteImpl(params))
+  }
+
+  private async handleDeleteImpl(params: Record<string, unknown>): Promise<Record<string, unknown>> {
     const vpath = (params.path as string) || ''
 
     let physical: string

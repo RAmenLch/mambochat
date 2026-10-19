@@ -117,6 +117,7 @@
               :range="block.range"
               :markup="block.markup"
               :closed="block.closed !== false"
+              :collapsed="isFileContentCollapsed"
               @edit="handleCodeBlockEdit"
               @copy="handleBlockCopy"
             />
@@ -138,6 +139,7 @@
             :range="{ start: 0, end: (fileContent || '').length }"
             :closed="true"
             :show-header="false"
+            :collapsed="isFileContentCollapsed"
             @edit="handleFileEditFromCodeBlock"
             @copy="handleBlockCopy"
           />
@@ -276,6 +278,7 @@
           <div
             v-if="!isGenerating && mcpContent.result && !mcpContent.is_error"
             class="mcp-tool-result"
+            :class="{ 'is-structured': !!webSearchParsed }"
           >
             <template v-if="mcpContent.media?.length">
               <div
@@ -313,6 +316,9 @@
                   {{ m.filename || m.file_type }}
                 </a>
               </div>
+            </template>
+            <template v-else-if="webSearchParsed">
+              <WebSearchResultList :parsed="webSearchParsed" :raw-result="mcpContent.result" />
             </template>
             <template v-else>{{ mcpContent.result }}</template>
           </div>
@@ -385,6 +391,7 @@ import { usePendingFileStore } from '@/stores/pendingFileStore'
 import { getFileContent } from '@/api/fileService'
 import { resolveFileUrl } from '@/services/electronUrl'
 import { unpackMcpToolCall } from '@/utils/mcpToolUnpack'
+import { parseWebSearchResult } from '@/utils/webSearchResult'
 import { ElMessage } from 'element-plus'
 import {
   Edit,
@@ -402,6 +409,7 @@ import {
   Sort,
 } from '@element-plus/icons-vue'
 import CodeBlock from './CodeBlock.vue'
+import WebSearchResultList from './WebSearchResultList.vue'
 import { copyToClipboard } from '@/utils/clipboard'
 import { parseMarkdown, type ParsedBlock } from '@/utils/markdownParser'
 import { getIconForMimeType } from '@/utils/fileIcons'
@@ -459,6 +467,22 @@ const fileContentLoading = ref(false)
 const fileContentError = ref(false)
 const isFileContentCollapsed = ref(false)
 
+// show 工具的文本内容过长时默认折叠：代码块可见最大高度 800px（见 CodeBlock.vue
+// .code-block-content），单行约 21px（font-size 14px × line-height 1.5），
+// 超过「两倍最大显示高度」对应的行数即视为过长。
+const CODE_BLOCK_MAX_HEIGHT = 800
+const CODE_LINE_HEIGHT = 21
+const AUTO_COLLAPSE_LINES = Math.floor((CODE_BLOCK_MAX_HEIGHT / CODE_LINE_HEIGHT) * 2)
+
+/** 按行数判断内容是否超过「两倍最大显示高度」，用于决定初始是否折叠 */
+function isFileContentTooLong(content: string): boolean {
+  let lines = 1
+  for (let i = 0; i < content.length; i++) {
+    if (content.charCodeAt(i) === 10) lines++
+  }
+  return lines > AUTO_COLLAPSE_LINES
+}
+
 const isFileCodeWrapEnabled = ref(false)
 
 let resizeObserver: ResizeObserver | null = null
@@ -487,7 +511,12 @@ onMounted(() => {
   if (isEditableFile.value && !isImageFile.value && props.subMessage.file_info) {
     fileContentLoading.value = true
     getFileContent(props.subMessage.file_info.id)
-      .then((res) => { fileContent.value = res.content })
+      .then((res) => {
+        fileContent.value = res.content
+        if (!isMarkdownFile.value) {
+          isFileContentCollapsed.value = isFileContentTooLong(res.content)
+        }
+      })
       .catch(() => { fileContentError.value = true })
       .finally(() => { fileContentLoading.value = false })
   }
@@ -508,6 +537,12 @@ const mcpContent = computed((): McpToolContent | null => {
     console.error('Failed to parse McpTool content:', props.subMessage.content, error)
     return null
   }
+})
+
+/** 搜索结果的结构化展示数据；非搜索工具或无法结构化时返回 null，走原始文本渲染 */
+const webSearchParsed = computed(() => {
+  if (!mcpContent.value || mcpContent.value.is_error) return null
+  return parseWebSearchResult(mcpContent.value)
 })
 
 const mcpArguments = computed((): { query?: string } | null => {
@@ -659,7 +694,12 @@ watch(
       fileContentLoading.value = true
       fileContentError.value = false
       getFileContent(newInfo.id)
-        .then((res) => { fileContent.value = res.content })
+        .then((res) => {
+          fileContent.value = res.content
+          if (!isMarkdownFile.value) {
+            isFileContentCollapsed.value = isFileContentTooLong(res.content)
+          }
+        })
         .catch(() => { fileContentError.value = true })
         .finally(() => { fileContentLoading.value = false })
     }
@@ -755,9 +795,9 @@ function scrollToTop() {
   --sub-message-bg: var(--el-bg-color);            /* ← 同步 */
   position: relative;
   transition: all 0.3s ease;
-  /* 视口外的子消息跳过布局/绘制，滚动时不再为其重排重绘 */
-  content-visibility: auto;
-  contain-intrinsic-size: auto 120px;
+  /* 隔离每条消息的布局/样式范围：单条内容变化不再引发整表重排。
+     不含 size containment，元素仍按真实高度撑开，不产生占位跳变。 */
+  contain: layout style;
 }
 
 /* 仅用于内联文本的无边框模式 */
@@ -806,8 +846,6 @@ function scrollToTop() {
   padding: 0;
   max-width: 240px;
   overflow: visible;
-  /* 文件缩略图依赖 overflow: visible，关闭内容包含 */
-  content-visibility: visible;
 }
 /* 音频/视频文件需要更宽的容器以正确渲染控件 */
 .sub-message-item.is-file:has(.file-audio-player),
@@ -1077,6 +1115,12 @@ function scrollToTop() {
   border-radius: 4px;
   font-size: 14px;
   line-height: 1.6;
+}
+/* 结构化渲染（搜索结果卡片）自带容器样式，去掉纯文本容器背景 */
+.mcp-tool-result.is-structured {
+  white-space: normal;
+  background-color: transparent;
+  padding: 0;
 }
 .mcp-tool-error-message {
   color: var(--el-color-error);

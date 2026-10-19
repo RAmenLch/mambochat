@@ -13,6 +13,7 @@ from backend import schemas
 from backend.database import get_db
 from backend.exceptions import AppHTTPException
 from backend.schemas.enums import FileManagementType
+from backend.services.generation.tools.deepseek_web_api import is_deepseek_host
 
 router = APIRouter()
 
@@ -47,6 +48,8 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
         "default_timeout",
         "proxy_enabled", "proxy_url",
         "web_search_default_mode", "web_search_use_proxy",
+        "web_search_provider", "web_search_provider_id", "web_search_result_count",
+        "web_search_need_content", "web_search_reader",
         "user_avatar_file_id", "ai_avatar_file_id",
         "frontend_editor", "kb_default_chunk_size", "kb_default_chunk_overlap", "send_message_shortcut",
         "language"
@@ -92,6 +95,13 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
 
     web_search_default_mode = _get_typed_setting(settings_map.get("web_search_default_mode"), "disable", str)
     web_search_use_proxy = _get_typed_setting(settings_map.get("web_search_use_proxy"), False, bool)
+    web_search_provider = _get_typed_setting(settings_map.get("web_search_provider"), "duckduckgo", str)
+    web_search_provider_id = _get_typed_setting(settings_map.get("web_search_provider_id"), None, str)
+    web_search_result_count = _get_typed_setting(settings_map.get("web_search_result_count"), 10, int)
+    web_search_need_content = _get_typed_setting(settings_map.get("web_search_need_content"), False, bool)
+    web_search_reader = _get_typed_setting(settings_map.get("web_search_reader"), "deepseek", str)
+    if web_search_reader not in WEB_SEARCH_READERS:
+        web_search_reader = "deepseek"
 
     frontend_editor = _get_typed_setting(settings_map.get("frontend_editor"), "simple", str)
     kb_default_chunk_size = _get_typed_setting(settings_map.get("kb_default_chunk_size"), 500, int)
@@ -116,6 +126,11 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
         proxy_url=proxy_url,
         web_search_default_mode=web_search_default_mode,
         web_search_use_proxy=web_search_use_proxy,
+        web_search_provider=web_search_provider,
+        web_search_provider_id=web_search_provider_id,
+        web_search_result_count=web_search_result_count,
+        web_search_need_content=web_search_need_content,
+        web_search_reader=web_search_reader,
         user_avatar_url=user_avatar_url,
         ai_avatar_url=ai_avatar_url,
         frontend_editor=frontend_editor,
@@ -124,6 +139,66 @@ async def get_global_settings(db: AsyncSession = Depends(get_db)):
         send_message_shortcut=send_message_shortcut,
         language=language
     )
+
+
+WEB_SEARCH_PROVIDERS = ("duckduckgo", "deepseek")
+WEB_SEARCH_READERS = ("deepseek", "local")
+
+
+async def _resolve_effective_setting(db: AsyncSession, update_data: dict, key: str, default: Any) -> Any:
+    """取更新后的生效值：优先请求体，其次数据库现值，最后默认值。"""
+    if update_data.get(key) is not None:
+        return update_data[key]
+    stored = await setting_crud.get_setting(db, key)
+    return _get_typed_setting(stored, default, str)
+
+
+async def _validate_web_search_settings(db: AsyncSession, update_data: dict) -> None:
+    """校验网页搜索相关配置。"""
+    count = update_data.get("web_search_result_count")
+    if count is not None:
+        try:
+            count_value = int(count)
+        except (ValueError, TypeError):
+            count_value = 0
+        if not 1 <= count_value <= 50:
+            raise AppHTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                error_code="INVALID_WEB_SEARCH_RESULT_COUNT",
+                detail="web_search_result_count 必须在 1~50 之间"
+            )
+
+    provider = update_data.get("web_search_provider")
+    if provider is not None and provider not in WEB_SEARCH_PROVIDERS:
+        raise AppHTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_WEB_SEARCH_PROVIDER",
+            detail=f"web_search_provider 仅支持: {', '.join(WEB_SEARCH_PROVIDERS)}"
+        )
+
+    reader = update_data.get("web_search_reader")
+    if reader is not None and reader not in WEB_SEARCH_READERS:
+        raise AppHTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_WEB_SEARCH_READER",
+            detail=f"web_search_reader 仅支持: {', '.join(WEB_SEARCH_READERS)}"
+        )
+
+    effective_provider = await _resolve_effective_setting(db, update_data, "web_search_provider", "duckduckgo")
+    if effective_provider != "deepseek":
+        return
+
+    provider_id = await _resolve_effective_setting(db, update_data, "web_search_provider_id", None)
+    if not provider_id:
+        return
+
+    db_provider = await provider_crud.get_provider(db, provider_id=provider_id)
+    if not db_provider or not is_deepseek_host(db_provider.apiHost):
+        raise AppHTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_WEB_SEARCH_PROVIDER_ID",
+            detail="所选服务商不存在或其 API 地址不是 DeepSeek 官方域名（api.deepseek.com）"
+        )
 
 
 @router.put(
@@ -177,6 +252,8 @@ async def update_global_settings(
                 )
         settings_to_update.append(schemas.GlobalSetting(key="last_selected_provider_id", value=provider_id))
 
+    await _validate_web_search_settings(db, update_data)
+
     param_keys = [
         "default_max_context_messages", "default_temperature", "default_top_p",
         "default_stream", "default_enable_suggest", "default_enable_ask_user",
@@ -184,6 +261,8 @@ async def update_global_settings(
         "default_timeout",
         "proxy_enabled", "proxy_url",
         "web_search_default_mode", "web_search_use_proxy",
+        "web_search_provider", "web_search_provider_id", "web_search_result_count",
+        "web_search_need_content", "web_search_reader",
         "zip_history_system_prompt",
         "frontend_editor", "kb_default_chunk_size", "kb_default_chunk_overlap", "send_message_shortcut",
         "language"

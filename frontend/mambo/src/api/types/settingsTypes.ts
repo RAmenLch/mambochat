@@ -12,6 +12,11 @@ export interface GlobalSettingsUpdate {
   proxy_url: string | null
   web_search_default_mode: string | null
   web_search_use_proxy: boolean | null
+  web_search_provider: string | null
+  web_search_provider_id: string | null
+  web_search_result_count: number | null
+  web_search_need_content: boolean | null
+  web_search_reader: string | null
   user_avatar_url: string | null
   ai_avatar_url: string | null
   zip_history_system_prompt?: string | null

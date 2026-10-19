@@ -145,6 +145,7 @@ declare module 'vue' {
     TaskSubAgentPanel: typeof import('./components/chat/task/TaskSubAgentPanel.vue')['default']
     UsageInfo: typeof import('./components/chat/UsageInfo.vue')['default']
     VersionHistoryDrawer: typeof import('./components/chat/dialogs/VersionHistoryDrawer.vue')['default']
+    WebSearchResultList: typeof import('./components/chat/WebSearchResultList.vue')['default']
     ZipHistoryCard: typeof import('./components/chat/ZipHistoryCard.vue')['default']
   }
   export interface GlobalDirectives {
@@ -287,5 +288,6 @@ declare global {
   const TaskSubAgentPanel: typeof import('./components/chat/task/TaskSubAgentPanel.vue')['default']
   const UsageInfo: typeof import('./components/chat/UsageInfo.vue')['default']
   const VersionHistoryDrawer: typeof import('./components/chat/dialogs/VersionHistoryDrawer.vue')['default']
+  const WebSearchResultList: typeof import('./components/chat/WebSearchResultList.vue')['default']
   const ZipHistoryCard: typeof import('./components/chat/ZipHistoryCard.vue')['default']
 }

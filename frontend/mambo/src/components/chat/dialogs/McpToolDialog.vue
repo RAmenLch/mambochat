@@ -113,29 +113,37 @@
                 </a>
               </div>
             </template>
-            <div class="result-box" :class="{ 'is-error': (getParsedContent(msg) as McpToolContent).is_error }">
-              {{ (getParsedContent(msg) as McpToolContent).result ? getResultDisplayText(msg.id, (getParsedContent(msg) as McpToolContent).result || '') : t('chat.message.mcp.noResult') }}
-            </div>
-            <el-button
-              v-if="isResultTruncated(msg.id, (getParsedContent(msg) as McpToolContent).result || '')"
-              type="primary"
-              link
-              size="small"
-              class="arg-expand-btn"
-              @click="toggleResultExpand(msg.id)"
-            >
-              {{ t('chat.message.mcp.expandFullContent', { count: getResultFullLength(msg.id, (getParsedContent(msg) as McpToolContent).result || '') }) }}
-            </el-button>
-            <el-button
-              v-else-if="isResultExpanded(msg.id)"
-              type="primary"
-              link
-              size="small"
-              class="arg-expand-btn"
-              @click="toggleResultExpand(msg.id)"
-            >
-              {{ t('chat.message.mcp.collapseContent') }}
-            </el-button>
+            <template v-if="webSearchParsed(msg)">
+              <WebSearchResultList
+                :parsed="webSearchParsed(msg) as WebSearchParsed"
+                :raw-result="(getParsedContent(msg) as McpToolContent).result"
+              />
+            </template>
+            <template v-else>
+              <div class="result-box" :class="{ 'is-error': (getParsedContent(msg) as McpToolContent).is_error }">
+                {{ (getParsedContent(msg) as McpToolContent).result ? getResultDisplayText(msg.id, (getParsedContent(msg) as McpToolContent).result || '') : t('chat.message.mcp.noResult') }}
+              </div>
+              <el-button
+                v-if="isResultTruncated(msg.id, (getParsedContent(msg) as McpToolContent).result || '')"
+                type="primary"
+                link
+                size="small"
+                class="arg-expand-btn"
+                @click="toggleResultExpand(msg.id)"
+              >
+                {{ t('chat.message.mcp.expandFullContent', { count: getResultFullLength(msg.id, (getParsedContent(msg) as McpToolContent).result || '') }) }}
+              </el-button>
+              <el-button
+                v-else-if="isResultExpanded(msg.id)"
+                type="primary"
+                link
+                size="small"
+                class="arg-expand-btn"
+                @click="toggleResultExpand(msg.id)"
+              >
+                {{ t('chat.message.mcp.collapseContent') }}
+              </el-button>
+            </template>
           </div>
 
           <div v-if="msg.type === 'ReviewTool'" class="tool-actions-wrapper">
@@ -244,9 +252,11 @@ import { useChatSessionStore } from '@/stores/chatSessionStore';
 import { getMessageTaskSubSteps } from '@/api/chatService';
 import type { SubMessage, McpToolContent, ReviewToolContent, ToolDecision, SchemaProperty, TaskSubStepContent, Message, SecurityReviewContent, MultimodalMedia } from '@/api/types';
 import { unpackMcpToolCall } from '@/utils/mcpToolUnpack';
+import { parseWebSearchResult, type WebSearchParsed } from '@/utils/webSearchResult';
 import { resolveFileUrl } from '@/services/electronUrl';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import TaskSubAgentPanel from '../task/TaskSubAgentPanel.vue';
+import WebSearchResultList from '@/components/chat/WebSearchResultList.vue';
 
 const { t } = useI18n();
 const mcpStore = useMcpStore();
@@ -523,6 +533,13 @@ function getParsedContent(msg: SubMessage): McpToolContent | ReviewToolContent |
   } catch {
     return null;
   }
+}
+
+/** 搜索结果的结构化展示数据；非搜索工具或无法结构化时返回 null，走原始文本渲染 */
+function webSearchParsed(msg: SubMessage) {
+  const content = getParsedContent(msg);
+  if (!content || (content as McpToolContent).is_error) return null;
+  return parseWebSearchResult(content);
 }
 
 /** 多模态媒体展示 url（后端已在 media.url 填充下载路径） */

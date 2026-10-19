@@ -30,6 +30,11 @@ class GlobalSettingsUpdate(BaseModel):
     # 网页搜索配置
     web_search_default_mode: Optional[str] = Field(None, description="默认网页搜索模式: null/disable 不启用, direct_read 仅读取网页, search_and_read 搜索并读取")
     web_search_use_proxy: Optional[bool] = Field(None, description="网页搜索是否启用全局代理")
+    web_search_provider: Optional[str] = Field(None, description="网页搜索后端: duckduckgo 内置搜索, deepseek 使用 DeepSeek Search 接口")
+    web_search_provider_id: Optional[str] = Field(None, description="DeepSeek 搜索使用的服务商ID(必须为 deepseek 类型服务商), provider=deepseek 时必填")
+    web_search_result_count: Optional[int] = Field(None, description="DeepSeek 搜索默认返回结果条数, 1~50")
+    web_search_need_content: Optional[bool] = Field(None, description="DeepSeek 搜索是否直接返回网页正文")
+    web_search_reader: Optional[str] = Field(None, description="网页读取方式: auto 跟随搜索后端, local 本地解析, deepseek 使用 DeepSeek Fetch 接口")
     # 全局头像配置 (仅用于API响应)
     user_avatar_url: Optional[str] = Field(None, description="当前用户头像的访问URL")
     ai_avatar_url: Optional[str] = Field(None, description="当前AI助手头像的访问URL")

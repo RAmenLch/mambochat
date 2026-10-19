@@ -277,12 +277,14 @@ _GLM_BIGMODEL_ONLY_MODELS: list[ModelPreset] = [
 
 MODEL_PRESETS: dict[str, list[ModelPreset]] = {
     "api.deepseek.com": [
-        # --- DeepSeek V4 系列（最新） ---
+        # --- DeepSeek V4.1 系列（最新） ---
+        # deepseek-flash：DeepSeek-V4.1-Flash-1017，支持文本+图像输入，默认思考模式
         ModelPreset(
-            modelId="deepseek-v4-flash",
-            name="DeepSeek V4 Flash",
+            modelId="deepseek-flash",
+            name="DeepSeek Flash",
             context_length=1_000_000,
             max_output_tokens=384_000,
+            input_modalities=["text", "image"],
             supported_parameters=[
                 "temperature",
                 "top_p",
@@ -312,8 +314,25 @@ MODEL_PRESETS: dict[str, list[ModelPreset]] = {
                 "deepseek::reasoning_effort",
             ],
         ),
-        # --- 视觉模型（2026/08/21 发布，实验性质） ---
-        # 支持 JPEG/PNG/GIF/WebP 图片输入，纯文本能力与 V4-Flash 持平
+        # --- 旧版 Flash 别名（模型已下线，请求由 DeepSeek-V4.1-Flash-1017 承接，按 Flash 计费） ---
+        ModelPreset(
+            modelId="deepseek-v4-flash",
+            name="DeepSeek V4 Flash (Legacy)",
+            context_length=1_000_000,
+            max_output_tokens=384_000,
+            input_modalities=["text", "image"],
+            supported_parameters=[
+                "temperature",
+                "top_p",
+                "max_tokens",
+                "max_completion_tokens",
+                "frequency_penalty",
+                "presence_penalty",
+                "stop",
+                "deepseek::thinking.type",
+                "deepseek::reasoning_effort",
+            ],
+        ),
         ModelPreset(
             modelId="deepseek-v4-flash-vision-exp",
             name="DeepSeek V4 Flash Vision (Exp)",

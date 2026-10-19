@@ -17,6 +17,7 @@ from backend.services.generation.tools.mcp_tool_provider import MCPToolProvider
 from backend.services.generation.tools.ask_user_tool_provider import AskUserToolProvider
 from backend.services.generation.tools.tail_tool_provider import TailToolProvider
 from backend.services.generation.tools.kb_tool_provider import KBToolProvider
+from backend.services.generation.tools.deepseek_web_api import WebSearchConfig
 from backend.services.generation.tools.web_search_tool_provider import WebSearchToolProvider
 from backend.schemas.enums import WebSearchMode
 
@@ -31,7 +32,7 @@ class AgentBasedReActInitializer(AbstractAgentInitializer):
             enable_resource_merge: bool = False,
             external_tools: Optional[List[BaseTool]] = None,
             web_search_mode: Optional[WebSearchMode] = None,
-            web_search_proxy_url: Optional[str] = None,
+            web_search_config: Optional[WebSearchConfig] = None,
     ):
         self.db = db
         self.agent = agent
@@ -40,7 +41,7 @@ class AgentBasedReActInitializer(AbstractAgentInitializer):
         self.enable_resource_merge = enable_resource_merge
         self.external_tools = external_tools or []
         self.web_search_mode = web_search_mode
-        self.web_search_proxy_url = web_search_proxy_url
+        self.web_search_config = web_search_config
 
         self.providers: List[BaseToolProvider] = []
         self.hitl_interrupt_on: Dict[str, bool] = {}
@@ -77,7 +78,7 @@ class AgentBasedReActInitializer(AbstractAgentInitializer):
 
             # WebSearch 内置搜索工具
             if self.web_search_mode is not None:
-                self.providers.append(WebSearchToolProvider(self.web_search_mode, proxy_url=self.web_search_proxy_url))
+                self.providers.append(WebSearchToolProvider(self.web_search_mode, config=self.web_search_config))
 
             # Suggest 建议 (改由 Builder 挂尾部工具,不再用 Provider)
             enable_suggest = params.get("enable_suggest", False)

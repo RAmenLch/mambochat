@@ -181,6 +181,7 @@
             <div
               v-if="!isGenerating && mcpToolContent?.result && !mcpToolContent.is_error && subMessage.type === 'McpTool'"
               class="mcp-tool-result"
+              :class="{ 'is-structured': !!mobileWebSearchParsed }"
             >
               <template v-if="mcpToolContent.media?.length">
                 <div
@@ -195,6 +196,9 @@
                     {{ m.filename || m.file_type }}
                   </a>
                 </div>
+              </template>
+              <template v-else-if="mobileWebSearchParsed">
+                <WebSearchResultList :parsed="mobileWebSearchParsed" :raw-result="mcpToolContent.result" />
               </template>
               <template v-else>{{ mcpToolContent.result }}</template>
           </div>
@@ -243,6 +247,7 @@ import { usePendingFileStore } from '@/stores/pendingFileStore'
 import { getFileContent } from '@/api/fileService'
 import { resolveFileUrl } from '@/services/electronUrl'
 import { unpackMcpToolCall } from '@/utils/mcpToolUnpack'
+import { parseWebSearchResult } from '@/utils/webSearchResult'
 import { ElMessage } from 'element-plus'
 import {
   Edit,
@@ -259,6 +264,7 @@ import {
   Sort,
 } from '@element-plus/icons-vue'
 import CodeBlock from '@/components/chat/CodeBlock.vue'
+import WebSearchResultList from '@/components/chat/WebSearchResultList.vue'
 import { copyToClipboard } from '@/utils/clipboard'
 import { parseMarkdown, type ParsedBlock } from '@/utils/markdownParser'
 import { getIconForMimeType } from '@/utils/fileIcons'
@@ -334,6 +340,12 @@ const mcpToolContent = computed((): McpToolContent | null => {
     return toolContent.value as McpToolContent
   }
   return null
+})
+
+/** 搜索结果的结构化展示数据；非搜索工具或无法结构化时返回 null，走原始文本渲染 */
+const mobileWebSearchParsed = computed(() => {
+  if (!mcpToolContent.value || mcpToolContent.value.is_error) return null
+  return parseWebSearchResult(mcpToolContent.value)
 })
 
 /** 多模态媒体展示 url（后端已在 media.url 填充下载路径） */
@@ -924,6 +936,13 @@ onBeforeUnmount(() => {
   font-size: 12px;
   max-height: 120px;
   overflow-y: auto;
+}
+/* 结构化渲染（搜索结果卡片）自带容器样式，去掉纯文本容器限制 */
+.mcp-tool-result.is-structured {
+  background: transparent;
+  padding: 0;
+  max-height: none;
+  overflow-y: visible;
 }
 .mcp-tool-media {
   margin-top: 6px;
