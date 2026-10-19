@@ -219,12 +219,17 @@ class MamboAPIBackend(BackendProtocol):
                 desc += (
                     "\n**Windows quoting rules:** cmd.exe has no single-quote "
                     "support and no backslash escaping (unlike bash). "
-                    "``python -c \"print('x')\"`` works — double quotes outside, "
-                    "single quotes inside the code. But "
-                    "``python -c 'print(\"x\")'`` (single-quoted delimiter) "
-                    "fails silently (exit 0, no output). For anything non-trivial, "
-                    "prefer writing a temporary script file with the write tool, "
-                    "then executing it."
+                    "Every `\"` in a command is rewritten to `\\\"` by an extra "
+                    "argv-quoting layer before cmd.exe sees it, and cmd has no "
+                    "`\\\"` semantics — so double quotes arrive at the shell as "
+                    "literal backslash-quote pairs. Consequences: ``echo \"abc\"`` "
+                    "prints ``\\\"abc\\\"``, ``python -c \"print(1)\"`` dies with a "
+                    "SyntaxError, ``findstr /c:\"a b\"`` loses its quoted "
+                    "argument. Therefore: do NOT use double quotes in commands. "
+                    "When quotes, arguments containing spaces, or multi-line "
+                    "logic are needed, write a temporary .bat / .ps1 / .py file "
+                    "with the write tool and execute that file instead — file "
+                    "contents reach the shell untouched."
                 )
         else:
             desc += " [shell execution disabled]"
