@@ -370,6 +370,11 @@ watch(
 .gav-body.is-image {
   background-color: var(--el-fill-color-light);
 }
+/* 文本模式下由 .gav-text 自己控制限高/滚动，body 不再钳制高度 */
+.gav-body:has(.gav-text) {
+  max-height: none;
+  overflow: visible;
+}
 /* 让图片按比例自适应容器大小 */
 .gav-image {
   max-width: 100%;
@@ -397,9 +402,12 @@ watch(
   border-radius: 8px;
   background: #fff;
 }
+/* 文本模式：白色卡片自身限高并在内部滚动，避免长文本溢出到 body 的灰色背景 */
 .gav-text {
   align-self: stretch;
   width: 100%;
+  max-height: 68vh;
+  overflow: auto;
   margin: 0;
   padding: 14px 16px;
   background: var(--el-bg-color);

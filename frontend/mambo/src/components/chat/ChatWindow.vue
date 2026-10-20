@@ -838,7 +838,9 @@ async function handleSaveSettings(settings: ChatUpdate) {
 
 async function handleSaveAgentSettings(settings: ChatUpdate) {
   if (!currentChat.value) return;
-  await chatListStore.updateChatSettings(currentChat.value.id, settings);
+  if (Object.keys(settings).length > 0) {
+    await chatListStore.updateChatSettings(currentChat.value.id, settings);
+  }
   agentSettingsDrawerVisible.value = false;
   ElMessage.success(t('chat.settings.saveSuccess'));
 }

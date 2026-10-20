@@ -20,6 +20,8 @@
         :src="subMessage.file_info.url"
         :preview-src-list="previewSrcList"
         :initial-index="previewIndex"
+        :preview-teleported="true"
+        :z-index="9999"
         fit="contain"
         class="file-image-thumbnail"
         hide-on-click-modal

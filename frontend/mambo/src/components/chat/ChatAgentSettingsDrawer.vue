@@ -14,7 +14,7 @@
           <el-input v-model.trim="form.name" :placeholder="$t('chat.settings.namePlaceholder')" />
         </el-form-item>
         <el-form-item :label="$t('chat.settings.bindAgent')">
-          <el-select v-model="form.agentId" style="width: 100%">
+          <el-select v-model="form.agentId" style="width: 100%" :disabled="!!chatData.memberAlias">
             <el-option
               v-for="agent in agentOptions"
               :key="agent.value"
@@ -775,7 +775,11 @@ async function handleSaveSettings() {
     }
   }
 
-  const payload: ChatUpdate = { agentId: form.agentId };
+  const payload: ChatUpdate = {};
+  // 群成员会话的 Agent 绑定固定，回传 agentId 会被后端整单拒绝；仅名称可改
+  if (!props.chatData.memberAlias) {
+    payload.agentId = form.agentId;
+  }
   // 与 header 一致:输入等于当前显示标题 = 未修改 → 不提交 name,保留后端默认 Key
   const displayTitle = isDefaultChatName(props.chatData.name) ? t('chat.sidebar.initChatName') : props.chatData.name;
   if (form.name && form.name.trim() !== displayTitle) {
