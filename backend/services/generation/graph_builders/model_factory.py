@@ -1,6 +1,8 @@
 # backend/services/generation/graph_builders/model_factory.py
 
-from typing import Optional
+import inspect
+from functools import lru_cache
+from typing import Optional, Tuple
 
 from langchain_core.language_models import BaseChatModel
 
@@ -53,6 +55,45 @@ class ModelFactory:
         return ModelFactory._RESENDS_REASONING_BY_WORKER.get(worker_type, False)
 
     @staticmethod
+    @lru_cache(maxsize=1)
+    def _chat_completions_params() -> frozenset:
+        """OpenAI SDK ``chat.completions.create`` 接受的顶层参数名。
+
+        ``ChatOpenAI`` 把 ``model_kwargs`` 原样并入请求体后调用
+        ``chat.completions.create(**payload)``，SDK 对签名外的键直接抛
+        ``TypeError: got an unexpected keyword argument``，故以该签名作为
+        “可留在 model_kwargs 里”的白名单。
+        """
+        from openai.resources.chat.completions import AsyncCompletions
+
+        return frozenset(inspect.signature(AsyncCompletions.create).parameters) - {"self"}
+
+    @classmethod
+    def _split_model_params(cls, params: dict) -> Tuple[dict, Optional[dict]]:
+        """把生成参数拆成 (model_kwargs, extra_body)。
+
+        provider 扩展参数（``reasoning`` / ``include_reasoning`` / ``top_k`` /
+        ``do_sample`` 等）不在 SDK 签名内，必须由 ``extra_body`` 携带——SDK 会在发送前
+        把它平铺进 JSON body，provider 拿到的字段与写在顶层完全一致；否则请求会以
+        ``TypeError: ... got an unexpected keyword argument`` 失败。
+
+        顺带避免 ``reasoning`` 之类的键出现在 payload 顶层：那会让
+        ``ChatOpenAI._use_responses_api`` 把请求静默切到 Responses API。
+        """
+        known = cls._chat_completions_params()
+        model_kwargs: dict = {}
+        extra_body: dict = {}
+        for key, value in params.items():
+            if key == "extra_body":
+                if isinstance(value, dict):
+                    extra_body.update(value)
+            elif key in known:
+                model_kwargs[key] = value
+            else:
+                extra_body[key] = value
+        return model_kwargs, (extra_body or None)
+
+    @staticmethod
     def create_model(model_config: ModelConfig, run_time_config: RunTimeConfig) -> BaseChatModel:
         if model_config is None:
             raise ValueError(
@@ -103,15 +144,19 @@ class ModelFactory:
             from backend.services.generation.worker.deepseek_chat_model import ChatDeepSeek
             thinking = params_copy.pop("thinking", None)
             reasoning_effort = params_copy.pop("reasoning_effort", None)
+            model_kwargs, extra_body = ModelFactory._split_model_params(params_copy)
             model = ChatDeepSeek(
                 model=model_config.model_id,
                 api_key=model_config.api_key,
                 base_url=model_config.api_host.rstrip("/"),
-                model_kwargs=params_copy,
+                model_kwargs=model_kwargs,
+                extra_body=extra_body,
                 openai_proxy=model_config.proxy_url,
                 timeout=model_config.timeout,
                 streaming=stream,
                 stream_usage=True,
+                # ChatDeepSeek._get_request_payload 只构造 chat/completions 请求体
+                use_responses_api=False,
                 callbacks=callbacks,
                 max_retries=max_retries,
                 thinking=thinking,
@@ -125,12 +170,12 @@ class ModelFactory:
 
         else:
             from backend.services.generation.worker.extended_chat_openai_model import ExtendedChatOpenAI
-            extra_body = params_copy.pop("extra_body", None)
+            model_kwargs, extra_body = ModelFactory._split_model_params(params_copy)
             model = ExtendedChatOpenAI(
                 model=model_config.model_id,
                 api_key=model_config.api_key,
                 base_url=model_config.api_host.rstrip("/"),
-                model_kwargs=params_copy,
+                model_kwargs=model_kwargs,
                 extra_body=extra_body,
                 openai_proxy=model_config.proxy_url,
                 timeout=model_config.timeout,

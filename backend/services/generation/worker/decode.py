@@ -24,6 +24,51 @@ def _restore_uploaded_media_block(blk: Dict[str, Any]) -> Optional[Dict[str, Any
         return None
 
 
+def _content_blocks_to_text(content: Any) -> str:
+    """把消息 content 归一化为纯文本串。
+
+    Chat Completions 下 ``content`` 是 str；Responses API（含 langchain-openai 的
+    ``output_version="v1"``）下 ``content`` 是内容块列表，其中混有 ``reasoning`` /
+    ``function_call`` / 媒体块。下游 ``AppendToSubMessage(content=...)`` 等字段声明为
+    str，直接透传列表会触发 pydantic 校验错误，因此这里只拼接文本块；其余块
+    （工具调用、推理、媒体）由各自通道单独处理。
+    """
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts: List[str] = []
+    for block in content:
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, dict) and block.get("type") in ("text", "text-plain"):
+            text = block.get("text")
+            if isinstance(text, str):
+                parts.append(text)
+    return "".join(parts)
+
+
+def _content_blocks_to_reasoning(content: Any) -> str:
+    """从内容块列表中提取推理文本。
+
+    Responses API 的推理内容以 ``{"type": "reasoning", ...}`` 块出现：部分 provider
+    直接给 ``reasoning`` 字段，部分给 ``summary`` 子块列表（``summary_text``）。
+    """
+    if not isinstance(content, list):
+        return ""
+    parts: List[str] = []
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "reasoning":
+            continue
+        reasoning = block.get("reasoning")
+        if isinstance(reasoning, str):
+            parts.append(reasoning)
+        for sub in block.get("summary") or []:
+            if isinstance(sub, dict) and isinstance(sub.get("text"), str):
+                parts.append(sub["text"])
+    return "".join(parts)
+
+
 class BaseDecode(ABC):
     @abstractmethod
     def get_text_content(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[str]:
@@ -204,14 +249,21 @@ class OpenAiDecode(DefaultLangChainDecode):
         if mode == "updates":
             return None
         if mode == "messages" and isinstance(message, AIMessage):
-            return message.content
+            # content 可能是 str（Chat Completions）或内容块列表（Responses API）
+            return _content_blocks_to_text(message.content) or None
         return None
 
     def get_reasoning_content(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[str]:
         if mode == "updates":
             return None
         if mode == "messages" and isinstance(message, AIMessage):
-            return message.additional_kwargs.get("reasoning") or message.additional_kwargs.get("reasoning_content")
+            # Chat Completions：推理在 additional_kwargs 的非标准字段里；
+            # Responses API：推理是 content 中的 reasoning 块
+            return (
+                message.additional_kwargs.get("reasoning")
+                or message.additional_kwargs.get("reasoning_content")
+                or _content_blocks_to_reasoning(message.content)
+            ) or None
         return None
 
     def get_image_url(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:

@@ -1,51 +1,116 @@
 <!-- frontend/mambo/src/components/chat/task/TaskSubAgentPanel.vue -->
 <template>
   <div class="subagent-panel">
-    <!-- 思考区域 (Reasoning) -->
-    <div class="bubble-section reasoning-section" v-if="reasoningSection && !isReasoningMinimized">
-      <div class="section-title" @click="isReasoningMinimized = true">
-        {{ t('chat.message.reasoning') }}
+    <!-- ========== 堆叠模式（全局配置 message_display_mode = 'stacked'） ========== -->
+    <template v-if="messageDisplayMode === 'stacked'">
+      <!-- 思考区域 (Reasoning) -->
+      <div class="bubble-section reasoning-section" v-if="reasoningSection && !isReasoningMinimized">
+        <div class="section-title" @click="isReasoningMinimized = true">
+          {{ t('chat.message.reasoning') }}
+        </div>
+        <div class="section-content">
+          <BubbleSectionGroup
+            v-for="group in reasoningSection.groups"
+            :key="group.id"
+            :group="group"
+            :parent-message="virtualMessage"
+            :is-generating="false"
+            :is-inactive="false"
+            :show-edit="false"
+            :external-collapsed="isSubMsgCollapsed(group.textSubMessage?.id)"
+            @copy="handleCopy"
+            @toggle-collapse="handleToggleCollapse"
+            @open-tool-dialog="handleToolClick"
+          />
+        </div>
       </div>
-      <div class="section-content">
-        <BubbleSectionGroup
-          v-for="group in reasoningSection.groups"
-          :key="group.id"
-          :group="group"
-          :parent-message="virtualMessage"
-          :is-generating="false"
-          :is-inactive="false"
-          :show-edit="false"
-          :external-collapsed="isSubMsgCollapsed(group.textSubMessage?.id)"
-          @copy="handleCopy"
-          @toggle-collapse="handleToggleCollapse"
-          @open-tool-dialog="handleToolClick"
-        />
+      <div v-else-if="reasoningSection" class="reasoning-minimized-block" @click="isReasoningMinimized = false">
+        {{ t('chat.message.reasoningCollapsed') }}
       </div>
-    </div>
-    <div v-else-if="reasoningSection" class="reasoning-minimized-block" @click="isReasoningMinimized = false">
-      {{ t('chat.message.reasoningCollapsed') }}
-    </div>
 
-    <!-- 正文区域 (Normal) -->
-    <div class="bubble-section normal-section" v-if="normalSection">
-      <div class="section-content">
-        <BubbleSectionGroup
-          v-for="group in normalSection.groups"
-          :key="group.id"
-          :group="group"
-          :parent-message="virtualMessage"
-          :is-generating="false"
-          :is-inactive="false"
-          :show-edit="false"
-          :external-collapsed="isSubMsgCollapsed(group.textSubMessage?.id)"
-          @copy="handleCopy"
-          @toggle-collapse="handleToggleCollapse"
-          @open-tool-dialog="handleToolClick"
-        />
+      <!-- 正文区域 (Normal) -->
+      <div class="bubble-section normal-section" v-if="normalSection">
+        <div class="section-content">
+          <BubbleSectionGroup
+            v-for="group in normalSection.groups"
+            :key="group.id"
+            :group="group"
+            :parent-message="virtualMessage"
+            :is-generating="false"
+            :is-inactive="false"
+            :show-edit="false"
+            :external-collapsed="isSubMsgCollapsed(group.textSubMessage?.id)"
+            @copy="handleCopy"
+            @toggle-collapse="handleToggleCollapse"
+            @open-tool-dialog="handleToolClick"
+          />
+        </div>
       </div>
-    </div>
+    </template>
 
-    <div v-if="!reasoningSection && !normalSection" class="empty-state">
+    <!-- ========== 交错模式（全局配置 message_display_mode = 'interleaved'，与主代理一致） ========== -->
+    <template v-else>
+      <div
+        v-for="(section, index) in interleavedSections"
+        :key="sectionKey(section, index)"
+        :class="[
+          'bubble-section',
+          section.type === 'reasoning' ? 'interleaved-reasoning-section' : 'interleaved-normal-section'
+        ]"
+      >
+        <!-- Reasoning Section（折叠面板：默认展开，便于查看追踪过程） -->
+        <template v-if="section.type === 'reasoning'">
+          <div class="reasoning-collapsible" :class="{ 'is-collapsed': isSectionCollapsed(section, index) }">
+            <div class="reasoning-collapse-header" @click="toggleSectionCollapse(section, index)">
+              <el-icon class="collapse-arrow">
+                <ArrowRight v-if="isSectionCollapsed(section, index)" />
+                <ArrowDown v-else />
+              </el-icon>
+              <span class="collapse-title">{{ t('chat.message.reasoning') }}</span>
+              <span v-if="sectionToolCount(section) > 0" class="collapse-tool-count">{{ sectionToolCount(section) }}</span>
+            </div>
+            <div class="reasoning-collapse-body" v-show="!isSectionCollapsed(section, index)">
+              <div class="section-content">
+                <BubbleSectionGroup
+                  v-for="group in section.groups"
+                  :key="group.id"
+                  :group="group"
+                  :parent-message="virtualMessage"
+                  :is-generating="false"
+                  :is-inactive="false"
+                  :show-edit="false"
+                  :external-collapsed="isSubMsgCollapsed(group.textSubMessage?.id)"
+                  @copy="handleCopy"
+                  @toggle-collapse="handleToggleCollapse"
+                  @open-tool-dialog="handleToolClick"
+                />
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- Normal Section -->
+        <template v-else>
+          <div class="section-content">
+            <BubbleSectionGroup
+              v-for="group in section.groups"
+              :key="group.id"
+              :group="group"
+              :parent-message="virtualMessage"
+              :is-generating="false"
+              :is-inactive="false"
+              :show-edit="false"
+              :external-collapsed="isSubMsgCollapsed(group.textSubMessage?.id)"
+              @copy="handleCopy"
+              @toggle-collapse="handleToggleCollapse"
+              @open-tool-dialog="handleToolClick"
+            />
+          </div>
+        </template>
+      </div>
+    </template>
+
+    <div v-if="interleavedSections.length === 0" class="empty-state">
       {{ t('chat.subagent.noSteps') }}
     </div>
 
@@ -62,15 +127,24 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { storeToRefs } from 'pinia';
 import { ElMessage } from 'element-plus';
+import { ArrowRight, ArrowDown } from '@element-plus/icons-vue';
 import type { Message, MessageRole, MessageStatus, SubMessage, SubMessageType, TaskSubStepContent, SecurityReviewContent, ReviewToolContent } from '@/api/types';
-import { useAssistantTimeline } from '@/composables/useAssistantTimeline';
+import { useAssistantTimeline, type BubbleSection } from '@/composables/useAssistantTimeline';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { copyToClipboard } from '@/utils/clipboard';
 import BubbleSectionGroupComponent from '../message/BubbleSectionGroup.vue';
 import McpToolDialog from '../dialogs/McpToolDialog.vue';
 
 const BubbleSectionGroup = BubbleSectionGroupComponent;
 const { t } = useI18n();
+
+const settingsStore = useSettingsStore();
+const { globalSettings } = storeToRefs(settingsStore);
+
+/** 消息显示模式：与主代理（AssistantBubble）读取同一份全局配置 */
+const messageDisplayMode = computed(() => globalSettings.value.message_display_mode ?? 'interleaved');
 
 const props = defineProps<{
   steps: SubMessage[];
@@ -232,8 +306,35 @@ const virtualMessage = computed<Message>(() => {
 });
 
 const messageRef = computed(() => virtualMessage.value);
-const { reasoningSection, normalSection } = useAssistantTimeline(messageRef);
+const { reasoningSection, normalSection, interleavedSections } = useAssistantTimeline(messageRef, messageDisplayMode);
 const isReasoningMinimized = ref(true);
+
+/** 交错模式：被用户折叠的 reasoning 区块键集合（默认全部展开，便于查看追踪过程） */
+const collapsedSectionKeys = ref<Set<string>>(new Set());
+
+function sectionKey(section: BubbleSection, index: number): string {
+  return `${section.groups[0]?.id ?? 'section'}_${index}`;
+}
+
+function isSectionCollapsed(section: BubbleSection, index: number): boolean {
+  return collapsedSectionKeys.value.has(sectionKey(section, index));
+}
+
+function toggleSectionCollapse(section: BubbleSection, index: number) {
+  const key = sectionKey(section, index);
+  const next = new Set(collapsedSectionKeys.value);
+  if (next.has(key)) {
+    next.delete(key);
+  } else {
+    next.add(key);
+  }
+  collapsedSectionKeys.value = next;
+}
+
+/** 交错模式：reasoning 区块内包含的工具调用数量（用于折叠态提示） */
+function sectionToolCount(section: BubbleSection): number {
+  return section.groups.reduce((sum, group) => sum + group.toolSubMessages.length, 0);
+}
 
 // ── 子代理工具调用弹窗 ──
 const toolDialogVisible = ref(false);
@@ -309,5 +410,83 @@ function handleToolClick(subMessageId: string) {
   color: var(--el-text-color-placeholder);
   padding: 24px;
   font-size: 14px;
+}
+
+/* ========== 交错模式（与主代理 AssistantBubble 对齐） ========== */
+.interleaved-reasoning-section {
+  position: relative;
+}
+
+.reasoning-collapsible {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  overflow: hidden;
+  background-color: #fafafa;
+}
+
+.reasoning-collapse-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.15s;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+}
+.reasoning-collapse-header:hover {
+  background-color: #f0f0f0;
+}
+
+.reasoning-collapse-header .collapse-arrow {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+
+.reasoning-collapse-header .collapse-title {
+  font-weight: 600;
+  flex: 1;
+}
+
+.reasoning-collapse-header .collapse-tool-count {
+  flex-shrink: 0;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background-color: var(--el-fill-color-dark);
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.reasoning-collapse-body {
+  border-top: 1px solid var(--el-border-color-lighter);
+  padding: 12px 16px;
+  border-left: 3px solid var(--el-border-color);
+  background-color: #f5f5f5;
+  margin: 0 8px 8px 8px;
+  border-radius: 0 6px 6px 0;
+}
+
+.reasoning-collapsible.is-collapsed .reasoning-collapse-body {
+  display: none;
+}
+
+.interleaved-reasoning-section :deep(.message-content) {
+  color: var(--el-text-color-primary) !important;
+}
+
+.interleaved-reasoning-section :deep(.content-block strong),
+.interleaved-reasoning-section :deep(.content-block b) {
+  color: var(--el-text-color-primary) !important;
+}
+
+.interleaved-normal-section :deep(.message-content) {
+  color: var(--el-text-color-primary);
 }
 </style>

@@ -3,7 +3,7 @@
 
 背景：``read`` 工具读取图片时返回内联 base64 内容块，该 base64 会同时进入
 LangGraph checkpoint 与模型请求体（受 48 MiB 请求体 / 32 MiB 单图限制约束）。
-本模块提供两类能力：
+本模块提供三类能力：
 
 1. **file_id 缓存与上传**（:func:`resolve_file_id`）：内存 → 数据库 → Files API
    上传三级缓存；进程内与跨请求复用同一张图的 ``file_id``。模型层（``ChatDeepSeek``
@@ -11,6 +11,10 @@ LangGraph checkpoint 与模型请求体（受 48 MiB 请求体 / 32 MiB 单图�
 2. **``read`` 预上传钩子**（:class:`DeepSeekFileUploader`）：图片上传成功后在源头替换为
    ``{"type": "file", "file_id": ...}`` 引用块，使 ``ToolMessage``、checkpoint 与历史
    重建只携带小引用；上传失败 / 非图片返回 ``None``（由库回退内联 base64）。
+3. **图片可用性兜底**（:func:`unsupported_image_reason`）：视觉模型对超尺寸 / 非法图片
+   会整包 400（``You have uploaded an unsupported image``），把整轮生成打成 failed。
+   故上传前先校验，不合法的一律降级为文本占位块（``unsupported_image_block``），
+   既不写缓存也不进上下文。
 
 引用块不再携带 base64，而前端展示 / 落库仍需要原始内容：上传成功时经
 :func:`stash_raw` 暂存 ``file_id -> 原始内容``，工具结果解码（``DefaultLangChainDecode``）
@@ -94,6 +98,164 @@ def set_cached_file_id(cache_key: str, file_id: str, expires_ts: float) -> None:
     _FILE_ID_CACHE[cache_key] = (file_id, expires_ts)
 
 
+# ----------------------------------------------------------------------
+# 图片可用性兜底：视觉模型不接受的图片一律降级为文本占位
+#
+# 背景：DeepSeek 对"格式合法但不可用"的图片（超大尺寸等）会整包返回 400
+# ``.messages[N].image[0]: You have uploaded an unsupported image``，
+# 该错误会沿 tool -> pregel -> manager 冒泡，把整轮生成打成 failed。
+# 例：子代理 read 了一张 2412x20211 的 matplotlib PNG 直接炸掉整轮。
+# 故在上传前（以及请求期归一化时）做尺寸/格式校验，不合法就换成文本占位。
+# ----------------------------------------------------------------------
+
+#: 单边像素上限（超过则视为视觉模型不可用）
+MAX_IMAGE_SIDE = 8000
+
+#: 总像素上限（约 40 MP；常规截图/图表在 1~5 MP，超大画布才会触发）
+MAX_IMAGE_PIXELS = 40_000_000
+
+#: 视觉模型支持的图片 MIME
+SUPPORTED_IMAGE_MIMES = frozenset(
+    {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"}
+)
+
+
+def sniff_image_size(raw: bytes) -> Optional[Tuple[str, int, int]]:
+    """从文件头解析 ``(mime, width, height)``。
+
+    只依赖标准库（不引入 Pillow）：支持 PNG / GIF / JPEG / WebP。
+    无法识别时返回 None，尺寸解析不出来时返回宽高为 0 的元组。
+    """
+    if not raw:
+        return None
+
+    # PNG: 签名 8B + IHDR(宽 4B、高 4B，大端)
+    if raw[:8] == b"\x89PNG\r\n\x1a\n" and len(raw) >= 24:
+        return (
+            "image/png",
+            int.from_bytes(raw[16:20], "big"),
+            int.from_bytes(raw[20:24], "big"),
+        )
+
+    # GIF: 签名 6B + 逻辑屏宽/高（小端 2B）
+    if raw[:6] in (b"GIF87a", b"GIF89a") and len(raw) >= 10:
+        return (
+            "image/gif",
+            int.from_bytes(raw[6:8], "little"),
+            int.from_bytes(raw[8:10], "little"),
+        )
+
+    # WebP: RIFF....WEBP + 子块（VP8X 画布 / VP8 有损 / VP8L 无损）
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP" and len(raw) >= 30:
+        chunk = raw[12:16]
+        if chunk == b"VP8X":
+            return (
+                "image/webp",
+                int.from_bytes(raw[24:27], "little") + 1,
+                int.from_bytes(raw[27:30], "little") + 1,
+            )
+        if chunk == b"VP8 ":
+            return (
+                "image/webp",
+                int.from_bytes(raw[26:28], "little") & 0x3FFF,
+                int.from_bytes(raw[28:30], "little") & 0x3FFF,
+            )
+        if chunk == b"VP8L" and len(raw) >= 25:
+            bits = int.from_bytes(raw[21:25], "little")
+            return "image/webp", (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+        return "image/webp", 0, 0
+
+    # JPEG: 逐段扫描 SOFn 取高宽
+    if raw[:2] == b"\xff\xd8":
+        i, n = 2, len(raw)
+        while i + 9 < n:
+            if raw[i] != 0xFF:
+                i += 1
+                continue
+            marker = raw[i + 1]
+            if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
+                i += 2
+                continue
+            seg_len = int.from_bytes(raw[i + 2:i + 4], "big")
+            if seg_len < 2:
+                return None
+            if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+                return (
+                    "image/jpeg",
+                    int.from_bytes(raw[i + 7:i + 9], "big"),
+                    int.from_bytes(raw[i + 5:i + 7], "big"),
+                )
+            i += 2 + seg_len
+        return "image/jpeg", 0, 0
+
+    return None
+
+
+def unsupported_image_reason(mime: str, raw: bytes) -> Optional[str]:
+    """判断图片能否交给视觉模型；可用返回 None，不可用返回中文原因。
+
+    判定项：MIME 白名单、文件内容可解析、单边 / 总像素上限。
+    """
+    normalized = (mime or "").split(";")[0].strip().lower()
+    if normalized not in SUPPORTED_IMAGE_MIMES:
+        return f"格式 {normalized or '未知'} 不受支持"
+
+    sniffed = sniff_image_size(raw)
+    if sniffed is None:
+        return "文件内容不是有效的图片"
+
+    _, width, height = sniffed
+    if width <= 0 or height <= 0:
+        return "无法解析图片尺寸"
+    if width > MAX_IMAGE_SIDE or height > MAX_IMAGE_SIDE:
+        return f"尺寸 {width}×{height} 超过单边 {MAX_IMAGE_SIDE}px 上限"
+    if width * height > MAX_IMAGE_PIXELS:
+        return (
+            f"尺寸 {width}×{height} 超过 "
+            f"{MAX_IMAGE_PIXELS // 1_000_000}M 像素上限"
+        )
+    return None
+
+
+def unsupported_image_block(reason: str) -> Dict[str, Any]:
+    """把不可用图片降级成的文本内容块。"""
+    return {"type": "text", "text": f"[图片不可用（{reason}），已省略]"}
+
+
+#: 引用块（file_id）校验结果缓存：file_id -> 不可用原因（None 表示可用）。
+#: 避免每次请求都重复解码同一张图的 base64。
+_IMAGE_REASON_CACHE: Dict[str, Optional[str]] = {}
+_IMAGE_REASON_CACHE_MAX = 256
+
+
+def stashed_image_reason(file_id: str) -> Optional[str]:
+    """按引用块 ``file_id`` 取暂存的原始内容做兜底校验。
+
+    取不到原始内容（进程重启 / 条目被淘汰）返回 None —— 这类历史引用无法回溯，
+    交由上传前校验挡住新增的坏图。结果按 ``file_id`` 缓存。
+    """
+    if not file_id:
+        return None
+    if file_id in _IMAGE_REASON_CACHE:
+        return _IMAGE_REASON_CACHE[file_id]
+
+    entry = get_stashed_raw(file_id)
+    if entry is None:
+        return None
+
+    _, mime, base64_content = entry
+    try:
+        raw = base64.b64decode(base64_content)
+    except Exception:
+        return None
+
+    reason = unsupported_image_reason(mime, raw)
+    if len(_IMAGE_REASON_CACHE) >= _IMAGE_REASON_CACHE_MAX:
+        _IMAGE_REASON_CACHE.clear()
+    _IMAGE_REASON_CACHE[file_id] = reason
+    return reason
+
+
 async def resolve_file_id(
     client: Any, provider_key: str, mime: str, raw: bytes
 ) -> Optional[str]:
@@ -101,7 +263,15 @@ async def resolve_file_id(
 
     ``client`` 为 ``openai.AsyncOpenAI`` 实例（复用模型层的 ``root_async_client``，
     继承其代理 / 超时配置）。上传或查库失败一律返回 None，由调用方回退内联 base64。
+
+    不受支持的图片（格式 / 尺寸超限）直接返回 None：既不上传也不入缓存，避免污染
+    ``DeepSeekFileCache``（缓存命中后会被反复塞进请求，导致每次都 400）。
     """
+    reason = unsupported_image_reason(mime, raw)
+    if reason:
+        logger.warning(f"[deepseek-files] 跳过不受支持的图片上传（{reason}）")
+        return None
+
     digest = hashlib.sha256(raw).hexdigest()
     # 注意：cache_key_of 接收原始内容（内部自行取 sha256），不能传 hex 摘要字符串。
     cache_key = cache_key_of(provider_key, raw)
@@ -218,7 +388,11 @@ class DeepSeekFileUploader:
     """``read`` 工具预上传钩子（``mambo_agents.backends.protocol.FileUploader`` 契约）。
 
     异步回调：图片上传成功后返回 ``[{"type": "file", "file_id": ...}]`` 替换内联
-    base64 块；非图片 / 上传失败返回 ``None``（库自动回退内联，不影响 read 结果）。
+    base64 块；非图片返回 ``None``（库自动回退内联，不影响 read 结果）。
+
+    不受支持的图片（格式 / 尺寸超限）返回 **文本占位块** 而不是 ``None``：
+    回退内联 base64 同样会被视觉模型 400 拒绝，必须让这张图完全不进入
+    ToolMessage / checkpoint / 后续请求。
     """
 
     def __init__(self, client: Any, provider_key: str) -> None:
@@ -238,6 +412,13 @@ class DeepSeekFileUploader:
         except Exception as e:
             logger.warning(f"[deepseek-files] 预上传解码 base64 失败，回退内联: {e}")
             return None
+
+        reason = unsupported_image_reason(mime_type, raw)
+        if reason:
+            logger.warning(
+                f"[deepseek-files] read 读取的图片不受支持（{reason}），已降级为文本占位：{file_path}"
+            )
+            return [unsupported_image_block(reason)]
 
         file_id = await resolve_file_id(self._client, self._provider_key, mime_type, raw)
         if not file_id:

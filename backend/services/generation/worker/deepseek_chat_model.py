@@ -17,6 +17,9 @@ from backend.services.generation.worker.deepseek_file_uploader import (
     get_cached_file_id,
     provider_key_of,
     resolve_file_id,
+    stashed_image_reason,
+    unsupported_image_block,
+    unsupported_image_reason,
 )
 
 logger = logging.getLogger(__name__)
@@ -315,6 +318,9 @@ class ChatDeepSeek(ChatOpenAI):
                 inner.get("url") if isinstance(inner, dict) else None
             )
             if info:
+                reason = unsupported_image_reason(info[0], info[1])
+                if reason:
+                    return unsupported_image_block(reason)
                 file_id = get_cached_file_id(cache_key_of(provider_key, info[1]))
                 if file_id:
                     return {"type": "file", "file_id": file_id}
@@ -323,9 +329,10 @@ class ChatDeepSeek(ChatOpenAI):
         if block_type != "file":
             return None
 
-        # 已是扁平 file_id：保持（例如上一轮已被替换、随消息持久化的块）
+        # 已是扁平 file_id：校验通过则保持（例如上一轮已被替换、随消息持久化的块）
         if block.get("file_id"):
-            return None
+            reason = stashed_image_reason(block["file_id"])
+            return unsupported_image_block(reason) if reason else None
         file_data = block.get("file_data")
         filename = block.get("filename")
         if file_data is None:
@@ -333,6 +340,9 @@ class ChatDeepSeek(ChatOpenAI):
             if not isinstance(inner, dict):
                 return None
             if inner.get("file_id"):
+                reason = stashed_image_reason(inner["file_id"])
+                if reason:
+                    return unsupported_image_block(reason)
                 return {"type": "file", "file_id": inner["file_id"]}
             file_data = inner.get("file_data")
             filename = filename or inner.get("filename")
@@ -346,6 +356,9 @@ class ChatDeepSeek(ChatOpenAI):
         """扁平 file_data：图片则用 file_id 或扁平内联；非图片转文本占位。"""
         info = self._decode_image_data_url(file_data)
         if info:
+            reason = unsupported_image_reason(info[0], info[1])
+            if reason:
+                return unsupported_image_block(reason)
             file_id = get_cached_file_id(cache_key_of(provider_key, info[1]))
             if file_id:
                 return {"type": "file", "file_id": file_id}
