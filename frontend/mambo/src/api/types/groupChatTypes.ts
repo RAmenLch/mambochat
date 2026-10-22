@@ -74,7 +74,7 @@ export interface GroupDetail {
   autoRoundLimit: number
   autoRoundCount: number
   /** 邮件投递模式：auto=生成完毕即投递；review=需用户逐封审核后投递 */
-  mailMode?: GroupMailMode
+  mailMode: GroupMailMode
   /** 群累计实际启动过的自动邮件轮次（跨额度周期，仅用于展示） */
   totalAutoRoundCount?: number
   version: number

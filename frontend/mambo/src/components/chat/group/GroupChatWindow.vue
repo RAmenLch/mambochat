@@ -516,12 +516,13 @@ async function onSaveSettings() {
   if (!d) return;
   const payload: GroupSettingsUpdate = {};
   if (limitDraft.value !== d.autoRoundLimit) payload.autoRoundLimit = limitDraft.value;
-  if (mailModeDraft.value !== (d.mailMode ?? 'auto')) payload.mailMode = mailModeDraft.value;
+  if (mailModeDraft.value !== d.mailMode) payload.mailMode = mailModeDraft.value;
   if (payload.autoRoundLimit === undefined && payload.mailMode === undefined) return;
   savingSettings.value = true;
   try {
     markLocalActivity();
     await groupStore.updateSettings(groupId.value, payload);
+    syncSettingsDraft();
     ElMessage.success(t('common.msg.updateSuccess'));
   } catch (error) {
     console.error('Failed to update group settings:', error);

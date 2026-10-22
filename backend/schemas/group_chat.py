@@ -171,6 +171,8 @@ class GroupDetailResponse(BaseModel):
     pauseReason: Optional[GroupPauseReason] = None
     autoRoundLimit: int
     autoRoundCount: int
+    # 邮件投递模式：auto=生成完毕自动投递；review=需用户逐封审核
+    mailMode: GroupMailMode = GroupMailMode.AUTO
     # 群累计实际启动过的自动邮件轮次（跨额度周期，仅用于展示）
     totalAutoRoundCount: int = 0
     version: int
