@@ -17,6 +17,10 @@ export default {
     newArchiveFolder: 'New Archive Folder',
     sortByTime: 'Sort by time (folders on top)',
     sortManual: 'Manual sort',
+    filterByAgent: 'Filter by Agent',
+    filterAll: 'All Chats',
+    filterNormal: 'Plain Chats',
+    filterUnknownAgent: 'Deleted Agent',
     status: {
       generating: 'Generating',
       unread: 'Generated, unread',

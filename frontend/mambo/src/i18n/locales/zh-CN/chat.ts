@@ -17,6 +17,10 @@ export default {
     newArchiveFolder: '新建归档文件夹',
     sortByTime: '按时间排序（文件夹置顶）',
     sortManual: '手动排序',
+    filterByAgent: '按 Agent 筛选',
+    filterAll: '全部会话',
+    filterNormal: '普通会话',
+    filterUnknownAgent: '已删除 Agent',
     status: {
       generating: '生成中',
       unread: '已生成，未读',

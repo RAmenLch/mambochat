@@ -4,6 +4,14 @@
     <div class="list-header">
       <span class="list-title">{{ $t('chat.sidebar.title') }}</span>
       <div class="header-actions">
+        <button
+          class="icon-btn"
+          :class="{ active: isAgentFiltering }"
+          @click="agentFilterSheetVisible = true"
+          :aria-label="$t('chat.sidebar.filterByAgent')"
+        >
+          <el-icon :size="18"><Filter /></el-icon>
+        </button>
         <button class="icon-btn" @click="toggleSortMode" :aria-label="isManualSort ? $t('chat.sidebar.sortByTime') : $t('chat.sidebar.sortManual')">
           <el-icon :size="18"><Sort /></el-icon>
         </button>
@@ -21,6 +29,7 @@
         :is-loading="isChatListLoading"
         :loading-folder-ids="loadingFolders"
         folder-item-type="folder"
+        :draggable="!isAgentFiltering"
         :custom-allow-drop="customAllowDrop"
         class="chat-tree"
         @node-click="handleNodeClick"
@@ -73,6 +82,34 @@
         </button>
       </div>
     </div>
+
+    <!-- Agent 筛选 Sheet -->
+    <Teleport to="body">
+      <Transition name="sheet">
+        <div v-if="agentFilterSheetVisible" class="sheet-overlay" @click="agentFilterSheetVisible = false">
+          <div class="sheet-panel" @click.stop>
+            <div class="sheet-handle"></div>
+            <div class="sheet-panel-title">{{ $t('chat.sidebar.filterByAgent') }}</div>
+            <div class="sheet-items agent-filter-items">
+              <button
+                v-for="option in agentFilterOptions"
+                :key="option.value"
+                class="sheet-item"
+                :class="{ active: agentFilter === option.value }"
+                @click="selectAgentFilter(option.value)"
+              >
+                <el-avatar v-if="option.avatar" :size="20" :src="option.avatar" />
+                <el-icon v-else :size="20"><component :is="option.icon" /></el-icon>
+                <span class="agent-filter-label">{{ option.label }}</span>
+                <el-icon v-if="agentFilter === option.value" :size="16" class="agent-filter-check">
+                  <Check />
+                </el-icon>
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
 
     <!-- Context Menu Sheet -->
     <Teleport to="body">
@@ -198,6 +235,10 @@ import {
   Sort,
   Service,
   UserFilled,
+  Filter,
+  Check,
+  Files,
+  QuestionFilled,
 } from '@element-plus/icons-vue'
 import type { AllowDropType } from 'element-plus/es/components/tree/src/tree.type'
 /** Element Plus Tree 内部节点结构（避免依赖内部路径） */
@@ -217,6 +258,15 @@ import { useChatListStore } from '@/stores/chatListStore'
 import { useChatSessionStore, LAST_ACTIVE_CHAT_KEY } from '@/stores/chatSessionStore'
 import { useAgentStore } from '@/stores/agentStore' // [新增] 引入 LAST_ACTIVE_CHAT_KEY
 import { buildChatTree } from '@/utils/treeHelper'
+import {
+  AGENT_FILTER_ALL,
+  AGENT_FILTER_NORMAL,
+  AGENT_FILTER_UNKNOWN,
+  AGENT_FILTER_STORAGE_KEY,
+  filterChatListByAgent,
+  hasDanglingAgentRef,
+} from '@/utils/agentFilter'
+import { resolveFileUrl } from '@/services/electronUrl'
 import { MASTER_MEMBER_ALIAS } from '@/api/types/groupChatTypes'
 import type { ChatSortMode } from '@/utils/treeHelper'
 import { isDefaultChatName, DEFAULT_CHAT_TITLE_KEY } from '@/utils/chatName'
@@ -249,6 +299,7 @@ const chatSortMode = ref<ChatSortMode>(
 const isManualSort = computed(() => chatSortMode.value === 'manual');
 
 const customAllowDrop = (draggingNode: any, dropNode: any, dropType: AllowDropType): boolean => {
+  if (isAgentFiltering.value) return false;
   if (isManualSort.value) return true;
   const isDropRoot = !(dropNode.data as BaseTreeItem).parentId;
   if (!isDropRoot) return true;
@@ -261,6 +312,60 @@ function toggleSortMode() {
   chatSortMode.value = chatSortMode.value === 'manual' ? 'folder-top-time' : 'manual';
   localStorage.setItem(SORT_MODE_KEY, chatSortMode.value);
 }
+
+// --- 按 Agent 筛选（仅显示层过滤） ---
+interface AgentFilterOption {
+  value: string
+  label: string
+  avatar?: string | null
+  icon?: unknown
+}
+
+const agentFilter = ref<string>(localStorage.getItem(AGENT_FILTER_STORAGE_KEY) || AGENT_FILTER_ALL)
+const agentFilterSheetVisible = ref(false)
+
+const isAgentFiltering = computed(() => agentFilter.value !== AGENT_FILTER_ALL)
+
+const knownAgentIds = computed(() => new Set(agentStore.allAgents.map(a => a.id)))
+
+const getAgentAvatarUrl = (agentId: string): string | null =>
+  resolveFileUrl(agentStore.allAgents.find(a => a.id === agentId)?.agentAvatarUrl) || null
+
+const agentFilterOptions = computed((): AgentFilterOption[] => {
+  const options: AgentFilterOption[] = [
+    { value: AGENT_FILTER_ALL, label: t('chat.sidebar.filterAll'), icon: Files },
+    { value: AGENT_FILTER_NORMAL, label: t('chat.sidebar.filterNormal'), icon: ChatDotRound },
+  ]
+
+  agentStore.allAgents
+    .filter(a => a.itemType === 'agent')
+    .forEach(a => {
+      options.push({ value: a.id, label: a.name, avatar: getAgentAvatarUrl(a.id) })
+    })
+
+  if (hasDanglingAgentRef(chatList.value, knownAgentIds.value)) {
+    options.push({
+      value: AGENT_FILTER_UNKNOWN,
+      label: t('chat.sidebar.filterUnknownAgent'),
+      icon: QuestionFilled,
+    })
+  }
+
+  return options
+})
+
+function selectAgentFilter(value: string) {
+  agentFilter.value = value
+  localStorage.setItem(AGENT_FILTER_STORAGE_KEY, value)
+  agentFilterSheetVisible.value = false
+}
+
+// 当前筛选的 Agent 若已不存在（如被删除），回落到"全部会话"
+watch(agentFilterOptions, opts => {
+  if (opts.length && !opts.some(o => o.value === agentFilter.value)) {
+    selectAgentFilter(AGENT_FILTER_ALL)
+  }
+})
 
 // buildChatTree 已深拷贝数据，此处仅替换显示层副本的 name，不污染 store 真实数据
 const decorateDefaultNames = (nodes: any[]): void => {
@@ -280,7 +385,13 @@ const treeData = computed(
     const visibleList = chatList.value.filter(
       c => !(c.itemType === 'chat' && c.memberAlias === MASTER_MEMBER_ALIAS),
     )
-    const tree = buildChatTree(visibleList, loadedFolderIds.value, chatSortMode.value) as unknown as BaseTreeItem[]
+    const filteredList = filterChatListByAgent(
+      visibleList,
+      agentFilter.value,
+      knownAgentIds.value,
+      loadedFolderIds.value,
+    )
+    const tree = buildChatTree(filteredList, loadedFolderIds.value, chatSortMode.value) as unknown as BaseTreeItem[]
     decorateDefaultNames(tree)
     return tree
   },
@@ -642,6 +753,33 @@ const goToSettings = () => {
 
 .icon-btn:active {
   background: var(--el-fill-color-light);
+}
+
+.icon-btn.active {
+  color: var(--el-color-primary);
+}
+
+.agent-filter-items {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.sheet-item.active {
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+
+.agent-filter-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.agent-filter-check {
+  flex-shrink: 0;
 }
 
 .tree-container {
