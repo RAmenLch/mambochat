@@ -17,7 +17,8 @@ from .chat import (
     ChatBase, ChatCreate, Chat, ChatUpdate, ChatWithMessages,
     ChatReorderItem, GenerateRequest,UpdateMessageResponse,PrepareGenerateResponse,
     SearchRequest,SearchResultItem,SearchResponse,MoveAction,ChatMoveRequest,
-    ChatArchiveRequest,ChatDuplicateRequest
+    ChatArchiveRequest,ChatDuplicateRequest,
+    ChatStatusRequest, ChatStatusFlags, ChatStatusResponse
 )
 from .setting import GlobalSetting, GlobalSettingsUpdate
 

@@ -374,3 +374,21 @@ export interface ZipHistoryUpdateNotificationPayload {
   message_id: string
   sub_message: SubMessage
 }
+
+// --- Chat Status Types ---
+
+/** 会话列表徽标状态 */
+export interface ChatStatusFlags {
+  generating: boolean
+  pendingReview: boolean
+  unread: boolean
+}
+
+export interface ChatStatusNotificationPayload extends Partial<ChatStatusFlags> {
+  chat_id: string
+  status: 'generating' | 'review' | 'unread' | 'idle'
+}
+
+export interface ChatStatusResponse {
+  statuses: Record<string, ChatStatusFlags>
+}

@@ -65,6 +65,8 @@ class StreamManager:
         self.lock = asyncio.Lock()
         self._chat_generation_locks: dict[str, asyncio.Lock] = {}
         self._chat_generation_locks_lock = asyncio.Lock()
+        # 会话级活动状态（进程内存，单进程部署下为权威来源）
+        self.chat_status: dict[str, str] = {}
 
     # ── 取消信号管理 ──────────────────────────────────────
 
@@ -194,6 +196,23 @@ class StreamManager:
         if lock and lock.locked():
             lock.release()
             print(f"[StreamManager] Generation lock RELEASED for chat '{chat_id}'.")
+
+    # ── 会话活动状态管理 ──────────────────────────────────
+
+    async def set_chat_generating(self, chat_id: str):
+        """标记指定会话正在生成。"""
+        async with self.lock:
+            self.chat_status[chat_id] = "generating"
+
+    async def clear_chat_generating(self, chat_id: str):
+        """清除指定会话的生成中标记。"""
+        async with self.lock:
+            self.chat_status.pop(chat_id, None)
+
+    async def get_generating_chat_ids(self) -> set[str]:
+        """返回当前处于生成中的会话 ID 集合。"""
+        async with self.lock:
+            return {cid for cid, st in self.chat_status.items() if st == "generating"}
 
 
 stream_manager = StreamManager()

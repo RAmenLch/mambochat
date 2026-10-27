@@ -66,6 +66,12 @@
             <ChatDotRound />
           </el-icon>
         </template>
+        <template #item-suffix="{ data }">
+          <ChatStatusBadge
+            v-if="data.itemType === 'chat' && !data.memberAlias"
+            :status="chatListStore.chatStatusMap[data.id]"
+          />
+        </template>
       </ExplorerTree>
 
       <el-dropdown
@@ -220,11 +226,13 @@ import { MASTER_MEMBER_ALIAS } from '@/api/types/groupChatTypes';
 import type { ChatSortMode } from '@/utils/treeHelper';
 import { isDefaultChatName, DEFAULT_CHAT_TITLE_KEY } from '@/utils/chatName';
 import { useTreeController, type DialogPayload, type DialogConfirmPayload } from '@/composables/useTreeController';
+import { useChatReadHeartbeat } from '@/composables/useChatReadHeartbeat';
 
 import ExplorerTree from '@/components/common/ExplorerTree.vue';
 import EntityFormDialog, { type SelectConfigOption, type ConfirmPayload } from '@/components/common/EntityFormDialog.vue';
 import SearchDialog from '@/components/chat/dialogs/SearchDialog.vue';
 import ChatHeader from '@/components/chat/ChatHeader.vue';
+import ChatStatusBadge from '@/components/chat/ChatStatusBadge.vue';
 import GroupChatCreateDialog from '@/components/chat/group/GroupChatCreateDialog.vue';
 import type { GroupCreatedResponse } from '@/api/types/groupChatTypes';
 
@@ -258,6 +266,9 @@ const { currentChatId, currentChat } = storeToRefs(chatSessionStore);
 const { providers } = storeToRefs(providerStore);
 const { globalSettings } = storeToRefs(settingsStore);
 const { agentList } = storeToRefs(agentStore);
+
+// 当前打开的会话在生成中/待审核时，周期推进已读水位
+useChatReadHeartbeat();
 
 // 排序模式
 const SORT_MODE_KEY = 'mambo_chat_sort_mode';

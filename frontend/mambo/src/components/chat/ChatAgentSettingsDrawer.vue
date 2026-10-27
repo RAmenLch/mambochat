@@ -789,10 +789,16 @@ async function handleSaveSettings() {
 };
 
 const openAgentSettings = (agentId: string) => {
-  router.push({
+  const target = router.resolve({
     path: '/settings',
     query: { tab: 'agentManager', agentId }
   });
+  // 桌面端为单窗口应用（无标签页，window.open 会被转交系统浏览器），保持原窗口跳转
+  if (window.electronAPI) {
+    router.push(target.fullPath);
+    return;
+  }
+  window.open(target.href, '_blank', 'noopener');
 };
 </script>
 

@@ -11,6 +11,7 @@ from typing import List, Optional, Dict, Any
 
 from backend.crud import chat_crud, setting_crud, provider_crud, resource_crud, agent_crud, checkpoint_map_crud
 from backend.services import chat_service
+from backend.services import chat_status_service
 from backend.services.group_chat import guards as group_guards
 from backend.services.group_chat import service as group_service
 from backend.services.resource_service import validate_mounted_resources
@@ -216,6 +217,35 @@ async def read_chat_children(
         _apply_default_model_to_chat_object(chat, default_model_id)
 
     return chats
+
+
+@router.post(
+    "/chats/status",
+    response_model=schemas.ChatStatusResponse,
+    summary="批量查询会话实时状态（生成中 / 待审核 / 未读）"
+)
+async def read_chat_statuses(request: schemas.ChatStatusRequest, db: AsyncSession = Depends(get_db)):
+    """
+    会话列表徽标对账接口：前端首屏、SSE 重连、展开文件夹后批量拉取。
+    群父节点与群成员会话不在返回结果中。
+    """
+    statuses = await chat_status_service.compute_chat_statuses(db, request.chat_ids)
+    return schemas.ChatStatusResponse(statuses=statuses)
+
+
+@router.post(
+    "/chats/{chat_id}/touch",
+    status_code=status.HTTP_200_OK,
+    summary="推进会话已读水位"
+)
+async def touch_chat_read(chat_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    将会话的 lastOpenedAt 推进到当前时间，用于清除"生成完毕未读"徽标。
+    与 GET /chats/{chat_id}/messages 的隐式 touch 解耦，避免后台对账误清未读。
+    """
+    await chat_crud.touch_chat(db, chat_id)
+    await chat_status_service.publish_current_status(chat_id)
+    return {"message": "Touch successful"}
 
 
 @router.post(

@@ -53,7 +53,6 @@
                   :placeholder="t('chat.askUser.otherPlaceholder')"
                   size="small"
                   style="margin-top: 4px; margin-left: 28px; max-width: 400px"
-                  @input="(val: string) => { if (val) answersState[entry.subMsg.id][qIdx] = val }"
                 />
               </div>
             </template>
@@ -162,24 +161,32 @@ function isTabValid(subMsgId: string): boolean {
   const ans = answersState.value[subMsgId];
   const entry = askUserSubMessages.value.find(e => e.subMsg.id === subMsgId);
   if (!entry || !ans) return false;
+  const texts = otherTextsState.value[subMsgId] ?? {};
   return entry.content.questions.every((q, qIdx) => {
     if (q.required === false) return true;
-    return (ans[qIdx] ?? '')?.trim();
+    const value = ans[qIdx] ?? '';
+    if (value === '__other__') return !!(texts[qIdx] ?? '').trim();
+    return !!value.trim();
   });
 }
 
 // ── 打开/关闭 ──
 
+/** 确保该条目的作答状态已初始化（弹窗打开期间可能新增条目） */
+function ensureEntryState(entry: ParsedAskUserEntry) {
+  if (!answersState.value[entry.subMsg.id]) {
+    answersState.value[entry.subMsg.id] = entry.content.questions.map(() => '');
+  }
+  if (!otherTextsState.value[entry.subMsg.id]) {
+    otherTextsState.value[entry.subMsg.id] = {};
+  }
+}
+
 watch(() => props.visible, (newVal) => {
   internalVisible.value = newVal;
   if (newVal) {
     for (const entry of askUserSubMessages.value) {
-      if (!answersState.value[entry.subMsg.id]) {
-        answersState.value[entry.subMsg.id] = entry.content.questions.map(() => '');
-      }
-      if (!otherTextsState.value[entry.subMsg.id]) {
-        otherTextsState.value[entry.subMsg.id] = {};
-      }
+      ensureEntryState(entry);
     }
     if (askUserSubMessages.value.length > 0) {
       const targetId = askUserSubMessages.value.find(
@@ -192,6 +199,9 @@ watch(() => props.visible, (newVal) => {
 
 watch(() => askUserSubMessages.value, (newVal) => {
   if (internalVisible.value) {
+    for (const entry of newVal) {
+      ensureEntryState(entry);
+    }
     if (newVal.length === 0) {
       emit('update:visible', false);
     } else if (!newVal.find(m => m.subMsg.id === activeTabId.value)) {

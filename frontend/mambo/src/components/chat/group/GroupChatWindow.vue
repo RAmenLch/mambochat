@@ -5,7 +5,33 @@
       <div class="group-header">
         <div class="header-left">
           <el-icon class="group-icon"><UserFilled /></el-icon>
-          <span class="group-name">{{ detail?.name || $t('groupChat.create.title') }}</span>
+          <el-input
+            v-if="isEditingTitle"
+            ref="titleInputRef"
+            v-model="titleInput"
+            size="small"
+            maxlength="200"
+            class="group-name-input"
+            @keyup.enter="onSaveTitle"
+            @keyup.esc="onCancelTitle"
+            @blur="onSaveTitle"
+          />
+          <template v-else>
+            <span
+              class="group-name"
+              :title="$t('chat.header.editTitle')"
+              @dblclick="onStartEditTitle"
+            >{{ displayName }}</span>
+            <el-button
+              :icon="Edit"
+              size="small"
+              text
+              circle
+              class="group-name-edit"
+              :title="$t('chat.header.editTitle')"
+              @click="onStartEditTitle"
+            />
+          </template>
           <el-tag :type="statusTagType" size="small">{{ statusText }}</el-tag>
           <span v-if="pauseReasonText" class="pause-reason">{{ pauseReasonText }}</span>
         </div>
@@ -178,11 +204,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onUnmounted, watch } from 'vue';
+import { computed, defineAsyncComponent, nextTick, onUnmounted, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { Refresh, Setting, UserFilled } from '@element-plus/icons-vue';
+import type { ElInput } from 'element-plus';
+import { Edit, Refresh, Setting, UserFilled } from '@element-plus/icons-vue';
 import { useI18n } from 'vue-i18n';
 import { useChatSessionStore } from '@/stores/chatSessionStore';
 import { useGroupChatStore } from '@/stores/groupChatStore';
@@ -211,6 +238,51 @@ const members = computed(() => detail.value?.members ?? []);
 const mails = computed(() => (groupId.value ? groupStore.mails[groupId.value] ?? [] : []));
 const hasMore = computed(() => (groupId.value ? !!groupStore.mailHasMore[groupId.value] : false));
 const isLoading = computed(() => (groupId.value ? !!groupStore.loading[groupId.value] : false));
+
+// ── 群标题：标题落在群父节点（Chat.name）上，与侧边栏共用同一字段 ──
+const isEditingTitle = ref(false);
+const titleInput = ref('');
+const savingTitle = ref(false);
+const titleInputRef = ref<InstanceType<typeof ElInput>>();
+
+/** 优先取列表节点上的名称：侧边栏改名后无需重新拉取群详情即可同步 */
+const displayName = computed(() => {
+  const node = groupId.value
+    ? chatListStore.chatList.find((c) => c.id === groupId.value)
+    : undefined;
+  return node?.name || detail.value?.name || t('groupChat.create.title');
+});
+
+function onStartEditTitle() {
+  titleInput.value = displayName.value;
+  isEditingTitle.value = true;
+  nextTick(() => titleInputRef.value?.focus());
+}
+
+function onCancelTitle() {
+  isEditingTitle.value = false;
+}
+
+async function onSaveTitle() {
+  if (!isEditingTitle.value || savingTitle.value) return;
+  const gid = groupId.value;
+  const newName = titleInput.value.trim();
+  if (!gid || !newName || newName === displayName.value) {
+    isEditingTitle.value = false;
+    return;
+  }
+  savingTitle.value = true;
+  try {
+    await chatListStore.updateChatSettings(gid, { name: newName });
+    await groupStore.loadDetail(gid);
+    isEditingTitle.value = false;
+  } catch (error) {
+    console.error('Failed to rename group chat:', error);
+    ElMessage.error(t('common.error.operationFailed'));
+  } finally {
+    savingTitle.value = false;
+  }
+}
 
 // ── 邮件筛选：按发信人 / 收信人（含 Master=用户）过滤已投递邮件（服务端过滤） ──
 // combine 决定发信人条件与收信人条件的组合方式：union=并集（默认），intersection=交集
@@ -677,6 +749,20 @@ async function onRejectAllMails(reason: string) {
 .group-name {
   font-weight: 600;
   font-size: 16px;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: text;
+}
+.group-name-input {
+  width: 240px;
+}
+.group-name-edit {
+  opacity: 0.6;
+}
+.group-name-edit:hover {
+  opacity: 1;
 }
 .pause-reason {
   font-size: 12px;

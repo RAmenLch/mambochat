@@ -17,6 +17,11 @@ export default {
     newArchiveFolder: 'New Archive Folder',
     sortByTime: 'Sort by time (folders on top)',
     sortManual: 'Manual sort',
+    status: {
+      generating: 'Generating',
+      unread: 'Generated, unread',
+      pendingReview: 'Interrupted, waiting for review or answer',
+    },
   },
   move: {
     title: 'Move to Folder',

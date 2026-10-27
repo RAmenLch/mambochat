@@ -328,7 +328,9 @@ export const useChatSessionStore = defineStore('chatSession', () => {
     systemPromptResources.value = [];
 
     try {
-      const chatWithMessages = await getChatWithMessages(chatId);
+      const chatWithMessages = await getChatWithMessages(chatId, true);
+      // 打开会话即推进已读水位（服务端同步），并清除本地未读徽标
+      chatListStore.clearLocalUnread(chatId);
       // 更新chatListStore中的会话数据，以同步最新信息
       const chatIndex = chatListStore.chatList.findIndex(c => c.id === chatId);
       if (chatIndex !== -1) {

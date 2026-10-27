@@ -2,7 +2,7 @@
 
 import type {
   ChatUpdateNotificationPayload, TitleGenerationErrorContext,
-  ZipHistoryUpdateNotificationPayload
+  ZipHistoryUpdateNotificationPayload, ChatStatusNotificationPayload
 } from "@/api/types/chatTypes.ts";
 import type { GroupNotificationContext } from "@/api/types/groupChatTypes.ts";
 
@@ -54,6 +54,10 @@ export type GlobalNotification =
   | {
       type: 'zip_history_update'
       payload: ZipHistoryUpdateNotificationPayload
+    }
+  | {
+      type: 'chat_status'
+      payload: ChatStatusNotificationPayload
     }
   | {
       type: 'notification'

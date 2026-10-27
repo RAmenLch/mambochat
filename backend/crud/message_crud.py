@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload, with_loader_criteria
 from sqlalchemy import update, delete as sa_delete, and_, func
-from typing import List, Optional
+from typing import List, Optional, Dict
 import json
 from datetime import datetime, timezone
 
@@ -149,7 +149,42 @@ async def _get_active_linear_path(db: AsyncSession, chat_id: str) -> List[_PathN
             chat_model.Message.role,
         ).filter(chat_model.Message.chatId == chat_id)
     )
-    rows = result.all()
+    return _build_active_path(result.all())
+
+
+async def get_active_path_message_ids(db: AsyncSession, chat_ids: List[str]) -> Dict[str, List[str]]:
+    """批量计算多个会话的活跃路径消息ID，返回 {chat_id: [message_id, ...]}。
+
+    与 `_get_active_linear_path` 使用完全相同的路径判定规则，
+    但只发一次查询，供列表级状态聚合使用（避免遍历分支上的历史消息）。
+    """
+    if not chat_ids:
+        return {}
+
+    result = await db.execute(
+        select(
+            chat_model.Message.chatId,
+            chat_model.Message.id,
+            chat_model.Message.parentId,
+            chat_model.Message.createdAt,
+            chat_model.Message.lastActiveAt,
+            chat_model.Message.sortOrder,
+            chat_model.Message.role,
+        ).filter(chat_model.Message.chatId.in_(list(chat_ids)))
+    )
+
+    grouped: Dict[str, list] = {}
+    for row in result.all():
+        grouped.setdefault(row.chatId, []).append(row)
+
+    return {
+        cid: [node.id for node in _build_active_path(rows)]
+        for cid, rows in grouped.items()
+    }
+
+
+def _build_active_path(rows) -> List[_PathNode]:
+    """按活跃时间回溯出单条活跃线性路径（仅依赖 id/parentId/lastActiveAt 等轻量列）。"""
     all_nodes = [
         _PathNode(
             id=r.id,

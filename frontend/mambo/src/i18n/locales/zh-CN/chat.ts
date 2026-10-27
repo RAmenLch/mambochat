@@ -17,6 +17,11 @@ export default {
     newArchiveFolder: '新建归档文件夹',
     sortByTime: '按时间排序（文件夹置顶）',
     sortManual: '手动排序',
+    status: {
+      generating: '生成中',
+      unread: '已生成，未读',
+      pendingReview: '已中断，等待审核或回答',
+    },
   },
   move: {
     title: '移动到文件夹',

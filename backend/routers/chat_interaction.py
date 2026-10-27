@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 from typing import List, Optional
 
 from backend.services import generation_service
+from backend.services import chat_status_service
 from backend.services.stream_manager_service import stream_manager
 from backend.services.file_service import FileService
 from backend.services import maintenance
@@ -305,6 +306,8 @@ async def _start_generation_task(
             return
 
     await stream_manager.mark_task_running(assistant_message_id)
+    await stream_manager.set_chat_generating(chat_id)
+    await chat_status_service.publish_chat_status(chat_id, {"generating": True, "pendingReview": False})
     if is_retry:
         background_tasks.add_task(generation_service._run_retry_generation_task, chat_id, assistant_message_id)
     else:
@@ -357,8 +360,14 @@ async def _hydrate_and_validate_messages(
     summary="获取单个会话及其消息",
     response_model_exclude_none=True
 )
-async def read_chat_with_messages(chat_id: str, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
-    background_tasks.add_task(_touch_chat_task, chat_id)
+async def read_chat_with_messages(
+        chat_id: str,
+        background_tasks: BackgroundTasks,
+        mark_read: bool = Query(False, description="是否推进会话已读水位（仅用户主动打开会话时为 True）"),
+        db: AsyncSession = Depends(get_db)
+):
+    if mark_read:
+        background_tasks.add_task(_touch_chat_task, chat_id)
 
     db_chat = await chat_crud.get_chat_meta(db, chat_id=chat_id)
     if db_chat is None:
@@ -796,6 +805,8 @@ async def review_tool_call(
 
     if is_resuming:
         response_message.status = schemas.MessageStatus.GENERATING
+    else:
+        await chat_status_service.publish_current_status(db_message.chatId)
 
     return response_message
 
@@ -865,6 +876,8 @@ async def answer_ask_user(
 
     if is_resuming:
         response_message.status = schemas.MessageStatus.GENERATING
+    else:
+        await chat_status_service.publish_current_status(db_message.chatId)
 
     return response_message
 

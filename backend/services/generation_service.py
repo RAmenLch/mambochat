@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import AsyncGenerator, Tuple, Optional, Type, Dict
 
 from backend.services.stream_manager_service import stream_manager
+from backend.services import chat_status_service
 from backend.crud import chat_crud, message_crud, resource_crud, setting_crud
 from backend import schemas
 from backend.models import chat_model
@@ -277,6 +278,8 @@ async def _run_managed_generation_task(chat_id: str, assistant_message_id: str):
             await stream_manager.mark_task_completed(assistant_message_id)
             await stream_manager.close_stream(assistant_message_id)
             await stream_manager.release_generation_lock(chat_id)
+            await stream_manager.clear_chat_generating(chat_id)
+            await chat_status_service.publish_current_status(chat_id)
             if final_status == MessageStatus.COMPLETED:
                 await maybe_schedule_title_generation(chat_id)
 
@@ -336,6 +339,7 @@ async def run_group_member_generation(chat_id: str, assistant_message_id: str, r
             await stream_manager.mark_task_completed(assistant_message_id)
             await stream_manager.close_stream(assistant_message_id)
             await stream_manager.release_generation_lock(chat_id)
+            await stream_manager.clear_chat_generating(chat_id)
 
 
 async def maybe_schedule_title_generation(chat_id: str) -> None:
@@ -424,6 +428,7 @@ async def _run_retry_generation_task(chat_id: str, assistant_message_id: str):
             await stream_manager.mark_task_completed(assistant_message_id)
             await stream_manager.close_stream(assistant_message_id)
             await stream_manager.release_generation_lock(chat_id)
+            await stream_manager.clear_chat_generating(chat_id)
             if final_status == MessageStatus.COMPLETED:
                 await maybe_schedule_title_generation(chat_id)
 

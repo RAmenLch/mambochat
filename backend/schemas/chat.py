@@ -144,3 +144,17 @@ class ChatArchiveRequest(BaseModel):
     item_ids: List[str] = Field(..., description="要打包移动的会话或文件夹ID列表")
     new_folder_name: str = Field(..., description="新建归档文件夹的名称", min_length=1, max_length=100)
     parent_id: Optional[str] = Field(None, description="新建归档文件夹的父级位置ID，'root'或不传代表放置在根目录")
+
+class ChatStatusRequest(BaseModel):
+    """批量查询会话实时状态的请求模型"""
+    chat_ids: List[str] = Field(default_factory=list, description="要查询的会话ID列表")
+
+class ChatStatusFlags(BaseModel):
+    """会话列表徽标状态"""
+    generating: bool = Field(False, description="是否正在生成")
+    pendingReview: bool = Field(False, description="是否处于待审核/待回答的中断态")
+    unread: bool = Field(False, description="自上次打开以来是否有新内容")
+
+class ChatStatusResponse(BaseModel):
+    """会话实时状态批量响应"""
+    statuses: Dict[str, ChatStatusFlags] = Field(default_factory=dict)

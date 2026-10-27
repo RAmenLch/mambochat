@@ -21,6 +21,7 @@ import type {
   AskUserAnswerRequest,
   ChatDuplicateRequest,
   ChatArchiveRequest,
+  ChatStatusResponse,
   ImportChatReport,
 } from './types';
 
@@ -57,9 +58,25 @@ export const createChat = (chatData: ChatCreate): Promise<Chat> => {
 
 /**
  * 获取单个会话及其所有消息
+ * @param chatId 会话ID
+ * @param markRead 是否推进已读水位（仅用户主动打开会话时为 true）
  */
-export const getChatWithMessages = (chatId: string): Promise<ChatWithMessages> => {
-  return apiClient.get(`/chats/${chatId}/messages`)
+export const getChatWithMessages = (chatId: string, markRead = false): Promise<ChatWithMessages> => {
+  return apiClient.get(`/chats/${chatId}/messages`, { params: { mark_read: markRead } })
+};
+
+/**
+ * 批量查询会话实时状态（生成中 / 待审核 / 未读）
+ */
+export const getChatStatuses = (chatIds: string[]): Promise<ChatStatusResponse> => {
+  return apiClient.post('/chats/status', { chat_ids: chatIds });
+};
+
+/**
+ * 推进会话已读水位（清除未读徽标）
+ */
+export const touchChatRead = (chatId: string): Promise<void> => {
+  return apiClient.post(`/chats/${chatId}/touch`);
 };
 
 /**

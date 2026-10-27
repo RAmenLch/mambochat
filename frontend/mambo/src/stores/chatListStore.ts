@@ -12,10 +12,11 @@ import {
   duplicateChat as duplicateChatAPI,
   generateChatTitle as generateChatTitleAPI,
   getChatLineage,
-  archiveChats as archiveChatsAPI, checkTasksStatus, getChatWithMessages
+  archiveChats as archiveChatsAPI, checkTasksStatus, getChatWithMessages,
+  getChatStatuses, touchChatRead
 } from '@/api/chatService';
 import { subscribeToGlobalNotifications } from '@/services/notificationService';
-import type { Chat, ChatCreate, ChatUpdate, MoveRequest, GlobalNotification, ChatArchiveRequest } from '@/api/types';
+import type { Chat, ChatCreate, ChatUpdate, MoveRequest, GlobalNotification, ChatArchiveRequest, ChatStatusFlags } from '@/api/types';
 import type { GroupCreatedResponse } from '@/api/types/groupChatTypes';
 import { useChatSessionStore } from './chatSessionStore';
 import { useGroupChatStore } from './groupChatStore';
@@ -33,6 +34,13 @@ export const useChatListStore = defineStore('chatList', () => {
   const refreshingTitleChatIds = reactive<Set<string>>(new Set());
   // 标题生成超时兜底定时器：chatId -> timeoutId
   const titleRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  // 会话实时状态（生成中 / 待审核 / 未读），仅保存已加载节点
+  const chatStatusMap = reactive<Record<string, ChatStatusFlags>>({});
+  // 状态查询批次号：用于丢弃过期响应
+  let statusRequestSeq = 0;
+  // 每个会话最近一次收到 SSE 状态事件的序号：避免对账响应覆盖更新的实时事件
+  const statusEventVersions = new Map<string, number>();
+  let statusEventTick = 0;
 
   // --- Actions ---
 
@@ -66,6 +74,7 @@ export const useChatListStore = defineStore('chatList', () => {
     },
     onDeleteItem: (deletedItem: Chat) => {
       const sessionStore = useChatSessionStore();
+      removeChatStatus(deletedItem.id);
       // 如果删除的是当前打开的会话，则清空会话状态。
       if (sessionStore.currentChatId === deletedItem.id) {
         sessionStore.clearSession();
@@ -112,6 +121,7 @@ export const useChatListStore = defineStore('chatList', () => {
   async function initializeList() {
     await _initializeList();
     prefetchSubFolders('root');
+    refreshChatStatuses();
   }
 
   /**
@@ -122,6 +132,100 @@ export const useChatListStore = defineStore('chatList', () => {
     await fetchChildren(parentId);
     // 加载成功后，触发预测加载
     prefetchSubFolders(parentId);
+    // 新加载的节点补一次状态对账（未展开的文件夹内部不查询）
+    refreshChatStatuses(
+      chatList.value
+        .filter(c => (c.parentId ?? 'root') === parentId && _isDisplayableChat(c))
+        .map(c => c.id)
+    );
+  }
+
+  // --- 会话实时状态（生成中 / 待审核 / 未读） ---
+
+  /**
+   * 包装 resolvePath：回溯链路会加载文件夹子节点，完成后补一次状态对账。
+   */
+  async function resolveChatPath(targetId: string) {
+    await resolvePath(targetId);
+    refreshChatStatuses();
+  }
+
+  function _defaultStatusFlags(): ChatStatusFlags {
+    return { generating: false, pendingReview: false, unread: false };
+  }
+
+  /**
+   * 群父节点(folder)与群成员子会话不参与徽标展示。
+   */
+  function _isDisplayableChat(node: Chat): boolean {
+    return node.itemType === 'chat' && !node.memberAlias;
+  }
+
+  /**
+   * 合并式更新单个会话的状态（支持后端增量事件）。
+   */
+  function applyChatStatus(chatId: string, patch: Partial<ChatStatusFlags>) {
+    const prev = chatStatusMap[chatId] ?? _defaultStatusFlags();
+    chatStatusMap[chatId] = { ...prev, ...patch };
+  }
+
+  /**
+   * 仅在本地清除未读标记（不产生网络请求）。
+   */
+  function clearLocalUnread(chatId: string) {
+    const current = chatStatusMap[chatId];
+    if (current) current.unread = false;
+  }
+
+  function removeChatStatus(chatId: string) {
+    delete chatStatusMap[chatId];
+  }
+
+  /**
+   * 推进会话已读水位：本地清除未读 + 服务端持久化。
+   */
+  async function markChatRead(chatId: string) {
+    clearLocalUnread(chatId);
+    try {
+      await touchChatRead(chatId);
+    } catch (err) {
+      console.warn(`[ChatStatus] Failed to touch chat ${chatId}:`, err);
+    }
+  }
+
+  function _loadedDisplayableChatIds(): string[] {
+    return chatList.value.filter(_isDisplayableChat).map(c => c.id);
+  }
+
+  /**
+   * 批量对账会话状态。不传 ids 时刷新所有已加载的可展示会话。
+   */
+  async function refreshChatStatuses(ids?: string[]) {
+    const targetIds = (ids ?? _loadedDisplayableChatIds()).filter(Boolean);
+    if (targetIds.length === 0) return;
+
+    const seq = ++statusRequestSeq;
+    // 记录请求发起时各会话的事件版本，响应回来时跳过期间被实时事件更新过的会话
+    const eventSnapshot = new Map<string, number>();
+    targetIds.forEach(chatId => eventSnapshot.set(chatId, statusEventVersions.get(chatId) ?? 0));
+
+    try {
+      const { statuses } = await getChatStatuses(targetIds);
+      // 已有更新的一次对账发起，丢弃本次过期结果
+      if (seq !== statusRequestSeq) return;
+
+      Object.keys(chatStatusMap).forEach(chatId => {
+        if (!chatList.value.some(c => c.id === chatId)) delete chatStatusMap[chatId];
+      });
+
+      targetIds.forEach(chatId => {
+        if ((statusEventVersions.get(chatId) ?? 0) !== eventSnapshot.get(chatId)) return;
+        const flags = statuses[chatId];
+        chatStatusMap[chatId] = flags ? { ...flags } : _defaultStatusFlags();
+      });
+    } catch (err) {
+      console.warn('[ChatStatus] Failed to fetch chat statuses:', err);
+    }
   }
 
   /**
@@ -262,6 +366,9 @@ export const useChatListStore = defineStore('chatList', () => {
           const sessionStore = useChatSessionStore();
           const tasksToCheck: string[] = [];
 
+          // 重连后对已加载会话做一次状态对账（SSE 断线期间的事件可能丢失）
+          refreshChatStatuses();
+
           // 对所有正在刷新标题的会话做重连对账
           const pendingTitleChatIds = Array.from(refreshingTitleChatIds);
           pendingTitleChatIds.forEach(id => {
@@ -343,6 +450,20 @@ export const useChatListStore = defineStore('chatList', () => {
               notification.payload.sub_message
             );
           }
+        } else if (notification.type === 'chat_status') {
+          const { chat_id: statusChatId, status, ...flags } = notification.payload;
+          statusEventVersions.set(statusChatId, ++statusEventTick);
+          applyChatStatus(statusChatId, flags);
+
+          const sessionStore = useChatSessionStore();
+          if (
+            status === 'unread' &&
+            statusChatId === sessionStore.currentChatId &&
+            document.visibilityState === 'visible'
+          ) {
+            // 用户正停留在该会话，立即推进已读水位，避免误报未读
+            markChatRead(statusChatId);
+          }
         } else if (notification.type === 'notification' && notification.category === 'title_generation_error') {
           const errorChatId = notification.context.chat_id;
           _clearTitleRefresh(errorChatId);
@@ -360,6 +481,7 @@ export const useChatListStore = defineStore('chatList', () => {
             const gid = notification.context.groupId;
             const idx = chatList.value.findIndex(c => c.id === gid);
             if (idx !== -1) chatList.value.splice(idx, 1);
+            removeChatStatus(gid);
             return;
           }
           await groupStore.applyNotification(notification.context, notification.category);
@@ -379,6 +501,7 @@ export const useChatListStore = defineStore('chatList', () => {
     refreshingTitleChatIds,
     loadedFolderIds,
     loadingFolders,
+    chatStatusMap,
 
     // Actions
     initializeList,
@@ -388,12 +511,19 @@ export const useChatListStore = defineStore('chatList', () => {
     deleteItem,
     moveChatItem,
     duplicateChat,
-    resolvePath,
+    resolvePath: resolveChatPath,
     archiveItems,
     mergeCreatedGroup,
 
     // Store-specific Actions
     refreshChatTitle,
     initializeNotificationListener,
+
+    // 会话实时状态
+    applyChatStatus,
+    refreshChatStatuses,
+    markChatRead,
+    clearLocalUnread,
+    removeChatStatus,
   };
 });
