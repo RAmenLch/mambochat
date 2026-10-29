@@ -8,17 +8,19 @@
 协议差异（MCP、内置 HTTP 模型等）全部收敛在子类内部。
 """
 
+import asyncio
 import base64
 import binascii
 import json
 import logging
 import re
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from mambo_agents.backends.protocol import BackendProtocol
 from mambo_agents.backends.schemas import VirtualPath
@@ -49,7 +51,19 @@ DEFAULT_COUNT = 1
 MAX_COUNT = 8
 MAX_PREFIX_LEN = 64
 
+# 分辨率参数（契约名 NumxNum，形如 1024x1024）
+RESOLUTION_ARG = "NumxNum"
+DEFAULT_RESOLUTION = "1024x1024"
+MIN_RESOLUTION = 64
+MAX_RESOLUTION = 4096
+
+# 状态工具阻塞等待（秒）
+DEFAULT_WAIT_TIMEOUT = 0
+MAX_WAIT_TIMEOUT = 300
+POLL_INTERVAL = 1.5
+
 _PREFIX_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_RESOLUTION_RE = re.compile(r"^\s*(\d{1,4})\s*[xX*×:：]\s*(\d{1,4})\s*$")
 
 _MIME_EXT = {
     "image/png": ".png",
@@ -67,6 +81,14 @@ class ImageGenerateArgs(BaseModel):
     """``image_generate`` 的参数（锁定，不随 server 上报的 schema 变化）。"""
 
     prompt: str = Field(description="正向提示词，描述期望生成的画面内容")
+    numxnum: str = Field(
+        default=DEFAULT_RESOLUTION,
+        alias=RESOLUTION_ARG,
+        description=(
+            "图片分辨率，格式为 `宽x高`（单位像素），例如 1024x1024、768x1344；"
+            f"取值范围 {MIN_RESOLUTION}~{MAX_RESOLUTION}"
+        ),
+    )
     negative_prompt: Optional[str] = Field(
         default=None, description="反向提示词，描述不希望出现的内容"
     )
@@ -85,11 +107,20 @@ class ImageGenerateArgs(BaseModel):
         ),
     )
 
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
 
 class ImageStatusArgs(BaseModel):
     """``image_task_status`` 的参数。"""
 
     task_id: str = Field(description="``image_generate`` 返回的任务 ID")
+    wait_timeout: int = Field(
+        default=DEFAULT_WAIT_TIMEOUT,
+        description=(
+            "阻塞等待秒数，0 表示立即返回当前状态；大于 0 时最多阻塞这么多秒，"
+            "任务提前完成（成功/失败/进度 100%）则立即返回"
+        ),
+    )
 
 
 class ImageDownloadArgs(BaseModel):
@@ -98,6 +129,12 @@ class ImageDownloadArgs(BaseModel):
     task_id: str = Field(description="``image_generate`` 返回的任务 ID")
     index: Optional[int] = Field(
         default=None, description="仅下载指定下标（从 0 开始）的图片；不传则下载全部"
+    )
+    wait_timeout: int = Field(
+        default=DEFAULT_WAIT_TIMEOUT,
+        description=(
+            "下载前阻塞等待秒数，0 表示不等待；大于 0 时先等任务完成再取图"
+        ),
     )
     path: str = Field(
         description=(
@@ -108,6 +145,33 @@ class ImageDownloadArgs(BaseModel):
     prefix: Optional[str] = Field(
         default=None, description=f"文件名前缀，缺省为 {DEFAULT_PREFIX}"
     )
+
+
+# ---------------------------------------------------------------------------
+# 分辨率解析
+# ---------------------------------------------------------------------------
+
+
+def parse_resolution(value: Any) -> Optional[Tuple[int, int]]:
+    """把 ``"1024x1024"`` 之类的分辨率字符串解析为 ``(width, height)``。
+
+    无法识别或越界时返回 ``None``（调用方自行决定降级策略）。
+    """
+    if value is None:
+        return None
+    matched = _RESOLUTION_RE.match(str(value))
+    if not matched:
+        return None
+    width, height = int(matched.group(1)), int(matched.group(2))
+    if not (MIN_RESOLUTION <= width <= MAX_RESOLUTION):
+        return None
+    if not (MIN_RESOLUTION <= height <= MAX_RESOLUTION):
+        return None
+    return width, height
+
+
+def format_resolution(width: int, height: int) -> str:
+    return f"{width}x{height}"
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +211,10 @@ class ImageGenStandard(ABC):
         未指定 ``count`` 时的默认生成数量。
     default_sync:
         未指定 ``sync`` 时的默认值。
+    default_resolution:
+        未指定 ``NumxNum`` 时的默认分辨率，形如 ``1024x1024``。
+    default_wait_timeout:
+        未指定 ``wait_timeout`` 时的默认阻塞秒数。
 
     注：图片落地目录完全由 LLM 通过 ``image_download.path`` 指定，
     缺失或越界一律报错，框架不做任何回退。
@@ -157,9 +225,13 @@ class ImageGenStandard(ABC):
         *,
         default_count: int = DEFAULT_COUNT,
         default_sync: bool = True,
+        default_resolution: str = DEFAULT_RESOLUTION,
+        default_wait_timeout: int = DEFAULT_WAIT_TIMEOUT,
     ) -> None:
         self._default_count = max(1, min(int(default_count or DEFAULT_COUNT), MAX_COUNT))
         self._default_sync = bool(default_sync)
+        self._default_resolution = self._normalize_resolution(default_resolution)
+        self._default_wait_timeout = self._clamp_wait_timeout(default_wait_timeout)
 
     # ------------------------------------------------------------------
     # 子类原语
@@ -173,11 +245,17 @@ class ImageGenStandard(ABC):
         count: int,
         sync: bool,
         extra: Dict[str, Any],
+        resolution: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """提交生成任务，返回至少包含 ``task_id`` 的字典。"""
+        """提交生成任务，返回至少包含 ``task_id`` 的字典。
+
+        ``resolution`` 已归一化为 ``宽x高`` 形式（缺省时由框架填入默认值）。
+        """
 
     @abstractmethod
-    async def status(self, task_id: str) -> Dict[str, Any]:
+    async def status(
+        self, task_id: str, wait_timeout: int = DEFAULT_WAIT_TIMEOUT
+    ) -> Dict[str, Any]:
         """查询任务状态，返回至少包含 ``task_id`` / ``status`` 的字典。"""
 
     @abstractmethod
@@ -192,26 +270,30 @@ class ImageGenStandard(ABC):
 
     async def run_generate(self, args: ImageGenerateArgs) -> str:
         count = self._clamp_count(args.count)
-        extra = self._merge_extra(args.extra)
+        resolution = self._normalize_resolution(args.numxnum)
+        extra = self._merge_extra(args.extra, resolution)
         payload = await self.submit(
             prompt=args.prompt,
             negative_prompt=args.negative_prompt,
             count=count,
             sync=bool(args.sync),
             extra=extra,
+            resolution=resolution,
         )
         task_id = self._require_task_id(payload)
         result: Dict[str, Any] = {
             "task_id": task_id,
             "status": payload.get("status") or ("queued" if not args.sync else "completed"),
             "count": count,
+            "resolution": resolution,
         }
         if payload.get("error"):
             result["error"] = payload["error"]
         return self._dumps(result)
 
     async def run_status(self, args: ImageStatusArgs) -> str:
-        payload = await self.status(args.task_id)
+        wait_timeout = self._clamp_wait_timeout(args.wait_timeout)
+        payload = await self._status_until_settled(args.task_id, wait_timeout)
         result: Dict[str, Any] = {
             "task_id": payload.get("task_id") or args.task_id,
             "status": self._normalize_status(payload.get("status")),
@@ -228,6 +310,10 @@ class ImageGenStandard(ABC):
             raise ImageGenToolError(
                 "当前会话没有可写的 backend，无法保存图片。请先为该 Agent 挂载一个 Backend。"
             )
+
+        await self._status_until_settled(
+            args.task_id, self._clamp_wait_timeout(args.wait_timeout)
+        )
 
         blobs = await self.download(args.task_id, args.index)
         if not blobs:
@@ -282,12 +368,80 @@ class ImageGenStandard(ABC):
             return self._default_count
         return max(1, min(value, MAX_COUNT))
 
-    def _merge_extra(self, extra: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        """过滤掉与标准参数同名的键，避免透传覆盖契约字段。"""
-        if not extra:
-            return {}
-        reserved = {"prompt", "negative_prompt", "count", "sync", "task_id", "extra"}
-        return {k: v for k, v in extra.items() if k not in reserved}
+    def _merge_extra(
+        self, extra: Optional[Dict[str, Any]], resolution: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """过滤掉与标准参数同名的键，并把分辨率解析为 width/height 合并进去。
+
+        ``extra`` 中显式给出的 ``width`` / ``height`` 优先级高于 ``NumxNum``。
+        """
+        reserved = {
+            "prompt",
+            "negative_prompt",
+            "count",
+            "sync",
+            "task_id",
+            "extra",
+            "wait_timeout",
+            RESOLUTION_ARG,
+            "numxnum",
+        }
+        merged = {k: v for k, v in (extra or {}).items() if k not in reserved}
+
+        size = parse_resolution(resolution)
+        if size is not None:
+            width, height = size
+            merged.setdefault("width", width)
+            merged.setdefault("height", height)
+        return merged
+
+    @staticmethod
+    def _normalize_resolution(value: Any) -> str:
+        """把任意输入归一化为 ``宽x高``；无法识别时回退到默认分辨率。"""
+        size = parse_resolution(value) or parse_resolution(DEFAULT_RESOLUTION)
+        assert size is not None  # DEFAULT_RESOLUTION 必然合法
+        return format_resolution(*size)
+
+    @staticmethod
+    def _clamp_wait_timeout(value: Any) -> int:
+        if value is None:
+            return DEFAULT_WAIT_TIMEOUT
+        try:
+            seconds = int(value)
+        except (TypeError, ValueError):
+            return DEFAULT_WAIT_TIMEOUT
+        return max(0, min(seconds, MAX_WAIT_TIMEOUT))
+
+    async def _status_until_settled(
+        self, task_id: str, wait_timeout: int
+    ) -> Dict[str, Any]:
+        """查询状态；``wait_timeout > 0`` 时短轮询直到任务收敛或超时。
+
+        任务进入 ``completed`` / ``failed`` / ``expired``（或进度达到 100）即提前返回。
+        后端自身已实现阻塞时，第一次调用就可能直接返回终态，因此不会额外轮询。
+        """
+        payload = await self.status(task_id, wait_timeout)
+        if wait_timeout <= 0 or self._is_settled(payload):
+            return payload
+
+        deadline = time.monotonic() + wait_timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(POLL_INTERVAL, remaining))
+            payload = await self.status(task_id, 0)
+            if self._is_settled(payload):
+                break
+        return payload
+
+    @classmethod
+    def _is_settled(cls, payload: Dict[str, Any]) -> bool:
+        status = cls._normalize_status((payload or {}).get("status"))
+        if status in ("completed", "failed", "expired"):
+            return True
+        progress = cls._normalize_progress((payload or {}).get("progress"))
+        return progress is not None and progress >= 100
 
     def _resolve_target(
         self,

@@ -14,7 +14,11 @@ from backend.models.image_gen_model import ImageGenConfig
 from backend.services.generation.tools.mambo_mcp_tool_provider import MamboMCPToolProvider
 
 from .mcp_standard import McpImageGenStandard
-from .standard import IMAGE_TOOL_NAMES
+from .standard import (
+    DEFAULT_RESOLUTION,
+    DEFAULT_WAIT_TIMEOUT,
+    IMAGE_TOOL_NAMES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +63,8 @@ async def build_mcp_image_standard(
         server_config,
         default_count=config.defaultCount or 1,
         default_sync=bool(config.defaultSync),
+        default_resolution=getattr(config, "defaultResolution", "") or DEFAULT_RESOLUTION,
+        default_wait_timeout=getattr(config, "defaultWaitTimeout", 0) or DEFAULT_WAIT_TIMEOUT,
     )
 
 

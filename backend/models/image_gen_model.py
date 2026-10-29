@@ -25,6 +25,10 @@ class ImageGenConfig(Base):
     # 默认参数
     defaultCount = Column(Integer, nullable=False, default=1)
     defaultSync = Column(Boolean, nullable=False, default=True)
+    # 默认分辨率，形如 1024x1024（对应契约参数 NumxNum）
+    defaultResolution = Column(String(20), nullable=False, default="1024x1024")
+    # 状态工具默认阻塞等待秒数（对应契约参数 wait_timeout），0 表示不等待
+    defaultWaitTimeout = Column(Integer, nullable=False, default=0)
 
     # 单次 MCP 工具调用超时（秒），None 表示沿用 MCP 服务自身配置
     timeout = Column(Float, nullable=True)

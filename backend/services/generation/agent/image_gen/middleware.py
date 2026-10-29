@@ -14,6 +14,7 @@ from langchain_core.tools import StructuredTool
 from mambo_agents.backends.protocol import BackendProtocol
 
 from .standard import (
+    DEFAULT_WAIT_TIMEOUT,
     IMAGE_TOOL_DOWNLOAD,
     IMAGE_TOOL_GENERATE,
     IMAGE_TOOL_NAMES,
@@ -31,6 +32,8 @@ _GENERATE_DESCRIPTION = (
     "Generate images from a text prompt using the configured image generation "
     "service. Returns a task id. Use sync=true to wait for completion, or "
     "sync=false and poll with image_task_status for long jobs. "
+    "'NumxNum' sets the image resolution as 'WIDTHxHEIGHT' in pixels, e.g. "
+    "'1024x1024' or '768x1344'; omit it to use the configured default. "
     "Extra parameters (width/height/steps/seed/model/...) can be passed through "
     "'extra' and are forwarded verbatim to the service."
 )
@@ -39,7 +42,9 @@ _STATUS_DESCRIPTION = (
     "Check the progress of an image generation task. Returns "
     "{task_id, status, progress, count, error}. status is one of "
     "queued / running / completed / failed / expired; progress may be null "
-    "when the backend does not report it."
+    "when the backend does not report it. 'wait_timeout' is a number of seconds "
+    "to block (default 0 = return immediately); the call returns early as soon as "
+    "the task settles, so prefer e.g. wait_timeout=30 instead of tight polling."
 )
 
 _DOWNLOAD_DESCRIPTION = (
@@ -49,7 +54,8 @@ _DOWNLOAD_DESCRIPTION = (
     "`show` tool with the returned path afterwards. 'path' is REQUIRED: the "
     "target directory as a virtual path under /workspace (e.g. /workspace/images); "
     "a missing or out-of-workspace path is an error. 'prefix' sets the filename "
-    "prefix."
+    "prefix. 'wait_timeout' (seconds, default 0) waits for the task to settle "
+    "before downloading."
 )
 
 
@@ -96,6 +102,7 @@ class ImageGenMiddleware(AgentMiddleware):
     async def _agenerate(
         self,
         prompt: str,
+        numxnum: str = "",
         negative_prompt: Optional[str] = None,
         count: int = 1,
         sync: bool = True,
@@ -106,6 +113,7 @@ class ImageGenMiddleware(AgentMiddleware):
             lambda: self._standard.run_generate(
                 ImageGenerateArgs(
                     prompt=prompt,
+                    numxnum=numxnum or "",
                     negative_prompt=negative_prompt,
                     count=count,
                     sync=sync,
@@ -114,10 +122,14 @@ class ImageGenMiddleware(AgentMiddleware):
             ),
         )
 
-    async def _astatus(self, task_id: str) -> str:
+    async def _astatus(
+        self, task_id: str, wait_timeout: int = DEFAULT_WAIT_TIMEOUT
+    ) -> str:
         return await self._safe(
             IMAGE_TOOL_STATUS,
-            lambda: self._standard.run_status(ImageStatusArgs(task_id=task_id)),
+            lambda: self._standard.run_status(
+                ImageStatusArgs(task_id=task_id, wait_timeout=wait_timeout)
+            ),
         )
 
     async def _adownload(
@@ -125,6 +137,7 @@ class ImageGenMiddleware(AgentMiddleware):
         task_id: str,
         path: str,
         index: Optional[int] = None,
+        wait_timeout: int = DEFAULT_WAIT_TIMEOUT,
         prefix: Optional[str] = None,
     ) -> str:
         return await self._safe(
@@ -132,7 +145,11 @@ class ImageGenMiddleware(AgentMiddleware):
             lambda: self._standard.run_download(
                 self._backend,
                 ImageDownloadArgs(
-                    task_id=task_id, index=index, path=path, prefix=prefix
+                    task_id=task_id,
+                    index=index,
+                    wait_timeout=wait_timeout,
+                    path=path,
+                    prefix=prefix,
                 ),
             ),
         )

@@ -14,9 +14,11 @@ from mambo_agents.middleware.mcp import MCPServerConfig
 from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .standard import (
+    DEFAULT_WAIT_TIMEOUT,
     IMAGE_TOOL_DOWNLOAD,
     IMAGE_TOOL_GENERATE,
     IMAGE_TOOL_STATUS,
+    RESOLUTION_ARG,
     ImageBlob,
     ImageGenStandard,
     ImageGenToolError,
@@ -41,8 +43,15 @@ class McpImageGenStandard(ImageGenStandard):
         *,
         default_count: int = 1,
         default_sync: bool = True,
+        default_resolution: str = "",
+        default_wait_timeout: int = DEFAULT_WAIT_TIMEOUT,
     ) -> None:
-        super().__init__(default_count=default_count, default_sync=default_sync)
+        super().__init__(
+            default_count=default_count,
+            default_sync=default_sync,
+            default_resolution=default_resolution,
+            default_wait_timeout=default_wait_timeout,
+        )
 
         self._server_config = server_config
         self._client = MultiServerMCPClient(
@@ -125,6 +134,7 @@ class McpImageGenStandard(ImageGenStandard):
         count: int,
         sync: bool,
         extra: Dict[str, Any],
+        resolution: Optional[str] = None,
     ) -> Dict[str, Any]:
         arguments: Dict[str, Any] = {
             "prompt": prompt,
@@ -133,13 +143,21 @@ class McpImageGenStandard(ImageGenStandard):
         }
         if negative_prompt:
             arguments["negative_prompt"] = negative_prompt
+        if resolution:
+            arguments[RESOLUTION_ARG] = resolution
         arguments.update(extra or {})
 
         result = await self._call(IMAGE_TOOL_GENERATE, arguments)
         return self._extract_payload(result)
 
-    async def status(self, task_id: str) -> Dict[str, Any]:
-        result = await self._call(IMAGE_TOOL_STATUS, {"task_id": task_id})
+    async def status(
+        self, task_id: str, wait_timeout: int = DEFAULT_WAIT_TIMEOUT
+    ) -> Dict[str, Any]:
+        arguments: Dict[str, Any] = {"task_id": task_id}
+        timeout = self._clamp_wait_timeout(wait_timeout)
+        if timeout > 0:
+            arguments["wait_timeout"] = timeout
+        result = await self._call(IMAGE_TOOL_STATUS, arguments)
         return self._extract_payload(result)
 
     async def download(

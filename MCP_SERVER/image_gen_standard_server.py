@@ -1,16 +1,20 @@
 """生图标准 MCP 服务 —— 参考实现 / 验收用。
 
-实现了 MamboChat 生图工具标准 v1 的三个固定工具::
+实现了 MamboChat 生图工具标准 v2 的三个固定工具::
 
-    image_generate     prompt / negative_prompt / count / sync / extra  -> {task_id, status}
-    image_task_status  task_id                                          -> {task_id, status, progress, count, error}
-    image_download     task_id / index                                  -> ImageContent(...)
+    image_generate     prompt / NumxNum / negative_prompt / count / sync / extra
+                       -> {task_id, status, count, resolution}
+    image_task_status  task_id / wait_timeout
+                       -> {task_id, status, progress, count, error}
+    image_download     task_id / index -> ImageContent(...)
 
 特点：
 - 不依赖任何第三方库（PNG 由标准库 zlib + struct 手工构造），产出纯色占位图。
 - 任务状态落在临时目录的 JSON 文件里，因此 **stdio 传输下每次调用重启进程也不会丢状态**
   （标准要求服务自己持久化任务状态，本文件即示范）。
-- 支持 ``extra`` 透传：``width`` / ``height`` / ``color``(r,g,b) / ``fail``。
+- 支持透传 ``extra``：``width`` / ``height`` / ``color``(r,g,b) / ``fail``。
+- 支持 ``NumxNum`` 分辨率，优先级低于显式 ``width`` / ``height``。
+- ``image_task_status`` 支持 ``wait_timeout``：阻塞轮询、状态收敛即提前返回。
 
 启动方式（stdio，供 MCP 服务配置使用）::
 
@@ -21,6 +25,7 @@
 import base64
 import json
 import os
+import re
 import struct
 import tempfile
 import time
@@ -37,8 +42,30 @@ IMAGES_DIR = os.path.join(STATE_DIR, "images")
 DEFAULT_SIZE = (512, 512)
 DEFAULT_COLOR = (90, 140, 220)
 MAX_COUNT = 8
+MIN_RESOLUTION = 64
+MAX_RESOLUTION = 4096
+
+# 阻塞等待状态的轮询节奏（秒）
+POLL_INTERVAL = 0.5
+SETTLED_STATUSES = ("completed", "failed", "expired")
+
+_RESOLUTION_RE = re.compile(r"^\s*(\d{1,4})\s*[xX*×:：]\s*(\d{1,4})\s*$")
 
 mcp = FastMCP("image-gen-standard")
+
+
+def _parse_resolution(value: Any) -> Optional[tuple[int, int]]:
+    if value is None:
+        return None
+    matched = _RESOLUTION_RE.match(str(value))
+    if not matched:
+        return None
+    width, height = int(matched.group(1)), int(matched.group(2))
+    if not (MIN_RESOLUTION <= width <= MAX_RESOLUTION):
+        return None
+    if not (MIN_RESOLUTION <= height <= MAX_RESOLUTION):
+        return None
+    return width, height
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +124,7 @@ def _save_tasks(tasks: Dict[str, Dict[str, Any]]) -> None:
 @mcp.tool()
 def image_generate(
     prompt: str,
+    NumxNum: Optional[str] = None,
     negative_prompt: Optional[str] = None,
     count: int = 1,
     sync: bool = True,
@@ -104,15 +132,17 @@ def image_generate(
 ) -> Dict[str, Any]:
     """Generate placeholder images from a prompt.
 
-    Returns {"task_id": ..., "status": "completed"|"queued", "count": N}.
+    ``NumxNum`` sets the resolution, e.g. "1024x1024" / "768x1344".
+    Returns {"task_id": ..., "status": "completed"|"queued", "count": N, "resolution": "WxH"}.
     Extra keys are forwarded verbatim; unknown keys are ignored.
     """
     if not prompt or not str(prompt).strip():
         raise ValueError("prompt 不能为空")
 
     opts = dict(extra or {})
-    width = int(opts.get("width") or DEFAULT_SIZE[0])
-    height = int(opts.get("height") or DEFAULT_SIZE[1])
+    size = _parse_resolution(NumxNum) or DEFAULT_SIZE
+    width = int(opts.get("width") or size[0])
+    height = int(opts.get("height") or size[1])
     color = opts.get("color") or DEFAULT_COLOR
     if not (isinstance(color, (list, tuple)) and len(color) == 3):
         color = DEFAULT_COLOR
@@ -137,6 +167,7 @@ def image_generate(
         "progress": None if failed else 100,
         "count": total,
         "files": files,
+        "resolution": f"{width}x{height}",
         "prompt": prompt,
         "negative_prompt": negative_prompt,
         "error": "extra.fail=true，演示失败返回" if failed else None,
@@ -148,6 +179,7 @@ def image_generate(
         "task_id": task_id,
         "status": tasks[task_id]["status"],
         "count": total,
+        "resolution": tasks[task_id]["resolution"],
     }
 
 
@@ -155,22 +187,42 @@ def image_generate(
 # 工具：image_task_status
 # ---------------------------------------------------------------------------
 
+def _settled(task: Dict[str, Any]) -> bool:
+    if str(task.get("status", "")).lower() in SETTLED_STATUSES:
+        return True
+    progress = task.get("progress")
+    return isinstance(progress, (int, float)) and progress >= 100
+
+
 @mcp.tool()
-def image_task_status(task_id: str) -> Dict[str, Any]:
+def image_task_status(task_id: str, wait_timeout: int = 0) -> Dict[str, Any]:
     """Check task progress.
 
+    ``wait_timeout`` (seconds) blocks up to that long, returning early as soon as
+    the task settles (completed / failed / expired / progress 100).
     Returns {"task_id", "status", "progress", "count", "error"}.
     progress may be null when unknown.
     """
-    task = _load_tasks().get(task_id)
-    if task is None:
-        return {
-            "task_id": task_id,
-            "status": "expired",
-            "progress": None,
-            "count": None,
-            "error": "任务不存在或已过期",
-        }
+    try:
+        wait = max(0, int(wait_timeout or 0))
+    except (TypeError, ValueError):
+        wait = 0
+
+    deadline = time.monotonic() + wait
+    while True:
+        task = _load_tasks().get(task_id)
+        if task is None:
+            return {
+                "task_id": task_id,
+                "status": "expired",
+                "progress": None,
+                "count": None,
+                "error": "任务不存在或已过期",
+            }
+        if _settled(task) or time.monotonic() >= deadline:
+            break
+        time.sleep(min(POLL_INTERVAL, max(0.0, deadline - time.monotonic())))
+
     return {
         "task_id": task_id,
         "status": task.get("status", "unknown"),

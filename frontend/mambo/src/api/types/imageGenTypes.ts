@@ -7,6 +7,8 @@ export interface ImageGenConfig {
   mcpServerId: string;
   defaultCount: number;
   defaultSync: boolean;
+  defaultResolution: string;
+  defaultWaitTimeout: number;
   timeout: number | null;
   isEnabled: boolean;
   createdAt?: string | null;
@@ -19,6 +21,8 @@ export interface ImageGenConfigCreate {
   mcpServerId: string;
   defaultCount?: number;
   defaultSync?: boolean;
+  defaultResolution?: string;
+  defaultWaitTimeout?: number;
   timeout?: number | null;
   isEnabled?: boolean;
 }
@@ -29,6 +33,8 @@ export interface ImageGenConfigUpdate {
   mcpServerId?: string;
   defaultCount?: number;
   defaultSync?: boolean;
+  defaultResolution?: string;
+  defaultWaitTimeout?: number;
   timeout?: number | null;
   isEnabled?: boolean;
 }

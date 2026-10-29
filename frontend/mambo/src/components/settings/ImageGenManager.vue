@@ -36,9 +36,12 @@
         </template>
       </el-table-column>
 
-      <el-table-column :label="t('settings.imageGen.columns.defaults')" width="150">
+      <el-table-column :label="t('settings.imageGen.columns.defaults')" width="220">
         <template #default="{ row }">
           <el-tag size="small" effect="plain">{{ t('settings.imageGen.count', { n: row.defaultCount }) }}</el-tag>
+          <el-tag size="small" effect="plain" type="success" class="ml-4">
+            {{ row.defaultResolution }}
+          </el-tag>
           <el-tag size="small" effect="plain" type="info" class="ml-4">
             {{ row.defaultSync ? 'sync' : 'async' }}
           </el-tag>
@@ -110,9 +113,26 @@
           <el-input-number v-model="form.defaultCount" :min="1" :max="8" />
         </el-form-item>
 
+        <el-form-item :label="t('settings.imageGen.form.resolution')" class="has-hint">
+          <el-select v-model="form.defaultResolution" allow-create filterable style="width: 180px">
+            <el-option
+              v-for="option in resolutionPresets"
+              :key="option"
+              :label="option"
+              :value="option"
+            />
+          </el-select>
+          <div class="form-hint">{{ t('settings.imageGen.form.resolutionHint') }}</div>
+        </el-form-item>
+
         <el-form-item :label="t('settings.imageGen.form.sync')" class="has-hint">
           <el-switch v-model="form.defaultSync" />
           <div class="form-hint">{{ t('settings.imageGen.form.syncHint') }}</div>
+        </el-form-item>
+
+        <el-form-item :label="t('settings.imageGen.form.waitTimeout')" class="has-hint">
+          <el-input-number v-model="form.defaultWaitTimeout" :min="0" :max="300" style="width: 180px" />
+          <div class="form-hint">{{ t('settings.imageGen.form.waitTimeoutHint') }}</div>
         </el-form-item>
 
         <el-form-item :label="t('settings.imageGen.form.timeout')" class="has-hint">
@@ -155,12 +175,16 @@ const saving = ref(false);
 const editingId = ref<string | null>(null);
 const checkingIds = ref<Set<string>>(new Set());
 
+const resolutionPresets = ['512x512', '768x768', '1024x1024', '1024x1536', '1536x1024', '768x1344', '1344x768'];
+
 const form = reactive({
   name: '',
   description: '',
   mcpServerId: '',
   defaultCount: 1,
+  defaultResolution: '1024x1024',
   defaultSync: true,
+  defaultWaitTimeout: 0,
   timeout: undefined as number | undefined,
   isEnabled: true,
 });
@@ -176,7 +200,9 @@ function resetForm() {
   form.description = '';
   form.mcpServerId = '';
   form.defaultCount = 1;
+  form.defaultResolution = '1024x1024';
   form.defaultSync = true;
+  form.defaultWaitTimeout = 0;
   form.timeout = undefined;
   form.isEnabled = true;
 }
@@ -195,7 +221,9 @@ function handleEdit(row: ImageGenConfig) {
   form.description = row.description || '';
   form.mcpServerId = row.mcpServerId;
   form.defaultCount = row.defaultCount;
+  form.defaultResolution = row.defaultResolution || '1024x1024';
   form.defaultSync = row.defaultSync;
+  form.defaultWaitTimeout = row.defaultWaitTimeout ?? 0;
   form.timeout = row.timeout ?? undefined;
   form.isEnabled = row.isEnabled;
   dialogVisible.value = true;
@@ -213,7 +241,9 @@ async function handleSave() {
       description: form.description || null,
       mcpServerId: form.mcpServerId,
       defaultCount: form.defaultCount || 1,
+      defaultResolution: form.defaultResolution || '1024x1024',
       defaultSync: form.defaultSync,
+      defaultWaitTimeout: form.defaultWaitTimeout ?? 0,
       timeout: form.timeout ?? null,
       isEnabled: form.isEnabled,
     };
