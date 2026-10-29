@@ -7,7 +7,8 @@ Create Date: 2026-10-29 10:00:00.000000
 ImageGenConfig 新增默认分辨率与默认等待超时两列（对应生图标准 v2 的
 `resolution` / `wait_timeout` 参数），存量配置按 1024x1024 与 0 回填，
 行为与升级前保持一致。
-"""from typing import Sequence, Union
+"""
+from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
