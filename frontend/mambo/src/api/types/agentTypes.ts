@@ -66,6 +66,11 @@ export interface TailToolConfig {
   max_rounds?: number | null
 }
 
+export interface ImageGenConfigRef {
+  enabled: boolean
+  configId: string | null
+}
+
 export interface MamboAgentParameters {
   include_general_purpose: boolean
   enable_planning: boolean
@@ -79,6 +84,7 @@ export interface MamboAgentParameters {
   version_control?: VersionControlConfig | null
   goal_loop?: GoalLoopConfig | null
   tail_tool?: TailToolConfig | null
+  image_gen?: ImageGenConfigRef | null
   mcp_direct_tool_threshold: number
 }
 

@@ -43,6 +43,9 @@
           <el-tab-pane :label="t('settings.tabs.mcpManager')" name="mcpManager">
             <McpManager />
           </el-tab-pane>
+          <el-tab-pane :label="t('settings.tabs.imageGen')" name="imageGen">
+            <ImageGenManager />
+          </el-tab-pane>
           <el-tab-pane :label="t('settings.tabs.resourceManager')" name="resourceManager">
             <ResourceManager />
           </el-tab-pane>
@@ -102,6 +105,7 @@ import ProviderModelManager from '@/components/settings/ProviderModelManager.vue
 import GlobalSettings from '@/components/settings/GlobalSettings.vue'
 import ResourceManager from '@/components/settings/ResourceManager.vue'
 import McpManager from '@/components/settings/McpManager.vue'
+import ImageGenManager from '@/components/settings/ImageGenManager.vue'
 import AgentManager from '@/components/settings/AgentManager.vue'
 import { useIsMobile } from '@/composables/useIsMobile'
 

@@ -652,6 +652,17 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
                 session_factory=_make_session_factory(),
             )
 
+        # --- Image generation middleware (opt-in, requires agent image gen config) ---
+        _image_gen_middleware = None
+        _image_gen_standard = getattr(agent_config, 'image_gen_standard', None)
+        if _image_gen_standard is not None:
+            from backend.services.generation.agent.image_gen.middleware import (
+                build_image_gen_middleware,
+            )
+            _image_gen_middleware = build_image_gen_middleware(
+                _image_gen_standard, backend
+            )
+
         # --- Tail tool middleware (opt-in; enable_suggest 时注入 suggest 尾部工具) ---
         _tail_tool_middleware = None
         tt_cfg = dict(getattr(agent_config, 'tail_tool_config', None) or {})
@@ -682,6 +693,8 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
             _middlewares.append(_version_control_middleware)
         if _show_middleware:
             _middlewares.append(_show_middleware)
+        if _image_gen_middleware:
+            _middlewares.append(_image_gen_middleware)
         # goal_loop 显式排到尾部中间件之前：wrap_model_call 由外到内，靠后者的 request
         # 已包含靠前者的 system 注入，使尾部中间件捕获的 request 与主调用完全一致。
         if goal_loop is not None:

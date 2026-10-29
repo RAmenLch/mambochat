@@ -61,6 +61,7 @@
           <GlobalSettings v-if="activeSection === 'global'" class="mobile-setting-component" />
           <MobileProviderModelManager v-else-if="activeSection === 'provider'" class="mobile-setting-component" />
           <MobileMcpManager v-else-if="activeSection === 'mcp'" class="mobile-setting-component" />
+          <ImageGenManager v-else-if="activeSection === 'imageGen'" class="mobile-setting-component" />
           <MobileResourceManager v-else-if="activeSection === 'resource'" class="mobile-setting-component" />
           <MobileAgentManager v-else-if="activeSection === 'agent'" class="mobile-setting-component" />
         </div>
@@ -106,12 +107,13 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
   ArrowLeft, ArrowRight, InfoFilled, User, Monitor, Connection,
-  FolderOpened, Message, Service, ChatDotRound, Setting
+  FolderOpened, Message, Service, ChatDotRound, Setting, Picture
 } from '@element-plus/icons-vue'
 
 import GlobalSettings from '@/mobile/components/settings/MobileGlobalSettings.vue'
 import MobileProviderModelManager from '@/mobile/components/settings/MobileProviderModelManager.vue'
 import MobileMcpManager from '@/mobile/components/settings/MobileMcpManager.vue'
+import ImageGenManager from '@/components/settings/ImageGenManager.vue'
 import MobileResourceManager from '@/mobile/components/settings/MobileResourceManager.vue'
 import MobileAgentManager from '@/mobile/components/settings/MobileAgentManager.vue'
 
@@ -155,6 +157,7 @@ const menuItems = computed(() => [
   { id: 'global', icon: Setting, label: t('settings.tabs.globalSettings'), desc: t('settings.about.globalDesc') || '语言、模型、编辑器偏好', color: '#6366f1' },
   { id: 'provider', icon: Monitor, label: t('settings.tabs.providerModel'), desc: t('settings.about.providerDesc') || '服务商与模型管理', color: '#0891b2' },
   { id: 'mcp', icon: Connection, label: t('settings.tabs.mcpManager'), desc: t('settings.about.mcpDesc') || 'MCP 工具服务配置', color: '#059669' },
+  { id: 'imageGen', icon: Picture, label: t('settings.tabs.imageGen'), desc: t('settings.about.imageGenDesc') || '生图工具配置', color: '#7c3aed' },
   { id: 'resource', icon: FolderOpened, label: t('settings.tabs.resourceManager'), desc: t('settings.about.resourceDesc') || '资源与知识库', color: '#d97706' },
   { id: 'agent', icon: Service, label: 'Agent 管理', desc: '智能体配置与 Backend 挂载', color: '#dc2626' },
 ])

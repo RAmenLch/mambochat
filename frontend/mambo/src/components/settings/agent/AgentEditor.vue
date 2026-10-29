@@ -901,6 +901,44 @@
 
           <el-divider />
 
+          <!-- 生图工具 -->
+          <el-row :gutter="32" class="settings-row">
+            <el-col :span="24">
+              <el-form-item>
+                <template #label>
+                  <span>{{ $t('agent.imageGenEnable') }}</span>
+                  <el-tooltip effect="dark" :content="$t('agent.imageGenEnableDesc')" placement="top">
+                    <el-icon class="label-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-switch v-model="form.mambo_image_gen_enabled" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+
+          <el-row v-if="form.mambo_image_gen_enabled" :gutter="32" class="settings-row">
+            <el-col :span="12">
+              <el-form-item :label="$t('agent.imageGenConfig')">
+                <el-select
+                  v-model="form.mambo_image_gen_config_id"
+                  :placeholder="$t('agent.imageGenConfigPlaceholder')"
+                  style="width: 100%"
+                  clearable
+                >
+                  <el-option
+                    v-for="cfg in imageGenStore.enabledConfigs"
+                    :key="cfg.id"
+                    :label="cfg.name"
+                    :value="cfg.id"
+                  />
+                </el-select>
+                <div class="goal-loop-field-desc">{{ $t('agent.imageGenConfigDesc') }}</div>
+              </el-form-item>
+            </el-col>
+          </el-row>
+
+          <el-divider />
+
           <!-- AI 安全审核 -->
           <el-row :gutter="32" class="settings-row">
             <el-col :span="24">
@@ -1087,6 +1125,7 @@ import { useAgentStore } from '@/stores/agentStore';
 import { useProviderStore } from '@/stores/providerStore';
 import { useSystemConfigStore } from '@/stores/systemConfigStore';
 import { useMcpStore } from '@/stores/mcpStore';
+import { useImageGenStore } from '@/stores/imageGenStore';
 import { useBackendStore } from '@/stores/backendStore'; // [新增] 引入 BackendStore
 
 import { uploadAgentAvatar, deleteAgentAvatar, getAgent, getAgentHitlTools, getGoalLoopTools, getTailToolTools } from '@/api/agentService';
@@ -1135,6 +1174,7 @@ const agentStore = useAgentStore();
 const providerStore = useProviderStore();
 const systemConfigStore = useSystemConfigStore();
 const mcpStore = useMcpStore();
+const imageGenStore = useImageGenStore();
 const backendStore = useBackendStore();
 
 const { currentAgentId, agentList } = storeToRefs(agentStore);
@@ -1374,6 +1414,10 @@ const form = reactive({
 
   // Mambo MCP 工具阈值
   mambo_mcp_threshold: 15,
+
+  // Mambo 生图工具
+  mambo_image_gen_enabled: false,
+  mambo_image_gen_config_id: null as string | null,
 });
 
 // --- Backend 挂载逻辑 [新增] ---
@@ -1612,6 +1656,11 @@ watch(agentData, async (newVal) => {
 
     // MCP 工具阈值
     form.mambo_mcp_threshold = mamboParams.mcp_direct_tool_threshold ?? 15;
+
+    // 生图工具配置还原
+    const igCfg = mamboParams.image_gen;
+    form.mambo_image_gen_enabled = igCfg?.enabled ?? false;
+    form.mambo_image_gen_config_id = igCfg?.configId ?? null;
 
     // 加载 HITL 可审核工具列表
     fetchHitlTools(newVal.id);
@@ -1942,6 +1991,10 @@ function buildMamboAgentParameters(): MamboAgentParameters | null {
     } : null,
     goal_loop: form.mambo_goal_loop_enabled ? buildGoalLoopConfig() : null,
     tail_tool: form.mambo_tail_tool_enabled ? buildTailToolConfig() : null,
+    image_gen: form.mambo_image_gen_enabled ? {
+      enabled: true,
+      configId: form.mambo_image_gen_config_id || null,
+    } : null,
     mcp_direct_tool_threshold: form.mambo_mcp_threshold,
   };
   return params;
@@ -2059,6 +2112,7 @@ onMounted(() => {
   if (backendStore.backendList.length === 0) {
     backendStore.fetchBackends(); // [新增] 初始化拉取 Backend 列表
   }
+  imageGenStore.fetchConfigs(); // [新增] 生图配置列表
 });
 </script>
 

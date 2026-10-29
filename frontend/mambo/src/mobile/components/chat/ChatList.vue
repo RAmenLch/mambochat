@@ -86,7 +86,7 @@
     <!-- Agent 筛选 Sheet -->
     <Teleport to="body">
       <Transition name="sheet">
-        <div v-if="agentFilterSheetVisible" class="sheet-overlay" @click="agentFilterSheetVisible = false">
+        <div v-if="agentFilterSheetVisible" class="sheet-overlay agent-filter-overlay" @click="agentFilterSheetVisible = false">
           <div class="sheet-panel" @click.stop>
             <div class="sheet-handle"></div>
             <div class="sheet-panel-title">{{ $t('chat.sidebar.filterByAgent') }}</div>
@@ -917,6 +917,11 @@ const goToSettings = () => {
   display: flex;
   align-items: flex-end;
   justify-content: center;
+}
+
+/* 会话列表位于 el-drawer 内，抽屉的 z-index 由 Element Plus 动态分配（≥2000） */
+.agent-filter-overlay {
+  z-index: 2200;
 }
 
 .sheet-panel {

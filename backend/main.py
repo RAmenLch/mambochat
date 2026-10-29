@@ -33,6 +33,7 @@ from backend.routers import (
     resource_management,
     system_config,
     mcp_management,
+    image_gen_management,
     kb_management,
     skill_management,
     agent_management,
@@ -283,6 +284,7 @@ app.include_router(settings.router, prefix="/api", tags=["Global Settings"])
 app.include_router(system_config.router, prefix="/api", tags=["System Configuration"])
 app.include_router(notifications.router, prefix="/api", tags=["Notifications"])
 app.include_router(mcp_management.router, prefix="/api/mcp", tags=["MCP Management"])
+app.include_router(image_gen_management.router, prefix="/api/image-gen", tags=["Image Generation"])
 app.include_router(kb_management.router, prefix="/api/resources/kb", tags=["Knowledge Base Management"])
 app.include_router(skill_management.router, prefix="/api/resources/skills", tags=["Skills Management"])
 # Agent 导出包路由必须先于 agent_management 注册：

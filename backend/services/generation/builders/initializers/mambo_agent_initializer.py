@@ -365,6 +365,31 @@ class MamboAgentInitializer(AbstractAgentInitializer):
         enable_show = mambo_params.enable_show
         memory_resource_ids = mambo_params.memory_resource_ids
 
+        # --- 生图工具（标准 MCP 实现）---
+        image_gen_standard = None
+        ig = mambo_params.image_gen
+        if self.enable_tools and ig is not None and ig.enabled and ig.configId:
+            from backend.crud import image_gen_crud
+            from backend.services.generation.agent.image_gen.factory import (
+                ImageGenConfigError,
+                build_mcp_image_standard,
+            )
+            from backend.services.generation.agent.image_gen.standard import (
+                IMAGE_TOOL_NAMES,
+            )
+
+            ig_config = await image_gen_crud.get_image_gen_config(self.db, ig.configId)
+            if not ig_config or not ig_config.isEnabled:
+                logger.warning("生图配置 %s 不存在或已停用，跳过生图工具", ig.configId)
+            else:
+                try:
+                    image_gen_standard = await build_mcp_image_standard(self.db, ig_config)
+                except ImageGenConfigError as exc:
+                    logger.warning("生图工具未启用: %s", exc)
+                else:
+                    for tool_name in IMAGE_TOOL_NAMES:
+                        builtin_provider.register_tool(tool_name)
+
         # 尾部工具调用：注册 tail_tool 的追踪 provider（正文误调用时落库，避免其后内容缓存失效）
         if enable_suggest or (mambo_params.tail_tool is not None and mambo_params.tail_tool.enabled):
             self.providers.append(TailToolProvider())
@@ -555,6 +580,7 @@ class MamboAgentInitializer(AbstractAgentInitializer):
             summarization_config=sum_config.model_dump() if (enable_sum and sum_config) else None,
             enable_planning=enable_planning,
             enable_show=enable_show,
+            image_gen_standard=image_gen_standard,
             memory_resource_roots=memory_roots if memory_roots else None,
             security_review_config=security_review_config,
             security_review_llm_config=security_review_llm_config,

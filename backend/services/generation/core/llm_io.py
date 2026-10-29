@@ -251,6 +251,11 @@ class AgentConfig(BaseModel):
         default=True,
         description="是否启用 show 工具（展示文件/图片给用户，仅 Mambo Agent 有效）"
     )
+    image_gen_standard: Optional[Any] = Field(
+        default=None,
+        description="生图标准实现（ImageGenStandard 实例）。由 initializer 依据生图配置构建，"
+                    "builder 消费以注册生图工具中间件。为 None 时不启用"
+    )
     memory_resource_roots: Optional[Dict[str, str]] = Field(
         default=None,
         description="长期记忆资源映射（仅 Mambo Agent）：{resource_name: resource_id}。"

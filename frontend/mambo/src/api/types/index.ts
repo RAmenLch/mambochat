@@ -9,3 +9,4 @@ export * from './settingsTypes';
 export * from './mcpTypes';
 export * from './agentTypes.ts'
 export * from './backendTypes.ts'
+export * from './imageGenTypes.ts'

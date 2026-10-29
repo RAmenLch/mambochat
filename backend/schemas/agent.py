@@ -111,6 +111,12 @@ class TailToolConfigSchema(BaseModel):
     max_rounds: int = Field(1, description="尾部工具执行的最大轮数(阈值);1=单轮。suggest 启用时强制为 1")
 
 
+class ImageGenConfigRefSchema(BaseModel):
+    """生图工具挂载配置（引用 ImageGenConfig 记录）"""
+    enabled: bool = Field(False, description="是否为该 Agent 启用生图工具")
+    configId: Optional[str] = Field(None, description="引用的生图配置 ID")
+
+
 class MamboAgentParametersSchema(BaseModel):
     """Mambo Agent 专属参数（持久化到 Agent.agentParameters JSON 列）"""
     include_general_purpose: bool = Field(False, description="是否启用通用子代理")
@@ -125,6 +131,7 @@ class MamboAgentParametersSchema(BaseModel):
     version_control: Optional[VersionControlConfigSchema] = Field(None, description="版本控制配置")
     goal_loop: Optional[GoalLoopConfigSchema] = Field(None, description="任务循环配置")
     tail_tool: Optional[TailToolConfigSchema] = Field(None, description="通用尾部工具调用配置")
+    image_gen: Optional[ImageGenConfigRefSchema] = Field(None, description="生图工具配置")
     mcp_direct_tool_threshold: int = Field(15, description="MCP 工具数量阈值：低于此值时直接暴露工具，否则使用 meta-tool 包装模式")
 
 
