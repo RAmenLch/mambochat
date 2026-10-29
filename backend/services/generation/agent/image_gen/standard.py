@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from mambo_agents.backends.protocol import BackendProtocol
 from mambo_agents.backends.schemas import VirtualPath
@@ -51,8 +51,8 @@ DEFAULT_COUNT = 1
 MAX_COUNT = 8
 MAX_PREFIX_LEN = 64
 
-# 分辨率参数（契约名 NumxNum，形如 1024x1024）
-RESOLUTION_ARG = "NumxNum"
+# 分辨率参数名（契约字段，形如 1024x1024）
+RESOLUTION_ARG = "resolution"
 DEFAULT_RESOLUTION = "1024x1024"
 MIN_RESOLUTION = 64
 MAX_RESOLUTION = 4096
@@ -81,9 +81,8 @@ class ImageGenerateArgs(BaseModel):
     """``image_generate`` 的参数（锁定，不随 server 上报的 schema 变化）。"""
 
     prompt: str = Field(description="正向提示词，描述期望生成的画面内容")
-    numxnum: str = Field(
+    resolution: str = Field(
         default=DEFAULT_RESOLUTION,
-        alias=RESOLUTION_ARG,
         description=(
             "图片分辨率，格式为 `宽x高`（单位像素），例如 1024x1024、768x1344；"
             f"取值范围 {MIN_RESOLUTION}~{MAX_RESOLUTION}"
@@ -106,8 +105,6 @@ class ImageGenerateArgs(BaseModel):
             "平台会原样扁平传入，与标准参数同名的键会被忽略"
         ),
     )
-
-    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
 
 class ImageStatusArgs(BaseModel):
@@ -212,7 +209,7 @@ class ImageGenStandard(ABC):
     default_sync:
         未指定 ``sync`` 时的默认值。
     default_resolution:
-        未指定 ``NumxNum`` 时的默认分辨率，形如 ``1024x1024``。
+        未指定 ``resolution`` 时的默认分辨率，形如 ``1024x1024``。
     default_wait_timeout:
         未指定 ``wait_timeout`` 时的默认阻塞秒数。
 
@@ -270,7 +267,7 @@ class ImageGenStandard(ABC):
 
     async def run_generate(self, args: ImageGenerateArgs) -> str:
         count = self._clamp_count(args.count)
-        resolution = self._normalize_resolution(args.numxnum)
+        resolution = self._normalize_resolution(args.resolution)
         extra = self._merge_extra(args.extra, resolution)
         payload = await self.submit(
             prompt=args.prompt,
@@ -373,7 +370,7 @@ class ImageGenStandard(ABC):
     ) -> Dict[str, Any]:
         """过滤掉与标准参数同名的键，并把分辨率解析为 width/height 合并进去。
 
-        ``extra`` 中显式给出的 ``width`` / ``height`` 优先级高于 ``NumxNum``。
+        ``extra`` 中显式给出的 ``width`` / ``height`` 优先级高于 ``resolution``。
         """
         reserved = {
             "prompt",
@@ -384,7 +381,6 @@ class ImageGenStandard(ABC):
             "extra",
             "wait_timeout",
             RESOLUTION_ARG,
-            "numxnum",
         }
         merged = {k: v for k, v in (extra or {}).items() if k not in reserved}
 

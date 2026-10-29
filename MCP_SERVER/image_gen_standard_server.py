@@ -2,7 +2,7 @@
 
 实现了 MamboChat 生图工具标准 v2 的三个固定工具::
 
-    image_generate     prompt / NumxNum / negative_prompt / count / sync / extra
+    image_generate     prompt / resolution / negative_prompt / count / sync / extra
                        -> {task_id, status, count, resolution}
     image_task_status  task_id / wait_timeout
                        -> {task_id, status, progress, count, error}
@@ -13,7 +13,7 @@
 - 任务状态落在临时目录的 JSON 文件里，因此 **stdio 传输下每次调用重启进程也不会丢状态**
   （标准要求服务自己持久化任务状态，本文件即示范）。
 - 支持透传 ``extra``：``width`` / ``height`` / ``color``(r,g,b) / ``fail``。
-- 支持 ``NumxNum`` 分辨率，优先级低于显式 ``width`` / ``height``。
+- 支持 ``resolution`` 分辨率（如 ``1024x1024``），优先级低于显式 ``width`` / ``height``。
 - ``image_task_status`` 支持 ``wait_timeout``：阻塞轮询、状态收敛即提前返回。
 
 启动方式（stdio，供 MCP 服务配置使用）::
@@ -124,7 +124,7 @@ def _save_tasks(tasks: Dict[str, Dict[str, Any]]) -> None:
 @mcp.tool()
 def image_generate(
     prompt: str,
-    NumxNum: Optional[str] = None,
+    resolution: Optional[str] = None,
     negative_prompt: Optional[str] = None,
     count: int = 1,
     sync: bool = True,
@@ -132,7 +132,7 @@ def image_generate(
 ) -> Dict[str, Any]:
     """Generate placeholder images from a prompt.
 
-    ``NumxNum`` sets the resolution, e.g. "1024x1024" / "768x1344".
+    ``resolution`` sets the size, e.g. "1024x1024" / "768x1344".
     Returns {"task_id": ..., "status": "completed"|"queued", "count": N, "resolution": "WxH"}.
     Extra keys are forwarded verbatim; unknown keys are ignored.
     """
@@ -140,7 +140,7 @@ def image_generate(
         raise ValueError("prompt 不能为空")
 
     opts = dict(extra or {})
-    size = _parse_resolution(NumxNum) or DEFAULT_SIZE
+    size = _parse_resolution(resolution) or DEFAULT_SIZE
     width = int(opts.get("width") or size[0])
     height = int(opts.get("height") or size[1])
     color = opts.get("color") or DEFAULT_COLOR

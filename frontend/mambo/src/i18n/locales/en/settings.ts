@@ -291,7 +291,7 @@ export default {
       mcpServerPlaceholder: 'Select a configured MCP service',
       count: 'Default Count',
       resolution: 'Default Resolution',
-      resolutionHint: 'Corresponds to NumxNum, format WIDTHxHEIGHT (e.g. 1024x1024)',
+      resolutionHint: 'Corresponds to resolution, format WIDTHxHEIGHT (e.g. 1024x1024)',
       sync: 'Wait Synchronously',
       syncHint: 'When on, the tool blocks until generation finishes; when off it returns a task id immediately',
       waitTimeout: 'Status Wait (s)',

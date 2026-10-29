@@ -14,6 +14,7 @@ from langchain_core.tools import StructuredTool
 from mambo_agents.backends.protocol import BackendProtocol
 
 from .standard import (
+    DEFAULT_RESOLUTION,
     DEFAULT_WAIT_TIMEOUT,
     IMAGE_TOOL_DOWNLOAD,
     IMAGE_TOOL_GENERATE,
@@ -32,7 +33,7 @@ _GENERATE_DESCRIPTION = (
     "Generate images from a text prompt using the configured image generation "
     "service. Returns a task id. Use sync=true to wait for completion, or "
     "sync=false and poll with image_task_status for long jobs. "
-    "'NumxNum' sets the image resolution as 'WIDTHxHEIGHT' in pixels, e.g. "
+    "'resolution' sets the image resolution as 'WIDTHxHEIGHT' in pixels, e.g. "
     "'1024x1024' or '768x1344'; omit it to use the configured default. "
     "Extra parameters (width/height/steps/seed/model/...) can be passed through "
     "'extra' and are forwarded verbatim to the service."
@@ -102,7 +103,7 @@ class ImageGenMiddleware(AgentMiddleware):
     async def _agenerate(
         self,
         prompt: str,
-        numxnum: str = "",
+        resolution: str = DEFAULT_RESOLUTION,
         negative_prompt: Optional[str] = None,
         count: int = 1,
         sync: bool = True,
@@ -113,7 +114,7 @@ class ImageGenMiddleware(AgentMiddleware):
             lambda: self._standard.run_generate(
                 ImageGenerateArgs(
                     prompt=prompt,
-                    numxnum=numxnum or "",
+                    resolution=resolution or "",
                     negative_prompt=negative_prompt,
                     count=count,
                     sync=sync,

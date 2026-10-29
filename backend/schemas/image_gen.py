@@ -32,7 +32,7 @@ class ImageGenConfigBase(BaseModel):
     defaultSync: bool = Field(True, description="默认是否同步等待生成完成")
     defaultResolution: str = Field(
         DEFAULT_RESOLUTION,
-        description="默认分辨率（NumxNum），形如 1024x1024",
+        description="默认分辨率（resolution），形如 1024x1024",
     )
     defaultWaitTimeout: int = Field(
         0,

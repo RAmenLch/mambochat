@@ -288,7 +288,7 @@ export default {
       mcpServerPlaceholder: '选择已配置的 MCP 服务',
       count: '默认生成数量',
       resolution: '默认分辨率',
-      resolutionHint: '对应 NumxNum，格式为 宽x高（如 1024x1024）',
+      resolutionHint: '对应 resolution，格式为 宽x高（如 1024x1024）',
       sync: '默认同步等待',
       syncHint: '开启后生图工具会阻塞到生成完成；关闭则立即返回任务 ID',
       waitTimeout: '状态等待(秒)',
