@@ -356,6 +356,13 @@ const isAgentFiltering = computed(() => agentFilter.value !== AGENT_FILTER_ALL);
 
 const knownAgentIds = computed(() => new Set(agentStore.allAgents.map(a => a.id)));
 
+// 获取 Agent 头像 URL
+const getAgentAvatarUrl = (agentId: string | null | undefined): string | null => {
+  if (!agentId) return null;
+  const agent = agentStore.allAgents.find(a => a.id === agentId);
+  return agent?.agentAvatarUrl ? (resolveFileUrl(agent.agentAvatarUrl) ?? null) : null;
+};
+
 const agentFilterOptions = computed((): AgentFilterOption[] => {
   const options: AgentFilterOption[] = [
     { value: AGENT_FILTER_ALL, label: t('chat.sidebar.filterAll'), icon: Files },
@@ -452,13 +459,6 @@ const agentOptions = computed((): SelectConfigOption[] => {
       value: a.id
     }));
 });
-
-// 获取 Agent 头像 URL
-const getAgentAvatarUrl = (agentId: string | null | undefined): string | null => {
-  if (!agentId) return null;
-  const agent = agentStore.allAgents.find(a => a.id === agentId);
-  return agent?.agentAvatarUrl ? (resolveFileUrl(agent.agentAvatarUrl) ?? null) : null;
-};
 
 // 群组节点头像：把成员 Agent 的头像叠在一起，营造"群"的感觉
 const groupChatStore = useGroupChatStore();
