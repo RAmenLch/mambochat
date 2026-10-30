@@ -683,9 +683,19 @@ class TailToolMiddleware(AgentMiddleware):
         # 产出文件的工具(show / image_generate_show) → 额外落 FILE 子消息
         # (同样带 is_tail_tool,由尾部面板渲染)。
         if name in FILE_OUTPUT_TOOLS and not content.is_error:
-            await self._persist_show_file(call.get("output"))
+            await self._persist_show_file(
+                call.get("output"),
+                tool_call_id=call.get("tool_call_id"),
+                run_args=call.get("arguments") if isinstance(call.get("arguments"), dict) else None,
+            )
 
-    async def _persist_show_file(self, output: Optional[str]) -> None:
+    async def _persist_show_file(
+        self,
+        output: Optional[str],
+        *,
+        tool_call_id: Optional[str] = None,
+        run_args: Optional[dict] = None,
+    ) -> None:
         if not output:
             return
         try:
@@ -711,6 +721,8 @@ class TailToolMiddleware(AgentMiddleware):
                         pending_image_task_id=data.get("task_id"),
                         pending_image_prefix=data.get("prefix"),
                         pending_image_count=data.get("count"),
+                        image_run_id=tool_call_id,
+                        image_run_args=run_args,
                     ),
                 )
             return
@@ -723,6 +735,8 @@ class TailToolMiddleware(AgentMiddleware):
                     context_participation_length=0,
                     is_tail_tool=True,
                     show_tool_mode=mode,
+                    image_run_id=tool_call_id,
+                    image_run_args=run_args,
                 ),
             )
 

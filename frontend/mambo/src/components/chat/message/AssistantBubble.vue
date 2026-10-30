@@ -209,6 +209,16 @@
         </div>
       </div>
 
+      <!-- 生图区域：同一次生成的多图编为一组，重跑的多次生成用左右箭头切换（不参与上下文） -->
+      <ImageRunGallery
+        v-for="slot in imageSlots"
+        :key="slot.slotId"
+        :slot="slot"
+        :parent-message="message"
+        @open-tool-dialog="(toolId) => $emit('open-tool-dialog', toolId)"
+        @edit-file="(file) => $emit('edit-file', file)"
+      />
+
       <!-- 尾部工具汇总面板（config.is_tail_tool，不参与正文/时间线；默认折叠） -->
       <TailToolPanel
         v-if="tailToolSubMessages.length > 0"
@@ -227,12 +237,14 @@ import { useI18n } from 'vue-i18n';
 import { storeToRefs } from 'pinia';
 import type { Message, SubMessage, ErrorContent, FileResponse } from '@/api/types';
 import { useAssistantTimeline, type BubbleSectionGroup } from '@/composables/useAssistantTimeline';
+import { useImageRuns } from '@/composables/useImageRuns';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { useChatSessionStore } from '@/stores/chatSessionStore';
 import { useAgentStore } from '@/stores/agentStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import BubbleSectionGroupComponent from './BubbleSectionGroup.vue';
 import TailToolPanelComponent from './TailToolPanel.vue';
+import ImageRunGallery from './ImageRunGallery.vue';
 import { Cpu, Minus, FullScreen, ArrowUpBold, ArrowDownBold, ArrowRight, ArrowDown, Loading, Warning, Check, Opportunity, View, RefreshRight } from '@element-plus/icons-vue';
 
 const BubbleSectionGroup = BubbleSectionGroupComponent;
@@ -261,6 +273,16 @@ const { globalSettings } = storeToRefs(settingsStore);
 const messageRef = computed(() => props.message);
 const messageDisplayMode = computed(() => globalSettings.value.message_display_mode ?? 'interleaved');
 
+// 生图"按次编组"：已归入图片区域的 File 子消息不再由正文分组渲染
+const { imageSlots, galleryFileIds } = useImageRuns(messageRef);
+const timelineMessageRef = computed<Message>(() => {
+  if (galleryFileIds.value.size === 0) return props.message;
+  return {
+    ...props.message,
+    sub_messages: props.message.sub_messages.filter(sm => !galleryFileIds.value.has(sm.id)),
+  };
+});
+
 const {
   reasoningSection,
   normalSection,
@@ -274,7 +296,7 @@ const {
   isSparkCollapsed,
   toggleSpark,
   tailToolSubMessages,
-} = useAssistantTimeline(messageRef, messageDisplayMode);
+} = useAssistantTimeline(timelineMessageRef, messageDisplayMode);
 
 const isBubbleCollapsed = ref(false);
 

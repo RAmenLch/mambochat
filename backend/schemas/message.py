@@ -152,6 +152,11 @@ class SubMessageConfig(BaseModel):
     file_copy_error: Optional[str] = Field(None, description="【仅用于File类型】副本写入失败原因（file_copy_status=failed 时）")
     is_goal_loop_round: Optional[bool] = Field(None, description="【仅用于MCP_TOOL类型·get_goal】是否为 GoalLoopMiddleware 注入的轮次边界 get_goal（tool_call_id 以 goal-loop- 前缀标识）；前端据此渲染轮次分隔线，轮数从 result 文本解析")
     is_tail_tool: Optional[bool] = Field(None, description="是否为尾部工具调用中间件(TailToolMiddleware)产出的子消息；不参与上下文（context_participation_length=0），前端在底部可折叠小窗口中以不同颜色渲染，不进入正文")
+    image_run_id: Optional[str] = Field(None, description="【仅用于File类型与生图记录子消息】本次生成 run 的标识：LLM 调用取该工具的 tool_call_id，平台重跑取新生成的 uuid")
+    image_slot_id: Optional[str] = Field(None, description="【仅用于File类型】所属“插槽”标识（同一位置的第 1/2/3 次生成共享）；为空表示自成一插槽")
+    image_run_args: Optional[Dict[str, Any]] = Field(None, description="【仅用于File类型与生图记录子消息】本次生成下发的参数快照（prompt/resolution/count/extra/mode/生图配置名）")
+    image_pinned_run_id: Optional[str] = Field(None, description="【仅用于File类型】用户当前置顶的 run；只写在插槽内最早的一条 File 子消息上")
+    is_image_run_record: Optional[bool] = Field(None, description="【仅用于McpTool类型】是否为“图片重跑生成记录”子消息：不参与上下文，前端只在图片区域内按参数详情展示，不进入正文工具气泡")
 
 
 class SubMessageBase(BaseModel):

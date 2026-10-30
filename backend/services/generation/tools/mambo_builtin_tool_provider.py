@@ -160,6 +160,8 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
                                 pending_image_task_id=data.get("task_id"),
                                 pending_image_prefix=data.get("prefix"),
                                 pending_image_count=data.get("count"),
+                                image_run_id=tool_call_id,
+                                image_run_args=cached_content.get_argument_dict(),
                             ),
                         )
                 else:
@@ -177,6 +179,8 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
                             config=SubMessageConfig(
                                 context_participation_length=0,
                                 show_tool_mode=data.get("mode", "Normal"),
+                                image_run_id=tool_call_id,
+                                image_run_args=cached_content.get_argument_dict(),
                             ),
                         )
             except (json.JSONDecodeError, KeyError, TypeError):

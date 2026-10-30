@@ -40,6 +40,16 @@ export interface SubMessageConfig {
    * 不参与正文 / 时间线渲染，仅在助手消息底部以折叠面板展示
    */
   is_tail_tool?: boolean | null
+  /** 本次生成 run 的标识：LLM 调用=该工具 tool_call_id，平台重跑=新生成的 uuid */
+  image_run_id?: string | null
+  /** 所属"插槽"标识（同一位置的第 1/2/3 次生成共享）；为空表示自成一插槽 */
+  image_slot_id?: string | null
+  /** 本次生成下发的参数快照 */
+  image_run_args?: Record<string, any> | null
+  /** 用户当前置顶的 run（只写在插槽内最早的一条 File 子消息上） */
+  image_pinned_run_id?: string | null
+  /** 是否为"图片重跑生成记录"子消息（McpTool 类型，不参与上下文，只在图片区域展示） */
+  is_image_run_record?: boolean | null
 }
 
 export interface SubMessage {
@@ -66,6 +76,28 @@ export interface SubMessageUpdate {
   content?: string
   config?: SubMessageConfig
   status?: MessageStatus
+}
+
+/** 图片重跑请求：留空的字段沿用该插槽上一次生成的取值 */
+export interface ImageRunRerunRequest {
+  prompt?: string
+  negative_prompt?: string | null
+  resolution?: string
+  count?: number
+  mode?: string
+  extra?: Record<string, any>
+  path?: string
+  timeout?: number
+}
+
+/** 图片重跑结果：record 为本次生成记录，files 为本次生成入库的图片子消息 */
+export interface ImageRunRerunResponse {
+  run_id: string
+  slot_id: string
+  status: 'completed' | 'failed'
+  record: SubMessage
+  files: SubMessage[]
+  error: string | null
 }
 
 // --- Message Types ---

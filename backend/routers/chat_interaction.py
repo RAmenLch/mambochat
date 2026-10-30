@@ -49,6 +49,19 @@ class AskUserAnswerRequest(BaseModel):
     ask_status: str = "answered"
 
 
+class ImageRunRerunRequest(BaseModel):
+    """图片重跑参数：留空的字段沿用该插槽上一次生成的取值。"""
+
+    prompt: Optional[str] = None
+    negative_prompt: Optional[str] = None
+    resolution: Optional[str] = None
+    count: Optional[int] = None
+    mode: Optional[str] = None
+    extra: Optional[dict] = None
+    path: Optional[str] = None
+    timeout: Optional[int] = None
+
+
 # ----------------------------------------------------------------------
 # Pending file (show wait) — 按会话聚合
 # 同一会话的所有待生成文件共享一个轮询任务与一个 backend 实例。
@@ -112,14 +125,26 @@ async def _process_pending_file(
             sub_path="chat_attachments",
         )
 
-        # 保留创建时设置的 show_tool_mode（防止轮询完成时被覆盖）
+        # 保留创建时设置的 show_tool_mode / 生图编组字段（防止轮询完成时被覆盖）
         existing_sub = await message_crud.get_sub_message(db, sub_message_id)
         show_tool_mode = None
+        image_run_id = None
+        image_run_args = None
+        is_tail_tool = None
         if existing_sub and existing_sub.config:
             raw_cfg = existing_sub.config
             if isinstance(raw_cfg, str):
                 raw_cfg = json.loads(raw_cfg)
-            show_tool_mode = raw_cfg.get("show_tool_mode") if isinstance(raw_cfg, dict) else getattr(raw_cfg, "show_tool_mode", None)
+            if isinstance(raw_cfg, dict):
+                show_tool_mode = raw_cfg.get("show_tool_mode")
+                image_run_id = raw_cfg.get("image_run_id")
+                image_run_args = raw_cfg.get("image_run_args")
+                is_tail_tool = raw_cfg.get("is_tail_tool")
+            else:
+                show_tool_mode = getattr(raw_cfg, "show_tool_mode", None)
+                image_run_id = getattr(raw_cfg, "image_run_id", None)
+                image_run_args = getattr(raw_cfg, "image_run_args", None)
+                is_tail_tool = getattr(raw_cfg, "is_tail_tool", None)
 
         await message_crud.update_sub_message(
             db,
@@ -132,6 +157,9 @@ async def _process_pending_file(
                     pending_file_path=None,
                     pending_file_timeout=None,
                     show_tool_mode=show_tool_mode,
+                    image_run_id=image_run_id,
+                    image_run_args=image_run_args,
+                    is_tail_tool=is_tail_tool,
                 ),
             ),
         )
@@ -628,6 +656,40 @@ async def update_sub_message(
     if not updated_sub_message:
         raise HTTPException(status_code=404, detail="SubMessage not found")
     return updated_sub_message
+
+
+@router.post(
+    "/image-runs/{sub_message_id}/rerun",
+    summary="对图片子消息重新生成（调参重跑，不写入对话上下文）",
+)
+async def rerun_image_run(sub_message_id: str, request: ImageRunRerunRequest):
+    from backend.services.image_run_service import (
+        ImageRunConflictError,
+        ImageRunError,
+        rerun_image_run as _rerun_image_run,
+    )
+
+    allowed_modes = {"Normal", "Mini_Avatar", "Gal_Avatar", "Group", "Spark"}
+    if request.mode is not None and request.mode not in allowed_modes:
+        raise AppHTTPException(
+            status_code=400,
+            error_code="INVALID_IMAGE_MODE",
+            detail=f"不支持的展示模式: {request.mode}",
+        )
+
+    try:
+        return await _rerun_image_run(
+            sub_message_id=sub_message_id,
+            overrides=request.model_dump(),
+        )
+    except ImageRunConflictError as exc:
+        raise AppHTTPException(
+            status_code=409, error_code="IMAGE_RUN_IN_PROGRESS", detail=str(exc)
+        )
+    except ImageRunError as exc:
+        raise AppHTTPException(
+            status_code=400, error_code="IMAGE_RUN_FAILED", detail=str(exc)
+        )
 
 
 @router.post("/messages/{message_id}/stop", status_code=status.HTTP_202_ACCEPTED, summary="请求停止AI生成")

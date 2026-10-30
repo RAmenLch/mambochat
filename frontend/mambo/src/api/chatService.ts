@@ -23,6 +23,8 @@ import type {
   ChatArchiveRequest,
   ChatStatusResponse,
   ImportChatReport,
+  ImageRunRerunRequest,
+  ImageRunRerunResponse,
 } from './types';
 
 /**
@@ -151,6 +153,19 @@ export const updateMessageAndRegenerate = (messageId: string, data: MessageUpdat
  */
 export const updateSubMessage = (subMessageId: string, data: SubMessageUpdate): Promise<SubMessage> => {
   return apiClient.put(`/sub-messages/${subMessageId}`, data)
+};
+
+/**
+ * 对图片子消息重新生成（调参重跑）。
+ * 服务端只会追加"生成记录 + 图片"两类子消息，二者都不参与上下文。
+ * @param subMessageId 目标图片子消息ID
+ * @param data 覆盖参数，留空则沿用该插槽上一次生成的取值
+ */
+export const rerunImageRun = (
+  subMessageId: string,
+  data: ImageRunRerunRequest,
+): Promise<ImageRunRerunResponse> => {
+  return apiClient.post(`/image-runs/${subMessageId}/rerun`, data)
 };
 
 /**
