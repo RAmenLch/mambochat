@@ -51,6 +51,8 @@ from backend.crud import message_crud
 from backend.models.base_model import generate_uuid
 from backend.schemas import enums as schemas_enums
 from backend.schemas.message import McpToolContent, SubMessageConfig
+from backend.services.generation.agent.image_gen.sink import collect_file_ids
+from backend.services.generation.agent.image_gen.standard import FILE_OUTPUT_TOOLS
 from backend.services.stream_manager_service import stream_manager
 
 logger = logging.getLogger(__name__)
@@ -678,8 +680,9 @@ class TailToolMiddleware(AgentMiddleware):
             payload = schemas.message.SubMessage.model_validate(db_sub).model_dump(mode="json")
         await stream_manager.publish(self._message_id, {"type": "create", "sub_message": payload})
 
-        # show → 额外落一条 FILE 子消息(同样带 is_tail_tool,由尾部面板渲染)。
-        if name == "show" and not content.is_error:
+        # 产出文件的工具(show / image_generate_show) → 额外落 FILE 子消息
+        # (同样带 is_tail_tool,由尾部面板渲染)。
+        if name in FILE_OUTPUT_TOOLS and not content.is_error:
             await self._persist_show_file(call.get("output"))
 
     async def _persist_show_file(self, output: Optional[str]) -> None:
@@ -691,27 +694,40 @@ class TailToolMiddleware(AgentMiddleware):
             return
         if not isinstance(data, dict):
             return
+
+        mode = data.get("mode", "Normal")
         if data.get("status") == "pending":
-            file_cfg = SubMessageConfig(
-                context_participation_length=0,
-                is_tail_tool=True,
-                pending_file_path=data.get("path"),
-                pending_file_timeout=data.get("timeout", 300),
-                show_tool_mode=data.get("mode", "Normal"),
+            await self._append_file_sub_message(
+                content="",
+                status=schemas_enums.MessageStatus.WAITING,
+                config=SubMessageConfig(
+                    context_participation_length=0,
+                    is_tail_tool=True,
+                    pending_file_path=data.get("path"),
+                    pending_file_timeout=data.get("timeout", 300),
+                    show_tool_mode=mode,
+                ),
             )
-            status = schemas_enums.MessageStatus.WAITING
-            file_content = ""
-        elif data.get("file_id"):
-            file_cfg = SubMessageConfig(
-                context_participation_length=0,
-                is_tail_tool=True,
-                show_tool_mode=data.get("mode", "Normal"),
-            )
-            status = schemas_enums.MessageStatus.COMPLETED
-            file_content = data["file_id"]
-        else:
             return
 
+        for file_id in collect_file_ids(data):
+            await self._append_file_sub_message(
+                content=file_id,
+                status=schemas_enums.MessageStatus.COMPLETED,
+                config=SubMessageConfig(
+                    context_participation_length=0,
+                    is_tail_tool=True,
+                    show_tool_mode=mode,
+                ),
+            )
+
+    async def _append_file_sub_message(
+        self,
+        content: str,
+        status: str,
+        config: SubMessageConfig,
+    ) -> None:
+        """落一条 FILE 子消息并在有 file_id 时附带 file_info。"""
         sub_id = generate_uuid()
         async with self._session_factory() as db:
             db_sub = await message_crud.create_sub_message(
@@ -719,21 +735,21 @@ class TailToolMiddleware(AgentMiddleware):
                 message_id=self._message_id,
                 sub_message_data=schemas.message.SubMessageCreate(
                     id=sub_id,
-                    content=file_content,
+                    content=content,
                     sortOrder=91,
                     type=schemas_enums.SubMessageType.FILE.value,
                     status=status,
-                    config=file_cfg,
+                    config=config,
                 ),
                 sub_message_id=sub_id,
             )
             payload = schemas.message.SubMessage.model_validate(db_sub).model_dump(mode="json")
             # File 子消息需附带 file_info,前端据此立即渲染(见 executor/handlers.py 同款处理)
-            if file_content:
+            if content:
                 from backend.services.file_service import FileService
 
                 file_service = FileService(db)
-                file_record = await file_service.get_file(file_content)
+                file_record = await file_service.get_file(content)
                 if file_record:
                     payload["file_info"] = file_service.convert_to_schema(file_record).model_dump(
                         mode="json"

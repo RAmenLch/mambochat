@@ -279,7 +279,12 @@ export default {
       name: '名称',
       mcpServer: 'MCP 服务',
       defaults: '默认参数',
+      tools: '工具集',
       enabled: '状态',
+    },
+    tools: {
+      standard: '标准三件套',
+      generateShow: '一条龙生图',
     },
     form: {
       name: '配置名称',
@@ -295,6 +300,9 @@ export default {
       waitTimeoutHint: '对应 wait_timeout，0 表示立即返回；大于 0 时最多阻塞该秒数，任务完成即提前返回',
       timeout: '调用超时(秒)',
       timeoutHint: '留空则沿用 MCP 服务自身配置',
+      tools: '启用工具集',
+      toolsHint: '标准三件套为 image_generate / image_task_status / image_download；一条龙为 image_generate_show（生成 + 落盘 + 展示，一次调用完成）。两者至少启用一个，可同时启用',
+      toolsRequired: '标准三件套与一条龙生图至少需要启用一个',
       enabled: '启用',
       requiredHint: '请填写名称并选择 MCP 服务',
     },

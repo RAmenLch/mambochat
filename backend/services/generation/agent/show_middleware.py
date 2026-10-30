@@ -10,19 +10,17 @@ import json
 from pathlib import PurePosixPath
 from typing import Callable, Literal
 
-from fastapi import HTTPException
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import StructuredTool
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from pydantic import BaseModel, Field
 
-from mambo_agents.backends.protocol import BackendProtocol, _get_mime_type
+from mambo_agents.backends.protocol import BackendProtocol
 from mambo_agents.backends.schemas import VirtualPath
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.schemas.enums import FileManagementType
-from backend.services.file_service import FileService
+from backend.services.generation.agent.image_gen.sink import persist_path
 
 
 class ShowInput(BaseModel):
@@ -65,27 +63,6 @@ _SHOW_TOOL_DESCRIPTION = (
     "If the file path is definitely wrong or the script has already failed, do NOT use wait_timeout — "
     "pass 0 and the tool will fail fast."
 )
-
-
-async def _download_safe(
-    backend: BackendProtocol, path: str,
-) -> tuple[bytes | None, str | None]:
-    """Download file bytes from backend; return (content_bytes, error_str).
-
-    Uses ``adownload_files`` (async protocol method) so that backends with
-    per-instance locks (e.g. ``SshBackend._async_lock``) can serialize
-    SFTP access and avoid paramiko deadlocks on concurrent calls.
-    """
-    try:
-        results = await backend.adownload_files([VirtualPath(path)])
-        if not results:
-            return None, "adownload_files returned empty results"
-        r = results[0]
-        if r.error:
-            return None, str(r.error)
-        return r.content, None
-    except Exception as exc:
-        return None, str(exc)
 
 
 class ShowMiddleware(AgentMiddleware):
@@ -149,53 +126,13 @@ class ShowMiddleware(AgentMiddleware):
             return json.dumps({"error": f"File not found: {path}", "mode": mode}, ensure_ascii=False)
 
         # 3. 文件存在 → 下载 + 持久化
-        content_bytes, error = await _download_safe(self._backend, path)
-        if error:
-            return json.dumps({"error": error, "mode": mode}, ensure_ascii=False)
+        info, error = await persist_path(self._backend, self._session_factory, path)
+        if error or info is None:
+            return json.dumps(
+                {"error": error or "未知错误", "mode": mode}, ensure_ascii=False
+            )
 
-        filename = PurePosixPath(path).name
-        mime = _get_mime_type(path)
-
-        # If the content is valid UTF-8 text, treat it as text regardless of
-        # file extension.  This handles files like .env, Dockerfile, or other
-        # non-.txt extensions that contain plain UTF-8 text but whose MIME
-        # type was guessed as application/octet-stream (or another non-text
-        # type) by mimetypes / _get_mime_type.
-        if content_bytes:
-            sample = content_bytes[:8192]
-            try:
-                sample.decode("utf-8")
-                # Content is valid UTF-8 → use FileUtils to resolve the proper
-                # text MIME type (falling back to text/plain when the extension
-                # is not in the map).
-                from backend.utils.file_utils import FileUtils
-                mime = FileUtils.correct_mime_type(filename, mime, sample)
-            except (UnicodeDecodeError, ValueError, LookupError):
-                # Not valid UTF-8 text; keep the original MIME guess and let
-                # save_file_from_bytes perform its own detection / rejection.
-                pass
-
-        async with self._session_factory() as db:
-            fs = FileService(db)
-            try:
-                db_file = await fs.save_file_from_bytes(
-                    data=content_bytes or b"",
-                    filename=filename,
-                    mime_type=mime,
-                    management_type=[FileManagementType.SUB_MESSAGE.value],
-                    sub_path="chat_attachments",
-                )
-            except HTTPException as exc:
-                return json.dumps({"error": exc.detail, "mode": mode}, ensure_ascii=False)
-            except Exception as exc:
-                return json.dumps({"error": str(exc), "mode": mode}, ensure_ascii=False)
-
-        return json.dumps({
-            "file_id": db_file.id,
-            "filename": filename,
-            "mime_type": mime,
-            "mode": mode,
-        }, ensure_ascii=False)
+        return json.dumps({**info, "mode": mode}, ensure_ascii=False)
 
     # ------------------------------------------------------------------
     # Middleware hooks (delegate to default — no wrapping needed)

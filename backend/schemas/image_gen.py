@@ -3,7 +3,7 @@
 from typing import Optional, List
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from backend.services.generation.agent.image_gen.standard import (
     DEFAULT_COUNT,
@@ -41,11 +41,27 @@ class ImageGenConfigBase(BaseModel):
         description="状态工具默认阻塞等待秒数（wait_timeout），0 表示不等待",
     )
     timeout: Optional[float] = Field(None, description="单次工具调用超时（秒）")
+    enableStandardTools: bool = Field(
+        True,
+        description=(
+            "是否启用契约三件套（image_generate / image_task_status / image_download）"
+        ),
+    )
+    enableGenerateShow: bool = Field(
+        False,
+        description=(
+            "是否启用一条龙工具 image_generate_show（生成 + 落盘 + 展示）"
+        ),
+    )
     isEnabled: bool = Field(True, description="是否启用")
 
 
 class ImageGenConfigCreate(ImageGenConfigBase):
-    pass
+    @model_validator(mode="after")
+    def _ensure_tool_mode(self) -> "ImageGenConfigCreate":
+        if not self.enableStandardTools and not self.enableGenerateShow:
+            raise ValueError("标准三件套与一条龙工具至少需要启用一个")
+        return self
 
 
 class ImageGenConfigUpdate(BaseModel):
@@ -57,7 +73,15 @@ class ImageGenConfigUpdate(BaseModel):
     defaultResolution: Optional[str] = None
     defaultWaitTimeout: Optional[int] = Field(None, ge=0, le=MAX_WAIT_TIMEOUT)
     timeout: Optional[float] = None
+    enableStandardTools: Optional[bool] = None
+    enableGenerateShow: Optional[bool] = None
     isEnabled: Optional[bool] = None
+
+    @model_validator(mode="after")
+    def _ensure_not_both_off(self) -> "ImageGenConfigUpdate":
+        if self.enableStandardTools is False and self.enableGenerateShow is False:
+            raise ValueError("标准三件套与一条龙工具至少需要启用一个")
+        return self
 
 
 class ImageGenConfigResponse(ImageGenConfigBase):

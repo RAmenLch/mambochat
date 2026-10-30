@@ -18,7 +18,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
@@ -36,11 +36,20 @@ IMAGE_TOOL_GENERATE = "image_generate"
 IMAGE_TOOL_STATUS = "image_task_status"
 IMAGE_TOOL_DOWNLOAD = "image_download"
 
+# 契约三件套（MCP 服务必须实现，也是配置检测的唯一依据）
 IMAGE_TOOL_NAMES: Tuple[str, ...] = (
     IMAGE_TOOL_GENERATE,
     IMAGE_TOOL_STATUS,
     IMAGE_TOOL_DOWNLOAD,
 )
+
+# 平台侧「一条龙」工具：生成 → 落盘 → 入库展示，一步完成。
+# 它完全由平台包装上面三个原语实现，MCP 服务无需感知。
+IMAGE_TOOL_GENERATE_SHOW = "image_generate_show"
+
+# 产出 FILE 子消息的工具（前端据此把结果渲染成文件/图片）。
+# show 是通用展示工具，image_generate_show 是一条龙生图工具。
+FILE_OUTPUT_TOOLS: Tuple[str, ...] = ("show", IMAGE_TOOL_GENERATE_SHOW)
 
 # 工作区虚拟根：与 show 工具、agent 默认 workspace_root 保持一致
 WORKSPACE_ROOT = "/workspace"
@@ -61,6 +70,18 @@ MAX_RESOLUTION = 4096
 DEFAULT_WAIT_TIMEOUT = 0
 MAX_WAIT_TIMEOUT = 300
 POLL_INTERVAL = 1.5
+
+# 一条龙工具的默认阻塞上限（秒）：未单独配置且未显式传 timeout 时生效
+DEFAULT_ONESHOT_WAIT_TIMEOUT = 60
+
+# 文件名生成模式
+#   stamp —— 下载时刻的时间戳命名（三件套沿用，行为不变）
+#   task  —— 按 task_id 确定性命名（一条龙使用，下载前即可得知路径）
+NAMING_STAMP = "stamp"
+NAMING_TASK = "task"
+
+# 确定性命名时用于提前规划路径的兜底扩展名；实际下载后以 blob 上报的 mime 为准
+DEFAULT_EXT = ".png"
 
 _PREFIX_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _RESOLUTION_RE = re.compile(r"^\s*(\d{1,4})\s*[xX*×:：]\s*(\d{1,4})\s*$")
@@ -144,6 +165,58 @@ class ImageDownloadArgs(BaseModel):
     )
 
 
+class ImageGenerateShowArgs(BaseModel):
+    """``image_generate_show`` 的参数（一条龙：生成 + 落盘 + 展示）。"""
+
+    prompt: str = Field(description="正向提示词，描述期望生成的画面内容")
+    resolution: str = Field(
+        default=DEFAULT_RESOLUTION,
+        description=(
+            "图片分辨率，格式为 `宽x高`（单位像素），例如 1024x1024、768x1344；"
+            f"取值范围 {MIN_RESOLUTION}~{MAX_RESOLUTION}"
+        ),
+    )
+    negative_prompt: Optional[str] = Field(
+        default=None, description="反向提示词，描述不希望出现的内容"
+    )
+    count: int = Field(
+        default=DEFAULT_COUNT, description=f"生成数量，1~{MAX_COUNT}"
+    )
+    extra: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "透传给生图后端的额外参数（如 width/height/steps/seed/model 等）。"
+            "平台会原样扁平传入，与标准参数同名的键会被忽略"
+        ),
+    )
+    mode: Literal["Normal", "Mini_Avatar", "Gal_Avatar", "Group", "Spark"] = Field(
+        default="Normal",
+        description=(
+            "Display mode for the generated image:\n"
+            "- Normal: default inline file display\n"
+            "- Mini_Avatar: use image as conversation AI avatar\n"
+            "- Gal_Avatar: pin image to left side above toolbar, push AI messages right\n"
+            "- Group: group consecutive File images, allow user to pin one to top\n"
+            "- Spark: hide all other content (text/reasoning/tools), only show Spark + Group files"
+        ),
+    )
+    path: Optional[str] = Field(
+        default=None,
+        description=(
+            f"图片落地目录的虚拟路径，缺省为 {DEFAULT_OUTPUT_DIR}；"
+            f"必须位于 {WORKSPACE_ROOT} 之下。若以文件名结尾（如 "
+            f"{DEFAULT_OUTPUT_DIR}/fox.png），则目录与文件名前缀会随之推断"
+        ),
+    )
+    timeout: Optional[int] = Field(
+        default=None,
+        description=(
+            "本次等待生成完成的最长秒数；不传则使用配置的等待时长"
+            f"（{MAX_WAIT_TIMEOUT} 秒封顶）"
+        ),
+    )
+
+
 # ---------------------------------------------------------------------------
 # 分辨率解析
 # ---------------------------------------------------------------------------
@@ -192,6 +265,88 @@ class ImageBlob:
 
 class ImageGenToolError(Exception):
     """生图后端返回的业务错误（可直接展示给 LLM）。"""
+
+
+def _sanitize_token(value: Any, fallback: str = "task") -> str:
+    """把任意 task_id 收敛为可安全用于文件名的片段。"""
+    text = str(value or "").strip()
+    cleaned = re.sub(r"[^A-Za-z0-9_-]", "_", text).strip("_")
+    return cleaned[:64] or fallback
+
+
+@dataclass
+class ImageTarget:
+    """一张图片的确定落盘位置（下载前即可算出）。"""
+
+    path: VirtualPath
+    index: int
+    mime_type: str
+    extension: str
+
+
+@dataclass
+class TargetPlan:
+    """落盘路径规划器。
+
+    既可以「下载前预测路径」（``predict``，供“先登记、后落盘”的异步流程使用），
+    也可以「拿到真实 blob 后物化路径」（``resolve``，扩展名以 blob 上报的 mime 为准）。
+    """
+
+    task_id: str
+    output_dir: str
+    prefix: str
+    naming: str
+    stamp: str
+    ext: Optional[str] = None
+
+    def _filename(self, index: int, multi: bool, extension: str) -> str:
+        suffix = f"_{index}" if multi else ""
+        if self.naming == NAMING_TASK:
+            token = _sanitize_token(self.task_id)
+        else:
+            token = self.stamp
+        return f"{self.prefix}_{token}{suffix}{extension}"
+
+    def resolve(self, blobs: List[ImageBlob]) -> List[Tuple[ImageTarget, ImageBlob]]:
+        """按真实 blob 列表物化路径（扩展名取自 blob 的 mime）。"""
+        multi = len(blobs) > 1
+        resolved: List[Tuple[ImageTarget, ImageBlob]] = []
+        for blob in blobs:
+            extension = blob.extension
+            filename = self._filename(blob.index, multi, extension)
+            target = ImageTarget(
+                path=VirtualPath(f"{self.output_dir}/{filename}"),
+                index=blob.index,
+                mime_type=blob.mime_type,
+                extension=extension,
+            )
+            resolved.append((target, blob))
+        return resolved
+
+    def predict(self, count: int) -> List[ImageTarget]:
+        """不联网地预测 ``count`` 张图片的落盘路径（扩展名取兜底值）。"""
+        multi = count > 1
+        extension = self.ext or DEFAULT_EXT
+        return [
+            ImageTarget(
+                path=VirtualPath(
+                    f"{self.output_dir}/{self._filename(index, multi, extension)}"
+                ),
+                index=index,
+                mime_type="",
+                extension=extension,
+            )
+            for index in range(max(1, count))
+        ]
+
+
+@dataclass
+class DownloadOutcome:
+    """一次下载的结果。"""
+
+    files: List[Dict[str, Any]]
+    errors: List[str]
+    items: List[Tuple[ImageTarget, bytes]]
 
 
 # ---------------------------------------------------------------------------
@@ -303,51 +458,114 @@ class ImageGenStandard(ABC):
     async def run_download(
         self, backend: Optional[BackendProtocol], args: ImageDownloadArgs
     ) -> str:
-        if backend is None:
-            raise ImageGenToolError(
-                "当前会话没有可写的 backend，无法保存图片。请先为该 Agent 挂载一个 Backend。"
-            )
+        backend = self._require_backend(backend)
 
         await self._status_until_settled(
             args.task_id, self._clamp_wait_timeout(args.wait_timeout)
         )
 
-        blobs = await self.download(args.task_id, args.index)
-        if not blobs:
-            raise ImageGenToolError(f"任务 {args.task_id} 没有可下载的图片")
-
-        output_dir, prefix = self._resolve_target(args.path, args.prefix)
-        targets = self._build_targets(blobs, output_dir, prefix)
-
-        payloads: List[Tuple[VirtualPath, ImageBlob, bytes]] = [
-            (vp, blob, self._decode(blob)) for vp, blob in targets
-        ]
-        results = await backend.aupload_files(
-            [(vp, data) for vp, _, data in payloads]
+        plan = self.plan_targets(
+            task_id=args.task_id,
+            path=args.path,
+            prefix=args.prefix,
+            naming=NAMING_STAMP,
         )
+        outcome = await self.download_to(backend, args.task_id, plan, index=args.index)
+        if not outcome.files:
+            raise ImageGenToolError(
+                "图片保存失败: "
+                + ("; ".join(outcome.errors) if outcome.errors else "未知原因")
+            )
 
-        files: List[Dict[str, Any]] = []
-        errors: List[str] = []
-        for (vp, blob, data), res in zip(payloads, results):
-            err = getattr(res, "error", None)
-            if err is not None:
-                errors.append(f"{vp.value}: {getattr(err, 'message', err)}")
-                continue
-            files.append(
+        result: Dict[str, Any] = {"task_id": args.task_id, "files": outcome.files}
+        if outcome.errors:
+            result["errors"] = outcome.errors
+        return self._dumps(result)
+
+    async def run_generate_show(
+        self,
+        backend: Optional[BackendProtocol],
+        session_factory: Optional[Callable[[], Any]],
+        args: ImageGenerateShowArgs,
+    ) -> str:
+        """一条龙：生成 → 等待 → 确定性命名落盘 → 入库 → 返回 file_id。
+
+        超时未收敛时不做任何落盘，返回 ``task_id`` 让 LLM 退回三件套继续。
+        """
+        backend = self._require_backend(backend)
+        if session_factory is None:
+            raise ImageGenToolError(
+                "当前会话无法访问文件库，无法展示生成的图片。请检查服务端配置。"
+            )
+
+        count = self._clamp_count(args.count)
+        resolution = self._normalize_resolution(args.resolution)
+        extra = self._merge_extra(args.extra, resolution)
+
+        payload = await self.submit(
+            prompt=args.prompt,
+            negative_prompt=args.negative_prompt,
+            count=count,
+            sync=self._default_sync,
+            extra=extra,
+            resolution=resolution,
+        )
+        task_id = self._require_task_id(payload)
+
+        timeout = self._resolve_oneshot_timeout(args.timeout)
+        settled = await self._status_until_settled(task_id, timeout)
+        status = self._normalize_status(settled.get("status"))
+        if status in ("failed", "expired"):
+            raise ImageGenToolError(
+                f"生成任务 {task_id} {status}: "
+                + str(settled.get("error") or "后端未提供失败原因")
+            )
+        if not self._is_settled(settled):
+            return self._dumps(
                 {
-                    "index": blob.index,
-                    "path": vp.value,
-                    "mime": blob.mime_type,
-                    "bytes": len(data),
+                    "task_id": task_id,
+                    "status": status,
+                    "progress": self._normalize_progress(settled.get("progress")),
+                    "count": count,
+                    "resolution": resolution,
+                    "files": [],
+                    "mode": args.mode,
+                    "note": (
+                        f"生成未在 {timeout} 秒内完成，图片尚未就绪。"
+                        "请稍后用 image_task_status(wait_timeout=30) 查询进度，"
+                        "完成后再用 image_download 取图并调用 show 展示。"
+                    ),
                 }
             )
 
-        if not files:
+        plan = self.plan_targets(
+            task_id=task_id,
+            path=args.path or DEFAULT_OUTPUT_DIR,
+            naming=NAMING_TASK,
+        )
+        outcome = await self.download_to(backend, task_id, plan)
+        if not outcome.items:
             raise ImageGenToolError(
-                "图片保存失败: " + ("; ".join(errors) if errors else "未知原因")
+                "图片保存失败: "
+                + ("; ".join(outcome.errors) if outcome.errors else "未知原因")
             )
 
-        result: Dict[str, Any] = {"task_id": args.task_id, "files": files}
+        from .sink import persist_uploaded
+
+        files, persist_errors = await persist_uploaded(session_factory, outcome.items)
+        if not files:
+            reason = "; ".join(persist_errors or outcome.errors) or "未知原因"
+            raise ImageGenToolError(f"图片入库失败: {reason}")
+
+        result: Dict[str, Any] = {
+            "task_id": task_id,
+            "status": "completed",
+            "count": count,
+            "resolution": resolution,
+            "mode": args.mode,
+            "files": files,
+        }
+        errors = outcome.errors + persist_errors
         if errors:
             result["errors"] = errors
         return self._dumps(result)
@@ -381,6 +599,10 @@ class ImageGenStandard(ABC):
             "extra",
             "wait_timeout",
             RESOLUTION_ARG,
+            # 平台侧参数：仅用于落盘与展示，不该下发给服务
+            "mode",
+            "path",
+            "prefix",
         }
         merged = {k: v for k, v in (extra or {}).items() if k not in reserved}
 
@@ -407,6 +629,22 @@ class ImageGenStandard(ABC):
         except (TypeError, ValueError):
             return DEFAULT_WAIT_TIMEOUT
         return max(0, min(seconds, MAX_WAIT_TIMEOUT))
+
+    def _resolve_oneshot_timeout(self, value: Optional[int]) -> int:
+        """一条龙的等待上限：显式入参 > 配置项 > 默认 60 秒。"""
+        if value is not None:
+            return self._clamp_wait_timeout(value)
+        if self._default_wait_timeout > 0:
+            return self._clamp_wait_timeout(self._default_wait_timeout)
+        return self._clamp_wait_timeout(DEFAULT_ONESHOT_WAIT_TIMEOUT)
+
+    @staticmethod
+    def _require_backend(backend: Optional[BackendProtocol]) -> BackendProtocol:
+        if backend is None:
+            raise ImageGenToolError(
+                "当前会话没有可写的 backend，无法保存图片。请先为该 Agent 挂载一个 Backend。"
+            )
+        return backend
 
     async def _status_until_settled(
         self, task_id: str, wait_timeout: int
@@ -524,16 +762,70 @@ class ImageGenStandard(ABC):
             )
         return prefix
 
-    def _build_targets(
-        self, blobs: List[ImageBlob], output_dir: str, prefix: str
-    ) -> List[Tuple[VirtualPath, ImageBlob]]:
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        targets: List[Tuple[VirtualPath, ImageBlob]] = []
-        for position, blob in enumerate(blobs):
-            suffix = f"_{blob.index}" if len(blobs) > 1 else ""
-            filename = f"{prefix}_{stamp}{suffix}{blob.extension}"
-            targets.append((VirtualPath(f"{output_dir}/{filename}"), blob))
-        return targets
+    def plan_targets(
+        self,
+        *,
+        task_id: str,
+        path: str,
+        prefix: Optional[str] = None,
+        naming: str = NAMING_STAMP,
+    ) -> TargetPlan:
+        """计算落盘路径规划器（纯计算，不联网、不触达 backend）。
+
+        ``path`` 缺失或越界一律报错；``prefix`` 缺省从 path 的文件名推断，
+        仍无则用 ``DEFAULT_PREFIX``。``naming=NAMING_TASK`` 时文件名按
+        ``task_id`` 确定性生成，可在下载前预测最终路径。
+        """
+        output_dir, resolved_prefix = self._resolve_target(path, prefix)
+        return TargetPlan(
+            task_id=str(task_id or ""),
+            output_dir=output_dir,
+            prefix=resolved_prefix,
+            naming=naming,
+            stamp=datetime.now().strftime("%Y%m%d_%H%M%S"),
+        )
+
+    async def download_to(
+        self,
+        backend: Optional[BackendProtocol],
+        task_id: str,
+        plan: TargetPlan,
+        *,
+        index: Optional[int] = None,
+    ) -> DownloadOutcome:
+        """按已规划的路径下载并落盘，返回含元信息与原始字节的结果。"""
+        backend = self._require_backend(backend)
+
+        blobs = await self.download(task_id, index)
+        if not blobs:
+            raise ImageGenToolError(f"任务 {task_id} 没有可下载的图片")
+
+        payloads: List[Tuple[ImageTarget, bytes]] = [
+            (target, self._decode(blob)) for target, blob in plan.resolve(blobs)
+        ]
+        results = await backend.aupload_files(
+            [(target.path, data) for target, data in payloads]
+        )
+
+        files: List[Dict[str, Any]] = []
+        errors: List[str] = []
+        items: List[Tuple[ImageTarget, bytes]] = []
+        for (target, data), res in zip(payloads, results):
+            err = getattr(res, "error", None)
+            if err is not None:
+                errors.append(f"{target.path.value}: {getattr(err, 'message', err)}")
+                continue
+            files.append(
+                {
+                    "index": target.index,
+                    "path": target.path.value,
+                    "mime": target.mime_type,
+                    "bytes": len(data),
+                }
+            )
+            items.append((target, data))
+
+        return DownloadOutcome(files=files, errors=errors, items=items)
 
     @staticmethod
     def _decode(blob: ImageBlob) -> bytes:

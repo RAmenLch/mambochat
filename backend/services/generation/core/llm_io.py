@@ -256,6 +256,11 @@ class AgentConfig(BaseModel):
         description="生图标准实现（ImageGenStandard 实例）。由 initializer 依据生图配置构建，"
                     "builder 消费以注册生图工具中间件。为 None 时不启用"
     )
+    image_gen_tools: Optional[List[str]] = Field(
+        default=None,
+        description="本次要注册的生图工具名集合（由生图配置的两个开关决定）。"
+                    "None 时按契约三件套兜底"
+    )
     memory_resource_roots: Optional[Dict[str, str]] = Field(
         default=None,
         description="长期记忆资源映射（仅 Mambo Agent）：{resource_name: resource_id}。"

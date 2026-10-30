@@ -659,8 +659,25 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
             from backend.services.generation.agent.image_gen.middleware import (
                 build_image_gen_middleware,
             )
+            from backend.services.generation.agent.image_gen.standard import (
+                IMAGE_TOOL_GENERATE_SHOW,
+                IMAGE_TOOL_NAMES,
+            )
+            _image_gen_tools = list(getattr(agent_config, 'image_gen_tools', None) or [])
+            if not _image_gen_tools:
+                # 兜底：未显式指定工具集时保持契约三件套
+                _image_gen_tools = list(IMAGE_TOOL_NAMES)
+            _with_generate_show = IMAGE_TOOL_GENERATE_SHOW in _image_gen_tools
             _image_gen_middleware = build_image_gen_middleware(
-                _image_gen_standard, backend
+                _image_gen_standard,
+                backend,
+                session_factory=(
+                    _make_session_factory() if _with_generate_show else None
+                ),
+                enable_standard_tools=any(
+                    name in _image_gen_tools for name in IMAGE_TOOL_NAMES
+                ),
+                enable_generate_show=_with_generate_show,
             )
 
         # --- Tail tool middleware (opt-in; enable_suggest 时注入 suggest 尾部工具) ---

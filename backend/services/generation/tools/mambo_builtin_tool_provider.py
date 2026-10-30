@@ -17,6 +17,8 @@ from backend.services.generation.core.instructions import (
 from backend.schemas import enums as schemas_enums
 from backend.schemas.message import McpToolContent, MultimodalMedia, SubMessageConfig
 from backend.models.base_model import generate_uuid
+from backend.services.generation.agent.image_gen.standard import FILE_OUTPUT_TOOLS
+from backend.services.generation.agent.image_gen.sink import collect_file_ids
 
 
 class MamboAgentBuiltinToolProvider(BaseToolProvider):
@@ -134,8 +136,8 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
         sub_id = self._tool_sub_msg_map.get(tool_call_id)
         cached_content = self._tool_info_cache.get(tool_call_id)
 
-        # --- show 工具特殊处理：额外创建 FILE 子消息 ---
-        if cached_content and cached_content.name == "show" and not is_error:
+        # --- 产出文件的工具特殊处理：额外创建 FILE 子消息 ---
+        if cached_content and cached_content.name in FILE_OUTPUT_TOOLS and not is_error:
             try:
                 data = json.loads(result_text)
 
@@ -154,8 +156,11 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
                         ),
                     )
                 else:
-                    file_id = data.get("file_id")
-                    if file_id:
+                    # 兼容两种结果形态：
+                    #   show → {"file_id": ...}
+                    #   image_generate_show → {"files": [{"file_id": ..., "path": ...}, ...]}
+                    file_ids = self._collect_file_ids(data)
+                    for file_id in file_ids:
                         yield CreateSubMessage(
                             sub_message_id=generate_uuid(),
                             type=schemas_enums.SubMessageType.FILE.value,
@@ -219,6 +224,11 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
         self._tool_sub_msg_map[tool_call_id] = sub_message_id
         if isinstance(tool_content, McpToolContent):
             self._tool_info_cache[tool_call_id] = tool_content
+
+    @staticmethod
+    def _collect_file_ids(data: Dict[str, Any]) -> List[str]:
+        """从工具结果里收集待展示的文件 ID（兼容单文件与多文件两种形态）。"""
+        return collect_file_ids(data)
 
     _MEDIA_EXTENSIONS = {
         "image": {".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".heif"},

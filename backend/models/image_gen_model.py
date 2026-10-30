@@ -33,6 +33,12 @@ class ImageGenConfig(Base):
     # 单次 MCP 工具调用超时（秒），None 表示沿用 MCP 服务自身配置
     timeout = Column(Float, nullable=True)
 
+    # 工具集开关（两者至少开启一个）
+    # enableStandardTools：契约三件套 image_generate / image_task_status / image_download
+    # enableGenerateShow：平台侧一条龙 image_generate_show（生成 + 落盘 + 展示）
+    enableStandardTools = Column(Boolean, nullable=False, default=True)
+    enableGenerateShow = Column(Boolean, nullable=False, default=False)
+
     isEnabled = Column(Boolean, default=True)
 
     createdAt = Column(DateTime, nullable=False, default=get_configured_now)

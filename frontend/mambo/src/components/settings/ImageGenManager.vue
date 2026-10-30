@@ -48,6 +48,17 @@
         </template>
       </el-table-column>
 
+      <el-table-column :label="t('settings.imageGen.columns.tools')" width="200">
+        <template #default="{ row }">
+          <el-tag v-if="row.enableStandardTools" size="small" effect="plain">
+            {{ t('settings.imageGen.tools.standard') }}
+          </el-tag>
+          <el-tag v-if="row.enableGenerateShow" size="small" effect="plain" type="warning" class="ml-4">
+            {{ t('settings.imageGen.tools.generateShow') }}
+          </el-tag>
+        </template>
+      </el-table-column>
+
       <el-table-column :label="t('settings.imageGen.columns.enabled')" width="80">
         <template #default="{ row }">
           <el-tag :type="row.isEnabled ? 'success' : 'danger'" effect="dark" size="small">
@@ -143,6 +154,16 @@
         <el-form-item :label="t('settings.imageGen.form.enabled')">
           <el-switch v-model="form.isEnabled" />
         </el-form-item>
+
+        <el-form-item :label="t('settings.imageGen.form.tools')" required class="has-hint">
+          <el-checkbox v-model="form.enableStandardTools">
+            {{ t('settings.imageGen.tools.standard') }}
+          </el-checkbox>
+          <el-checkbox v-model="form.enableGenerateShow" class="ml-4">
+            {{ t('settings.imageGen.tools.generateShow') }}
+          </el-checkbox>
+          <div class="form-hint">{{ t('settings.imageGen.form.toolsHint') }}</div>
+        </el-form-item>
       </el-form>
 
       <template #footer>
@@ -186,6 +207,8 @@ const form = reactive({
   defaultSync: true,
   defaultWaitTimeout: 0,
   timeout: undefined as number | undefined,
+  enableStandardTools: true,
+  enableGenerateShow: true,
   isEnabled: true,
 });
 
@@ -204,6 +227,8 @@ function resetForm() {
   form.defaultSync = true;
   form.defaultWaitTimeout = 0;
   form.timeout = undefined;
+  form.enableStandardTools = true;
+  form.enableGenerateShow = true;
   form.isEnabled = true;
 }
 
@@ -225,6 +250,8 @@ function handleEdit(row: ImageGenConfig) {
   form.defaultSync = row.defaultSync;
   form.defaultWaitTimeout = row.defaultWaitTimeout ?? 0;
   form.timeout = row.timeout ?? undefined;
+  form.enableStandardTools = row.enableStandardTools !== false;
+  form.enableGenerateShow = row.enableGenerateShow === true;
   form.isEnabled = row.isEnabled;
   dialogVisible.value = true;
 }
@@ -232,6 +259,10 @@ function handleEdit(row: ImageGenConfig) {
 async function handleSave() {
   if (!form.name.trim() || !form.mcpServerId) {
     ElMessage.warning(t('settings.imageGen.form.requiredHint'));
+    return;
+  }
+  if (!form.enableStandardTools && !form.enableGenerateShow) {
+    ElMessage.warning(t('settings.imageGen.form.toolsRequired'));
     return;
   }
   saving.value = true;
@@ -245,6 +276,8 @@ async function handleSave() {
       defaultSync: form.defaultSync,
       defaultWaitTimeout: form.defaultWaitTimeout ?? 0,
       timeout: form.timeout ?? null,
+      enableStandardTools: form.enableStandardTools,
+      enableGenerateShow: form.enableGenerateShow,
       isEnabled: form.isEnabled,
     };
     if (isEditing.value && editingId.value) {

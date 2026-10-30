@@ -282,7 +282,12 @@ export default {
       name: 'Name',
       mcpServer: 'MCP Service',
       defaults: 'Defaults',
+      tools: 'Tool set',
       enabled: 'Status',
+    },
+    tools: {
+      standard: 'Standard trio',
+      generateShow: 'One-shot generation',
     },
     form: {
       name: 'Config Name',
@@ -298,6 +303,9 @@ export default {
       waitTimeoutHint: 'Corresponds to wait_timeout; 0 returns immediately, otherwise blocks up to that many seconds and returns early once the task settles',
       timeout: 'Call Timeout (s)',
       timeoutHint: 'Leave empty to inherit the MCP service timeout',
+      tools: 'Enabled tool sets',
+      toolsHint: 'Standard trio = image_generate / image_task_status / image_download; one-shot = image_generate_show (generate + save + display in a single call). At least one must be enabled; both can be enabled.',
+      toolsRequired: 'Enable at least one of the standard trio and the one-shot tool',
       enabled: 'Enabled',
       requiredHint: 'Please fill in a name and select an MCP service',
     },

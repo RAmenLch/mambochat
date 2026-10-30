@@ -60,6 +60,25 @@ async def update_image_gen_config(
         if existing and existing.id != config_id:
             raise HTTPException(status_code=400, detail="配置名称已存在")
 
+    current = await image_gen_crud.get_image_gen_config(db, config_id)
+    if not current:
+        raise HTTPException(status_code=404, detail="生图配置不存在")
+
+    standard_tools = (
+        payload.enableStandardTools
+        if payload.enableStandardTools is not None
+        else current.enableStandardTools
+    )
+    generate_show = (
+        payload.enableGenerateShow
+        if payload.enableGenerateShow is not None
+        else current.enableGenerateShow
+    )
+    if not standard_tools and not generate_show:
+        raise HTTPException(
+            status_code=400, detail="标准三件套与一条龙工具至少需要启用一个"
+        )
+
     updated = await image_gen_crud.update_image_gen_config(db, config_id, payload)
     if not updated:
         raise HTTPException(status_code=404, detail="生图配置不存在")

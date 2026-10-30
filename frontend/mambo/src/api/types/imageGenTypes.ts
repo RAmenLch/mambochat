@@ -10,6 +10,8 @@ export interface ImageGenConfig {
   defaultResolution: string;
   defaultWaitTimeout: number;
   timeout: number | null;
+  enableStandardTools: boolean;
+  enableGenerateShow: boolean;
   isEnabled: boolean;
   createdAt?: string | null;
   updatedAt?: string | null;
@@ -24,6 +26,8 @@ export interface ImageGenConfigCreate {
   defaultResolution?: string;
   defaultWaitTimeout?: number;
   timeout?: number | null;
+  enableStandardTools?: boolean;
+  enableGenerateShow?: boolean;
   isEnabled?: boolean;
 }
 
@@ -36,6 +40,8 @@ export interface ImageGenConfigUpdate {
   defaultResolution?: string;
   defaultWaitTimeout?: number;
   timeout?: number | null;
+  enableStandardTools?: boolean;
+  enableGenerateShow?: boolean;
   isEnabled?: boolean;
 }
 

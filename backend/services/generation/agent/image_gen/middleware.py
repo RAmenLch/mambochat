@@ -7,22 +7,27 @@
 
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.tools import StructuredTool
 from mambo_agents.backends.protocol import BackendProtocol
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from .standard import (
+    DEFAULT_ONESHOT_WAIT_TIMEOUT,
+    DEFAULT_OUTPUT_DIR,
     DEFAULT_RESOLUTION,
     DEFAULT_WAIT_TIMEOUT,
     IMAGE_TOOL_DOWNLOAD,
     IMAGE_TOOL_GENERATE,
+    IMAGE_TOOL_GENERATE_SHOW,
     IMAGE_TOOL_NAMES,
     IMAGE_TOOL_STATUS,
     ImageDownloadArgs,
     ImageGenStandard,
     ImageGenerateArgs,
+    ImageGenerateShowArgs,
     ImageStatusArgs,
 )
 
@@ -59,42 +64,96 @@ _DOWNLOAD_DESCRIPTION = (
     "before downloading."
 )
 
+_GENERATE_SHOW_DESCRIPTION = (
+    "One-shot image generation AND presentation: generate from a text prompt, "
+    "wait for the image, save it into the workspace, and display it to the human "
+    "user in one call. Returns {files:[{index, path, file_id, mime}], mode}. "
+    "Prefer this tool whenever the user wants to see the generated image. "
+    "'resolution' is 'WIDTHxHEIGHT' in pixels (e.g. '1024x1024', '768x1344'); "
+    "omit it to use the configured default. 'mode' picks the display mode "
+    "(Normal / Mini_Avatar / Gal_Avatar / Group / Spark). 'path' is an optional "
+    f"workspace directory for the saved files (default {DEFAULT_OUTPUT_DIR}); if it "
+    "ends with a filename like /workspace/images/fox.png the directory and the "
+    "filename prefix are inferred from it. 'timeout' is the max seconds to wait "
+    f"(default {DEFAULT_ONESHOT_WAIT_TIMEOUT}); if the task is still running by then, "
+    "nothing is saved and you get the task_id back so you can continue with "
+    "image_task_status / image_download / show. Extra backend parameters "
+    "(width/height/steps/seed/model/...) go in 'extra' and are forwarded verbatim."
+)
+
+# 两个工具集都开启时，给三件套追加一句指引，避免 LLM 走 4 步
+_ONESHOT_HINT = (
+    " NOTE: when the user should actually see the image, the one-shot tool "
+    "'image_generate_show' does generation + saving + display in a single call — "
+    "prefer it over this multi-step flow."
+)
+
 
 class ImageGenMiddleware(AgentMiddleware):
-    """Registers the three image generation tools and owns the backend sink."""
+    """Registers the image generation tools and owns the backend/file sink.
+
+    Parameters
+    ----------
+    enable_standard_tools:
+        是否注册契约三件套（``image_generate`` / ``image_task_status`` /
+        ``image_download``）。
+    enable_generate_show:
+        是否注册一条龙工具 ``image_generate_show``（生成 + 落盘 + 展示）。
+    """
 
     def __init__(
         self,
         standard: ImageGenStandard,
         backend: Optional[BackendProtocol],
+        *,
+        session_factory: Optional[Callable[[], AsyncSession]] = None,
+        enable_standard_tools: bool = True,
+        enable_generate_show: bool = False,
     ) -> None:
         super().__init__()
         self._standard = standard
         self._backend = backend
+        self._session_factory = session_factory
 
-        self.tools = [
-            StructuredTool.from_function(
-                name=IMAGE_TOOL_GENERATE,
-                description=_GENERATE_DESCRIPTION,
-                coroutine=self._agenerate,
-                args_schema=ImageGenerateArgs,
-                infer_schema=False,
-            ),
-            StructuredTool.from_function(
-                name=IMAGE_TOOL_STATUS,
-                description=_STATUS_DESCRIPTION,
-                coroutine=self._astatus,
-                args_schema=ImageStatusArgs,
-                infer_schema=False,
-            ),
-            StructuredTool.from_function(
-                name=IMAGE_TOOL_DOWNLOAD,
-                description=_DOWNLOAD_DESCRIPTION,
-                coroutine=self._adownload,
-                args_schema=ImageDownloadArgs,
-                infer_schema=False,
-            ),
-        ]
+        tools = []
+        if enable_standard_tools:
+            hint = _ONESHOT_HINT if enable_generate_show else ""
+            tools.extend(
+                [
+                    StructuredTool.from_function(
+                        name=IMAGE_TOOL_GENERATE,
+                        description=_GENERATE_DESCRIPTION + hint,
+                        coroutine=self._agenerate,
+                        args_schema=ImageGenerateArgs,
+                        infer_schema=False,
+                    ),
+                    StructuredTool.from_function(
+                        name=IMAGE_TOOL_STATUS,
+                        description=_STATUS_DESCRIPTION,
+                        coroutine=self._astatus,
+                        args_schema=ImageStatusArgs,
+                        infer_schema=False,
+                    ),
+                    StructuredTool.from_function(
+                        name=IMAGE_TOOL_DOWNLOAD,
+                        description=_DOWNLOAD_DESCRIPTION + hint,
+                        coroutine=self._adownload,
+                        args_schema=ImageDownloadArgs,
+                        infer_schema=False,
+                    ),
+                ]
+            )
+        if enable_generate_show:
+            tools.append(
+                StructuredTool.from_function(
+                    name=IMAGE_TOOL_GENERATE_SHOW,
+                    description=_GENERATE_SHOW_DESCRIPTION,
+                    coroutine=self._agenerate_show,
+                    args_schema=ImageGenerateShowArgs,
+                    infer_schema=False,
+                )
+            )
+        self.tools = tools
 
     # ------------------------------------------------------------------
     # 工具实现
@@ -155,6 +214,35 @@ class ImageGenMiddleware(AgentMiddleware):
             ),
         )
 
+    async def _agenerate_show(
+        self,
+        prompt: str,
+        resolution: str = DEFAULT_RESOLUTION,
+        negative_prompt: Optional[str] = None,
+        count: int = 1,
+        extra: Optional[Dict[str, Any]] = None,
+        mode: str = "Normal",
+        path: Optional[str] = None,
+        timeout: Optional[int] = None,
+    ) -> str:
+        return await self._safe(
+            IMAGE_TOOL_GENERATE_SHOW,
+            lambda: self._standard.run_generate_show(
+                self._backend,
+                self._session_factory,
+                ImageGenerateShowArgs(
+                    prompt=prompt,
+                    resolution=resolution or "",
+                    negative_prompt=negative_prompt,
+                    count=count,
+                    extra=extra,
+                    mode=mode,
+                    path=path,
+                    timeout=timeout,
+                ),
+            ),
+        )
+
     # ------------------------------------------------------------------
     # 异常安全
     # ------------------------------------------------------------------
@@ -173,10 +261,21 @@ class ImageGenMiddleware(AgentMiddleware):
 
 
 def build_image_gen_middleware(
-    standard: ImageGenStandard, backend: Optional[BackendProtocol]
+    standard: ImageGenStandard,
+    backend: Optional[BackendProtocol],
+    *,
+    session_factory: Optional[Callable[[], AsyncSession]] = None,
+    enable_standard_tools: bool = True,
+    enable_generate_show: bool = False,
 ) -> ImageGenMiddleware:
     """便捷构造器。"""
-    return ImageGenMiddleware(standard=standard, backend=backend)
+    return ImageGenMiddleware(
+        standard=standard,
+        backend=backend,
+        session_factory=session_factory,
+        enable_standard_tools=enable_standard_tools,
+        enable_generate_show=enable_generate_show,
+    )
 
 
 __all__ = [
