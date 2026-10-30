@@ -697,17 +697,22 @@ class TailToolMiddleware(AgentMiddleware):
 
         mode = data.get("mode", "Normal")
         if data.get("status") == "pending":
-            await self._append_file_sub_message(
-                content="",
-                status=schemas_enums.MessageStatus.WAITING,
-                config=SubMessageConfig(
-                    context_participation_length=0,
-                    is_tail_tool=True,
-                    pending_file_path=data.get("path"),
-                    pending_file_timeout=data.get("timeout", 300),
-                    show_tool_mode=mode,
-                ),
-            )
+            paths = data.get("paths") or ([data["path"]] if data.get("path") else [])
+            for path in paths:
+                await self._append_file_sub_message(
+                    content="",
+                    status=schemas_enums.MessageStatus.WAITING,
+                    config=SubMessageConfig(
+                        context_participation_length=0,
+                        is_tail_tool=True,
+                        pending_file_path=path,
+                        pending_file_timeout=data.get("timeout", 300),
+                        show_tool_mode=mode,
+                        pending_image_task_id=data.get("task_id"),
+                        pending_image_prefix=data.get("prefix"),
+                        pending_image_count=data.get("count"),
+                    ),
+                )
             return
 
         for file_id in collect_file_ids(data):

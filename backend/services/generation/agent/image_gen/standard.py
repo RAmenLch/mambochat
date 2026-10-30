@@ -115,9 +115,12 @@ class ImageGenerateArgs(BaseModel):
     count: int = Field(
         default=DEFAULT_COUNT, description=f"生成数量，1~{MAX_COUNT}"
     )
-    sync: bool = Field(
-        default=True,
-        description="是否同步等待生成完成；false 时立即返回任务 ID，需用状态工具查询",
+    sync: Optional[bool] = Field(
+        default=None,
+        description=(
+            "是否同步等待生成完成；false 时立即返回任务 ID，需用状态工具查询。"
+            "不传则使用配置的默认值"
+        ),
     )
     extra: Optional[Dict[str, Any]] = Field(
         default=None,
@@ -290,6 +293,9 @@ class TargetPlan:
 
     既可以「下载前预测路径」（``predict``，供“先登记、后落盘”的异步流程使用），
     也可以「拿到真实 blob 后物化路径」（``resolve``，扩展名以 blob 上报的 mime 为准）。
+
+    ``multi`` 显式锁定「是否带多图下标后缀」：异步流程在下载前就已登记路径，
+    必须保证之后落盘用的判断一致（否则服务少返回几张图时文件名会对不上）。
     """
 
     task_id: str
@@ -298,6 +304,7 @@ class TargetPlan:
     naming: str
     stamp: str
     ext: Optional[str] = None
+    multi: Optional[bool] = None
 
     def _filename(self, index: int, multi: bool, extension: str) -> str:
         suffix = f"_{index}" if multi else ""
@@ -307,25 +314,38 @@ class TargetPlan:
             token = self.stamp
         return f"{self.prefix}_{token}{suffix}{extension}"
 
+    def _is_multi(self, blob_count: int) -> bool:
+        return self.multi if self.multi is not None else blob_count > 1
+
     def resolve(self, blobs: List[ImageBlob]) -> List[Tuple[ImageTarget, ImageBlob]]:
-        """按真实 blob 列表物化路径（扩展名取自 blob 的 mime）。"""
-        multi = len(blobs) > 1
+        """按真实 blob 列表物化路径（扩展名取自 blob 的 mime）。
+
+        服务实际产出的张数可能超出预期（例如请求 1 张却返回 2 张）：此时若
+        仍不带下标后缀，多张图会撞成同一个文件名互相覆盖，因此统一降级为
+        带下标的形式。
+        """
+        multi = self._is_multi(len(blobs))
+        filenames = [self._filename(blob.index, multi, blob.extension) for blob in blobs]
+        if len(set(filenames)) != len(filenames):
+            multi = True
+            filenames = [
+                self._filename(blob.index, multi, blob.extension) for blob in blobs
+            ]
+
         resolved: List[Tuple[ImageTarget, ImageBlob]] = []
-        for blob in blobs:
-            extension = blob.extension
-            filename = self._filename(blob.index, multi, extension)
+        for blob, filename in zip(blobs, filenames):
             target = ImageTarget(
                 path=VirtualPath(f"{self.output_dir}/{filename}"),
                 index=blob.index,
                 mime_type=blob.mime_type,
-                extension=extension,
+                extension=blob.extension,
             )
             resolved.append((target, blob))
         return resolved
 
     def predict(self, count: int) -> List[ImageTarget]:
         """不联网地预测 ``count`` 张图片的落盘路径（扩展名取兜底值）。"""
-        multi = count > 1
+        multi = self._is_multi(count)
         extension = self.ext or DEFAULT_EXT
         return [
             ImageTarget(
@@ -347,6 +367,15 @@ class DownloadOutcome:
     files: List[Dict[str, Any]]
     errors: List[str]
     items: List[Tuple[ImageTarget, bytes]]
+
+
+def is_settled(payload: Dict[str, Any]) -> bool:
+    """任务是否已收敛（完成 / 失败 / 过期 / 进度 100）。
+
+    平台侧后台轮询器驱动「先登记、后落盘」的异步下载时需要这个判断，
+    因此在这里提供一个与实现无关的公开入口。
+    """
+    return ImageGenStandard._is_settled(payload)
 
 
 # ---------------------------------------------------------------------------
@@ -389,6 +418,11 @@ class ImageGenStandard(ABC):
     # 子类原语
     # ------------------------------------------------------------------
 
+    @property
+    def default_sync(self) -> bool:
+        """是否为同步模式（False 时一条龙走「登记 pending + 后台下载」）。"""
+        return self._default_sync
+
     @abstractmethod
     async def submit(
         self,
@@ -424,18 +458,19 @@ class ImageGenStandard(ABC):
         count = self._clamp_count(args.count)
         resolution = self._normalize_resolution(args.resolution)
         extra = self._merge_extra(args.extra, resolution)
+        sync = self._default_sync if args.sync is None else bool(args.sync)
         payload = await self.submit(
             prompt=args.prompt,
             negative_prompt=args.negative_prompt,
             count=count,
-            sync=bool(args.sync),
+            sync=sync,
             extra=extra,
             resolution=resolution,
         )
         task_id = self._require_task_id(payload)
         result: Dict[str, Any] = {
             "task_id": task_id,
-            "status": payload.get("status") or ("queued" if not args.sync else "completed"),
+            "status": payload.get("status") or ("queued" if not sync else "completed"),
             "count": count,
             "resolution": resolution,
         }
@@ -490,7 +525,9 @@ class ImageGenStandard(ABC):
     ) -> str:
         """一条龙：生成 → 等待 → 确定性命名落盘 → 入库 → 返回 file_id。
 
-        超时未收敛时不做任何落盘，返回 ``task_id`` 让 LLM 退回三件套继续。
+        异步模式（配置 ``defaultSync=false``）下只提交任务并返回全部确定路径，
+        落盘与展示交给平台后台轮询器，LLM 无需再调用其它工具；同步模式下
+        超时仍未收敛时不落盘，返回 ``task_id`` 让 LLM 退回三件套继续。
         """
         backend = self._require_backend(backend)
         if session_factory is None:
@@ -511,8 +548,19 @@ class ImageGenStandard(ABC):
             resolution=resolution,
         )
         task_id = self._require_task_id(payload)
-
         timeout = self._resolve_oneshot_timeout(args.timeout)
+        plan = self.plan_targets(
+            task_id=task_id,
+            path=args.path or DEFAULT_OUTPUT_DIR,
+            naming=NAMING_TASK,
+            multi=count > 1,
+        )
+
+        if not self._default_sync:
+            return self._dumps(
+                self._pending_result(task_id, plan, count, resolution, timeout, args)
+            )
+
         settled = await self._status_until_settled(task_id, timeout)
         status = self._normalize_status(settled.get("status"))
         if status in ("failed", "expired"):
@@ -538,11 +586,6 @@ class ImageGenStandard(ABC):
                 }
             )
 
-        plan = self.plan_targets(
-            task_id=task_id,
-            path=args.path or DEFAULT_OUTPUT_DIR,
-            naming=NAMING_TASK,
-        )
         outcome = await self.download_to(backend, task_id, plan)
         if not outcome.items:
             raise ImageGenToolError(
@@ -637,6 +680,38 @@ class ImageGenStandard(ABC):
         if self._default_wait_timeout > 0:
             return self._clamp_wait_timeout(self._default_wait_timeout)
         return self._clamp_wait_timeout(DEFAULT_ONESHOT_WAIT_TIMEOUT)
+
+    def _pending_result(
+        self,
+        task_id: str,
+        plan: TargetPlan,
+        count: int,
+        resolution: str,
+        timeout: int,
+        args: ImageGenerateShowArgs,
+    ) -> Dict[str, Any]:
+        """异步模式的结果：给出全部确定路径，交给平台后台下载并在就绪后展示。
+
+        ``paths`` 里的每个条目都会被前端登记成一条待生成文件；``task_id`` /
+        ``prefix`` / ``count`` 让后台轮询器能还原同一套确定性命名去取图。
+        """
+        predicted = plan.predict(count)
+        return {
+            "status": "pending",
+            "task_id": task_id,
+            "path": predicted[0].path.value,
+            "paths": [target.path.value for target in predicted],
+            "count": count,
+            "prefix": plan.prefix,
+            "resolution": resolution,
+            "timeout": timeout,
+            "mode": args.mode,
+            "note": (
+                f"图片已提交生成（任务 {task_id}），保存与展示由平台在后台完成，"
+                f"最多等待 {timeout} 秒；无需再次调用本工具，也不必调用 "
+                "image_download / show。若想确认进度可用 image_task_status。"
+            ),
+        }
 
     @staticmethod
     def _require_backend(backend: Optional[BackendProtocol]) -> BackendProtocol:
@@ -769,12 +844,14 @@ class ImageGenStandard(ABC):
         path: str,
         prefix: Optional[str] = None,
         naming: str = NAMING_STAMP,
+        multi: Optional[bool] = None,
     ) -> TargetPlan:
         """计算落盘路径规划器（纯计算，不联网、不触达 backend）。
 
         ``path`` 缺失或越界一律报错；``prefix`` 缺省从 path 的文件名推断，
         仍无则用 ``DEFAULT_PREFIX``。``naming=NAMING_TASK`` 时文件名按
-        ``task_id`` 确定性生成，可在下载前预测最终路径。
+        ``task_id`` 确定性生成，可在下载前预测最终路径；此时应同时显式传入
+        ``multi``，保证预测与实际落盘的命名判断一致。
         """
         output_dir, resolved_prefix = self._resolve_target(path, prefix)
         return TargetPlan(
@@ -783,6 +860,7 @@ class ImageGenStandard(ABC):
             prefix=resolved_prefix,
             naming=naming,
             stamp=datetime.now().strftime("%Y%m%d_%H%M%S"),
+            multi=multi,
         )
 
     async def download_to(

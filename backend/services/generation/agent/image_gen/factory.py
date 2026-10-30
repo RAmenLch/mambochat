@@ -68,6 +68,41 @@ async def build_mcp_image_standard(
     )
 
 
+async def build_image_gen_standard_from_chat_id(
+    db: AsyncSession, chat_id: str
+) -> Optional[McpImageGenStandard]:
+    """按会话所属 Agent 的生图配置重建标准实现。
+
+    供 pending file 轮询器这类「独立于生成任务生命周期」的场景使用：同步模式
+    由工具自己完成下载，异步模式则需要在 Agent 跑完之后由平台后台把图取回。
+    会话未配置生图 / 未启用 / 服务不可用时返回 ``None``（调用方按原逻辑兜底）。
+    """
+    from backend.crud import chat_crud, agent_crud, image_gen_crud
+
+    try:
+        chat = await chat_crud.get_chat(db, chat_id=chat_id)
+        if not chat or not chat.agentId:
+            return None
+        agent = await agent_crud.get_agent(db, chat.agentId)
+        if not agent:
+            return None
+
+        ig = (agent.agentParameters or {}).get("image_gen") or {}
+        if not ig.get("enabled") or not ig.get("configId"):
+            return None
+
+        config = await image_gen_crud.get_image_gen_config(db, ig["configId"])
+        if not config or not config.isEnabled:
+            return None
+        return await build_mcp_image_standard(db, config)
+    except ImageGenConfigError as exc:
+        logger.warning("异步生图下载：生图配置不可用: %s", exc)
+        return None
+    except Exception as exc:  # noqa: BLE001 - 后台轮询不应因配置解析失败中断
+        logger.warning("异步生图下载：解析会话生图配置失败: %s", exc)
+        return None
+
+
 async def check_mcp_image_service(
     db: AsyncSession, config: ImageGenConfig
 ) -> Tuple[List[str], List[str], Optional[str]]:
@@ -100,5 +135,6 @@ async def check_mcp_image_service(
 __all__ = [
     "ImageGenConfigError",
     "build_mcp_image_standard",
+    "build_image_gen_standard_from_chat_id",
     "check_mcp_image_service",
 ]

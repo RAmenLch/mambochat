@@ -20,6 +20,15 @@ logger = logging.getLogger(__name__)
 
 SessionFactory = Callable[[], Any]
 
+# 常见图片格式的文件头（用于校正兜底扩展名带来的 mime 偏差）
+_IMAGE_MAGIC: Tuple[Tuple[bytes, str], ...] = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+    (b"BM", "image/bmp"),
+)
+
 
 async def read_workspace_file(
     backend: BackendProtocol, path: str
@@ -41,16 +50,34 @@ async def read_workspace_file(
         return None, str(exc)
 
 
+def _sniff_image_mime(data: Optional[bytes]) -> Optional[str]:
+    """按文件头识别常见图片格式（异步生图的扩展名是兜底的，需以内容为准）。"""
+    if not data or len(data) < 12:
+        return None
+    head = data[:16]
+    for magic, mime in _IMAGE_MAGIC:
+        if head.startswith(magic):
+            return mime
+    if head[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
 def resolve_mime(filename: str, mime: Optional[str], data: Optional[bytes]) -> str:
     """确定文件 mime。
 
-    优先信任调用方给出的 mime（生图 blob 自带，准确）；仅当内容是可解码的
-    UTF-8 文本时才让 ``FileUtils`` 重新判定（覆盖 ``.env`` / ``Dockerfile``
-    这类扩展名不可靠的纯文本文件）。
+    优先信任调用方给出的 mime（生图 blob 自带，准确）；若该 mime 是图片类型，
+    则用文件头校正一次（异步生图按 ``.png`` 兜底命名时实际可能是 jpeg）；
+    内容是可解码 UTF-8 文本时再让 ``FileUtils`` 重新判定（覆盖 ``.env`` /
+    ``Dockerfile`` 这类扩展名不可靠的纯文本文件）。
     """
     resolved = mime or _get_mime_type(filename)
     if not data:
         return resolved
+
+    if resolved.startswith("image/"):
+        return _sniff_image_mime(data) or resolved
+
     try:
         data[:8192].decode("utf-8")
     except (UnicodeDecodeError, ValueError, LookupError):

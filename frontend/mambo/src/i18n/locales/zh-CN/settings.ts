@@ -295,7 +295,7 @@ export default {
       resolution: '默认分辨率',
       resolutionHint: '对应 resolution，格式为 宽x高（如 1024x1024）',
       sync: '默认同步等待',
-      syncHint: '开启后生图工具会阻塞到生成完成；关闭则立即返回任务 ID',
+      syncHint: '开启后生图工具会阻塞到生成完成；关闭则立即返回任务 ID。一条龙工具在关闭时立即返回 pending，落盘与展示由平台后台完成',
       waitTimeout: '状态等待(秒)',
       waitTimeoutHint: '对应 wait_timeout，0 表示立即返回；大于 0 时最多阻塞该秒数，任务完成即提前返回',
       timeout: '调用超时(秒)',

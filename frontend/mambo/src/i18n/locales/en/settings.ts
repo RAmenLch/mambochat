@@ -298,7 +298,7 @@ export default {
       resolution: 'Default Resolution',
       resolutionHint: 'Corresponds to resolution, format WIDTHxHEIGHT (e.g. 1024x1024)',
       sync: 'Wait Synchronously',
-      syncHint: 'When on, the tool blocks until generation finishes; when off it returns a task id immediately',
+      syncHint: 'When on, the tool blocks until generation finishes; when off it returns a task id immediately. In async mode the one-shot tool returns status=pending right away and the platform saves + displays the images in the background',
       waitTimeout: 'Status Wait (s)',
       waitTimeoutHint: 'Corresponds to wait_timeout; 0 returns immediately, otherwise blocks up to that many seconds and returns early once the task settles',
       timeout: 'Call Timeout (s)',

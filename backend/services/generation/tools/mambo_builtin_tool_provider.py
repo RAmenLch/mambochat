@@ -142,19 +142,26 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
                 data = json.loads(result_text)
 
                 if data.get("status") == "pending":
-                    yield CreateSubMessage(
-                        sub_message_id=generate_uuid(),
-                        type=schemas_enums.SubMessageType.FILE.value,
-                        sortOrder=2,
-                        status=schemas_enums.MessageStatus.WAITING,
-                        initial_content="",
-                        config=SubMessageConfig(
-                            context_participation_length=0,
-                            pending_file_path=data["path"],
-                            pending_file_timeout=data.get("timeout", 300),
-                            show_tool_mode=data.get("mode", "Normal"),
-                        ),
-                    )
+                    # show 等待单个文件；异步一条龙会给出多个确定路径，
+                    # 每条路径登记一个待生成文件，并由 task_id 驱动后台下载。
+                    paths = data.get("paths") or ([data["path"]] if data.get("path") else [])
+                    for path in paths:
+                        yield CreateSubMessage(
+                            sub_message_id=generate_uuid(),
+                            type=schemas_enums.SubMessageType.FILE.value,
+                            sortOrder=2,
+                            status=schemas_enums.MessageStatus.WAITING,
+                            initial_content="",
+                            config=SubMessageConfig(
+                                context_participation_length=0,
+                                pending_file_path=path,
+                                pending_file_timeout=data.get("timeout", 300),
+                                show_tool_mode=data.get("mode", "Normal"),
+                                pending_image_task_id=data.get("task_id"),
+                                pending_image_prefix=data.get("prefix"),
+                                pending_image_count=data.get("count"),
+                            ),
+                        )
                 else:
                     # 兼容两种结果形态：
                     #   show → {"file_id": ...}

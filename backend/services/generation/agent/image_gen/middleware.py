@@ -37,7 +37,8 @@ logger = logging.getLogger(__name__)
 _GENERATE_DESCRIPTION = (
     "Generate images from a text prompt using the configured image generation "
     "service. Returns a task id. Use sync=true to wait for completion, or "
-    "sync=false and poll with image_task_status for long jobs. "
+    "sync=false and poll with image_task_status for long jobs (omit sync to use "
+    "the configured default). "
     "'resolution' sets the image resolution as 'WIDTHxHEIGHT' in pixels, e.g. "
     "'1024x1024' or '768x1344'; omit it to use the configured default. "
     "Extra parameters (width/height/steps/seed/model/...) can be passed through "
@@ -86,6 +87,14 @@ _ONESHOT_HINT = (
     " NOTE: when the user should actually see the image, the one-shot tool "
     "'image_generate_show' does generation + saving + display in a single call — "
     "prefer it over this multi-step flow."
+)
+
+# 异步模式下追加的说明：调用立即返回，后续交给平台
+_ASYNC_ONESHOT_HINT = (
+    " NOTE: this deployment generates images asynchronously — the call returns "
+    "immediately with status=pending plus the target file paths, and the platform "
+    "saves and displays the images in the background. Do NOT call show or "
+    "image_download afterwards; use image_task_status only if you need progress."
 )
 
 
@@ -144,10 +153,13 @@ class ImageGenMiddleware(AgentMiddleware):
                 ]
             )
         if enable_generate_show:
+            description = _GENERATE_SHOW_DESCRIPTION
+            if not standard.default_sync:
+                description += _ASYNC_ONESHOT_HINT
             tools.append(
                 StructuredTool.from_function(
                     name=IMAGE_TOOL_GENERATE_SHOW,
-                    description=_GENERATE_SHOW_DESCRIPTION,
+                    description=description,
                     coroutine=self._agenerate_show,
                     args_schema=ImageGenerateShowArgs,
                     infer_schema=False,
@@ -165,7 +177,7 @@ class ImageGenMiddleware(AgentMiddleware):
         resolution: str = DEFAULT_RESOLUTION,
         negative_prompt: Optional[str] = None,
         count: int = 1,
-        sync: bool = True,
+        sync: Optional[bool] = None,
         extra: Optional[Dict[str, Any]] = None,
     ) -> str:
         return await self._safe(

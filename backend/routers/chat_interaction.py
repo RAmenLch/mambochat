@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import time
 from pathlib import PurePosixPath
 
@@ -28,6 +29,12 @@ from backend.schemas.message import ToolApprovalRequest, SubMessageConfig, SubMe
 from backend.schemas.enums import FileManagementType, GroupTaskKind
 
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
+
+# 异步生图：同一任务两次驱动下载之间的最小间隔（秒）与最大连续失败次数
+IMAGE_DOWNLOAD_RETRY_INTERVAL = 5.0
+IMAGE_DOWNLOAD_MAX_ERRORS = 3
 
 class TaskStatusRequest(BaseModel):
     task_ids: List[str]
@@ -91,16 +98,9 @@ async def _process_pending_file(
 
     content = r2[0].content
     filename = PurePosixPath(path).name
-    mime = _get_mime_type(path)
+    from backend.services.generation.agent.image_gen.sink import resolve_mime
 
-    if content:
-        sample = content[:8192]
-        try:
-            sample.decode("utf-8")
-            from backend.utils.file_utils import FileUtils
-            mime = FileUtils.correct_mime_type(filename, mime, sample)
-        except (UnicodeDecodeError, ValueError, LookupError):
-            pass
+    mime = resolve_mime(filename, _get_mime_type(path), content)
 
     async with AsyncSessionLocal() as db:
         fs = FileService(db)
@@ -148,9 +148,13 @@ async def _process_pending_file(
 
 async def _scan_chat_pending_sub_messages(
     db: AsyncSession, chat_id: str,
-) -> dict[str, tuple[str, int]]:
-    """扫描会话下所有等待中的文件子消息，返回 {sub_message_id: (path, timeout)}。"""
-    pending: dict[str, tuple[str, int]] = {}
+) -> dict[str, dict]:
+    """扫描会话下所有等待中的文件子消息。
+
+    返回 ``{sub_message_id: {path, timeout, task_id, prefix, count}}``。
+    ``task_id`` 非空表示这是异步生图产出：文件还没出现时由轮询器先驱动下载。
+    """
+    pending: dict[str, dict] = {}
     msgs = await message_crud.get_messages_by_chat(db, chat_id=chat_id)
     for msg in msgs:
         for sub in msg.sub_messages:
@@ -167,15 +171,92 @@ async def _scan_chat_pending_sub_messages(
             path = raw_cfg.get("pending_file_path")
             if not path:
                 continue
-            timeout = raw_cfg.get("pending_file_timeout") or 300
-            pending[sub.id] = (path, int(timeout))
+            pending[sub.id] = {
+                "path": path,
+                "timeout": int(raw_cfg.get("pending_file_timeout") or 300),
+                "task_id": raw_cfg.get("pending_image_task_id"),
+                "prefix": raw_cfg.get("pending_image_prefix"),
+                "count": raw_cfg.get("pending_image_count"),
+            }
     return pending
+
+
+async def _drive_pending_image_downloads(
+    standard,
+    backend,
+    db_pending: dict[str, dict],
+    state: dict[str, dict],
+) -> set[str]:
+    """异步生图：任务收敛后由平台把图片下载到已登记的确定路径。
+
+    同一个 ``task_id`` 在一次轮询里只驱动一次，并以 ``state`` 跨轮节流；
+    返回已失败/过期的 task_id 集合，交给调用方把对应子消息标记为失败。
+    """
+    from backend.services.generation.agent.image_gen.standard import (
+        NAMING_TASK,
+        is_settled,
+    )
+
+    failed: set[str] = set()
+    for info in db_pending.values():
+        task_id = info.get("task_id")
+        if not task_id:
+            continue
+
+        cursor = state.setdefault(task_id, {"last": 0.0, "done": False, "errors": 0})
+        if cursor["done"]:
+            continue
+        now = time.monotonic()
+        if now - cursor["last"] < IMAGE_DOWNLOAD_RETRY_INTERVAL:
+            continue
+        cursor["last"] = now
+
+        try:
+            payload = await standard.status(task_id, 0)
+        except Exception as exc:  # noqa: BLE001 - 服务暂时不可用，下一轮重试
+            logger.warning("异步生图查询状态失败(task=%s): %s", task_id, exc)
+            cursor["errors"] += 1
+            if cursor["errors"] >= IMAGE_DOWNLOAD_MAX_ERRORS:
+                cursor["done"] = True
+            continue
+
+        if not is_settled(payload):
+            continue
+
+        status = str(payload.get("status") or "").strip().lower()
+        if status in ("failed", "expired", "error"):
+            cursor["done"] = True
+            failed.add(task_id)
+            continue
+
+        plan = standard.plan_targets(
+            task_id=task_id,
+            path=str(PurePosixPath(info["path"]).parent),
+            prefix=info.get("prefix"),
+            naming=NAMING_TASK,
+            multi=bool((info.get("count") or 1) > 1),
+        )
+        try:
+            await standard.download_to(backend, task_id, plan)
+        except Exception as exc:  # noqa: BLE001 - 下载失败下一轮重试
+            logger.warning("异步生图下载失败(task=%s): %s", task_id, exc)
+            cursor["errors"] += 1
+            if cursor["errors"] >= IMAGE_DOWNLOAD_MAX_ERRORS:
+                cursor["done"] = True
+            continue
+
+        cursor["done"] = True
+
+    return failed
 
 
 async def _poll_chat_pending_files(chat_id: str) -> None:
     """轮询会话下所有待生成文件，就绪/超时后入库并广播事件。"""
     from backend.services.generation.agent.backend_factory import (
         build_backend_from_chat_id,
+    )
+    from backend.services.generation.agent.image_gen.factory import (
+        build_image_gen_standard_from_chat_id,
     )
     # 延迟导入：mambo_agents.backends 依赖较重
     from mambo_agents.backends.schemas import VirtualPath
@@ -185,8 +266,11 @@ async def _poll_chat_pending_files(chat_id: str) -> None:
         async with AsyncSessionLocal() as db:
             backend = await build_backend_from_chat_id(db, chat_id)
 
-        # sub_message_id -> (path, timeout, deadline)
-        pending: dict[str, tuple[str, int, float]] = {}
+        # sub_message_id -> {path, timeout, task_id, prefix, count, deadline}
+        pending: dict[str, dict] = {}
+        # task_id -> {last, done, errors}：异步生图下载的节流状态
+        image_state: dict[str, dict] = {}
+        image_standard = None
 
         while True:
             # 1. 与 DB 同步 pending 集合（新文件自动纳入，已终态移除）
@@ -197,16 +281,33 @@ async def _poll_chat_pending_files(chat_id: str) -> None:
             for sub_id in list(pending.keys()):
                 if sub_id not in db_pending:
                     del pending[sub_id]
-            for sub_id, (path, timeout) in db_pending.items():
+            for sub_id, info in db_pending.items():
                 if sub_id not in pending:
-                    pending[sub_id] = (path, timeout, now + timeout)
+                    pending[sub_id] = {**info, "deadline": now + info["timeout"]}
 
             if not pending:
                 break
 
-            # 2. 逐个处理：超时 → failed；就绪 → 入库 + completed
-            for sub_id, (path, timeout, deadline) in list(pending.items()):
-                if time.monotonic() >= deadline:
+            # 2. 异步生图：任务收敛后先把图下载到确定路径（文件出现由下一步接管）
+            if any(item["task_id"] for item in db_pending.values()):
+                if image_standard is None:
+                    async with AsyncSessionLocal() as db:
+                        image_standard = await build_image_gen_standard_from_chat_id(
+                            db, chat_id
+                        )
+                if image_standard is not None:
+                    failed_tasks = await _drive_pending_image_downloads(
+                        image_standard, backend, db_pending, image_state
+                    )
+                    if failed_tasks:
+                        for item in pending.values():
+                            if item["task_id"] in failed_tasks:
+                                item["deadline"] = 0.0
+
+            # 3. 逐个处理：超时 → failed；就绪 → 入库 + completed
+            for sub_id, item in list(pending.items()):
+                path = item["path"]
+                if time.monotonic() >= item["deadline"]:
                     async with AsyncSessionLocal() as db:
                         await message_crud.update_sub_message(
                             db,
