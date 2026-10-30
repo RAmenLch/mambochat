@@ -31,6 +31,7 @@ interface UseTreeStoreActionsReturn<TItem, TCreate, TUpdate> {
   createItem: (data: TCreate) => Promise<TItem | null>;
   updateItem: (id: string, data: TUpdate) => Promise<void>;
   deleteItem: (id: string) => Promise<void>;
+  deleteItems: (ids: string[]) => Promise<void>;
   moveItem: (req: MoveRequest) => Promise<void>;
   duplicateItem?: (id: string) => Promise<TItem | null>;
 }
@@ -200,6 +201,58 @@ export function useTreeStoreActions<TItem extends BaseTreeItem, TCreate, TUpdate
     }
   }
 
+  /**
+   * 批量删除（同层级多选场景）：先收集待移除子树做一次乐观更新，
+   * 任一请求失败时以服务端为准重新拉取受影响目录，避免回滚产生孤儿节点。
+   */
+  async function deleteItems(ids: string[]) {
+    if (ids.length === 0) return;
+
+    const idsToRemove = new Set<string>();
+    const queue = [...ids];
+    while (queue.length > 0) {
+      const currentId = queue.pop() as string;
+      if (idsToRemove.has(currentId)) continue;
+      idsToRemove.add(currentId);
+      for (const item of items.value) {
+        if (item.parentId === currentId && !idsToRemove.has(item.id)) {
+          queue.push(item.id);
+        }
+      }
+    }
+
+    const removedItems = items.value.filter(item => idsToRemove.has(item.id));
+    const parentIdsToRefresh = new Set<string>();
+    removedItems.forEach(item => {
+      const parentId = item.parentId || 'root';
+      if (!idsToRemove.has(parentId)) {
+        parentIdsToRefresh.add(parentId);
+      }
+    });
+
+    items.value = items.value.filter(item => !idsToRemove.has(item.id));
+    idsToRemove.forEach(removeId => {
+      loadedFolderIds.value.delete(removeId);
+      loadingFolders.value.delete(removeId);
+    });
+
+    const results = await Promise.allSettled(ids.map(id => api.remove(id)));
+    const hasFailure = results.some(result => result.status === 'rejected');
+
+    if (hasFailure) {
+      console.error('Failed to delete items:', results.filter(r => r.status === 'rejected'));
+      items.value.push(...removedItems.filter(item => !idsToRemove.has(item.parentId || '')));
+      parentIdsToRefresh.forEach(parentId => loadedFolderIds.value.delete(parentId));
+      await Promise.all(Array.from(parentIdsToRefresh).map(parentId => fetchChildren(parentId)));
+      ElMessage.error(t('common.error.deleteFailed'));
+      throw new Error('Batch delete failed');
+    }
+
+    if (onDeleteItem) {
+      removedItems.forEach(item => onDeleteItem(item));
+    }
+  }
+
   async function moveItem(req: MoveRequest) {
     const firstItemId = req.item_ids[0];
     const itemIndex = items.value.findIndex(i => i.id === firstItemId);
@@ -260,7 +313,7 @@ export function useTreeStoreActions<TItem extends BaseTreeItem, TCreate, TUpdate
 
   const returnObject: UseTreeStoreActionsReturn<TItem, TCreate, TUpdate> = {
     isLoading, loadedFolderIds, loadingFolders, initializeList, fetchChildren, resolvePath,
-    createItem, updateItem, deleteItem, moveItem,
+    createItem, updateItem, deleteItem, deleteItems, moveItem,
   };
   if (duplicateItem) returnObject.duplicateItem = duplicateItem;
 

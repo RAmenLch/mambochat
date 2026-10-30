@@ -61,7 +61,8 @@ _DOWNLOAD_DESCRIPTION = (
     "`show` tool with the returned path afterwards. 'path' is REQUIRED: the "
     "target directory as a virtual path under /workspace (e.g. /workspace/images); "
     "a missing or out-of-workspace path is an error. 'prefix' sets the filename "
-    "prefix. 'wait_timeout' (seconds, default 0) waits for the task to settle "
+    "prefix (Chinese / any Unicode text is allowed; only \\ / : * ? \" < > | are "
+    "rejected). 'wait_timeout' (seconds, default 0) waits for the task to settle "
     "before downloading."
 )
 

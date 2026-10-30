@@ -9,6 +9,7 @@
       @node-click="handleNodeClick"
       @item-created="handleItemCreated"
       @item-deleted="handleItemDeleted"
+      @items-deleted="handleItemsDeleted"
       @move-success="handleMoveSuccess"
     />
 
@@ -115,6 +116,17 @@ async function handleItemCreated(newItem: Resource) {
  */
 function handleItemDeleted(deletedId: string) {
   if (selectedResourceId.value === deletedId) {
+    selectedResourceId.value = null
+  }
+}
+
+/**
+ * 处理批量删除后的事件（含被删文件夹的子孙节点）
+ */
+function handleItemsDeleted(deletedIds: string[]) {
+  if (!selectedResourceId.value) return
+  const stillExists = resources.value.some((r) => r.id === selectedResourceId.value)
+  if (deletedIds.includes(selectedResourceId.value) || !stillExists) {
     selectedResourceId.value = null
   }
 }

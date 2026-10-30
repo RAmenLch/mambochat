@@ -15,6 +15,9 @@ export default {
     exportZipFailed: '导出失败',
     collapse: '折叠资源列表',
     expand: '展开资源列表',
+    batchDelete: '删除选中的 {count} 项',
+    batchDeleteConfirm:
+      '确定删除选中的 {count} 项吗？文件夹将连同其内部所有内容一并删除，此操作不可恢复。',
   },
   explorer: {
     uploadingCount: '正在上传 {count} 个文件...',

@@ -62,6 +62,7 @@ export const useResourceStore = defineStore('resource', () => {
     createItem: addResourceItem,
     updateItem: updateResourceItem,
     deleteItem: deleteResourceItem,
+    deleteItems: _deleteResourceItems,
     moveItem: moveResourceItem,
   } = useTreeStoreActions<Resource, ResourceCreate, ResourceUpdate>({
     items: resources,
@@ -87,6 +88,14 @@ export const useResourceStore = defineStore('resource', () => {
   });
 
   // --- Resource-Specific Actions (Versioning, etc.) ---
+
+  /**
+   * 批量删除资源（同一层级多选），复用通用批量删除逻辑并清理 SKILL 校验缓存。
+   */
+  async function deleteResourceItems(ids: string[]) {
+    await _deleteResourceItems(ids);
+    ids.forEach(id => skillValidationStatus.value.delete(id));
+  }
 
   /**
    * 预测加载子文件夹内容。
@@ -429,6 +438,7 @@ export const useResourceStore = defineStore('resource', () => {
     addResourceItem,
     updateResourceItem,
     deleteResourceItem,
+    deleteResourceItems,
     moveResourceItem,
     // Resource-specific Actions
     updateVersionContent,

@@ -16,6 +16,9 @@ export default {
     exportZipFailed: 'Export failed',
     collapse: 'Collapse resource list',
     expand: 'Expand resource list',
+    batchDelete: 'Delete {count} selected items',
+    batchDeleteConfirm:
+      'Delete the {count} selected items? Folders will be removed together with all their contents. This cannot be undone.',
   },
   explorer: {
     uploadingCount: 'Uploading {count} files...',

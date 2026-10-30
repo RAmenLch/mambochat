@@ -60,6 +60,7 @@ export default {
     confirmDelete: '确定要删除吗？',
     createFailed: '创建失败',
     noData: '暂无数据',
+    selectSameLevelOnly: '仅支持选择同一层级的内容',
   },
   error: {
     unknown: '发生未知错误',

@@ -17,10 +17,11 @@
       :loading-folder-ids="loadingFolders"
       folder-item-type="folder"
       persistence-key="mambo_resource_folder_expanded_state"
+      :enable-multi-select="true"
       :custom-allow-drop="checkDropPermission"
       @node-click="handleNodeClick"
-      @node-contextmenu="handleNodeContextMenu"
-      @root-contextmenu="openRootContextMenu"
+      @node-contextmenu="onNodeContextMenu"
+      @root-contextmenu="onRootContextMenu"
       @move="handleResourceMove"
       @node-expand="handleNodeExpand"
       @upload-success="handleUploadSuccess"
@@ -78,33 +79,41 @@
     <span :style="contextMenuPosition" />
     <template #dropdown>
       <el-dropdown-menu>
-        <template v-if="!contextMenuItem || contextMenuItem.itemType === 'folder'">
-          <el-dropdown-item command="newResource">
-            <el-icon><DocumentAdd /></el-icon>{{ t('resource.tree.newResource') }}
-          </el-dropdown-item>
-          <el-dropdown-item command="newFolder">
-            <el-icon><FolderAdd /></el-icon>{{ t('resource.tree.newFolder') }}
-          </el-dropdown-item>
-          <el-dropdown-item command="newKB">
-            <el-icon><Collection /></el-icon>{{ t('resource.tree.newKB') }}
-          </el-dropdown-item>
-          <el-dropdown-item command="newSkill">
-            <el-icon><Reading /></el-icon>{{ t('resource.tree.newSkill') }}
+        <template v-if="selectedNodeCount > 1">
+          <el-dropdown-item command="batchDelete" class="delete-item">
+            <el-icon><Delete /></el-icon
+            >{{ t('resource.tree.batchDelete', { count: selectedNodeCount }) }}
           </el-dropdown-item>
         </template>
-        <template v-if="contextMenuItem">
-          <el-dropdown-item
-            command="rename"
-            :divided="!contextMenuItem || contextMenuItem.itemType === 'folder'"
-          >
-            <el-icon><EditPen /></el-icon>{{ t('resource.tree.rename') }}
-          </el-dropdown-item>
-          <el-dropdown-item command="delete" class="delete-item">
-            <el-icon><Delete /></el-icon>{{ t('resource.tree.delete') }}
-          </el-dropdown-item>
-          <el-dropdown-item v-if="contextMenuItem.itemType === 'folder'" command="exportZip">
-            <el-icon><Download /></el-icon>{{ t('resource.tree.exportZip') }}
-          </el-dropdown-item>
+        <template v-else>
+          <template v-if="!contextMenuItem || contextMenuItem.itemType === 'folder'">
+            <el-dropdown-item command="newResource">
+              <el-icon><DocumentAdd /></el-icon>{{ t('resource.tree.newResource') }}
+            </el-dropdown-item>
+            <el-dropdown-item command="newFolder">
+              <el-icon><FolderAdd /></el-icon>{{ t('resource.tree.newFolder') }}
+            </el-dropdown-item>
+            <el-dropdown-item command="newKB">
+              <el-icon><Collection /></el-icon>{{ t('resource.tree.newKB') }}
+            </el-dropdown-item>
+            <el-dropdown-item command="newSkill">
+              <el-icon><Reading /></el-icon>{{ t('resource.tree.newSkill') }}
+            </el-dropdown-item>
+          </template>
+          <template v-if="contextMenuItem">
+            <el-dropdown-item
+              command="rename"
+              :divided="!contextMenuItem || contextMenuItem.itemType === 'folder'"
+            >
+              <el-icon><EditPen /></el-icon>{{ t('resource.tree.rename') }}
+            </el-dropdown-item>
+            <el-dropdown-item command="delete" class="delete-item">
+              <el-icon><Delete /></el-icon>{{ t('resource.tree.delete') }}
+            </el-dropdown-item>
+            <el-dropdown-item v-if="contextMenuItem.itemType === 'folder'" command="exportZip">
+              <el-icon><Download /></el-icon>{{ t('resource.tree.exportZip') }}
+            </el-dropdown-item>
+          </template>
         </template>
       </el-dropdown-menu>
     </template>
@@ -216,8 +225,12 @@ const emit = defineEmits<{
   (e: 'node-click', data: BaseTreeItem): void
   (e: 'item-created', data: Resource): void
   (e: 'item-deleted', id: string): void
+  (e: 'items-deleted', ids: string[]): void
   (e: 'move-success', item_ids: string[]): void
 }>()
+
+// 当前多选数量，用于在右键菜单中切换为批量操作
+const selectedNodeCount = ref(0)
 
 // --- Collapse State ---
 const TREE_COLLAPSED_KEY = 'mambo_resource_tree_collapsed'
@@ -402,9 +415,56 @@ const {
   },
 })
 
+// --- Multi Select Context Menu ---
+
+const onNodeContextMenu = (event: MouseEvent, data: BaseTreeItem, node?: any) => {
+  selectedNodeCount.value = treeRef.value?.selectedIds?.size ?? 0
+  handleNodeContextMenu(event, data, node)
+}
+
+const onRootContextMenu = (event: MouseEvent) => {
+  // 空白处右键时清除多选，确保弹回常规菜单
+  treeRef.value?.clearSelection()
+  selectedNodeCount.value = 0
+  openRootContextMenu(event)
+}
+
+const handleBatchDelete = async () => {
+  const ids = Array.from(treeRef.value?.selectedIds ?? [])
+  if (ids.length === 0) return
+
+  try {
+    await ElMessageBox.confirm(
+      t('resource.tree.batchDeleteConfirm', { count: ids.length }),
+      t('common.dialog.warning'),
+      {
+        confirmButtonText: t('common.action.confirmDelete'),
+        cancelButtonText: t('common.action.cancel'),
+        type: 'warning',
+      },
+    )
+  } catch {
+    return
+  }
+
+  try {
+    await resourceStore.deleteResourceItems(ids)
+    treeRef.value?.clearSelection()
+    selectedNodeCount.value = 0
+    emit('items-deleted', ids)
+    ElMessage.success(t('common.msg.deleteSuccess'))
+  } catch {
+    /* 失败提示与数据回滚由 store 统一处理 */
+  }
+}
+
 // --- Custom Context Menu Command ---
 
 const handleMenuCommand = async (command: string) => {
+  if (command === 'batchDelete') {
+    await handleBatchDelete()
+    return
+  }
   if (command === 'exportZip' && contextMenuItem.value) {
     const target = contextMenuItem.value
     try {

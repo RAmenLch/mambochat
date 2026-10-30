@@ -22,7 +22,7 @@
         :current-node-key="currentId || undefined"
         highlight-current
         :expand-on-click-node="false"
-        :draggable="draggable"
+        :draggable="isDraggable"
         :allow-drop="allowDrop"
         :indent="5"
         @node-click="handleNodeClick"
@@ -144,6 +144,15 @@ const currentMultiSelectParentId = ref<string | null>(null)
 const displayEmptyText = computed(() => props.emptyText || t('common.status.noData'))
 const loadingNodes = computed(() => props.loadingFolderIds)
 
+/** 占位节点（stub）不参与多选，避免把虚构 ID 提交给后端 */
+const isSelectable = (data: BaseTreeItem) => data.itemType !== 'stub'
+
+/** 层级标识：根层级的 parentId 可能是 null 或 'root'，需归一化后比较 */
+const levelKeyOf = (data: BaseTreeItem) => data.parentId ?? 'root'
+
+const selectedCount = computed(() => selectedIds.value.size)
+const isDraggable = computed(() => props.draggable && selectedIds.value.size <= 1)
+
 const treeProps = {
   label: 'name',
   children: 'children',
@@ -155,6 +164,13 @@ const treeProps = {
   },
 }
 
+const selectSingle = (data: BaseTreeItem) => {
+  selectedIds.value.clear()
+  selectedIds.value.add(data.id)
+  lastClickedId.value = data.id
+  currentMultiSelectParentId.value = levelKeyOf(data)
+}
+
 const handleNodeClick = (data: BaseTreeItem, node: any, treeNode: unknown, event: MouseEvent) => {
   // 如果未开启多选，直接触发原有逻辑
   if (!props.enableMultiSelect) {
@@ -162,10 +178,15 @@ const handleNodeClick = (data: BaseTreeItem, node: any, treeNode: unknown, event
     return
   }
 
-  // 多选逻辑
+  if (!isSelectable(data)) return
+
+  const levelKey = levelKeyOf(data)
+
+  // 多选逻辑：仅允许在同一层级内累积选择，跨层级点击被忽略
   if (event.ctrlKey || event.metaKey) {
-    if (selectedIds.value.size > 0 && currentMultiSelectParentId.value !== data.parentId) {
-      selectedIds.value.clear();
+    if (selectedIds.value.size > 0 && currentMultiSelectParentId.value !== levelKey) {
+      ElMessage.warning(t('common.msg.selectSameLevelOnly'))
+      return
     }
 
     if (selectedIds.value.has(data.id)) {
@@ -177,47 +198,54 @@ const handleNodeClick = (data: BaseTreeItem, node: any, treeNode: unknown, event
     } else {
       selectedIds.value.add(data.id);
       lastClickedId.value = data.id;
-      currentMultiSelectParentId.value = data.parentId;
+      currentMultiSelectParentId.value = levelKey;
     }
-  } else if (event.shiftKey) {
-    if (!lastClickedId.value || currentMultiSelectParentId.value !== data.parentId) {
-      selectedIds.value.clear();
-      selectedIds.value.add(data.id);
-      lastClickedId.value = data.id;
-      currentMultiSelectParentId.value = data.parentId;
-    } else {
-      if (node && node.parent) {
-        const siblings = node.parent.childNodes.map((child: any) => child.data as BaseTreeItem);
-        const idx1 = siblings.findIndex((i: BaseTreeItem) => i.id === lastClickedId.value);
-        const idx2 = siblings.findIndex((i: BaseTreeItem) => i.id === data.id);
-
-        if (idx1 !== -1 && idx2 !== -1) {
-          const minIdx = Math.min(idx1, idx2);
-          const maxIdx = Math.max(idx1, idx2);
-          selectedIds.value.clear();
-          for (let i = minIdx; i <= maxIdx; i++) {
-            selectedIds.value.add(siblings[i].id);
-          }
-        }
-      }
-    }
-  } else {
-    selectedIds.value.clear();
-    selectedIds.value.add(data.id);
-    lastClickedId.value = data.id;
-    currentMultiSelectParentId.value = data.parentId;
+    // 多选点击不触发导航，避免切换右侧内容
+    return
   }
 
+  if (event.shiftKey) {
+    if (selectedIds.value.size > 0 && currentMultiSelectParentId.value !== levelKey) {
+      ElMessage.warning(t('common.msg.selectSameLevelOnly'))
+      return
+    }
+
+    if (!lastClickedId.value || !node || !node.parent) {
+      selectSingle(data)
+      return
+    }
+
+    const siblings = (node.parent.childNodes as any[])
+      .map((child: any) => child.data as BaseTreeItem)
+      .filter(isSelectable)
+    const idx1 = siblings.findIndex((i: BaseTreeItem) => i.id === lastClickedId.value);
+    const idx2 = siblings.findIndex((i: BaseTreeItem) => i.id === data.id);
+
+    if (idx1 === -1 || idx2 === -1) {
+      selectSingle(data)
+      return
+    }
+
+    const minIdx = Math.min(idx1, idx2);
+    const maxIdx = Math.max(idx1, idx2);
+    selectedIds.value.clear();
+    for (let i = minIdx; i <= maxIdx; i++) {
+      selectedIds.value.add(siblings[i].id);
+    }
+    currentMultiSelectParentId.value = levelKey
+    return
+  }
+
+  // 普通点击：单选并交由外部导航
+  selectSingle(data)
   emit('node-click', data)
 }
 
 const handleNodeContextMenu = (event: Event, data: BaseTreeItem, node: any) => {
   if (props.enableMultiSelect) {
+    if (!isSelectable(data)) return
     if (!selectedIds.value.has(data.id)) {
-      selectedIds.value.clear();
-      selectedIds.value.add(data.id);
-      lastClickedId.value = data.id;
-      currentMultiSelectParentId.value = data.parentId;
+      selectSingle(data)
     }
   }
   emit('node-contextmenu', event as MouseEvent, data, node)
@@ -450,7 +478,7 @@ const expandNode = async (key: string) => {
   }
 }
 
-defineExpose({ scrollToKey, selectedIds, clearSelection, expandNode })
+defineExpose({ scrollToKey, selectedIds, selectedCount, clearSelection, expandNode })
 </script>
 
 <style scoped>

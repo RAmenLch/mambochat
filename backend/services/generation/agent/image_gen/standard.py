@@ -83,7 +83,9 @@ NAMING_TASK = "task"
 # 确定性命名时用于提前规划路径的兜底扩展名；实际下载后以 blob 上报的 mime 为准
 DEFAULT_EXT = ".png"
 
-_PREFIX_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+# 文件名片段（前缀 / 由 path 推断的文件名）的非法字符黑名单：只挡会影响
+# 路径解析与跨平台文件名合法性的字符，中文等 Unicode 字符一律放行
+_FILENAME_FORBIDDEN_RE = re.compile(r'[\\/:*?"<>|\x00-\x1f\x7f]')
 _RESOLUTION_RE = re.compile(r"^\s*(\d{1,4})\s*[xX*×:：]\s*(\d{1,4})\s*$")
 
 _MIME_EXT = {
@@ -164,7 +166,11 @@ class ImageDownloadArgs(BaseModel):
         )
     )
     prefix: Optional[str] = Field(
-        default=None, description=f"文件名前缀，缺省为 {DEFAULT_PREFIX}"
+        default=None,
+        description=(
+            f"文件名前缀，缺省为 {DEFAULT_PREFIX}。支持中文等 Unicode 字符，"
+            '仅禁止 \\ / : * ? " < > | 等路径/文件系统非法字符'
+        ),
     )
 
 
@@ -800,7 +806,7 @@ class ImageGenStandard(ABC):
         if "." in name:
             stem = name.rsplit(".", 1)[0]
             parent = normalized.rsplit("/", 1)[0] or WORKSPACE_ROOT
-            if stem and _PREFIX_RE.match(stem):
+            if stem and not _FILENAME_FORBIDDEN_RE.search(stem):
                 file_prefix = stem
             normalized = parent
 
@@ -830,10 +836,10 @@ class ImageGenStandard(ABC):
         prefix = (raw_prefix or "").strip()
         if not prefix:
             return DEFAULT_PREFIX
-        if not _PREFIX_RE.match(prefix) or len(prefix) > MAX_PREFIX_LEN:
+        if _FILENAME_FORBIDDEN_RE.search(prefix) or len(prefix) > MAX_PREFIX_LEN:
             raise ImageGenToolError(
-                "prefix 仅允许字母、数字、下划线和连字符（长度 1~"
-                f"{MAX_PREFIX_LEN}），收到: {prefix!r}"
+                "prefix 不能包含 \\ / : * ? \" < > | 及控制字符（长度 1~"
+                f"{MAX_PREFIX_LEN}），中文等其它字符均可使用，收到: {prefix!r}"
             )
         return prefix
 

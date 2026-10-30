@@ -60,6 +60,7 @@ export default {
     confirmDelete: 'Are you sure you want to delete?',
     createFailed: 'Creation failed',
     noData: 'No Data',
+    selectSameLevelOnly: 'Only items at the same level can be selected',
   },
   error: {
     unknown: 'An unknown error occurred',
