@@ -24,8 +24,10 @@ const IMAGE_TOOL_NAME = 'image_generate_show'
 export interface ImageRun {
   runId: string
   slotId: string
-  /** 本次生成的全部图片（按创建时间排序） */
+  /** 本次生成已完成、可直接展示的图片（按创建时间排序） */
   files: SubMessage[]
+  /** 本次生成中尚未落盘（等待中 / 超时失败）的图片子消息 */
+  pendingFiles: SubMessage[]
   /** 本次生成使用的展示形态 */
   mode: string
   /** 本次生成的参数快照 */
@@ -38,7 +40,10 @@ export interface ImageRun {
   toolName: string
   /** 是否可以用同一组参数重跑 */
   canRerun: boolean
-  status: string
+  /** run 状态：completed / pending（等待落盘）/ failed（超时或失败） */
+  status: 'completed' | 'pending' | 'failed'
+  /** 可作为重跑 / 获取文件来源的子消息 id（图片优先，其次失败的待生成文件） */
+  sourceSubId: string | null
   createdAt: number
 }
 
@@ -122,13 +127,23 @@ function analyze(message: Message | null | undefined): ImageRunsAnalysis {
     }
   }
 
-  // 3. 逐条图片子消息归组
+  // 3. 逐条图片子消息归组：已完成图片与「等待落盘 / 超时失败」的子消息都参与编组，
+  //    后者即使没有 file_info 也必须能进入图片区域（否则超时后区域直接消失）
   const fileSubs = subs
-    .filter(sm => sm.type === 'File' && sm.file_info?.mime_type?.startsWith('image/'))
+    .filter(sm => {
+      if (sm.type !== 'File') return false
+      if (sm.file_info?.mime_type?.startsWith('image/')) return true
+      // 未落盘的待生成文件：只要有 run 归属或 pending 路径，就归入图片区域
+      return (
+        !sm.file_info &&
+        (!!sm.config?.image_run_id || !!sm.config?.pending_file_path)
+      )
+    })
     .slice()
     .sort((a, b) => timestampOf(a) - timestampOf(b))
 
   const runFiles = new Map<string, SubMessage[]>()
+  const runPending = new Map<string, SubMessage[]>()
   const runSlot = new Map<string, string>()
   const slotFirstFileId = new Map<string, string>()
   const slotPinnedRun = new Map<string, string>()
@@ -138,6 +153,7 @@ function analyze(message: Message | null | undefined): ImageRunsAnalysis {
     const mode = (config.show_tool_mode as string) || 'Normal'
     if (!GALLERY_MODES.has(mode)) continue
 
+    const isImageFile = !!sm.file_info?.mime_type?.startsWith('image/')
     const runId =
       (config.image_run_id as string) || runByFileId.get(sm.content) || ''
     if (!runId) continue
@@ -145,9 +161,11 @@ function analyze(message: Message | null | undefined): ImageRunsAnalysis {
     const slotId = (config.image_slot_id as string) || runId
     if (!runFiles.has(runId)) {
       runFiles.set(runId, [])
+      runPending.set(runId, [])
       runSlot.set(runId, slotId)
     }
-    runFiles.get(runId)!.push(sm)
+    if (isImageFile) runFiles.get(runId)!.push(sm)
+    else runPending.get(runId)!.push(sm)
 
     if (!slotFirstFileId.has(slotId)) slotFirstFileId.set(slotId, sm.id)
     if (config.image_pinned_run_id && !slotPinnedRun.has(slotId)) {
@@ -155,17 +173,27 @@ function analyze(message: Message | null | undefined): ImageRunsAnalysis {
     }
   }
 
+  /** 由子消息状态推导 run 状态：失败优先，其次等待中 */
+  function resolveRunStatus(pendingFiles: SubMessage[], fallback: string): ImageRun['status'] {
+    if (pendingFiles.some(sm => sm.status === 'failed')) return 'failed'
+    if (pendingFiles.length > 0) return 'pending'
+    if (fallback === 'failed') return 'failed'
+    return 'completed'
+  }
+
   // 4. 组装插槽：单 run 单图不占用该区域，交回原有渲染
   const runsBySlot = new Map<string, ImageRun[]>()
   for (const [runId, files] of runFiles) {
     const slotId = runSlot.get(runId)!
-    const config = files[0]?.config ?? {}
+    const pendingFiles = runPending.get(runId) ?? []
+    const config = (files[0] ?? pendingFiles[0])?.config ?? {}
     const record = recordByRun.get(runId)
     const tool = tools.get(runId)
     const run: ImageRun = {
       runId,
       slotId,
       files,
+      pendingFiles,
       mode: (config.show_tool_mode as string) || 'Normal',
       args:
         (record && parseJson<any>(record.content)?.arguments) ||
@@ -176,8 +204,9 @@ function analyze(message: Message | null | undefined): ImageRunsAnalysis {
       toolSubId: tool?.sub.id ?? null,
       toolName: tool?.name || '',
       canRerun: Boolean(record) || tool?.name === IMAGE_TOOL_NAME,
-      status: record?.status ?? files[0]?.status ?? 'completed',
-      createdAt: timestampOf(files[0]),
+      status: resolveRunStatus(pendingFiles, String(record?.status ?? '')),
+      sourceSubId: files[0]?.id ?? pendingFiles[0]?.id ?? null,
+      createdAt: timestampOf(files[0] ?? pendingFiles[0]),
     }
     if (!runsBySlot.has(slotId)) runsBySlot.set(slotId, [])
     runsBySlot.get(slotId)!.push(run)
@@ -195,6 +224,7 @@ function analyze(message: Message | null | undefined): ImageRunsAnalysis {
       runId,
       slotId,
       files: [],
+      pendingFiles: [],
       mode: (recordConfig.show_tool_mode as string) || 'Normal',
       args: content?.arguments ?? null,
       recordId: record.id,
@@ -202,6 +232,7 @@ function analyze(message: Message | null | undefined): ImageRunsAnalysis {
       toolName: IMAGE_TOOL_NAME,
       canRerun: true,
       status: 'failed',
+      sourceSubId: null,
       createdAt: timestampOf(record),
     })
   }
@@ -211,7 +242,8 @@ function analyze(message: Message | null | undefined): ImageRunsAnalysis {
   for (const [slotId, runs] of runsBySlot) {
     runs.sort((a, b) => a.createdAt - b.createdAt)
     const worthGallery =
-      runs.length > 1 || runs.some(run => run.files.length > 1) || runs.some(run => run.canRerun)
+      runs.length > 1 ||
+      runs.some(run => run.files.length > 1 || run.pendingFiles.length > 0 || run.canRerun)
     if (!worthGallery) continue
     const pinned = slotPinnedRun.get(slotId)
     const pinnedRunId =
@@ -224,6 +256,7 @@ function analyze(message: Message | null | undefined): ImageRunsAnalysis {
     })
     for (const run of runs) {
       for (const file of run.files) galleryFileIds.add(file.id)
+      for (const file of run.pendingFiles) galleryFileIds.add(file.id)
     }
   }
 

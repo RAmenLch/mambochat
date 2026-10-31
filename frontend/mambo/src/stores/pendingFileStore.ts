@@ -87,6 +87,10 @@ export const usePendingFileStore = defineStore('pendingFile', () => {
     } else if (data.type === 'file_timeout') {
       updateSubMessage(data.sub_message_id, (sm) => {
         sm.status = 'failed'
+        sm.config = {
+          ...sm.config,
+          pending_failed_reason: data.reason ?? 'timeout',
+        }
       })
       const cb = registry.get(data.sub_message_id)
       if (cb) {

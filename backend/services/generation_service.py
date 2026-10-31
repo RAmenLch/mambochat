@@ -26,6 +26,33 @@ GENERATION_START_TIMEOUT = timedelta(minutes=10)
 DEFAULT_CHAT_TITLE_KEY = "__DEFAULT_CHAT_TITLE__"
 
 
+def _is_pending_media_sub_message(sub) -> bool:
+    """是否为「待生成文件」子消息（File + pending_image_task_id）。
+
+    这类子消息是回复完成之后才落盘的媒体，它们失败只影响图片展示，
+    不代表整条回复失败，因此不参与消息聚合状态的 FAILED 判定。
+    """
+    if sub.type != SubMessageType.FILE.value:
+        return False
+    raw_cfg = getattr(sub, "config", None)
+    if isinstance(raw_cfg, str):
+        try:
+            raw_cfg = json.loads(raw_cfg)
+        except (json.JSONDecodeError, TypeError):
+            return False
+    if isinstance(raw_cfg, dict):
+        return bool(raw_cfg.get("pending_image_task_id"))
+    return bool(getattr(raw_cfg, "pending_image_task_id", None))
+
+
+def _has_blocking_failed_sub_message(sub_messages) -> bool:
+    """是否存在让整条回复判定为失败的子消息（排除后置落盘的媒体失败）。"""
+    return any(
+        sm.status == MessageStatus.FAILED.value and not _is_pending_media_sub_message(sm)
+        for sm in sub_messages
+    )
+
+
 async def _calculate_message_status(message: chat_model.Message) -> schemas.MessageStatus:
     """
     根据消息的角色、子消息状态和活跃流状态，动态计算消息的聚合状态。
@@ -62,7 +89,7 @@ async def _calculate_message_status(message: chat_model.Message) -> schemas.Mess
 
         if MessageStatus.GENERATING.value in sub_statuses:
             return MessageStatus.COMPLETED if cancellation_requested else MessageStatus.GENERATING
-        if MessageStatus.FAILED.value in sub_statuses:
+        if _has_blocking_failed_sub_message(message.sub_messages):
             return MessageStatus.FAILED
 
     if await stream_manager.is_stream_active(message.id):

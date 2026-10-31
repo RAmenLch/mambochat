@@ -25,6 +25,7 @@ import type {
   ImportChatReport,
   ImageRunRerunRequest,
   ImageRunRerunResponse,
+  PendingFileFetchResponse,
 } from './types';
 
 /**
@@ -166,6 +167,17 @@ export const rerunImageRun = (
   data: ImageRunRerunRequest,
 ): Promise<ImageRunRerunResponse> => {
   return apiClient.post(`/image-runs/${subMessageId}/rerun`, data)
+};
+
+/**
+ * 手动获取一条等待超时的待生成文件（查任务 → 下载 → 入库）。
+ * 任务仍在生成时返回 status='running'，不会改变子消息状态。
+ * @param subMessageId 待生成文件子消息ID
+ */
+export const fetchPendingFile = (
+  subMessageId: string,
+): Promise<PendingFileFetchResponse> => {
+  return apiClient.post(`/pending-files/${subMessageId}/fetch`)
 };
 
 /**

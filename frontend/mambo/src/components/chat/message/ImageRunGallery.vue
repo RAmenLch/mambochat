@@ -66,12 +66,31 @@
         </div>
       </template>
 
-      <div v-else class="run-failed">
+      <div v-else-if="activeRun && activeRun.status === 'failed'" class="run-failed">
         <el-icon><Warning /></el-icon>
         <span class="run-failed-text">{{ failureText }}</span>
-        <el-button link size="small" @click="openRerunDialog">
+        <el-button
+          v-if="fetchableSubId"
+          link
+          size="small"
+          :loading="isFetching"
+          @click="fetchFile"
+        >
+          {{ t('chat.imageRun.fetchFile') }}
+        </el-button>
+        <el-button
+          v-if="activeRun?.canRerun"
+          link
+          size="small"
+          @click="openRerunDialog"
+        >
           {{ t('chat.imageRun.retry') }}
         </el-button>
+      </div>
+
+      <div v-else class="run-pending">
+        <el-icon class="is-loading"><Loading /></el-icon>
+        <span class="run-pending-text">{{ t('chat.imageRun.pending') }}</span>
       </div>
     </div>
 
@@ -129,7 +148,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, ArrowRight, Warning, Loading } from '@element-plus/icons-vue'
 import type { FileResponse, Message, SubMessage } from '@/api/types'
-import { rerunImageRun, updateSubMessage } from '@/api/chatService'
+import { rerunImageRun, updateSubMessage, fetchPendingFile } from '@/api/chatService'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { describeRunArgs, type ImageRunSlot } from '@/composables/useImageRuns'
 import SubMessageItem from '../SubMessageItem.vue'
@@ -152,6 +171,7 @@ const modeOptions = ['Normal', 'Group', 'Mini_Avatar', 'Gal_Avatar', 'Spark']
 const activeRunId = ref<string>(props.slot.pinnedRunId)
 const pinnedFileId = ref<string | null>(null)
 const isRerunning = ref(false)
+const isFetching = ref(false)
 const dialogVisible = ref(false)
 
 const form = reactive({
@@ -201,9 +221,20 @@ const previewIndex = computed(() => {
   return Math.max(all.findIndex(file => file.id === target.id), 0)
 })
 
+/** 可用于「获取文件」的子消息：本次 run 里失败或未落盘的图片子消息 */
+const fetchableSubId = computed(() => {
+  const run = activeRun.value
+  if (!run || run.pendingFiles.length === 0) return null
+  const target = run.pendingFiles.find(sm => sm.status === 'failed') || run.pendingFiles[0]
+  return target?.id ?? null
+})
+
 const failureText = computed(() => {
   const run = activeRun.value
   if (!run) return t('chat.imageRun.failed')
+  const pending = run.pendingFiles[0]
+  const pendingReason = pending?.config?.pending_failed_reason
+  if (pendingReason === 'timeout') return t('chat.imageRun.timedOut')
   const record = run.recordId ? props.parentMessage.sub_messages.find(sm => sm.id === run.recordId) : null
   let reason = ''
   if (record?.content) {
@@ -279,12 +310,13 @@ function openRerunDialog() {
 }
 
 async function submitRerun() {
-  // 源图片只需任取插槽内的一张：服务端会据此定位插槽与原始参数
-  const source =
-    activeRun.value?.files[0] ||
-    props.slot.runs.flatMap(run => run.files)[0] ||
+  // 源子消息只需任取一条：服务端会据此定位插槽与原始参数
+  // （失败态没有图片时，用该 run 里未落盘的图片子消息，它同样带参数快照）
+  const sourceId =
+    activeRun.value?.sourceSubId ||
+    props.slot.runs.flatMap(run => run.files).find(Boolean)?.id ||
     null
-  if (!source) {
+  if (!sourceId) {
     ElMessage.error(t('chat.imageRun.noSource'))
     return
   }
@@ -297,7 +329,7 @@ async function submitRerun() {
 
   isRerunning.value = true
   try {
-    const response = await rerunImageRun(source.id, {
+    const response = await rerunImageRun(sourceId, {
       prompt: form.prompt.trim() || undefined,
       negative_prompt: form.negativePrompt.trim() || undefined,
       resolution: form.resolution.trim() || undefined,
@@ -320,6 +352,37 @@ async function submitRerun() {
     ElMessage.error(error?.message || t('chat.imageRun.failed'))
   } finally {
     isRerunning.value = false
+  }
+}
+
+/** 手动获取文件：查任务 → 下载 → 入库；成功后把子消息就地更新为完成态 */
+async function fetchFile() {
+  const targetId = fetchableSubId.value
+  if (!targetId) return
+  isFetching.value = true
+  try {
+    const res = await fetchPendingFile(targetId)
+    if (res.status === 'completed') {
+      const target = props.parentMessage.sub_messages.find(sm => sm.id === targetId)
+      if (target) {
+        target.content = res.file_id || ''
+        target.status = 'completed'
+        if (res.file_info) target.file_info = res.file_info
+        const config = { ...(target.config ?? {}) } as Record<string, any>
+        delete config.pending_file_path
+        delete config.pending_file_timeout
+        delete config.pending_failed_reason
+        target.config = config as any
+      }
+    } else if (res.status === 'running') {
+      ElMessage.info(t('chat.attachment.stillGenerating'))
+    } else {
+      ElMessage.error(res.error || t('chat.imageRun.failed'))
+    }
+  } catch (error: any) {
+    ElMessage.error(error?.message || t('chat.imageRun.failed'))
+  } finally {
+    isFetching.value = false
   }
 }
 </script>
@@ -405,6 +468,15 @@ async function submitRerun() {
   padding: 8px 4px;
   font-size: 12px;
   color: var(--el-color-danger);
+}
+
+.run-pending {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 4px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 .gallery-progress {

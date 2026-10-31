@@ -83,7 +83,7 @@ export function subscribeToMessageStream(params: SseSubscriptionParams): AbortCo
  */
 export type PendingFileEvent =
   | { type: 'file_ready'; sub_message_id: string; file_id: string; file_info?: Record<string, unknown> }
-  | { type: 'file_timeout'; sub_message_id: string; path: string };
+  | { type: 'file_timeout'; sub_message_id: string; path: string; reason?: string };
 
 /**
  * 订阅待生成文件的聚合 SSE 流。

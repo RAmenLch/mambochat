@@ -153,10 +153,10 @@ class McpImageGenStandard(ImageGenStandard):
     async def status(
         self, task_id: str, wait_timeout: int = DEFAULT_WAIT_TIMEOUT
     ) -> Dict[str, Any]:
-        arguments: Dict[str, Any] = {"task_id": task_id}
+        # wait_timeout 必须显式下发（含 0）：缺省时服务端会按自己的默认值
+        # 长时间阻塞，导致平台侧的轮询节流与超时判定失效。
         timeout = self._clamp_wait_timeout(wait_timeout)
-        if timeout > 0:
-            arguments["wait_timeout"] = timeout
+        arguments: Dict[str, Any] = {"task_id": task_id, "wait_timeout": timeout}
         result = await self._call(IMAGE_TOOL_STATUS, arguments)
         return self._extract_payload(result)
 

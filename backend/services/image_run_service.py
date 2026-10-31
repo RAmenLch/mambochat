@@ -413,23 +413,31 @@ def _merge_args(base: Dict[str, Any], overrides: Dict[str, Any]) -> Dict[str, An
 
     if not merged.get("path"):
         directory, prefix = _derive_target(base or {})
-        merged["path"] = f"{directory}/{prefix}.png" if prefix else directory
+        directory = directory.rstrip("/") + "/"
+        merged["path"] = f"{directory}{prefix}.png" if prefix else directory
     return merged
 
 
 def _derive_target(base: Dict[str, Any]) -> Tuple[str, Optional[str]]:
-    """从源参数里的落盘路径推导目录与文件名前缀，让重跑落在同一目录下。"""
-    raw = base.get("path")
-    if not isinstance(raw, str) or not raw.startswith("/"):
+    """从源参数里的落盘路径推导目录与文件名前缀，让重跑落在同一目录下。
+
+    规则与工具侧一致：**以 ``/`` 结尾的是目录**，否则末段视为文件名。
+    推导失败时回退默认目录，绝不抛错（重跑不能因旧参数形态而失败）。
+    """
+    try:
+        raw = base.get("path")
+        if not isinstance(raw, str) or not raw.startswith("/"):
+            return DEFAULT_OUTPUT_DIR, None
+
+        if raw.endswith("/"):
+            return raw.rstrip("/") or DEFAULT_OUTPUT_DIR, None
+
+        parent, _, name = raw.rpartition("/")
+        directory = parent or DEFAULT_OUTPUT_DIR
+        stem = name.rsplit(".", 1)[0] if "." in name else name
+        return directory, (stem or None)
+    except Exception:  # noqa: BLE001 - 推导失败一律回退默认目录
         return DEFAULT_OUTPUT_DIR, None
-
-    name = raw.rsplit("/", 1)[-1]
-    if "." not in name:
-        return raw, None
-
-    directory = raw.rsplit("/", 1)[0] or DEFAULT_OUTPUT_DIR
-    prefix = name.rsplit(".", 1)[0]
-    return directory, prefix or None
 
 
 def _clamp_timeout(value: Any) -> int:

@@ -232,7 +232,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { storeToRefs } from 'pinia';
 import type { Message, SubMessage, ErrorContent, FileResponse } from '@/api/types';
@@ -240,6 +240,7 @@ import { useAssistantTimeline, type BubbleSectionGroup } from '@/composables/use
 import { useImageRuns } from '@/composables/useImageRuns';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { useChatSessionStore } from '@/stores/chatSessionStore';
+import { usePendingFileStore } from '@/stores/pendingFileStore';
 import { useAgentStore } from '@/stores/agentStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import BubbleSectionGroupComponent from './BubbleSectionGroup.vue';
@@ -281,6 +282,35 @@ const timelineMessageRef = computed<Message>(() => {
     ...props.message,
     sub_messages: props.message.sub_messages.filter(sm => !galleryFileIds.value.has(sm.id)),
   };
+});
+
+// 归入图片区域的待生成文件不会渲染正文卡片，SSE 订阅需要在这里代为注册，
+// 否则后台轮询器不会启动、图片永远等不到
+const pendingFileStore = usePendingFileStore();
+const galleryPendingIds = computed(() =>
+  imageSlots.value
+    .flatMap(slot => slot.runs.flatMap(run => run.pendingFiles))
+    .filter(sm => sm.status === 'waiting')
+    .map(sm => sm.id),
+);
+
+watch(
+  galleryPendingIds,
+  (ids, oldIds) => {
+    for (const id of ids) {
+      if (!oldIds?.includes(id)) {
+        pendingFileStore.register(id, { onReady() {}, onTimeout() {} });
+      }
+    }
+    for (const id of oldIds ?? []) {
+      if (!ids.includes(id)) pendingFileStore.unregister(id);
+    }
+  },
+  { immediate: true },
+);
+
+onBeforeUnmount(() => {
+  for (const id of galleryPendingIds.value) pendingFileStore.unregister(id);
 });
 
 const {

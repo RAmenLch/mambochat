@@ -54,7 +54,8 @@ FILE_OUTPUT_TOOLS: Tuple[str, ...] = ("show", IMAGE_TOOL_GENERATE_SHOW)
 # 工作区虚拟根：与 show 工具、agent 默认 workspace_root 保持一致
 WORKSPACE_ROOT = "/workspace"
 
-DEFAULT_OUTPUT_DIR = f"{WORKSPACE_ROOT}/images"
+# 默认落地目录（以 “/” 结尾表示目录，见 _normalize_dir）
+DEFAULT_OUTPUT_DIR = f"{WORKSPACE_ROOT}/images/"
 DEFAULT_PREFIX = "image"
 DEFAULT_COUNT = 1
 MAX_COUNT = 8
@@ -161,8 +162,9 @@ class ImageDownloadArgs(BaseModel):
     )
     path: str = Field(
         description=(
-            f"目标目录虚拟路径，必填且必须位于 {WORKSPACE_ROOT} 之下"
-            f"（例如 {DEFAULT_OUTPUT_DIR}）。缺少或越界会直接报错"
+            f"目标目录虚拟路径，必填且必须位于 {WORKSPACE_ROOT} 之下，"
+            f"**目录必须以 / 结尾**（例如 {DEFAULT_OUTPUT_DIR}）；"
+            "缺省、不以 / 结尾或越界都会直接报错"
         )
     )
     prefix: Optional[str] = Field(
@@ -212,9 +214,11 @@ class ImageGenerateShowArgs(BaseModel):
     path: Optional[str] = Field(
         default=None,
         description=(
-            f"图片落地目录的虚拟路径，缺省为 {DEFAULT_OUTPUT_DIR}；"
-            f"必须位于 {WORKSPACE_ROOT} 之下。若以文件名结尾（如 "
-            f"{DEFAULT_OUTPUT_DIR}/fox.png），则目录与文件名前缀会随之推断"
+            f"图片落地路径的虚拟路径，缺省为 {DEFAULT_OUTPUT_DIR}；"
+            f"必须位于 {WORKSPACE_ROOT} 之下。**以 / 结尾表示目录**（如 "
+            f"{DEFAULT_OUTPUT_DIR}）；不以 / 结尾则末段视为文件名（如 "
+            f"{DEFAULT_OUTPUT_DIR}fox.png 或 {DEFAULT_OUTPUT_DIR}fox），"
+            "目录取父级、末段（去扩展名）作文件名前缀"
         ),
     )
     timeout: Optional[int] = Field(
@@ -501,6 +505,12 @@ class ImageGenStandard(ABC):
     ) -> str:
         backend = self._require_backend(backend)
 
+        if not (args.path or "").strip().endswith("/"):
+            raise ImageGenToolError(
+                f"image_download 的 path 是目标目录，必须以 / 结尾"
+                f"（例如 {DEFAULT_OUTPUT_DIR}），收到: {args.path!r}"
+            )
+
         await self._status_until_settled(
             args.task_id, self._clamp_wait_timeout(args.wait_timeout)
         )
@@ -779,58 +789,53 @@ class ImageGenStandard(ABC):
     def _normalize_dir(self, raw_path: str) -> Tuple[str, str]:
         """返回 ``(目录, 从文件名推断的前缀)``，非法输入直接抛错。
 
-        仅接受 ``WORKSPACE_ROOT`` 之下的绝对虚拟路径。
-        若传入的是形如 ``/workspace/images/cat.png`` 的文件路径，则拆出
-        目录 ``/workspace/images`` 与推断前缀 ``cat``。
+        路径合法性交给 :class:`VirtualPath`（绝对路径、拒绝 ``..`` / ``//`` /
+        根目录），本方法只在此之上做两件事：
+
+        1. 限定在 ``WORKSPACE_ROOT`` 之下；
+        2. 判定「目录」还是「文件名」——**以 ``/`` 结尾即目录**，
+           否则末段视为文件名，目录取其父级、末段（去扩展名）作前缀。
         """
         raw = (raw_path or "").strip()
         if not raw:
             raise ImageGenToolError(
                 f"image_download 缺少必填参数 path：请指定工作区内的目标目录"
-                f"（例如 {DEFAULT_OUTPUT_DIR}）"
+                f"（目录以 / 结尾，例如 {DEFAULT_OUTPUT_DIR}）"
             )
 
-        if not raw.startswith("/") or raw.startswith("//") or "\\" in raw or ":" in raw:
+        try:
+            virtual = VirtualPath(raw)
+        except Exception as exc:  # noqa: BLE001 - 校验失败统一转文本
             raise ImageGenToolError(
-                f"path 必须是绝对虚拟路径且位于 {WORKSPACE_ROOT} 之下，收到: {raw!r}"
-            )
+                f"path 必须是合法的绝对虚拟路径（不能包含 '..' / '//'，"
+                f"不能是根目录），收到: {raw!r}（{exc}）"
+            ) from exc
 
-        normalized = self._posix_normpath(raw)
-        if normalized is None:
+        value = virtual.value
+        if "\\" in value or ":" in value:
             raise ImageGenToolError(
-                f"path 不能包含 '..' 越出工作区，收到: {raw!r}"
+                f"path 不能包含 '\\' 或 ':'，收到: {raw!r}"
             )
 
-        file_prefix = ""
-        name = normalized.rsplit("/", 1)[-1]
-        if "." in name:
-            stem = name.rsplit(".", 1)[0]
-            parent = normalized.rsplit("/", 1)[0] or WORKSPACE_ROOT
-            if stem and not _FILENAME_FORBIDDEN_RE.search(stem):
-                file_prefix = stem
-            normalized = parent
+        # 工作区根自身按目录处理（``/workspace`` 无尾斜杠也不当作文件名）
+        if value.rstrip("/") == WORKSPACE_ROOT:
+            return WORKSPACE_ROOT, ""
 
-        if not (normalized == WORKSPACE_ROOT or normalized.startswith(f"{WORKSPACE_ROOT}/")):
+        if value.endswith("/"):
+            directory = value.rstrip("/")
+            file_prefix = ""
+        else:
+            parent, name = value.rsplit("/", 1)
+            directory = parent or WORKSPACE_ROOT
+            stem = name.rsplit(".", 1)[0] if "." in name else name
+            file_prefix = stem if stem and not _FILENAME_FORBIDDEN_RE.search(stem) else ""
+
+        if not (directory == WORKSPACE_ROOT or directory.startswith(f"{WORKSPACE_ROOT}/")):
             raise ImageGenToolError(
                 f"path 必须位于 {WORKSPACE_ROOT} 之下，收到: {raw!r}"
             )
 
-        return normalized, file_prefix
-
-    @staticmethod
-    def _posix_normpath(path: str) -> Optional[str]:
-        """纯字符串实现的 POSIX 规范化，拒绝 ``..`` 越界。"""
-        parts: List[str] = []
-        for segment in path.split("/"):
-            if segment in ("", "."):
-                continue
-            if segment == "..":
-                if not parts:
-                    return None
-                parts.pop()
-                continue
-            parts.append(segment)
-        return "/" + "/".join(parts) if parts else "/"
+        return directory, file_prefix
 
     def _normalize_prefix(self, raw_prefix: str) -> str:
         prefix = (raw_prefix or "").strip()

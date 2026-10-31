@@ -32,6 +32,8 @@ export interface SubMessageConfig {
   task_group_id?: string | null
   pending_file_path?: string | null
   pending_file_timeout?: number | null
+  /** 待生成文件的失败原因：timeout / task_failed / no_backend / download_failed */
+  pending_failed_reason?: string | null
   show_tool_mode?: string | null
   /** get_goal MCP_TOOL 轮次边界标志（GoalLoopMiddleware 注入），前端据此渲染轮次分隔线 */
   is_goal_loop_round?: boolean | null
@@ -98,6 +100,15 @@ export interface ImageRunRerunResponse {
   record: SubMessage
   files: SubMessage[]
   error: string | null
+}
+
+/** 手动获取待生成文件的结果 */
+export interface PendingFileFetchResponse {
+  /** completed=已入库；running=任务仍在生成；failed=任务失败或下载失败 */
+  status: 'completed' | 'running' | 'failed'
+  file_id?: string | null
+  file_info?: FileResponse | null
+  error?: string | null
 }
 
 // --- Message Types ---

@@ -191,6 +191,29 @@
       </div>
     </div>
 
+    <!-- 待生成文件失败（超时 / 任务失败）：展示原因并允许手动获取文件 -->
+    <div
+      v-else-if="isPendingFailed && showToolMode !== 'Mini_Avatar' && showToolMode !== 'Gal_Avatar'"
+      class="file-pending-container"
+    >
+      <div class="file-pending-card is-failed">
+        <div class="file-pending-icon">
+          <el-icon :size="28" color="var(--el-color-danger)"><Warning /></el-icon>
+        </div>
+        <div class="file-pending-info">
+          <div class="file-pending-name">
+            {{ pendingFileName }}
+          </div>
+          <div class="file-pending-status">
+            {{ pendingFailedText }}
+          </div>
+        </div>
+        <el-button size="small" :loading="fetchingFile" @click="handleFetchFile">
+          {{ fetchingFile ? t('chat.attachment.loadingFile') : t('chat.attachment.loadFile') }}
+        </el-button>
+      </div>
+    </div>
+
     <template v-else>
       <div v-if="showHeader || subMessage.type === 'McpTool'" class="sub-message-header">
         <div v-if="subMessage.type === 'McpTool' && isCollapsed" class="mcp-collapsed-summary">
@@ -391,6 +414,7 @@ import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { usePendingFileStore } from '@/stores/pendingFileStore'
 import { getFileContent } from '@/api/fileService'
+import { fetchPendingFile } from '@/api/chatService'
 import { resolveFileUrl } from '@/services/electronUrl'
 import { unpackMcpToolCall } from '@/utils/mcpToolUnpack'
 import { parseWebSearchResult } from '@/utils/webSearchResult'
@@ -409,6 +433,7 @@ import {
   Top,
   Document,
   Sort,
+  Warning,
 } from '@element-plus/icons-vue'
 import CodeBlock from './CodeBlock.vue'
 import WebSearchResultList from './WebSearchResultList.vue'
@@ -600,6 +625,15 @@ const isPendingFile = computed(() =>
   !!props.subMessage.config.pending_file_path
 )
 
+/** 待生成文件失败（超时 / 任务失败）：展示失败卡片并允许手动获取 */
+const isPendingFailed = computed(() =>
+  props.subMessage.type === 'File' &&
+  props.subMessage.status === 'failed' &&
+  !!props.subMessage.config.pending_file_path
+)
+
+const fetchingFile = ref(false)
+
 const isEditableFile = computed(() =>
   props.subMessage.type === 'File' &&
   !!props.subMessage.file_info?.editable
@@ -649,7 +683,7 @@ const fileContentBlocks = computed(() => {
 })
 
 const pendingFileName = computed(() => {
-  if (!isPendingFile.value) return ''
+  if (!isPendingFile.value && !isPendingFailed.value) return ''
   const path = props.subMessage.config.pending_file_path || ''
   return path.split('/').pop() || path
 })
@@ -658,6 +692,43 @@ const pendingStatusText = computed(() => {
   if (pendingFailed.value) return t('chat.attachment.fileTimeout')
   return t('chat.attachment.waitingForFile')
 })
+
+/** 失败卡片文案：区分「超时」与「生成失败」 */
+const pendingFailedText = computed(() => {
+  const reason = props.subMessage.config.pending_failed_reason
+  if (reason === 'task_failed') return t('chat.attachment.generationFailed')
+  return t('chat.attachment.fileTimeout')
+})
+
+/** 手动获取文件：查任务 → 下载 → 入库；成功后把子消息就地更新为完成态 */
+async function handleFetchFile() {
+  if (fetchingFile.value) return
+  fetchingFile.value = true
+  try {
+    const res = await fetchPendingFile(props.subMessage.id)
+    if (res.status === 'completed') {
+      const config = { ...(props.subMessage.config ?? {}) } as Record<string, any>
+      delete config.pending_file_path
+      delete config.pending_file_timeout
+      delete config.pending_failed_reason
+      sessionStore._addOrUpdateSubMessage(props.parentMessage.id, {
+        ...props.subMessage,
+        content: res.file_id || '',
+        status: 'completed',
+        file_info: (res.file_info ?? undefined) as SubMessage['file_info'],
+        config: config as SubMessageConfig,
+      } as SubMessage)
+    } else if (res.status === 'running') {
+      ElMessage.info(t('chat.attachment.stillGenerating'))
+    } else {
+      ElMessage.error(res.error || t('chat.attachment.generationFailed'))
+    }
+  } catch (error: any) {
+    ElMessage.error(error?.message || t('chat.attachment.generationFailed'))
+  } finally {
+    fetchingFile.value = false
+  }
+}
 
 const contentBlocks = computed(() => {
   if (props.subMessage.type !== 'File' && props.subMessage.type !== 'McpTool') {
@@ -1064,6 +1135,12 @@ function scrollToTop() {
 .is-user .file-pending-card {
   background-color: var(--el-color-primary-light-9);
   border-color: var(--el-color-primary-light-5);
+}
+.file-pending-card.is-failed {
+  border-color: var(--el-color-danger-light-5);
+}
+.file-pending-card.is-failed .file-pending-status {
+  color: var(--el-color-danger);
 }
 .file-pending-icon {
   flex-shrink: 0;
