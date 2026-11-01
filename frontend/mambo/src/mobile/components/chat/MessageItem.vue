@@ -829,6 +829,8 @@ async function handleDeleteMessage() {
 .sub-messages-container {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
   gap: 2px;
 }
 

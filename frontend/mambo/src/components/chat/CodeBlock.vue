@@ -477,6 +477,7 @@ const closeMermaidPreview = () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   padding: 4px 12px;
   background-color: rgba(255, 255, 255, 0.05);
   height: 32px;
@@ -486,11 +487,16 @@ const closeMermaidPreview = () => {
   font-size: 12px;
   color: #ccc;
   font-family: 'Courier New', Courier, monospace;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .actions {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
   gap: 4px;
 }
 
