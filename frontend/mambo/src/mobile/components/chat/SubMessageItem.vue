@@ -20,9 +20,21 @@
       <el-image
         v-if="subMessage.file_info.mime_type.startsWith('image/')"
         :src="subMessage.file_info.url"
+        :preview-src-list="effectivePreviewSrcList"
+        :initial-index="previewIndex"
+        :preview-teleported="true"
+        :z-index="9999"
         fit="contain"
         class="file-image-thumbnail"
-      />
+        hide-on-click-modal
+      >
+        <template #error>
+          <div class="file-placeholder">
+            <el-icon><Picture /></el-icon>
+            <span>{{ t('chat.attachment.imageLoadFailed') }}</span>
+          </div>
+        </template>
+      </el-image>
       <audio
         v-else-if="subMessage.file_info.mime_type.startsWith('audio/')"
         :src="subMessage.file_info.url"
@@ -252,6 +264,16 @@
           </template>
         </template>
       </div>
+
+      <!-- 折叠态展开入口：移动端无悬浮操作栏，需常驻可点的展开按钮 -->
+      <div
+        v-if="isCollapsed && !isToolType && !isGenerating"
+        class="collapsed-toggle-bar"
+        @click.stop="toggleCollapse"
+      >
+        <span>{{ t('chat.message.expand') }}</span>
+        <el-icon :size="12"><ArrowDownBold /></el-icon>
+      </div>
     </template>
   </div>
 </template>
@@ -282,6 +304,7 @@ import {
   Document,
   Warning,
   Sort,
+  Picture,
 } from '@element-plus/icons-vue'
 import CodeBlock from '@/components/chat/CodeBlock.vue'
 import WebSearchResultList from '@/components/chat/WebSearchResultList.vue'
@@ -685,6 +708,24 @@ onBeforeUnmount(() => {
   width: 100%;
 }
 
+.file-placeholder {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  min-height: 120px;
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+.file-placeholder .el-icon {
+  font-size: 28px;
+  margin-bottom: 8px;
+}
+
 .file-audio-player {
   display: block;
   width: 100%;
@@ -940,8 +981,55 @@ onBeforeUnmount(() => {
   color: rgba(255, 255, 255, 0.95);
 }
 
+/* 折叠态：文本保留可读摘要（与桌面一致的限高+渐变），工具内容直接隐藏 */
 .message-content.collapsed {
+  position: relative;
+  max-height: 5em;
+  overflow: hidden;
+}
+
+.message-content.collapsed::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2.5em;
+  background: linear-gradient(to bottom, transparent, var(--el-bg-color));
+  pointer-events: none;
+}
+
+.is-user .message-content.collapsed::after {
+  background: linear-gradient(to bottom, transparent, var(--el-color-primary));
+}
+
+.message-content.collapsed.mcp-tool-content {
+  max-height: none;
   display: none;
+}
+
+/* 可编辑文件内容沿用「整体隐藏 + 头部图标展开」的既有行为 */
+.message-content.file-message-content.collapsed {
+  max-height: none;
+  display: none;
+}
+
+.message-content.file-message-content.collapsed::after {
+  content: none;
+}
+
+.collapsed-toggle-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--el-color-primary);
+  background-color: var(--color-background-soft);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  user-select: none;
 }
 
 .content-block :deep(img) {

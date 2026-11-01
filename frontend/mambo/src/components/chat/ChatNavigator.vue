@@ -28,8 +28,8 @@
     <transition name="fade-slide">
       <div v-if="isPanelVisible" class="navigator-panel">
         <div class="panel-header">
-          <span>会话导航</span>
-          <span class="count">{{ userMessages.length }} 条对话</span>
+          <span>{{ t('chat.navigator.title') }}</span>
+          <span class="count">{{ t('chat.navigator.count', { count: userMessages.length }) }}</span>
         </div>
         <div class="panel-list">
           <div
@@ -50,7 +50,10 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { Message } from '@/api/types'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   messages: Message[]

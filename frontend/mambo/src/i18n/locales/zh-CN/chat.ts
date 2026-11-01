@@ -27,6 +27,10 @@ export default {
       pendingReview: '已中断，等待审核或回答',
     },
   },
+  navigator: {
+    title: '会话导航',
+    count: '{count} 条对话',
+  },
   move: {
     title: '移动到文件夹',
     rootFolder: '根目录',

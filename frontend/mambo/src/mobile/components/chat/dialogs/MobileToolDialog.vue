@@ -82,8 +82,24 @@
               <div v-if="currentArgs && Object.keys(currentArgs).length > 0" class="args-list">
                 <div v-for="(val, key) in currentArgs" :key="key" class="arg-row">
                   <span class="arg-key">{{ key }}</span>
-                  <pre v-if="isMultiline(val)" class="arg-val">{{ formatArg(val) }}</pre>
+                  <pre
+                    v-if="isMultiline(val)"
+                    class="arg-val"
+                    :class="{ 'is-expanded': expandedArgs[key] }"
+                  >{{ formatArg(val) }}</pre>
                   <span v-else class="arg-val inline">{{ formatArg(val) }}</span>
+                  <button
+                    v-if="isMultiline(val) && isLongText(formatArg(val))"
+                    class="expand-toggle"
+                    @click="expandedArgs[key] = !expandedArgs[key]"
+                  >
+                    <el-icon :size="12">
+                      <ArrowUp v-if="expandedArgs[key]" />
+                      <ArrowDown v-else />
+                    </el-icon>
+                    <span v-if="expandedArgs[key]">{{ t('chat.message.mcp.collapseContent') }}</span>
+                    <span v-else>{{ t('chat.message.mcp.expandFullContent', { count: formatArg(val).length }) }}</span>
+                  </button>
                 </div>
               </div>
               <div v-else class="empty-hint">无参数</div>
@@ -102,9 +118,21 @@
                   </a>
                 </div>
               </template>
-              <div class="result-box" :class="{ 'is-error': mcpTool?.is_error }">
+              <div class="result-box" :class="{ 'is-error': mcpTool?.is_error, 'is-expanded': isResultExpanded }">
                 {{ mcpTool?.result || '无结果' }}
               </div>
+              <button
+                v-if="isResultLong"
+                class="expand-toggle"
+                @click="isResultExpanded = !isResultExpanded"
+              >
+                <el-icon :size="12">
+                  <ArrowUp v-if="isResultExpanded" />
+                  <ArrowDown v-else />
+                </el-icon>
+                <span v-if="isResultExpanded">{{ t('chat.message.mcp.collapseContent') }}</span>
+                <span v-else>{{ t('chat.message.mcp.expandFullContent', { count: mcpTool?.result?.length ?? 0 }) }}</span>
+              </button>
             </div>
 
             <!-- Security Review -->
@@ -157,6 +185,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch, reactive } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { Message, SubMessage, McpToolContent, ReviewToolContent, SecurityReviewContent, ToolDecision, MultimodalMedia } from '@/api/types'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
@@ -164,7 +193,7 @@ import { useMcpStore } from '@/stores/mcpStore'
 import { unpackMcpToolCall } from '@/utils/mcpToolUnpack'
 import { resolveFileUrl } from '@/services/electronUrl'
 import { ElMessage } from 'element-plus'
-import { Warning, Loading, CircleClose, CircleCheck, Close, Edit, Select } from '@element-plus/icons-vue'
+import { Warning, Loading, CircleClose, CircleCheck, Close, Edit, Select, ArrowUp, ArrowDown } from '@element-plus/icons-vue'
 
 interface SchemaProperty {
   type?: string
@@ -192,6 +221,20 @@ const activeTabId = ref<string>('')
 const showRejectInput = ref(false)
 const rejectReason = ref('')
 const editForms = reactive<Record<string, any>>({})
+
+const { t } = useI18n()
+
+// --- 长参数 / 长结果的折叠与展开 ---
+/** 超过该字符数或行数即视为长文本，默认限高展示 */
+const LONG_TEXT_MAX_CHARS = 300
+const LONG_TEXT_MAX_LINES = 8
+
+const expandedArgs = reactive<Record<string, boolean>>({})
+const isResultExpanded = ref(false)
+
+function isLongText(text: string): boolean {
+  return text.length > LONG_TEXT_MAX_CHARS || text.split('\n').length > LONG_TEXT_MAX_LINES
+}
 
 const parentMessage = computed<Message | null>(() => {
   if (!props.parentMessageId) return null
@@ -227,6 +270,8 @@ const mcpTool = computed((): McpToolContent | null => {
   if (activeMsg.value?.type !== 'McpTool') return null
   return currentTool.value as McpToolContent
 })
+
+const isResultLong = computed(() => isLongText(mcpTool.value?.result || ''))
 
 /** 多模态媒体展示 url（后端已在 media.url 填充下载路径） */
 function mcpMediaUrl(m: MultimodalMedia | null | undefined): string {
@@ -306,6 +351,7 @@ watch(() => props.visible, (v) => {
     activeTabId.value = props.initialSubMessageId || toolMessages.value[0].id
     showRejectInput.value = false
     rejectReason.value = ''
+    resetExpandedState()
     initEditForms()
   }
 })
@@ -313,8 +359,14 @@ watch(() => props.visible, (v) => {
 watch(activeTabId, () => {
   showRejectInput.value = false
   rejectReason.value = ''
+  resetExpandedState()
   initEditForms()
 })
+
+function resetExpandedState() {
+  for (const key of Object.keys(expandedArgs)) delete expandedArgs[key]
+  isResultExpanded.value = false
+}
 
 function initEditForms() {
   const args = currentArgs.value
@@ -536,14 +588,26 @@ async function handleEditAndApprove() {
   font-size: 13px; color: var(--el-text-color-primary); margin: 0;
   white-space: pre-wrap; word-break: break-word;
   font-family: 'SF Mono', Monaco, Menlo, monospace; background: transparent;
+  max-height: 160px; overflow-y: auto;
 }
 
-.arg-val.inline { font-family: inherit; }
+.arg-val.is-expanded { max-height: none; }
+
+.arg-val.inline { font-family: inherit; max-height: none; overflow: visible; }
+
+.expand-toggle {
+  display: inline-flex; align-items: center; gap: 2px;
+  margin-top: 6px; padding: 4px 8px;
+  font-size: 12px; color: var(--el-color-primary);
+  background: transparent; border: none; cursor: pointer;
+}
 
 .result-box {
   padding: 10px 12px; background: var(--el-fill-color-light); border-radius: 8px;
   font-size: 13px; max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;
 }
+
+.result-box.is-expanded { max-height: none; }
 
 .result-box.is-error {
   background: var(--el-color-danger-light-9); color: var(--el-color-danger);

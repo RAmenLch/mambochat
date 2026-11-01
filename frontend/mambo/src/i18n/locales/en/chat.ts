@@ -27,6 +27,10 @@ export default {
       pendingReview: 'Interrupted, waiting for review or answer',
     },
   },
+  navigator: {
+    title: 'Chat Navigation',
+    count: '{count} messages',
+  },
   move: {
     title: 'Move to Folder',
     rootFolder: 'Root Directory',

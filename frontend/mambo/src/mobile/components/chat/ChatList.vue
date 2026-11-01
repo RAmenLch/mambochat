@@ -44,6 +44,10 @@
         </template>
 
         <template #item-suffix="{ data }">
+          <ChatStatusBadge
+            v-if="data.itemType === 'chat' && !data.memberAlias"
+            :status="chatListStore.chatStatusMap[data.id]"
+          />
           <div class="node-actions" @click.stop="openContextMenu(data)">
             <el-icon :size="16"><MoreFilled /></el-icon>
           </div>
@@ -249,6 +253,7 @@ interface ElTreeNode {
   childNodes: ElTreeNode[]
 }
 import ExplorerTree from '@/components/common/ExplorerTree.vue'
+import ChatStatusBadge from '@/components/chat/ChatStatusBadge.vue'
 import EntityFormDialog from '@/components/common/EntityFormDialog.vue'
 import MoveTargetDialog from './dialogs/MoveTargetDialog.vue'
 import SearchDialog from './dialogs/SearchDialog.vue'
@@ -258,6 +263,7 @@ import { useChatListStore } from '@/stores/chatListStore'
 import { useChatSessionStore, LAST_ACTIVE_CHAT_KEY } from '@/stores/chatSessionStore'
 import { useAgentStore } from '@/stores/agentStore' // [新增] 引入 LAST_ACTIVE_CHAT_KEY
 import { buildChatTree } from '@/utils/treeHelper'
+import { useChatReadHeartbeat } from '@/composables/useChatReadHeartbeat'
 import {
   AGENT_FILTER_ALL,
   AGENT_FILTER_NORMAL,
@@ -287,6 +293,9 @@ const treeRef = ref<InstanceType<typeof ExplorerTree>>()
 
 const { chatList, isChatListLoading, loadingFolders, loadedFolderIds } = storeToRefs(chatListStore)
 const { currentChatId } = storeToRefs(chatSessionStore)
+
+// 当前打开的会话在生成中/待审核时，周期推进已读水位
+useChatReadHeartbeat()
 
 const showFabMenu = ref(false)
 
@@ -786,6 +795,10 @@ const goToSettings = () => {
   flex: 1;
   overflow-y: auto;
   padding: 8px 0;
+}
+
+:deep(.node-suffix-wrapper) {
+  gap: 2px;
 }
 
 :deep(.node-actions) {

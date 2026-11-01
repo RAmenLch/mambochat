@@ -2,6 +2,15 @@
 <template>
   <div class="mobile-assistant-bubble">
 
+    <!-- Spark 视图折叠提示：移动端无桌面悬浮头，需常驻展开入口 -->
+    <div v-if="hasSparkMode" class="spark-toggle-bar" @click.stop="toggleSpark">
+      <el-icon>
+        <FullScreen v-if="isSparkCollapsed" />
+        <Minus v-else />
+      </el-icon>
+      <span>{{ isSparkCollapsed ? $t('chat.message.expandSpark') : $t('chat.message.collapseSpark') }}</span>
+    </div>
+
     <!-- ========== 堆叠模式 ========== -->
     <template v-if="messageDisplayMode === 'stacked'">
       <!-- 顶部区域：头像 + 思考 -->
@@ -165,6 +174,53 @@
       </div>
     </template>
 
+    <!-- 生图区域：同一次生成的多图编为一组，重跑的多次生成用左右箭头切换 -->
+    <MobileImageRunGallery
+      v-for="slot in imageSlots"
+      :key="slot.slotId"
+      :slot="slot"
+      :parent-message="message"
+      @open-tool-dialog="(toolId) => $emit('open-tool-dialog', toolId)"
+      @edit-file="(file) => $emit('edit-file', file)"
+    />
+
+    <!-- 错误区域 (Error)：后端生成的错误子消息，不进时间线，单独呈现原因/堆栈/重试 -->
+    <div class="error-section" v-if="errorSubMessages.length > 0 && !isGenerating">
+      <div
+        v-for="errorSub in errorSubMessages"
+        :key="errorSub.id"
+        class="error-block"
+      >
+        <div class="error-header">
+          <el-icon><Warning /></el-icon>
+          <span class="error-title">{{ $t('chat.message.errorOccurred') }}</span>
+        </div>
+        <div class="error-message">{{ parseErrorMessage(errorSub.content) }}</div>
+        <div class="error-actions">
+          <el-button
+            v-if="parseErrorStackTrace(errorSub.content)"
+            link
+            size="small"
+            @click.stop="toggleErrorDetail(errorSub.id)"
+          >
+            <el-icon class="detail-icon"><View /></el-icon>
+            {{ expandedErrorId === errorSub.id ? $t('chat.message.hideStack') : $t('chat.message.showStack') }}
+          </el-button>
+          <el-button
+            link
+            size="small"
+            type="primary"
+            :disabled="!canRetry"
+            @click.stop="handleRetry"
+          >
+            <el-icon><RefreshRight /></el-icon>
+            {{ $t('chat.message.retryFromError') }}
+          </el-button>
+        </div>
+        <pre v-if="expandedErrorId === errorSub.id && parseErrorStackTrace(errorSub.content)" class="error-detail">{{ parseErrorStackTrace(errorSub.content) }}</pre>
+      </div>
+    </div>
+
     <!-- 尾部工具汇总面板（config.is_tail_tool，不参与正文/时间线；默认折叠） -->
     <TailToolPanel
       v-if="tailToolSubMessages.length > 0"
@@ -176,16 +232,20 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import type { Message, SubMessage, FileResponse } from '@/api/types'
 import { useAssistantTimeline, type BubbleSectionGroup } from '@/composables/useAssistantTimeline'
+import { useImageRuns } from '@/composables/useImageRuns'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { usePendingFileStore } from '@/stores/pendingFileStore'
+import { parseErrorMessage, parseErrorStackTrace } from '@/utils/errorMessage'
 import MobileBubbleSectionGroup from './MobileBubbleSectionGroup.vue'
+import MobileImageRunGallery from './MobileImageRunGallery.vue'
 import TailToolPanel from '@/components/chat/message/TailToolPanel.vue'
-import { Loading, Warning, Check, ArrowUp, ArrowRight, ArrowDown } from '@element-plus/icons-vue'
+import { Loading, Warning, Check, ArrowUp, ArrowRight, ArrowDown, FullScreen, Minus, View, RefreshRight } from '@element-plus/icons-vue'
 
 const props = defineProps<{
   message: Message
@@ -209,6 +269,44 @@ const { globalSettings } = storeToRefs(settingsStore)
 const messageRef = computed(() => props.message)
 const messageDisplayMode = computed(() => globalSettings.value.message_display_mode ?? 'interleaved')
 
+// 生图「按次编组」：已归入图片区域的 File 子消息不再由正文分组渲染
+const { imageSlots, galleryFileIds } = useImageRuns(messageRef)
+const timelineMessageRef = computed<Message>(() => {
+  if (galleryFileIds.value.size === 0) return props.message
+  return {
+    ...props.message,
+    sub_messages: props.message.sub_messages.filter(sm => !galleryFileIds.value.has(sm.id)),
+  }
+})
+
+// 归入图片区域的待生成文件不会渲染正文卡片，SSE 订阅需在此代为注册
+const pendingFileStore = usePendingFileStore()
+const galleryPendingIds = computed(() =>
+  imageSlots.value
+    .flatMap(slot => slot.runs.flatMap(run => run.pendingFiles))
+    .filter(sm => sm.status === 'waiting')
+    .map(sm => sm.id),
+)
+
+watch(
+  galleryPendingIds,
+  (ids, oldIds) => {
+    for (const id of ids) {
+      if (!oldIds?.includes(id)) {
+        pendingFileStore.register(id, { onReady() {}, onTimeout() {} })
+      }
+    }
+    for (const id of oldIds ?? []) {
+      if (!ids.includes(id)) pendingFileStore.unregister(id)
+    }
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(() => {
+  for (const id of galleryPendingIds.value) pendingFileStore.unregister(id)
+})
+
 const {
   reasoningSection,
   normalSection,
@@ -216,8 +314,12 @@ const {
   isSectionMinimized,
   isReasoningMinimized,
   hasPendingReviews,
+  errorSubMessages,
+  hasSparkMode,
+  isSparkCollapsed,
+  toggleSpark,
   tailToolSubMessages
-} = useAssistantTimeline(messageRef, messageDisplayMode)
+} = useAssistantTimeline(timelineMessageRef, messageDisplayMode)
 
 function toggleReasoningMinimize() {
   const newState = !isReasoningMinimized.value
@@ -247,6 +349,20 @@ function isInactive(group: BubbleSectionGroup): boolean {
   if (cpl > 0) return props.currentMessageRank > cpl
   return false
 }
+
+// --- Error Section Logic ---
+const expandedErrorId = ref<string | null>(null)
+
+const canRetry = computed(() => props.message.status === 'failed' && !props.isGenerating)
+
+function toggleErrorDetail(errorId: string) {
+  expandedErrorId.value = expandedErrorId.value === errorId ? null : errorId
+}
+
+function handleRetry() {
+  if (!canRetry.value) return
+  interactionStore.retryFailedGeneration(props.message.id)
+}
 </script>
 
 <style scoped>
@@ -255,6 +371,86 @@ function isInactive(group: BubbleSectionGroup): boolean {
   flex-direction: column;
   gap: 8px;
   width: 100%;
+}
+
+/* ========== Spark 折叠提示条 ========== */
+.spark-toggle-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 6px 10px;
+  background-color: var(--color-background-soft);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--el-color-primary);
+  user-select: none;
+}
+
+/* ========== 错误区域 ========== */
+.error-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.error-block {
+  padding: 10px 12px;
+  background-color: var(--el-color-error-light-9);
+  border: 1px solid var(--el-color-error-light-5);
+  border-radius: 8px;
+}
+
+.error-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.error-header .el-icon {
+  color: var(--el-color-error);
+  font-size: 15px;
+}
+
+.error-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-color-error);
+}
+
+.error-message {
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.error-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.error-actions .detail-icon {
+  margin-right: 2px;
+}
+
+.error-detail {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  background-color: var(--el-fill-color-darker);
+  border-radius: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  font-size: 11px;
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  color: var(--el-text-color-regular);
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.5;
 }
 
 .bubble-header {

@@ -22,6 +22,12 @@
           />
         </div>
       </el-scrollbar>
+
+      <MobileChatNavigator
+        :messages="currentChatMessages"
+        :active-message-id="currentVisibleMessageId"
+        @jump="handleJumpToMessage"
+      />
     </div>
 
     <div class="mobile-empty" v-else>
@@ -131,6 +137,7 @@ import { ElScrollbar, ElMessage } from 'element-plus'
 import type { Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ChatHeader from './ChatHeader.vue'
+import MobileChatNavigator from './MobileChatNavigator.vue'
 import MessageItem from '@/mobile/components/chat/MessageItem.vue'
 import ChatToolbar from '@/mobile/components/chat/ChatToolbar.vue'
 import AttachmentPreview from '@/mobile/components/chat/AttachmentPreview.vue'
@@ -189,6 +196,10 @@ const settingsDrawerVisible = ref(false)
 const agentSettingsDrawerVisible = ref(false)
 const resourceSelectorVisible = ref(false)
 const userHasScrolledUp = ref(false)
+
+/** 会话导航：当前视口顶部的用户消息 ID */
+const currentVisibleMessageId = ref<string | null>(null)
+let scrollRafId: number | null = null
 
 const toolDialogVisible = ref(false)
 const toolDialogMessageId = ref<string | null>(null)
@@ -258,6 +269,10 @@ onUnmounted(() => {
     if (vvScrollHandler) window.visualViewport.removeEventListener('scroll', vvScrollHandler)
   }
   if (winResizeHandler) window.removeEventListener('resize', winResizeHandler)
+  if (scrollRafId !== null) {
+    cancelAnimationFrame(scrollRafId)
+    scrollRafId = null
+  }
 })
 
 const handleSendMessage = async () => {
@@ -475,6 +490,31 @@ const handleScroll = ({ scrollTop }: { scrollTop: number }) => {
   const el = scrollbarRef.value?.wrapRef
   if (!el) return
   userHasScrolledUp.value = el.scrollHeight - el.clientHeight - scrollTop > 20
+  if (scrollRafId === null) {
+    scrollRafId = requestAnimationFrame(() => {
+      scrollRafId = null
+      updateActiveUserMessage()
+    })
+  }
+}
+
+/** 会话导航：以容器 30% 高度为基准线，取基准线之上最后一条用户消息作为当前定位 */
+function updateActiveUserMessage() {
+  const wrap = scrollbarRef.value?.wrapRef
+  if (!wrap) return
+  const threshold = wrap.getBoundingClientRect().top + wrap.clientHeight * 0.3
+  let activeId: string | null = null
+  for (const msg of currentChatMessages.value) {
+    if (msg.role !== 'user') continue
+    const el = document.getElementById(`msg-${msg.id}`)
+    if (!el) continue
+    if (el.getBoundingClientRect().top <= threshold) {
+      activeId = msg.id
+    } else {
+      break
+    }
+  }
+  currentVisibleMessageId.value = activeId
 }
 
 function handleJumpToMessage(messageId: string) {
@@ -491,6 +531,13 @@ function handleJumpToMessage(messageId: string) {
     }, 2000)
   }
 }
+
+watch(
+  () => currentChatId.value,
+  () => {
+    currentVisibleMessageId.value = null
+  },
+)
 
 watch(
   () => currentChatMessages.value,
@@ -520,6 +567,7 @@ watch(
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  position: relative;
 }
 
 .message-scrollbar {
