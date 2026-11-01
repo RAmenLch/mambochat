@@ -3,7 +3,7 @@
   <el-dialog
     :model-value="visible"
     :title="$t('groupChat.create.title')"
-    width="560px"
+    :width="isMobile ? '92%' : '560px'"
     @update:model-value="(v: boolean) => emit('update:visible', v)"
   >
     <el-form label-position="top" @submit.prevent>
@@ -89,6 +89,10 @@ import { createGroupChat } from '@/api/groupChatService';
 import type { GroupCreatedResponse, GroupMailMode } from '@/api/types/groupChatTypes';
 import { MASTER_MEMBER_ALIAS } from '@/api/types/groupChatTypes';
 import { useAgentStore } from '@/stores/agentStore';
+import { useIsMobile } from '@/composables/useIsMobile';
+
+// 小屏收窄弹窗宽度
+const { isMobile } = useIsMobile();
 
 const props = defineProps<{
   visible: boolean;
@@ -273,9 +277,11 @@ async function submit() {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
 }
 .agent-select {
   flex: 1 1 45%;
+  min-width: 0;
 }
 .alias-input {
   flex: 1 1 45%;

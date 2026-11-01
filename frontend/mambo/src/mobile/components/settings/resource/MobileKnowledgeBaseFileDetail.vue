@@ -4,6 +4,24 @@
     <el-scrollbar class="main-scroll">
       <div class="content-wrapper">
 
+        <!-- Section 0: 文件头部信息 -->
+        <div class="file-header">
+          <div class="file-title-row">
+            <span class="file-title">{{ resource.name }}</span>
+            <el-tag :type="statusTagType" effect="dark" size="small">{{ statusLabel }}</el-tag>
+          </div>
+          <div class="file-meta">
+            <span class="meta-item">{{ $t('resource.meta.id') }}: {{ resource.id }}</span>
+            <span class="meta-item">
+              {{ $t('kb.detail.uploadTime', { time: new Date(resource.createdAt).toLocaleString() }) }}
+            </span>
+          </div>
+          <div v-if="statusInfo?.is_stale" class="stale-tag">
+            <el-icon><Warning /></el-icon>
+            <span>{{ $t('kb.detail.staleTooltip') }}</span>
+          </div>
+        </div>
+
         <!-- Section 1: Task Configuration -->
         <el-card shadow="never" class="config-card">
           <template #header>
@@ -135,6 +153,14 @@
 
             <div class="stats-grid">
               <div class="stat-item">
+                <span class="label">{{ $t('kb.task.totalChunks') }}</span>
+                <span class="value">{{ statusInfo.total_chunks }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="label">{{ $t('kb.task.currentStatus') }}</span>
+                <el-tag :type="statusTagType" size="small" effect="plain">{{ statusLabel }}</el-tag>
+              </div>
+              <div class="stat-item">
                 <span class="label">{{ $t('kb.task.completed') }}</span>
                 <span class="value success">{{ statusInfo.completed_chunks }}</span>
               </div>
@@ -174,7 +200,7 @@
           <template #header>
             <div class="card-header">
               <span>{{ $t('kb.chunk.title') }}</span>
-              <span class="chunk-badge" v-if="totalChunks > 0">{{ totalChunks }}</span>
+              <span class="chunk-badge" v-if="totalChunks > 0">{{ $t('kb.chunk.totalCount', { count: totalChunks }) }}</span>
             </div>
           </template>
 
@@ -217,8 +243,8 @@
               <el-pagination
                 v-model:current-page="currentPage"
                 v-model:page-size="pageSize"
-                :page-sizes="[10, 20, 50]"
-                layout="prev, pager, next"
+                :page-sizes="[10, 20, 50, 100]"
+                layout="total, sizes, prev, pager, next"
                 :total="totalChunks"
                 small
                 @change="fetchChunks"
@@ -235,7 +261,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { QuestionFilled } from '@element-plus/icons-vue'
+import { QuestionFilled, Warning } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 import { useKBFileTask } from '@/composables/useKBFileTask'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -304,8 +330,43 @@ const progressStatus = computed(() => {
   return ''
 })
 
-/** 任务级别错误信息：优先来自 statusInfo，回退到本地填充 */
-const taskErrorMessage = computed(() => {
+const statusLabel = computed(() => {
+  if (optimisticStatus.value === 'STARTING') return t('kb.task.starting')
+  if (optimisticStatus.value === 'STOPPING') return t('kb.task.stopping')
+
+  const status = statusInfo.value?.file_status
+  const map: Record<string, string> = {
+    INITIAL: t('kb.status.initial'),
+    CLEANING: t('kb.status.cleaning'),
+    READING: t('kb.status.reading'),
+    SPLITTING: t('kb.status.splitting'),
+    EMBEDDING: t('kb.status.embedding'),
+    COMPLETED: t('kb.status.completed'),
+    FAILED: t('kb.status.failed'),
+    STOPPED: t('kb.status.stopped'),
+  }
+  return status ? (map[status] || status) : t('common.status.loading')
+})
+
+const statusTagType = computed(() => {
+  if (optimisticStatus.value === 'STARTING') return 'primary'
+  if (optimisticStatus.value === 'STOPPING') return 'warning'
+
+  const status = statusInfo.value?.file_status
+  const map: Record<string, 'info' | 'primary' | 'success' | 'danger' | 'warning'> = {
+    INITIAL: 'info',
+    CLEANING: 'primary',
+    READING: 'primary',
+    SPLITTING: 'primary',
+    EMBEDDING: 'primary',
+    COMPLETED: 'success',
+    FAILED: 'danger',
+    STOPPED: 'warning',
+  }
+  return status ? (map[status] || 'info') : 'info'
+})
+
+/** 任务级别错误信息：优先来自 statusInfo，回退到本地填充 */const taskErrorMessage = computed(() => {
   if (!statusInfo.value) return null
   if (statusInfo.value.error_message) return statusInfo.value.error_message
   if (statusInfo.value.file_status === 'FAILED' && statusInfo.value.failed_chunks > 0) {
@@ -484,6 +545,52 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+/* 文件头部信息 */
+.file-header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-lighter);
+}
+
+.file-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.file-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  word-break: break-all;
+}
+
+.stale-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--el-color-warning);
 }
 
 /* Cards */

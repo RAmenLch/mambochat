@@ -55,22 +55,59 @@
                 </div>
                 <div class="field-item">
                   <label class="field-label">{{ t('model.form.inputModalities') }}</label>
-                  <el-select v-model="form.meta_config.input_modalities" multiple style="width: 100%" popper-class="mobile-popper">
+                  <el-select v-model="form.meta_config.input_modalities" multiple clearable filterable style="width: 100%" popper-class="mobile-popper">
                     <el-option v-for="item in inputOpts" :key="item" :label="item" :value="item" />
                   </el-select>
+                </div>
+                <div class="field-item">
+                  <label class="field-label">{{ t('model.form.outputModalities') }}</label>
+                  <el-select v-model="form.meta_config.output_modalities" multiple clearable style="width: 100%" popper-class="mobile-popper">
+                    <el-option v-for="item in outputOpts" :key="item" :label="item" :value="item" />
+                  </el-select>
+                </div>
+                <div class="field-item">
+                  <label class="field-label">{{ t('model.form.supportedParams') }}</label>
+                  <el-select
+                    v-model="form.meta_config.supported_parameters"
+                    multiple
+                    filterable
+                    allow-create
+                    default-first-option
+                    style="width: 100%"
+                    popper-class="mobile-popper"
+                  >
+                    <el-option v-for="item in parameterOptions" :key="item.key" :label="item.label" :value="item.key" />
+                  </el-select>
+                </div>
+                <div class="field-item">
+                  <label class="field-label">{{ t('model.form.timeout') }}</label>
+                  <el-input-number v-model="form.meta_config.timeout" :min="10" :max="600" :step="10" controls-position="right" style="width: 100%" />
+                  <span class="field-hint">{{ t('model.form.timeoutTip') }}</span>
                 </div>
               </template>
 
               <template v-else>
                 <div class="field-item">
                   <label class="field-label">{{ t('model.form.embeddingDimension') }}</label>
-                  <el-input-number v-model="form.meta_config.embedding_dimension" :min="1" controls-position="right" style="width: 100%" />
+                  <el-select
+                    v-model="form.meta_config.embedding_dimension"
+                    filterable
+                    allow-create
+                    default-first-option
+                    clearable
+                    style="width: 100%"
+                    popper-class="mobile-popper"
+                    :placeholder="t('model.form.embeddingDimensionPlaceholder')"
+                  >
+                    <el-option v-for="item in embeddingDimensionOptions" :key="item" :label="String(item)" :value="item" />
+                  </el-select>
                 </div>
               </template>
 
               <div class="field-item">
                 <label class="field-label">{{ t('model.form.maxRetries') }}</label>
                 <el-input-number v-model="form.meta_config.max_retries" :min="0" :max="20" controls-position="right" style="width: 100%" />
+                <span class="field-hint">{{ t('model.form.useGlobal') }}: 0</span>
               </div>
             </el-form>
           </div>
@@ -90,13 +127,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, computed } from 'vue';
+import { ref, reactive, watch, computed, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { storeToRefs } from 'pinia';
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
 import { Close } from '@element-plus/icons-vue';
 import { useProviderStore } from '@/stores/providerStore';
+import { useSystemConfigStore } from '@/stores/systemConfigStore';
 import type { AIModel, AIModelMetaConfig, AIModelCreate, AIModelUpdate, ModelType } from '@/api/types';
-import { inputModalitiesOptions } from '@/constants/metaConfigOptions';
+import { inputModalitiesOptions, outputModalitiesOptions } from '@/constants/metaConfigOptions';
 
 const props = defineProps<{
   visible: boolean;
@@ -111,10 +150,15 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 const providerStore = useProviderStore();
+const systemConfigStore = useSystemConfigStore();
+const { parameterOptions } = storeToRefs(systemConfigStore);
 
 const formRef = ref<FormInstance>();
 const isSubmitting = ref(false);
 const inputOpts = inputModalitiesOptions;
+const outputOpts = outputModalitiesOptions;
+/** 向量维度预设（可自由输入其它值） */
+const embeddingDimensionOptions = [384, 768, 1024, 1536, 2560, 3072, 4096];
 
 const internalVisible = computed({
   get: () => props.visible,
@@ -126,7 +170,11 @@ const isEditing = computed(() => !!props.modelData);
 const defaultMeta = (): AIModelMetaConfig => ({
   context_length: null, max_output_tokens: null, embedding_dimension: null,
   tokenizer: null, input_modalities: [], output_modalities: [],
-  supported_parameters: [], max_retries: 0,
+  supported_parameters: [], max_retries: 0, timeout: null,
+});
+
+onMounted(() => {
+  systemConfigStore.fetchSystemConfig();
 });
 
 const form = reactive({
@@ -163,7 +211,10 @@ const submitForm = async () => {
       try {
         const cleanMeta = { ...form.meta_config };
         if (form.model_type === 'chat') { cleanMeta.embedding_dimension = null; }
-        else { cleanMeta.max_output_tokens = null; cleanMeta.input_modalities = []; cleanMeta.output_modalities = []; }
+        else {
+          cleanMeta.max_output_tokens = null; cleanMeta.input_modalities = []; cleanMeta.output_modalities = [];
+          cleanMeta.supported_parameters = []; cleanMeta.timeout = null;
+        }
 
         if (isEditing.value && props.modelData) {
           await providerStore.updateModel(props.modelData.id, {
@@ -199,6 +250,7 @@ const submitForm = async () => {
 .sheet-form { padding: 0; }
 .field-item { margin-bottom: 12px; }
 .field-label { display: block; font-size: 13px; font-weight: 600; color: var(--el-text-color-primary); margin-bottom: 4px; }
+.field-hint { display: block; margin-top: 4px; font-size: 12px; line-height: 1.4; color: var(--el-text-color-secondary); }
 .native-input { width: 100%; height: 40px; padding: 0 12px; font-size: 15px; font-family: inherit; color: var(--el-text-color-primary); background: var(--el-bg-color); border: none; border-radius: 10px; box-shadow: 0 0 0 1px var(--el-border-color-lighter) inset; outline: none; box-sizing: border-box; transition: box-shadow 0.2s; }
 .native-input:focus { box-shadow: 0 0 0 2px var(--el-color-primary) inset; }
 .native-input:disabled { opacity: 0.5; background: var(--el-fill-color-light); }

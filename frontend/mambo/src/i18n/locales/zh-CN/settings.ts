@@ -240,6 +240,7 @@ export default {
       deleteSuccess: '删除成功',
       deleteFailed: '删除失败',
       deleteConfirm: '确定要删除该失效工具吗？',
+      noTools: '暂无工具，请先手动同步',
       noSchema: '无',
       description: '描述:',
     },

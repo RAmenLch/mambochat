@@ -3,7 +3,7 @@
   <el-dialog
     v-model="internalVisible"
     :title="title"
-    width="400px"
+    :width="isMobile ? '92%' : '400px'"
     @close="handleClose"
   >
     <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent>
@@ -84,6 +84,7 @@
 import { ref, reactive, watch, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { type FormInstance, type FormRules, ElMessage } from 'element-plus';
+import { useIsMobile } from '@/composables/useIsMobile';
 
 export interface SelectOptionItem {
   label: string;
@@ -127,6 +128,8 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+// 小屏收窄弹窗宽度
+const { isMobile } = useIsMobile();
 const internalVisible = ref(false);
 const formRef = ref<FormInstance>();
 const nameInputRef = ref<HTMLInputElement>();

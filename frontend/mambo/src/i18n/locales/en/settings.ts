@@ -243,6 +243,7 @@ export default {
       deleteSuccess: 'Deleted successfully',
       deleteFailed: 'Delete failed',
       deleteConfirm: 'Are you sure you want to delete this tool?',
+      noTools: 'No tools yet — sync first',
       noSchema: 'None',
       description: 'Description:',
     },

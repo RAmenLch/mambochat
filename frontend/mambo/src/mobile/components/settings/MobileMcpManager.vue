@@ -59,6 +59,9 @@
         </div>
 
         <div class="card-footer">
+          <button class="card-action-btn" @click="openToolSheet(item)">
+            {{ t('settings.mcp.toolDrawer.title') }}
+          </button>
           <button class="card-action-btn" :disabled="item.isSystem" @click="handleEdit(item)">
             {{ t('common.action.edit') }}
           </button>
@@ -82,6 +85,13 @@
       :initial-data="editingMcp"
       :is-submitting="isSubmitting"
       @save="handleSave"
+    />
+
+    <!-- Bottom Sheet: 工具级管理 -->
+    <MobileMcpToolSheet
+      v-model:visible="toolSheetVisible"
+      :server-id="toolSheetServerId"
+      :server-name="toolSheetServerName"
     />
 
     <!-- Bottom Sheet: 错误详情 -->
@@ -122,6 +132,7 @@ import { Plus, Refresh, WarningFilled, ArrowRight, Loading, Close } from '@eleme
 import { useMcpStore } from '@/stores/mcpStore';
 import type { McpServer, McpCreateRequest, McpHealthStatus } from '@/api/types';
 import MobileMcpFormDialog from './dialogs/MobileMcpFormDialog.vue';
+import MobileMcpToolSheet from './dialogs/MobileMcpToolSheet.vue';
 import { useI18n } from 'vue-i18n';
 
 const { t, locale } = useI18n();
@@ -135,6 +146,17 @@ const editingMcp = ref<McpServer | null>(null);
 const testingRowIds = reactive(new Set<string>());
 const errorDialogVisible = ref(false);
 const currentErrorMcp = ref<McpServer | null>(null);
+
+// 工具级管理面板（系统内置服务也允许查看工具，仅禁止编辑服务本身）
+const toolSheetVisible = ref(false);
+const toolSheetServerId = ref<string | null>(null);
+const toolSheetServerName = ref('');
+
+const openToolSheet = (row: McpServer) => {
+  toolSheetServerId.value = row.id;
+  toolSheetServerName.value = row.name;
+  toolSheetVisible.value = true;
+};
 
 onMounted(async () => { isLoading.value = true; await mcpStore.fetchAvailableServices(); isLoading.value = false; });
 

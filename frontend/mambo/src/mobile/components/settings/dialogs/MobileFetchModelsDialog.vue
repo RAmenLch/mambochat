@@ -36,7 +36,8 @@
                 :class="{ selected: selectedIds.includes(model.modelId) }"
                 @click="toggleSelection(model.modelId)"
               >
-                {{ model.modelId }}
+                <span class="chip-name" v-if="model.name && model.name !== model.modelId">{{ model.name }}</span>
+                <span class="chip-id">{{ model.modelId }}</span>
               </button>
             </div>
           </div>
@@ -80,9 +81,12 @@ const internalVisible = computed({
 });
 
 const filteredModels = computed(() => {
-  if (!searchQuery.value) return props.fetchedModels;
+  const query = searchQuery.value.trim().toLowerCase();
+  if (!query) return props.fetchedModels;
+  // 同时按模型 ID 与显示名称匹配，便于按名称检索
   return props.fetchedModels.filter(m =>
-    m.modelId.toLowerCase().includes(searchQuery.value.toLowerCase())
+    m.modelId.toLowerCase().includes(query) ||
+    (m.name ?? '').toLowerCase().includes(query)
   );
 });
 
@@ -123,6 +127,9 @@ const handleConfirm = () => {
 .model-chip { padding: 8px 14px; font-size: 13px; font-weight: 500; color: var(--el-text-color-primary); background: var(--color-background-soft); border: 1.5px solid transparent; border-radius: 20px; cursor: pointer; transition: all 0.15s; -webkit-tap-highlight-color: transparent; }
 .model-chip.selected { border-color: var(--el-color-primary); background: var(--el-color-primary-light-9); color: var(--el-color-primary); }
 .model-chip:active { background: var(--el-fill-color); }
+.model-chip { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; max-width: 100%; }
+.chip-name { font-size: 13px; font-weight: 600; }
+.chip-id { font-size: 11px; opacity: 0.7; word-break: break-all; }
 .sheet-footer { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; padding-bottom: max(10px, env(safe-area-inset-bottom)); border-top: 0.5px solid rgba(0,0,0,0.08); flex-shrink: 0; }
 .footer-count { font-size: 14px; color: var(--el-text-color-secondary); }
 .footer-confirm { height: 40px; padding: 0 28px; font-size: 15px; font-weight: 600; color: #fff; background: linear-gradient(135deg, var(--el-color-primary), var(--el-color-primary-light-3)); border: none; border-radius: 10px; box-shadow: 0 4px 12px rgba(64,158,255,0.3); cursor: pointer; }
