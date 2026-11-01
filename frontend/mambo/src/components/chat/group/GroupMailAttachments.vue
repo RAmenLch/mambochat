@@ -121,6 +121,7 @@ function formatSize(size: number): string {
 /* 尺寸随数量自适应 */
 .image-grid.is-single .image-thumb {
   width: 200px;
+  max-width: 100%;
   height: 150px;
 }
 .image-grid.is-single .image-cell {

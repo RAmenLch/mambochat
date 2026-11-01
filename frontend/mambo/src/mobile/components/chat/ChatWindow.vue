@@ -5,6 +5,7 @@
       :current-chat="currentChat"
       @toggle-drawer="$emit('toggle-drawer')"
       @open-settings="handleOpenSettings"
+      @return-to-group="handleReturnToGroup"
     />
 
     <div class="mobile-messages" v-if="currentChat">
@@ -19,6 +20,8 @@
             @suggestion-click="handleSuggestionClick"
             @switch-branch="handleSwitchBranch"
             @open-tool-dialog="handleOpenToolDialog"
+            @view-logs="handleViewLogs"
+            @duplicate-upto="handleDuplicateUpTo"
           />
         </div>
       </el-scrollbar>
@@ -41,7 +44,7 @@
     <div class="mobile-input-area" v-if="currentChat">
       <div v-if="isPendingReview" class="pending-review-bar" @click="handleOpenReviewFromInput">
         <el-icon :size="18"><Warning /></el-icon>
-        <span>有 {{ pendingReviewSubMessages.length }} 项待审核，点击处理</span>
+        <span>{{ t('chat.message.pendingActions', { count: pendingReviewSubMessages.length }) }}</span>
         <el-icon :size="14"><ArrowRight /></el-icon>
       </div>
 
@@ -72,6 +75,8 @@
         @toggle-mcp-tool="handleToggleMcpTool"
         @toggle-web-search="handleToggleWebSearch"
         @jump-to-message="handleJumpToMessage"
+        @open-version-history="versionHistoryVisible = true"
+        @imported="handleImported"
       />
 
       <ChatInputBox
@@ -120,6 +125,19 @@
       @append-resources="handleAppendResources"
       @mount-knowledge-base="handleMountKnowledgeBase"
     />
+
+    <VersionHistoryDrawer
+      v-model:visible="versionHistoryVisible"
+      :chat-id="currentChat?.id ?? null"
+      :messages="currentChatMessages"
+      @refreshed="handleVersionHistoryRefreshed"
+    />
+
+    <LogViewerDialog
+      v-model:visible="logViewerVisible"
+      :message-id="logViewerMessageId"
+      :chat-id="currentChat?.id ?? null"
+    />
   </div>
 </template>
 
@@ -145,6 +163,8 @@ import ChatInputBox from '@/mobile/components/chat/ChatInputBox.vue'
 import ChatSettingsDrawer from './ChatSettingsDrawer.vue'
 import MobileChatAgentSettingsDrawer from './MobileChatAgentSettingsDrawer.vue'
 import MobileToolDialog from './dialogs/MobileToolDialog.vue'
+import VersionHistoryDrawer from '@/components/chat/dialogs/VersionHistoryDrawer.vue'
+import LogViewerDialog from '@/components/chat/dialogs/LogViewerDialog.vue'
 import MobileAskUserDialog from './dialogs/MobileAskUserDialog.vue'
 import ResourceSelectorDialog from './dialogs/ResourceSelectorDialog.vue'
 
@@ -155,6 +175,8 @@ import { useProviderStore } from '@/stores/providerStore'
 import { useChatInput } from '@/composables/useChatInput'
 import { useTokenEstimator } from '@/composables/useTokenEstimator'
 import { uploadFile } from '@/api/fileService'
+import { duplicateChat } from '@/api/chatService'
+import { useRouter } from 'vue-router'
 import type { AIModel, ChatUpdate, Resource, SubMessageCreate, Message, SubMessage } from '@/api/types'
 
 interface GroupedModels {
@@ -167,6 +189,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const router = useRouter()
 const chatListStore = useChatListStore()
 const chatSessionStore = useChatSessionStore()
 const chatInteractionStore = useChatInteractionStore()
@@ -196,6 +219,11 @@ const settingsDrawerVisible = ref(false)
 const agentSettingsDrawerVisible = ref(false)
 const resourceSelectorVisible = ref(false)
 const userHasScrolledUp = ref(false)
+
+/** 版本历史抽屉 / 请求日志弹窗 */
+const versionHistoryVisible = ref(false)
+const logViewerVisible = ref(false)
+const logViewerMessageId = ref<string | null>(null)
 
 /** 会话导航：当前视口顶部的用户消息 ID */
 const currentVisibleMessageId = ref<string | null>(null)
@@ -325,6 +353,51 @@ const handleSwitchBranch = async (targetId: string) => {
   }
 }
 
+/** 查看该消息对应的请求日志 */
+function handleViewLogs(messageId: string) {
+  logViewerMessageId.value = messageId
+  logViewerVisible.value = true
+}
+
+/** 以该消息为终点分叉出新的会话 */
+async function handleDuplicateUpTo(messageId: string) {
+  const chatId = currentChat.value?.id
+  if (!chatId || isGenerating.value) return
+  try {
+    const newChat = await duplicateChat(chatId, { up_to_message_id: messageId })
+    if (!chatListStore.chatList.some(c => c.id === newChat.id)) {
+      chatListStore.chatList.push(newChat)
+    }
+    await chatSessionStore.selectChat(newChat.id)
+    router.push(`/chat/${newChat.id}`)
+    ElMessage.success(t('common.msg.duplicateSuccess'))
+  } catch (error) {
+    console.error('Duplicate chat failed:', error)
+    ElMessage.error(t('common.error.operationFailed'))
+  }
+}
+
+/** 从群内打开的成员会话：返回来源群 */
+async function handleReturnToGroup() {
+  const groupId = chatSessionStore.lastGroupId
+  if (!groupId) return
+  await chatSessionStore.selectChat(groupId)
+  router.push(`/chat/${groupId}`)
+}
+
+/** 导入会话后刷新列表并跳到新会话 */
+async function handleImported(chatId: string) {
+  await chatListStore.initializeList()
+  await chatSessionStore.selectChat(chatId)
+  router.push(`/chat/${chatId}`)
+}
+
+/** 版本回滚后重新拉取当前会话消息（快照列表来自消息子项） */
+async function handleVersionHistoryRefreshed() {
+  const chatId = currentChat.value?.id
+  if (chatId) await chatSessionStore.selectChat(chatId, true)
+}
+
 const handleOpenToolDialog = (message: Message, subMessageId: string, mode: 'review_all' | 'single') => {
   const sub = message.sub_messages.find(sm => sm.id === subMessageId)
   if (sub && sub.type === 'AskUser') {
@@ -349,8 +422,7 @@ const pendingReviewSubMessages = computed(() => {
 
 const isPendingReview = computed(() => pendingReviewSubMessages.value.length > 0)
 
-function handleOpenReviewFromInput() {
-  if (pendingReviewSubMessages.value.length > 0) {
+function handleOpenReviewFromInput() {  if (pendingReviewSubMessages.value.length > 0) {
     const first = pendingReviewSubMessages.value[0]
     const parentMsg = currentChatMessages.value.find(m => m.id === first.messageId)
     if (parentMsg) {

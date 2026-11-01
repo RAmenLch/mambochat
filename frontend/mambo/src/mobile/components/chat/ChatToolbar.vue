@@ -12,6 +12,11 @@
         <span>{{ estimatedTokens }}</span>
       </span>
 
+      <button v-if="usageStats" class="tool-chip usage-chip" @click="showUsageSheet = true">
+        <el-icon :size="12"><Histogram /></el-icon>
+        <span>{{ formatTokens(usageStats.active_path_main_agent.total_tokens) }}</span>
+      </button>
+
       <button
         v-if="zipHistoryItems.length > 0"
         class="tool-chip zip-chip"
@@ -50,6 +55,37 @@
                 <el-icon :size="20"><Suitcase /></el-icon>
                 <span>MCP 工具</span>
               </button>
+              <button
+                v-if="showVersionHistory"
+                class="sheet-item"
+                @click="showMorePopover = false; $emit('openVersionHistory')"
+              >
+                <el-icon :size="20"><Timer /></el-icon>
+                <span>{{ t('chat.toolbar.versionHistory') }}</span>
+              </button>
+              <button class="sheet-item" @click="handleExport('json')">
+                <el-icon :size="20"><Document /></el-icon>
+                <span>{{ t('chat.header.exportJson') }}</span>
+              </button>
+              <button class="sheet-item" @click="handleExport('markdown')">
+                <el-icon :size="20"><Document /></el-icon>
+                <span>{{ t('chat.header.exportMd') }}</span>
+              </button>
+              <button class="sheet-item" @click="handleExport('html')">
+                <el-icon :size="20"><Document /></el-icon>
+                <span>{{ t('chat.header.exportHtml') }}</span>
+              </button>
+              <button class="sheet-item" @click="triggerImport">
+                <el-icon :size="20"><Upload /></el-icon>
+                <span>{{ t('chat.header.importJson') }}</span>
+              </button>
+              <input
+                ref="importInputRef"
+                type="file"
+                accept=".json,application/json"
+                style="display: none"
+                @change="handleImportFile"
+              />
             </div>
             <button class="sheet-cancel" @click="showMorePopover = false">{{ t('common.action.cancel') }}</button>
           </div>
@@ -105,20 +141,61 @@
           </div>
         </div>
       </Transition>
+
+      <!-- 会话用量统计 -->
+      <Transition name="sheet">
+        <div v-if="showUsageSheet" class="popover-overlay" @click="showUsageSheet = false">
+          <div class="popover-sheet" @click.stop>
+            <div class="sheet-handle"></div>
+            <div class="sheet-title">{{ t('chat.toolbar.usageConversation') }}</div>
+            <div class="usage-sheet-body">
+              <div v-for="section in usageSections" :key="section.key" class="usage-section">
+                <div class="usage-section-title">{{ section.title }}</div>
+                <div class="usage-row">
+                  <span class="usage-label">{{ t('chat.toolbar.usageTotal') }}</span>
+                  <span class="usage-value">{{ formatTokens(section.data.total_tokens) }}</span>
+                </div>
+                <div class="usage-row">
+                  <span class="usage-label">{{ t('chat.toolbar.usageInput') }}</span>
+                  <span class="usage-value">{{ formatTokens(section.data.prompt_tokens) }}</span>
+                </div>
+                <div class="usage-row">
+                  <span class="usage-label">{{ t('chat.toolbar.usageOutput') }}</span>
+                  <span class="usage-value">{{ formatTokens(section.data.completion_tokens) }}</span>
+                </div>
+                <div class="usage-row">
+                  <span class="usage-label">{{ t('chat.toolbar.usageCacheHit') }}</span>
+                  <span class="usage-value">
+                    {{ formatTokens(section.data.cache_hit_tokens) }}
+                    <span v-if="cacheHitRate(section.data)" class="usage-rate">{{ cacheHitRate(section.data) }}</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+            <button class="sheet-cancel" @click="showUsageSheet = false">{{ t('common.action.close') }}</button>
+          </div>
+        </div>
+      </Transition>
     </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
+import { ElMessage } from 'element-plus'
 import { useProviderStore } from '@/stores/providerStore'
 import { useMcpStore } from '@/stores/mcpStore'
 import { useAgentStore } from '@/stores/agentStore'
-import type { Chat, Message } from '@/api/types'
+import type { Chat, ChatUsageStats, Message } from '@/api/types'
 import type { PropType } from 'vue'
-import { Cpu, Collection, Coin, Suitcase, Tickets, MoreFilled, User, Search } from '@element-plus/icons-vue'
+import { getChatUsage, importChat } from '@/api/chatService'
+import { exportChat, type ChatExportFormat } from '@/utils/chatExport'
+import {
+  Cpu, Collection, Coin, Suitcase, Tickets, MoreFilled, User, Search,
+  Histogram, Document, Upload, Timer,
+} from '@element-plus/icons-vue'
 
 const props = defineProps({
   currentChat: {
@@ -142,6 +219,8 @@ const emit = defineEmits([
   'toggleMcpTool',
   'jumpToMessage',
   'toggleWebSearch',
+  'openVersionHistory',
+  'imported',
 ])
 
 const { t } = useI18n()
@@ -193,6 +272,115 @@ const zipHistoryItems = computed(() => {
 
 function handleJumpToMessage(messageId: string) {
   emit('jumpToMessage', messageId)
+}
+
+// --- 会话累计用量（B8） ---
+const usageStats = ref<ChatUsageStats | null>(null)
+const showUsageSheet = ref(false)
+
+const fetchUsage = async () => {
+  const chatId = props.currentChat?.id
+  if (!chatId) return
+  try {
+    usageStats.value = await getChatUsage(chatId)
+  } catch {
+    // 用量统计失败不阻塞工具栏
+  }
+}
+
+watch(
+  () => props.currentChat?.id,
+  () => {
+    usageStats.value = null
+    fetchUsage()
+  },
+  { immediate: true },
+)
+
+/** 消息中出现新的 Usage 子消息时刷新统计 */
+const usageSubMessageCount = computed(() => {
+  let count = 0
+  for (const msg of props.messages || []) {
+    for (const sm of msg.sub_messages || []) {
+      if (sm.type === 'Usage') count += 1
+    }
+  }
+  return count
+})
+
+watch(usageSubMessageCount, (val, old) => {
+  if (val !== old) fetchUsage()
+})
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M'
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'k'
+  return String(n)
+}
+
+/** 缓存命中率 = 缓存命中量 / 输入量 */
+function cacheHitRate(agg: ChatUsageStats['conversation']): string | null {
+  if (agg.prompt_tokens <= 0) return null
+  return ((agg.cache_hit_tokens / agg.prompt_tokens) * 100).toFixed(1) + '%'
+}
+
+const usageSections = computed(() => {
+  if (!usageStats.value) return []
+  return [
+    { key: 'active', title: t('chat.toolbar.usageActivePath'), data: usageStats.value.active_path_main_agent },
+    { key: 'conversation', title: t('chat.toolbar.usageConversation'), data: usageStats.value.conversation },
+  ]
+})
+
+// --- 版本历史入口（B4） ---
+/** 仅在 Agent 模式下且 Agent 启用了版本控制时显示 */
+const showVersionHistory = computed(() => {
+  const chat = props.currentChat
+  if (chat?.chatMode !== 'agent' || !chat.agentId) return false
+  const agent = agentStore.allAgents.find(a => a.id === chat.agentId) ||
+    agentStore.agentList.find(a => a.id === chat.agentId)
+  if (!agent) return false
+  const params = (agent as any).agentParameters
+  return params?.version_control?.enabled === true
+})
+
+// --- 导出 / 导入（B5） ---
+const isExporting = ref(false)
+const importInputRef = ref<HTMLInputElement | null>(null)
+
+async function handleExport(format: ChatExportFormat) {
+  if (isExporting.value) return
+  isExporting.value = true
+  try {
+    await exportChat(props.currentChat, props.messages || [], format)
+    showMorePopover.value = false
+  } catch (error) {
+    console.error('Export failed:', error)
+    ElMessage.error(t('chat.header.exportFailed'))
+  } finally {
+    isExporting.value = false
+  }
+}
+
+function triggerImport() {
+  showMorePopover.value = false
+  importInputRef.value?.click()
+}
+
+async function handleImportFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+
+  try {
+    const report = await importChat(file)
+    ElMessage.success(t('chat.header.importSuccess', { name: report.name }))
+    emit('imported', report.chat_id)
+  } catch (error) {
+    console.error('Chat import failed:', error)
+    ElMessage.error(t('common.error.operationFailed'))
+  }
 }
 </script>
 
@@ -307,6 +495,55 @@ function handleJumpToMessage(messageId: string) {
 .web-search-btn.search {
   color: var(--el-color-success);
   background: var(--el-color-success-light-9);
+}
+
+/* 会话用量统计 */
+.usage-chip {
+  background: var(--el-color-success-light-9);
+  color: var(--el-color-success);
+}
+
+.usage-sheet-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 2px 8px;
+}
+
+.usage-section {
+  background: var(--el-fill-color-light);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.usage-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-regular);
+  margin-bottom: 6px;
+}
+
+.usage-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  padding: 2px 0;
+}
+
+.usage-label {
+  color: var(--el-text-color-secondary);
+}
+
+.usage-value {
+  color: var(--el-text-color-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-rate {
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  margin-left: 4px;
 }
 
 /* Popover Sheet (reusable) */

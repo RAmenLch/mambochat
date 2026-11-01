@@ -50,6 +50,7 @@ export default {
     exportFailed: '导出失败',
     exportResourceError: '资源导出失败',
     inputPlaceholder: '输入新标题',
+    backToGroup: '返回群聊',
   },
   toolbar: {
     currentModel: '当前模型',
@@ -154,6 +155,7 @@ export default {
     pendingReview: '待审核',
     toolCallReviewed: '工具调用(已审核)',
     pendingAnswer: '待回答',
+    pendingActions: '有 {count} 项待处理，点击继续',
     file: '文件',
     partition: '分区',
     duplicateUpToHere: '复制会话至此消息',

@@ -24,7 +24,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Menu } from '@element-plus/icons-vue'
 import ChatList from '@/mobile/components/chat/ChatList.vue'
@@ -34,11 +34,31 @@ import { useChatSessionStore } from '@/stores/chatSessionStore'
 
 const drawerVisible = ref(false)
 const { isGroupSelected } = storeToRefs(useChatSessionStore())
+
+// 群聊分支不经过 ChatWindow，视口高度需在此统一维护（键盘弹起时底部不被遮挡）
+const vvResizeHandler = () => {
+  const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight
+  document.documentElement.style.setProperty('--vv-height', `${vh}px`)
+}
+
+onMounted(() => {
+  vvResizeHandler()
+  window.visualViewport?.addEventListener('resize', vvResizeHandler)
+  window.visualViewport?.addEventListener('scroll', vvResizeHandler)
+  window.addEventListener('resize', vvResizeHandler)
+})
+
+onUnmounted(() => {
+  window.visualViewport?.removeEventListener('resize', vvResizeHandler)
+  window.visualViewport?.removeEventListener('scroll', vvResizeHandler)
+  window.removeEventListener('resize', vvResizeHandler)
+})
 </script>
 
 <style scoped>
 .mobile-layout {
-  height: 100vh;
+  height: var(--vv-height, 100vh);
+  height: var(--vv-height, 100dvh);
   width: 100vw;
   overflow: hidden;
   background-color: var(--color-background);

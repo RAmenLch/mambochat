@@ -50,6 +50,7 @@ export default {
     exportFailed: 'Export failed',
     exportResourceError: 'Resource export failed',
     inputPlaceholder: 'Enter new title',
+    backToGroup: 'Back to group',
   },
   toolbar: {
     currentModel: 'Model',
@@ -155,6 +156,7 @@ export default {
     pendingReview: 'Pending Review',
     toolCallReviewed: 'Tool Call (Reviewed)',
     pendingAnswer: 'Pending Answer',
+    pendingActions: '{count} pending item(s) — tap to continue',
     file: 'File',
     partition: 'Partition',
     duplicateUpToHere: 'Duplicate Up To Here',

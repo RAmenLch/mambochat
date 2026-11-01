@@ -96,18 +96,20 @@
           v-else
           class="tool-chip"
           :class="{
-            'has-review': tool.type === 'ReviewTool',
+            'has-review': tool.type === 'ReviewTool' && tool.status === 'pending_review',
+            'has-ask-user': tool.type === 'AskUser' && tool.status === 'pending_review',
             'is-mcp-wrapped': isWrappedTool(tool),
           }"
           @click.stop="$emit('open-tool-dialog', tool.id)"
         >
           <el-icon>
-            <Warning v-if="tool.type === 'ReviewTool'" style="color: var(--el-color-warning)" />
+            <Warning v-if="tool.type === 'ReviewTool' && tool.status === 'pending_review'" style="color: var(--el-color-warning)" />
+            <QuestionFilled v-else-if="tool.type === 'AskUser' && tool.status === 'pending_review'" style="color: var(--el-color-primary)" />
             <Loading v-else-if="tool.status === 'generating'" class="is-loading" />
             <CircleClose v-else-if="isToolError(tool)" style="color: var(--el-color-error)" />
             <CircleCheck v-else style="color: var(--el-color-success)" />
           </el-icon>
-          <span class="tool-chip-title">{{ getToolBubbleText(tool) }}</span>
+          <span class="tool-chip-title" :class="{ 'is-pending': isPendingTool(tool) }">{{ getToolBubbleText(tool) }}</span>
           <span v-if="getSecurityReviewForTool(tool)" class="security-review-badge" :class="{ 'is-failed': !getSecurityReviewForTool(tool)!.passed }">
             🛡️ {{ getSecurityReviewForTool(tool)!.passed ? t('agent.securityReviewPassed') : t('agent.securityReviewFailed') }}
           </span>
@@ -129,7 +131,7 @@ import type { Message, SubMessage, McpToolContent, ReviewToolContent, SecurityRe
 import SubMessageItem from '../SubMessageItem.vue'
 import type { BubbleSectionGroup } from '@/composables/useAssistantTimeline'
 import { unpackMcpToolCall, getToolArgsSummary, parseGoalLoopRound } from '@/utils/mcpToolUnpack'
-import { Warning, Loading, CircleClose, CircleCheck, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
+import { Warning, Loading, CircleClose, CircleCheck, ArrowLeft, ArrowRight, QuestionFilled } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
 
@@ -172,10 +174,16 @@ function getParsedContent(tool: SubMessage): McpToolContent | ReviewToolContent 
 }
 
 function getToolName(tool: SubMessage): string {
+  if (tool.type === 'AskUser') return t('chat.askUser.toolName')
   const content = getParsedContent(tool)
   if (!content) return t('chat.message.mcp.unknownTool')
   const unpacked = unpackMcpToolCall(content)
   return unpacked.displayName
+}
+
+/** 该工具条目是否仍在等用户处理（待审批 / 待回答） */
+function isPendingTool(tool: SubMessage): boolean {
+  return (tool.type === 'ReviewTool' || tool.type === 'AskUser') && tool.status === 'pending_review'
 }
 
 function getToolArgsSummaryText(tool: SubMessage): string {
@@ -185,6 +193,14 @@ function getToolArgsSummaryText(tool: SubMessage): string {
 }
 
 function getToolBubbleText(tool: SubMessage): string {
+  // 待处理条目直接给出"等你处理"的语义，而不是只显示工具名
+  if (isPendingTool(tool)) {
+    if (tool.type === 'AskUser') return t('chat.message.pendingAnswer')
+    const pendingName = getToolName(tool)
+    return pendingName
+      ? `${t('chat.message.pendingReview')} · ${pendingName}`
+      : t('chat.message.pendingReview')
+  }
   const name = getToolName(tool)
   const args = getToolArgsSummaryText(tool)
   return args ? `${name} ${args}` : name
@@ -435,6 +451,20 @@ function fileGroupPreviewIndex(fileIdx: number): number {
 .tool-chip.has-review {
   border-color: var(--el-color-warning-light-3);
   background-color: var(--el-color-warning-light-9);
+}
+
+.tool-chip.has-ask-user {
+  border-color: var(--el-color-primary-light-3);
+  background-color: var(--el-color-primary-light-9);
+}
+
+.tool-chip-title.is-pending {
+  font-weight: 600;
+  color: var(--el-color-warning);
+}
+
+.tool-chip.has-ask-user .tool-chip-title.is-pending {
+  color: var(--el-color-primary);
 }
 
 .tool-chip.is-mcp-wrapped {

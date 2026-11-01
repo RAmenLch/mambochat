@@ -120,6 +120,7 @@ import { Close, Document, Paperclip, Promotion } from '@element-plus/icons-vue';
 import { uploadFile } from '@/api/fileService';
 import type { FileResponse } from '@/api/types';
 import { useResizablePanels } from '@/composables/useResizablePanels';
+import { useIsMobile } from '@/composables/useIsMobile';
 import type { GroupMember } from '@/api/types/groupChatTypes';
 
 const props = defineProps<{
@@ -179,7 +180,10 @@ const textareaRef = ref();
 // --- 高度可拖拽（与普通会话输入区一致的交互与上下限） ---
 const MIN_COMPOSER_HEIGHT = 110;
 const MAX_COMPOSER_HEIGHT = 600;
-const composerHeight = ref(150);
+
+// 小屏默认更矮，给邮件列表留出空间
+const { isMobile } = useIsMobile();
+const composerHeight = ref(isMobile.value ? MIN_COMPOSER_HEIGHT : 150);
 // 群输入框不做“拖到折叠”，拖到最小高度即回弹到 min
 const neverCollapsed = ref(false);
 const { startResize: startResizeComposer } = useResizablePanels(

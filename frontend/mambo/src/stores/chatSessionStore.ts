@@ -20,6 +20,12 @@ export const useChatSessionStore = defineStore('chatSession', () => {
   // --- State ---
   const currentChatId = ref<string | null>(null);
   const currentGroupId = ref<string | null>(null);
+  /**
+   * 最近一次进入的群组父节点 ID。
+   * 用于「从群内打开成员会话后返回群」：进入普通会话时 currentGroupId 会被清空，
+   * 这里保留来源群直到用户明确进入其它会话/群。
+   */
+  const lastGroupId = ref<string | null>(null);
   const currentChatMessages = ref<Message[]>([]);
   const isChatHistoryLoading = ref(false);
   const activeSubscriptions = new Map<string, AbortController>();
@@ -297,6 +303,7 @@ export const useChatSessionStore = defineStore('chatSession', () => {
       // 群组父节点：进入群页面，不请求普通消息
       if (item && item.folderType === 'group') {
         currentGroupId.value = chatId;
+        lastGroupId.value = chatId;
         currentChatId.value = chatId;
         currentChatMessages.value = [];
         isChatHistoryLoading.value = false;
@@ -316,6 +323,11 @@ export const useChatSessionStore = defineStore('chatSession', () => {
     }
 
     currentGroupId.value = null;
+
+    // 只有群成员会话（parentId 指向来源群）才保留「返回群」的上下文
+    if (lastGroupId.value && item.parentId !== lastGroupId.value) {
+      lastGroupId.value = null;
+    }
 
     // 记录最后一次活跃的会话ID，用于页面刷新后恢复上下文
     localStorage.setItem(LAST_ACTIVE_CHAT_KEY, chatId);
@@ -520,6 +532,7 @@ export const useChatSessionStore = defineStore('chatSession', () => {
     // State
     currentChatId,
     currentGroupId,
+    lastGroupId,
     currentChatMessages,
     isChatHistoryLoading,
     activeSubscriptions,

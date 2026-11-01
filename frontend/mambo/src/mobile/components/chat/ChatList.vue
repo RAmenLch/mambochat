@@ -449,7 +449,7 @@ onMounted(async () => {
   await router.isReady()
 
   // 1. 尝试从 URL 获取 ID
-  let targetChatId = route.params.id as string
+  let targetChatId = route.params.chatId as string
 
   // 2. 尝试从 URL Path 解析 (兼容性处理)
   if (!targetChatId) {
@@ -478,7 +478,7 @@ onMounted(async () => {
 
 // [新增] 监听路由变化，处理浏览器后退/前进按钮
 watch(
-  () => route.params.id,
+  () => route.params.chatId,
   async (newId) => {
     if (newId && typeof newId === 'string') {
       if (currentChatId.value !== newId) {
@@ -498,7 +498,7 @@ const handleSelectChat = async (chatId: string) => {
   await chatSessionStore.selectChat(chatId)
 
   // 核心修复：如果当前路由不是该 ID，则推入新路由
-  if (route.params.id !== chatId) {
+  if (route.params.chatId !== chatId) {
     router.push(`/chat/${chatId}`)
   }
 }

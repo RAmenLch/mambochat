@@ -1,6 +1,6 @@
 <!-- frontend/mambo/src/components/chat/group/GroupChatWindow.vue -->
 <template>
-  <div class="group-window">
+  <div class="group-window" :class="{ 'is-mobile': isMobile }">
     <div class="group-main">
       <div class="group-header">
         <div class="header-left">
@@ -58,7 +58,14 @@
             size="small"
             @click="onResetRoundCount"
           >{{ $t('groupChat.control.resetRoundCount') }}</el-button>
-          <el-popover placement="bottom-end" :width="320" trigger="click" @show="syncSettingsDraft">
+          <el-button
+            v-if="isMobile"
+            size="small"
+            :icon="UserFilled"
+            :title="$t('groupChat.member.title')"
+            @click="membersDrawerVisible = true"
+          />
+          <el-popover placement="bottom-end" :width="settingsPopoverWidth" trigger="click" @show="syncSettingsDraft">
             <template #reference>
               <el-button size="small" :icon="Setting" />
             </template>
@@ -199,6 +206,24 @@
       </div>
     </div>
 
+    <!-- 小屏：成员面板以抽屉呈现（桌面仍为右侧固定栏） -->
+    <el-drawer
+      v-if="isMobile"
+      v-model="membersDrawerVisible"
+      direction="rtl"
+      size="100%"
+      :with-header="true"
+      :title="$t('groupChat.member.title')"
+    >
+      <GroupMemberPanel
+        :members="members"
+        :active-tasks="memberActiveTasks"
+        :queued-counts="memberQueuedCounts"
+        @open-sub-session="(chatId: string) => { membersDrawerVisible = false; onOpenSubSession(chatId) }"
+        @process-unread="onProcessUnread"
+      />
+    </el-drawer>
+
     <GroupChatComposer :members="members" @send="onSend" />
   </div>
 </template>
@@ -220,12 +245,19 @@ import GroupMailList from './GroupMailList.vue';
 import GroupMailReviewPanel from './GroupMailReviewPanel.vue';
 import GroupMemberPanel from './GroupMemberPanel.vue';
 import GroupChatComposer from './GroupChatComposer.vue';
+import { useIsMobile } from '@/composables/useIsMobile';
 
 const { t } = useI18n();
 const router = useRouter();
 const sessionStore = useChatSessionStore();
 const groupStore = useGroupChatStore();
 const chatListStore = useChatListStore();
+
+// 小屏：成员面板改为抽屉、双栏降级为单栏
+const { isMobile } = useIsMobile();
+const membersDrawerVisible = ref(false);
+/** 群设置气泡在小屏上收窄，避免超出视口 */
+const settingsPopoverWidth = computed(() => (isMobile.value ? 'min(320px, 92vw)' : 320));
 
 const { currentGroupId } = storeToRefs(sessionStore);
 const { details } = storeToRefs(groupStore);
@@ -813,8 +845,7 @@ async function onRejectAllMails(reason: string) {
   overflow-y: auto;
 }
 /* 需要人工处理的轮次横幅 */
-.recovery-bar {
-  display: flex;
+.recovery-bar {  display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -889,6 +920,59 @@ async function onRejectAllMails(reason: string) {
   font-size: 12px;
   line-height: 1.4;
   color: var(--el-text-color-secondary);
+}
+
+/* ========== 小屏适配：单栏 + 成员抽屉 ========== */
+.group-window.is-mobile .group-main {
+  padding: 8px 10px;
+  gap: 8px;
+}
+
+.group-window.is-mobile .group-header {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.group-window.is-mobile .group-name {
+  max-width: 100%;
+  white-space: normal;
+  word-break: break-all;
+}
+
+.group-window.is-mobile .group-name-input {
+  width: 100%;
+}
+
+.group-window.is-mobile .header-right {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.group-window.is-mobile .round-info {
+  white-space: nowrap;
+}
+
+/* 双栏降级为单栏：成员面板改由抽屉承载 */
+.group-window.is-mobile .group-body {
+  gap: 0;
+}
+
+.group-window.is-mobile .side-column {
+  display: none;
+}
+
+.group-window.is-mobile .mail-filters {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.group-window.is-mobile .mail-filters .filter-select {
+  width: calc(50% - 4px);
+  min-width: 0;
+}
+
+.group-window.is-mobile .recovery-bar {
+  flex-wrap: wrap;
 }
 </style>
 

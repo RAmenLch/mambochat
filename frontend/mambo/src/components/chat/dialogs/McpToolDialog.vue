@@ -226,7 +226,7 @@
         <div class="tool-detail-container">
           <TaskSubAgentPanel
             :steps="taskSubSteps"
-            :is-running="activeMsg?.status === 'generating'"
+            :is-running="isTaskRunning"
             :security-review-map="securityReviewMap"
             :review-tool-map="reviewToolMap"
           />
@@ -369,6 +369,16 @@ const taskToolCallId = computed(() => {
 const subagentTabName = computed(() =>
   taskToolCallId.value ? `__subagent__` : ''
 );
+
+/** task 工具是否仍在执行（用于子代理面板的耗时实时增长） */
+const isTaskRunning = computed(() => {
+  const targetId = taskToolCallId.value;
+  if (!targetId) return false;
+  return toolMessages.value.some(msg => {
+    const content = getParsedContent(msg) as McpToolContent | null;
+    return content?.tool_call_id === targetId && msg.status === 'generating';
+  });
+});
 
 /** 当前工具对应 SecurityReview 内容（从 toolMessages 的所有 tool_call_id 推导）*/
 const activeSecurityReviewContent = computed(() => {

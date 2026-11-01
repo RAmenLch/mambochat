@@ -2,6 +2,15 @@
 <template>
   <div class="mobile-chat-header">
     <div class="header-left">
+      <button
+        v-if="canReturnToGroup"
+        class="icon-btn"
+        @click="$emit('return-to-group')"
+        :aria-label="$t('chat.header.backToGroup')"
+        :title="$t('chat.header.backToGroup')"
+      >
+        <el-icon :size="20"><Back /></el-icon>
+      </button>
       <button class="icon-btn" @click="$emit('toggle-drawer')" :aria-label="$t('chat.sidebar.title')">
         <el-icon :size="22"><MenuIcon /></el-icon>
       </button>
@@ -37,7 +46,7 @@
 import { ref, computed, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
-import { Menu as MenuIcon, Setting as SettingIcon } from '@element-plus/icons-vue'
+import { Menu as MenuIcon, Setting as SettingIcon, Back } from '@element-plus/icons-vue'
 import type { Chat } from '@/api/types'
 import { useChatListStore } from '@/stores/chatListStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
@@ -52,6 +61,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'toggle-drawer'): void
   (e: 'open-settings'): void
+  (e: 'return-to-group'): void
 }>()
 
 const { t } = useI18n()
@@ -63,6 +73,11 @@ const agentStore = useAgentStore()
 const isEditing = ref(false)
 const editName = ref('')
 const inputRef = ref()
+
+/** 从群内打开的成员会话：提供返回群聊的出口 */
+const canReturnToGroup = computed(
+  () => !!chatSessionStore.lastGroupId && chatSessionStore.currentGroupId === null,
+)
 
 // 默认标题占位 Key 渲染为 i18n 文本，其余情况原样显示
 const displayTitle = computed(() => {
@@ -123,6 +138,11 @@ async function saveTitle() {
   justify-content: center;
   align-items: center;
   flex-shrink: 0;
+}
+
+.header-left {
+  width: auto;
+  gap: 2px;
 }
 
 .header-center {

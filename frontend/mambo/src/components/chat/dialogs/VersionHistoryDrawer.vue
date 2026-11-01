@@ -4,7 +4,7 @@
     :model-value="visible"
     :title="$t('agent.versionHistory')"
     direction="rtl"
-    size="450px"
+    :size="drawerSize"
     @update:model-value="handleUpdateModelValue"
   >
     <div class="version-history-content">
@@ -132,7 +132,7 @@
     <el-dialog
       v-model="restoreDialogVisible"
       :title="$t('agent.versionHistoryRestoreTitle')"
-      width="420px"
+      :width="subDialogWidth(420)"
       destroy-on-close
     >
       <div class="restore-dialog-body">
@@ -164,7 +164,7 @@
     <el-dialog
       v-model="fileDialogVisible"
       :title="$t('agent.versionHistoryFileContent')"
-      width="700px"
+      :width="subDialogWidth(700)"
       destroy-on-close
     >
       <div class="file-dialog-header">
@@ -197,7 +197,7 @@
     <el-dialog
       v-model="diffDialogVisible"
       :title="$t('agent.versionHistoryDiffTitle') + ': ' + diffFilePath"
-      width="850px"
+      :width="subDialogWidth(850)"
       destroy-on-close
     >
       <div v-if="diffDialogLoading" class="file-dialog-loading">
@@ -227,6 +227,15 @@ import { useI18n } from 'vue-i18n';
 import { ElMessage } from 'element-plus';
 import { Document, CopyDocument, RefreshRight, CircleCheck, CircleClose, ChatLineSquare, ArrowRight } from '@element-plus/icons-vue';
 import { getFileVersion, restoreFiles, getFileDiff } from '@/api/versionControlService';
+import { useIsMobile } from '@/composables/useIsMobile';
+
+const { isMobile } = useIsMobile();
+
+/** 桌面 450px 抽屉；小屏占满宽度 */
+const drawerSize = computed(() => (isMobile.value ? '100%' : '450px'));
+
+/** 抽屉内的子弹窗宽度，小屏自适应 */
+const subDialogWidth = (desktopPx: number) => (isMobile.value ? '94vw' : `${desktopPx}px`);
 
 interface RollbackRecord {
   target_checkpoint_id: string;

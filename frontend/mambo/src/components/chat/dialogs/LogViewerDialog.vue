@@ -3,7 +3,7 @@
   <el-dialog
     v-model="dialogVisible"
     :title="$t('chat.logViewer.title')"
-    width="900px"
+    :width="dialogWidth"
     class="log-viewer-dialog"
     destroy-on-close
   >
@@ -120,13 +120,19 @@ import { ref, watch, computed } from 'vue';
 import { CopyDocument, Expand, Fold } from '@element-plus/icons-vue';
 import { getPostPayloadLogs } from '@/api/logService';
 import type { LogItem } from '@/api/types/logTypes';
+import { useIsMobile } from '@/composables/useIsMobile';
 import JsonNode from './JsonNode.vue';
+
+const { isMobile } = useIsMobile();
 
 const props = defineProps<{
   visible: boolean;
   messageId: string | null;
   chatId: string | null;
 }>();
+
+/** 桌面固定 900px，小屏自适应（弹窗内容为长报文，需要尽可能宽） */
+const dialogWidth = computed(() => (isMobile.value ? '94vw' : '900px'));
 
 const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void;
@@ -271,7 +277,7 @@ function copySectionData(data: any) {
   background-color: var(--el-bg-color-page);
   padding: 12px;
   border-radius: 4px;
-  max-height: 600px;
+  max-height: min(600px, 58vh);
   overflow-y: auto;
 }
 

@@ -24,11 +24,15 @@
             v-for="sub in minimizedSubMessages"
             :key="sub.id"
             size="small"
-            type="info"
+            :type="minimizedTagType(sub)"
             :class="{ 'is-inactive': isSubMessageInactive(sub) }"
             @click.stop="restoreSubMessage(sub.id)"
           >
-            <el-icon><Document /></el-icon>
+            <el-icon>
+              <QuestionFilled v-if="sub.type === 'AskUser'" />
+              <Warning v-else-if="sub.type === 'ReviewTool'" />
+              <Document v-else />
+            </el-icon>
           </el-tag>
         </div>
 
@@ -211,7 +215,8 @@ import { useAgentStore } from '@/stores/agentStore'
 import { useProviderStore } from '@/stores/providerStore'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  User, Cpu, Document, CopyDocument, RefreshRight, Delete, Edit, Clock, Loading, CircleCheck, ArrowLeft, ArrowRight
+  User, Cpu, Document, CopyDocument, DocumentCopy, RefreshRight, Delete, Edit, Clock, Loading, CircleCheck,
+  ArrowLeft, ArrowRight, QuestionFilled, Warning,
 } from '@element-plus/icons-vue'
 import SubMessageItem from './SubMessageItem.vue'
 import ZipHistoryCard from './ZipHistoryCard.vue'
@@ -241,6 +246,8 @@ const emit = defineEmits<{
   (e: 'suggestion-click', text: string): void
   (e: 'switch-branch', targetId: string): void
   (e: 'open-tool-dialog', message: Message, subMessageId: string, mode: 'review_all' | 'single'): void
+  (e: 'view-logs', messageId: string): void
+  (e: 'duplicate-upto', messageId: string): void
 }>()
 
 const { t } = useI18n()
@@ -347,6 +354,24 @@ function showActionSheet() {
     })
   }
 
+  if (props.message.role === 'assistant' && props.message.status !== 'generating') {
+    actions.push({
+      key: 'view-logs',
+      label: t('chat.message.viewLogs'),
+      icon: Document,
+      handler: () => { emit('view-logs', props.message.id); closeActionSheet() }
+    })
+  }
+
+  if (props.message.status !== 'generating') {
+    actions.push({
+      key: 'duplicate-upto',
+      label: t('chat.message.duplicateUpToHere'),
+      icon: DocumentCopy,
+      handler: () => { emit('duplicate-upto', props.message.id); closeActionSheet() }
+    })
+  }
+
   actions.push({
     key: 'delete',
     label: t('common.action.delete'),
@@ -419,6 +444,14 @@ const displayableSubMessages = computed(() =>
 const minimizedSubMessages = computed(() =>
   displayableSubMessages.value.filter((sm) => sm.config?.is_minimal === true),
 )
+
+/** 最小化条上的标签样式：待处理条目高亮（待审批 / 待回答） */
+function minimizedTagType(sub: SubMessage): 'warning' | 'primary' | 'info' {
+  if (sub.status !== 'pending_review') return 'info'
+  if (sub.type === 'ReviewTool') return 'warning'
+  if (sub.type === 'AskUser') return 'primary'
+  return 'info'
+}
 
 const normalSubMessages = computed(() =>
   displayableSubMessages.value.filter((sm) => !sm.config?.is_minimal && sm.config?.is_tail_tool !== true),
