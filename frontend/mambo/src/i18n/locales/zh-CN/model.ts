@@ -50,5 +50,6 @@ export default {
     title: '选择要添加的模型',
     placeholder: '搜索模型',
     confirm: '确认添加',
+    selected: '已选',
   },
 }

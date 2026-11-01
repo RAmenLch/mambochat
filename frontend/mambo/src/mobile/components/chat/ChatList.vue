@@ -23,14 +23,11 @@
 
     <div class="tree-container">
       <ExplorerTree
-        ref="treeRef"
         :data="treeData"
         :current-id="currentChatId"
         :is-loading="isChatListLoading"
         :loading-folder-ids="loadingFolders"
         folder-item-type="folder"
-        :draggable="!isAgentFiltering"
-        :custom-allow-drop="customAllowDrop"
         class="chat-tree"
         @node-click="handleNodeClick"
         @node-expand="handleNodeExpand"
@@ -244,7 +241,6 @@ import {
   Files,
   QuestionFilled,
 } from '@element-plus/icons-vue'
-import type { AllowDropType } from 'element-plus/es/components/tree/src/tree.type'
 /** Element Plus Tree 内部节点结构（避免依赖内部路径） */
 interface ElTreeNode {
   data: Record<string, any>
@@ -289,7 +285,6 @@ const route = useRoute() // [新增] 获取 route 实例
 const chatListStore = useChatListStore()
 const chatSessionStore = useChatSessionStore()
 const agentStore = useAgentStore()
-const treeRef = ref<InstanceType<typeof ExplorerTree>>()
 
 const { chatList, isChatListLoading, loadingFolders, loadedFolderIds } = storeToRefs(chatListStore)
 const { currentChatId } = storeToRefs(chatSessionStore)
@@ -306,16 +301,6 @@ const chatSortMode = ref<ChatSortMode>(
 );
 
 const isManualSort = computed(() => chatSortMode.value === 'manual');
-
-const customAllowDrop = (draggingNode: any, dropNode: any, dropType: AllowDropType): boolean => {
-  if (isAgentFiltering.value) return false;
-  if (isManualSort.value) return true;
-  const isDropRoot = !(dropNode.data as BaseTreeItem).parentId;
-  if (!isDropRoot) return true;
-  const isDragFromSub = !!(draggingNode.data as BaseTreeItem).parentId;
-  if (isDragFromSub) return true;
-  return dropType === 'inner';
-};
 
 function toggleSortMode() {
   chatSortMode.value = chatSortMode.value === 'manual' ? 'folder-top-time' : 'manual';

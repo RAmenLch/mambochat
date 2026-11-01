@@ -7,6 +7,7 @@ export default {
     disabled: '未启用',
     searching: '正在搜索...',
     loading: '加载中...',
+    saving: '保存中...',
     noData: '暂无数据',
     connectionFailed: '连接失败',
     unspecified: '未指定',
@@ -60,6 +61,7 @@ export default {
     confirmDelete: '确定要删除吗？',
     createFailed: '创建失败',
     noData: '暂无数据',
+    noDescription: '暂无描述',
     selectSameLevelOnly: '仅支持选择同一层级的内容',
   },
   error: {

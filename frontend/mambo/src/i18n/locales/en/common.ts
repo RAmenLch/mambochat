@@ -7,6 +7,7 @@ export default {
     disabled: 'Disabled',
     searching: 'Searching...',
     loading: 'Loading...',
+    saving: 'Saving...',
     noData: 'No Data',
     connectionFailed: 'Connection Failed',
     unspecified: 'Unspecified',
@@ -60,6 +61,7 @@ export default {
     confirmDelete: 'Are you sure you want to delete?',
     createFailed: 'Creation failed',
     noData: 'No Data',
+    noDescription: 'No description',
     selectSameLevelOnly: 'Only items at the same level can be selected',
   },
   error: {

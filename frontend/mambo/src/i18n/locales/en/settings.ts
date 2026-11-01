@@ -160,6 +160,7 @@ export default {
     cleanupSkipped: 'Nothing to clean up',
     cleanupFailed: 'Cleanup failed',
     cleanupTriggerFailed: 'Failed to trigger cleanup, please retry later',
+    cleanupConfirmTitle: 'Clean up history snapshots?',
     saving: 'Saving settings...',
     saved: 'All changes saved',
     autoSave: 'Auto-save on change',

@@ -42,7 +42,7 @@
           </div>
 
           <div class="sheet-footer">
-            <span class="footer-count">{{ selectedIds.length }} {{ t('model.fetch.selected') }}</span>
+            <span class="footer-count">{{ t('model.fetch.selected') }} {{ selectedIds.length }}</span>
             <button class="footer-confirm" @click="handleConfirm">
               {{ t('model.fetch.confirm') }}
             </button>

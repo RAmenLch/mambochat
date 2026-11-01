@@ -331,7 +331,8 @@ const handleEdit = (row: BackendConfig) => {
   });
   whitelistProxy.value = cd.edit_whitelist || [];
   blacklistProxy.value = cd.edit_blacklist || [];
-  editMode.value = (cd.edit_whitelist && cd.edit_whitelist.length > 0) ? 'whitelist' : 'blacklist';
+  // 与桌面 resolveEditMode 保持一致：黑名单非空才算黑名单，否则默认白名单
+  editMode.value = (cd.edit_blacklist && cd.edit_blacklist.length > 0) ? 'blacklist' : 'whitelist';
   dialogVisible.value = true; formRef.value?.clearValidate();
 };
 

@@ -544,19 +544,6 @@ const usageSubMessage = computed(() => {
   return usageMessages.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
 })
 
-function handleShowUsage() {
-  if (!usageSubMessage.value) return
-  try {
-    const usage = JSON.parse(usageSubMessage.value.content)
-    const prompt = usage.prompt_tokens ?? 0
-    const completion = usage.completion_tokens ?? 0
-    const total = usage.total_tokens ?? (prompt + completion)
-    ElMessage.info(`Tokens - Prompt: ${prompt}, Completion: ${completion}, Total: ${total}`)
-  } catch {
-    ElMessage.info(usageSubMessage.value.content)
-  }
-}
-
 const maxContextTokens = computed(() => {
   const chat = sessionStore.currentChat
   if (!chat?.aiModelId) return undefined

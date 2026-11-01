@@ -213,7 +213,6 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
-  'triggerFileUpload',
   'openSettings',
   'openResourceSelector',
   'toggleMcpTool',

@@ -70,7 +70,7 @@
         :current-chat="currentChat"
         :messages="currentChatMessages"
         :estimated-tokens="estimatedTokens"
-        @trigger-file-upload="handleTriggerFileUpload"
+        @open-settings="handleOpenSettings"
         @open-resource-selector="resourceSelectorVisible = true"
         @toggle-mcp-tool="handleToggleMcpTool"
         @toggle-web-search="handleToggleWebSearch"

@@ -50,5 +50,6 @@ export default {
     title: 'Select Models to Add',
     placeholder: 'Search models',
     confirm: 'Confirm Add',
+    selected: 'Selected',
   },
 }

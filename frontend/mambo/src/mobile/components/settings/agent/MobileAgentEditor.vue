@@ -1185,10 +1185,10 @@ function handleRemoveMemory(id: string) {
 }
 
 function getMemoryTypeLabel(type: string | undefined): string {
-  if (type === 'knowledge_base') return t('resource.type.knowledgeBase');
-  if (type === 'system_prompt') return t('resource.type.systemPrompt');
-  if (type === 'submessage_template') return t('resource.type.submessageTemplate');
-  return t('resource.type.file');
+  if (type === 'knowledge_base') return t('resource.types.knowledge_base');
+  if (type === 'system_prompt') return t('resource.types.system_prompt');
+  if (type === 'submessage_template') return t('resource.types.submessage_template');
+  return t('resource.types.file');
 }
 
 async function fetchHitlTools(agentId: string) {
@@ -1210,7 +1210,7 @@ async function fetchGoalLoopTools(agentId: string) {
 }
 
 function buildMamboAgentParameters(): MamboAgentParameters | null {
-  return {
+  const built: MamboAgentParameters = {
     include_general_purpose: form.mambo_general_purpose,
     enable_planning: form.mambo_planning_enabled,
     enable_show: form.mambo_show_enabled,
@@ -1234,6 +1234,17 @@ function buildMamboAgentParameters(): MamboAgentParameters | null {
     goal_loop: form.mambo_goal_loop_enabled ? buildGoalLoopConfig() : null,
     mcp_direct_tool_threshold: form.mambo_mcp_threshold,
   };
+
+  // 移动端暂未提供编辑入口的分区（Tail Tool / 图片生成 / 多模态描述器）必须原样保留：
+  // 后端对 agentParameters 是整体覆盖写入，缺省即被清空。
+  const original = agentData.value?.agentParameters as MamboAgentParameters | undefined;
+  if (original) {
+    built.tail_tool = original.tail_tool ?? null;
+    built.image_gen = original.image_gen ?? null;
+    built.multimodal_describer = original.multimodal_describer ?? null;
+  }
+
+  return built;
 }
 
 async function handleUploadAvatar(file: File) {

@@ -42,7 +42,7 @@
                 <el-avatar v-else :size="38" :icon="User" />
                 <div class="item-info">
                   <span class="item-name">{{ agent.name }}</span>
-                  <span class="item-desc">{{ agent.description || $t('common.noDescription') }}</span>
+                  <span class="item-desc">{{ agent.description || $t('common.msg.noDescription') }}</span>
                 </div>
               </div>
               <div class="item-check" :class="{ checked: isSelected(agent.id) }">

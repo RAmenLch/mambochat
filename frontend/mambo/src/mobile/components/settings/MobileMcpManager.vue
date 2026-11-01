@@ -33,7 +33,7 @@
         <div class="card-desc" v-if="item.description">{{ item.description }}</div>
 
         <div class="card-meta">
-          <span class="meta-tag" :class="'tag-' + item.transportType">{{ item.transportType.toUpperCase() }}</span>
+          <span class="meta-tag" :class="'tag-' + item.transportType">{{ transportLabel(item.transportType) }}</span>
           <div class="health-badge" :class="getStatusClass(item.last_status)">
             <span class="health-dot"></span>
             <span class="health-text">{{ getStatusText(item.last_status) }}</span>
@@ -124,7 +124,7 @@ import type { McpServer, McpCreateRequest, McpHealthStatus } from '@/api/types';
 import MobileMcpFormDialog from './dialogs/MobileMcpFormDialog.vue';
 import { useI18n } from 'vue-i18n';
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const mcpStore = useMcpStore();
 const { availableServices } = storeToRefs(mcpStore);
 
@@ -181,9 +181,11 @@ const getStatusClass = (s: McpHealthStatus) => (s ? statusClassMap[s] : '') || '
 const statusTextMap: Record<string, string> = { healthy: t('chat.toolbar.mcpStatus.healthy'), unhealthy: t('chat.toolbar.mcpStatus.unhealthy') };
 const getStatusText = (s: McpHealthStatus) => (s ? statusTextMap[s] : '') || t('chat.toolbar.mcpStatus.unknown');
 
-const formatTime = (iso: string) => {
-  if (!iso) return '-';
-  return new Date(iso).toLocaleString(t('locale') === 'en' ? 'en-US' : 'zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+/** 传输类型展示名：streamable_http 显示为 HTTP，避免出现 STREAMABLE_HTTP */
+const transportLabel = (type: string) => (type === 'streamable_http' ? 'HTTP' : type.toUpperCase());
+
+const formatTime = (iso: string) => {  if (!iso) return '-';
+  return new Date(iso).toLocaleString(locale.value === 'en' ? 'en-US' : 'zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 };
 </script>
 

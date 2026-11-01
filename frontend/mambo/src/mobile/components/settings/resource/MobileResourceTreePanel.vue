@@ -332,7 +332,7 @@ function handleContextAction(action: string, parentIdOverride: string | null = n
 
 async function handleDelete(item: Resource) {
   try {
-    await ElMessageBox.confirm(t('common.msg.deleteConfirm', { name: item.name }), t('common.action.delete'), {
+    await ElMessageBox.confirm(t('common.msg.confirmDelete', { name: item.name }), t('common.action.delete'), {
       type: 'warning',
       confirmButtonClass: 'el-button--danger'
     })

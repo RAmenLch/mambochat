@@ -87,7 +87,7 @@
           <span>{{ t('common.status.loading') }}</span>
         </div>
         <div v-else-if="fileContentError" class="file-content-error">
-          <span>{{ t('chat.attachment.fileLoadFailed') }}</span>
+          <span>{{ t('chat.message.fileLoadFailed') }}</span>
         </div>
 
         <div v-else-if="isMarkdownFile" class="message-content file-message-content" :class="{ collapsed: isFileContentCollapsed }">

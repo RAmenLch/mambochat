@@ -157,6 +157,7 @@ export default {
     cleanupSkipped: '当前无需清理',
     cleanupFailed: '清理失败',
     cleanupTriggerFailed: '触发清理失败，请稍后重试',
+    cleanupConfirmTitle: '确认清理历史快照？',
     saving: '正在保存设置...',
     saved: '所有更改已保存',
     autoSave: '修改后自动保存',

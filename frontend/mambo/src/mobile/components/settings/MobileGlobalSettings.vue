@@ -239,6 +239,42 @@
         </div>
       </div>
 
+      <!-- 数据库维护 -->
+      <div class="section-card">
+        <div class="section-title">{{ t('settings.global.dbMaintenance') }}</div>
+        <div class="field-item">
+          <label class="field-label">{{ t('settings.global.checkpointCleanup') }}</label>
+          <span class="field-hint">{{ t('settings.global.cleanupTip') }}</span>
+        </div>
+        <div class="cleanup-actions">
+          <el-button
+            type="primary"
+            size="small"
+            :loading="cleanupStatus === 'running'"
+            :disabled="cleanupStatus === 'running'"
+            @click="handleTriggerCleanup"
+          >
+            {{ t('settings.global.cleanupBtn') }}
+          </el-button>
+          <span v-if="reclaimableBytes > 0 && cleanupStatus === 'idle'" class="cleanup-reclaimable">
+            {{ t('settings.global.cleanupReclaimable', { size: formatBytes(reclaimableBytes) }) }}
+          </span>
+        </div>
+        <el-progress
+          v-if="cleanupStatus === 'running'"
+          :percentage="cleanupProgress"
+          :stroke-width="10"
+          style="width: 100%"
+        />
+        <div v-else-if="cleanupStatus === 'done'" class="cleanup-done">
+          <el-icon><Check /></el-icon>
+          <span>{{ t('settings.global.cleanupDone', { size: formatBytes(cleanupFreedBytes) }) }}</span>
+        </div>
+        <div v-else-if="cleanupStatus === 'skipped' || cleanupStatus === 'failed'" class="cleanup-message">
+          {{ cleanupMessage }}
+        </div>
+      </div>
+
       <div class="body-spacer"></div>
     </div>
 
@@ -272,10 +308,11 @@ import { useProviderStore } from '@/stores/providerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
-import { User, Cpu, Loading, Select, WarningFilled } from '@element-plus/icons-vue'
+import { User, Cpu, Loading, Select, WarningFilled, Check } from '@element-plus/icons-vue'
 import type { GlobalSettingsUpdate } from '@/api/types'
 import AvatarUploader from '@/components/settings/AvatarUploader.vue'
 import { useModelSelectScroll } from '@/composables/useModelSelectScroll'
+import { useCheckpointCleanup } from '@/composables/useCheckpointCleanup'
 
 type AvatarType = 'user' | 'ai'
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
@@ -285,6 +322,17 @@ const providerStore = useProviderStore()
 const settingsStore = useSettingsStore()
 const { groupedModels } = storeToRefs(providerStore)
 const { globalSettings } = storeToRefs(settingsStore)
+
+// 数据库维护：清理 checkpoints 历史快照（与桌面共用 composable）
+const {
+  status: cleanupStatus,
+  progress: cleanupProgress,
+  message: cleanupMessage,
+  reclaimableBytes,
+  freedBytes: cleanupFreedBytes,
+  triggerWithConfirm: handleTriggerCleanup,
+  formatBytes,
+} = useCheckpointCleanup()
 
 // 按 apiHost 域名判断是否为 DeepSeek 服务商（与执行器类型无关）
 const isDeepseekHost = (apiHost: string): boolean => {
@@ -422,6 +470,13 @@ const handleTestProxy = async () => {
 .field-label { display: block; font-size: 13px; font-weight: 600; color: var(--el-text-color-primary); margin-bottom: 4px; }
 .field-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; }
 .field-row + .field-row { border-top: 0.5px solid rgba(0,0,0,0.05); }
+
+/* 数据库维护 */
+.field-hint { display: block; font-size: 12px; line-height: 1.4; color: var(--el-text-color-secondary); margin-bottom: 8px; }
+.cleanup-actions { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.cleanup-reclaimable { font-size: 12px; color: var(--el-text-color-secondary); }
+.cleanup-done { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--el-color-success); }
+.cleanup-message { font-size: 13px; color: var(--el-text-color-secondary); }
 
 .native-input { width: 100%; height: 40px; padding: 0 12px; font-size: 15px; font-family: inherit; color: var(--el-text-color-primary); background: var(--el-bg-color); border: none; border-radius: 10px; box-shadow: 0 0 0 1px var(--el-border-color-lighter) inset; outline: none; box-sizing: border-box; transition: box-shadow 0.2s; }
 .native-input:focus { box-shadow: 0 0 0 2px var(--el-color-primary) inset; }

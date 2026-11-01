@@ -30,6 +30,7 @@
                 <el-radio-group v-model="formData.transportType" @change="handleTransportChange" class="full-radio">
                   <el-radio-button value="stdio">Stdio</el-radio-button>
                   <el-radio-button value="sse">SSE</el-radio-button>
+                  <el-radio-button value="streamable_http">HTTP</el-radio-button>
                 </el-radio-group>
               </div>
 
@@ -79,8 +80,8 @@
                 </div>
               </template>
 
-              <template v-if="formData.transportType === 'sse'">
-                <div class="sheet-divider">SSE Config</div>
+              <template v-if="formData.transportType === 'sse' || formData.transportType === 'streamable_http'">
+                <div class="sheet-divider">{{ formData.transportType === 'sse' ? 'SSE Config' : 'HTTP Config' }}</div>
                 <div class="field-item">
                   <label class="field-label">URL</label>
                   <input v-model="formData.url" class="native-input" placeholder="http://localhost:8080/sse" />
