@@ -59,6 +59,16 @@
                   </div>
                 </div>
               </el-popover>
+              <button
+                v-if="activeAgentFilterLabel"
+                type="button"
+                class="agent-filter-chip"
+                :title="activeAgentFilterLabel"
+                @click="agentFilterPopoverVisible = true"
+              >
+                <el-avatar v-if="activeAgentFilterAvatar" :size="14" :src="activeAgentFilterAvatar" />
+                <span class="agent-filter-chip-label">{{ activeAgentFilterLabel }}</span>
+              </button>
               <el-tooltip
                 :content="isManualSort ? $t('chat.sidebar.sortByTime') : $t('chat.sidebar.sortManual')"
                 placement="top"
@@ -385,6 +395,15 @@ const agentFilterOptions = computed((): AgentFilterOption[] => {
 
   return options;
 });
+
+const activeAgentFilterOption = computed(() =>
+  isAgentFiltering.value
+    ? agentFilterOptions.value.find(o => o.value === agentFilter.value)
+    : undefined
+);
+
+const activeAgentFilterLabel = computed(() => activeAgentFilterOption.value?.label ?? '');
+const activeAgentFilterAvatar = computed(() => activeAgentFilterOption.value?.avatar ?? null);
 
 function selectAgentFilter(value: string) {
   agentFilter.value = value;
@@ -859,6 +878,36 @@ async function handleSearchResultSelect(data: { chatId: string; subMessageId: st
   font-size: 16px;
   font-weight: 600;
   color: var(--el-text-color-primary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 108px;
+  min-width: 0;
+  padding: 1px 8px;
+  border: none;
+  border-radius: 10px;
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.agent-filter-chip:hover {
+  background: var(--el-color-primary-light-8);
+}
+
+.agent-filter-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sort-toggle-btn {
