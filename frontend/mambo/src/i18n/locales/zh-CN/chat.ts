@@ -335,6 +335,8 @@ export default {
     reasoning: '思考',
     toolResult: '工具结果',
     noSteps: '暂无追踪步骤',
+    steps: '{count} 步',
+    elapsed: '耗时 {duration}',
   },
   file: {
     groupPinned: '已置顶',

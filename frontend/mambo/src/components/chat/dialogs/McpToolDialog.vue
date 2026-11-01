@@ -226,6 +226,7 @@
         <div class="tool-detail-container">
           <TaskSubAgentPanel
             :steps="taskSubSteps"
+            :is-running="activeMsg?.status === 'generating'"
             :security-review-map="securityReviewMap"
             :review-tool-map="reviewToolMap"
           />
@@ -249,8 +250,8 @@ import { useI18n } from 'vue-i18n';
 import { useMcpStore } from '@/stores/mcpStore';
 import { useChatInteractionStore } from '@/stores/chatInteractionStore';
 import { useChatSessionStore } from '@/stores/chatSessionStore';
-import { getMessageTaskSubSteps } from '@/api/chatService';
-import type { SubMessage, McpToolContent, ReviewToolContent, ToolDecision, SchemaProperty, TaskSubStepContent, Message, SecurityReviewContent, MultimodalMedia } from '@/api/types';
+import { useTaskSubSteps } from '@/composables/useTaskSubSteps';
+import type { SubMessage, McpToolContent, ReviewToolContent, ToolDecision, SchemaProperty, Message, SecurityReviewContent, MultimodalMedia } from '@/api/types';
 import { unpackMcpToolCall } from '@/utils/mcpToolUnpack';
 import { parseWebSearchResult, type WebSearchParsed } from '@/utils/webSearchResult';
 import { resolveFileUrl } from '@/services/electronUrl';
@@ -444,64 +445,11 @@ const reviewToolMap = computed(() => {
   return map;
 });
 
-/** task 工具对应的子代理追踪步骤（store 优先，缺失时按需拉取） */
-const taskSubSteps = ref<SubMessage[]>([]);
-const taskSubStepsCache = new Map<string, SubMessage[]>();
-
-function sortTaskSubSteps(steps: SubMessage[]): SubMessage[] {
-  return [...steps].sort((a, b) => {
-    try {
-      const ca: TaskSubStepContent = JSON.parse(a.content);
-      const cb: TaskSubStepContent = JSON.parse(b.content);
-      return ca.step_order - cb.step_order;
-    } catch {
-      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-    }
-  });
-}
-
-watch(
-  [() => props.visible, taskToolCallId, () => liveParentMessage.value?.id],
-  async () => {
-    if (!props.visible || !taskToolCallId.value) {
-      taskSubSteps.value = [];
-      return;
-    }
-    const toolCallId = taskToolCallId.value;
-    const parentMsg = liveParentMessage.value;
-
-    // 1) store 中已有（SSE 生成中推送的完整数据）→ 直接用
-    if (parentMsg) {
-      const fromStore = parentMsg.sub_messages.filter(
-        sm => sm.type === 'TaskSubStep' && sm.config?.task_group_id === toolCallId
-      );
-      if (fromStore.length > 0) {
-        taskSubSteps.value = sortTaskSubSteps(fromStore);
-        return;
-      }
-    }
-
-    // 2) store 无数据（刷新后）→ 按需拉取，带组件级缓存
-    const messageId = parentMsg?.id ?? props.parentMessageId;
-    if (!messageId) {
-      taskSubSteps.value = [];
-      return;
-    }
-    const cacheKey = `${messageId}:${toolCallId}`;
-    if (taskSubStepsCache.has(cacheKey)) {
-      taskSubSteps.value = taskSubStepsCache.get(cacheKey)!;
-      return;
-    }
-    try {
-      const fetched = await getMessageTaskSubSteps(messageId, toolCallId);
-      const sorted = sortTaskSubSteps(fetched);
-      taskSubStepsCache.set(cacheKey, sorted);
-      taskSubSteps.value = sorted;
-    } catch (error) {
-      console.error('Failed to fetch task substeps:', error);
-      taskSubSteps.value = [];
-    }
-  },
+/** task 工具对应的子代理追踪步骤：store 实时数据 + 按需拉取的历史数据合并 */
+const { steps: taskSubSteps } = useTaskSubSteps(
+  liveParentMessage,
+  taskToolCallId,
+  computed(() => props.visible),
 );
 
 watch(() => toolMessages.value, (newVal) => {

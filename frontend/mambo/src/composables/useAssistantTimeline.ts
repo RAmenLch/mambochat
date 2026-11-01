@@ -1,7 +1,7 @@
 // frontend/mambo/src/composables/useAssistantTimeline.ts
 
 import { computed, ref, type Ref } from 'vue';
-import type { Message, SubMessage, ReviewToolContent, AskUserContent, TaskSubStepContent } from '@/api/types';
+import type { Message, SubMessage, ReviewToolContent, AskUserContent } from '@/api/types';
 
 /** 时间线中的一个分组：一段文本 + 跟随的工具调用 */
 export interface BubbleSectionGroup {
@@ -351,31 +351,6 @@ export function useAssistantTimeline(message: Ref<Message>, messageDisplayMode?:
     message.value.sub_messages.filter(sm => sm.type === 'Error')
   );
 
-  // 6. 子代理追踪步骤：按 task_group_id 分组，供 task 工具气泡的 SubAgentPanel 使用
-  const taskSubAgentGroups = computed(() => {
-    const map = new Map<string, SubMessage[]>();
-    for (const sm of message.value.sub_messages) {
-      if (sm.type !== 'TaskSubStep') continue;
-      const gid = sm.config?.task_group_id;
-      if (!gid) continue;
-      if (!map.has(gid)) map.set(gid, []);
-      map.get(gid)!.push(sm);
-    }
-    // 组内按 step_order 排序
-    for (const msgs of map.values()) {
-      msgs.sort((a, b) => {
-        try {
-          const ca: TaskSubStepContent = JSON.parse(a.content);
-          const cb: TaskSubStepContent = JSON.parse(b.content);
-          return ca.step_order - cb.step_order;
-        } catch {
-          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-        }
-      });
-    }
-    return map;
-  });
-
   // 5. 导出气泡状态
 
   /**
@@ -410,7 +385,6 @@ export function useAssistantTimeline(message: Ref<Message>, messageDisplayMode?:
     errorSubMessages,
     isReasoningMinimized,
     hasPendingReviews,
-    taskSubAgentGroups,
     hasSparkMode,
     isSparkCollapsed,
     toggleSpark,

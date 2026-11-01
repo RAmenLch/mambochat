@@ -1,6 +1,11 @@
 <!-- frontend/mambo/src/components/chat/task/TaskSubAgentPanel.vue -->
 <template>
   <div class="subagent-panel">
+    <!-- 步骤数与耗时摘要（耗时取步骤时间戳跨度，进行中实时增长） -->
+    <div class="task-summary">
+      <span>{{ t('chat.subagent.steps', { count: steps.length }) }}</span>
+      <span v-if="durationText" class="task-duration">{{ t('chat.subagent.elapsed', { duration: durationText }) }}</span>
+    </div>
     <!-- ========== 堆叠模式（全局配置 message_display_mode = 'stacked'） ========== -->
     <template v-if="messageDisplayMode === 'stacked'">
       <!-- 思考区域 (Reasoning) -->
@@ -130,8 +135,9 @@ import { useI18n } from 'vue-i18n';
 import { storeToRefs } from 'pinia';
 import { ElMessage } from 'element-plus';
 import { ArrowRight, ArrowDown } from '@element-plus/icons-vue';
-import type { Message, MessageRole, MessageStatus, SubMessage, SubMessageType, TaskSubStepContent, SecurityReviewContent, ReviewToolContent } from '@/api/types';
+import type { Message, SubMessage, SecurityReviewContent } from '@/api/types';
 import { useAssistantTimeline, type BubbleSection } from '@/composables/useAssistantTimeline';
+import { buildSubAgentVirtualMessage, useTaskDuration, type ReviewToolMapEntry } from '@/composables/useTaskSubSteps';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { copyToClipboard } from '@/utils/clipboard';
 import BubbleSectionGroupComponent from '../message/BubbleSectionGroup.vue';
@@ -148,11 +154,19 @@ const messageDisplayMode = computed(() => globalSettings.value.message_display_m
 
 const props = defineProps<{
   steps: SubMessage[];
+  /** 子代理任务是否仍在进行（耗时实时增长） */
+  isRunning?: boolean;
   /** 子代理工具调用 → SecurityReview 映射，key=sub_tool_call_id */
   securityReviewMap?: Map<string, SecurityReviewContent>;
   /** 子代理工具调用 → {content, sub_message_id} 映射，key=sub_tool_call_id */
-  reviewToolMap?: Map<string, { content: ReviewToolContent; sub_message_id: string }>;
+  reviewToolMap?: Map<string, ReviewToolMapEntry>;
 }>();
+
+const { durationText } = useTaskDuration(
+  computed(() => props.steps),
+  computed(() => props.isRunning === true),
+);
+
 
 /** 本地折叠状态：子代理追踪面板内子消息的折叠与展开 */
 const collapsedSubMsgIds = ref<Set<string>>(new Set());
@@ -183,127 +197,10 @@ async function handleCopy(subMessage: SubMessage) {
   }
 }
 
-/** 将 TaskSubStep 数组转换为虚拟 Message，子消息使用 Reasoning/Normal/McpTool 类型 */
-const virtualMessage = computed<Message>(() => {
-  const subMessages: SubMessage[] = [];
-
-  for (let i = 0; i < props.steps.length; i++) {
-    const sm = props.steps[i];
-    let stepData: TaskSubStepContent;
-    try {
-      stepData = JSON.parse(sm.content) as TaskSubStepContent;
-    } catch {
-      continue;
-    }
-
-    switch (stepData.display_type) {
-      case 'reasoning':
-        subMessages.push({
-          ...sm,
-          type: 'Reasoning' as SubMessageType,
-          content: stepData.content,
-          config: { is_collapsed: false, is_minimal: true },
-        } as SubMessage);
-        break;
-
-      case 'text':
-        subMessages.push({
-          ...sm,
-          type: 'Normal' as SubMessageType,
-          content: stepData.content,
-          config: { is_collapsed: false },
-        } as SubMessage);
-        break;
-
-      case 'tool_call': {
-        // 查找匹配的 tool_result 合并（全数组搜索，因 step_order 可能交叉）
-        let resultText: string | null = null;
-        for (let j = 0; j < props.steps.length; j++) {
-          if (j === i) continue;
-          try {
-            const next = JSON.parse(props.steps[j].content) as TaskSubStepContent;
-            if (next.display_type !== 'tool_result') continue;
-            if (stepData.sub_tool_call_id && next.sub_tool_call_id === stepData.sub_tool_call_id) {
-              resultText = next.content;
-              break;
-            }
-            // 降级兜底：无 sub_tool_call_id 时用 tool_name 匹配
-            if (!stepData.sub_tool_call_id && !next.sub_tool_call_id && next.tool_name === stepData.tool_name) {
-              resultText = next.content;
-              break;
-            }
-          } catch { /* skip */ }
-        }
-        const toolCallId = `${stepData.tool_call_id}_s_${stepData.step_order}`;
-        subMessages.push({
-          ...sm,
-          type: 'McpTool' as SubMessageType,
-          content: JSON.stringify({
-            tool_call_id: toolCallId,
-            name: stepData.tool_name || '',
-            arguments: typeof stepData.tool_args === 'string'
-              ? stepData.tool_args
-              : JSON.stringify(stepData.tool_args || {}),
-            result: resultText,
-            is_error: false,
-          }),
-          config: { is_collapsed: false },
-        } as SubMessage);
-
-        // 绑定 AI 安全审核（通过 sub_tool_call_id 匹配 SecurityReview）
-        if (stepData.sub_tool_call_id && props.securityReviewMap) {
-          const review = props.securityReviewMap.get(stepData.sub_tool_call_id);
-          if (review) {
-            subMessages.push({
-              id: crypto.randomUUID(),
-              type: 'SecurityReview' as SubMessageType,
-              content: JSON.stringify({ ...review, tool_call_id: toolCallId }),
-              config: { is_collapsed: false, context_participation_length: 0 },
-              createdAt: sm.createdAt,
-              messageId: sm.messageId,
-              sortOrder: 2,
-              status: 'completed',
-            } as SubMessage);
-          }
-        }
-
-        // 绑定人工审核（通过 sub_tool_call_id 匹配 ReviewTool）
-        if (stepData.sub_tool_call_id && props.reviewToolMap) {
-          const rtoolEntry = props.reviewToolMap.get(stepData.sub_tool_call_id);
-          if (rtoolEntry) {
-            subMessages.push({
-              id: rtoolEntry.sub_message_id,
-              type: 'ReviewTool' as SubMessageType,
-              content: JSON.stringify({ ...rtoolEntry.content, tool_call_id: toolCallId }),
-              config: { is_collapsed: false, context_participation_length: 0 },
-              createdAt: sm.createdAt,
-              messageId: sm.messageId,
-              sortOrder: 2,
-              status: 'completed',
-            } as SubMessage);
-          }
-        }
-        break;
-      }
-
-      // tool_result: skip（已合并到上方 tool_call）
-    }
-  }
-
-  return {
-    id: props.steps[0]?.messageId || '',
-    createdAt: props.steps[0]?.createdAt || new Date().toISOString(),
-    role: 'assistant' as MessageRole,
-    chatId: '',
-    sortOrder: 0,
-    sub_messages: subMessages,
-    status: 'completed' as MessageStatus,
-    parentId: null,
-    lastActiveAt: props.steps[0]?.createdAt || new Date().toISOString(),
-    sibling_ids: [],
-    sibling_index: 0,
-  };
-});
+/** 将 TaskSubStep 数组转换为虚拟 Message（映射实现见 composables/useTaskSubSteps） */
+const virtualMessage = computed<Message>(() =>
+  buildSubAgentVirtualMessage(props.steps, props.securityReviewMap, props.reviewToolMap),
+);
 
 const messageRef = computed(() => virtualMessage.value);
 const { reasoningSection, normalSection, interleavedSections } = useAssistantTimeline(messageRef, messageDisplayMode);
@@ -351,6 +248,19 @@ function handleToolClick(subMessageId: string) {
 <style scoped>
 .subagent-panel {
   padding: 4px 0;
+}
+
+.task-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.task-duration {
+  font-variant-numeric: tabular-nums;
 }
 
 /* 思考区域 */

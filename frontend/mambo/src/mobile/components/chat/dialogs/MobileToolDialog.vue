@@ -32,6 +32,24 @@
           </div>
 
           <div class="tool-body">
+            <!-- 子 Agent 追踪步骤 -->
+            <div class="tool-section subagent-section" v-if="taskSubSteps.length > 0 || taskSubStepsLoading">
+              <button class="subagent-toggle" @click="subagentExpanded = !subagentExpanded">
+                <el-icon :size="14">
+                  <ArrowDown v-if="subagentExpanded" />
+                  <ArrowRight v-else />
+                </el-icon>
+                <span class="subagent-title">🤖 {{ t('chat.subagent.tracking') }}</span>
+                <span class="subagent-count">{{ t('chat.subagent.steps', { count: taskSubSteps.length }) }}</span>
+                <span v-if="taskDurationText" class="subagent-count">{{ t('chat.subagent.elapsed', { duration: taskDurationText }) }}</span>
+              </button>
+              <MobileTaskSubAgentPanel
+                v-if="subagentExpanded"
+                :steps="taskSubSteps"
+                :security-review-map="securityReviewMap"
+                :review-tool-map="reviewToolMap"
+              />
+            </div>
             <!-- Editable Args (ReviewTool only) -->
             <div class="tool-section" v-if="isReviewType">
               <div class="section-label">参数{{ hasSchema ? '（可编辑）' : '' }}</div>
@@ -190,10 +208,12 @@ import type { Message, SubMessage, McpToolContent, ReviewToolContent, SecurityRe
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { useMcpStore } from '@/stores/mcpStore'
+import { useTaskSubSteps, useTaskDuration, collectSecurityReviewMap, collectReviewToolMap } from '@/composables/useTaskSubSteps'
 import { unpackMcpToolCall } from '@/utils/mcpToolUnpack'
 import { resolveFileUrl } from '@/services/electronUrl'
 import { ElMessage } from 'element-plus'
-import { Warning, Loading, CircleClose, CircleCheck, Close, Edit, Select, ArrowUp, ArrowDown } from '@element-plus/icons-vue'
+import { Warning, Loading, CircleClose, CircleCheck, Close, Edit, Select, ArrowUp, ArrowDown, ArrowRight } from '@element-plus/icons-vue'
+import MobileTaskSubAgentPanel from '../task/MobileTaskSubAgentPanel.vue'
 
 interface SchemaProperty {
   type?: string
@@ -205,6 +225,8 @@ interface SchemaProperty {
 const props = defineProps<{
   visible: boolean
   parentMessageId: string | null
+  /** 直接传入父消息（子代理面板等虚拟消息场景），优先于 parentMessageId */
+  parentMessage?: Message | null
   initialSubMessageId?: string
   mode: 'review_all' | 'single'
 }>()
@@ -237,6 +259,7 @@ function isLongText(text: string): boolean {
 }
 
 const parentMessage = computed<Message | null>(() => {
+  if (props.parentMessage) return props.parentMessage
   if (!props.parentMessageId) return null
   return sessionStore.currentChatMessages.find((m: Message) => m.id === props.parentMessageId) || null
 })
@@ -272,6 +295,33 @@ const mcpTool = computed((): McpToolContent | null => {
 })
 
 const isResultLong = computed(() => isLongText(mcpTool.value?.result || ''))
+
+// --- 子 Agent（task 工具）追踪步骤 ---
+/** 当前工具为 task 时的 tool_call_id（兼容拆包后的内层工具名） */
+const taskToolCallId = computed<string | null>(() => {
+  const content = mcpTool.value
+  if (!content) return null
+  if (content.name === 'task' || currentUnpacked.value.effectiveName === 'task') {
+    return content.tool_call_id || null
+  }
+  return null
+})
+
+const { steps: taskSubSteps, isLoading: taskSubStepsLoading } = useTaskSubSteps(
+  parentMessage,
+  taskToolCallId,
+  computed(() => props.visible),
+)
+
+const { durationText: taskDurationText } = useTaskDuration(
+  taskSubSteps,
+  computed(() => activeMsg.value?.status === 'generating'),
+)
+
+const securityReviewMap = computed(() => collectSecurityReviewMap(parentMessage.value))
+const reviewToolMap = computed(() => collectReviewToolMap(parentMessage.value))
+
+const subagentExpanded = ref(true)
 
 /** 多模态媒体展示 url（后端已在 media.url 填充下载路径） */
 function mcpMediaUrl(m: MultimodalMedia | null | undefined): string {
@@ -531,6 +581,27 @@ async function handleEditAndApprove() {
 .section-label {
   font-size: 12px; font-weight: 600; color: var(--el-text-color-secondary);
   text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;
+}
+
+/* 子 Agent 追踪步骤 */
+.subagent-section {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--el-fill-color-blank);
+}
+
+.subagent-toggle {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  padding: 0; border: none; background: transparent;
+  font-size: 13px; color: var(--el-text-color-regular); text-align: left;
+}
+
+.subagent-title { flex: 1; min-width: 0; }
+
+.subagent-count {
+  font-size: 11px; color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light); border-radius: 4px; padding: 1px 6px;
 }
 
 /* Editable form */

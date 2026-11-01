@@ -339,6 +339,8 @@ export default {
     reasoning: 'Reasoning',
     toolResult: 'Tool Result',
     noSteps: 'No tracking steps',
+    steps: '{count} steps',
+    elapsed: 'Elapsed {duration}',
   },
   file: {
     groupPinned: 'Pinned',
