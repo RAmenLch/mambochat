@@ -2,6 +2,10 @@ export default {
   test: 'Test Text',
   noData: 'No Data',
   none: 'None',
+  state: {
+    on: 'On',
+    off: 'Off',
+  },
   status: {
     enabled: 'Enabled',
     disabled: 'Disabled',

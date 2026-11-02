@@ -17,7 +17,7 @@
     <div class="drawer-content">
       <el-form v-if="chatData" :model="chatSettingsForm" label-position="top">
         <div class="form-section">
-          <div class="form-section-title">基本信息</div>
+          <div class="form-section-title">{{ t('chat.settings.basicInfo') }}</div>
           <el-form-item :label="$t('chat.settings.name')">
             <el-input
               v-model.trim="chatSettingsForm.name"
@@ -49,7 +49,7 @@
         </div>
 
         <div class="form-section">
-          <div class="form-section-title">对话设置</div>
+          <div class="form-section-title">{{ t('chat.settings.sectionTitle') }}</div>
           <el-form-item>
             <template #label>
               <div class="form-item-label-with-action">
@@ -350,7 +350,7 @@ async function handleMountKnowledgeBase(resources: Resource[]) {
     await chatListStore.updateChatSettings(props.chatData.id, {
       resource_prompt_list: updatedList
     })
-    ElMessage.success(`已启用知识库: ${resources.map(r => r.name).join(', ')}`)
+    ElMessage.success(t('chat.attachment.kbEnabled', { names: resources.map(r => r.name).join(', ') }))
   }
 }
 

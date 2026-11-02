@@ -78,7 +78,7 @@
             </div>
             <div class="info-item" v-if="selectedAgent.modelParameters?.stream !== undefined">
               <span class="info-label">{{ $t('agent.streamOutput') }}:</span>
-              <span class="info-value">{{ selectedAgent.modelParameters.stream ? '开启' : '关闭' }}</span>
+              <span class="info-value">{{ selectedAgent.modelParameters.stream ? t('common.state.on') : t('common.state.off') }}</span>
             </div>
             <div class="info-item" v-if="selectedAgent.modelParameters?.temperature !== undefined">
               <span class="info-label">Temperature:</span>

@@ -22,12 +22,12 @@
               class="rs-tab"
               :class="{ active: selectorMode === 'resource' }"
               @click="selectorMode = 'resource'; selectedResources = []; selectionType = null"
-            >资源</button>
+            >{{ t('resource.selector.modeResource') }}</button>
             <button
               class="rs-tab"
               :class="{ active: selectorMode === 'kb' }"
               @click="selectorMode = 'kb'; selectedResources = []; selectionType = null"
-            >知识库</button>
+            >{{ t('resource.selector.modeKb') }}</button>
           </div>
 
           <!-- Search -->
@@ -49,8 +49,8 @@
             <!-- Resource Tree -->
             <template v-if="selectorMode === 'resource'">
               <div class="rs-list" v-if="searchText">
-                <div v-if="isSearching" class="rs-loading">搜索中...</div>
-                <div v-else-if="searchResult.length === 0" class="rs-empty">无结果</div>
+                <div v-if="isSearching" class="rs-loading">{{ t('chat.search.searching') }}</div>
+                <div v-else-if="searchResult.length === 0" class="rs-empty">{{ t('resource.selector.noMatch') }}</div>
                 <button
                   v-for="item in searchResult"
                   :key="item.resource_id"
@@ -114,23 +114,23 @@
 
           <!-- Footer -->
           <div class="rs-footer" v-if="selectedResources.length > 0">
-            <span class="rs-selected-count">已选 {{ selectedResources.length }} 项</span>
+            <span class="rs-selected-count">{{ t('resource.selector.selectedCount', { count: selectedResources.length }) }}</span>
             <div class="rs-footer-actions">
               <button
                 v-if="showKbSearchButton"
                 class="rs-btn primary"
                 @click="handleMountKnowledgeBase"
-              >挂载知识库检索</button>
+              >{{ t('resource.action.mountKbSearch') }}</button>
               <button
                 v-if="showAppendButton"
                 class="rs-btn outline"
                 @click="handleAppend"
-              >追加到输入</button>
+              >{{ t('resource.action.append', { count: selectedResources.length }) }}</button>
               <button
                 v-if="showMountButton"
                 class="rs-btn primary"
                 @click="handleMount"
-              >挂载</button>
+              >{{ t('resource.action.mount', { count: selectedResources.length }) }}</button>
             </div>
           </div>
         </div>

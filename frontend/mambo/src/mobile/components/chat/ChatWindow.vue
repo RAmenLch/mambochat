@@ -456,7 +456,7 @@ async function handleFileUploads(files: FileList) {
       addUploadedFile(fileInfo)
     } catch (error) {
       console.error(`Failed to upload file ${file.name}:`, error)
-      ElMessage.error(`文件 ${file.name} 上传失败`)
+      ElMessage.error(t('chat.attachment.fileUploadFailed', { name: file.name }))
     }
   }
 }
@@ -490,7 +490,7 @@ async function handleMountKnowledgeBase(resources: Resource[]) {
     await chatListStore.updateChatSettings(currentChat.value.id, {
       resource_prompt_list: updatedList
     })
-    ElMessage.success(`已启用知识库: ${resources.map(r => r.name).join(', ')}`)
+    ElMessage.success(t('chat.attachment.kbEnabled', { names: resources.map(r => r.name).join(', ') }))
   }
 }
 
@@ -502,7 +502,7 @@ async function handleRemoveKnowledgeBase(resourceId: string) {
   await chatListStore.updateChatSettings(currentChat.value.id, {
     resource_prompt_list: updatedList.length > 0 ? updatedList : null
   })
-  ElMessage.success('已停用知识库')
+  ElMessage.success(t('chat.attachment.kbDisabled'))
 }
 
 async function handleToggleMcpTool(mcpId: string) {
@@ -528,11 +528,11 @@ async function handleToggleWebSearch() {
   }
   await chatListStore.updateChatSettings(currentChat.value.id, { web_search_mode: nextMode })
   if (nextMode === 'direct_read') {
-    ElMessage.success('联网搜索：直接读取')
+    ElMessage.success(t('chat.toolbar.webSearchDirectRead'))
   } else if (nextMode === 'search_and_read') {
-    ElMessage.success('联网搜索：搜索并读取')
+    ElMessage.success(t('chat.toolbar.webSearchSearchAndRead'))
   } else {
-    ElMessage.info('联网搜索已关闭')
+    ElMessage.info(t('chat.toolbar.webSearchOff'))
   }
 }
 

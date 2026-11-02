@@ -52,7 +52,7 @@
             </div>
             <!-- Editable Args (ReviewTool only) -->
             <div class="tool-section" v-if="isReviewType">
-              <div class="section-label">参数{{ hasSchema ? '（可编辑）' : '' }}</div>
+              <div class="section-label">{{ t('chat.message.mcp.arguments') }}{{ hasSchema ? t('chat.message.mcp.argEditable') : '' }}</div>
               <div v-if="hasSchema" class="args-form">
                 <div v-for="(prop, key) in schemaProperties" :key="key" class="arg-field">
                   <label class="arg-label">{{ key }}</label>
@@ -90,13 +90,13 @@
                     class="arg-input textarea"
                   ></textarea>
                 </div>
-                <div v-if="!currentArgs || Object.keys(currentArgs).length === 0" class="empty-hint">无参数</div>
+                <div v-if="!currentArgs || Object.keys(currentArgs).length === 0" class="empty-hint">{{ t('chat.message.mcp.noArguments') }}</div>
               </div>
             </div>
 
             <!-- Read-only Args (McpTool only) -->
             <div class="tool-section" v-if="!isReviewType">
-              <div class="section-label">参数</div>
+              <div class="section-label">{{ t('chat.message.mcp.arguments') }}</div>
               <div v-if="currentArgs && Object.keys(currentArgs).length > 0" class="args-list">
                 <div v-for="(val, key) in currentArgs" :key="key" class="arg-row">
                   <span class="arg-key">{{ key }}</span>
@@ -120,12 +120,12 @@
                   </button>
                 </div>
               </div>
-              <div v-else class="empty-hint">无参数</div>
+              <div v-else class="empty-hint">{{ t('chat.message.mcp.noArguments') }}</div>
             </div>
 
             <!-- Result (McpTool only) -->
             <div v-if="activeMsg?.type === 'McpTool'" class="tool-section">
-              <div class="section-label">结果</div>
+              <div class="section-label">{{ t('chat.message.mcp.result') }}</div>
               <template v-if="mcpTool?.media?.length">
                 <div v-for="m in mcpTool.media" :key="m.file_id" class="mcp-tool-media">
                   <img v-if="m.file_type === 'image'" :src="mcpMediaUrl(m)" alt="" class="mcp-tool-media-img" />
@@ -137,7 +137,7 @@
                 </div>
               </template>
               <div class="result-box" :class="{ 'is-error': mcpTool?.is_error, 'is-expanded': isResultExpanded }">
-                {{ mcpTool?.result || '无结果' }}
+                {{ mcpTool?.result || t('chat.message.mcp.noResult') }}
               </div>
               <button
                 v-if="isResultLong"
@@ -155,25 +155,25 @@
 
             <!-- Security Review -->
             <div v-if="securityReview" class="tool-section security-section" :class="{ 'is-failed': !securityReview.passed }">
-              <div class="section-label">🛡️ 安全审核</div>
+              <div class="section-label">🛡️ {{ t('chat.message.mcp.securityReview') }}</div>
               <div class="security-info">
-                <span class="security-level">风险等级: {{ securityReview.risk_level }}</span>
+                <span class="security-level">{{ t('chat.message.mcp.riskLevel') }}: {{ securityReview.risk_level }}</span>
                 <span class="security-reason">{{ securityReview.reason }}</span>
               </div>
             </div>
 
             <!-- Reject Reason -->
             <div v-if="showRejectInput" class="tool-section">
-              <div class="section-label">拒绝原因</div>
+              <div class="section-label">{{ t('chat.message.mcp.rejectReason') }}</div>
               <textarea
                 v-model="rejectReason"
                 rows="3"
-                placeholder="请输入拒绝原因（可选）"
+                :placeholder="t('chat.message.mcp.rejectReasonPrompt')"
                 class="reject-textarea"
               ></textarea>
               <div class="reject-actions">
-                <button class="mini-btn cancel" @click="showRejectInput = false">取消</button>
-                <button class="mini-btn confirm" @click="confirmReject">确认拒绝</button>
+                <button class="mini-btn cancel" @click="showRejectInput = false">{{ t('common.action.cancel') }}</button>
+                <button class="mini-btn confirm" @click="confirmReject">{{ t('chat.message.mcp.confirmReject') }}</button>
               </div>
             </div>
           </div>
@@ -182,19 +182,19 @@
           <div class="tool-actions" v-if="isReviewType && !currentDecision && !showRejectInput">
             <button class="action-btn reject" @click="showRejectInput = true">
               <el-icon :size="18"><Close /></el-icon>
-              <span>拒绝</span>
+              <span>{{ t('chat.message.mcp.reject') }}</span>
             </button>
             <button class="action-btn edit" @click="handleEditAndApprove">
               <el-icon :size="18"><Edit /></el-icon>
-              <span>编辑并批准</span>
+              <span>{{ t('chat.message.mcp.editAndApprove') }}</span>
             </button>
             <button class="action-btn approve" @click="handleApprove">
               <el-icon :size="18"><Select /></el-icon>
-              <span>批准</span>
+              <span>{{ t('chat.message.mcp.approve') }}</span>
             </button>
           </div>
 
-          <button class="sheet-cancel" @click="handleClose">关闭</button>
+          <button class="sheet-cancel" @click="handleClose">{{ t('common.action.close') }}</button>
         </div>
       </div>
     </Transition>
@@ -467,9 +467,9 @@ async function handleApprove() {
   if (!activeMsg.value || !props.parentMessageId) return
   try {
     await interactionStore.submitToolReview(props.parentMessageId, activeMsg.value.id, { type: 'approve' })
-    ElMessage.success('已批准')
+    ElMessage.success(t('chat.message.mcp.decisionApprove'))
     handleClose()
-  } catch { ElMessage.error('操作失败') }
+  } catch { ElMessage.error(t('common.error.operationFailed')) }
 }
 
 async function confirmReject() {
@@ -480,9 +480,9 @@ async function confirmReject() {
   }
   try {
     await interactionStore.submitToolReview(props.parentMessageId, activeMsg.value.id, decision)
-    ElMessage.success('已拒绝')
+    ElMessage.success(t('chat.message.mcp.decisionReject'))
     handleClose()
-  } catch { ElMessage.error('操作失败') }
+  } catch { ElMessage.error(t('common.error.operationFailed')) }
 }
 
 async function handleEditAndApprove() {
@@ -504,9 +504,9 @@ async function handleEditAndApprove() {
   }
   try {
     await interactionStore.submitToolReview(props.parentMessageId, activeMsg.value.id, decision)
-    ElMessage.success('已编辑并批准')
+    ElMessage.success(t('chat.message.mcp.decisionEdit'))
     handleClose()
-  } catch { ElMessage.error('操作失败') }
+  } catch { ElMessage.error(t('common.error.operationFailed')) }
 }
 </script>
 

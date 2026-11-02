@@ -62,11 +62,11 @@
           <div v-if="showFabMenu" class="fab-menu">
             <button class="fab-menu-btn" @click="handleNewAgent(); showFabMenu = false">
               <el-icon :size="18"><Service /></el-icon>
-              <span>新建 Agent</span>
+              <span>{{ $t('agent.tree.newAgent') }}</span>
             </button>
             <button class="fab-menu-btn" @click="handleNewChat(null); showFabMenu = false">
               <el-icon :size="18"><ChatDotRound /></el-icon>
-              <span>新建聊天</span>
+              <span>{{ $t('chat.sidebar.newChat') }}</span>
             </button>
             <button class="fab-menu-btn" @click="handleNewGroup(null); showFabMenu = false">
               <el-icon :size="18"><UserFilled /></el-icon>

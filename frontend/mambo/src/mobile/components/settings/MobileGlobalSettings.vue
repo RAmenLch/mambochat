@@ -77,10 +77,12 @@
         <div class="field-item">
           <label class="field-label">{{ t('settings.global.kbChunkSize') }}</label>
           <el-input-number v-model="settingsForm.kb_default_chunk_size" :min="100" :step="100" controls-position="right" style="width:100%" />
+          <span class="field-hint">{{ t('settings.global.kbChunkSizeTip') }}</span>
         </div>
         <div class="field-item">
           <label class="field-label">{{ t('settings.global.kbChunkOverlap') }}</label>
           <el-input-number v-model="settingsForm.kb_default_chunk_overlap" :min="0" :step="10" controls-position="right" style="width:100%" />
+          <span class="field-hint">{{ t('settings.global.kbChunkOverlapTip') }}</span>
         </div>
       </div>
 
@@ -198,6 +200,7 @@
         <div class="field-item">
           <label class="field-label">{{ t('settings.global.compressionPrompt') }}</label>
           <textarea v-model="settingsForm.zip_history_system_prompt" class="native-textarea" :rows="4" :placeholder="t('settings.global.compressionPromptPlaceholder')"></textarea>
+          <span class="field-hint">{{ t('settings.global.compressionPromptTip') }}</span>
         </div>
       </div>
 
@@ -208,6 +211,7 @@
         <div class="field-item">
           <label class="field-label">{{ t('settings.global.contextMsgCount') }}</label>
           <el-input-number v-model="settingsForm.default_max_context_messages" :min="0" :step="2" controls-position="right" style="width:100%" />
+          <span class="field-hint">{{ t('settings.global.contextMsgCountTip') }}</span>
         </div>
         <div class="field-item">
           <label class="field-label">{{ t('settings.global.temperature') }}</label>
@@ -225,17 +229,21 @@
           <span class="field-label" style="margin-bottom:0">{{ t('settings.global.defaultEnableSuggest') }}</span>
           <el-switch :model-value="settingsForm.default_enable_suggest ?? false" @update:model-value="(v: string | number | boolean) => (settingsForm.default_enable_suggest = v as boolean)" size="small" />
         </div>
+        <span class="field-hint">{{ t('settings.global.defaultEnableSuggestTip') }}</span>
         <div class="field-row">
           <span class="field-label" style="margin-bottom:0">{{ t('settings.global.defaultEnableAskUser') }}</span>
           <el-switch :model-value="settingsForm.default_enable_ask_user ?? false" @update:model-value="(v: string | number | boolean) => (settingsForm.default_enable_ask_user = v as boolean)" size="small" />
         </div>
+        <span class="field-hint">{{ t('settings.global.defaultEnableAskUserTip') }}</span>
         <div class="field-item">
           <label class="field-label">{{ t('settings.global.defaultMaxRetries') }}</label>
           <el-input-number v-model="settingsForm.default_max_retries" :min="1" :max="20" :step="1" controls-position="right" style="width:100%" />
+          <span class="field-hint">{{ t('settings.global.defaultMaxRetriesTip') }}</span>
         </div>
         <div class="field-item">
           <label class="field-label">{{ t('settings.global.defaultTimeout') }}</label>
           <el-input-number v-model="settingsForm.default_timeout" :min="10" :max="600" :step="10" controls-position="right" style="width:100%" />
+          <span class="field-hint">{{ t('settings.global.defaultTimeoutTip') }}</span>
         </div>
       </div>
 

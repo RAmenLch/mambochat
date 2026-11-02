@@ -49,11 +49,11 @@
         <div v-if="showMorePopover" class="popover-overlay" @click="showMorePopover = false">
           <div class="popover-sheet" @click.stop>
             <div class="sheet-handle"></div>
-            <div class="sheet-title">更多操作</div>
+            <div class="sheet-title">{{ t('chat.toolbar.more') }}</div>
             <div class="sheet-items">
               <button class="sheet-item" @click="showMcpList = true; showMorePopover = false">
                 <el-icon :size="20"><Suitcase /></el-icon>
-                <span>MCP 工具</span>
+                <span>{{ t('settings.tabs.mcpManager') }}</span>
               </button>
               <button
                 v-if="showVersionHistory"
@@ -97,10 +97,10 @@
         <div v-if="showMcpList" class="popover-overlay" @click="showMcpList = false">
           <div class="popover-sheet" @click.stop>
             <div class="sheet-handle"></div>
-            <div class="sheet-title">可用 MCP 工具</div>
+            <div class="sheet-title">{{ t('chat.toolbar.mcpTools') }}</div>
             <div class="sheet-items">
               <div v-if="activeUserMcpServices.length === 0" class="sheet-empty">
-                暂无可用工具
+                {{ t('chat.toolbar.noTools') }}
               </div>
               <label
                 v-for="tool in activeUserMcpServices"
@@ -125,7 +125,7 @@
         <div v-if="showZipPopover" class="popover-overlay" @click="showZipPopover = false">
           <div class="popover-sheet" @click.stop>
             <div class="sheet-handle"></div>
-            <div class="sheet-title">历史压缩记录</div>
+            <div class="sheet-title">{{ t('chat.toolbar.zipHistoryTitle') }}</div>
             <div class="sheet-items">
               <button
                 v-for="item in zipHistoryItems"
@@ -133,7 +133,7 @@
                 class="sheet-item"
                 @click="handleJumpToMessage(item.messageId); showZipPopover = false"
               >
-                <span>第 {{ item.index }} 条消息</span>
+                <span>{{ t('chat.toolbar.messageIndex', { index: item.index }) }}</span>
                 <span class="zip-status-dot" :class="{ enabled: item.isEnabled }"></span>
               </button>
             </div>

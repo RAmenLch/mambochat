@@ -25,6 +25,7 @@ export default {
     mcpDesc: 'MCP tools configuration',
     imageGenDesc: 'Image generation configuration',
     resourceDesc: 'Resources & knowledge base',
+    agentDesc: 'Agent configuration & backend mounting',
   },
   avatar: {
     uploadTip: 'Click to upload new avatar',

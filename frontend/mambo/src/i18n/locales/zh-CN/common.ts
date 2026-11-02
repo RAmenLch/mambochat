@@ -2,6 +2,10 @@ export default {
   test: '测试文本',
   noData: '暂无数据',
   none: '无',
+  state: {
+    on: '开启',
+    off: '关闭',
+  },
   status: {
     enabled: '已启用',
     disabled: '未启用',

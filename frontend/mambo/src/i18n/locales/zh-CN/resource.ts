@@ -121,6 +121,8 @@ export default {
     kbModeTip: '通过语义向量检索查找知识库切片，选中后内容将注入输入框',
     previewHeader: '预览: {name}',
     noDesc: '暂无描述',
+    noMatch: '无匹配结果',
+    selectedCount: '已选 {count} 项',
     kbMountTip: '知识库挂载说明',
     kbMountContent:
       '点击下方"提供给AI助手检索"按钮，将此知识库挂载到当前会话。AI助手将能够根据您的提问，自动检索知识库中的相关内容。',

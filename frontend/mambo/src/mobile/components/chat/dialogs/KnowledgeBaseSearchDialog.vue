@@ -5,7 +5,7 @@
     <div class="kb-toolbar">
       <div class="kb-picker" @click="showKbPicker = !showKbPicker">
         <el-icon :size="16"><Collection /></el-icon>
-        <span class="kb-picker-label">{{ selectedKbName || '选择知识库' }}</span>
+        <span class="kb-picker-label">{{ selectedKbName || t('kb.select.selectKbPlaceholder') }}</span>
         <el-icon :size="14" class="picker-arrow"><ArrowDown /></el-icon>
         <Transition name="fade">
           <div v-if="showKbPicker" class="kb-picker-list">
@@ -48,7 +48,7 @@
     <div class="kb-results">
       <div v-if="isSearching" class="kb-searching">
         <el-icon :size="24" class="is-loading"><Loading /></el-icon>
-        <span>搜索中...</span>
+        <span>{{ t('chat.search.searching') }}</span>
       </div>
 
       <div v-else-if="results.length > 0" class="results-list">
@@ -99,15 +99,15 @@
         </div>
       </div>
 
-      <div v-else-if="hasSearched" class="kb-empty">无搜索结果</div>
+      <div v-else-if="hasSearched" class="kb-empty">{{ t('kb.select.noResult') }}</div>
       <div v-else class="kb-placeholder">
         <el-icon :size="40"><Search /></el-icon>
-        <p>输入关键词搜索知识库</p>
+        <p>{{ t('kb.select.placeholder') }}</p>
       </div>
 
       <div v-if="selectedItems.length > 0" class="kb-confirm-bar">
-        <span class="confirm-count">已选 {{ selectedItems.length }} 条</span>
-        <button class="confirm-btn" @click="emitConfirm">确认使用</button>
+        <span class="confirm-count">{{ t('kb.select.selectedCount', { count: selectedItems.length }) }}</span>
+        <button class="confirm-btn" @click="emitConfirm">{{ t('kb.select.confirmUse', { count: selectedItems.length }) }}</button>
       </div>
     </div>
   </div>

@@ -25,6 +25,7 @@ export default {
     mcpDesc: 'MCP 工具服务配置',
     imageGenDesc: '生图工具配置',
     resourceDesc: '资源与知识库管理',
+    agentDesc: '智能体配置与 Backend 挂载',
   },
   avatar: {
     uploadTip: '点击上传新头像',

@@ -94,8 +94,11 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import type { PropType } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { FileResponse, Resource } from '@/api/types'
 import { Document, Picture, Close, Search } from '@element-plus/icons-vue'
+
+const { t } = useI18n()
 
 // --- Props Definition ---
 const props = defineProps({
@@ -127,19 +130,19 @@ const previewContent = ref('')
 
 const handlePreviewResource = (resource: Resource) => {
   previewTitle.value = resource.name
-  previewContent.value = resource.latest_version?.content || '无内容预览'
+  previewContent.value = resource.latest_version?.content || t('resource.selector.noContent')
   previewVisible.value = true
 }
 
 const handlePreviewKB = (kb: Resource) => {
   previewTitle.value = kb.name
-  previewContent.value = kb.description || '暂无描述'
+  previewContent.value = kb.description || t('resource.selector.noDesc')
   previewVisible.value = true
 }
 
 const handlePreviewFile = (file: FileResponse) => {
   previewTitle.value = file.filename
-  previewContent.value = `文件类型: ${file.mime_type}\n文件大小: ${(file.size / 1024).toFixed(2)} KB`
+  previewContent.value = `${t('chat.attachment.fileType')}: ${file.mime_type}\n${t('chat.attachment.fileSize')}: ${(file.size / 1024).toFixed(2)} KB`
   previewVisible.value = true
 }
 

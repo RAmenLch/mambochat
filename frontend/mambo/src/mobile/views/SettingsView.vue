@@ -154,12 +154,12 @@ watch(() => router.currentRoute.value.query, (q) => {
 }, { deep: true })
 
 const menuItems = computed(() => [
-  { id: 'global', icon: Setting, label: t('settings.tabs.globalSettings'), desc: t('settings.about.globalDesc') || '语言、模型、编辑器偏好', color: '#6366f1' },
-  { id: 'provider', icon: Monitor, label: t('settings.tabs.providerModel'), desc: t('settings.about.providerDesc') || '服务商与模型管理', color: '#0891b2' },
-  { id: 'mcp', icon: Connection, label: t('settings.tabs.mcpManager'), desc: t('settings.about.mcpDesc') || 'MCP 工具服务配置', color: '#059669' },
-  { id: 'imageGen', icon: Picture, label: t('settings.tabs.imageGen'), desc: t('settings.about.imageGenDesc') || '生图工具配置', color: '#7c3aed' },
-  { id: 'resource', icon: FolderOpened, label: t('settings.tabs.resourceManager'), desc: t('settings.about.resourceDesc') || '资源与知识库', color: '#d97706' },
-  { id: 'agent', icon: Service, label: 'Agent 管理', desc: '智能体配置与 Backend 挂载', color: '#dc2626' },
+  { id: 'global', icon: Setting, label: t('settings.tabs.globalSettings'), desc: t('settings.about.globalDesc'), color: '#6366f1' },
+  { id: 'provider', icon: Monitor, label: t('settings.tabs.providerModel'), desc: t('settings.about.providerDesc'), color: '#0891b2' },
+  { id: 'mcp', icon: Connection, label: t('settings.tabs.mcpManager'), desc: t('settings.about.mcpDesc'), color: '#059669' },
+  { id: 'imageGen', icon: Picture, label: t('settings.tabs.imageGen'), desc: t('settings.about.imageGenDesc'), color: '#7c3aed' },
+  { id: 'resource', icon: FolderOpened, label: t('settings.tabs.resourceManager'), desc: t('settings.about.resourceDesc'), color: '#d97706' },
+  { id: 'agent', icon: Service, label: t('settings.tabs.agentManager'), desc: t('settings.about.agentDesc'), color: '#dc2626' },
 ])
 
 const currentTitle = computed(() => menuItems.value.find(m => m.id === activeSection.value)?.label || '')

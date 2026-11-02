@@ -8,7 +8,7 @@
 
           <div class="au-header">
             <el-icon :size="20" color="var(--el-color-warning)"><Warning /></el-icon>
-            <span class="au-title">需要您确认</span>
+            <span class="au-title">{{ t('chat.askUser.confirmTitle') }}</span>
             <span class="au-count" v-if="askUserMessages.length > 1">{{ activeIndex + 1 }}/{{ askUserMessages.length }}</span>
           </div>
 
@@ -21,7 +21,7 @@
               <div class="au-q-text">
                 <span class="au-q-num">{{ qIdx + 1 }}.</span>
                 {{ q.question }}
-                <span v-if="q.required === false" class="au-optional">(可选)</span>
+                <span v-if="q.required === false" class="au-optional">({{ t('chat.askUser.optional') }})</span>
               </div>
 
               <!-- 单选题 -->
@@ -37,11 +37,11 @@
                   class="au-choice-btn"
                   :class="{ active: answers[activeEntry.subMsg.id]?.[qIdx] === '__other__' }"
                   @click="answers[activeEntry.subMsg.id][qIdx] = '__other__'"
-                >其他</button>
+                >{{ t('chat.askUser.other') }}</button>
                 <input
                   v-if="answers[activeEntry.subMsg.id]?.[qIdx] === '__other__'"
                   v-model="otherTexts[activeEntry.subMsg.id][qIdx]"
-                  placeholder="请输入..."
+                  :placeholder="t('chat.askUser.otherPlaceholder')"
                   class="au-other-input"
                   @input="(e: Event) => { const t = (e.target as HTMLInputElement).value; if (t) answers[activeEntry.subMsg.id][qIdx] = t }"
                 />
@@ -52,15 +52,15 @@
                 v-else
                 v-model="answers[activeEntry.subMsg.id][qIdx]"
                 rows="3"
-                placeholder="请输入..."
+                :placeholder="t('chat.askUser.answerPlaceholder')"
                 class="au-textarea"
               ></textarea>
             </div>
           </div>
 
           <div class="au-footer">
-            <button class="au-btn outline" @click="handleClose">取消</button>
-            <button class="au-btn primary" :disabled="!isCurrentValid" @click="submitCurrent">提交回答</button>
+            <button class="au-btn outline" @click="handleClose">{{ t('common.action.cancel') }}</button>
+            <button class="au-btn primary" :disabled="!isCurrentValid" @click="submitCurrent">{{ t('chat.askUser.submitAnswer') }}</button>
           </div>
         </div>
       </div>
@@ -74,6 +74,7 @@ import type { Message, SubMessage, AskUserContent } from '@/api/types'
 import { useChatInteractionStore } from '@/stores/chatInteractionStore'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { ElMessage } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 import { Warning } from '@element-plus/icons-vue'
 
 const props = defineProps<{
@@ -88,6 +89,7 @@ const emit = defineEmits<{
 
 const interactionStore = useChatInteractionStore()
 const sessionStore = useChatSessionStore()
+const { t } = useI18n()
 
 const activeIndex = ref(0)
 const answers = reactive<Record<string, Record<number, string>>>({})
@@ -172,7 +174,7 @@ async function submitCurrent() {
       finalAnswers,
       'answered'
     )
-    ElMessage.success('已提交回答')
+    ElMessage.success(t('chat.askUser.submitted'))
 
     // Remove this entry and move to next or close
     const remaining = askUserMessages.value.filter(e => e.subMsg.id !== entry.subMsg.id)
@@ -187,7 +189,7 @@ async function submitCurrent() {
       emit('update:visible', false)
     }
   } catch {
-    ElMessage.error('提交失败')
+    ElMessage.error(t('chat.askUser.submitFailed'))
   }
 }
 </script>

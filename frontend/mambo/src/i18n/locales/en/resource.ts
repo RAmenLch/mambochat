@@ -124,6 +124,8 @@ export default {
       'Find KB chunks via semantic vector search. Selected content will be injected into input.',
     previewHeader: 'Preview: {name}',
     noDesc: 'No description',
+    noMatch: 'No matching results',
+    selectedCount: '{count} selected',
     kbMountTip: 'KB Mount Instructions',
     kbMountContent:
       'Click "Provide to AI" below to mount this KB. AI will be able to retrieve content based on your questions.',
