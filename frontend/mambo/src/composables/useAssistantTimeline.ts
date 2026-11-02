@@ -73,6 +73,11 @@ export function useAssistantTimeline(message: Ref<Message>, messageDisplayMode?:
       if (sm.config?.is_tail_tool === true) {
         return false;
       }
+      // 排除图片重跑生成记录（config.is_image_run_record）：它不参与上下文，
+      // 只在图片区域的「参数详情」里展示，不能作为新的工具气泡出现在正文
+      if (sm.config?.is_image_run_record === true) {
+        return false;
+      }
       return true;
     }).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   });
