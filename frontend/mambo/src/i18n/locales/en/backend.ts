@@ -70,6 +70,8 @@ export default {
   localPickerTip: 'Enter manually or click "Browse" to select a directory from the local file system.',
   sshPickerTip: 'Enter manually or click "Browse" to select a directory from the remote server.',
   browseSelect: 'Browse',
+  browse: 'Browse',
+  ignoreDirs: 'Ignored Directories',
   ignoreDirsPlaceholder: 'e.g. .git, node_modules (Press Enter to add)',
   commonConfig: 'General Configuration',
   executeLabel: 'Execute',

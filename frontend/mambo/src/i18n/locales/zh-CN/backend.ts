@@ -70,6 +70,8 @@ export default {
   localPickerTip: '手动输入或点击「浏览选择」从本机文件系统选取目录',
   sshPickerTip: '手动输入或点击「浏览选择」从远程服务器选取目录',
   browseSelect: '浏览选择',
+  browse: '浏览',
+  ignoreDirs: '忽略目录',
   ignoreDirsPlaceholder: '例如: .git, node_modules (回车添加)',
   commonConfig: '通用配置',
   executeLabel: 'Execute',

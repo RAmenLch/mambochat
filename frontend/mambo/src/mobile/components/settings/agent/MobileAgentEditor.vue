@@ -89,6 +89,28 @@
 
           <div class="field-row">
             <div class="field-label">
+              <span>{{ $t('chat.settings.enableSuggest') }}</span>
+            </div>
+            <el-switch
+              :model-value="form.modelParameters.enable_suggest !== false"
+              @update:model-value="(val: string | number | boolean) => form.modelParameters.enable_suggest = Boolean(val)"
+              size="small"
+            />
+          </div>
+
+          <div class="field-row">
+            <div class="field-label">
+              <span>{{ $t('chat.settings.enableAskUser') }}</span>
+            </div>
+            <el-switch
+              :model-value="form.modelParameters.enable_ask_user !== false"
+              @update:model-value="(val: string | number | boolean) => form.modelParameters.enable_ask_user = Boolean(val)"
+              size="small"
+            />
+          </div>
+
+          <div class="field-row">
+            <div class="field-label">
               <span>{{ $t('agent.streamOutput') }}</span>
               <el-tooltip effect="dark" :content="$t('agent.streamOutputTip')" placement="top">
                 <el-icon class="tip-icon"><QuestionFilled /></el-icon>
@@ -531,6 +553,90 @@
 
         <div class="section-divider"></div>
 
+        <!-- 生图能力 -->
+        <div class="field-row">
+          <div class="field-label">
+            <span>{{ $t('agent.imageGenEnable') }}</span>
+          </div>
+          <el-switch v-model="form.mambo_image_gen_enabled" size="small" />
+        </div>
+        <p class="field-hint">{{ $t('agent.imageGenEnableDesc') }}</p>
+
+        <div v-if="form.mambo_image_gen_enabled" class="field-item">
+          <label class="field-label">{{ $t('agent.imageGenConfig') }}</label>
+          <el-select
+            v-model="form.mambo_image_gen_config_id"
+            clearable
+            :placeholder="$t('agent.imageGenConfigPlaceholder')"
+            style="width: 100%"
+            popper-class="mobile-popper"
+          >
+            <el-option v-for="cfg in imageGenStore.enabledConfigs" :key="cfg.id" :label="cfg.name" :value="cfg.id" />
+          </el-select>
+          <span class="field-hint">{{ $t('agent.imageGenConfigDesc') }}</span>
+        </div>
+
+        <div class="section-divider"></div>
+
+        <!-- 尾部工具调用 -->
+        <div class="field-row">
+          <div class="field-label">
+            <span>{{ $t('agent.tailTool.title') }}</span>
+          </div>
+          <el-switch v-model="form.mambo_tail_tool_enabled" size="small" />
+        </div>
+        <p class="field-hint">{{ $t('agent.tailTool.enableDesc') }}</p>
+
+        <template v-if="form.mambo_tail_tool_enabled">
+          <div class="field-item">
+            <label class="field-label">{{ $t('agent.tailTool.failMode') }}</label>
+            <el-select v-model="form.mambo_tail_tool_fail_mode" style="width: 100%" popper-class="mobile-popper">
+              <el-option :label="$t('agent.tailTool.failModeSilent')" value="silent" />
+              <el-option :label="$t('agent.tailTool.failModeMessage')" value="message" />
+            </el-select>
+            <span class="field-hint">{{ $t('agent.tailTool.failModeDesc') }}</span>
+          </div>
+
+          <div v-if="form.mambo_tail_tool_fail_mode === 'message'" class="field-item">
+            <label class="field-label">{{ $t('agent.tailTool.failMessage') }}</label>
+            <input v-model="form.mambo_tail_tool_fail_message" class="native-input" :placeholder="$t('agent.tailTool.failMessagePlaceholder')" />
+          </div>
+
+          <div class="field-item">
+            <label class="field-label">{{ $t('agent.tailTool.maxRounds') }}</label>
+            <el-input-number v-model="form.mambo_tail_tool_max_rounds" :min="1" :max="20" controls-position="right" style="width: 100%" />
+            <span class="field-hint">{{ $t('agent.tailTool.maxRoundsDesc') }}</span>
+          </div>
+
+          <div class="field-item">
+            <label class="field-label">{{ $t('agent.tailTool.tasks') }}</label>
+            <div v-for="(task, idx) in form.mambo_tail_tool_tasks" :key="idx" class="tail-task-row">
+              <el-select
+                v-model="task.name"
+                filterable
+                allow-create
+                default-first-option
+                :placeholder="$t('agent.tailTool.taskNamePlaceholder')"
+                style="width: 100%"
+                popper-class="mobile-popper"
+              >
+                <el-option v-for="tool in tailToolOptions" :key="tool.name" :label="tool.name" :value="tool.name" />
+              </el-select>
+              <textarea
+                v-model="task.instruction"
+                class="native-textarea"
+                rows="2"
+                :placeholder="$t('agent.tailTool.taskInstructionPlaceholder')"
+              ></textarea>
+              <button class="tail-task-remove" @click="removeTailToolTask(idx)">{{ $t('agent.tailTool.removeTask') }}</button>
+            </div>
+            <button class="tail-task-add" @click="addTailToolTask">+ {{ $t('agent.tailTool.addTask') }}</button>
+            <span class="field-hint">{{ $t('agent.tailTool.tasksDesc') }}</span>
+          </div>
+        </template>
+
+        <div class="section-divider"></div>
+
         <div class="field-row">
           <div class="field-label">
             <span>{{ $t('agent.securityReviewEnable') }}</span>
@@ -581,6 +687,40 @@
               :rows="5"
               :placeholder="DEFAULT_SECURITY_REVIEW_SYSTEM_PROMPT"
             ></textarea>
+          </div>
+        </template>
+      </div>
+
+      <!-- 多模态描述器 -->
+      <div class="section-card">
+        <div class="section-title">{{ $t('agent.multimodalDescriber') }}</div>
+        <div class="field-row">
+          <span class="field-label" style="margin-bottom:0">{{ $t('agent.multimodalDescriberEnable') }}</span>
+          <el-switch v-model="form.mambo_multimodal_enabled" size="small" />
+        </div>
+        <p class="field-hint">{{ $t('agent.multimodalDescriberEnableDesc') }}</p>
+
+        <template v-if="form.mambo_multimodal_enabled">
+          <div v-for="slot in multimodalSlots" :key="slot.modality" class="field-item">
+            <label class="field-label">{{ $t(slot.labelKey) }}</label>
+            <el-select
+              v-model="form[slot.formKey]"
+              clearable
+              :placeholder="$t('agent.multimodalDescriberModelPlaceholder')"
+              :no-data-text="$t('agent.multimodalDescriberEmpty')"
+              style="width: 100%"
+              popper-class="mobile-popper"
+            >
+              <el-option-group v-for="group in multimodalModelOptions(slot.modality)" :key="group.label" :label="group.label">
+                <el-option v-for="item in group.options" :key="item.id" :label="item.name" :value="item.id" />
+              </el-option-group>
+            </el-select>
+          </div>
+
+          <div class="field-item">
+            <label class="field-label">{{ $t('agent.multimodalDescriberReadTimeout') }}</label>
+            <el-input-number v-model="form.mambo_multimodal_read_timeout" :min="0" :max="600" :step="10" :controls="false" controls-position="right" style="width: 100%" />
+            <span class="field-hint">{{ $t('agent.multimodalDescriberReadTimeoutDesc') }}</span>
           </div>
         </template>
       </div>
@@ -714,7 +854,7 @@ import { useSystemConfigStore } from '@/stores/systemConfigStore';
 import { useMcpStore } from '@/stores/mcpStore';
 import { useBackendStore } from '@/stores/backendStore';
 
-import { uploadAgentAvatar, deleteAgentAvatar, getAgent, getAgentHitlTools, getGoalLoopTools } from '@/api/agentService';
+import { uploadAgentAvatar, deleteAgentAvatar, getAgent, getAgentHitlTools, getGoalLoopTools, getTailToolTools } from '@/api/agentService';
 import { getResourceDetails } from '@/api/resourceService';
 import type { Resource, Agent, AgentType, HitlToolInfo, GoalLoopToolInfo, MamboAgentParameters, GoalLoopConfig } from '@/api/types';
 
@@ -723,6 +863,7 @@ import ResourceSelectorDialog from '@/mobile/components/chat/dialogs/ResourceSel
 import MobileAgentSelectorSheet from './dialogs/MobileAgentSelectorSheet.vue';
 import MountedResourceTags from '@/components/common/MountedResourceTags.vue';
 import { useModelSelectScroll } from '@/composables/useModelSelectScroll';
+import { useImageGenStore } from '@/stores/imageGenStore';
 
 type AgentModelParameterValue = boolean | number | string | undefined;
 
@@ -772,6 +913,51 @@ const { scrollToTopIfStarred } = useModelSelectScroll();
 
 const hitlToolOptions = ref<HitlToolInfo[]>([]);
 const hitlToolOptionsLoaded = ref(false);
+
+/** 生图配置（Agent 生图能力选择） */
+const imageGenStore = useImageGenStore();
+
+/** 尾部工具调用的工具名建议 */
+const tailToolOptions = ref<GoalLoopToolInfo[]>([]);
+
+/** 多模态描述器槽位定义 */
+const multimodalSlots = [
+  { modality: 'image', formKey: 'mambo_multimodal_image_model_id', labelKey: 'agent.multimodalDescriberImageLabel' },
+  { modality: 'audio', formKey: 'mambo_multimodal_audio_model_id', labelKey: 'agent.multimodalDescriberAudioLabel' },
+  { modality: 'video', formKey: 'mambo_multimodal_video_model_id', labelKey: 'agent.multimodalDescriberVideoLabel' },
+  { modality: 'file', formKey: 'mambo_multimodal_file_model_id', labelKey: 'agent.multimodalDescriberFileLabel' },
+] as const;
+
+/** 按模态能力过滤模型（未声明能力的模型视为纯文本，不展示） */
+function multimodalModelOptions(modality: string) {
+  const accepts = (mods: string[] | null | undefined): boolean => {
+    if (!mods) return false;
+    if (modality === 'file') return mods.includes('file') || mods.includes('document');
+    return mods.includes(modality);
+  };
+  return filteredGroupedModels.value
+    .map(group => ({
+      label: group.label,
+      options: group.options.filter(m => accepts(m.meta_config?.input_modalities)),
+    }))
+    .filter(group => group.options.length > 0);
+}
+
+function addTailToolTask() {
+  form.mambo_tail_tool_tasks.push({ name: '', instruction: '' });
+}
+
+function removeTailToolTask(index: number) {
+  form.mambo_tail_tool_tasks.splice(index, 1);
+}
+
+async function fetchTailToolOptions(agentId: string) {
+  try {
+    tailToolOptions.value = await getTailToolTools(agentId);
+  } catch {
+    tailToolOptions.value = [];
+  }
+}
 
 /** 任务循环「我的规则」工具名 / 参数名建议（与执行侧工具名一致） */
 const goalLoopToolOptions = ref<GoalLoopToolInfo[]>([]);
@@ -912,6 +1098,21 @@ const form = reactive({
   mambo_goal_loop_objective: '',
   mambo_goal_loop_conditions: [] as GoalLoopConditionRow[],
   mambo_mcp_threshold: 15,
+
+  // 生图 / 多模态描述器 / 尾部工具
+  mambo_image_gen_enabled: false,
+  mambo_image_gen_config_id: null as string | null,
+  mambo_multimodal_enabled: false,
+  mambo_multimodal_image_model_id: null as string | null,
+  mambo_multimodal_audio_model_id: null as string | null,
+  mambo_multimodal_video_model_id: null as string | null,
+  mambo_multimodal_file_model_id: null as string | null,
+  mambo_multimodal_read_timeout: 30,
+  mambo_tail_tool_enabled: false,
+  mambo_tail_tool_fail_mode: 'silent' as 'silent' | 'message',
+  mambo_tail_tool_fail_message: '',
+  mambo_tail_tool_max_rounds: 1,
+  mambo_tail_tool_tasks: [] as Array<{ name: string; instruction: string }>,
 });
 
 const availableBackends = computed(() => backendList.value.filter(b => !form.backendIds.includes(b.id)));
@@ -1037,8 +1238,39 @@ watch(agentData, async (newVal) => {
 
     form.mambo_mcp_threshold = mamboParams.mcp_direct_tool_threshold ?? 15;
 
+    // 生图能力
+    const igCfg = mamboParams.image_gen;
+    form.mambo_image_gen_enabled = !!(igCfg && igCfg.enabled);
+    form.mambo_image_gen_config_id = igCfg?.configId ?? null;
+
+    // 多模态描述器
+    const mmCfg = mamboParams.multimodal_describer;
+    form.mambo_multimodal_enabled = !!(mmCfg && mmCfg.enabled);
+    form.mambo_multimodal_image_model_id = mmCfg?.image_model_id ?? null;
+    form.mambo_multimodal_audio_model_id = mmCfg?.audio_model_id ?? null;
+    form.mambo_multimodal_video_model_id = mmCfg?.video_model_id ?? null;
+    form.mambo_multimodal_file_model_id = mmCfg?.file_model_id ?? null;
+    form.mambo_multimodal_read_timeout = mmCfg?.read_timeout ?? 30;
+
+    // 尾部工具调用
+    const ttCfg = mamboParams.tail_tool;
+    if (ttCfg) {
+      form.mambo_tail_tool_enabled = !!ttCfg.enabled;
+      form.mambo_tail_tool_fail_mode = ttCfg.fail_mode === 'message' ? 'message' : 'silent';
+      form.mambo_tail_tool_fail_message = ttCfg.fail_message || '';
+      form.mambo_tail_tool_max_rounds = ttCfg.max_rounds ?? 1;
+      form.mambo_tail_tool_tasks = (ttCfg.tasks || []).map(t => ({ name: t.name, instruction: t.instruction || '' }));
+    } else {
+      form.mambo_tail_tool_enabled = false;
+      form.mambo_tail_tool_fail_mode = 'silent';
+      form.mambo_tail_tool_fail_message = '';
+      form.mambo_tail_tool_max_rounds = 1;
+      form.mambo_tail_tool_tasks = [];
+    }
+
     fetchHitlTools(newVal.id);
     fetchGoalLoopTools(newVal.id);
+    fetchTailToolOptions(newVal.id);
 
     if (newVal.resourcePromptList && newVal.resourcePromptList.length > 0) {
       try { mountedResources.value = (await Promise.all(newVal.resourcePromptList.map(id => getResourceDetails(id)))).filter(r => !!r) as Resource[]; }
@@ -1233,6 +1465,28 @@ function buildMamboAgentParameters(): MamboAgentParameters | null {
     version_control: form.mambo_version_control_enabled ? { enabled: true, auto_snapshot: true } : null,
     goal_loop: form.mambo_goal_loop_enabled ? buildGoalLoopConfig() : null,
     mcp_direct_tool_threshold: form.mambo_mcp_threshold,
+    image_gen: form.mambo_image_gen_enabled
+      ? { enabled: true, configId: form.mambo_image_gen_config_id }
+      : null,
+    multimodal_describer: form.mambo_multimodal_enabled
+      ? {
+        enabled: true,
+        image_model_id: form.mambo_multimodal_image_model_id,
+        audio_model_id: form.mambo_multimodal_audio_model_id,
+        video_model_id: form.mambo_multimodal_video_model_id,
+        file_model_id: form.mambo_multimodal_file_model_id,
+        read_timeout: form.mambo_multimodal_read_timeout,
+      }
+      : null,
+    tail_tool: form.mambo_tail_tool_enabled
+      ? {
+        enabled: true,
+        fail_mode: form.mambo_tail_tool_fail_mode,
+        fail_message: form.mambo_tail_tool_fail_message || null,
+        max_rounds: form.mambo_tail_tool_max_rounds || 1,
+        tasks: form.mambo_tail_tool_tasks.filter(t => t.name.trim()),
+      }
+      : null,
   };
 
   // 移动端暂未提供编辑入口的分区（Tail Tool / 图片生成 / 多模态描述器）必须原样保留：
@@ -1343,10 +1597,45 @@ onMounted(() => {
   providerStore.fetchProviders();
   systemConfigStore.fetchSystemConfig();
   if (backendStore.backendList.length === 0) backendStore.fetchBackends();
+  if (imageGenStore.configs.length === 0) imageGenStore.fetchConfigs();
 });
 </script>
 
 <style scoped>
+.field-hint {
+  display: block;
+  margin: 4px 0 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--el-text-color-secondary);
+}
+
+.tail-task-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0;
+  border-bottom: 0.5px dashed var(--el-border-color-lighter);
+}
+
+.tail-task-remove {
+  align-self: flex-end;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  color: var(--el-color-danger);
+}
+
+.tail-task-add {
+  margin-top: 6px;
+  padding: 6px 10px;
+  border: 1px dashed var(--el-border-color);
+  border-radius: 8px;
+  background: transparent;
+  font-size: 13px;
+  color: var(--el-color-primary);
+}
+
 .mobile-agent-editor {
   display: flex;
   flex-direction: column;

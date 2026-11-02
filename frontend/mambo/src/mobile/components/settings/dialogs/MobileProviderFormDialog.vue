@@ -66,6 +66,29 @@
                   <el-icon :size="14"><WarningFilled /></el-icon> {{ t('provider.form.proxyTip') }}
                 </div>
               </div>
+
+              <!-- 模型清单（表单内维护 + 表单内拉取） -->
+              <div class="sheet-divider">{{ t('model.list.title') }}</div>
+              <div class="model-rows">
+                <div v-for="(row, idx) in form.models" :key="row.modelId" class="model-row">
+                  <div class="model-row-main">
+                    <span class="model-row-name">{{ row.name || row.modelId }}</span>
+                    <span class="model-row-id">{{ row.modelId }}</span>
+                  </div>
+                  <button class="row-remove" @click="removeModelRow(idx)">
+                    <el-icon :size="14"><Minus /></el-icon>
+                  </button>
+                </div>
+                <div v-if="form.models.length === 0" class="hint-text">{{ t('model.list.empty') }}</div>
+              </div>
+              <div class="model-actions">
+                <button class="mini-btn" @click="addEmptyModelRow">+ {{ t('model.list.add') }}</button>
+                <button class="mini-btn" :disabled="isFetchingModels" @click="handleFetchIntoForm">
+                  <el-icon v-if="isFetchingModels" :size="12" class="is-loading"><Loading /></el-icon>
+                  <el-icon v-else :size="12"><Download /></el-icon>
+                  {{ t('model.list.fetch') }}
+                </button>
+              </div>
             </el-form>
 
             <button class="test-btn" @click="handleTestConnection" :disabled="isTesting">
@@ -73,6 +96,44 @@
               <span v-else>{{ t('provider.form.testConnection') }}</span>
             </button>
           </div>
+
+          <!-- 拉取结果选择 -->
+          <Teleport to="body">
+            <Transition name="sheet">
+              <div v-if="fetchPickerVisible" class="sheet-overlay" @click="fetchPickerVisible = false">
+                <div class="sheet-panel" @click.stop>
+                  <div class="sheet-handle"></div>
+                  <div class="sheet-header">
+                    <span class="sheet-title">{{ t('model.fetch.title') }}</span>
+                    <button class="sheet-close" @click="fetchPickerVisible = false">
+                      <el-icon :size="20"><Close /></el-icon>
+                    </button>
+                  </div>
+                  <div class="sheet-body">
+                    <div class="model-chips">
+                      <button
+                        v-for="m in fetchedModels"
+                        :key="m.modelId"
+                        class="model-chip"
+                        :class="{ selected: pickedIds.includes(m.modelId) }"
+                        @click="togglePick(m.modelId)"
+                      >
+                        <span class="chip-name">{{ m.name || m.modelId }}</span>
+                        <span class="chip-id">{{ m.modelId }}</span>
+                      </button>
+                    </div>
+                    <div v-if="fetchedModels.length === 0" class="hint-text">{{ t('model.list.empty') }}</div>
+                  </div>
+                  <div class="sheet-footer">
+                    <button class="footer-btn footer-btn-cancel" @click="fetchPickerVisible = false">{{ t('common.action.cancel') }}</button>
+                    <button class="footer-btn footer-btn-confirm" @click="applyFetchedModels">
+                      {{ t('model.fetch.confirm') }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </Transition>
+          </Teleport>
 
           <div class="sheet-footer">
             <button class="footer-btn footer-btn-cancel" @click="internalVisible = false">
@@ -92,12 +153,12 @@
 import { ref, reactive, watch, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
-import { Close, View, Hide, WarningFilled, Loading } from '@element-plus/icons-vue';
+import { Close, View, Hide, WarningFilled, Loading, Minus, Download } from '@element-plus/icons-vue';
 import { useProviderStore } from '@/stores/providerStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useSystemConfigStore } from '@/stores/systemConfigStore';
 import { storeToRefs } from 'pinia';
-import type { AIProviderWithModels, AIProviderUpdate, ProviderWorkerType, ProviderWithModelsCreate } from '@/api/types';
+import type { AIModelBase, AIProviderWithModels, AIProviderUpdate, ProviderWorkerType, ProviderWithModelsCreate, ModelType } from '@/api/types';
 import { isAxiosError } from 'axios';
 import { localizeProviderTestMessage } from '@/utils/providerTestMessage';
 
@@ -136,8 +197,61 @@ const isProxyGloballyEnabled = computed(() => globalSettings.value.proxy_enabled
 
 const form = reactive({
   name: '', apiHost: '', apiKey: '',
-  worker_type: 'openai' as ProviderWorkerType, use_proxy: false
+  worker_type: 'openai' as ProviderWorkerType, use_proxy: false,
+  models: [] as Array<{ modelId: string; name: string; model_type: ModelType }>,
 });
+
+// --- 表单内模型清单 / 拉取 ---
+const isFetchingModels = ref(false);
+const fetchPickerVisible = ref(false);
+const fetchedModels = ref<AIModelBase[]>([]);
+const pickedIds = ref<string[]>([]);
+
+function addEmptyModelRow() {
+  const seq = form.models.length + 1;
+  form.models.push({ modelId: '', name: `${t('model.list.add')} ${seq}`, model_type: 'chat' });
+}
+
+function removeModelRow(index: number) {
+  form.models.splice(index, 1);
+}
+
+function togglePick(modelId: string) {
+  pickedIds.value = pickedIds.value.includes(modelId)
+    ? pickedIds.value.filter(id => id !== modelId)
+    : [...pickedIds.value, modelId];
+}
+
+/** 拉取模型：未保存用表单凭证，已保存且 Key 为占位符时用服务商凭证 */
+async function handleFetchIntoForm() {
+  if (!form.apiHost) { ElMessage.warning(t('provider.form.testWarningHost')); return; }
+  if (!isEditing.value && !form.apiKey) { ElMessage.warning(t('provider.form.testWarningKey')); return; }
+  isFetchingModels.value = true;
+  try {
+    const list = (isEditing.value && form.apiKey === API_KEY_PLACEHOLDER && props.providerData)
+      ? await providerStore.fetchModelsForProvider(props.providerData.id, form.use_proxy)
+      : await providerStore.fetchExternalModels({ apiHost: form.apiHost, apiKey: form.apiKey }, form.use_proxy);
+    fetchedModels.value = list;
+    const existing = new Set(form.models.map(m => m.modelId));
+    pickedIds.value = list.filter(m => !existing.has(m.modelId)).map(m => m.modelId);
+    fetchPickerVisible.value = true;
+  } catch (error: unknown) {
+    if (isAxiosError(error)) ElMessage.error(error?.response?.data?.detail || t('model.fetchFailed'));
+    else ElMessage.error(t('model.fetchFailed'));
+  } finally {
+    isFetchingModels.value = false;
+  }
+}
+
+function applyFetchedModels() {
+  const chosen = fetchedModels.value.filter(m => pickedIds.value.includes(m.modelId));
+  const byId = new Map(form.models.map(m => [m.modelId, m]));
+  for (const m of chosen) {
+    byId.set(m.modelId, { modelId: m.modelId, name: m.name || m.modelId, model_type: m.model_type || 'chat' });
+  }
+  form.models = [...byId.values()];
+  fetchPickerVisible.value = false;
+}
 
 const rules = computed<FormRules>(() => ({
   name: [{ required: true, message: t('provider.form.namePlaceholder'), trigger: 'blur' }],
@@ -161,9 +275,14 @@ watch(() => props.visible, (val) => {
       form.apiKey = API_KEY_PLACEHOLDER;
       form.worker_type = props.providerData.worker_type;
       form.use_proxy = props.providerData.use_proxy;
+      form.models = (props.providerData.models || []).map(m => ({
+        modelId: m.modelId,
+        name: m.name || m.modelId,
+        model_type: m.model_type || 'chat',
+      }));
     } else {
       formRef.value?.resetFields();
-      Object.assign(form, { name: '', apiHost: '', apiKey: '', worker_type: 'openai', use_proxy: false });
+      Object.assign(form, { name: '', apiHost: '', apiKey: '', worker_type: 'openai', use_proxy: false, models: [] });
     }
   }
 });
@@ -216,11 +335,39 @@ const submitForm = async () => {
           };
           if (form.apiKey !== API_KEY_PLACEHOLDER) updateData.apiKey = form.apiKey;
           await providerStore.updateProvider(props.providerData.id, updateData);
+
+          // 模型清单差分同步：新增 / 更新 / 删除
+          const originals = props.providerData.models || [];
+          const originalMap = new Map(originals.map(m => [m.modelId, m]));
+          const nextIds = new Set(form.models.map(m => m.modelId).filter(Boolean));
+
+          for (const modelId of originalMap.keys()) {
+            if (!nextIds.has(modelId)) {
+              const target = originalMap.get(modelId);
+              if (target) await providerStore.removeModel(target.id);
+            }
+          }
+          for (const row of form.models) {
+            if (!row.modelId.trim()) continue;
+            const existing = originalMap.get(row.modelId);
+            if (!existing) {
+              await providerStore.addModel({
+                providerId: props.providerData.id,
+                modelId: row.modelId,
+                name: row.name || row.modelId,
+                model_type: row.model_type || 'chat',
+              });
+            } else if (existing.name !== row.name) {
+              await providerStore.updateModel(existing.id, { name: row.name });
+            }
+          }
+
           ElMessage.success(t('provider.form.updateSuccess'));
         } else {
           await providerStore.addProviderWithModels({
             name: form.name, apiHost: form.apiHost, apiKey: form.apiKey,
-            worker_type: form.worker_type, use_proxy: form.use_proxy, models: []
+            worker_type: form.worker_type, use_proxy: form.use_proxy,
+            models: form.models.filter(m => m.modelId.trim()),
           });
           ElMessage.success(t('provider.form.createSuccess'));
         }
@@ -253,6 +400,22 @@ const submitForm = async () => {
 .hint-text { display: flex; align-items: center; gap: 4px; margin-top: 4px; font-size: 12px; color: var(--el-text-color-secondary); }
 .test-btn { display: flex; align-items: center; justify-content: center; width: 100%; height: 40px; margin-top: 8px; font-size: 14px; font-weight: 500; color: var(--el-color-primary); background: var(--el-color-primary-light-9); border: 1px solid var(--el-color-primary-light-5); border-radius: 10px; cursor: pointer; transition: background 0.15s; }
 .test-btn:active { background: var(--el-color-primary-light-7); }
+
+/* 表单内模型清单 */
+.model-rows { display: flex; flex-direction: column; gap: 6px; }
+.model-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--el-fill-color-light); }
+.model-row-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.model-row-name { font-size: 13px; color: var(--el-text-color-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-row-id { font-size: 11px; color: var(--el-text-color-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-remove { flex-shrink: 0; width: 24px; height: 24px; border: none; border-radius: 50%; background: transparent; color: var(--el-text-color-secondary); display: inline-flex; align-items: center; justify-content: center; }
+.model-actions { display: flex; gap: 8px; margin-top: 8px; }
+.mini-btn { flex: 1; height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; border: 1px dashed var(--el-border-color); border-radius: 8px; background: transparent; font-size: 13px; color: var(--el-color-primary); }
+.mini-btn:disabled { opacity: 0.5; }
+.model-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.model-chip { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; max-width: 100%; padding: 8px 12px; border-radius: 18px; border: 1.5px solid transparent; background: var(--color-background-soft); font-size: 13px; }
+.model-chip.selected { border-color: var(--el-color-primary); background: var(--el-color-primary-light-9); color: var(--el-color-primary); }
+.chip-name { font-size: 13px; font-weight: 600; }
+.chip-id { font-size: 11px; opacity: 0.7; word-break: break-all; }
 .sheet-footer { display: flex; gap: 10px; padding: 10px 16px; padding-bottom: max(10px, env(safe-area-inset-bottom)); border-top: 0.5px solid rgba(0,0,0,0.08); flex-shrink: 0; }
 .footer-btn { flex: 1; height: 44px; font-size: 15px; font-weight: 600; border: none; border-radius: 10px; cursor: pointer; transition: opacity 0.2s, transform 0.1s; }
 .footer-btn-cancel { color: var(--el-text-color-primary); background: var(--el-fill-color-light); }

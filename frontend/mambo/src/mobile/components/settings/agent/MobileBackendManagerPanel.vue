@@ -104,6 +104,24 @@
                       <button class="toggle-key" @click="showPwd = !showPwd"><el-icon :size="16"><View v-if="!showPwd" /><Hide v-else /></el-icon></button>
                     </div>
                   </div>
+                  <div class="field-item">
+                    <label class="field-label">SSH Root Dir</label>
+                    <div class="path-row">
+                      <input v-model="form.configData.root_dir" class="native-input" :placeholder="$t('backend.rootDirPlaceholder')" />
+                      <button class="browse-btn" :disabled="!canBrowseSsh" @click="openPicker('ssh')">
+                        {{ $t('backend.browse') }}
+                      </button>
+                    </div>
+                  </div>
+                  <div class="field-item">
+                    <label class="field-label">{{ $t('backend.ignoreDirs') }}</label>
+                    <div class="path-row">
+                      <el-select v-model="form.configData.ignore_dirs" multiple filterable allow-create default-first-option style="flex:1" popper-class="mobile-popper" />
+                      <button class="browse-btn" :disabled="!canBrowseSsh" @click="openPicker('ssh', 'ignore')">
+                        {{ $t('backend.browse') }}
+                      </button>
+                    </div>
+                  </div>
                 </template>
 
                 <!-- API -->
@@ -126,6 +144,10 @@
                       <el-option v-for="f in resourceFolderOptions" :key="f.id" :label="f.name" :value="f.id" />
                     </el-select>
                   </div>
+                  <div class="field-row">
+                    <span class="field-label" style="margin-bottom:0">{{ $t('backend.enableVersionEditing') }}</span>
+                    <el-switch v-model="form.configData.enable_version_editing" size="small" />
+                  </div>
                 </template>
 
                 <!-- Local -->
@@ -134,11 +156,24 @@
                     <template #title>{{ $t('backend.localWarning') }}</template>
                   </el-alert>
                   <div class="sheet-divider">{{ $t('backend.localConfig') }}</div>
-                  <div class="field-item"><label class="field-label">Root Dir</label><input v-model="form.configData.root_dir" class="native-input" :placeholder="$t('backend.rootDirPlaceholder')" /></div>
+                  <div class="field-item">
+                    <label class="field-label">Root Dir</label>
+                    <div class="path-row">
+                      <input v-model="form.configData.root_dir" class="native-input" :placeholder="$t('backend.rootDirPlaceholder')" />
+                      <button class="browse-btn" @click="openPicker('local')">{{ $t('backend.browse') }}</button>
+                    </div>
+                  </div>
+                  <div class="field-item">
+                    <label class="field-label">{{ $t('backend.ignoreDirs') }}</label>
+                    <div class="path-row">
+                      <el-select v-model="form.configData.ignore_dirs" multiple filterable allow-create default-first-option style="flex:1" popper-class="mobile-popper" />
+                      <button class="browse-btn" @click="openPicker('local', 'ignore')">{{ $t('backend.browse') }}</button>
+                    </div>
+                  </div>
                 </template>
 
-                <!-- 通用编辑权限 (SSH / Local / Resource) -->
-                <template v-if="form.backendType !== 'api'">
+                <!-- 编辑权限（SSH / Local / Resource / API 均支持） -->
+                <template>
                   <div class="sheet-divider">{{ $t('backend.editPermission') }}</div>
                   <div class="field-item">
                     <label class="field-label">{{ $t('backend.editMode') }}</label>
@@ -209,6 +244,16 @@
         </div>
       </Transition>
     </Teleport>
+
+    <!-- Bottom Sheet: 目录 / 资源文件夹选择器 -->
+    <MobilePathPickerSheet
+      v-model:visible="pickerVisible"
+      :mode="pickerMode"
+      :title="pickerTitle"
+      :multiple="pickerTarget !== 'root'"
+      :context="pickerContext"
+      @confirm="handlePickerConfirm"
+    />
   </div>
 </template>
 
@@ -224,6 +269,7 @@ import { copyToClipboard } from '@/utils/clipboard';
 import { getClientStatus } from '@/api/backendService';
 import type { BackendConfig, BackendCreate, BackendType, SshConfigData, ApiConfigData, LocalConfigData, ResourceConfigData, SshTestRequest } from '@/api/types/backendTypes';
 import { defaultToolsConfig } from '@/api/types/backendTypes';
+import MobilePathPickerSheet from './dialogs/MobilePathPickerSheet.vue';
 
 const { t } = useI18n();
 const backendStore = useBackendStore();
@@ -245,6 +291,57 @@ const blacklistProxy = ref<string[]>([]);
 const formRef = ref<FormInstance>();
 const clientStatusMap = ref<Record<string, { connected: boolean }>>({});
 let statusPollTimer: ReturnType<typeof setInterval> | null = null;
+
+// --- 目录 / 资源文件夹选择器 ---
+const pickerVisible = ref(false);
+const pickerMode = ref<BackendType | 'resource'>('local');
+const pickerTarget = ref<'root' | 'ignore' | 'whitelist'>('root');
+const pickerTitle = ref('');
+
+/** SSH 浏览需要在线凭证（与桌面一致） */
+const canBrowseSsh = computed(() => {
+  const cd = form.configData as any;
+  return form.backendType === 'ssh' && !!cd.hostname && !!cd.username;
+});
+
+function openPicker(mode: BackendType | 'resource', target: 'root' | 'ignore' | 'whitelist' = 'root') {
+  pickerMode.value = mode;
+  pickerTarget.value = target;
+  pickerTitle.value = target === 'root'
+    ? t('backend.dirPickerTitleWhitelist')
+    : target === 'ignore'
+      ? t('backend.ignoreDirs')
+      : t('backend.whitelistLabel');
+  pickerVisible.value = true;
+}
+
+const pickerContext = computed(() => {
+  const cd = form.configData as any;
+  return {
+    backendId: isEdit.value ? currentEditId.value : null,
+    hostname: cd.hostname ?? null,
+    port: cd.port ?? 22,
+    username: cd.username ?? null,
+    password: cd.password ?? null,
+    rootDir: cd.root_dir || (form.backendType === 'local' ? '~' : '/'),
+  };
+});
+
+/** 选择结果回填：root 覆盖单值，ignore 追加去重，whitelist 追加去重 */
+function handlePickerConfirm(paths: string[]) {
+  if (paths.length === 0) return;
+  const cd = form.configData as any;
+  if (pickerTarget.value === 'root') {
+    cd.root_dir = paths[0];
+    return;
+  }
+  const field = pickerTarget.value === 'ignore' ? 'ignore_dirs' : 'edit_whitelist';
+  const merged = new Set<string>([...(cd[field] || []), ...paths]);
+  cd[field] = [...merged];
+  if (pickerTarget.value === 'whitelist') {
+    whitelistProxy.value = [...cd[field]];
+  }
+}
 
 const sshDefault = (): SshConfigData => ({ hostname: '', username: 'root', port: 22, password: null, root_dir: '/', edit_whitelist: [], edit_blacklist: [], ignore_dirs: ['.git', 'node_modules', 'build'] });
 const apiDefault = (): ApiConfigData => ({ api_key: '', edit_whitelist: [], edit_blacklist: [] });
@@ -478,6 +575,12 @@ const copyPublicKey = async () => {
 .password-row { position: relative; display: flex; align-items: center; }
 .password-row .native-input { padding-right: 40px; }
 .toggle-key { position: absolute; right: 8px; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: none; background: transparent; color: var(--el-text-color-secondary); cursor: pointer; border-radius: 6px; }
+
+/* 路径选择行 */
+.path-row { display: flex; align-items: center; gap: 8px; }
+.path-row .native-input { flex: 1; min-width: 0; }
+.browse-btn { flex-shrink: 0; height: 40px; padding: 0 12px; border: 1px solid var(--el-border-color); border-radius: 10px; background: var(--el-fill-color-light); font-size: 13px; color: var(--el-text-color-primary); }
+.browse-btn:disabled { opacity: 0.5; }
 .api-hint { margin-bottom: 8px; }
 .test-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; height: 38px; margin-top: 8px; font-size: 13px; font-weight: 500; color: var(--el-color-info); background: var(--el-color-info-light-9); border: 1px solid var(--el-color-info-light-5); border-radius: 8px; cursor: pointer; }
 .test-btn:active { background: var(--el-color-info-light-7); }
