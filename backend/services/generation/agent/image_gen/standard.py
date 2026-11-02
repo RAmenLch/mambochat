@@ -629,6 +629,37 @@ class ImageGenStandard(ABC):
             result["errors"] = errors
         return self._dumps(result)
 
+    async def run_pending(self, args: ImageGenerateShowArgs) -> str:
+        """只提交任务并返回「待生成」结果，**不做任何等待与下载**。
+
+        与 agent 异步模式下的 ``image_generate_show`` 结果完全同形：给出
+        ``task_id`` 与全部确定路径，落盘 / 入库交给平台后台轮询器。平台重跑
+        走这条入口，保证「请求线程只提交、轮询器只下载」，不会重复取图。
+        """
+        count = self._clamp_count(args.count)
+        resolution = self._normalize_resolution(args.resolution)
+        extra = self._merge_extra(args.extra, resolution)
+        timeout = self._resolve_oneshot_timeout(args.timeout)
+
+        payload = await self.submit(
+            prompt=args.prompt,
+            negative_prompt=args.negative_prompt,
+            count=count,
+            sync=False,
+            extra=extra,
+            resolution=resolution,
+        )
+        task_id = self._require_task_id(payload)
+        plan = self.plan_targets(
+            task_id=task_id,
+            path=args.path or DEFAULT_OUTPUT_DIR,
+            naming=NAMING_TASK,
+            multi=count > 1,
+        )
+        return self._dumps(
+            self._pending_result(task_id, plan, count, resolution, timeout, args)
+        )
+
     # ------------------------------------------------------------------
     # 公共工具方法
     # ------------------------------------------------------------------

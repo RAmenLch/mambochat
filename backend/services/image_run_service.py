@@ -9,7 +9,11 @@
 2. **FILE 子消息**——本次生成的图片，与原图通过 ``image_slot_id`` 归入同一「插槽」，
    前端据此做左右箭头切换。
 
-失败时只把记录子消息标为失败，**不落 FILE 子消息**（与原工具调用行为一致）。
+重跑与 agent 异步生图**行为一致**：提交成功即落 N 条「待生成文件」子消息
+（``status=waiting`` + ``pending_image_task_id``），落盘 / 入库由会话级轮询器完成，
+超时后由轮询器写 ``pending_failed_reason`` 并提供「获取文件」。请求线程只负责
+提交，绝不自行下载（否则会和轮询器重复取图）。只有提交阶段就失败时，才只把记录
+子消息标为失败、不落 FILE 子消息。
 """
 
 from __future__ import annotations
@@ -25,15 +29,12 @@ from backend.database import AsyncSessionLocal
 from backend.models.base_model import generate_uuid
 from backend.schemas import MessageStatus, SubMessageType
 from backend.schemas.message import McpToolContent, SubMessageConfig, SubMessageUpdate
-from backend.services.file_service import FileService
 from backend.services.generation.agent.backend_factory import build_backend_from_chat_id
 from backend.services.generation.agent.image_gen.factory import (
     build_image_gen_standard_from_chat_id,
 )
-from backend.services.generation.agent.image_gen.sink import persist_uploaded
 from backend.services.generation.agent.image_gen.standard import (
     DEFAULT_OUTPUT_DIR,
-    NAMING_TASK,
     ImageGenerateShowArgs,
 )
 from backend.services.stream_manager_service import stream_manager
@@ -42,11 +43,8 @@ logger = logging.getLogger(__name__)
 
 IMAGE_TOOL_NAME = "image_generate_show"
 
-# 一次重跑最多等待的秒数（含平台侧兜底轮询）
+# 一次重跑的后台等待上限（秒）；不传 timeout 时由标准框架按配置/默认值解析
 MAX_RERUN_TIMEOUT = 300
-# 兜底轮询的单次阻塞时长与轮询间隔
-POLL_STATUS_WAIT = 10
-POLL_INTERVAL = 2.0
 
 # 同一插槽同时只允许一个重跑在进行：{(message_id, slot_id)}
 _inflight: set[Tuple[str, str]] = set()
@@ -76,6 +74,9 @@ async def rerun_image_run(
     -------
     ``{"run_id", "slot_id", "status", "record": <SubMessage>, "files": [<SubMessage>],
     "error": <str|null>}``
+
+    ``status`` 为 ``pending``（已提交，落盘由后台轮询器完成）/ ``failed``
+    （仅提交阶段失败）。
     """
     overrides = {k: v for k, v in (overrides or {}).items() if v is not None}
 
@@ -131,7 +132,6 @@ async def _execute(
 ) -> Dict[str, Any]:
     merged = _merge_args(source.get("args") or {}, overrides)
     mode = merged.get("mode") or "Normal"
-    timeout = _clamp_timeout(merged.get("timeout"))
 
     args = ImageGenerateShowArgs(
         prompt=merged["prompt"],
@@ -141,8 +141,10 @@ async def _execute(
         extra=merged.get("extra") or None,
         mode=mode,
         path=merged.get("path") or None,
-        timeout=timeout,
+        timeout=_clamp_timeout(merged.get("timeout")),
     )
+
+    await _require_backend(chat_id)
 
     record_id, _ = await _create_record(
         message_id=message_id,
@@ -153,10 +155,10 @@ async def _execute(
     )
 
     try:
-        files_meta = await _generate(chat_id=chat_id, args=args, timeout=timeout)
-    except Exception as exc:  # noqa: BLE001 - 失败统一转成记录子消息的失败态
+        pending = await _submit(chat_id=chat_id, args=args)
+    except Exception as exc:  # noqa: BLE001 - 提交失败统一转成记录子消息的失败态
         reason = str(exc) or exc.__class__.__name__
-        logger.warning("图片重跑失败(run=%s): %s", run_id, reason)
+        logger.warning("图片重跑提交失败(run=%s): %s", run_id, reason)
         payload = await _finish_record(
             message_id=message_id,
             record_id=record_id,
@@ -181,13 +183,15 @@ async def _execute(
             "error": reason,
         }
 
-    file_payloads = await _append_file_sub_messages(
+    timeout = int(pending.get("timeout") or 0)
+    file_payloads = await _append_pending_file_sub_messages(
         message_id=message_id,
         run_id=run_id,
         slot_id=slot_id,
-        files_meta=files_meta,
+        pending=pending,
         args=merged,
         mode=mode,
+        timeout=timeout,
     )
     payload = await _finish_record(
         message_id=message_id,
@@ -196,115 +200,81 @@ async def _execute(
         args=merged,
         is_error=False,
         result={
-            "status": "completed",
-            "count": args.count,
-            "resolution": args.resolution,
+            "status": "pending",
+            "task_id": pending.get("task_id"),
+            "count": pending.get("count") or args.count,
+            "resolution": pending.get("resolution") or args.resolution,
             "mode": mode,
-            "files": [
-                {
-                    "index": item.get("index"),
-                    "path": item.get("path"),
-                    "mime": item.get("mime"),
-                    "file_id": item.get("file_id"),
-                }
-                for item in files_meta
-            ],
+            "timeout": timeout,
+            "files": [],
         },
     )
+    _start_pending_poller(chat_id)
     return {
         "run_id": run_id,
         "slot_id": slot_id,
-        "status": "completed",
+        "status": "pending",
         "record": payload,
         "files": file_payloads,
         "error": None,
     }
 
 
-async def _generate(
-    *,
-    chat_id: str,
-    args: ImageGenerateShowArgs,
-    timeout: int,
-) -> List[Dict[str, Any]]:
-    """执行一次生成并返回入库后的文件元信息列表。"""
-    async with AsyncSessionLocal() as db:
-        standard = await build_image_gen_standard_from_chat_id(db, chat_id)
-    if standard is None:
-        raise ImageRunError("当前会话未启用生图工具或生图服务不可用")
-
+async def _require_backend(chat_id: str) -> None:
+    """重跑本身不落盘，但下载由后台轮询器完成，缺 backend 时尽早给出明确错误。"""
     async with AsyncSessionLocal() as db:
         backend = await build_backend_from_chat_id(db, chat_id)
     if backend is None:
         raise ImageRunError("当前会话没有可写的 backend，无法保存图片")
 
-    raw = await standard.run_generate_show(backend, AsyncSessionLocal, args)
+    aclose = getattr(backend, "aclose", None)
+    if aclose is not None:
+        try:
+            await aclose()
+        except Exception:  # noqa: BLE001 - 探测型 backend 关闭失败不影响重跑
+            pass
+
+
+async def _submit(
+    *,
+    chat_id: str,
+    args: ImageGenerateShowArgs,
+) -> Dict[str, Any]:
+    """只提交生成任务，返回「待生成」描述（``task_id`` + 全部确定路径）。"""
+    async with AsyncSessionLocal() as db:
+        standard = await build_image_gen_standard_from_chat_id(db, chat_id)
+    if standard is None:
+        raise ImageRunError("当前会话未启用生图工具或生图服务不可用")
+
+    raw = await standard.run_pending(args)
     try:
         data = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
         raise ImageRunError(f"生图服务返回了无法解析的结果: {raw!r}") from None
     if not isinstance(data, dict):
         raise ImageRunError("生图服务返回了无法解析的结果")
-
-    files = data.get("files") or []
-    if files:
-        return files
-
-    task_id = data.get("task_id")
-    if not task_id:
+    if not data.get("task_id"):
         raise ImageRunError(data.get("error") or "生图任务未返回 task_id")
+    return data
 
-    # 异步配置 / 同步超时：由平台兜底轮询到收敛后自行下载
-    return await _poll_and_collect(
-        standard=standard,
-        backend=backend,
-        task_id=str(task_id),
-        args=args,
-        timeout=timeout,
+
+def _start_pending_poller(chat_id: str) -> None:
+    """立刻启动会话级待生成文件轮询器。
+
+    前端进入会话时也会通过 SSE 启动同一个任务；这里主动启动是为了让重跑
+    不依赖页面是否还停留在该会话上（轮询任务与客户端连接无关）。
+    """
+    from backend.routers.chat_interaction import (
+        _chat_pending_tasks,
+        _poll_chat_pending_files,
     )
 
-
-async def _poll_and_collect(
-    *,
-    standard,
-    backend,
-    task_id: str,
-    args: ImageGenerateShowArgs,
-    timeout: int,
-) -> List[Dict[str, Any]]:
-    deadline = asyncio.get_event_loop().time() + timeout
-    payload: Dict[str, Any] = {}
-    while True:
-        remaining = deadline - asyncio.get_event_loop().time()
-        if remaining <= 0:
-            break
-        payload = await standard.status(task_id, min(POLL_STATUS_WAIT, int(remaining) or 1))
-        if standard._is_settled(payload):  # noqa: SLF001 - 与工具内部判定保持一致
-            break
-        await asyncio.sleep(POLL_INTERVAL)
-
-    status = str((payload or {}).get("status") or "").strip().lower()
-    if status in ("failed", "expired", "error"):
-        raise ImageRunError(
-            f"生成任务 {task_id} {status}: {payload.get('error') or '后端未提供失败原因'}"
-        )
-
-    plan = standard.plan_targets(
-        task_id=task_id,
-        path=args.path or DEFAULT_OUTPUT_DIR,
-        naming=NAMING_TASK,
-        multi=args.count > 1,
-    )
-    outcome = await standard.download_to(backend, task_id, plan)
-    if not outcome.items:
-        raise ImageRunError(
-            "图片保存失败: "
-            + ("; ".join(outcome.errors) if outcome.errors else "生成任务未在预期时间内完成")
-        )
-    files, errors = await persist_uploaded(AsyncSessionLocal, outcome.items)
-    if not files:
-        raise ImageRunError("图片入库失败: " + ("; ".join(errors) or "未知原因"))
-    return files
+    existing = _chat_pending_tasks.get(chat_id)
+    if existing is not None and not existing.done():
+        return
+    task = asyncio.create_task(_poll_chat_pending_files(chat_id))
+    _chat_pending_tasks[chat_id] = task
+    task.add_done_callback(lambda _: _chat_pending_tasks.pop(chat_id, None))
 
 
 # ---------------------------------------------------------------------------
@@ -440,13 +410,20 @@ def _derive_target(base: Dict[str, Any]) -> Tuple[str, Optional[str]]:
         return DEFAULT_OUTPUT_DIR, None
 
 
-def _clamp_timeout(value: Any) -> int:
+def _clamp_timeout(value: Any) -> Optional[int]:
+    """重跑的等待窗口：不传时返回 ``None``，交给标准框架按配置/默认值解析。
+
+    这样重跑与 agent 侧 ``image_generate_show`` 的等待时长完全同源
+    （``_resolve_oneshot_timeout``），不会出现两个入口窗口不一致。
+    """
+    if value is None or value == "":
+        return None
     try:
         seconds = int(value)
     except (TypeError, ValueError):
-        seconds = 0
+        return None
     if seconds <= 0:
-        seconds = 60
+        return None
     return max(5, min(seconds, MAX_RERUN_TIMEOUT))
 
 
@@ -545,49 +522,52 @@ async def _finish_record(
     return payload
 
 
-async def _append_file_sub_messages(
+async def _append_pending_file_sub_messages(
     *,
     message_id: str,
     run_id: str,
     slot_id: str,
-    files_meta: List[Dict[str, Any]],
+    pending: Dict[str, Any],
     args: Dict[str, Any],
     mode: str,
+    timeout: int,
 ) -> List[Dict[str, Any]]:
+    """落 N 条「待生成文件」子消息，形态与 agent 异步生图完全一致。
+
+    路径按 ``task_id`` 确定性命名提前预测；后台轮询器据 ``pending_image_task_id``
+    驱动下载，就绪后把子消息就地改成完成态，超时则写 ``pending_failed_reason``
+    并提供「获取文件」。子消息一律 ``context_participation_length=0``，不进入上下文。
+    """
+    paths = pending.get("paths") or ([pending["path"]] if pending.get("path") else [])
     payloads: List[Dict[str, Any]] = []
     async with AsyncSessionLocal() as db:
-        file_service = FileService(db)
-        for item in files_meta:
-            file_id = item.get("file_id")
-            if not isinstance(file_id, str) or not file_id:
-                continue
+        for path in paths:
             sub_id = generate_uuid()
             db_sub = await message_crud.create_sub_message(
                 db,
                 message_id=message_id,
                 sub_message_data=schemas.message.SubMessageCreate(
                     id=sub_id,
-                    content=file_id,
+                    content="",
                     sortOrder=91,
                     type=SubMessageType.FILE.value,
-                    status=MessageStatus.COMPLETED,
+                    status=MessageStatus.WAITING,
                     config=SubMessageConfig(
                         context_participation_length=0,
                         show_tool_mode=mode,
                         image_run_id=run_id,
                         image_slot_id=slot_id,
                         image_run_args=args,
+                        pending_file_path=path,
+                        pending_file_timeout=timeout,
+                        pending_image_task_id=pending.get("task_id"),
+                        pending_image_prefix=pending.get("prefix"),
+                        pending_image_count=pending.get("count"),
                     ),
                 ),
                 sub_message_id=sub_id,
             )
-            payload = _sub_payload(db_sub)
-            record = await file_service.get_file(file_id)
-            if record is not None:
-                payload["file_info"] = file_service.convert_to_schema(record).model_dump(
-                    mode="json"
-                )
-            payloads.append(payload)
+            payloads.append(_sub_payload(db_sub))
     for payload in payloads:
         await stream_manager.publish(message_id, {"type": "create", "sub_message": payload})
     return payloads

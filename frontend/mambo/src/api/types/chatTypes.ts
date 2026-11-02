@@ -92,11 +92,12 @@ export interface ImageRunRerunRequest {
   timeout?: number
 }
 
-/** 图片重跑结果：record 为本次生成记录，files 为本次生成入库的图片子消息 */
+/** 图片重跑结果：record 为本次生成记录，files 为本次产出的图片子消息
+ *  status='pending' 表示已提交、落盘由平台后台轮询器完成（files 为待生成子消息） */
 export interface ImageRunRerunResponse {
   run_id: string
   slot_id: string
-  status: 'completed' | 'failed'
+  status: 'pending' | 'completed' | 'failed'
   record: SubMessage
   files: SubMessage[]
   error: string | null

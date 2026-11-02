@@ -319,7 +319,8 @@ async function submitRerun() {
     for (const file of response.files || []) {
       sessionStore._addOrUpdateSubMessage(props.parentMessage.id, file)
     }
-    if (response.status !== 'completed') {
+    // pending：已提交，落盘由平台后台完成，稍后由图区/SSE 自动更新
+    if (response.status === 'failed') {
       ElMessage.error(response.error || t('chat.imageRun.failed'))
     }
     sheetVisible.value = false
