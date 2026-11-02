@@ -17,6 +17,7 @@ export default {
     next: 'Next',
   },
   preview: {
+    warnings: 'Import notes',
     renameTitle: 'Name conflict handling (auto-rename)',
     entity: 'Entity',
     entityTypes: {
@@ -50,5 +51,7 @@ export default {
     newId: 'New ID',
     cleanRetry: 'Clean Up & Retry',
     cleanSuccess: 'Entities created by this import have been cleaned up',
+    createdCount: '{count} entities created',
+    failedEntity: 'Failed Entity',
   },
 }

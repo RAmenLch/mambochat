@@ -91,6 +91,8 @@ export default {
     deleteSuccess: 'Version deleted',
     selected: 'Selected {count}',
     deleteSelected: 'Delete Selected ({count})',
+    moveUp: 'Move up',
+    moveDown: 'Move down',
     confirmDeleteBatch: 'Are you sure you want to delete the selected {count} versions? This action cannot be undone.',
     deleteBatchSuccess: 'Deleted {count} versions',
   },

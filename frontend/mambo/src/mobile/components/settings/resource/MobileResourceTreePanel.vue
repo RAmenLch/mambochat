@@ -121,6 +121,11 @@
           <span>{{ t('resource.tree.move') }}</span>
         </div>
 
+        <div v-if="selectedItem.itemType === 'folder'" class="menu-item" @click="handleContextAction('exportZip')">
+          <el-icon><Download /></el-icon>
+          <span>{{ t('resource.tree.exportZip') }}</span>
+        </div>
+
         <el-divider />
 
         <div class="menu-item danger" @click="handleContextAction('delete')">
@@ -174,13 +179,14 @@ import { ref, computed, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import {
-  Folder, Document, DocumentAdd, FolderAdd, EditPen, Delete, Memo, Collection, Cpu, Plus, MoreFilled, Rank, Reading, CircleCheckFilled, CircleCloseFilled
+  Folder, Document, DocumentAdd, FolderAdd, EditPen, Delete, Memo, Collection, Cpu, Plus, MoreFilled, Rank, Reading, CircleCheckFilled, CircleCloseFilled, Download
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { useResourceStore } from '@/stores/resourceStore'
 import { useProviderStore } from '@/stores/providerStore'
 import { createKnowledgeBase } from '@/api/kbService'
+import { downloadResourceZip } from '@/api/resourceService'
 import ExplorerTree from '@/components/common/ExplorerTree.vue'
 import EntityFormDialog from '@/components/common/EntityFormDialog.vue'
 import KnowledgeBaseFormDialog, { type ModelGroup } from '@/components/settings/dialogs/KnowledgeBaseFormDialog.vue'
@@ -325,6 +331,8 @@ function handleContextAction(action: string, parentIdOverride: string | null = n
     dialogVisible.value = true
   } else if (action === 'delete' && item) {
     handleDelete(item)
+  } else if (action === 'exportZip' && item) {
+    handleExportZip(item)
   } else if (action === 'move' && item) {
     moveDialogVisible.value = true
   }
@@ -340,6 +348,17 @@ async function handleDelete(item: Resource) {
     emit('item-deleted', item.id)
     ElMessage.success(t('common.msg.deleteSuccess'))
   } catch {}
+}
+
+/** 文件夹整体打包导出 */
+async function handleExportZip(item: Resource) {
+  try {
+    await downloadResourceZip(item.id, item.name)
+    ElMessage.success(t('resource.tree.exportZipSuccess'))
+  } catch (error) {
+    console.error('Resource zip export failed:', error)
+    ElMessage.error(t('resource.tree.exportZipFailed'))
+  }
 }
 
 const DEFAULT_SUBMESSAGE_ATTRIBUTES = {

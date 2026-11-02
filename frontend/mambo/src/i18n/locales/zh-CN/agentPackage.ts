@@ -17,6 +17,7 @@ export default {
     next: '下一步',
   },
   preview: {
+    warnings: '导入提示',
     renameTitle: '名称冲突处理（自动改名）',
     entity: '实体',
     entityTypes: {
@@ -50,5 +51,7 @@ export default {
     newId: '新 ID',
     cleanRetry: '清理并重试',
     cleanSuccess: '已清理本次导入创建的实体',
+    createdCount: '已创建 {count} 个实体',
+    failedEntity: '失败实体',
   },
 }

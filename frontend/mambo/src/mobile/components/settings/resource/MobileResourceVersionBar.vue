@@ -48,21 +48,51 @@
                 {{ t('resource.version.setActive') }}
               </el-button>
               <el-tag v-else type="success" size="small" effect="plain">{{ t('resource.version.current') }}</el-tag>
+              <button class="card-more-btn" @click.stop="openActions(version)">
+                <el-icon :size="14"><MoreFilled /></el-icon>
+              </button>
             </div>
           </div>
         </template>
         <div v-else-if="!kbId" class="no-versions">{{ t('resource.version.empty') }}</div>
       </div>
     </el-scrollbar>
+
+    <!-- 版本操作面板（触屏无右键菜单，改为点按弹出） -->
+    <Teleport to="body">
+      <Transition name="sheet">
+        <div v-if="actionVersion" class="sheet-overlay" @click="actionVersion = null">
+          <div class="sheet-panel" @click.stop>
+            <div class="sheet-handle"></div>
+            <div class="sheet-title">{{ actionVersion.name }}</div>
+            <button class="sheet-item" :disabled="actionIndex <= 0" @click="emitMove('up')">
+              {{ t('resource.version.moveUp') }}
+            </button>
+            <button class="sheet-item" :disabled="actionIndex < 0 || actionIndex >= versions.length - 1" @click="emitMove('down')">
+              {{ t('resource.version.moveDown') }}
+            </button>
+            <button
+              class="sheet-item danger"
+              :disabled="deleteDisabled"
+              @click="emitDelete"
+            >
+              {{ t('resource.version.delete') }}
+            </button>
+            <button class="sheet-cancel" @click="actionVersion = null">{{ t('common.action.cancel') }}</button>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Setting } from '@element-plus/icons-vue'
+import { MoreFilled, Setting } from '@element-plus/icons-vue'
 import type { ResourceVersion } from '@/api/types'
 
-defineProps<{
+const props = defineProps<{
   versions: ResourceVersion[]
   activeVersionId: string | null
   viewingVersionId: string | null
@@ -70,13 +100,45 @@ defineProps<{
   viewMode?: 'editor' | 'kb_config'
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'select-version', version: ResourceVersion): void
   (e: 'set-active', versionId: string): void
   (e: 'toggle-kb-view'): void
+  (e: 'delete-version', versionId: string): void
+  (e: 'move-version', payload: { versionId: string; direction: 'up' | 'down' }): void
 }>()
 
 const { t } = useI18n()
+
+// --- 版本操作面板 ---
+const actionVersion = ref<ResourceVersion | null>(null)
+
+const actionIndex = computed(() =>
+  actionVersion.value ? props.versions.findIndex(v => v.id === actionVersion.value!.id) : -1,
+)
+
+/** 当前活跃版本与最后一个版本不允许删除（与后端约束一致） */
+const deleteDisabled = computed(() => {
+  if (!actionVersion.value) return true
+  if (actionVersion.value.id === props.activeVersionId) return true
+  return props.versions.length <= 1
+})
+
+function openActions(version: ResourceVersion) {
+  actionVersion.value = version
+}
+
+function emitMove(direction: 'up' | 'down') {
+  if (!actionVersion.value) return
+  emit('move-version', { versionId: actionVersion.value.id, direction })
+  actionVersion.value = null
+}
+
+function emitDelete() {
+  if (!actionVersion.value || deleteDisabled.value) return
+  emit('delete-version', actionVersion.value.id)
+  actionVersion.value = null
+}
 </script>
 
 <style scoped>
@@ -161,7 +223,34 @@ const { t } = useI18n()
   justify-content: flex-end;
   height: 20px;
   align-items: center;
+  gap: 4px;
 }
+
+.card-more-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--el-text-color-secondary);
+}
+
+/* 操作面板 */
+.sheet-overlay { position: fixed; inset: 0; z-index: 2200; background: rgba(0, 0, 0, 0.35); display: flex; align-items: flex-end; justify-content: center; }
+.sheet-panel { width: 100%; max-width: 520px; background: var(--el-bg-color); border-radius: 16px 16px 0 0; padding: 0 14px 12px; display: flex; flex-direction: column; }
+.sheet-handle { width: 36px; height: 4px; border-radius: 2px; background: var(--el-border-color); margin: 8px auto 4px; }
+.sheet-title { padding: 8px 2px; font-size: 15px; font-weight: 600; color: var(--el-text-color-primary); word-break: break-all; }
+.sheet-item { height: 46px; border: none; background: transparent; font-size: 15px; color: var(--el-text-color-primary); border-top: 0.5px solid var(--el-border-color-lighter); text-align: left; padding: 0 4px; }
+.sheet-item:disabled { color: var(--el-text-color-disabled); }
+.sheet-item.danger { color: var(--el-color-danger); }
+.sheet-cancel { height: 46px; margin-top: 8px; border: none; border-radius: 10px; background: var(--el-fill-color-light); font-size: 15px; font-weight: 600; color: var(--el-text-color-primary); }
+
+.sheet-enter-active, .sheet-leave-active { transition: opacity 0.2s ease; }
+.sheet-enter-from, .sheet-leave-to { opacity: 0; }
 
 .no-versions {
   padding: 16px;

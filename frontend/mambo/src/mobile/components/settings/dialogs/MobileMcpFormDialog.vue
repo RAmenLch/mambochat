@@ -78,6 +78,10 @@
                     </button>
                   </div>
                 </div>
+                <div class="field-item">
+                  <label class="field-label">Working Directory</label>
+                  <input v-model="formData.cwd" class="native-input" placeholder="/path/to/workdir" />
+                </div>
               </template>
 
               <template v-if="formData.transportType === 'sse' || formData.transportType === 'streamable_http'">
@@ -85,6 +89,38 @@
                 <div class="field-item">
                   <label class="field-label">URL</label>
                   <input v-model="formData.url" class="native-input" placeholder="http://localhost:8080/sse" />
+                </div>
+
+                <div class="field-item">
+                  <label class="field-label">Headers</label>
+                  <div class="dynamic-list">
+                    <div v-for="(header, index) in formData.headersList" :key="index" class="dynamic-row env-row">
+                      <input v-model="header.key" class="native-input" placeholder="Header" style="flex:1" />
+                      <span class="sep">:</span>
+                      <input v-model="header.value" class="native-input" placeholder="Value" style="flex:1" />
+                      <button class="chip-close-btn" @click="removeHeader(index)">
+                        <el-icon :size="16"><Minus /></el-icon>
+                      </button>
+                    </div>
+                    <button class="add-row-btn" @click="addHeader">
+                      <el-icon :size="14"><Plus /></el-icon> Add Header
+                    </button>
+                  </div>
+                </div>
+
+                <div class="field-item">
+                  <label class="field-label">Timeout (s)</label>
+                  <el-input-number v-model="formData.timeout" :min="1" :max="600" controls-position="right" style="width: 100%" />
+                </div>
+
+                <div class="field-item">
+                  <label class="field-label">SSE Read Timeout (s)</label>
+                  <el-input-number v-model="formData.sseReadTimeout" :min="1" :max="600" controls-position="right" style="width: 100%" />
+                </div>
+
+                <div class="field-row">
+                  <span class="field-label" style="margin-bottom:0">Use Proxy</span>
+                  <el-switch v-model="formData.useProxy" size="small" />
                 </div>
               </template>
             </el-form>
@@ -142,11 +178,17 @@ const testFeedback = reactive({ status: 'none' as 'none' | 'success' | 'error', 
 interface LocalFormData {
   name: string; description: string; transportType: McpTransportType; isEnabled: boolean;
   command: string; argsList: string[]; envList: { key: string; value: string }[]; url: string;
+  cwd: string;
+  headersList: { key: string; value: string }[];
+  timeout: number | null;
+  sseReadTimeout: number | null;
+  useProxy: boolean;
 }
 
 const defaultFormData: LocalFormData = {
   name: '', description: '', transportType: 'stdio', isEnabled: true,
   command: '', argsList: [], envList: [], url: '',
+  cwd: '', headersList: [], timeout: null, sseReadTimeout: null, useProxy: false,
 };
 
 const formData = reactive<LocalFormData>({ ...defaultFormData });
@@ -201,6 +243,12 @@ watch(() => [props.visible, props.initialData], ([newVisible]) => {
       formData.command = d.command || ''; formData.url = d.url || '';
       formData.argsList = d.args ? [...d.args] : [];
       formData.envList = d.env ? Object.entries(d.env).map(([k, v]) => ({ key: k, value: v })) : [];
+      formData.cwd = (d as any).cwd || '';
+      const headers = (d as any).headers ?? {};
+      formData.headersList = Object.entries(headers).map(([k, v]) => ({ key: k, value: String(v) }));
+      formData.timeout = (d as any).timeout ?? null;
+      formData.sseReadTimeout = (d as any).sse_read_timeout ?? null;
+      formData.useProxy = (d as any).useProxy ?? false;
     } else {
       Object.assign(formData, JSON.parse(JSON.stringify(defaultFormData)));
     }
@@ -212,23 +260,42 @@ const addArg = () => formData.argsList.push('');
 const removeArg = (i: number) => formData.argsList.splice(i, 1);
 const addEnv = () => formData.envList.push({ key: '', value: '' });
 const removeEnv = (i: number) => formData.envList.splice(i, 1);
+const addHeader = () => formData.headersList.push({ key: '', value: '' });
+const removeHeader = (i: number) => formData.headersList.splice(i, 1);
+
+/** 把动态表单收敛为接口请求体（stdio / sse / streamable_http 分支） */
+function buildPayload(): McpCreateRequest {
+  const data: McpCreateRequest = {
+    name: formData.name,
+    description: formData.description || null,
+    transportType: formData.transportType,
+    isEnabled: formData.isEnabled,
+  };
+  if (formData.transportType === 'stdio') {
+    data.command = formData.command;
+    const args = formData.argsList.filter(a => a.trim());
+    data.args = args.length > 0 ? args : null;
+    const env = formData.envList.filter(e => e.key.trim());
+    data.env = env.length > 0 ? env.reduce((acc, c) => { acc[c.key] = c.value; return acc; }, {} as Record<string, string>) : null;
+    data.cwd = formData.cwd.trim() || null;
+  } else {
+    data.url = formData.url;
+    const headers = formData.headersList.filter(h => h.key.trim());
+    data.headers = headers.length > 0
+      ? headers.reduce((acc, c) => { acc[c.key] = c.value; return acc; }, {} as Record<string, string>)
+      : null;
+    data.timeout = formData.timeout ?? null;
+    data.sse_read_timeout = formData.sseReadTimeout ?? null;
+    data.useProxy = formData.useProxy;
+  }
+  return data;
+}
 const handleCancel = () => { emit('update:visible', false); testFeedback.status = 'none'; };
 
 const handleTestConnection = async () => {
   isTestingConnection.value = true; testFeedback.status = 'none';
   try {
-    const configData: McpCreateRequest = {
-      name: formData.name, description: formData.description || null,
-      transportType: formData.transportType, isEnabled: formData.isEnabled,
-    };
-    if (formData.transportType === 'stdio') {
-      configData.command = formData.command;
-      const args = formData.argsList.filter(a => a.trim());
-      configData.args = args.length > 0 ? args : null;
-      const env = formData.envList.filter(e => e.key.trim());
-      configData.env = env.length > 0 ? env.reduce((acc, c) => { acc[c.key] = c.value; return acc; }, {} as Record<string, string>) : null;
-    } else { configData.url = formData.url; }
-    const resp = await mcpStore.testConnectionWithConfig(configData);
+    const resp = await mcpStore.testConnectionWithConfig(buildPayload());
     testFeedback.status = resp.status === 'healthy' ? 'success' : 'error';
     testFeedback.shortMessage = resp.status === 'healthy' ? `OK (${resp.tools_count})` : 'Failed';
     testFeedback.message = resp.error || resp.message || '';
@@ -241,18 +308,7 @@ const handleSubmit = async () => {
   if (!formRef.value) return;
   await formRef.value.validate((valid) => {
     if (valid) {
-      const data: McpCreateRequest = {
-        name: formData.name, description: formData.description || null,
-        transportType: formData.transportType, isEnabled: formData.isEnabled,
-      };
-      if (formData.transportType === 'stdio') {
-        data.command = formData.command;
-        const args = formData.argsList.filter(a => a.trim());
-        data.args = args.length > 0 ? args : null;
-        const env = formData.envList.filter(e => e.key.trim());
-        data.env = env.length > 0 ? env.reduce((acc, c) => { acc[c.key] = c.value; return acc; }, {} as Record<string, string>) : null;
-      } else { data.url = formData.url; }
-      emit('save', data);
+      emit('save', buildPayload());
     }
   });
 };

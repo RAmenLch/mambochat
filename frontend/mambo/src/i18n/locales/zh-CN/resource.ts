@@ -89,6 +89,8 @@ export default {
     deleteSuccess: '版本已删除',
     selected: '已选 {count} 项',
     deleteSelected: '删除所选 ({count})',
+    moveUp: '上移一位',
+    moveDown: '下移一位',
     confirmDeleteBatch: '确定要删除选中的 {count} 个版本吗？此操作不可撤销。',
     deleteBatchSuccess: '已删除 {count} 个版本',
   },

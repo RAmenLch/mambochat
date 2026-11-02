@@ -51,6 +51,7 @@ export default {
     rename: 'Rename',
     delete: 'Delete',
     duplicate: 'Duplicate',
+    duplicateConfirm: 'Duplicate agent "{name}"?',
     duplicateSuccess: 'Agent duplicated successfully',
     duplicateFailed: 'Failed to duplicate Agent',
   },

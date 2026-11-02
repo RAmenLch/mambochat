@@ -61,7 +61,7 @@
           <GlobalSettings v-if="activeSection === 'global'" class="mobile-setting-component" />
           <MobileProviderModelManager v-else-if="activeSection === 'provider'" class="mobile-setting-component" />
           <MobileMcpManager v-else-if="activeSection === 'mcp'" class="mobile-setting-component" />
-          <ImageGenManager v-else-if="activeSection === 'imageGen'" class="mobile-setting-component" />
+          <MobileImageGenManager v-else-if="activeSection === 'imageGen'" class="mobile-setting-component" />
           <MobileResourceManager v-else-if="activeSection === 'resource'" class="mobile-setting-component" />
           <MobileAgentManager v-else-if="activeSection === 'agent'" class="mobile-setting-component" />
         </div>
@@ -113,7 +113,7 @@ import {
 import GlobalSettings from '@/mobile/components/settings/MobileGlobalSettings.vue'
 import MobileProviderModelManager from '@/mobile/components/settings/MobileProviderModelManager.vue'
 import MobileMcpManager from '@/mobile/components/settings/MobileMcpManager.vue'
-import ImageGenManager from '@/components/settings/ImageGenManager.vue'
+import MobileImageGenManager from '@/mobile/components/settings/MobileImageGenManager.vue'
 import MobileResourceManager from '@/mobile/components/settings/MobileResourceManager.vue'
 import MobileAgentManager from '@/mobile/components/settings/MobileAgentManager.vue'
 

@@ -12,6 +12,8 @@
       @select-version="loadVersionIntoEditor"
       @set-active="handleSetActiveVersion"
       @toggle-kb-view="toggleKbView"
+      @delete-version="handleDeleteVersion"
+      @move-version="handleMoveVersion"
     />
 
     <!-- 2. 主内容区域 -->
@@ -577,6 +579,41 @@ async function handleSetActiveVersion(versionId: string) {
     await resourceStore.setActiveResourceVersion(props.resource.id, versionId)
     ElMessage.success(t('resource.version.switchSuccess'))
   } catch {}
+}
+
+/** 删除单个版本（活跃版本/最后一个版本由后端与调用方一并拦截） */
+async function handleDeleteVersion(versionId: string) {
+  if (!props.resource) return
+  const version = props.resource.versions?.find(v => v.id === versionId)
+  if (!version) return
+  try {
+    await ElMessageBox.confirm(
+      t('resource.version.confirmDelete', { name: version.name }),
+      t('resource.version.delete'),
+      { type: 'warning', confirmButtonText: t('common.action.confirm'), cancelButtonText: t('common.action.cancel') }
+    )
+  } catch {
+    return
+  }
+  await resourceStore.deleteVersion(props.resource.id, versionId)
+  ElMessage.success(t('resource.version.deleteSuccess'))
+}
+
+/** 触屏无拖拽排序：以上移/下移按钮调整版本顺序 */
+async function handleMoveVersion(payload: { versionId: string; direction: 'up' | 'down' }) {
+  if (!props.resource) return
+  const versions = [...(props.resource.versions || [])]
+  const index = versions.findIndex(v => v.id === payload.versionId)
+  if (index < 0) return
+  const target = payload.direction === 'up' ? index - 1 : index + 1
+  if (target < 0 || target >= versions.length) return
+
+  const [moved] = versions.splice(index, 1)
+  versions.splice(target, 0, moved)
+  await resourceStore.reorderVersions(
+    props.resource.id,
+    versions.map((v, idx) => ({ id: v.id, sortOrder: idx })),
+  )
 }
 
 function openNewVersionDialog() {

@@ -51,6 +51,7 @@ export default {
     rename: '重命名',
     delete: '删除',
     duplicate: '复制副本',
+    duplicateConfirm: '确定要复制 Agent "{name}" 吗？',
     duplicateSuccess: 'Agent 副本创建成功',
     duplicateFailed: 'Agent 副本创建失败',
   },

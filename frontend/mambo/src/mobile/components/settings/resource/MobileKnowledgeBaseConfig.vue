@@ -105,27 +105,37 @@
 
         <div v-loading="isFilesLoading" class="file-list-container">
           <template v-if="kbTreeData.length > 0">
-            <div v-for="node in flattenTree(kbTreeData)" :key="node.id" class="file-item-card">
-              <div class="file-item-content" @click="handleNodeClick(node)">
-                <el-icon class="file-icon" :class="{ 'is-folder': node.itemType === 'folder' }">
-                  <Folder v-if="node.itemType === 'folder'" />
+            <div
+              v-for="entry in visibleNodes"
+              :key="entry.node.id"
+              class="file-item-card"
+              :style="{ marginLeft: `${entry.depth * 16}px` }"
+            >
+              <div class="file-item-content" @click="handleTreeEntryClick(entry)">
+                <el-icon class="file-icon" :class="{ 'is-folder': entry.node.itemType === 'folder' }">
+                  <ArrowDown v-if="entry.node.itemType === 'folder' && expandedFolderIds.has(entry.node.id)" />
+                  <ArrowRight v-else-if="entry.node.itemType === 'folder'" />
+                  <Folder v-else-if="entry.node.itemType !== 'resource'" />
                   <Document v-else />
                 </el-icon>
                 <div class="file-info">
-                  <span class="file-name">{{ node.name }}</span>
-                  <span class="file-meta" v-if="node.itemType === 'resource'">
-                    {{ new Date(node.updatedAt).toLocaleDateString() }}
+                  <span class="file-name">{{ entry.node.name }}</span>
+                  <span class="file-meta" v-if="entry.node.itemType === 'resource'">
+                    {{ new Date(entry.node.updatedAt).toLocaleDateString() }}
+                  </span>
+                  <span class="file-meta" v-else-if="entry.node.itemType === 'folder'">
+                    {{ $t('resource.types.folder') }}
                   </span>
                 </div>
               </div>
 
               <!-- Actions for Files -->
-              <div v-if="node.itemType === 'resource'" class="file-actions">
+              <div v-if="entry.node.itemType === 'resource'" class="file-actions">
                 <el-button
                   type="primary"
                   link
                   size="small"
-                  @click.stop="handleManageFile(node)"
+                  @click.stop="handleManageFile(entry.node)"
                 >
                   <el-icon><Setting /></el-icon>
                   {{ $t('kb.config.file.configTask') }}
@@ -134,7 +144,7 @@
                   type="danger"
                   link
                   size="small"
-                  @click.stop="handleDeleteFile(node)"
+                  @click.stop="handleDeleteFile(entry.node)"
                 >
                   {{ $t('common.action.delete') }}
                 </el-button>
@@ -152,7 +162,7 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { Upload, Document, QuestionFilled, Setting, Folder } from '@element-plus/icons-vue'
+import { Upload, Document, QuestionFilled, Setting, Folder, ArrowDown, ArrowRight } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
 import { useResourceStore } from '@/stores/resourceStore'
@@ -362,27 +372,36 @@ const handleDeleteFile = async (file: Resource) => {
   } catch {}
 }
 
-// Flatten tree for simple list rendering in mobile view
-// Preserves folder structure logic if needed, but here we just show a flat list for simplicity
-// or we can keep tree logic. Let's keep it simple: flatten.
-const flattenTree = (nodes: ResourceNode[]): Resource[] => {
-  const result: Resource[] = []
-  const traverse = (items: ResourceNode[]) => {
-    for (const item of items) {
-      // We only show resources (files) directly, or handle folders if needed
-      // For KB, usually it's files. But if folders exist:
-      if (item.itemType === 'folder') {
-        // Optional: handle folders
-      } else if (item.itemType === 'resource') {
-        result.push(item as unknown as Resource)
-      }
-      if (item.children && item.children.length > 0) {
-        traverse(item.children)
-      }
+// 分层展示：文件夹可展开/收起，文件带缩进，避免把目录结构拍平
+interface VisibleTreeNode {
+  node: Resource
+  depth: number
+}
+
+const expandedFolderIds = ref<Set<string>>(new Set())
+
+function buildVisibleNodes(items: ResourceNode[], depth = 0, out: VisibleTreeNode[] = []): VisibleTreeNode[] {
+  for (const item of items) {
+    out.push({ node: item as unknown as Resource, depth })
+    const children = item.children
+    if (children && children.length > 0 && expandedFolderIds.value.has(item.id)) {
+      buildVisibleNodes(children, depth + 1, out)
     }
   }
-  traverse(nodes)
-  return result
+  return out
+}
+
+const visibleNodes = computed(() => buildVisibleNodes(kbTreeData.value))
+
+function handleTreeEntryClick(entry: VisibleTreeNode) {
+  if (entry.node.itemType === 'folder') {
+    const next = new Set(expandedFolderIds.value)
+    if (next.has(entry.node.id)) next.delete(entry.node.id)
+    else next.add(entry.node.id)
+    expandedFolderIds.value = next
+    return
+  }
+  handleNodeClick(entry.node)
 }
 
 const handleNodeClick = (node: Resource) => {

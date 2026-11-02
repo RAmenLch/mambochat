@@ -82,6 +82,14 @@
                 <span class="model-type-tag">{{ model.model_type }}</span>
               </div>
               <div class="card-desc">{{ model.modelId }}</div>
+              <div class="card-meta">
+                <span v-if="modelMetaPrimary(model)" class="meta-item">{{ modelMetaPrimary(model) }}</span>
+                <span v-for="mod in modelModalities(model)" :key="mod" class="meta-tag">{{ mod }}</span>
+              </div>
+              <div v-if="modelParams(model).length > 0" class="card-params">
+                <span v-for="param in modelParams(model)" :key="param" class="param-tag">{{ param }}</span>
+                <span v-if="modelParams(model).length >= PARAM_PREVIEW_LIMIT" class="param-tag more">+</span>
+              </div>
             </div>
             <button class="action-btn action-danger" @click.stop="handleDeleteModel(model)">
               <el-icon :size="16"><Delete /></el-icon>
@@ -127,6 +135,7 @@ import { storeToRefs } from 'pinia';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Plus, Edit, Delete, ArrowRight, ArrowLeft, Download, MoreFilled, Star } from '@element-plus/icons-vue';
 import { useProviderStore } from '@/stores/providerStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import type { AIProviderWithModels, AIModel, AIModelBase } from '@/api/types';
 import { useSystemConfigStore } from '@/stores/systemConfigStore';
 
@@ -135,6 +144,7 @@ import MobileModelFormDialog from './dialogs/MobileModelFormDialog.vue';
 import MobileFetchModelsDialog from './dialogs/MobileFetchModelsDialog.vue';
 
 const { t } = useI18n();
+const settingsStore = useSettingsStore();
 const providerStore = useProviderStore();
 const { providers, isLoading } = storeToRefs(providerStore);
 
@@ -152,9 +162,55 @@ const fetchedModels = ref<AIModelBase[]>([]);
 const existingModelIds = ref<string[]>([]);
 const systemConfigStore = useSystemConfigStore();
 
+// --- 模型卡片信息（上下文长度 / 输出上限 / 模态 / 参数预览） ---
+const PARAM_PREVIEW_LIMIT = 6
+
+const formatTokens = (n: number): string => {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k`
+  return String(n)
+}
+
+/** 主指标：对话模型显示上下文/输出，向量模型显示维度 */
+function modelMetaPrimary(model: AIModel): string {
+  const meta = model.meta_config
+  if (!meta) return ''
+  if (model.model_type === 'embedding') {
+    return meta.embedding_dimension ? `dim ${meta.embedding_dimension}` : ''
+  }
+  const parts: string[] = []
+  if (meta.context_length) parts.push(`ctx ${formatTokens(meta.context_length)}`)
+  if (meta.max_output_tokens) parts.push(`out ${formatTokens(meta.max_output_tokens)}`)
+  return parts.join(' · ')
+}
+
+/** 输入/输出模态标签 */
+function modelModalities(model: AIModel): string[] {
+  const meta = model.meta_config
+  if (!meta) return []
+  const tags = new Set<string>()
+  for (const m of meta.input_modalities ?? []) tags.add(m)
+  for (const m of meta.output_modalities ?? []) tags.add(`${m}↗`)
+  return [...tags]
+}
+
+/** 支持的参数预览（超出上限截断） */
+function modelParams(model: AIModel): string[] {
+  const params = model.meta_config?.supported_parameters ?? []
+  return params.slice(0, PARAM_PREVIEW_LIMIT)
+}
+
 onMounted(async () => {
   await systemConfigStore.fetchSystemConfig();
   await providerStore.fetchProviders();
+  // 恢复上次选中的服务商（与桌面一致，读取全局设置中的记录）
+  if (!settingsStore.globalSettings?.last_selected_provider_id) {
+    await settingsStore.fetchGlobalSettings();
+  }
+  const lastId = settingsStore.globalSettings?.last_selected_provider_id;
+  if (lastId) {
+    selectedProvider.value = providers.value.find(p => p.id === lastId) ?? null;
+  }
 });
 
 watch(providers, (newPros) => {
@@ -263,6 +319,12 @@ const onDialogSubmitted = () => { providerStore.fetchProviders(); };
 .card-desc { font-size: 12px; color: var(--el-text-color-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .model-type-tag { font-size: 11px; font-weight: 500; color: var(--el-color-info); background: var(--el-color-info-light-9); padding: 1px 6px; border-radius: 4px; }
+.card-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.card-meta .meta-item { font-size: 11px; color: var(--el-text-color-secondary); }
+.card-meta .meta-tag { font-size: 10px; padding: 0 4px; border-radius: 3px; color: var(--el-color-primary); background: var(--el-color-primary-light-9); }
+.card-params { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
+.param-tag { font-size: 10px; padding: 0 4px; border-radius: 3px; color: var(--el-text-color-secondary); background: var(--el-fill-color-light); }
+.param-tag.more { color: var(--el-color-primary); }
 
 .card-actions { display: flex; gap: 4px; margin-right: 6px; flex-shrink: 0; }
 .action-btn {
