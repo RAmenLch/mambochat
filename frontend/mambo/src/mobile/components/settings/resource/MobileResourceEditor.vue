@@ -98,7 +98,9 @@
                         :src="fileDownloadUrl"
                         fit="contain"
                         class="preview-image"
+                        :style="imageBoxStyle"
                         :preview-src-list="[fileDownloadUrl]"
+                        @load="onImageLoad"
                        />
                        <el-icon v-else :size="60" class="file-icon"><Document /></el-icon>
                     </div>
@@ -264,6 +266,7 @@ import { useResourceStore } from '@/stores/resourceStore'
 import { uploadResourceFile } from '@/api/kbService'
 import type { ResourceWithVersions, ResourceVersion, ResourceVersionCreate } from '@/api/types'
 import ResourceUniversalEditor from '@/components/common/ResourceUniversalEditor.vue'
+import { useImageAspectBox } from '@/composables/useImageAspectBox'
 import MobileResourceVersionBar from './MobileResourceVersionBar.vue'
 import MobileKnowledgeBaseFileDetail from './MobileKnowledgeBaseFileDetail.vue'
 
@@ -334,6 +337,10 @@ const isEditableFile = computed(() => {
 
 const fileDownloadUrl = computed(() => {
   return currentFileInfo.value?.url ?? ''
+})
+
+const { boxStyle: imageBoxStyle, onImageLoad } = useImageAspectBox(fileDownloadUrl, {
+  maxHeight: 240,
 })
 
 const isFormDirty = computed(() => {
@@ -976,7 +983,7 @@ async function handleConfirmNewVersion() {
 
 .preview-image {
   max-width: 100%;
-  max-height: 180px;
+  display: block;
 }
 
 .file-info {

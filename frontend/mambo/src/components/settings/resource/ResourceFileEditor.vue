@@ -1,6 +1,6 @@
 <!-- frontend/mambo/src/components/settings/resource/ResourceFileEditor.vue -->
 <template>
-  <div class="file-uploader-area" :class="{ 'is-editable-layout': isEditable }">
+  <div class="file-uploader-area" :class="{ 'is-editable-layout': isEditable }" ref="uploaderAreaRef">
     <!-- Case 1: Editable File -->
     <div v-if="isEditable" class="editable-file-layout">
       <!-- Left: Compact Info -->
@@ -58,75 +58,76 @@
 
     <!-- Case 2: Non-editable File -->
     <template v-else>
-      <div v-if="fileInfo" class="file-info-card">
-        <!-- Image Preview -->
-        <div v-if="isImage" class="file-preview-image">
-          <el-image
-            :src="fileInfo.url"
-            :preview-src-list="[fileInfo.url]"
-            fit="contain"
-            class="preview-img"
+      <div class="file-body">
+        <div v-if="fileInfo" class="file-info-card" :class="{ 'is-image': isImage }">
+          <!-- Image Preview -->
+          <div v-if="isImage" class="file-preview-image" :style="imageBoxStyle">
+            <el-image
+              :src="fileInfo.url"
+              :preview-src-list="[fileInfo.url]"
+              fit="contain"
+              class="preview-img"
+              @load="onImageLoad"
+            >
+              <template #error>
+                <div class="image-slot">
+                  <el-icon><Picture /></el-icon>
+                  <span>Load failed</span>
+                </div>
+              </template>
+            </el-image>
+          </div>
+
+          <!-- Generic File Icon -->
+          <div v-else class="file-preview-icon">
+            <el-icon :size="64"><Document /></el-icon>
+          </div>
+
+          <div class="file-meta-content">
+            <h3 class="file-name" :title="fileInfo.filename">{{ fileInfo.filename }}</h3>
+            <div class="file-details">
+              <el-tag size="small" type="info">{{ fileInfo.mime_type }}</el-tag>
+              <span class="file-size">{{ formatFileSize(fileInfo.size) }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Empty State -->
+        <div v-else class="file-empty-state">
+          <el-icon :size="64" class="empty-icon"><DocumentAdd /></el-icon>
+          <p class="empty-text">No file uploaded</p>
+        </div>
+
+        <!-- File Actions -->
+        <div class="file-action-bar">
+          <a v-if="fileInfo" :href="fileInfo.url" target="_blank" rel="noopener" class="download-link">
+            <el-button :icon="Download">{{ t('resource.editor.downloadFile') }}</el-button>
+          </a>
+          <el-upload
+            action="#"
+            :auto-upload="false"
+            :show-file-list="false"
+            :on-change="onFileChange"
+            :disabled="isUploading"
           >
-            <template #error>
-              <div class="image-slot">
-                <el-icon><Picture /></el-icon>
-                <span>Load failed</span>
-              </div>
+            <template #trigger>
+              <el-button type="primary" :loading="isUploading" :icon="Upload">
+                {{ fileInfo ? t('resource.editor.uploadNew') : t('resource.editor.uploadFile') }}
+              </el-button>
             </template>
-          </el-image>
+          </el-upload>
         </div>
-
-        <!-- Generic File Icon -->
-        <div v-else class="file-preview-icon">
-          <el-icon :size="64"><Document /></el-icon>
-        </div>
-
-        <div class="file-meta-content">
-          <h3 class="file-name" :title="fileInfo.filename">{{ fileInfo.filename }}</h3>
-          <div class="file-details">
-            <el-tag size="small" type="info">{{ fileInfo.mime_type }}</el-tag>
-            <span class="file-size">{{ formatFileSize(fileInfo.size) }}</span>
-          </div>
-          <div class="file-actions">
-            <a :href="fileInfo.url" target="_blank" class="download-link">
-              <el-button type="primary" link icon="Download">{{t('resource.editor.downloadFile')}}</el-button>
-            </a>
-          </div>
-        </div>
-      </div>
-
-      <!-- Empty State -->
-      <div v-else class="file-empty-state">
-        <el-icon :size="64" class="empty-icon"><DocumentAdd /></el-icon>
-        <p class="empty-text">No file uploaded</p>
-      </div>
-
-      <!-- Upload Action -->
-      <div class="upload-actions">
-        <el-upload
-          action="#"
-          :auto-upload="false"
-          :show-file-list="false"
-          :on-change="onFileChange"
-          :disabled="isUploading"
-        >
-          <template #trigger>
-            <el-button type="primary" :loading="isUploading">
-              <el-icon class="el-icon--left"><Upload /></el-icon>
-              {{ fileInfo ? t('resource.editor.uploadNew') : t('resource.editor.uploadFile')}}
-            </el-button>
-          </template>
-        </el-upload>
       </div>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { Document, Upload, Picture, DocumentAdd, EditPen } from '@element-plus/icons-vue'
+import { computed, ref } from 'vue'
+import { Document, Upload, Picture, DocumentAdd, Download, EditPen } from '@element-plus/icons-vue'
 import type { FileResponse } from '@/api/types'
 import ResourceUniversalEditor from '@/components/common/ResourceUniversalEditor.vue'
+import { useImageAspectBox } from '@/composables/useImageAspectBox'
 import type { UploadFile } from 'element-plus'
 import {useI18n} from "vue-i18n";
 const { t } = useI18n()
@@ -154,6 +155,13 @@ const isImage = computed(() => {
 
 const isEditable = computed(() => props.fileInfo?.editable ?? false)
 
+const uploaderAreaRef = ref<HTMLElement | null>(null)
+
+const { boxStyle: imageBoxStyle, onImageLoad } = useImageAspectBox(
+  computed(() => props.fileInfo?.url ?? ''),
+  { container: uploaderAreaRef, reservedHeight: 210, maxHeight: 520, minHeight: 140 }
+)
+
 const formatFileSize = (bytes: number): string => {
   if (bytes === 0) return '0 B'
   const k = 1024
@@ -171,13 +179,21 @@ const onFileChange = (uploadFile: UploadFile) => {
 /* 样式保持不变 */
 .file-uploader-area {
   flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 40px;
-  gap: 32px;
+  padding: 20px 24px;
   overflow-y: auto;
+}
+
+.file-body {
+  margin: auto 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
 }
 
 .file-uploader-area.is-editable-layout {
@@ -248,23 +264,42 @@ const onFileChange = (uploadFile: UploadFile) => {
   flex-direction: column;
   align-items: center;
   gap: 16px;
-  padding: 24px;
+  padding: 20px;
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 8px;
   background-color: var(--el-fill-color-lighter);
   width: 100%;
-  max-width: 400px;
+  max-width: 420px;
+}
+
+.file-info-card.is-image {
+  max-width: 680px;
+  padding: 16px;
 }
 
 .file-preview-image {
   width: 100%;
-  height: 200px;
+  height: 160px;
   display: flex;
   justify-content: center;
   align-items: center;
   background-color: #fff;
-  border-radius: 4px;
+  border-radius: 6px;
   overflow: hidden;
+}
+
+.preview-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.file-action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .file-preview-icon {

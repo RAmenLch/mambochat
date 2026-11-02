@@ -49,8 +49,8 @@
         <!-- File Resource Preview -->
         <template v-else-if="selectedResources[0].resourceType === 'file'">
           <div v-if="currentFileInfo" class="file-preview-wrapper">
-            <div v-if="isImage" class="file-preview-image">
-              <el-image :src="currentFileInfo.url" :preview-src-list="[currentFileInfo.url]" fit="contain" class="preview-img">
+            <div v-if="isImage" class="file-preview-image" :style="imageBoxStyle">
+              <el-image :src="currentFileInfo.url" :preview-src-list="[currentFileInfo.url]" fit="contain" class="preview-img" @load="onImageLoad">
                 <template #error>
                   <div class="image-slot"><el-icon><Picture /></el-icon><span>{{ $t('resource.attachment.imageLoadFailed') }}</span></div>
                 </template>
@@ -162,6 +162,7 @@ import { computed, ref, watch } from 'vue';
 import { Document, Picture, Collection, Reading, Loading } from '@element-plus/icons-vue';
 import type { FileResponse, Resource } from '@/api/types';
 import { getFileContent } from '@/api/fileService';
+import { useImageAspectBox } from '@/composables/useImageAspectBox';
 
 const props = defineProps<{
   selectedResources: Resource[];
@@ -178,6 +179,11 @@ const isResourceImage = (resource: Resource): boolean => {
   const mime = resource.latest_version?.file_info?.mime_type;
   return mime ? mime.startsWith('image/') : false;
 };
+
+const { boxStyle: imageBoxStyle, onImageLoad } = useImageAspectBox(
+  computed(() => currentFileInfo.value?.url ?? ''),
+  { maxHeight: 320 }
+);
 
 const fileInfoOf = (resource: Resource): FileResponse | null =>
   resource.latest_version?.file_info || null;
@@ -327,7 +333,7 @@ const formatFileSize = (bytes: number): string => {
 
 .file-preview-image {
   width: 100%;
-  max-height: 400px;
+  height: 200px;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -340,6 +346,7 @@ const formatFileSize = (bytes: number): string => {
 .preview-img {
   width: 100%;
   height: 100%;
+  display: block;
 }
 
 .file-generic {
