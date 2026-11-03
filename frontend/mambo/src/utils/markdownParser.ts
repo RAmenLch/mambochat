@@ -2,7 +2,8 @@
 
 import MarkdownIt from 'markdown-it'
 import markdownItLinkAttributes from 'markdown-it-link-attributes'
-import markdownItKatex from '@iktakahiro/markdown-it-katex'
+import texmath from 'markdown-it-texmath'
+import katex from 'katex'
 import DOMPurify from 'dompurify'
 
 /**
@@ -134,7 +135,21 @@ export const md = new MarkdownIt({
       rel: 'noopener noreferrer',
     },
   })
-  .use(markdownItKatex)
+  .use(texmath, {
+    engine: katex,
+    delimiters: ['brackets', 'dollars'],
+  })
+
+/**
+ * texmath 默认不给块级规则注册 alt 链，因此 `\[ ... \]` 无法打断段落：
+ * 紧跟在正文行之后（中间没有空行）时会被当作普通文本。重新注册并补上 alt，
+ * 使其与 `$$ ... $$` 一样可以中断段落。
+ */
+md.block.ruler.at(
+  'math_block',
+  texmath.block(texmath.rules.brackets.block[1]),
+  { alt: ['paragraph', 'reference', 'blockquote', 'list'] },
+)
 
 const base64ImageRegex = /!\[(.*?)\]\((data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+)\)/g
 
@@ -296,6 +311,9 @@ function parseTextAndCode(text: string, baseOffset: number): ParsedBlock[] {
         type: 'html',
         content: DOMPurify.sanitize(rawHtml, {
           ADD_TAGS: [
+            // texmath 的公式容器模板
+            'eq',
+            'eqn',
             'math',
             'semantics',
             'mrow',

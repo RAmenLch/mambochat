@@ -46,7 +46,6 @@
     "vue-router": "^4.5.1"
   },
   "devDependencies": {
-    "@iktakahiro/markdown-it-katex": "^4.0.1",
     "@tsconfig/node22": "^22.0.2",
     "@types/cropperjs": "^1.1.5",
     "@types/dompurify": "^3.0.5",
@@ -61,6 +60,7 @@
     "eslint": "^9.31.0",
     "eslint-plugin-vue": "~10.3.0",
     "jiti": "^2.4.2",
+    "markdown-it-texmath": "^1.0.0",
     "npm-run-all2": "^8.0.4",
     "prettier": "3.6.2",
     "typescript": "~5.8.0",
