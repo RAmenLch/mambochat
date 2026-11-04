@@ -22,6 +22,7 @@
               <AvatarUploader
                 :title="$t('agent.avatar')"
                 :avatar-url="resolveFileUrl(form.agentAvatarUrl) ?? null"
+                :name="form.name"
                 :icon="User"
                 :is-loading="isAvatarLoading"
                 @upload="handleUploadAvatar"
@@ -295,7 +296,7 @@
                       @close="handleRemoveSubAgent(subAgent.id)"
                     >
                       <div class="tag-inner">
-                        <el-avatar v-if="!(subAgent as any)._deleted" :size="14" :src="resolveFileUrl(subAgent.agentAvatarUrl) ?? undefined" :icon="User" class="tag-avatar" />
+                        <AgentAvatar v-if="!(subAgent as any)._deleted" :size="14" :name="subAgent.name" :src="resolveFileUrl(subAgent.agentAvatarUrl)" class="tag-avatar" />
                         <el-icon v-else><WarningFilled /></el-icon>
                         <span class="tag-text">{{ subAgent.name }}</span>
                       </div>
@@ -1133,6 +1134,7 @@ import { getResourceDetails } from '@/api/resourceService';
 import type { Resource, Agent, HitlToolInfo, GoalLoopToolInfo, MamboAgentParameters, GoalLoopConfig, TailToolConfig } from '@/api/types';
 
 import AvatarUploader from '../AvatarUploader.vue';
+import AgentAvatar from '@/components/common/AgentAvatar.vue';
 import ResourceSelectorDialog from '@/components/common/dialogs/ResourceSelectorDialog.vue';
 import AgentSelectorDialog from './dialogs/AgentSelectorDialog.vue';
 import MountedResourceTags from '@/components/common/MountedResourceTags.vue';

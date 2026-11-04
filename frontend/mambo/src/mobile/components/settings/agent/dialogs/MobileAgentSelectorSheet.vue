@@ -38,8 +38,7 @@
               @click="toggleSelection(agent)"
             >
               <div class="item-left">
-                <el-avatar v-if="agent.agentAvatarUrl" :size="38" :src="agent.agentAvatarUrl" />
-                <el-avatar v-else :size="38" :icon="User" />
+                <AgentAvatar :size="38" :name="agent.name" :src="agent.agentAvatarUrl" />
                 <div class="item-info">
                   <span class="item-name">{{ agent.name }}</span>
                   <span class="item-desc">{{ agent.description || $t('common.msg.noDescription') }}</span>
@@ -68,8 +67,9 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
-import { Search, User, Close, Select } from '@element-plus/icons-vue';
+import { Search, Close, Select } from '@element-plus/icons-vue';
 import { getAgents } from '@/api/agentService';
+import AgentAvatar from '@/components/common/AgentAvatar.vue';
 import type { Agent } from '@/api/types';
 
 const props = defineProps<{

@@ -11,9 +11,13 @@
         class="avatar-uploader-trigger"
       >
         <el-tooltip :content="t('settings.avatar.uploadTip')" placement="top" :show-after="500">
-          <el-avatar :size="80" :src="resolvedAvatarUrl || ''" v-loading="isLoading">
-            <component :is="icon" v-if="icon" />
-          </el-avatar>
+          <AgentAvatar
+            :size="80"
+            :name="name"
+            :src="resolvedAvatarUrl"
+            :fallback-icon="icon"
+            v-loading="isLoading"
+          />
         </el-tooltip>
       </el-upload>
     </div>
@@ -65,6 +69,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
 import { resolveFileUrl } from '@/services/electronUrl'
+import AgentAvatar from '@/components/common/AgentAvatar.vue'
 import type { UploadRequestOptions, UploadRawFile } from 'element-plus'
 import Cropper from 'cropperjs'
 import 'cropperjs/dist/cropper.css'
@@ -74,6 +79,8 @@ const props = defineProps<{
   avatarUrl: string | null
   icon: Component
   isLoading: boolean
+  /** 名称：无自定义头像时以首字符作为默认头像（仅 Agent 场景传入） */
+  name?: string
 }>()
 
 const resolvedAvatarUrl = computed(() => resolveFileUrl(props.avatarUrl))

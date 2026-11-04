@@ -8,9 +8,14 @@
     @mouseleave="showActions = false"
   >
     <div class="message-avatar" v-if="!hideAvatar">
-      <el-avatar :src="avatarUrl || ''">
-        <el-icon v-if="message.role === 'user'"><User /></el-icon>
-        <el-icon v-else><Cpu /></el-icon>
+      <AgentAvatar
+        v-if="message.role === 'assistant'"
+        :name="assistantAgentName"
+        :src="avatarUrl"
+        :fallback-icon="Cpu"
+      />
+      <el-avatar v-else :src="avatarUrl || ''">
+        <el-icon><User /></el-icon>
       </el-avatar>
     </div>
 
@@ -132,6 +137,7 @@ import { copyToClipboard } from '@/utils/clipboard'
 import { getFileContent, updateFileContent } from '@/api/fileService'
 import { resolveFileUrl } from '@/services/electronUrl'
 
+import AgentAvatar from '@/components/common/AgentAvatar.vue'
 import MessageEditDialog from './dialogs/MessageEditDialog.vue'
 import ZipHistoryCard from './ZipHistoryCard.vue'
 import MessageMinimizedArea from './message/MessageMinimizedArea.vue'
@@ -249,6 +255,15 @@ const roleClass = computed(() => ({
   'is-assistant': props.message.role === 'assistant',
 }))
 
+/** 当前会话绑定的 Agent（非 Agent 会话为 null），用于无自定义头像时取名称首字符 */
+const currentAgent = computed(() => {
+  const currentChat = sessionStore.currentChat
+  if (currentChat?.chatMode !== 'agent' || !currentChat.agentId) return null
+  return agentStore.allAgents.find(a => a.id === currentChat.agentId) ?? null
+})
+
+const assistantAgentName = computed(() => currentAgent.value?.name ?? '')
+
 const avatarUrl = computed(() => {
   if (props.message.role === 'user') {
     return resolveFileUrl(globalSettings.value.user_avatar_url)
@@ -264,12 +279,9 @@ const avatarUrl = computed(() => {
       return miniAvatarSub.file_info.url
     }
 
-    const currentChat = sessionStore.currentChat
-    if (currentChat?.chatMode === 'agent' && currentChat.agentId) {
-      const agent = agentStore.allAgents.find(a => a.id === currentChat.agentId)
-      if (agent && agent.agentAvatarUrl) {
-        return resolveFileUrl(agent.agentAvatarUrl)
-      }
+    // Agent 会话：无自定义头像时交由 AgentAvatar 用名称首字符兜底
+    if (currentAgent.value) {
+      return currentAgent.value.agentAvatarUrl ? resolveFileUrl(currentAgent.value.agentAvatarUrl) : null
     }
     return resolveFileUrl(globalSettings.value.ai_avatar_url)
   }

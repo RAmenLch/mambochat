@@ -48,7 +48,12 @@
                     :class="{ active: agentFilter === option.value }"
                     @click="selectAgentFilter(option.value)"
                   >
-                    <el-avatar v-if="option.avatar" :size="18" :src="option.avatar" />
+                    <AgentAvatar
+                      v-if="option.avatar !== undefined"
+                      :size="18"
+                      :name="option.label"
+                      :src="option.avatar"
+                    />
                     <el-icon v-else class="agent-filter-icon">
                       <component :is="option.icon" />
                     </el-icon>
@@ -66,7 +71,12 @@
                 :title="activeAgentFilterLabel"
                 @click="agentFilterPopoverVisible = true"
               >
-                <el-avatar v-if="activeAgentFilterAvatar" :size="14" :src="activeAgentFilterAvatar" />
+                <AgentAvatar
+                  v-if="activeAgentFilterOption?.avatar !== undefined"
+                  :size="14"
+                  :name="activeAgentFilterLabel"
+                  :src="activeAgentFilterAvatar"
+                />
                 <span class="agent-filter-chip-label">{{ activeAgentFilterLabel }}</span>
               </button>
               <el-tooltip
@@ -87,11 +97,12 @@
         <template #item-icon="{ data }">
           <template v-if="data.itemType === 'folder' && data.folderType === 'group'">
             <div v-if="getGroupMemberAvatars(data.id).length" class="tree-group-avatar">
-              <el-avatar
-                v-for="(url, i) in getGroupMemberAvatars(data.id).slice(0, 3)"
+              <AgentAvatar
+                v-for="(member, i) in getGroupMemberAvatars(data.id).slice(0, 3)"
                 :key="i"
                 :size="14"
-                :src="url"
+                :name="member.name"
+                :src="member.avatar"
                 class="tree-group-avatar-item"
                 :style="{ zIndex: 3 - i }"
               />
@@ -102,13 +113,12 @@
             <Folder />
           </el-icon>
           <template v-else-if="data.chatMode === 'agent' && data.agentId">
-            <el-avatar
-              v-if="getAgentAvatarUrl(data.agentId)"
+            <AgentAvatar
               :size="18"
-              :src="getAgentAvatarUrl(data.agentId)!"
+              :name="getAgentName(data.agentId)"
+              :src="getAgentAvatarUrl(data.agentId)"
               class="tree-agent-avatar"
             />
-            <el-icon v-else><User /></el-icon>
           </template>
           <el-icon v-else>
             <ChatDotRound />
@@ -249,7 +259,7 @@ import { onMounted, computed, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRouter, useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, EditPen, CopyDocument, Search, FolderChecked, Sort, User, UserFilled, Filter, Check, Files, QuestionFilled } from '@element-plus/icons-vue';
+import { Plus, Delete, Setting, Folder, ChatDotRound, FolderAdd, EditPen, CopyDocument, Search, FolderChecked, Sort, UserFilled, Filter, Check, Files, QuestionFilled } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import type { AllowDropType } from 'element-plus/es/components/tree/src/tree.type';
 /** Element Plus Tree 内部节点结构（避免依赖内部路径） */
@@ -285,6 +295,7 @@ import { useTreeController, type DialogPayload, type DialogConfirmPayload } from
 import { useChatReadHeartbeat } from '@/composables/useChatReadHeartbeat';
 
 import ExplorerTree from '@/components/common/ExplorerTree.vue';
+import AgentAvatar from '@/components/common/AgentAvatar.vue';
 import EntityFormDialog, { type SelectConfigOption, type ConfirmPayload } from '@/components/common/EntityFormDialog.vue';
 import SearchDialog from '@/components/chat/dialogs/SearchDialog.vue';
 import ChatHeader from '@/components/chat/ChatHeader.vue';
@@ -366,12 +377,19 @@ const isAgentFiltering = computed(() => agentFilter.value !== AGENT_FILTER_ALL);
 
 const knownAgentIds = computed(() => new Set(agentStore.allAgents.map(a => a.id)));
 
-// 获取 Agent 头像 URL
-const getAgentAvatarUrl = (agentId: string | null | undefined): string | null => {
+// 获取 Agent 展示信息（名称 + 自定义头像 URL），供默认头像取首字符使用
+const getAgentDisplay = (agentId: string | null | undefined): { name: string; avatar: string | null } | null => {
   if (!agentId) return null;
   const agent = agentStore.allAgents.find(a => a.id === agentId);
-  return agent?.agentAvatarUrl ? (resolveFileUrl(agent.agentAvatarUrl) ?? null) : null;
+  if (!agent) return null;
+  return { name: agent.name, avatar: agent.agentAvatarUrl ? (resolveFileUrl(agent.agentAvatarUrl) ?? null) : null };
 };
+
+const getAgentAvatarUrl = (agentId: string | null | undefined): string | null =>
+  getAgentDisplay(agentId)?.avatar ?? null;
+
+const getAgentName = (agentId: string | null | undefined): string =>
+  getAgentDisplay(agentId)?.name ?? '';
 
 const agentFilterOptions = computed((): AgentFilterOption[] => {
   const options: AgentFilterOption[] = [
@@ -482,31 +500,32 @@ const agentOptions = computed((): SelectConfigOption[] => {
 // 群组节点头像：把成员 Agent 的头像叠在一起，营造"群"的感觉
 const groupChatStore = useGroupChatStore();
 
-const groupMemberAvatars = computed<Record<string, string[]>>(() => {
-  const map: Record<string, string[]> = {};
+const groupMemberAvatars = computed<Record<string, { name: string; avatar: string | null }[]>>(() => {
+  const map: Record<string, { name: string; avatar: string | null }[]> = {};
   const groups = chatList.value.filter(c => c.itemType === 'folder' && c.folderType === 'group');
   for (const group of groups) {
-    const urls: string[] = [];
+    const members: { name: string; avatar: string | null }[] = [];
     // 来源1：会话列表中已加载的群成员子会话
     for (const child of chatList.value) {
       if (child.parentId === group.id && child.itemType === 'chat' && child.agentId) {
-        const url = getAgentAvatarUrl(child.agentId);
-        if (url) urls.push(url);
+        const display = getAgentDisplay(child.agentId);
+        if (display) members.push(display);
       }
     }
     // 来源2：已打开的群详情
-    if (urls.length === 0) {
+    if (members.length === 0) {
       for (const member of groupChatStore.details[group.id]?.members ?? []) {
-        const url = getAgentAvatarUrl(member.agentId);
-        if (url) urls.push(url);
+        const display = getAgentDisplay(member.agentId);
+        if (display) members.push(display);
       }
     }
-    if (urls.length) map[group.id] = urls;
+    if (members.length) map[group.id] = members;
   }
   return map;
 });
 
-const getGroupMemberAvatars = (groupId: string): string[] => groupMemberAvatars.value[groupId] ?? [];
+const getGroupMemberAvatars = (groupId: string): { name: string; avatar: string | null }[] =>
+  groupMemberAvatars.value[groupId] ?? [];
 
 /** 为列表中尚未取得成员头像的群节点补拉一次群详情（失败时退化为默认群图标） */
 async function ensureGroupMemberAvatars() {

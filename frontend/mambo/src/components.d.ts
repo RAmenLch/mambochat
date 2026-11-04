@@ -12,6 +12,7 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AgentAvatar: typeof import('./components/common/AgentAvatar.vue')['default']
     AgentEditor: typeof import('./components/settings/agent/AgentEditor.vue')['default']
     AgentManager: typeof import('./components/settings/AgentManager.vue')['default']
     AgentPackageImportDialog: typeof import('./components/settings/agent/AgentPackageImportDialog.vue')['default']
@@ -158,6 +159,7 @@ declare module 'vue' {
 
 // For TSX support
 declare global {
+  const AgentAvatar: typeof import('./components/common/AgentAvatar.vue')['default']
   const AgentEditor: typeof import('./components/settings/agent/AgentEditor.vue')['default']
   const AgentManager: typeof import('./components/settings/AgentManager.vue')['default']
   const AgentPackageImportDialog: typeof import('./components/settings/agent/AgentPackageImportDialog.vue')['default']

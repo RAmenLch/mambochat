@@ -31,13 +31,12 @@
         <el-table-column :label="$t('agent.name')" prop="name">
           <template #default="{ row }">
             <div class="agent-info">
-              <el-avatar
-                v-if="row.agentAvatarUrl"
+              <AgentAvatar
                 :size="24"
+                :name="row.name"
                 :src="row.agentAvatarUrl"
                 class="agent-avatar"
               />
-              <el-icon v-else class="agent-icon"><User /></el-icon>
               <span>{{ row.name }}</span>
             </div>
           </template>
@@ -61,8 +60,9 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue';
-import { Search, User } from '@element-plus/icons-vue';
+import { Search } from '@element-plus/icons-vue';
 import { getAgents } from '@/api/agentService';
+import AgentAvatar from '@/components/common/AgentAvatar.vue';
 import type { Agent } from '@/api/types';
 
 const props = defineProps<{
@@ -145,10 +145,6 @@ function handleConfirm() {
 }
 .agent-avatar {
   background-color: transparent;
-}
-.agent-icon {
-  font-size: 18px;
-  color: var(--el-text-color-secondary);
 }
 .selected-count {
   margin-top: 12px;

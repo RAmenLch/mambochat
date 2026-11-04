@@ -99,7 +99,7 @@
                 :class="{ active: agentFilter === option.value }"
                 @click="selectAgentFilter(option.value)"
               >
-                <el-avatar v-if="option.avatar" :size="20" :src="option.avatar" />
+                <AgentAvatar v-if="option.avatar !== undefined" :size="20" :name="option.label" :src="option.avatar" />
                 <el-icon v-else :size="20"><component :is="option.icon" /></el-icon>
                 <span class="agent-filter-label">{{ option.label }}</span>
                 <el-icon v-if="agentFilter === option.value" :size="16" class="agent-filter-check">
@@ -249,6 +249,7 @@ interface ElTreeNode {
   childNodes: ElTreeNode[]
 }
 import ExplorerTree from '@/components/common/ExplorerTree.vue'
+import AgentAvatar from '@/components/common/AgentAvatar.vue'
 import ChatStatusBadge from '@/components/chat/ChatStatusBadge.vue'
 import EntityFormDialog from '@/components/common/EntityFormDialog.vue'
 import MoveTargetDialog from './dialogs/MoveTargetDialog.vue'

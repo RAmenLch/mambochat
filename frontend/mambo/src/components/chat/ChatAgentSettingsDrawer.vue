@@ -34,10 +34,10 @@
 
           <div class="preview-section">
             <div class="agent-header">
-              <el-avatar
+              <AgentAvatar
                 :size="48"
-                :src="resolveFileUrl(selectedAgent.agentAvatarUrl) || ''"
-                :icon="User"
+                :name="selectedAgent.name"
+                :src="resolveFileUrl(selectedAgent.agentAvatarUrl)"
                 class="agent-avatar"
               />
               <div class="agent-title-info">
@@ -216,7 +216,7 @@
                   :title="sub.name !== t('common.status.unknownAgent') ? $t('common.action.edit') : $t('resource.deletedTooltip')"
                 >
                   <div class="tag-inner">
-                    <el-avatar v-if="sub.avatar && sub.name !== t('common.status.unknownAgent')" :size="14" :src="resolveFileUrl(sub.avatar) ?? undefined" class="tag-avatar" />
+                    <AgentAvatar v-if="sub.name !== t('common.status.unknownAgent')" :size="14" :name="sub.name" :src="resolveFileUrl(sub.avatar)" class="tag-avatar" />
                     <el-icon v-else><User /></el-icon>
                     <span>{{ sub.name === t('common.status.unknownAgent') ? sub.name + ' (ID: ' + sub.id.substring(0, 8) + '...)' : sub.name }}</span>
                   </div>
@@ -477,6 +477,7 @@ import type {
   TailToolConfig,
 } from '@/api/types';
 import MountedResourceTags from '@/components/common/MountedResourceTags.vue';
+import AgentAvatar from '@/components/common/AgentAvatar.vue';
 import { isDefaultChatName } from '@/utils/chatName';
 
 const props = defineProps<{

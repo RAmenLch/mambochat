@@ -44,10 +44,10 @@
         <!-- 1. 基本信息 -->
         <div class="preview-section">
           <div class="agent-header">
-            <el-avatar
+            <AgentAvatar
               :size="56"
-              :src="selectedAgent.agentAvatarUrl || ''"
-              :icon="User"
+              :name="selectedAgent.name"
+              :src="selectedAgent.agentAvatarUrl"
               class="agent-avatar"
             />
             <div class="agent-title-info">
@@ -148,8 +148,7 @@
                 class="custom-agent-tag"
               >
                 <div class="tag-inner">
-                  <el-avatar v-if="sub.avatar" :size="14" :src="sub.avatar" class="tag-avatar" />
-                  <el-icon v-else><User /></el-icon>
+                  <AgentAvatar :size="14" :name="sub.name" :src="sub.avatar" class="tag-avatar" />
                   <span>{{ sub.name }}</span>
                 </div>
               </el-tag>
@@ -392,7 +391,7 @@
 import { reactive, watch, computed, ref, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { ElMessage } from 'element-plus';
-import { User, Cpu, Document, MagicStick, Connection, Monitor, Setting, WarningFilled, Close, Aim, Finished, Picture, View } from '@element-plus/icons-vue';
+import { Cpu, Document, MagicStick, Connection, Monitor, Setting, WarningFilled, Close, Aim, Finished, Picture, View } from '@element-plus/icons-vue';
 
 import { useAgentStore } from '@/stores/agentStore';
 import { useProviderStore } from '@/stores/providerStore';
@@ -410,6 +409,7 @@ import type {
   TailToolConfig,
 } from '@/api/types';
 import MountedResourceTags from '@/components/common/MountedResourceTags.vue';
+import AgentAvatar from '@/components/common/AgentAvatar.vue';
 import { isDefaultChatName } from '@/utils/chatName';
 
 const props = defineProps<{

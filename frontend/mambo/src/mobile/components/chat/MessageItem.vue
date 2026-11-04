@@ -86,9 +86,7 @@
     <!-- AI 消息：左侧气泡 -->
     <template v-else-if="message.role === 'assistant'">
       <div class="message-avatar">
-        <el-avatar :size="28" :src="avatarUrl || ''">
-          <el-icon :size="16"><Cpu /></el-icon>
-        </el-avatar>
+        <AgentAvatar :size="28" :name="assistantAgentName" :src="avatarUrl" :fallback-icon="Cpu" />
       </div>
 
       <div class="message-body assistant-body">
@@ -223,6 +221,7 @@ import ZipHistoryCard from './ZipHistoryCard.vue'
 import MobileAssistantBubble from './message/MobileAssistantBubble.vue'
 import MobileMessageEditDialog from '@/mobile/components/chat/dialogs/MobileMessageEditDialog.vue'
 import UsageInfo from '@/components/chat/UsageInfo.vue'
+import AgentAvatar from '@/components/common/AgentAvatar.vue'
 import { copyToClipboard } from '@/utils/clipboard'
 import { getFileContent, updateFileContent } from '@/api/fileService'
 import { type ParsedBlock } from '@/utils/markdownParser'
@@ -511,6 +510,14 @@ const roleClass = computed(() => ({
   'is-assistant': props.message.role === 'assistant',
 }))
 
+const currentAgent = computed(() => {
+  const currentChat = sessionStore.currentChat
+  if (currentChat?.chatMode !== 'agent' || !currentChat.agentId) return null
+  return agentStore.allAgents.find(a => a.id === currentChat.agentId) ?? null
+})
+
+const assistantAgentName = computed(() => currentAgent.value?.name ?? '')
+
 const avatarUrl = computed(() => {
   if (props.message.role === 'user') {
     return resolveFileUrl(globalSettings.value.user_avatar_url)
@@ -526,12 +533,9 @@ const avatarUrl = computed(() => {
       return miniAvatarSub.file_info.url
     }
 
-    const currentChat = sessionStore.currentChat
-    if (currentChat?.chatMode === 'agent' && currentChat.agentId) {
-      const agent = agentStore.allAgents.find(a => a.id === currentChat.agentId)
-      if (agent && agent.agentAvatarUrl) {
-        return resolveFileUrl(agent.agentAvatarUrl)
-      }
+    // Agent 会话：无自定义头像时交由 AgentAvatar 用名称首字符兜底
+    if (currentAgent.value) {
+      return currentAgent.value.agentAvatarUrl ? resolveFileUrl(currentAgent.value.agentAvatarUrl) : null
     }
     return resolveFileUrl(globalSettings.value.ai_avatar_url)
   }

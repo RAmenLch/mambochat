@@ -17,6 +17,7 @@
             <AvatarUploader
               :title="$t('agent.avatar')"
               :avatar-url="form.agentAvatarUrl"
+              :name="form.name"
               :icon="User"
               :is-loading="isAvatarLoading"
               @upload="handleUploadAvatar"
@@ -248,7 +249,7 @@
                 :key="sub.id"
                 class="chip chip-primary"
               >
-                <el-avatar :size="14" :src="sub.agentAvatarUrl ?? undefined" :icon="User" class="chip-avatar" />
+                <AgentAvatar :size="14" :name="sub.name" :src="sub.agentAvatarUrl" class="chip-avatar" />
                 <span class="chip-text">{{ sub.name }}</span>
                 <button class="chip-close" @click="handleRemoveSubAgent(sub.id)">&times;</button>
               </span>
@@ -859,6 +860,7 @@ import { getResourceDetails } from '@/api/resourceService';
 import type { Resource, Agent, AgentType, HitlToolInfo, GoalLoopToolInfo, MamboAgentParameters, GoalLoopConfig } from '@/api/types';
 
 import AvatarUploader from '@/components/settings/AvatarUploader.vue';
+import AgentAvatar from '@/components/common/AgentAvatar.vue';
 import ResourceSelectorDialog from '@/mobile/components/chat/dialogs/ResourceSelectorDialog.vue';
 import MobileAgentSelectorSheet from './dialogs/MobileAgentSelectorSheet.vue';
 import MountedResourceTags from '@/components/common/MountedResourceTags.vue';

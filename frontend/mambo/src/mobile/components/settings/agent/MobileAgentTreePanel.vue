@@ -34,13 +34,12 @@
           <Folder />
         </el-icon>
         <template v-else>
-            <el-avatar
-              v-if="(data as unknown as Agent).agentAvatarUrl"
-              :size="18"
-              :src="(data as unknown as Agent).agentAvatarUrl ?? undefined"
-              class="tree-agent-avatar"
-            />
-          <el-icon v-else><User /></el-icon>
+          <AgentAvatar
+            :size="18"
+            :name="(data as unknown as Agent).name"
+            :src="(data as unknown as Agent).agentAvatarUrl"
+            class="tree-agent-avatar"
+          />
         </template>
       </template>
     </ExplorerTree>
@@ -103,6 +102,7 @@ import { getAgent, getAgentChildren } from '@/api/agentService';
 import { buildChatTree } from '@/utils/treeHelper';
 import { useTreeController, type DialogPayload, type DialogConfirmPayload } from '@/composables/useTreeController';
 import ExplorerTree from '@/components/common/ExplorerTree.vue';
+import AgentAvatar from '@/components/common/AgentAvatar.vue';
 import EntityFormDialog from '@/components/common/EntityFormDialog.vue';
 import MobileAgentPackageImportDialog from './dialogs/MobileAgentPackageImportDialog.vue';
 import { downloadAgentPackage } from '@/api/agentPackageService';
