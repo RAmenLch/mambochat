@@ -265,6 +265,10 @@
                   <span v-else>{{ $t('common.status.disabled') }}</span>
                 </span>
               </div>
+              <div class="info-item">
+                <span class="info-label">{{ $t('agent.mcpThreshold') }}:</span>
+                <span class="info-value">{{ mamboPreview.mcpThreshold }}</span>
+              </div>
             </div>
             <div v-if="mamboPreview.memoryEnabled && displayMemoryResources.length > 0" class="ext-item" style="margin-top: 12px;">
               <div class="ext-label">{{ $t('agent.memoryResources') }}:</div>
@@ -295,9 +299,14 @@
           </div>
 
           <!-- Mambo 任务循环预览 -->
-          <div class="preview-section" v-if="goalLoopPreview">
-            <div class="section-title"><el-icon><Aim /></el-icon> {{ $t('agent.goalLoop.title') }}</div>
-            <div class="info-grid">
+          <div class="preview-section" v-if="selectedAgent.AgentType === 'Mambo'">
+            <div class="section-title">
+              <el-icon><Aim /></el-icon> {{ $t('agent.goalLoop.title') }}
+              <el-tag size="small" effect="light" :type="goalLoopPreview ? 'success' : 'info'">
+                {{ goalLoopPreview ? t('common.status.enabled') : t('common.status.disabled') }}
+              </el-tag>
+            </div>
+            <div class="info-grid" v-if="goalLoopPreview">
               <div class="info-item">
                 <span class="info-label">{{ $t('agent.goalLoop.mode') }}:</span>
                 <span class="info-value">{{ goalLoopModeLabel }}</span>
@@ -311,7 +320,7 @@
                 <span class="info-value">{{ goalLoopPreview.blocked_threshold }}</span>
               </div>
             </div>
-            <template v-if="goalLoopPreview.mode === 'preset'">
+            <template v-if="goalLoopPreview && goalLoopPreview.mode === 'preset'">
               <div class="info-item goal-objective-item" v-if="goalLoopPreview.objective">
                 <span class="info-label">{{ $t('agent.goalLoop.objective') }}:</span>
                 <span class="info-value goal-objective">{{ goalLoopPreview.objective }}</span>
@@ -353,6 +362,77 @@
             </div>
           </div>
 
+          <!-- Mambo 尾部工具调用预览 -->
+          <div class="preview-section" v-if="selectedAgent.AgentType === 'Mambo' && tailToolPreview">
+            <div class="section-title">
+              <el-icon><Finished /></el-icon> {{ $t('agent.tailTool.title') }}
+              <el-tag size="small" effect="light" :type="tailToolPreview.enabled ? 'success' : 'info'">
+                {{ tailToolPreview.enabled ? t('common.status.enabled') : t('common.status.disabled') }}
+              </el-tag>
+            </div>
+            <div class="info-grid" v-if="tailToolPreview.enabled">
+              <div class="info-item">
+                <span class="info-label">{{ $t('agent.tailTool.failMode') }}:</span>
+                <span class="info-value">{{ tailToolFailModeLabel }}</span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">{{ $t('agent.tailTool.maxRounds') }}:</span>
+                <span class="info-value">{{ tailToolPreview.max_rounds ?? 1 }}</span>
+              </div>
+              <div class="info-item" v-if="tailToolPreview.fail_mode === 'message' && tailToolPreview.fail_message">
+                <span class="info-label">{{ $t('agent.tailTool.failMessage') }}:</span>
+                <span class="info-value">{{ tailToolPreview.fail_message }}</span>
+              </div>
+            </div>
+            <div v-if="tailToolPreview.enabled && tailToolPreview.tasks && tailToolPreview.tasks.length > 0" class="ext-item" style="margin-top: 12px;">
+              <div class="ext-label">{{ $t('agent.tailTool.tasks') }}:</div>
+              <div class="ext-tags">
+                <el-tag v-for="task in tailToolPreview.tasks" :key="task.name" size="small" type="primary" effect="light" :title="task.instruction || ''">
+                  {{ task.name }}
+                </el-tag>
+              </div>
+            </div>
+          </div>
+
+          <!-- Mambo 生图工具预览 -->
+          <div class="preview-section" v-if="selectedAgent.AgentType === 'Mambo' && imageGenPreview">
+            <div class="section-title">
+              <el-icon><Picture /></el-icon> {{ $t('agent.imageGenEnable') }}
+              <el-tag size="small" effect="light" :type="imageGenPreview.enabled ? 'success' : 'info'">
+                {{ imageGenPreview.enabled ? t('common.status.enabled') : t('common.status.disabled') }}
+              </el-tag>
+            </div>
+            <div class="info-grid" v-if="imageGenPreview.enabled">
+              <div class="info-item">
+                <span class="info-label">{{ $t('agent.imageGenConfig') }}:</span>
+                <span class="info-value">{{ imageGenConfigName || $t('common.none') }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Mambo 多模态描述预览 -->
+          <div class="preview-section" v-if="selectedAgent.AgentType === 'Mambo' && multimodalPreview">
+            <div class="section-title">
+              <el-icon><View /></el-icon> {{ $t('agent.multimodalDescriber') }}
+              <el-tag size="small" effect="light" :type="multimodalPreview.enabled ? 'success' : 'info'">
+                {{ multimodalPreview.enabled ? t('common.status.enabled') : t('common.status.disabled') }}
+              </el-tag>
+            </div>
+            <div class="info-grid" v-if="multimodalPreview.enabled">
+              <div class="info-item">
+                <span class="info-label">{{ $t('agent.multimodalDescriberReadTimeout') }}:</span>
+                <span class="info-value">{{ multimodalPreview.read_timeout ?? 60 }}</span>
+              </div>
+              <div class="info-item" v-for="item in multimodalModelItems" :key="item.label">
+                <span class="info-label">{{ item.label }}:</span>
+                <span class="info-value">{{ item.value }}</span>
+              </div>
+            </div>
+            <div v-if="multimodalPreview.enabled && multimodalModelItems.length === 0" class="ext-empty" style="margin-top: 12px;">
+              {{ $t('agent.multimodalDescriberEmpty') }}
+            </div>
+          </div>
+
         </div>
       </el-scrollbar>
       <div v-else class="empty-agent-preview">
@@ -374,7 +454,7 @@ import { reactive, watch, computed, ref, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { User, Cpu, Document, MagicStick, Collection, Connection, Monitor, Setting, WarningFilled, Aim, QuestionFilled } from '@element-plus/icons-vue';
+import { User, Cpu, Document, MagicStick, Collection, Connection, Monitor, Setting, WarningFilled, Aim, QuestionFilled, Finished, Picture, View } from '@element-plus/icons-vue';
 import { resolveFileUrl } from '@/services/electronUrl';
 
 import { useAgentStore } from '@/stores/agentStore';
@@ -382,9 +462,20 @@ import { useProviderStore } from '@/stores/providerStore';
 import { useMcpStore } from '@/stores/mcpStore';
 import { useBackendStore } from '@/stores/backendStore';
 import { useSystemConfigStore } from '@/stores/systemConfigStore';
+import { useImageGenStore } from '@/stores/imageGenStore';
 import { getResourceDetails } from '@/api/resourceService';
 import { updateAgent } from '@/api/agentService';
-import type { Chat, ChatUpdate, Resource, Agent, GoalLoopConfig, LLMParameterDefinition } from '@/api/types';
+import type {
+  Chat,
+  ChatUpdate,
+  Resource,
+  Agent,
+  GoalLoopConfig,
+  LLMParameterDefinition,
+  ImageGenConfigRef,
+  MultimodalDescriberConfig,
+  TailToolConfig,
+} from '@/api/types';
 import MountedResourceTags from '@/components/common/MountedResourceTags.vue';
 import { isDefaultChatName } from '@/utils/chatName';
 
@@ -406,6 +497,7 @@ const providerStore = useProviderStore();
 const mcpStore = useMcpStore();
 const backendStore = useBackendStore();
 const systemConfigStore = useSystemConfigStore();
+const imageGenStore = useImageGenStore();
 
 const form = reactive({
   name: '',
@@ -514,9 +606,14 @@ const displaySubAgents = computed(() => {
 });
 
 // --- Mambo 专属配置预览 ---
-const mamboPreview = computed(() => {
+/** Agent 未落库 agentParameters 时按默认值渲染，避免整块预览缺失 */
+const mamboParams = computed<Record<string, any> | null>(() => {
   if (!selectedAgent.value || selectedAgent.value.AgentType !== 'Mambo') return null;
-  const params = (selectedAgent.value as any).agentParameters;
+  return (selectedAgent.value as any).agentParameters ?? {};
+});
+
+const mamboPreview = computed(() => {
+  const params = mamboParams.value;
   if (!params) return null;
   return {
     generalPurpose: params.include_general_purpose ?? false,
@@ -527,13 +624,14 @@ const mamboPreview = computed(() => {
     summaryEnabled: params.enable_summarization ?? false,
     summaryConfig: params.summarization_config ?? null,
     versionControlEnabled: params.version_control?.enabled ?? false,
+    mcpThreshold: params.mcp_direct_tool_threshold ?? 15,
   };
 });
 
 const securityReviewPreview = computed(() => {
-  if (!selectedAgent.value || selectedAgent.value.AgentType !== 'Mambo') return null;
-  const params = (selectedAgent.value as any).agentParameters;
-  const sr = params?.security_review;
+  const params = mamboParams.value;
+  if (!params) return null;
+  const sr = params.security_review;
   if (!sr) {
     return { enabled: false, model_id: null, model_name: '', system_prompt: null, review_tools: null };
   }
@@ -552,9 +650,61 @@ const securityReviewPreview = computed(() => {
 });
 
 const goalLoopPreview = computed<GoalLoopConfig | null>(() => {
-  if (!selectedAgent.value || selectedAgent.value.AgentType !== 'Mambo') return null;
-  const params = (selectedAgent.value as any).agentParameters;
-  return params?.goal_loop ?? null;
+  return mamboParams.value?.goal_loop ?? null;
+});
+
+const tailToolPreview = computed<TailToolConfig | null>(() => {
+  const params = mamboParams.value;
+  if (!params) return null;
+  return params.tail_tool ?? { enabled: false, fail_mode: 'silent', fail_message: null, tasks: [], max_rounds: 1 };
+});
+
+const tailToolFailModeLabel = computed(() => {
+  const mode = tailToolPreview.value?.fail_mode;
+  if (mode === 'message') return t('agent.tailTool.failModeMessage');
+  return t('agent.tailTool.failModeSilent');
+});
+
+const imageGenPreview = computed<ImageGenConfigRef | null>(() => {
+  const params = mamboParams.value;
+  if (!params) return null;
+  return params.image_gen ?? { enabled: false, configId: null };
+});
+
+const imageGenConfigName = computed(() => {
+  const configId = imageGenPreview.value?.configId;
+  if (!configId) return '';
+  return imageGenStore.configs.find(c => c.id === configId)?.name ?? '';
+});
+
+const multimodalPreview = computed<MultimodalDescriberConfig | null>(() => {
+  const params = mamboParams.value;
+  if (!params) return null;
+  return params.multimodal_describer ?? {
+    enabled: false,
+    image_model_id: null,
+    audio_model_id: null,
+    video_model_id: null,
+    file_model_id: null,
+    read_timeout: 60,
+  };
+});
+
+const multimodalModelItems = computed<Array<{ label: string; value: string }>>(() => {
+  const cfg = multimodalPreview.value;
+  if (!cfg) return [];
+  const bindings: Array<{ label: string; id?: string | null }> = [
+    { label: t('agent.multimodalDescriberImageLabel'), id: cfg.image_model_id },
+    { label: t('agent.multimodalDescriberAudioLabel'), id: cfg.audio_model_id },
+    { label: t('agent.multimodalDescriberVideoLabel'), id: cfg.video_model_id },
+    { label: t('agent.multimodalDescriberFileLabel'), id: cfg.file_model_id },
+  ];
+  return bindings
+    .filter(binding => !!binding.id)
+    .map(binding => ({
+      label: binding.label,
+      value: providerStore.allModels.find(m => m.id === binding.id)?.name ?? String(binding.id),
+    }));
 });
 
 const goalLoopModeLabel = computed(() => {
@@ -592,6 +742,9 @@ onMounted(() => {
   }
   if (backendStore.backendList.length === 0) {
     backendStore.fetchBackends();
+  }
+  if (imageGenStore.configs.length === 0) {
+    imageGenStore.fetchConfigs();
   }
 });
 
