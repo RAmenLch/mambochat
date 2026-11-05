@@ -90,6 +90,7 @@ export interface ImageRunRerunRequest {
   extra?: Record<string, any>
   path?: string
   timeout?: number
+  reference_images?: string[]
 }
 
 /** 图片重跑结果：record 为本次生成记录，files 为本次产出的图片子消息

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Annotated, Any, Awaitable, Callable, Literal, Optional
 
@@ -717,6 +718,8 @@ class TailToolMiddleware(AgentMiddleware):
                         is_tail_tool=True,
                         pending_file_path=path,
                         pending_file_timeout=data.get("timeout", 300),
+                        pending_file_deadline=time.time()
+                        + float(data.get("timeout") or 300),
                         show_tool_mode=mode,
                         pending_image_task_id=data.get("task_id"),
                         pending_image_prefix=data.get("prefix"),

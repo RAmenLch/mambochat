@@ -2,8 +2,9 @@
 
 实现了 MamboChat 生图工具标准 v2 的三个固定工具::
 
-    image_generate     prompt / resolution / negative_prompt / count / sync / extra
-                       -> {task_id, status, count, resolution}
+    image_generate     prompt / resolution / negative_prompt / count / sync /
+                       extra / reference_images
+                       -> {task_id, status, count, resolution, reference_count}
     image_task_status  task_id / wait_timeout
                        -> {task_id, status, progress, count, error}
     image_download     task_id / index -> ImageContent(...)
@@ -14,6 +15,8 @@
   （标准要求服务自己持久化任务状态，本文件即示范）。
 - 支持透传 ``extra``：``width`` / ``height`` / ``color``(r,g,b) / ``fail``。
 - 支持 ``resolution`` 分辨率（如 ``1024x1024``），优先级低于显式 ``width`` / ``height``。
+- 支持参考图 ``reference_images``（MCP ``ImageContent`` 列表）：数量 / 格式 / 体积
+  严格校验，超限或非法直接报错；占位色按首张参考图的摘要微调，证明图确实被消费。
 - ``image_task_status`` 支持 ``wait_timeout``：阻塞轮询、状态收敛即提前返回。
 
 启动方式（stdio，供 MCP 服务配置使用）::
@@ -34,6 +37,7 @@ import zlib
 from typing import Any, Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP, Image
+from mcp.types import ImageContent
 
 STATE_DIR = os.path.join(tempfile.gettempdir(), "mambo_image_gen_standard")
 TASKS_FILE = os.path.join(STATE_DIR, "tasks.json")
@@ -93,6 +97,65 @@ def _make_png(width: int, height: int, color: tuple[int, int, int]) -> bytes:
 
 
 # ---------------------------------------------------------------------------
+# 参考图校验（标准 v2.1：声明了 reference_images 就必须严格处理）
+# ---------------------------------------------------------------------------
+
+MAX_REFERENCE_IMAGES = 8
+MAX_REFERENCE_BYTES = 8 * 1024 * 1024
+MAX_REFERENCE_TOTAL_BYTES = 20 * 1024 * 1024
+
+
+def _validate_references(
+    reference_images: Optional[List[ImageContent]],
+) -> List[Dict[str, Any]]:
+    """校验平台下发的参考图，返回 ``[{mime, size, digest}]``。
+
+    数量超限、base64 无法解码、mime 非图片、体积超限一律报错——声明了能力
+    就必须真正处理，静默忽略只会产出用户不想要的结果。
+    """
+    if not reference_images:
+        return []
+
+    if len(reference_images) > MAX_REFERENCE_IMAGES:
+        raise ValueError(
+            f"参考图最多 {MAX_REFERENCE_IMAGES} 张，收到 {len(reference_images)} 张"
+        )
+
+    records: List[Dict[str, Any]] = []
+    total = 0
+    for position, image in enumerate(reference_images, start=1):
+        mime = str(getattr(image, "mimeType", "") or "").strip().lower()
+        if not mime.startswith("image/"):
+            raise ValueError(f"第 {position} 张参考图的 mimeType 不合规: {mime!r}")
+
+        raw = str(getattr(image, "data", "") or "")
+        if not raw.strip():
+            raise ValueError(f"第 {position} 张参考图数据为空")
+        try:
+            decoded = base64.b64decode(raw, validate=False)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"第 {position} 张参考图 base64 无法解码: {exc}") from exc
+        if not decoded:
+            raise ValueError(f"第 {position} 张参考图数据为空")
+
+        size = len(decoded)
+        if size > MAX_REFERENCE_BYTES:
+            raise ValueError(
+                f"第 {position} 张参考图体积 {size / 1024 / 1024:.1f}MB 超过上限 "
+                f"{MAX_REFERENCE_BYTES // (1024 * 1024)}MB"
+            )
+        total += size
+        if total > MAX_REFERENCE_TOTAL_BYTES:
+            raise ValueError(
+                f"参考图合计体积超过上限 {MAX_REFERENCE_TOTAL_BYTES // (1024 * 1024)}MB"
+            )
+
+        records.append({"mime": mime, "size": size, "digest": sum(decoded) % 256})
+
+    return records
+
+
+# ---------------------------------------------------------------------------
 # 任务状态持久化
 # ---------------------------------------------------------------------------
 
@@ -129,21 +192,35 @@ def image_generate(
     count: int = 1,
     sync: bool = True,
     extra: Optional[Dict[str, Any]] = None,
+    reference_images: Optional[List[ImageContent]] = None,
 ) -> Dict[str, Any]:
     """Generate placeholder images from a prompt.
 
     ``resolution`` sets the size, e.g. "1024x1024" / "768x1344".
+    ``reference_images`` accepts MCP ImageContent items
+    ({"type": "image", "data": "<base64>", "mimeType": "image/png"}); this
+    demo tints the placeholder with the first reference image's digest.
     Returns {"task_id": ..., "status": "completed"|"queued", "count": N, "resolution": "WxH"}.
     Extra keys are forwarded verbatim; unknown keys are ignored.
     """
     if not prompt or not str(prompt).strip():
         raise ValueError("prompt 不能为空")
 
+    references = _validate_references(reference_images)
+
     opts = dict(extra or {})
     size = _parse_resolution(resolution) or DEFAULT_SIZE
     width = int(opts.get("width") or size[0])
     height = int(opts.get("height") or size[1])
     color = opts.get("color") or DEFAULT_COLOR
+    if references and not opts.get("color"):
+        # 用参考图的摘要微调占位色，证明参考图确实被消费
+        digest = references[0]["digest"]
+        color = (
+            (DEFAULT_COLOR[0] + digest) % 256,
+            (DEFAULT_COLOR[1] + digest * 3) % 256,
+            (DEFAULT_COLOR[2] + digest * 7) % 256,
+        )
     if not (isinstance(color, (list, tuple)) and len(color) == 3):
         color = DEFAULT_COLOR
     color = tuple(max(0, min(int(c), 255)) for c in color)
@@ -170,6 +247,8 @@ def image_generate(
         "resolution": f"{width}x{height}",
         "prompt": prompt,
         "negative_prompt": negative_prompt,
+        "reference_count": len(references),
+        "references": references,
         "error": "extra.fail=true，演示失败返回" if failed else None,
         "created_at": time.time(),
     }
@@ -180,6 +259,7 @@ def image_generate(
         "status": tasks[task_id]["status"],
         "count": total,
         "resolution": tasks[task_id]["resolution"],
+        "reference_count": len(references),
     }
 
 

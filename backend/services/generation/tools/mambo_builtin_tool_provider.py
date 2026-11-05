@@ -2,6 +2,7 @@
 
 import json
 import mimetypes
+import time
 from typing import List, Optional, Dict, Any, AsyncGenerator
 
 from langchain_core.tools import BaseTool
@@ -156,6 +157,8 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
                                 context_participation_length=0,
                                 pending_file_path=path,
                                 pending_file_timeout=data.get("timeout", 300),
+                                pending_file_deadline=time.time()
+                                + float(data.get("timeout") or 300),
                                 show_tool_mode=data.get("mode", "Normal"),
                                 pending_image_task_id=data.get("task_id"),
                                 pending_image_prefix=data.get("prefix"),

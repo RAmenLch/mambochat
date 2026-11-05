@@ -399,7 +399,7 @@ class MamboAgentInitializer(AbstractAgentInitializer):
             from backend.crud import image_gen_crud
             from backend.services.generation.agent.image_gen.factory import (
                 ImageGenConfigError,
-                build_mcp_image_standard,
+                build_image_standard,
             )
 
             ig_config = await image_gen_crud.get_image_gen_config(self.db, ig.configId)
@@ -407,7 +407,7 @@ class MamboAgentInitializer(AbstractAgentInitializer):
                 logger.warning("生图配置 %s 不存在或已停用，跳过生图工具", ig.configId)
             else:
                 try:
-                    image_gen_standard = await build_mcp_image_standard(self.db, ig_config)
+                    image_gen_standard = await build_image_standard(self.db, ig_config)
                 except ImageGenConfigError as exc:
                     logger.warning("生图工具未启用: %s", exc)
                 else:

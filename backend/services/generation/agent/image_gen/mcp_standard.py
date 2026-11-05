@@ -18,10 +18,12 @@ from .standard import (
     IMAGE_TOOL_DOWNLOAD,
     IMAGE_TOOL_GENERATE,
     IMAGE_TOOL_STATUS,
+    REFERENCE_ARG,
     RESOLUTION_ARG,
     ImageBlob,
     ImageGenStandard,
     ImageGenToolError,
+    RefImage,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,12 +47,14 @@ class McpImageGenStandard(ImageGenStandard):
         default_sync: bool = True,
         default_resolution: str = "",
         default_wait_timeout: int = DEFAULT_WAIT_TIMEOUT,
+        supports_reference_images: bool = False,
     ) -> None:
         super().__init__(
             default_count=default_count,
             default_sync=default_sync,
             default_resolution=default_resolution,
             default_wait_timeout=default_wait_timeout,
+            supports_reference_images=supports_reference_images,
         )
 
         self._server_config = server_config
@@ -135,6 +139,7 @@ class McpImageGenStandard(ImageGenStandard):
         sync: bool,
         extra: Dict[str, Any],
         resolution: Optional[str] = None,
+        reference_images: Optional[List[RefImage]] = None,
     ) -> Dict[str, Any]:
         arguments: Dict[str, Any] = {
             "prompt": prompt,
@@ -145,6 +150,9 @@ class McpImageGenStandard(ImageGenStandard):
             arguments["negative_prompt"] = negative_prompt
         if resolution:
             arguments[RESOLUTION_ARG] = resolution
+        if reference_images:
+            # B 方案：arguments 内嵌 MCP ImageContent 结构
+            arguments[REFERENCE_ARG] = [img.to_content() for img in reference_images]
         arguments.update(extra or {})
 
         result = await self._call(IMAGE_TOOL_GENERATE, arguments)

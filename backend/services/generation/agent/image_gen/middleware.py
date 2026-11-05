@@ -7,7 +7,7 @@
 
 import json
 import logging
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.tools import StructuredTool
@@ -24,11 +24,14 @@ from .standard import (
     IMAGE_TOOL_GENERATE_SHOW,
     IMAGE_TOOL_NAMES,
     IMAGE_TOOL_STATUS,
+    MAX_REFERENCE_BYTES,
+    MAX_REFERENCE_IMAGES,
+    MAX_REFERENCE_TOTAL_BYTES,
     ImageDownloadArgs,
     ImageGenStandard,
-    ImageGenerateArgs,
-    ImageGenerateShowArgs,
     ImageStatusArgs,
+    generate_args_model,
+    generate_show_args_model,
 )
 
 logger = logging.getLogger(__name__)
@@ -43,6 +46,19 @@ _GENERATE_DESCRIPTION = (
     "'1024x1024' or '768x1344'; omit it to use the configured default. "
     "Extra parameters (width/height/steps/seed/model/...) can be passed through "
     "'extra' and are forwarded verbatim to the service."
+)
+
+# 支持参考图时追加的参数说明（不支持时该参数根本不进 schema）
+_REFERENCE_HINT = (
+    " 'reference_images' (optional) is a list of workspace virtual paths under "
+    "/workspace pointing at existing image files (uploaded user images live under "
+    "/.mambo/chat_user_file/, previously generated images under /workspace/images/). "
+    "The platform reads them and sends the image data to the backend to guide "
+    "generation (image-to-image / style or character reference). "
+    f"At most {MAX_REFERENCE_IMAGES} images, each ≤ "
+    f"{MAX_REFERENCE_BYTES // (1024 * 1024)}MB and ≤ "
+    f"{MAX_REFERENCE_TOTAL_BYTES // (1024 * 1024)}MB in total; png / jpeg / webp / "
+    "gif / bmp only. A missing file, unsupported format or exceeded limit is an error."
 )
 
 _STATUS_DESCRIPTION = (
@@ -127,6 +143,12 @@ class ImageGenMiddleware(AgentMiddleware):
         self._backend = backend
         self._session_factory = session_factory
 
+        # 后端不支持参考图时，该参数不出现在 schema / 描述里
+        self._with_reference = standard.supports_reference_images
+        ref_hint = _REFERENCE_HINT if self._with_reference else ""
+        self._generate_args_cls = generate_args_model(self._with_reference)
+        self._generate_show_args_cls = generate_show_args_model(self._with_reference)
+
         tools = []
         if enable_standard_tools:
             hint = _ONESHOT_HINT if enable_generate_show else ""
@@ -134,9 +156,9 @@ class ImageGenMiddleware(AgentMiddleware):
                 [
                     StructuredTool.from_function(
                         name=IMAGE_TOOL_GENERATE,
-                        description=_GENERATE_DESCRIPTION + hint,
+                        description=_GENERATE_DESCRIPTION + ref_hint + hint,
                         coroutine=self._agenerate,
-                        args_schema=ImageGenerateArgs,
+                        args_schema=self._generate_args_cls,
                         infer_schema=False,
                     ),
                     StructuredTool.from_function(
@@ -156,7 +178,7 @@ class ImageGenMiddleware(AgentMiddleware):
                 ]
             )
         if enable_generate_show:
-            description = _GENERATE_SHOW_DESCRIPTION
+            description = _GENERATE_SHOW_DESCRIPTION + ref_hint
             if not standard.default_sync:
                 description += _ASYNC_ONESHOT_HINT
             tools.append(
@@ -164,7 +186,7 @@ class ImageGenMiddleware(AgentMiddleware):
                     name=IMAGE_TOOL_GENERATE_SHOW,
                     description=description,
                     coroutine=self._agenerate_show,
-                    args_schema=ImageGenerateShowArgs,
+                    args_schema=self._generate_show_args_cls,
                     infer_schema=False,
                 )
             )
@@ -182,17 +204,22 @@ class ImageGenMiddleware(AgentMiddleware):
         count: int = 1,
         sync: Optional[bool] = None,
         extra: Optional[Dict[str, Any]] = None,
+        reference_images: Optional[List[str]] = None,
     ) -> str:
         return await self._safe(
             IMAGE_TOOL_GENERATE,
             lambda: self._standard.run_generate(
-                ImageGenerateArgs(
-                    prompt=prompt,
-                    resolution=resolution or "",
-                    negative_prompt=negative_prompt,
-                    count=count,
-                    sync=sync,
-                    extra=extra,
+                self._backend,
+                self._generate_args_cls(
+                    **self._generate_args(
+                        prompt=prompt,
+                        resolution=resolution,
+                        negative_prompt=negative_prompt,
+                        count=count,
+                        sync=sync,
+                        extra=extra,
+                        reference_images=reference_images,
+                    )
                 )
             ),
         )
@@ -239,24 +266,45 @@ class ImageGenMiddleware(AgentMiddleware):
         mode: str = "Normal",
         path: Optional[str] = None,
         timeout: Optional[int] = None,
+        reference_images: Optional[List[str]] = None,
     ) -> str:
         return await self._safe(
             IMAGE_TOOL_GENERATE_SHOW,
             lambda: self._standard.run_generate_show(
                 self._backend,
                 self._session_factory,
-                ImageGenerateShowArgs(
-                    prompt=prompt,
-                    resolution=resolution or "",
-                    negative_prompt=negative_prompt,
-                    count=count,
-                    extra=extra,
-                    mode=mode,
-                    path=path,
-                    timeout=timeout,
+                self._generate_show_args_cls(
+                    **self._generate_show_args(
+                        prompt=prompt,
+                        resolution=resolution,
+                        negative_prompt=negative_prompt,
+                        count=count,
+                        extra=extra,
+                        mode=mode,
+                        path=path,
+                        timeout=timeout,
+                        reference_images=reference_images,
+                    )
                 ),
             ),
         )
+
+    def _generate_args(self, *, reference_images: Optional[List[str]], **fields: Any) -> Dict[str, Any]:
+        """后端不支持参考图时不把该键塞进 args（避免被 pydantic 静默丢弃）。"""
+        payload: Dict[str, Any] = dict(fields)
+        payload["resolution"] = payload.get("resolution") or ""
+        if self._with_reference:
+            payload["reference_images"] = reference_images
+        return payload
+
+    def _generate_show_args(
+        self, *, reference_images: Optional[List[str]], **fields: Any
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = dict(fields)
+        payload["resolution"] = payload.get("resolution") or ""
+        if self._with_reference:
+            payload["reference_images"] = reference_images
+        return payload
 
     # ------------------------------------------------------------------
     # 异常安全

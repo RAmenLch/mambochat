@@ -19,8 +19,18 @@ class ImageGenConfig(Base):
     name = Column(String(100), nullable=False, unique=True)
     description = Column(TEXT, nullable=True)
 
-    # 绑定的 MCP 服务（McpServer.id）
-    mcpServerId = Column(String(36), nullable=False, index=True)
+    # 后端类型：'mcp'（绑定实现生图标准的 MCP 服务）/ 'model'（绑定系统 Chat 模型）
+    backendType = Column(String(20), nullable=False, default="mcp")
+
+    # 绑定的 MCP 服务（McpServer.id），backendType='mcp' 时必填
+    mcpServerId = Column(String(36), nullable=True, index=True)
+
+    # 绑定的系统模型（AIModel.id），backendType='model' 时必填
+    aiModelId = Column(String(36), nullable=True, index=True)
+
+    # 参考图能力：None 表示自动探测（MCP 查 schema / 模型恒支持），
+    # True / False 表示手动钉住
+    supportsReferenceImages = Column(Boolean, nullable=True)
 
     # 默认参数
     defaultCount = Column(Integer, nullable=False, default=1)

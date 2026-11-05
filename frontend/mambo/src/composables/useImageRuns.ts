@@ -283,5 +283,8 @@ export function describeRunArgs(args: Record<string, any> | null): string {
   if (prompt) parts.push(prompt.length > 60 ? `${prompt.slice(0, 60)}…` : prompt)
   if (args.resolution) parts.push(String(args.resolution))
   if (args.count && Number(args.count) > 1) parts.push(`×${args.count}`)
+  if (Array.isArray(args.reference_images) && args.reference_images.length > 0) {
+    parts.push(`ref×${args.reference_images.length}`)
+  }
   return parts.join(' · ')
 }

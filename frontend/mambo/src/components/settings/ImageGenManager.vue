@@ -30,9 +30,21 @@
         </template>
       </el-table-column>
 
-      <el-table-column :label="t('settings.imageGen.columns.mcpServer')" min-width="140">
+      <el-table-column :label="t('settings.imageGen.columns.backend')" min-width="180">
         <template #default="{ row }">
-          <span>{{ serverName(row.mcpServerId) }}</span>
+          <el-tag size="small" effect="plain" :type="row.backendType === 'model' ? 'success' : 'info'">
+            {{ row.backendType === 'model' ? t('settings.imageGen.backend.model') : t('settings.imageGen.backend.mcp') }}
+          </el-tag>
+          <span class="backend-name">{{ backendLabel(row) }}</span>
+          <el-tag
+            v-if="referenceEnabled(row)"
+            size="small"
+            effect="plain"
+            type="warning"
+            class="ml-4"
+          >
+            {{ t('settings.imageGen.reference.supported') }}
+          </el-tag>
         </template>
       </el-table-column>
 
@@ -109,7 +121,19 @@
           <el-input v-model="form.description" type="textarea" :rows="2" />
         </el-form-item>
 
-        <el-form-item :label="t('settings.imageGen.form.mcpServer')" required>
+        <el-form-item :label="t('settings.imageGen.form.backend')" required class="has-hint">
+          <el-radio-group v-model="form.backendType" @change="onBackendTypeChange">
+            <el-radio value="mcp">{{ t('settings.imageGen.backend.mcp') }}</el-radio>
+            <el-radio value="model">{{ t('settings.imageGen.backend.model') }}</el-radio>
+          </el-radio-group>
+          <div class="form-hint">{{ t('settings.imageGen.form.backendHint') }}</div>
+        </el-form-item>
+
+        <el-form-item
+          v-if="form.backendType === 'mcp'"
+          :label="t('settings.imageGen.form.mcpServer')"
+          required
+        >
           <el-select v-model="form.mcpServerId" :placeholder="t('settings.imageGen.form.mcpServerPlaceholder')" style="width: 100%">
             <el-option
               v-for="server in selectableServers"
@@ -118,6 +142,48 @@
               :value="server.id"
             />
           </el-select>
+        </el-form-item>
+
+        <el-form-item v-else :label="t('settings.imageGen.form.aiModel')" required class="has-hint">
+          <el-select
+            v-model="form.aiModelId"
+            filterable
+            :placeholder="t('settings.imageGen.form.aiModelPlaceholder')"
+            style="width: 100%"
+            @change="onModelChange"
+          >
+            <el-option-group
+              v-for="group in modelOptions"
+              :key="group.label"
+              :label="group.label"
+            >
+              <el-option
+                v-for="model in group.options"
+                :key="model.id"
+                :label="model.name"
+                :value="model.id"
+              />
+            </el-option-group>
+          </el-select>
+          <el-checkbox v-model="showAllModels" class="ml-4">
+            {{ t('settings.imageGen.form.showAllModels') }}
+          </el-checkbox>
+          <div class="form-hint">{{ t('settings.imageGen.form.aiModelHint') }}</div>
+        </el-form-item>
+
+        <el-form-item :label="t('settings.imageGen.form.reference')" class="has-hint">
+          <el-select v-model="referenceCapabilityModel" style="width: 200px">
+            <el-option :label="t('settings.imageGen.reference.auto')" value="auto" />
+            <el-option :label="t('settings.imageGen.reference.supported')" value="supported" />
+            <el-option :label="t('settings.imageGen.reference.unsupported')" value="unsupported" />
+          </el-select>
+          <div class="form-hint">
+            {{
+              form.backendType === 'model'
+                ? t('settings.imageGen.form.referenceModelHint')
+                : t('settings.imageGen.form.referenceHint')
+            }}
+          </div>
         </el-form-item>
 
         <el-form-item :label="t('settings.imageGen.form.count')">
@@ -184,24 +250,30 @@ import { Plus } from '@element-plus/icons-vue';
 
 import { useImageGenStore } from '@/stores/imageGenStore';
 import { useMcpStore } from '@/stores/mcpStore';
-import type { ImageGenConfig } from '@/api/types';
+import { useProviderStore } from '@/stores/providerStore';
+import type { ImageGenBackendType, ImageGenConfig } from '@/api/types';
 
 const { t } = useI18n();
 const imageGenStore = useImageGenStore();
 const mcpStore = useMcpStore();
+const providerStore = useProviderStore();
 
 const dialogVisible = ref(false);
 const isEditing = ref(false);
 const saving = ref(false);
 const editingId = ref<string | null>(null);
 const checkingIds = ref<Set<string>>(new Set());
+const showAllModels = ref(false);
 
 const resolutionPresets = ['512x512', '768x768', '1024x1024', '1024x1536', '1536x1024', '768x1344', '1344x768'];
 
 const form = reactive({
   name: '',
   description: '',
+  backendType: 'mcp' as ImageGenBackendType,
   mcpServerId: '',
+  aiModelId: '',
+  supportsReferenceImages: null as boolean | null,
   defaultCount: 1,
   defaultResolution: '1024x1024',
   defaultSync: true,
@@ -214,14 +286,82 @@ const form = reactive({
 
 const selectableServers = computed(() => mcpStore.availableServices.filter(s => s.isEnabled));
 
-function serverName(id: string): string {
+/** 能出图的模型优先（meta_config.output_modalities 含 image） */
+function isImageOutputModel(model: any): boolean {
+  const modalities = model?.meta_config?.output_modalities;
+  return Array.isArray(modalities) && modalities.map((m: string) => String(m).toLowerCase()).includes('image');
+}
+
+const modelOptions = computed(() => {
+  return providerStore.providers
+    .map(provider => ({
+      label: provider.name,
+      options: provider.models.filter(model => showAllModels.value || isImageOutputModel(model)),
+    }))
+    .filter(group => group.options.length > 0);
+});
+
+function serverName(id: string | null): string {
+  if (!id) return '-';
   return mcpStore.availableServices.find(s => s.id === id)?.name || id.slice(0, 8);
 }
+
+function modelName(id: string | null): string {
+  if (!id) return '-';
+  return providerStore.allModels.find(m => m.id === id)?.name || id.slice(0, 8);
+}
+
+function backendLabel(row: ImageGenConfig): string {
+  return row.backendType === 'model' ? modelName(row.aiModelId) : serverName(row.mcpServerId);
+}
+
+/** 列表标签用：显式 true，或模型后端的「自动」（= 按支持处理） */
+function referenceEnabled(row: ImageGenConfig): boolean {
+  if (row.supportsReferenceImages === true) return true;
+  return row.supportsReferenceImages === null && row.backendType === 'model';
+}
+
+/**
+ * 按模型能力推断参考图能力：模型声明了 input_modalities 时据此判断能否吃图，
+ * 未声明则返回 null（= 自动，后端对模型后端默认按支持处理）。
+ */
+function modelCapability(modelId: string): boolean | null {
+  const modalities = providerStore.allModels.find(m => m.id === modelId)?.meta_config?.input_modalities;
+  if (!Array.isArray(modalities) || modalities.length === 0) return null;
+  return modalities.map(m => String(m).toLowerCase()).includes('image');
+}
+
+/** 用户换模型时按能力初始化，之后仍可手动改 */
+function onModelChange(modelId: string) {
+  if (!modelId) return;
+  form.supportsReferenceImages = modelCapability(modelId);
+}
+
+/** 切换后端类型时重置为对应默认：MCP 走探测，模型按已选模型能力 */
+function onBackendTypeChange(value: string | number | boolean | undefined) {
+  form.supportsReferenceImages = value === 'model' && form.aiModelId
+    ? modelCapability(form.aiModelId)
+    : null;
+}
+
+/** 参考图能力三态（null=自动）：el-select 取值不接受 null，用字符串哨兵中转 */
+const referenceCapabilityModel = computed<'auto' | 'supported' | 'unsupported'>({
+  get: () => {
+    if (form.supportsReferenceImages == null) return 'auto';
+    return form.supportsReferenceImages ? 'supported' : 'unsupported';
+  },
+  set: (value) => {
+    form.supportsReferenceImages = value === 'auto' ? null : value === 'supported';
+  },
+});
 
 function resetForm() {
   form.name = '';
   form.description = '';
+  form.backendType = 'mcp';
   form.mcpServerId = '';
+  form.aiModelId = '';
+  form.supportsReferenceImages = null;
   form.defaultCount = 1;
   form.defaultResolution = '1024x1024';
   form.defaultSync = true;
@@ -230,6 +370,7 @@ function resetForm() {
   form.enableStandardTools = true;
   form.enableGenerateShow = true;
   form.isEnabled = true;
+  showAllModels.value = false;
 }
 
 function handleCreate() {
@@ -244,7 +385,10 @@ function handleEdit(row: ImageGenConfig) {
   editingId.value = row.id;
   form.name = row.name;
   form.description = row.description || '';
-  form.mcpServerId = row.mcpServerId;
+  form.backendType = row.backendType === 'model' ? 'model' : 'mcp';
+  form.mcpServerId = row.mcpServerId || '';
+  form.aiModelId = row.aiModelId || '';
+  form.supportsReferenceImages = row.supportsReferenceImages ?? null;
   form.defaultCount = row.defaultCount;
   form.defaultResolution = row.defaultResolution || '1024x1024';
   form.defaultSync = row.defaultSync;
@@ -257,8 +401,16 @@ function handleEdit(row: ImageGenConfig) {
 }
 
 async function handleSave() {
-  if (!form.name.trim() || !form.mcpServerId) {
+  if (!form.name.trim()) {
     ElMessage.warning(t('settings.imageGen.form.requiredHint'));
+    return;
+  }
+  if (form.backendType === 'mcp' && !form.mcpServerId) {
+    ElMessage.warning(t('settings.imageGen.form.mcpServerRequired'));
+    return;
+  }
+  if (form.backendType === 'model' && !form.aiModelId) {
+    ElMessage.warning(t('settings.imageGen.form.aiModelRequired'));
     return;
   }
   if (!form.enableStandardTools && !form.enableGenerateShow) {
@@ -270,7 +422,10 @@ async function handleSave() {
     const payload = {
       name: form.name.trim(),
       description: form.description || null,
-      mcpServerId: form.mcpServerId,
+      backendType: form.backendType,
+      mcpServerId: form.backendType === 'mcp' ? form.mcpServerId : null,
+      aiModelId: form.backendType === 'model' ? form.aiModelId : null,
+      supportsReferenceImages: form.supportsReferenceImages ?? null,
       defaultCount: form.defaultCount || 1,
       defaultResolution: form.defaultResolution || '1024x1024',
       defaultSync: form.defaultSync,
@@ -307,8 +462,11 @@ async function handleCheck(row: ImageGenConfig) {
   checkingIds.value = new Set(checkingIds.value).add(row.id);
   try {
     const result = await imageGenStore.checkConfig(row.id);
+    const referenceNote = result.supports_reference_images
+      ? t('settings.imageGen.checkReferenceOn')
+      : t('settings.imageGen.checkReferenceOff');
     if (result.status === 'healthy') {
-      ElMessage.success(t('settings.imageGen.checkPassed'));
+      ElMessage.success(`${t('settings.imageGen.checkPassed')} · ${referenceNote}`);
     } else if (result.missing_tools.length) {
       ElMessage.warning(t('settings.imageGen.checkMissing', { tools: result.missing_tools.join(', ') }));
     } else {
@@ -324,7 +482,11 @@ async function handleCheck(row: ImageGenConfig) {
 }
 
 onMounted(async () => {
-  await Promise.all([imageGenStore.fetchConfigs(), mcpStore.fetchAvailableServices()]);
+  await Promise.all([
+    imageGenStore.fetchConfigs(),
+    mcpStore.fetchAvailableServices(),
+    providerStore.providers.length ? Promise.resolve() : providerStore.fetchProviders(),
+  ]);
 });
 </script>
 
@@ -382,6 +544,10 @@ onMounted(async () => {
 
 .name-text {
   font-weight: 500;
+}
+
+.backend-name {
+  margin-left: 6px;
 }
 
 .description-text {

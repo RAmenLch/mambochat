@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 
 from mambo_agents.backends.protocol import BackendProtocol
 from mambo_agents.backends.schemas import VirtualPath
@@ -61,6 +61,21 @@ DEFAULT_COUNT = 1
 MAX_COUNT = 8
 MAX_PREFIX_LEN = 64
 
+# 参考图（契约参数 reference_images）：
+#   LLM 侧给 workspace 虚拟路径列表，平台读取后以 MCP ImageContent JSON
+#   （{"type": "image", "data": <base64>, "mimeType": ...}）下发给实现类。
+REFERENCE_ARG = "reference_images"
+MAX_REFERENCE_IMAGES = 8
+MAX_REFERENCE_BYTES = 8 * 1024 * 1024
+MAX_REFERENCE_TOTAL_BYTES = 20 * 1024 * 1024
+REFERENCE_MIME_WHITELIST: Tuple[str, ...] = (
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/gif",
+    "image/bmp",
+)
+
 # 分辨率参数名（契约字段，形如 1024x1024）
 RESOLUTION_ARG = "resolution"
 DEFAULT_RESOLUTION = "1024x1024"
@@ -99,6 +114,13 @@ _MIME_EXT = {
     "image/tiff": ".tiff",
     "image/avif": ".avif",
 }
+
+# 只有这些后缀会被当成「调用方指定的扩展名」。异步流程要在下载前登记路径，
+# 必须让预测与落盘用同一个扩展名，否则会登记 ``x.png`` 却写出 ``x.jpg``，
+# 后台轮询器永远等不到文件（详见 TargetPlan 的 ext 说明）。
+_IMAGE_EXT_WHITELIST = frozenset(
+    {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".avif"}
+)
 
 
 class ImageGenerateArgs(BaseModel):
@@ -231,6 +253,51 @@ class ImageGenerateShowArgs(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# 参考图参数（按后端能力动态挂在 args schema 上）
+# ---------------------------------------------------------------------------
+
+_REFERENCE_FIELD = (
+    Optional[List[str]],
+    Field(
+        default=None,
+        description=(
+            "参考图列表：工作区（/workspace 之下）虚拟路径数组，例如 "
+            "[\"/.mambo/chat_user_file/xxx.png\"]。用于图生图 / 风格或人物参考。"
+            f"最多 {MAX_REFERENCE_IMAGES} 张，单张 ≤ "
+            f"{MAX_REFERENCE_BYTES // (1024 * 1024)}MB、合计 ≤ "
+            f"{MAX_REFERENCE_TOTAL_BYTES // (1024 * 1024)}MB，仅支持 "
+            "png / jpeg / webp / gif / bmp。超出限制或文件不存在会直接报错。"
+        ),
+    ),
+)
+
+_REF_ARGS_CACHE: Dict[str, Any] = {}
+
+
+def _args_model_with_refs(base: type, name: str) -> type:
+    """在锁定的 args 模型上追加 ``reference_images``，并按名字缓存。"""
+    cached = _REF_ARGS_CACHE.get(name)
+    if cached is None:
+        cached = create_model(name, __base__=base, reference_images=_REFERENCE_FIELD)
+        _REF_ARGS_CACHE[name] = cached
+    return cached
+
+
+def generate_args_model(with_reference: bool) -> type:
+    """``image_generate`` 的参数模型：后端不支持参考图时该参数完全不出现。"""
+    if not with_reference:
+        return ImageGenerateArgs
+    return _args_model_with_refs(ImageGenerateArgs, "ImageGenerateArgsRef")
+
+
+def generate_show_args_model(with_reference: bool) -> type:
+    """``image_generate_show`` 的参数模型（同上）。"""
+    if not with_reference:
+        return ImageGenerateShowArgs
+    return _args_model_with_refs(ImageGenerateShowArgs, "ImageGenerateShowArgsRef")
+
+
+# ---------------------------------------------------------------------------
 # 分辨率解析
 # ---------------------------------------------------------------------------
 
@@ -280,6 +347,27 @@ class ImageGenToolError(Exception):
     """生图后端返回的业务错误（可直接展示给 LLM）。"""
 
 
+@dataclass
+class RefImage:
+    """一张参考图（已读取并 base64 编码，协议无关）。
+
+    下发实现类时统一转成 MCP ``ImageContent`` 的 JSON 形状
+    （``{"type": "image", "data": ..., "mimeType": ...}``），
+    这样服务端可直接用 ``list[mcp.types.ImageContent]`` 声明参数并被校验。
+    """
+
+    index: int
+    mime_type: str
+    base64_data: str
+
+    def to_content(self) -> Dict[str, Any]:
+        return {
+            "type": "image",
+            "data": self.base64_data,
+            "mimeType": self.mime_type,
+        }
+
+
 def _sanitize_token(value: Any, fallback: str = "task") -> str:
     """把任意 task_id 收敛为可安全用于文件名的片段。"""
     text = str(value or "").strip()
@@ -306,6 +394,11 @@ class TargetPlan:
 
     ``multi`` 显式锁定「是否带多图下标后缀」：异步流程在下载前就已登记路径，
     必须保证之后落盘用的判断一致（否则服务少返回几张图时文件名会对不上）。
+
+    ``ext`` 同理锁定「扩展名」：非空时 ``predict`` 与 ``resolve`` 都用它，
+    保证「下载前登记的路径」与「下载后真正写出的路径」逐字节一致。它来自
+    调用方在 ``path`` 里显式写的图片后缀（如 ``.../凛.jpg``）；未指定时
+    ``predict`` 兜底 ``DEFAULT_EXT``、``resolve`` 以 blob 上报的 mime 为准。
     """
 
     task_id: str
@@ -328,18 +421,22 @@ class TargetPlan:
         return self.multi if self.multi is not None else blob_count > 1
 
     def resolve(self, blobs: List[ImageBlob]) -> List[Tuple[ImageTarget, ImageBlob]]:
-        """按真实 blob 列表物化路径（扩展名取自 blob 的 mime）。
+        """按真实 blob 列表物化路径（扩展名优先取显式 ``ext``，否则取 blob 的 mime）。
+
+        显式 ``ext`` 优先是有意为之：异步流程已经按它在下载前登记了路径，
+        这里若改用 blob 的扩展名就会写出另一个文件名，轮询器再也等不到文件。
+        内容与后缀不符无妨——入库时 ``resolve_mime`` 会按文件头校正 mime。
 
         服务实际产出的张数可能超出预期（例如请求 1 张却返回 2 张）：此时若
         仍不带下标后缀，多张图会撞成同一个文件名互相覆盖，因此统一降级为
         带下标的形式。
         """
         multi = self._is_multi(len(blobs))
-        filenames = [self._filename(blob.index, multi, blob.extension) for blob in blobs]
+        filenames = [self._filename(blob.index, multi, self._blob_ext(blob)) for blob in blobs]
         if len(set(filenames)) != len(filenames):
             multi = True
             filenames = [
-                self._filename(blob.index, multi, blob.extension) for blob in blobs
+                self._filename(blob.index, multi, self._blob_ext(blob)) for blob in blobs
             ]
 
         resolved: List[Tuple[ImageTarget, ImageBlob]] = []
@@ -348,10 +445,14 @@ class TargetPlan:
                 path=VirtualPath(f"{self.output_dir}/{filename}"),
                 index=blob.index,
                 mime_type=blob.mime_type,
-                extension=blob.extension,
+                extension=self._blob_ext(blob),
             )
             resolved.append((target, blob))
         return resolved
+
+    def _blob_ext(self, blob: ImageBlob) -> str:
+        """单张图的实际扩展名：显式 ``ext`` 优先，否则用 blob 的 mime 推断。"""
+        return self.ext or blob.extension
 
     def predict(self, count: int) -> List[ImageTarget]:
         """不联网地预测 ``count`` 张图片的落盘路径（扩展名取兜底值）。"""
@@ -388,6 +489,19 @@ def is_settled(payload: Dict[str, Any]) -> bool:
     return ImageGenStandard._is_settled(payload)
 
 
+def ext_from_path(path: str) -> Optional[str]:
+    """取路径里的显式图片扩展名（``.../凛.jpg`` → ``.jpg``）。
+
+    平台侧轮询器重建落盘计划时必须用**登记时的同一个扩展名**，
+    否则会写到另一个文件名上，登记路径永远等不到文件。
+    """
+    name = str(path or "").rsplit("/", 1)[-1]
+    if "." not in name:
+        return None
+    ext = f".{name.rsplit('.', 1)[-1]}".lower()
+    return ext if ext in _IMAGE_EXT_WHITELIST else None
+
+
 # ---------------------------------------------------------------------------
 # 标准框架
 # ---------------------------------------------------------------------------
@@ -406,6 +520,9 @@ class ImageGenStandard(ABC):
         未指定 ``resolution`` 时的默认分辨率，形如 ``1024x1024``。
     default_wait_timeout:
         未指定 ``wait_timeout`` 时的默认阻塞秒数。
+    supports_reference_images:
+        该实现是否支持参考图（``reference_images``）。为 False 时该参数不会
+        出现在工具 schema 里，LLM 无从传入。
 
     注：图片落地目录完全由 LLM 通过 ``image_download.path`` 指定，
     缺失或越界一律报错，框架不做任何回退。
@@ -418,11 +535,13 @@ class ImageGenStandard(ABC):
         default_sync: bool = True,
         default_resolution: str = DEFAULT_RESOLUTION,
         default_wait_timeout: int = DEFAULT_WAIT_TIMEOUT,
+        supports_reference_images: bool = False,
     ) -> None:
         self._default_count = max(1, min(int(default_count or DEFAULT_COUNT), MAX_COUNT))
         self._default_sync = bool(default_sync)
         self._default_resolution = self._normalize_resolution(default_resolution)
         self._default_wait_timeout = self._clamp_wait_timeout(default_wait_timeout)
+        self._supports_reference_images = bool(supports_reference_images)
 
     # ------------------------------------------------------------------
     # 子类原语
@@ -433,6 +552,11 @@ class ImageGenStandard(ABC):
         """是否为同步模式（False 时一条龙走「登记 pending + 后台下载」）。"""
         return self._default_sync
 
+    @property
+    def supports_reference_images(self) -> bool:
+        """是否支持参考图；不支持时工具 schema 里不会出现该参数。"""
+        return self._supports_reference_images
+
     @abstractmethod
     async def submit(
         self,
@@ -442,10 +566,12 @@ class ImageGenStandard(ABC):
         sync: bool,
         extra: Dict[str, Any],
         resolution: Optional[str] = None,
+        reference_images: Optional[List[RefImage]] = None,
     ) -> Dict[str, Any]:
         """提交生成任务，返回至少包含 ``task_id`` 的字典。
 
-        ``resolution`` 已归一化为 ``宽x高`` 形式（缺省时由框架填入默认值）。
+        ``resolution`` 已归一化为 ``宽x高`` 形式（缺省时由框架填入默认值）；
+        ``reference_images`` 已由框架读取为 base64，实现类只需按协议下发。
         """
 
     @abstractmethod
@@ -464,11 +590,18 @@ class ImageGenStandard(ABC):
     # 工具入口（中间件直接调用）
     # ------------------------------------------------------------------
 
-    async def run_generate(self, args: ImageGenerateArgs) -> str:
+    async def run_generate(
+        self,
+        backend: Optional[BackendProtocol],
+        args: ImageGenerateArgs,
+    ) -> str:
         count = self._clamp_count(args.count)
         resolution = self._normalize_resolution(args.resolution)
         extra = self._merge_extra(args.extra, resolution)
         sync = self._default_sync if args.sync is None else bool(args.sync)
+        reference_images = await self._load_reference_images(
+            backend, getattr(args, REFERENCE_ARG, None)
+        )
         payload = await self.submit(
             prompt=args.prompt,
             negative_prompt=args.negative_prompt,
@@ -476,6 +609,7 @@ class ImageGenStandard(ABC):
             sync=sync,
             extra=extra,
             resolution=resolution,
+            reference_images=reference_images,
         )
         task_id = self._require_task_id(payload)
         result: Dict[str, Any] = {
@@ -484,6 +618,8 @@ class ImageGenStandard(ABC):
             "count": count,
             "resolution": resolution,
         }
+        if reference_images:
+            result["reference_count"] = len(reference_images)
         if payload.get("error"):
             result["error"] = payload["error"]
         return self._dumps(result)
@@ -554,6 +690,9 @@ class ImageGenStandard(ABC):
         count = self._clamp_count(args.count)
         resolution = self._normalize_resolution(args.resolution)
         extra = self._merge_extra(args.extra, resolution)
+        reference_images = await self._load_reference_images(
+            backend, getattr(args, REFERENCE_ARG, None)
+        )
 
         payload = await self.submit(
             prompt=args.prompt,
@@ -562,6 +701,7 @@ class ImageGenStandard(ABC):
             sync=self._default_sync,
             extra=extra,
             resolution=resolution,
+            reference_images=reference_images,
         )
         task_id = self._require_task_id(payload)
         timeout = self._resolve_oneshot_timeout(args.timeout)
@@ -629,7 +769,11 @@ class ImageGenStandard(ABC):
             result["errors"] = errors
         return self._dumps(result)
 
-    async def run_pending(self, args: ImageGenerateShowArgs) -> str:
+    async def run_pending(
+        self,
+        backend: Optional[BackendProtocol],
+        args: ImageGenerateShowArgs,
+    ) -> str:
         """只提交任务并返回「待生成」结果，**不做任何等待与下载**。
 
         与 agent 异步模式下的 ``image_generate_show`` 结果完全同形：给出
@@ -640,6 +784,9 @@ class ImageGenStandard(ABC):
         resolution = self._normalize_resolution(args.resolution)
         extra = self._merge_extra(args.extra, resolution)
         timeout = self._resolve_oneshot_timeout(args.timeout)
+        reference_images = await self._load_reference_images(
+            backend, getattr(args, REFERENCE_ARG, None)
+        )
 
         payload = await self.submit(
             prompt=args.prompt,
@@ -648,6 +795,7 @@ class ImageGenStandard(ABC):
             sync=False,
             extra=extra,
             resolution=resolution,
+            reference_images=reference_images,
         )
         task_id = self._require_task_id(payload)
         plan = self.plan_targets(
@@ -689,6 +837,7 @@ class ImageGenStandard(ABC):
             "extra",
             "wait_timeout",
             RESOLUTION_ARG,
+            REFERENCE_ARG,
             # 平台侧参数：仅用于落盘与展示，不该下发给服务
             "mode",
             "path",
@@ -702,6 +851,92 @@ class ImageGenStandard(ABC):
             merged.setdefault("width", width)
             merged.setdefault("height", height)
         return merged
+
+    async def _load_reference_images(
+        self,
+        backend: Optional[BackendProtocol],
+        paths: Optional[List[str]],
+    ) -> Optional[List[RefImage]]:
+        """把 LLM 给的 workspace 路径读成 base64 参考图，任何问题都直接报错。"""
+        raw_paths = [str(p).strip() for p in (paths or []) if str(p or "").strip()]
+        if not raw_paths:
+            return None
+
+        if not self.supports_reference_images:
+            raise ImageGenToolError(
+                "当前生图后端不支持参考图（reference_images），请移除该参数后重试。"
+            )
+
+        if len(raw_paths) > MAX_REFERENCE_IMAGES:
+            raise ImageGenToolError(
+                f"参考图最多 {MAX_REFERENCE_IMAGES} 张，收到 {len(raw_paths)} 张。"
+            )
+
+        # 先校验路径形态，再要求 backend（路径错误与后端缺失是两类问题）
+        validated = [self._validate_reference_path(raw) for raw in raw_paths]
+        backend = self._require_backend(backend)
+
+        from .sink import read_workspace_file, resolve_mime
+
+        images: List[RefImage] = []
+        total_bytes = 0
+        for index, path in enumerate(validated):
+            data, error = await read_workspace_file(backend, path)
+            if error:
+                raise ImageGenToolError(f"读取参考图 {path} 失败: {error}")
+            if not data:
+                raise ImageGenToolError(f"参考图 {path} 内容为空")
+
+            size = len(data)
+            if size > MAX_REFERENCE_BYTES:
+                raise ImageGenToolError(
+                    f"参考图 {path} 体积 {size / 1024 / 1024:.1f}MB 超过单张上限 "
+                    f"{MAX_REFERENCE_BYTES // (1024 * 1024)}MB"
+                )
+            total_bytes += size
+            if total_bytes > MAX_REFERENCE_TOTAL_BYTES:
+                raise ImageGenToolError(
+                    f"参考图合计体积超过上限 "
+                    f"{MAX_REFERENCE_TOTAL_BYTES // (1024 * 1024)}MB，"
+                    "请减少张数或压缩后重试"
+                )
+
+            filename = path.rsplit("/", 1)[-1]
+            mime = resolve_mime(filename, None, data)
+            if mime not in REFERENCE_MIME_WHITELIST:
+                raise ImageGenToolError(
+                    f"参考图 {path} 的格式不受支持（识别为 {mime}），仅支持 "
+                    + " / ".join(REFERENCE_MIME_WHITELIST)
+                )
+
+            images.append(
+                RefImage(
+                    index=index,
+                    mime_type=mime,
+                    base64_data=base64.b64encode(data).decode("ascii"),
+                )
+            )
+        return images
+
+    @staticmethod
+    def _validate_reference_path(raw: str) -> str:
+        """参考图路径必须是 /workspace 之下的绝对虚拟路径。"""
+        try:
+            virtual = VirtualPath(raw)
+        except Exception as exc:  # noqa: BLE001 - 校验失败统一转文本
+            raise ImageGenToolError(
+                f"参考图路径必须是合法的绝对虚拟路径（不能包含 '..' / '//'，"
+                f"不能是根目录），收到: {raw!r}（{exc}）"
+            ) from exc
+
+        value = virtual.value
+        if "\\" in value or ":" in value:
+            raise ImageGenToolError(f"参考图路径不能包含 '\\' 或 ':'，收到: {raw!r}")
+        if not value.startswith(f"{WORKSPACE_ROOT}/"):
+            raise ImageGenToolError(
+                f"参考图必须位于 {WORKSPACE_ROOT} 之下，收到: {raw!r}"
+            )
+        return value
 
     @staticmethod
     def _normalize_resolution(value: Any) -> str:
@@ -803,29 +1038,31 @@ class ImageGenStandard(ABC):
         self,
         raw_path: str,
         raw_prefix: Optional[str],
-    ) -> Tuple[str, str]:
-        """解析目标目录与前缀。
+    ) -> Tuple[str, str, Optional[str]]:
+        """解析目标目录、前缀与（可选）显式扩展名。
 
         ``path`` 缺失或越界一律报错，绝不静默回退到其它目录；
         ``prefix`` 缺省使用默认值，非法时报错。
         """
-        directory, inferred_prefix = self._normalize_dir(raw_path)
+        directory, inferred_prefix, ext = self._normalize_dir(raw_path)
 
         prefix = (raw_prefix or "").strip()
         if not prefix and inferred_prefix:
             prefix = inferred_prefix
 
-        return directory, self._normalize_prefix(prefix)
+        return directory, self._normalize_prefix(prefix), ext
 
-    def _normalize_dir(self, raw_path: str) -> Tuple[str, str]:
-        """返回 ``(目录, 从文件名推断的前缀)``，非法输入直接抛错。
+    def _normalize_dir(self, raw_path: str) -> Tuple[str, str, Optional[str]]:
+        """返回 ``(目录, 从文件名推断的前缀, 显式扩展名)``，非法输入直接抛错。
 
         路径合法性交给 :class:`VirtualPath`（绝对路径、拒绝 ``..`` / ``//`` /
-        根目录），本方法只在此之上做两件事：
+        根目录），本方法只在此之上做三件事：
 
         1. 限定在 ``WORKSPACE_ROOT`` 之下；
         2. 判定「目录」还是「文件名」——**以 ``/`` 结尾即目录**，
-           否则末段视为文件名，目录取其父级、末段（去扩展名）作前缀。
+           否则末段视为文件名，目录取其父级、末段（去扩展名）作前缀；
+        3. 文件名后缀若是常见图片扩展名，则作为**显式扩展名**返回：落盘必须
+           沿用它，否则「下载前登记的路径」与「下载后写出的路径」对不上。
         """
         raw = (raw_path or "").strip()
         if not raw:
@@ -850,23 +1087,42 @@ class ImageGenStandard(ABC):
 
         # 工作区根自身按目录处理（``/workspace`` 无尾斜杠也不当作文件名）
         if value.rstrip("/") == WORKSPACE_ROOT:
-            return WORKSPACE_ROOT, ""
+            return WORKSPACE_ROOT, "", None
 
         if value.endswith("/"):
             directory = value.rstrip("/")
             file_prefix = ""
+            ext: Optional[str] = None
         else:
             parent, name = value.rsplit("/", 1)
             directory = parent or WORKSPACE_ROOT
-            stem = name.rsplit(".", 1)[0] if "." in name else name
-            file_prefix = stem if stem and not _FILENAME_FORBIDDEN_RE.search(stem) else ""
+            stem, ext = self._split_ext(name)
+            file_prefix = (
+                stem if stem and not _FILENAME_FORBIDDEN_RE.search(stem) else ""
+            )
 
         if not (directory == WORKSPACE_ROOT or directory.startswith(f"{WORKSPACE_ROOT}/")):
             raise ImageGenToolError(
                 f"path 必须位于 {WORKSPACE_ROOT} 之下，收到: {raw!r}"
             )
 
-        return directory, file_prefix
+        return directory, file_prefix, ext
+
+    @staticmethod
+    def _split_ext(name: str) -> Tuple[str, Optional[str]]:
+        """拆出 ``(去扩展名的主干, 显式图片扩展名)``。
+
+        只有白名单内的图片后缀才算「显式扩展名」，其余后缀（如 ``a.v2``）
+        维持原有行为：整体去后缀当主干，不锁定扩展名。
+        """
+        if "." not in name:
+            return name, None
+        stem, suffix = name.rsplit(".", 1)
+        ext = f".{suffix}".lower()
+        if ext in _IMAGE_EXT_WHITELIST:
+            # 统一小写，避免 .JPG / .jpg 登记成两个不同文件名
+            return stem, ext
+        return stem, None
 
     def _normalize_prefix(self, raw_prefix: str) -> str:
         prefix = (raw_prefix or "").strip()
@@ -887,21 +1143,27 @@ class ImageGenStandard(ABC):
         prefix: Optional[str] = None,
         naming: str = NAMING_STAMP,
         multi: Optional[bool] = None,
+        ext: Optional[str] = None,
     ) -> TargetPlan:
         """计算落盘路径规划器（纯计算，不联网、不触达 backend）。
 
         ``path`` 缺失或越界一律报错；``prefix`` 缺省从 path 的文件名推断，
         仍无则用 ``DEFAULT_PREFIX``。``naming=NAMING_TASK`` 时文件名按
         ``task_id`` 确定性生成，可在下载前预测最终路径；此时应同时显式传入
-        ``multi``，保证预测与实际落盘的命名判断一致。
+        ``multi`` 与 ``ext``，保证预测与实际落盘的命名判断一致。
+
+        ``ext`` 缺省时从 ``path`` 的文件名后缀推断（如 ``.../凛.jpg`` → ``.jpg``），
+        仍无则为 ``None``（``predict`` 兜底 ``DEFAULT_EXT``、``resolve`` 用 blob 的
+        真实扩展名）。异步流程必须让两侧一致，否则会「登记 .png 却写出 .jpg」。
         """
-        output_dir, resolved_prefix = self._resolve_target(path, prefix)
+        output_dir, resolved_prefix, path_ext = self._resolve_target(path, prefix)
         return TargetPlan(
             task_id=str(task_id or ""),
             output_dir=output_dir,
             prefix=resolved_prefix,
             naming=naming,
             stamp=datetime.now().strftime("%Y%m%d_%H%M%S"),
+            ext=(ext or path_ext),
             multi=multi,
         )
 

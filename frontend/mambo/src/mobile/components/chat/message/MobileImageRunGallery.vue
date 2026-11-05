@@ -113,6 +113,16 @@
                   </button>
                 </div>
               </label>
+              <label class="field">
+                <span class="field-label">{{ t('chat.imageRun.referenceImages') }}</span>
+                <textarea
+                  v-model="form.referenceImages"
+                  rows="2"
+                  class="field-input"
+                  :placeholder="t('chat.imageRun.referenceImagesPlaceholder')"
+                ></textarea>
+                <span class="field-hint">{{ t('chat.imageRun.referenceImagesHint') }}</span>
+              </label>
             </div>
             <div class="rerun-actions">
               <button class="mini-btn" @click="sheetVisible = false">{{ t('common.action.cancel') }}</button>
@@ -166,6 +176,7 @@ const form = reactive({
   count: 1,
   mode: 'Normal',
   seed: '',
+  referenceImages: '',
 })
 
 const activeRun = computed(
@@ -283,6 +294,9 @@ function openRerunSheet() {
   form.mode = typeof args.mode === 'string' ? args.mode : activeRun.value?.mode || 'Normal'
   const extra = args.extra && typeof args.extra === 'object' ? args.extra : {}
   form.seed = extra.seed === undefined || extra.seed === null ? '' : String(extra.seed)
+  form.referenceImages = Array.isArray(args.reference_images)
+    ? (args.reference_images as string[]).join('\n')
+    : ''
   sheetVisible.value = true
 }
 
@@ -302,6 +316,11 @@ async function submitRerun() {
     if (!Number.isNaN(seed)) extra.seed = seed
   }
 
+  const referenceImages = form.referenceImages
+    .split('\n')
+    .map(item => item.trim())
+    .filter(Boolean)
+
   isRerunning.value = true
   try {
     const response = await rerunImageRun(sourceId, {
@@ -311,6 +330,7 @@ async function submitRerun() {
       count: form.count,
       mode: form.mode,
       extra: Object.keys(extra).length > 0 ? extra : undefined,
+      reference_images: referenceImages.length > 0 ? referenceImages : undefined,
     })
 
     if (response.record) {
@@ -545,6 +565,12 @@ async function fetchFile() {
 .field-label {
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+
+.field-hint {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.4;
 }
 
 .field-input {

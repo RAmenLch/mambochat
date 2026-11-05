@@ -131,6 +131,15 @@
             </el-button>
           </div>
         </el-form-item>
+        <el-form-item :label="t('chat.imageRun.referenceImages')">
+          <el-input
+            v-model="form.referenceImages"
+            type="textarea"
+            :rows="2"
+            :placeholder="t('chat.imageRun.referenceImagesPlaceholder')"
+          />
+          <div class="reference-hint">{{ t('chat.imageRun.referenceImagesHint') }}</div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">{{ t('common.action.cancel') }}</el-button>
@@ -181,6 +190,7 @@ const form = reactive({
   count: 1,
   mode: 'Normal',
   seed: '',
+  referenceImages: '',
 })
 
 const activeRun = computed(
@@ -306,6 +316,9 @@ function openRerunDialog() {
   form.mode = typeof args.mode === 'string' ? args.mode : activeRun.value?.mode || 'Normal'
   const extra = args.extra && typeof args.extra === 'object' ? args.extra : {}
   form.seed = extra.seed === undefined || extra.seed === null ? '' : String(extra.seed)
+  form.referenceImages = Array.isArray(args.reference_images)
+    ? (args.reference_images as string[]).join('\n')
+    : ''
   dialogVisible.value = true
 }
 
@@ -327,6 +340,11 @@ async function submitRerun() {
     if (!Number.isNaN(seed)) extra.seed = seed
   }
 
+  const referenceImages = form.referenceImages
+    .split('\n')
+    .map(item => item.trim())
+    .filter(Boolean)
+
   isRerunning.value = true
   try {
     const response = await rerunImageRun(sourceId, {
@@ -336,6 +354,7 @@ async function submitRerun() {
       count: form.count,
       mode: form.mode,
       extra: Object.keys(extra).length > 0 ? extra : undefined,
+      reference_images: referenceImages.length > 0 ? referenceImages : undefined,
     })
 
     if (response.record) {
@@ -493,5 +512,11 @@ async function fetchFile() {
   align-items: center;
   gap: 8px;
   width: 100%;
+}
+
+.reference-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.5;
 }
 </style>

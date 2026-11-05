@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend import schemas
@@ -35,7 +36,7 @@ from backend.services.generation.agent.image_gen.factory import (
 )
 from backend.services.generation.agent.image_gen.standard import (
     DEFAULT_OUTPUT_DIR,
-    ImageGenerateShowArgs,
+    generate_show_args_model,
 )
 from backend.services.stream_manager_service import stream_manager
 
@@ -133,7 +134,7 @@ async def _execute(
     merged = _merge_args(source.get("args") or {}, overrides)
     mode = merged.get("mode") or "Normal"
 
-    args = ImageGenerateShowArgs(
+    args = generate_show_args_model(True)(
         prompt=merged["prompt"],
         negative_prompt=merged.get("negative_prompt"),
         resolution=merged.get("resolution") or None,
@@ -142,10 +143,37 @@ async def _execute(
         mode=mode,
         path=merged.get("path") or None,
         timeout=_clamp_timeout(merged.get("timeout")),
+        reference_images=merged.get("reference_images") or None,
     )
 
-    await _require_backend(chat_id)
+    backend = await _require_backend(chat_id)
 
+    try:
+        return await _submit_and_record(
+            message_id=message_id,
+            chat_id=chat_id,
+            run_id=run_id,
+            slot_id=slot_id,
+            args=args,
+            merged=merged,
+            mode=mode,
+            backend=backend,
+        )
+    finally:
+        await _close_backend(backend)
+
+
+async def _submit_and_record(
+    *,
+    message_id: str,
+    chat_id: str,
+    run_id: str,
+    slot_id: str,
+    args: Any,
+    merged: Dict[str, Any],
+    mode: str,
+    backend: Any,
+) -> Dict[str, Any]:
     record_id, _ = await _create_record(
         message_id=message_id,
         run_id=run_id,
@@ -155,7 +183,7 @@ async def _execute(
     )
 
     try:
-        pending = await _submit(chat_id=chat_id, args=args)
+        pending = await _submit(chat_id=chat_id, args=args, backend=backend)
     except Exception as exc:  # noqa: BLE001 - 提交失败统一转成记录子消息的失败态
         reason = str(exc) or exc.__class__.__name__
         logger.warning("图片重跑提交失败(run=%s): %s", run_id, reason)
@@ -220,13 +248,19 @@ async def _execute(
     }
 
 
-async def _require_backend(chat_id: str) -> None:
-    """重跑本身不落盘，但下载由后台轮询器完成，缺 backend 时尽早给出明确错误。"""
+async def _require_backend(chat_id: str):
+    """重跑本身不落盘，但下载由后台轮询器完成，缺 backend 时尽早给出明确错误。
+
+    返回的 backend 同时用于读取参考图（``reference_images``）。
+    """
     async with AsyncSessionLocal() as db:
         backend = await build_backend_from_chat_id(db, chat_id)
     if backend is None:
         raise ImageRunError("当前会话没有可写的 backend，无法保存图片")
+    return backend
 
+
+async def _close_backend(backend) -> None:
     aclose = getattr(backend, "aclose", None)
     if aclose is not None:
         try:
@@ -238,7 +272,8 @@ async def _require_backend(chat_id: str) -> None:
 async def _submit(
     *,
     chat_id: str,
-    args: ImageGenerateShowArgs,
+    args: Any,
+    backend: Any,
 ) -> Dict[str, Any]:
     """只提交生成任务，返回「待生成」描述（``task_id`` + 全部确定路径）。"""
     async with AsyncSessionLocal() as db:
@@ -246,7 +281,7 @@ async def _submit(
     if standard is None:
         raise ImageRunError("当前会话未启用生图工具或生图服务不可用")
 
-    raw = await standard.run_pending(args)
+    raw = await standard.run_pending(backend, args)
     try:
         data = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
@@ -560,6 +595,7 @@ async def _append_pending_file_sub_messages(
                         image_run_args=args,
                         pending_file_path=path,
                         pending_file_timeout=timeout,
+                        pending_file_deadline=time.time() + float(timeout or 300),
                         pending_image_task_id=pending.get("task_id"),
                         pending_image_prefix=pending.get("prefix"),
                         pending_image_count=pending.get("count"),

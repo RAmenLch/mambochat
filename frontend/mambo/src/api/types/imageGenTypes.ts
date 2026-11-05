@@ -1,10 +1,15 @@
 // frontend/mambo/src/api/types/imageGenTypes.ts
 
+export type ImageGenBackendType = 'mcp' | 'model'
+
 export interface ImageGenConfig {
   id: string;
   name: string;
   description: string | null;
-  mcpServerId: string;
+  backendType: ImageGenBackendType;
+  mcpServerId: string | null;
+  aiModelId: string | null;
+  supportsReferenceImages: boolean | null;
   defaultCount: number;
   defaultSync: boolean;
   defaultResolution: string;
@@ -20,7 +25,10 @@ export interface ImageGenConfig {
 export interface ImageGenConfigCreate {
   name: string;
   description?: string | null;
-  mcpServerId: string;
+  backendType?: ImageGenBackendType;
+  mcpServerId?: string | null;
+  aiModelId?: string | null;
+  supportsReferenceImages?: boolean | null;
   defaultCount?: number;
   defaultSync?: boolean;
   defaultResolution?: string;
@@ -34,7 +42,10 @@ export interface ImageGenConfigCreate {
 export interface ImageGenConfigUpdate {
   name?: string;
   description?: string | null;
-  mcpServerId?: string;
+  backendType?: ImageGenBackendType;
+  mcpServerId?: string | null;
+  aiModelId?: string | null;
+  supportsReferenceImages?: boolean | null;
   defaultCount?: number;
   defaultSync?: boolean;
   defaultResolution?: string;
@@ -48,8 +59,10 @@ export interface ImageGenConfigUpdate {
 export interface ImageGenToolCheckResult {
   status: 'healthy' | 'unhealthy';
   server_name: string | null;
+  backend_type?: ImageGenBackendType | null;
   found_tools: string[];
   missing_tools: string[];
+  supports_reference_images?: boolean | null;
   message: string;
   error: string | null;
 }

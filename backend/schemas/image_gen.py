@@ -1,6 +1,6 @@
 # backend/schemas/image_gen.py
 
-from typing import Optional, List
+from typing import Any, List, Literal, Optional
 from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -24,10 +24,37 @@ def _validate_resolution(value: Optional[str]) -> str:
     return f"{size[0]}x{size[1]}"
 
 
+def _ensure_backend_binding(payload: Any) -> None:
+    """``backendType`` 与绑定目标必须匹配：mcp 要服务，model 要模型。"""
+    backend_type = (getattr(payload, "backendType", None) or "mcp").strip().lower()
+    if backend_type == "model":
+        if not (getattr(payload, "aiModelId", None) or "").strip():
+            raise ValueError("后端类型为「系统模型」时必须绑定一个模型（aiModelId）")
+    elif not (getattr(payload, "mcpServerId", None) or "").strip():
+        raise ValueError("后端类型为「MCP 服务」时必须绑定一个 MCP 服务（mcpServerId）")
+
+
 class ImageGenConfigBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="配置名称")
     description: Optional[str] = Field(None, description="说明")
-    mcpServerId: str = Field(..., description="绑定的 MCP 服务 ID")
+    backendType: Literal["mcp", "model"] = Field(
+        "mcp",
+        description=(
+            "后端类型：mcp（实现生图标准的 MCP 服务）/ model（系统里能出图的 Chat 模型）"
+        ),
+    )
+    mcpServerId: Optional[str] = Field(
+        None, description="绑定的 MCP 服务 ID（backendType=mcp 时必填）"
+    )
+    aiModelId: Optional[str] = Field(
+        None, description="绑定的系统模型 ID（backendType=model 时必填）"
+    )
+    supportsReferenceImages: Optional[bool] = Field(
+        None,
+        description=(
+            "是否支持参考图；null 表示自动探测（MCP 查服务 schema，模型后端恒为支持）"
+        ),
+    )
     defaultCount: int = Field(DEFAULT_COUNT, ge=1, le=MAX_COUNT, description="默认生成数量")
     defaultSync: bool = Field(True, description="默认是否同步等待生成完成")
     defaultResolution: str = Field(
@@ -61,13 +88,17 @@ class ImageGenConfigCreate(ImageGenConfigBase):
     def _ensure_tool_mode(self) -> "ImageGenConfigCreate":
         if not self.enableStandardTools and not self.enableGenerateShow:
             raise ValueError("标准三件套与一条龙工具至少需要启用一个")
+        _ensure_backend_binding(self)
         return self
 
 
 class ImageGenConfigUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     description: Optional[str] = None
+    backendType: Optional[Literal["mcp", "model"]] = None
     mcpServerId: Optional[str] = None
+    aiModelId: Optional[str] = None
+    supportsReferenceImages: Optional[bool] = None
     defaultCount: Optional[int] = Field(None, ge=1, le=MAX_COUNT)
     defaultSync: Optional[bool] = None
     defaultResolution: Optional[str] = None
@@ -104,8 +135,12 @@ class ImageGenToolCheckResult(BaseModel):
 
     status: str = Field(..., description="healthy / unhealthy")
     server_name: Optional[str] = None
+    backend_type: Optional[str] = None
     found_tools: List[str] = Field(default_factory=list)
     missing_tools: List[str] = Field(default_factory=list)
+    supports_reference_images: Optional[bool] = Field(
+        None, description="后端是否支持参考图（reference_images）"
+    )
     message: str = ""
     error: Optional[str] = None
 
