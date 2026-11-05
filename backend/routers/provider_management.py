@@ -8,8 +8,39 @@ from backend.crud import provider_crud, setting_crud
 from backend import schemas
 from backend.database import get_db
 from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
+from backend.schemas.enums import ModelType
+from backend.services.generation.image_executors import (
+    ExecutorError,
+    is_image_worker,
+    resolve_executor,
+)
 
 router = APIRouter()
+
+
+def _validate_model_type(provider, model_type: str) -> None:
+    """生图执行器服务商只能挂生图模型；生图模型挂对话服务商时执行器必须可推导。"""
+    normalized = (str(model_type or ModelType.CHAT.value)).strip().lower()
+    provider_worker = getattr(provider, "worker_type", None)
+
+    if is_image_worker(provider_worker):
+        if normalized != ModelType.IMAGE.value:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"服务商后端类型 {provider_worker} 是生图执行器，"
+                    "只能创建生图模型（model_type=image）"
+                ),
+            )
+        return
+
+    if normalized != ModelType.IMAGE.value:
+        return
+
+    try:
+        resolve_executor(provider_worker, getattr(provider, "apiHost", None))
+    except ExecutorError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 # --- Provider Management Routes ---
 
@@ -24,6 +55,20 @@ async def create_provider(provider: schemas.ProviderWithModelsCreate, db: AsyncS
     创建一个新的服务商，并可选择性地同时创建其下的模型。
     创建成功后，会自动将该服务商设置为“最后选择的服务商”。
     """
+    # 生图执行器服务商下随建模型一律视为生图模型；对话服务商下的生图模型需能推导执行器
+    if is_image_worker(provider.worker_type):
+        for model in provider.models:
+            model.model_type = ModelType.IMAGE
+    else:
+        for model in provider.models:
+            if (str(model.model_type or "")).strip().lower() == ModelType.IMAGE.value:
+                try:
+                    resolve_executor(provider.worker_type, provider.apiHost)
+                except ExecutorError as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+                    )
+
     new_provider = await provider_crud.create_provider_with_models(db=db, provider_data=provider)
 
     await setting_crud.update_setting(
@@ -115,6 +160,7 @@ async def create_model(model: schemas.AIModelCreate, db: AsyncSession = Depends(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Provider with id {model.providerId} not found"
         )
+    _validate_model_type(provider, model.model_type)
     return await provider_crud.create_model(db=db, model=model)
 
 
@@ -138,6 +184,15 @@ async def update_model(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid supported parameters found: {', '.join(invalid_keys)}. Please use keys available in the system configuration."
             )
+
+    current_model = await provider_crud.get_model(db, model_id)
+    if current_model is None:
+        raise HTTPException(status_code=404, detail="Model not found")
+    if current_model.provider is not None:
+        _validate_model_type(
+            current_model.provider,
+            model_update.model_type or current_model.model_type,
+        )
 
     updated_model = await provider_crud.update_model(db, model_id=model_id, model_update=model_update)
     if updated_model is None:

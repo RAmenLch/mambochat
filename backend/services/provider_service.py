@@ -2,7 +2,7 @@
 
 import httpx
 import json
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from urllib.parse import urlparse
 
@@ -10,6 +10,7 @@ from backend import schemas
 from backend.crud import setting_crud
 from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 from backend.config.model_presets import MODEL_PRESETS, ModelPreset
+from backend.schemas.enums import ModelType
 
 
 async def _get_http_client_with_proxy(
@@ -66,18 +67,21 @@ async def test_connection_to_provider(
         db: AsyncSession,
         api_host: str,
         api_key: str,
-        use_proxy: bool
+        use_proxy: bool,
+        worker_type: Optional[str] = None,
 ) -> schemas.ConnectionTestResponse:
     """
     测试与外部LLM服务商的连接，并可选择通过代理进行。
+
+    ``worker_type`` 是生图执行器时改走纯生图端点探测。
     """
     try:
         if api_host == "https://generativelanguage.googleapis.com/v1beta":
-            func1 = fetch_models_from_provider_google
+            await fetch_models_from_provider_google(db, api_host, api_key, use_proxy)
         else:
-            func1 = fetch_models_from_provider
-
-        await func1(db, api_host, api_key, use_proxy)
+            await fetch_models_from_provider(
+                db, api_host, api_key, use_proxy, worker_type
+            )
         return schemas.ConnectionTestResponse(status="success", message="连接成功！", code="CONNECTION_OK")
     except json.JSONDecodeError:
         return schemas.ConnectionTestResponse(
@@ -174,12 +178,23 @@ async def fetch_models_from_provider(
         db: AsyncSession,
         api_host: str,
         api_key: str,
-        use_proxy: bool
+        use_proxy: bool,
+        worker_type: Optional[str] = None,
 ) -> List[schemas.AIModelBase]:
     """
     调用外部LLM服务商的API以获取其提供的模型列表，并解析元数据。
     解析完成后自动使用预置注册表（MODEL_PRESETS）补全缺失的元数据字段。
+
+    ``worker_type`` 是生图执行器时改走纯生图端点（``/images/models`` 等），
+    返回的模型全部标记为 ``model_type=image``。
     """
+    from backend.services.generation.image_executors import is_image_worker
+
+    if is_image_worker(worker_type):
+        return await fetch_models_from_image_provider(
+            db, api_host, api_key, use_proxy, worker_type
+        )
+
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -253,6 +268,69 @@ async def fetch_models_from_provider(
 
         # 用预置注册表补全缺失的元数据
         return _enrich_with_presets(processed_models, api_host)
+
+
+async def fetch_models_from_image_provider(
+        db: AsyncSession,
+        api_host: str,
+        api_key: str,
+        use_proxy: bool,
+        worker_type: Optional[str] = None,
+) -> List[schemas.AIModelBase]:
+    """纯生图执行器的模型列表（``/images/models`` 或 ``/models``）。
+
+    返回的模型一律 ``model_type=image``；OpenRouter 的 ``/images/models`` 还会给出
+    ``architecture`` 与 ``supported_parameters`` 描述符，存进
+    ``meta_config.image_capabilities``，供执行器做参数裁剪与配置页展示。
+    """
+    from backend.services.generation.image_executors import resolve_executor
+
+    executor = resolve_executor(worker_type, api_host)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    path = "/images/models" if executor.key == "openrouter_images" else "/models"
+    url = f"{api_host.rstrip('/')}{path}"
+
+    async with await _get_http_client_with_proxy(
+        db, use_proxy_flag=use_proxy, timeout=30
+    ) as client:
+        response = await client.get(url, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+
+    model_list = data.get("data", []) if isinstance(data, dict) else []
+    if not isinstance(model_list, list):
+        raise json.JSONDecodeError("响应体中的 'data' 字段不是一个列表", str(data), 0)
+
+    processed: List[schemas.AIModelBase] = []
+    for model in model_list:
+        if not (isinstance(model, dict) and model.get("id")):
+            continue
+
+        architecture = model.get("architecture") or {}
+        supported_parameters = model.get("supported_parameters")
+        meta: Dict[str, Any] = {
+            "output_modalities": ["image"],
+            "input_modalities": architecture.get("input_modalities") or ["text"],
+        }
+        if supported_parameters:
+            meta["image_capabilities"] = {
+                "architecture": architecture or None,
+                "supported_parameters": supported_parameters,
+                "supports_streaming": model.get("supports_streaming"),
+            }
+
+        processed.append(
+            schemas.AIModelBase(
+                modelId=model.get("id"),
+                name=model.get("name") or model.get("id"),
+                model_type=ModelType.IMAGE,
+                meta_config=schemas.AIModelMetaConfig(**meta),
+            )
+        )
+    return processed
 
 
 async def fetch_models_from_provider_google(

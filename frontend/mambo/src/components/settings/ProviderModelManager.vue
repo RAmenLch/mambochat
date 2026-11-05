@@ -69,9 +69,9 @@
         <el-table-column prop="name" :label="t('model.table.name')" width="200" />
         <el-table-column prop="model_type" :label="t('model.table.type')" width="50" align="center">
           <template #default="{ row }">
-            <el-tooltip :content="row.model_type === 'embedding' ? t('model.table.typeEmbedding') : t('model.table.typeChat')" placement="top">
+            <el-tooltip :content="modelTypeLabel(row.model_type)" placement="top">
               <el-icon size="18">
-                <component :is="row.model_type === 'embedding' ? Connection : ChatDotRound" />
+                <component :is="modelTypeIcon(row.model_type)" />
               </el-icon>
             </el-tooltip>
           </template>
@@ -83,6 +83,9 @@
               <span class="separator">/</span>
               <span v-if="row.model_type === 'embedding'">
                 {{ row.meta_config.embedding_dimension ? row.meta_config.embedding_dimension + ' dim' : '-' }}
+              </span>
+              <span v-else-if="row.model_type === 'image'">
+                {{ imageOptionsSummary(row) }}
               </span>
               <span v-else>
                 {{ row.meta_config.max_output_tokens || '-' }}
@@ -205,6 +208,28 @@ const modalityIcons = shallowRef<Record<string, Component>>({
   video: VideoCamera,
   file: Folder,
 });
+
+/** 模型类型 → 图标 / 文案 */
+function modelTypeIcon(modelType: string): Component {
+  if (modelType === 'embedding') return Connection;
+  if (modelType === 'image') return Picture;
+  return ChatDotRound;
+}
+
+function modelTypeLabel(modelType: string): string {
+  if (modelType === 'embedding') return t('model.table.typeEmbedding');
+  if (modelType === 'image') return t('model.table.typeImage');
+  return t('model.table.typeChat');
+}
+
+/** 生图模型在「上下文」列展示该模型的默认生图参数 */
+function imageOptionsSummary(row: AIModel): string {
+  const options = (row.meta_config?.image_options || {}) as Record<string, unknown>;
+  const parts = Object.entries(options)
+    .filter(([, value]) => value !== null && value !== undefined && value !== '')
+    .map(([key, value]) => `${key}=${value}`);
+  return parts.length ? parts.join(', ') : '-';
+}
 
 // Lifecycle and Watchers
 onMounted(async () => {

@@ -11,7 +11,7 @@ from backend.mambo_cli.resolver import resolve_model, resolve_provider
 from backend.mambo_cli.util import UsageError, parse_bool
 from backend.mambo_cli.llm_params import build_definition_map
 
-MODEL_TYPES = ["chat", "embedding"]
+MODEL_TYPES = ["chat", "embedding", "image"]
 
 # meta_config 平铺参数定义：flag 名 -> (meta_config 字段, 是否逗号分隔列表, 帮助说明)
 # dest 用独立命名（request_timeout），避免与全局 --timeout 的 dest 冲突

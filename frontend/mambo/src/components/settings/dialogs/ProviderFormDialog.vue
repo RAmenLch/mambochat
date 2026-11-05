@@ -22,11 +22,18 @@
 
         <el-form-item :label="t('provider.form.workerType')" prop="worker_type">
           <el-select v-model="providerForm.worker_type" :placeholder="t('provider.form.workerTypePlaceholder')" style="width: 100%">
-            <el-option label="OpenAI Compatible" value="openai" />
-            <el-option label="Google Gemini Native" value="google" />
-            <el-option label="DeepSeek Native" value="deepseek" />
-             <el-option label="Anthropic Native" value="anthropic" />
+            <el-option-group :label="t('provider.form.workerGroupChat')">
+              <el-option label="OpenAI Compatible" value="openai" />
+              <el-option label="Google Gemini Native" value="google" />
+              <el-option label="DeepSeek Native" value="deepseek" />
+              <el-option label="Anthropic Native" value="anthropic" />
+            </el-option-group>
+            <el-option-group :label="t('provider.form.workerGroupImage')">
+              <el-option :label="t('provider.form.workerOpenaiImages')" value="openai_images" />
+              <el-option :label="t('provider.form.workerOpenrouterImages')" value="openrouter_images" />
+            </el-option-group>
           </el-select>
+          <div v-if="isImageWorker" class="form-hint">{{ imageExecutorHint }}</div>
         </el-form-item>
 
         <el-form-item :label="t('provider.form.apiHost')" prop="apiHost">
@@ -74,6 +81,7 @@
           <el-select v-model="model.model_type" placeholder="Type" class="type-select">
             <el-option :label="t('model.table.typeChat')" value="chat" />
             <el-option :label="t('model.table.typeEmbedding')" value="embedding" />
+            <el-option :label="t('model.table.typeImage')" value="image" />
           </el-select>
           <el-button link type="danger" :icon="Delete" @click="removeModelEntryFromForm(index)" class="delete-model-btn" />
         </div>
@@ -169,6 +177,18 @@ const providerForm = reactive<ProviderFormData>({
 const isEditing = computed(() => !!props.providerData);
 const isProxyGloballyEnabled = computed(() => globalSettings.value.proxy_enabled === true);
 
+/** 生图执行器服务商：只服务生图模型，端点由执行器固定 */
+const isImageWorker = computed(
+  () => providerForm.worker_type === 'openai_images' || providerForm.worker_type === 'openrouter_images'
+);
+const imageExecutorHint = computed(() => {
+  if (!isImageWorker.value) return '';
+  const endpoint = providerForm.worker_type === 'openrouter_images'
+    ? '/images'
+    : '/images/generations、/images/edits';
+  return t('provider.form.imageExecutorHint', { endpoint });
+});
+
 const providerFormRules = computed<FormRules<ProviderFormData>>(() => ({
   name: [{ required: true, message: t('provider.form.namePlaceholder'), trigger: 'blur' }],
   worker_type: [{ required: true, message: t('provider.form.workerTypePlaceholder'), trigger: 'change' }],
@@ -194,6 +214,14 @@ watch(() => props.visible, (newVal) => {
   if (newVal) {
     resetAndInitializeForm();
   }
+});
+
+watch(() => providerForm.worker_type, (worker) => {
+  if (worker !== 'openai_images' && worker !== 'openrouter_images') return;
+  // 生图执行器服务商下的模型只能是生图模型
+  providerForm.models.forEach((model) => {
+    if (model.model_type !== 'image') model.model_type = 'image';
+  });
 });
 
 watch(() => providerForm.models, (newModels, oldModels) => {
@@ -270,7 +298,7 @@ async function handleTestConnection() {
     if (isEditing.value && providerForm.apiKey === API_KEY_PLACEHOLDER && props.providerData) {
       res = await providerStore.testConnectionForProvider(props.providerData.id, providerForm.apiHost, providerForm.use_proxy);
     } else {
-      res = await providerStore.testConnection({ apiHost: providerForm.apiHost, apiKey: providerForm.apiKey }, providerForm.use_proxy);
+      res = await providerStore.testConnection({ apiHost: providerForm.apiHost, apiKey: providerForm.apiKey }, providerForm.use_proxy, providerForm.worker_type);
     }
     const msg = res.status === 'success'
       ? t('provider.form.testSuccess')
@@ -299,7 +327,7 @@ async function handleFetchModels() {
         isFetchingModels.value = false;
         return;
       }
-      models = await providerStore.fetchExternalModels({ apiHost: providerForm.apiHost, apiKey: providerForm.apiKey }, providerForm.use_proxy);
+      models = await providerStore.fetchExternalModels({ apiHost: providerForm.apiHost, apiKey: providerForm.apiKey }, providerForm.use_proxy, providerForm.worker_type);
     }
     emit('fetch-models', models);
   } catch (error: unknown) {
@@ -326,7 +354,12 @@ function handleApiKeyBlur() {
 }
 
 function addModelEntryToForm() {
-  providerForm.models.push({ name: '', modelId: '', model_type: 'chat', meta_config: null });
+  providerForm.models.push({
+    name: '',
+    modelId: '',
+    model_type: isImageWorker.value ? 'image' : 'chat',
+    meta_config: null,
+  });
 }
 
 function removeModelEntryFromForm(index: number) {
@@ -485,5 +518,6 @@ defineExpose({
 .type-select { width: 20%; }
 .delete-model-btn { margin-left: 10px; }
 .label-icon { margin-left: 4px; color: var(--el-text-color-secondary); cursor: help; }
+.form-hint { width: 100%; font-size: 12px; line-height: 1.5; color: var(--el-text-color-secondary); margin-top: 4px; }
 .el-form-item .el-switch { margin-right: 8px; }
 </style>

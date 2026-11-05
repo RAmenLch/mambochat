@@ -34,15 +34,45 @@ async def _validate_backend_binding(db: AsyncSession, current, payload) -> None:
         payload.aiModelId if payload.aiModelId is not None else current.aiModelId
     )
 
-    if backend_type == "model":
+    if backend_type in ("model", "image_api"):
         if not (ai_model_id or "").strip():
             raise HTTPException(
                 status_code=400, detail="后端类型为「系统模型」时必须绑定一个模型"
             )
         from backend.crud import provider_crud
 
-        if await provider_crud.get_model(db, ai_model_id) is None:
+        model = await provider_crud.get_model(db, ai_model_id)
+        if model is None:
             raise HTTPException(status_code=400, detail="绑定的模型不存在")
+
+        model_type = (model.model_type or "").strip().lower()
+        if backend_type == "image_api":
+            if model_type != "image":
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "后端类型为「生图模型」时只能绑定生图模型"
+                        f"（当前模型类型为 {model_type or 'chat'}）"
+                    ),
+                )
+            from backend.services.generation.image_executors import (
+                ExecutorError,
+                resolve_executor,
+            )
+
+            provider = model.provider
+            try:
+                resolve_executor(
+                    getattr(provider, "worker_type", None),
+                    getattr(provider, "apiHost", None),
+                )
+            except ExecutorError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+        elif model_type == "image":
+            raise HTTPException(
+                status_code=400,
+                detail="该模型是生图模型，请把配置的后端类型改为「生图模型」",
+            )
     elif not (mcp_server_id or "").strip():
         raise HTTPException(
             status_code=400, detail="后端类型为「MCP 服务」时必须绑定一个 MCP 服务"
@@ -139,11 +169,13 @@ async def test_image_gen_config(config_id: str, db: AsyncSession = Depends(get_d
 
     - ``mcp``：连接服务，检查三个标准工具是否齐全，并探测是否声明
       ``reference_images``（参考图能力）；
-    - ``model``：校验模型与其服务商是否可用，并提示能力声明。
+    - ``model``：校验模型与其服务商是否可用，并提示能力声明；
+    - ``image_api``：校验生图模型与执行器，并 GET 探测端点 / 能力（不生成图片）。
 
     不合规仅作为提示返回，不阻止保存 —— 服务可能尚未启动。
     """
     from backend.services.generation.agent.image_gen.factory import (
+        BACKEND_IMAGE_API,
         BACKEND_MODEL,
         check_mcp_image_service,
         check_reference_support,
@@ -156,6 +188,8 @@ async def test_image_gen_config(config_id: str, db: AsyncSession = Depends(get_d
 
     backend_type = (config.backendType or "mcp").strip().lower()
 
+    if backend_type == BACKEND_IMAGE_API:
+        return await _test_image_api_backend(db, config)
     if backend_type == BACKEND_MODEL:
         return await _test_model_backend(db, config, load_model_backend_config)
 
@@ -248,4 +282,61 @@ async def _test_model_backend(
         found_tools=["image_generate", "image_task_status", "image_download"],
         supports_reference_images=supports_reference,
         message=message,
+    )
+
+
+async def _test_image_api_backend(db: AsyncSession, config) -> ImageGenToolCheckResult:
+    """纯生图后端检测：GET 探测端点与能力，不发真实生成请求（避免烧钱）。"""
+    from backend.services.generation.agent.image_gen.factory import (
+        ImageGenConfigError,
+        probe_image_endpoint,
+    )
+
+    try:
+        detail = await probe_image_endpoint(db, config)
+    except ImageGenConfigError as exc:
+        return ImageGenToolCheckResult(
+            status="unhealthy",
+            backend_type="image_api",
+            supports_reference_images=(
+                None
+                if config.supportsReferenceImages is None
+                else bool(config.supportsReferenceImages)
+            ),
+            message="生图模型后端不可用",
+            error=str(exc),
+        )
+
+    capabilities = detail.get("capabilities") or {}
+    declared = capabilities.get("supported_parameters")
+    if isinstance(declared, dict):
+        parameter_keys = sorted(declared)
+    elif isinstance(declared, list):
+        parameter_keys = sorted(str(key) for key in declared)
+    else:
+        parameter_keys = []
+
+    paths = " / ".join(detail.get("paths") or [])
+    reference_note = (
+        "支持参考图" if detail.get("supports_reference_images") else "不支持参考图"
+    )
+    message = (
+        f"已绑定模型 {detail.get('model_id')}（执行器 {detail.get('executor')} → {paths}）；"
+        f"{reference_note}"
+    )
+    if parameter_keys:
+        message += "；模型声明支持: " + ", ".join(parameter_keys)
+    elif detail.get("declared"):
+        message += "；接口未返回能力描述，参数将按执行器白名单下发"
+
+    return ImageGenToolCheckResult(
+        status="unhealthy" if detail.get("error") else "healthy",
+        backend_type="image_api",
+        server_name=detail.get("provider_name"),
+        found_tools=["image_generate", "image_task_status", "image_download"],
+        supports_reference_images=bool(detail.get("supports_reference_images")),
+        executor=detail.get("executor"),
+        capabilities=capabilities or None,
+        message=message,
+        error=detail.get("error"),
     )

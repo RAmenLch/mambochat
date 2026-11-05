@@ -32,8 +32,8 @@
 
       <el-table-column :label="t('settings.imageGen.columns.backend')" min-width="180">
         <template #default="{ row }">
-          <el-tag size="small" effect="plain" :type="row.backendType === 'model' ? 'success' : 'info'">
-            {{ row.backendType === 'model' ? t('settings.imageGen.backend.model') : t('settings.imageGen.backend.mcp') }}
+          <el-tag size="small" effect="plain" :type="row.backendType === 'mcp' ? 'info' : 'success'">
+            {{ backendTypeLabel(row.backendType) }}
           </el-tag>
           <span class="backend-name">{{ backendLabel(row) }}</span>
           <el-tag
@@ -125,6 +125,7 @@
           <el-radio-group v-model="form.backendType" @change="onBackendTypeChange">
             <el-radio value="mcp">{{ t('settings.imageGen.backend.mcp') }}</el-radio>
             <el-radio value="model">{{ t('settings.imageGen.backend.model') }}</el-radio>
+            <el-radio value="image_api">{{ t('settings.imageGen.backend.imageApi') }}</el-radio>
           </el-radio-group>
           <div class="form-hint">{{ t('settings.imageGen.form.backendHint') }}</div>
         </el-form-item>
@@ -165,10 +166,12 @@
               />
             </el-option-group>
           </el-select>
-          <el-checkbox v-model="showAllModels" class="ml-4">
+          <el-checkbox v-if="form.backendType === 'model'" v-model="showAllModels" class="ml-4">
             {{ t('settings.imageGen.form.showAllModels') }}
           </el-checkbox>
-          <div class="form-hint">{{ t('settings.imageGen.form.aiModelHint') }}</div>
+          <div class="form-hint">
+            {{ form.backendType === 'image_api' ? imageApiHint : t('settings.imageGen.form.aiModelHint') }}
+          </div>
         </el-form-item>
 
         <el-form-item :label="t('settings.imageGen.form.reference')" class="has-hint">
@@ -179,7 +182,7 @@
           </el-select>
           <div class="form-hint">
             {{
-              form.backendType === 'model'
+              form.backendType !== 'mcp'
                 ? t('settings.imageGen.form.referenceModelHint')
                 : t('settings.imageGen.form.referenceHint')
             }}
@@ -293,12 +296,43 @@ function isImageOutputModel(model: any): boolean {
 }
 
 const modelOptions = computed(() => {
+  const backend = form.backendType;
   return providerStore.providers
     .map(provider => ({
       label: provider.name,
-      options: provider.models.filter(model => showAllModels.value || isImageOutputModel(model)),
+      options: provider.models.filter(model => {
+        if (backend === 'image_api') return model.model_type === 'image';
+        if (model.model_type === 'image') return false;
+        return showAllModels.value || isImageOutputModel(model);
+      }),
     }))
     .filter(group => group.options.length > 0);
+});
+
+/** 生图模型的执行器（由所属服务商的 worker_type 决定） */
+function executorOfModel(modelId: string): { label: string; endpoint: string } | null {
+  const model = providerStore.allModels.find(m => m.id === modelId);
+  if (!model) return null;
+  const provider = providerStore.providers.find(p => p.id === model.providerId);
+  const worker = provider?.worker_type || '';
+  if (worker === 'openrouter_images') return { label: 'OpenRouter Images API', endpoint: '/images' };
+  if (worker === 'openai_images') return { label: 'OpenAI Images API', endpoint: '/images/generations' };
+  const host = (provider?.apiHost || '').toLowerCase();
+  if (host.includes('openrouter')) return { label: 'OpenRouter Images API（自动推导）', endpoint: '/images' };
+  if (!worker || worker === 'openai' || worker === 'deepseek') {
+    return { label: 'OpenAI Images API（自动推导）', endpoint: '/images/generations' };
+  }
+  return null;
+}
+
+const imageApiHint = computed(() => {
+  if (!form.aiModelId) return t('settings.imageGen.form.imageApiHintEmpty');
+  const executor = executorOfModel(form.aiModelId);
+  if (!executor) return t('settings.imageGen.form.imageApiHintNoExecutor');
+  return t('settings.imageGen.form.imageApiHint', {
+    executor: executor.label,
+    endpoint: executor.endpoint,
+  });
 });
 
 function serverName(id: string | null): string {
@@ -311,14 +345,24 @@ function modelName(id: string | null): string {
   return providerStore.allModels.find(m => m.id === id)?.name || id.slice(0, 8);
 }
 
+function backendTypeLabel(backend: string): string {
+  if (backend === 'model') return t('settings.imageGen.backend.model');
+  if (backend === 'image_api') return t('settings.imageGen.backend.imageApi');
+  return t('settings.imageGen.backend.mcp');
+}
+
 function backendLabel(row: ImageGenConfig): string {
-  return row.backendType === 'model' ? modelName(row.aiModelId) : serverName(row.mcpServerId);
+  if (row.backendType === 'mcp') return serverName(row.mcpServerId);
+  const name = modelName(row.aiModelId);
+  if (row.backendType !== 'image_api') return name;
+  const executor = executorOfModel(row.aiModelId || '');
+  return executor ? `${name} · ${executor.label}` : name;
 }
 
 /** 列表标签用：显式 true，或模型后端的「自动」（= 按支持处理） */
 function referenceEnabled(row: ImageGenConfig): boolean {
   if (row.supportsReferenceImages === true) return true;
-  return row.supportsReferenceImages === null && row.backendType === 'model';
+  return row.supportsReferenceImages === null && row.backendType !== 'mcp';
 }
 
 /**
@@ -334,14 +378,17 @@ function modelCapability(modelId: string): boolean | null {
 /** 用户换模型时按能力初始化，之后仍可手动改 */
 function onModelChange(modelId: string) {
   if (!modelId) return;
-  form.supportsReferenceImages = modelCapability(modelId);
+  // 生图模型的参考图能力由执行器决定（默认按支持，仍可手动钉住）
+  form.supportsReferenceImages = form.backendType === 'image_api' ? null : modelCapability(modelId);
 }
 
 /** 切换后端类型时重置为对应默认：MCP 走探测，模型按已选模型能力 */
 function onBackendTypeChange(value: string | number | boolean | undefined) {
-  form.supportsReferenceImages = value === 'model' && form.aiModelId
-    ? modelCapability(form.aiModelId)
-    : null;
+  form.aiModelId = '';
+  form.supportsReferenceImages = null;
+  if (value === 'model') {
+    showAllModels.value = false;
+  }
 }
 
 /** 参考图能力三态（null=自动）：el-select 取值不接受 null，用字符串哨兵中转 */
@@ -385,7 +432,9 @@ function handleEdit(row: ImageGenConfig) {
   editingId.value = row.id;
   form.name = row.name;
   form.description = row.description || '';
-  form.backendType = row.backendType === 'model' ? 'model' : 'mcp';
+  form.backendType = row.backendType === 'model'
+    ? 'model'
+    : (row.backendType === 'image_api' ? 'image_api' : 'mcp');
   form.mcpServerId = row.mcpServerId || '';
   form.aiModelId = row.aiModelId || '';
   form.supportsReferenceImages = row.supportsReferenceImages ?? null;
@@ -409,7 +458,7 @@ async function handleSave() {
     ElMessage.warning(t('settings.imageGen.form.mcpServerRequired'));
     return;
   }
-  if (form.backendType === 'model' && !form.aiModelId) {
+  if (form.backendType !== 'mcp' && !form.aiModelId) {
     ElMessage.warning(t('settings.imageGen.form.aiModelRequired'));
     return;
   }
@@ -424,7 +473,7 @@ async function handleSave() {
       description: form.description || null,
       backendType: form.backendType,
       mcpServerId: form.backendType === 'mcp' ? form.mcpServerId : null,
-      aiModelId: form.backendType === 'model' ? form.aiModelId : null,
+      aiModelId: form.backendType === 'mcp' ? null : form.aiModelId,
       supportsReferenceImages: form.supportsReferenceImages ?? null,
       defaultCount: form.defaultCount || 1,
       defaultResolution: form.defaultResolution || '1024x1024',
@@ -465,8 +514,11 @@ async function handleCheck(row: ImageGenConfig) {
     const referenceNote = result.supports_reference_images
       ? t('settings.imageGen.checkReferenceOn')
       : t('settings.imageGen.checkReferenceOff');
+    const executorNote = result.executor
+      ? ` · ${t('settings.imageGen.checkExecutor', { executor: result.executor })}`
+      : '';
     if (result.status === 'healthy') {
-      ElMessage.success(`${t('settings.imageGen.checkPassed')} · ${referenceNote}`);
+      ElMessage.success(`${result.message || t('settings.imageGen.checkPassed')} · ${referenceNote}${executorNote}`);
     } else if (result.missing_tools.length) {
       ElMessage.warning(t('settings.imageGen.checkMissing', { tools: result.missing_tools.join(', ') }));
     } else {

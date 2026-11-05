@@ -23,6 +23,7 @@ import type {
   AIProviderUpdate,
   AIModelUpdate,
   ConnectionTestResponse,
+  ProviderWorkerType,
 } from '@/api/types';
 import { useChatListStore } from './chatListStore';
 import { useSettingsStore } from './settingsStore';
@@ -152,9 +153,10 @@ export const useProviderStore = defineStore('providers', {
      * 测试新连接，需提供 apiHost, apiKey 和 useProxy 状态。
      * @param connectionData 包含 apiHost 和 apiKey 的连接数据。
      * @param useProxy 从表单实时传入的代理状态。
+     * @param workerType 生图执行器时后端改走纯生图端点探测。
      */
-    async testConnection(connectionData: ConnectionRequest, useProxy: boolean): Promise<ConnectionTestResponse> {
-      return await testConnection(connectionData, useProxy);
+    async testConnection(connectionData: ConnectionRequest, useProxy: boolean, workerType?: ProviderWorkerType): Promise<ConnectionTestResponse> {
+      return await testConnection(connectionData, useProxy, workerType);
     },
 
     /**
@@ -171,9 +173,10 @@ export const useProviderStore = defineStore('providers', {
      * 获取外部模型，需提供 apiHost, apiKey 和 useProxy 状态。
      * @param connectionData 包含 apiHost 和 apiKey 的连接数据。
      * @param useProxy 从表单实时传入的代理状态。
+     * @param workerType 生图执行器时走纯生图模型端点（返回 model_type=image）。
      */
-    async fetchExternalModels(connectionData: ConnectionRequest, useProxy: boolean): Promise<AIModelBase[]> {
-       return await fetchExternalModels(connectionData, useProxy);
+    async fetchExternalModels(connectionData: ConnectionRequest, useProxy: boolean, workerType?: ProviderWorkerType): Promise<AIModelBase[]> {
+       return await fetchExternalModels(connectionData, useProxy, workerType);
     },
 
     /**

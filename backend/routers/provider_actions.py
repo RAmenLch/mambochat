@@ -20,17 +20,22 @@ async def _fetch_models_and_handle_errors(
         api_host: str,
         api_key: str,
         use_proxy: bool,
-        source_description: str
+        source_description: str,
+        worker_type: str | None = None,
 ) -> List[schemas.AIModelBase]:
     """
     一个内部辅助函数，封装了调用服务获取模型并统一处理各种潜在异常的逻辑。
+
+    ``worker_type`` 是生图执行器时走纯生图端点，返回 ``model_type=image`` 的模型。
     """
     try:
         if api_host == "https://generativelanguage.googleapis.com/v1beta":
-            func1 = provider_service.fetch_models_from_provider_google
-        else:
-            func1 = provider_service.fetch_models_from_provider
-        return await func1(db, api_host, api_key, use_proxy)
+            return await provider_service.fetch_models_from_provider_google(
+                db, api_host, api_key, use_proxy
+            )
+        return await provider_service.fetch_models_from_provider(
+            db, api_host, api_key, use_proxy, worker_type
+        )
     except json.JSONDecodeError:
         raise AppHTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -60,6 +65,7 @@ async def _fetch_models_and_handle_errors(
 async def test_connection(
     request: schemas.ConnectionRequest,
     use_proxy: bool = False, # 允许前端在测试新连接时决定是否使用代理
+    worker_type: str | None = None, # 生图执行器时走纯生图端点
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -69,7 +75,8 @@ async def test_connection(
         db=db,
         api_host=request.apiHost,
         api_key=request.apiKey,
-        use_proxy=use_proxy
+        use_proxy=use_proxy,
+        worker_type=worker_type,
     )
 
 
@@ -92,7 +99,8 @@ async def test_connection_for_provider(
         db=db,
         api_host=request.apiHost,
         api_key=provider.apiKey,
-        use_proxy=use_proxy
+        use_proxy=use_proxy,
+        worker_type=provider.worker_type,
     )
 
 
@@ -100,6 +108,7 @@ async def test_connection_for_provider(
 async def fetch_models(
     request: schemas.ConnectionRequest,
     use_proxy: bool = False, # 允许前端在获取模型时决定是否使用代理
+    worker_type: str | None = None, # 生图执行器时走纯生图端点
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -110,7 +119,8 @@ async def fetch_models(
         api_host=request.apiHost,
         api_key=request.apiKey,
         use_proxy=use_proxy,
-        source_description="API Host"
+        source_description="API Host",
+        worker_type=worker_type,
     )
 
 
@@ -133,5 +143,6 @@ async def fetch_models_for_provider(
         api_host=provider.apiHost,
         api_key=provider.apiKey,
         use_proxy=use_proxy,
-        source_description="保存的 API Host"
+        source_description="保存的 API Host",
+        worker_type=provider.worker_type,
     )

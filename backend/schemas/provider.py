@@ -1,7 +1,7 @@
 # backend/schemas/provider.py
 import json
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
 
 from backend.schemas.enums import ProviderWorkerType, ModelType
 
@@ -20,6 +20,20 @@ class AIModelMetaConfig(BaseModel):
     max_context_length: Optional[int] = Field(None, description="Embeddings 模型的最大上下文Token限制")
     max_retries: Optional[int] = Field(0, description="模型请求最大重试次数, 0表示不配置, 使用全局默认值")
     timeout: Optional[int] = Field(None, description="请求超时时间(秒), None 时使用全局默认值")
+    image_options: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            "生图模型的默认额外参数（quality / output_format / aspect_ratio / "
+            "background / output_compression / seed），调用时由 extra 同名键覆盖"
+        ),
+    )
+    image_capabilities: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            "生图模型的能力描述（拉取模型或检测时回填）：supported_parameters 描述符、"
+            "architecture、pricing 等；执行器用它做参数二次过滤"
+        ),
+    )
 
 
 # --- AIModel Schemas ---
@@ -28,7 +42,7 @@ class AIModelBase(BaseModel):
     modelId: str
     name: str
     meta_config: Optional[AIModelMetaConfig] = Field(None, description="模型的元配置信息")
-    model_type: ModelType = Field(ModelType.CHAT, description="模型类型: chat 或 embedding")
+    model_type: ModelType = Field(ModelType.CHAT, description="模型类型: chat / embedding / image")
     starred: bool = Field(False, description="是否标星")
 
 

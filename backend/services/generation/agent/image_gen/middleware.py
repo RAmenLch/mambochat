@@ -146,6 +146,8 @@ class ImageGenMiddleware(AgentMiddleware):
         # 后端不支持参考图时，该参数不出现在 schema / 描述里
         self._with_reference = standard.supports_reference_images
         ref_hint = _REFERENCE_HINT if self._with_reference else ""
+        # 额外参数提示：必须由实现类按「配置快照」确定性渲染，避免打散 KV cache
+        extra_hint = standard.describe_extra_options()
         self._generate_args_cls = generate_args_model(self._with_reference)
         self._generate_show_args_cls = generate_show_args_model(self._with_reference)
 
@@ -156,7 +158,7 @@ class ImageGenMiddleware(AgentMiddleware):
                 [
                     StructuredTool.from_function(
                         name=IMAGE_TOOL_GENERATE,
-                        description=_GENERATE_DESCRIPTION + ref_hint + hint,
+                        description=_GENERATE_DESCRIPTION + ref_hint + hint + extra_hint,
                         coroutine=self._agenerate,
                         args_schema=self._generate_args_cls,
                         infer_schema=False,
@@ -178,7 +180,7 @@ class ImageGenMiddleware(AgentMiddleware):
                 ]
             )
         if enable_generate_show:
-            description = _GENERATE_SHOW_DESCRIPTION + ref_hint
+            description = _GENERATE_SHOW_DESCRIPTION + ref_hint + extra_hint
             if not standard.default_sync:
                 description += _ASYNC_ONESHOT_HINT
             tools.append(

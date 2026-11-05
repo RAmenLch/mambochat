@@ -63,17 +63,25 @@ class MoveAction(str, Enum):
 
 
 class ProviderWorkerType(str, Enum):
-    """定义服务商使用的 Worker 类型"""
+    """定义服务商使用的 Worker 类型
+
+    前四个用于对话生成；`openai_images` / `openrouter_images` 是**生图执行器**，
+    仅供 ``model_type='image'`` 的模型使用（服务商级执行器 + 端点 + 鉴权）。
+    """
     OPENAI = "openai"
     GOOGLE = "google"
     DEEPSEEK = "deepseek"
     ANTHROPIC = "anthropic"
+    # --- 生图执行器 ---
+    OPENAI_IMAGES = "openai_images"
+    OPENROUTER_IMAGES = "openrouter_images"
 
 
 class ModelType(str, Enum):
     """定义 AI 模型的类型"""
     CHAT = "chat"
     EMBEDDING = "embedding"
+    IMAGE = "image"
 
 
 # --- Resource Enums ---

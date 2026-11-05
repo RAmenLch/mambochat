@@ -10,7 +10,10 @@ from backend.mambo_cli import output
 from backend.mambo_cli.resolver import resolve_provider
 from backend.mambo_cli.util import UsageError, parse_bool
 
-WORKER_TYPES = ["openai", "google", "deepseek", "anthropic"]
+WORKER_TYPES = [
+    "openai", "google", "deepseek", "anthropic",
+    "openai_images", "openrouter_images",
+]
 MODEL_TYPES = ["chat", "embedding"]
 
 

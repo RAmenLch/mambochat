@@ -25,9 +25,9 @@ def _validate_resolution(value: Optional[str]) -> str:
 
 
 def _ensure_backend_binding(payload: Any) -> None:
-    """``backendType`` 与绑定目标必须匹配：mcp 要服务，model 要模型。"""
+    """``backendType`` 与绑定目标必须匹配：mcp 要服务，model / image_api 要模型。"""
     backend_type = (getattr(payload, "backendType", None) or "mcp").strip().lower()
-    if backend_type == "model":
+    if backend_type in ("model", "image_api"):
         if not (getattr(payload, "aiModelId", None) or "").strip():
             raise ValueError("后端类型为「系统模型」时必须绑定一个模型（aiModelId）")
     elif not (getattr(payload, "mcpServerId", None) or "").strip():
@@ -37,17 +37,18 @@ def _ensure_backend_binding(payload: Any) -> None:
 class ImageGenConfigBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="配置名称")
     description: Optional[str] = Field(None, description="说明")
-    backendType: Literal["mcp", "model"] = Field(
+    backendType: Literal["mcp", "model", "image_api"] = Field(
         "mcp",
         description=(
             "后端类型：mcp（实现生图标准的 MCP 服务）/ model（系统里能出图的 Chat 模型）"
+            " / image_api（纯生图接口模型，执行器由服务商 worker_type 决定）"
         ),
     )
     mcpServerId: Optional[str] = Field(
         None, description="绑定的 MCP 服务 ID（backendType=mcp 时必填）"
     )
     aiModelId: Optional[str] = Field(
-        None, description="绑定的系统模型 ID（backendType=model 时必填）"
+        None, description="绑定的系统模型 ID（backendType=model / image_api 时必填）"
     )
     supportsReferenceImages: Optional[bool] = Field(
         None,
@@ -95,7 +96,7 @@ class ImageGenConfigCreate(ImageGenConfigBase):
 class ImageGenConfigUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     description: Optional[str] = None
-    backendType: Optional[Literal["mcp", "model"]] = None
+    backendType: Optional[Literal["mcp", "model", "image_api"]] = None
     mcpServerId: Optional[str] = None
     aiModelId: Optional[str] = None
     supportsReferenceImages: Optional[bool] = None
@@ -140,6 +141,12 @@ class ImageGenToolCheckResult(BaseModel):
     missing_tools: List[str] = Field(default_factory=list)
     supports_reference_images: Optional[bool] = Field(
         None, description="后端是否支持参考图（reference_images）"
+    )
+    executor: Optional[str] = Field(
+        None, description="生图执行器（仅 image_api 后端）：openai_images / openrouter_images"
+    )
+    capabilities: Optional[dict] = Field(
+        None, description="生图模型能力摘要（仅 image_api 后端）：端点、支持的参数等"
     )
     message: str = ""
     error: Optional[str] = None

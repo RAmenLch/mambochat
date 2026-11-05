@@ -10,7 +10,8 @@ import type {
   AIModelUpdate,
   ConnectionRequest,
   ConnectionTestResponse,
-  AIModelBase
+  AIModelBase,
+  ProviderWorkerType
 } from './types';
 
 /**
@@ -64,10 +65,15 @@ export const deleteModel = (modelId: string): Promise<void> => {
 
 /**
  * 测试与外部服务的连接 (需要提供 apiHost 和 apiKey)
+ * @param workerType 生图执行器时后端改走纯生图端点探测
  */
-export const testConnection = (connectionData: ConnectionRequest, useProxy: boolean): Promise<ConnectionTestResponse> => {
+export const testConnection = (
+  connectionData: ConnectionRequest,
+  useProxy: boolean,
+  workerType?: ProviderWorkerType
+): Promise<ConnectionTestResponse> => {
   return apiClient.post('/providers/test-connection', connectionData, {
-    params: { use_proxy: useProxy }
+    params: { use_proxy: useProxy, worker_type: workerType }
   })
 };
 
@@ -85,10 +91,15 @@ export const testConnectionForProvider = (providerId: string, apiHost: string, u
 
 /**
  * 从外部服务获取模型列表 (需要提供 apiHost 和 apiKey)
+ * @param workerType 生图执行器时走纯生图模型端点（返回 model_type=image）
  */
-export const fetchExternalModels = (connectionData: ConnectionRequest, useProxy: boolean): Promise<AIModelBase[]> => {
+export const fetchExternalModels = (
+  connectionData: ConnectionRequest,
+  useProxy: boolean,
+  workerType?: ProviderWorkerType
+): Promise<AIModelBase[]> => {
   return apiClient.post('/providers/fetch-models', connectionData, {
-    params: { use_proxy: useProxy }
+    params: { use_proxy: useProxy, worker_type: workerType }
   })
 };
 

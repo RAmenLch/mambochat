@@ -30,11 +30,18 @@
               <div class="field-item">
                 <label class="field-label">{{ t('provider.form.workerType') }}</label>
                 <el-select v-model="form.worker_type" style="width: 100%" popper-class="mobile-popper">
-                  <el-option label="OpenAI Compatible" value="openai" />
-                  <el-option label="Google Gemini" value="google" />
-                  <el-option label="DeepSeek" value="deepseek" />
-                  <el-option label="Anthropic" value="anthropic" />
+                  <el-option-group :label="t('provider.form.workerGroupChat')">
+                    <el-option label="OpenAI Compatible" value="openai" />
+                    <el-option label="Google Gemini" value="google" />
+                    <el-option label="DeepSeek" value="deepseek" />
+                    <el-option label="Anthropic" value="anthropic" />
+                  </el-option-group>
+                  <el-option-group :label="t('provider.form.workerGroupImage')">
+                    <el-option :label="t('provider.form.workerOpenaiImages')" value="openai_images" />
+                    <el-option :label="t('provider.form.workerOpenrouterImages')" value="openrouter_images" />
+                  </el-option-group>
                 </el-select>
+                <div v-if="isImageWorker" class="field-hint">{{ imageExecutorHint }}</div>
               </div>
 
               <div class="field-item">
@@ -201,6 +208,18 @@ const form = reactive({
   models: [] as Array<{ modelId: string; name: string; model_type: ModelType }>,
 });
 
+/** 生图执行器服务商：模型只能是生图模型，端点由执行器固定 */
+const isImageWorker = computed(
+  () => form.worker_type === 'openai_images' || form.worker_type === 'openrouter_images'
+);
+const imageExecutorHint = computed(() => {
+  if (!isImageWorker.value) return '';
+  const endpoint = form.worker_type === 'openrouter_images'
+    ? '/images'
+    : '/images/generations、/images/edits';
+  return t('provider.form.imageExecutorHint', { endpoint });
+});
+
 // --- 表单内模型清单 / 拉取 ---
 const isFetchingModels = ref(false);
 const fetchPickerVisible = ref(false);
@@ -209,7 +228,11 @@ const pickedIds = ref<string[]>([]);
 
 function addEmptyModelRow() {
   const seq = form.models.length + 1;
-  form.models.push({ modelId: '', name: `${t('model.list.add')} ${seq}`, model_type: 'chat' });
+  form.models.push({
+    modelId: '',
+    name: `${t('model.list.add')} ${seq}`,
+    model_type: isImageWorker.value ? 'image' : 'chat',
+  });
 }
 
 function removeModelRow(index: number) {
@@ -230,7 +253,7 @@ async function handleFetchIntoForm() {
   try {
     const list = (isEditing.value && form.apiKey === API_KEY_PLACEHOLDER && props.providerData)
       ? await providerStore.fetchModelsForProvider(props.providerData.id, form.use_proxy)
-      : await providerStore.fetchExternalModels({ apiHost: form.apiHost, apiKey: form.apiKey }, form.use_proxy);
+      : await providerStore.fetchExternalModels({ apiHost: form.apiHost, apiKey: form.apiKey }, form.use_proxy, form.worker_type);
     fetchedModels.value = list;
     const existing = new Set(form.models.map(m => m.modelId));
     pickedIds.value = list.filter(m => !existing.has(m.modelId)).map(m => m.modelId);
@@ -312,7 +335,7 @@ const handleTestConnection = async () => {
       res = await providerStore.testConnectionForProvider(props.providerData.id, form.apiHost, form.use_proxy);
     } else {
       if (!form.apiKey) { ElMessage.warning(t('provider.form.testWarningKey')); isTesting.value = false; return; }
-      res = await providerStore.testConnection({ apiHost: form.apiHost, apiKey: form.apiKey }, form.use_proxy);
+      res = await providerStore.testConnection({ apiHost: form.apiHost, apiKey: form.apiKey }, form.use_proxy, form.worker_type);
     }
     const msg = res.status === 'success'
       ? t('provider.form.testSuccess')
@@ -391,6 +414,7 @@ const submitForm = async () => {
 .sheet-form { padding: 0; }
 .field-item { margin-bottom: 12px; }
 .field-label { display: block; font-size: 13px; font-weight: 600; color: var(--el-text-color-primary); margin-bottom: 4px; }
+.field-hint { font-size: 12px; line-height: 1.5; color: var(--el-text-color-secondary); margin-top: 4px; }
 .native-input { width: 100%; height: 40px; padding: 0 12px; font-size: 15px; font-family: inherit; color: var(--el-text-color-primary); background: var(--el-bg-color); border: none; border-radius: 10px; box-shadow: 0 0 0 1px var(--el-border-color-lighter) inset; outline: none; box-sizing: border-box; transition: box-shadow 0.2s; }
 .native-input:focus { box-shadow: 0 0 0 2px var(--el-color-primary) inset; }
 .password-row { position: relative; display: flex; align-items: center; }

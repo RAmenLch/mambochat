@@ -17,8 +17,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from mambo_agents.middleware.mcp import MCPServerConfig
 
 from backend.models.image_gen_model import ImageGenConfig
+from backend.services.generation.image_executors import (
+    ExecutorError,
+    ImageApiExecutor,
+    resolve_executor,
+)
 from backend.services.generation.tools.mambo_mcp_tool_provider import MamboMCPToolProvider
 
+from .api_standard import ImageApiImageGenStandard
 from .mcp_standard import McpImageGenStandard
 from .model_standard import PROTOCOL_CHAT, PROTOCOL_GOOGLE, ChatModelImageGenStandard
 from .standard import (
@@ -36,6 +42,7 @@ logger = logging.getLogger(__name__)
 # 后端类型
 BACKEND_MCP = "mcp"
 BACKEND_MODEL = "model"
+BACKEND_IMAGE_API = "image_api"
 
 # 参考图能力探测结果缓存：{cache_key: bool}
 _REFERENCE_CAPABILITY_CACHE: Dict[str, bool] = {}
@@ -157,15 +164,20 @@ async def build_mcp_image_standard(
 # ---------------------------------------------------------------------------
 
 
-def model_supports_image_output(meta: Optional[str]) -> bool:
-    """模型元配置是否声明可输出图片（``output_modalities`` 含 image）。"""
+def _meta_dict(meta: Optional[str]) -> Dict[str, Any]:
+    """把 ``AIModel.meta_config``（TEXT）解析成字典，失败返回空字典。"""
     if not meta:
-        return False
+        return {}
     try:
         data = json.loads(meta) if isinstance(meta, str) else dict(meta)
     except (ValueError, TypeError):
-        return False
-    modalities = data.get("output_modalities") or []
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def model_supports_image_output(meta: Optional[str]) -> bool:
+    """模型元配置是否声明可输出图片（``output_modalities`` 含 image）。"""
+    modalities = _meta_dict(meta).get("output_modalities") or []
     return "image" in [str(m).lower() for m in modalities]
 
 
@@ -183,6 +195,7 @@ async def load_model_backend_config(
         raise ImageGenConfigError(
             f"生图配置 '{config.name}' 绑定的模型不存在（id={config.aiModelId}）"
         )
+    meta = _meta_dict(model.meta_config)
     provider = model.provider
     if provider is None:
         raise ImageGenConfigError(
@@ -192,13 +205,28 @@ async def load_model_backend_config(
     return {
         "model_id": model.modelId,
         "model_name": model.name,
+        "model_type": (model.model_type or "").strip().lower(),
         "api_host": provider.apiHost,
         "api_key": provider.apiKey,
         "worker_type": provider.worker_type,
         "use_proxy": bool(provider.use_proxy),
         "declares_image_output": model_supports_image_output(model.meta_config),
+        "image_options": meta.get("image_options") or {},
+        "image_capabilities": meta.get("image_capabilities") or {},
         "provider_name": provider.name,
     }
+
+
+def resolve_model_executor(info: Dict[str, Any]) -> ImageApiExecutor:
+    """按服务商信息解析该生图模型应使用的执行器。
+
+    服务商的 ``worker_type`` 是生图执行器时直接命中；否则按 ``api_host`` 推断
+    （OpenRouter 网关 → OpenRouter Images，其余 OpenAI 兼容 → OpenAI Images）。
+    """
+    try:
+        return resolve_executor(info.get("worker_type"), info.get("api_host"))
+    except ExecutorError as exc:
+        raise ImageGenConfigError(str(exc)) from exc
 
 
 async def build_model_image_standard(
@@ -206,6 +234,11 @@ async def build_model_image_standard(
 ) -> ChatModelImageGenStandard:
     """按配置构建「系统模型」实现；配置不可用时抛 :class:`ImageGenConfigError`。"""
     info = await load_model_backend_config(db, config)
+    if info["model_type"] == "image":
+        raise ImageGenConfigError(
+            f"模型 {info['model_name']} 是生图模型（model_type=image），"
+            "请把生图配置的后端类型改为「生图模型」"
+        )
 
     declared = getattr(config, "supportsReferenceImages", None)
     try:
@@ -231,6 +264,76 @@ async def build_model_image_standard(
         raise ImageGenConfigError(str(exc)) from exc
 
 
+def _min_input_references(capabilities: Dict[str, Any]) -> int:
+    """模型声明的参考图下限（``input_references.min``），未声明视为 0。"""
+    declared = (capabilities or {}).get("supported_parameters")
+    if not isinstance(declared, dict):
+        return 0
+    descriptor = declared.get("input_references")
+    if not isinstance(descriptor, dict):
+        return 0
+    try:
+        return int(descriptor.get("min") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+async def build_image_api_standard(
+    db: AsyncSession, config: ImageGenConfig
+) -> ImageApiImageGenStandard:
+    """按配置构建「纯生图接口」实现（执行器由服务商决定）。"""
+    info = await load_model_backend_config(db, config)
+    if info["model_type"] != "image":
+        raise ImageGenConfigError(
+            f"模型 {info['model_name']} 不是生图模型（model_type={info['model_type'] or 'chat'}），"
+            "请把它设为 image，或把生图配置的后端类型改为「系统模型」"
+        )
+
+    executor = resolve_model_executor(info)
+    declared = getattr(config, "supportsReferenceImages", None)
+
+    # 模型要求必须带参考图时，参考图参数不能被配置钉死为「不支持」
+    reference_required = _min_input_references(info["image_capabilities"]) >= 1
+    if reference_required:
+        if declared is False:
+            logger.warning(
+                "生图配置 '%s' 的模型 %s 要求至少 %s 张参考图，"
+                "但配置把参考图能力钉成了「不支持」，已按支持处理",
+                config.name,
+                info["model_id"],
+                _min_input_references(info["image_capabilities"]),
+            )
+        supports_reference = True
+    else:
+        supports_reference = (
+            executor.supports_reference_images if declared is None else bool(declared)
+        )
+
+    try:
+        return ImageApiImageGenStandard(
+            executor=executor,
+            model_id=info["model_id"],
+            api_host=info["api_host"],
+            api_key=info["api_key"],
+            use_proxy=info["use_proxy"],
+            timeout=config.timeout,
+            session_factory=_session_factory(),
+            image_options=info["image_options"],
+            capabilities=info["image_capabilities"],
+            default_count=config.defaultCount or 1,
+            default_sync=bool(config.defaultSync),
+            default_resolution=(
+                getattr(config, "defaultResolution", "") or DEFAULT_RESOLUTION
+            ),
+            default_wait_timeout=(
+                getattr(config, "defaultWaitTimeout", 0) or DEFAULT_WAIT_TIMEOUT
+            ),
+            supports_reference_images=supports_reference,
+        )
+    except ImageGenToolError as exc:
+        raise ImageGenConfigError(str(exc)) from exc
+
+
 # ---------------------------------------------------------------------------
 # 统一入口
 # ---------------------------------------------------------------------------
@@ -240,7 +343,10 @@ async def build_image_standard(
     db: AsyncSession, config: ImageGenConfig
 ) -> ImageGenStandard:
     """按 ``backendType`` 构建对应实现。"""
-    if _backend_type(config) == BACKEND_MODEL:
+    backend = _backend_type(config)
+    if backend == BACKEND_IMAGE_API:
+        return await build_image_api_standard(db, config)
+    if backend == BACKEND_MODEL:
         return await build_model_image_standard(db, config)
     return await build_mcp_image_standard(db, config)
 
@@ -309,13 +415,134 @@ async def check_mcp_image_service(
     return found, missing, None
 
 
+async def _image_api_client(db: AsyncSession, use_proxy: bool):
+    from backend.services.provider_service import _get_http_client_with_proxy
+
+    return await _get_http_client_with_proxy(
+        db, use_proxy_flag=use_proxy, timeout=30
+    )
+
+
+async def _probe_openrouter_images(
+    db: AsyncSession, info: Dict[str, Any]
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """拉 ``/images/models`` 并挑出目标模型的能力描述符。"""
+    import httpx
+
+    url = f"{info['api_host'].rstrip('/')}/images/models"
+    headers = {"Authorization": f"Bearer {info['api_key']}"}
+    try:
+        async with await _image_api_client(db, info["use_proxy"]) as client:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            payload = response.json()
+    except httpx.HTTPStatusError as exc:
+        return None, f"HTTP {exc.response.status_code}"
+    except httpx.HTTPError as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+    except (ValueError, TypeError) as exc:
+        return None, f"响应不是合法 JSON: {exc}"
+
+    items = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(items, list):
+        return None, "响应缺少 data 列表"
+    for item in items:
+        if isinstance(item, dict) and str(item.get("id")) == str(info["model_id"]):
+            return {
+                "architecture": item.get("architecture"),
+                "supported_parameters": item.get("supported_parameters"),
+                "supports_streaming": item.get("supports_streaming"),
+            }, None
+    return None, f"图片模型列表中没有 {info['model_id']}"
+
+
+async def _probe_openai_models(
+    db: AsyncSession, info: Dict[str, Any]
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """``/models`` 里确认模型存在（OpenAI 不返回生图能力描述）。"""
+    import httpx
+
+    url = f"{info['api_host'].rstrip('/')}/models"
+    headers = {"Authorization": f"Bearer {info['api_key']}"}
+    try:
+        async with await _image_api_client(db, info["use_proxy"]) as client:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            payload = response.json()
+    except httpx.HTTPStatusError as exc:
+        return None, f"HTTP {exc.response.status_code}"
+    except httpx.HTTPError as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+    except (ValueError, TypeError) as exc:
+        return None, f"响应不是合法 JSON: {exc}"
+
+    items = payload.get("data") if isinstance(payload, dict) else None
+    ids = [
+        str(item.get("id"))
+        for item in (items if isinstance(items, list) else [])
+        if isinstance(item, dict)
+    ]
+    if str(info["model_id"]) in ids:
+        return {"architecture": None, "supported_parameters": None}, None
+    return None, f"模型列表中没有 {info['model_id']}"
+
+
+async def probe_image_endpoint(
+    db: AsyncSession, config: ImageGenConfig
+) -> Dict[str, Any]:
+    """检测纯生图后端：只做 GET 探测（校验 Key / 模型存在 / 拉能力），不生成图片。"""
+    info = await load_model_backend_config(db, config)
+    if info["model_type"] != "image":
+        raise ImageGenConfigError(
+            f"模型 {info['model_name']} 不是生图模型（model_type="
+            f"{info['model_type'] or 'chat'}），请先把模型类型设为 image"
+        )
+
+    executor = resolve_model_executor(info)
+    detail: Dict[str, Any] = {
+        "executor": executor.key,
+        "label": executor.label,
+        "paths": list(executor.paths),
+        "options": sorted(executor.whitelist()),
+        "model_id": info["model_id"],
+        "provider_name": info["provider_name"],
+        "supports_reference_images": executor.supports_reference_images,
+        "capabilities": dict(info["image_capabilities"] or {}),
+    }
+
+    if executor.key == "openrouter_images":
+        remote, error = await _probe_openrouter_images(db, info)
+    else:
+        remote, error = await _probe_openai_models(db, info)
+
+    if remote:
+        merged = dict(detail["capabilities"] or {})
+        for key, value in remote.items():
+            if value is not None:
+                merged[key] = value
+        detail["capabilities"] = merged
+    if error:
+        detail["error"] = error
+    detail["declared"] = remote is not None
+    return detail
+
+
 async def check_reference_support(
     db: AsyncSession, config: ImageGenConfig
 ) -> Tuple[bool, Optional[str]]:
-    """检测接口用：MCP 后端探测 schema，模型后端恒为支持。"""
-    if _backend_type(config) == BACKEND_MODEL:
+    """检测接口用：MCP 后端探测 schema，模型 / 纯生图后端按执行器能力。"""
+    backend = _backend_type(config)
+    if backend in (BACKEND_MODEL, BACKEND_IMAGE_API):
         declared = getattr(config, "supportsReferenceImages", None)
-        return (True if declared is None else bool(declared)), None
+        if declared is not None:
+            return bool(declared), None
+        if backend == BACKEND_IMAGE_API:
+            try:
+                info = await load_model_backend_config(db, config)
+                return resolve_model_executor(info).supports_reference_images, None
+            except ImageGenConfigError as exc:
+                return False, str(exc)
+        return True, None
 
     try:
         server_config = await _load_server_config(db, config)
@@ -325,11 +552,13 @@ async def check_reference_support(
 
 
 __all__ = [
+    "BACKEND_IMAGE_API",
     "BACKEND_MCP",
     "BACKEND_MODEL",
     "PROTOCOL_CHAT",
     "PROTOCOL_GOOGLE",
     "ImageGenConfigError",
+    "build_image_api_standard",
     "build_image_gen_standard_from_chat_id",
     "build_image_standard",
     "build_mcp_image_standard",
@@ -338,6 +567,8 @@ __all__ = [
     "check_reference_support",
     "load_model_backend_config",
     "model_supports_image_output",
+    "probe_image_endpoint",
     "probe_mcp_reference_support",
+    "resolve_model_executor",
     "resolve_reference_support",
 ]

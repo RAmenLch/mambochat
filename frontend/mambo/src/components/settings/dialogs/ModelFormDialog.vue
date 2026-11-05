@@ -16,9 +16,11 @@
       </el-form-item>
       <el-form-item :label="t('model.form.type')" prop="model_type">
         <el-radio-group v-model="modelForm.model_type">
-          <el-radio-button value="chat">{{ t('model.form.typeChat') }}</el-radio-button>
-          <el-radio-button value="embedding">{{ t('model.form.typeEmbedding') }}</el-radio-button>
+          <el-radio-button value="chat" :disabled="imageWorkerProvider">{{ t('model.form.typeChat') }}</el-radio-button>
+          <el-radio-button value="embedding" :disabled="imageWorkerProvider">{{ t('model.form.typeEmbedding') }}</el-radio-button>
+          <el-radio-button value="image">{{ t('model.form.typeImage') }}</el-radio-button>
         </el-radio-group>
+        <div v-if="imageWorkerProvider" class="form-hint">{{ t('model.form.imageWorkerHint') }}</div>
       </el-form-item>
 
       <el-divider>{{ t('model.form.metaConfig') }}</el-divider>
@@ -92,6 +94,75 @@
           >
             <el-option v-for="dim in embeddingDimensionOptions" :key="dim" :label="String(dim)" :value="dim" />
           </el-select>
+        </el-form-item>
+      </template>
+
+      <!-- 生图模型专用配置 -->
+      <template v-if="isImageModel">
+        <el-form-item :label="t('model.form.imageExecutor')">
+          <el-tag type="info" effect="plain">{{ imageExecutorLabel }}</el-tag>
+          <div class="form-hint">{{ t('model.form.imageExecutorHint') }}</div>
+        </el-form-item>
+        <el-form-item :label="t('model.form.imageQuality')">
+          <el-select
+            :model-value="imageTextOption('quality')"
+            clearable
+            style="width: 100%"
+            @update:model-value="(v: any) => setImageOption('quality', v)"
+          >
+            <el-option v-for="item in imageQualityOptions" :key="item" :label="item" :value="item" />
+          </el-select>
+        </el-form-item>
+        <el-form-item :label="t('model.form.imageFormat')">
+          <el-select
+            :model-value="imageTextOption('output_format')"
+            clearable
+            style="width: 100%"
+            @update:model-value="(v: any) => setImageOption('output_format', v)"
+          >
+            <el-option v-for="item in imageFormatOptions" :key="item" :label="item" :value="item" />
+          </el-select>
+        </el-form-item>
+        <el-form-item :label="t('model.form.imageAspectRatio')">
+          <el-select
+            :model-value="imageTextOption('aspect_ratio')"
+            clearable
+            filterable
+            allow-create
+            style="width: 100%"
+            @update:model-value="(v: any) => setImageOption('aspect_ratio', v)"
+          >
+            <el-option v-for="item in imageAspectRatioOptions" :key="item" :label="item" :value="item" />
+          </el-select>
+        </el-form-item>
+        <el-form-item :label="t('model.form.imageBackground')">
+          <el-select
+            :model-value="imageTextOption('background')"
+            clearable
+            style="width: 100%"
+            @update:model-value="(v: any) => setImageOption('background', v)"
+          >
+            <el-option v-for="item in imageBackgroundOptions" :key="item" :label="item" :value="item" />
+          </el-select>
+        </el-form-item>
+        <el-form-item :label="t('model.form.imageCompression')">
+          <el-input-number
+            :model-value="imageNumberOption('output_compression')"
+            :min="0"
+            :max="100"
+            :controls="false"
+            style="width: 100%"
+            @update:model-value="(v: any) => setImageOption('output_compression', v)"
+          />
+        </el-form-item>
+        <el-form-item :label="t('model.form.imageSeed')">
+          <el-input-number
+            :model-value="imageNumberOption('seed')"
+            :min="0"
+            :controls="false"
+            style="width: 100%"
+            @update:model-value="(v: any) => setImageOption('seed', v)"
+          />
         </el-form-item>
       </template>
 
@@ -171,6 +242,10 @@ import {
 } from '@/constants/metaConfigOptions';
 
 const embeddingDimensionOptions = [384, 768, 1024, 1536, 2560, 3072, 4096];
+const imageQualityOptions = ['auto', 'low', 'medium', 'high'];
+const imageFormatOptions = ['png', 'jpeg', 'webp', 'svg'];
+const imageAspectRatioOptions = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '4:5', '5:4', '21:9', '9:21'];
+const imageBackgroundOptions = ['auto', 'transparent', 'opaque'];
 
 interface ModelFormData {
   name: string;
@@ -206,6 +281,8 @@ const getInitialMetaConfig = (): AIModelMetaConfig => ({
   supported_parameters: [],
   max_retries: 0,
   timeout: null,
+  image_options: {},
+  image_capabilities: null,
 });
 
 const modelForm = reactive<ModelFormData>({
@@ -218,6 +295,45 @@ const modelForm = reactive<ModelFormData>({
 const isEditing = computed(() => !!props.modelData);
 const isChatModel = computed(() => modelForm.model_type === 'chat');
 const isEmbeddingModel = computed(() => modelForm.model_type === 'embedding');
+const isImageModel = computed(() => modelForm.model_type === 'image');
+
+/** 当前服务商是否是生图执行器（是则模型只能是生图模型，执行器由服务商决定） */
+const providerWorkerType = computed(() => {
+  const provider = providerStore.providers.find(p => p.id === props.providerId);
+  return provider?.worker_type || '';
+});
+const imageWorkerProvider = computed(
+  () => providerWorkerType.value === 'openai_images' || providerWorkerType.value === 'openrouter_images'
+);
+const imageExecutorLabel = computed(() => {
+  if (providerWorkerType.value === 'openrouter_images') return 'OpenRouter Images API → /images';
+  if (providerWorkerType.value === 'openai_images') return 'OpenAI Images API → /images/generations';
+  return t('model.form.imageExecutorDerived');
+});
+
+function imageTextOption(key: string): string | undefined {
+  const options = (modelForm.meta_config.image_options || {}) as Record<string, unknown>;
+  const value = options[key];
+  return value === null || value === undefined ? undefined : String(value);
+}
+
+function imageNumberOption(key: string): number | undefined {
+  const options = (modelForm.meta_config.image_options || {}) as Record<string, unknown>;
+  const value = options[key];
+  if (value === null || value === undefined || value === '') return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function setImageOption(key: string, value: unknown): void {
+  const options: Record<string, unknown> = { ...(modelForm.meta_config.image_options || {}) };
+  if (value === '' || value === null || value === undefined) {
+    delete options[key];
+  } else {
+    options[key] = value;
+  }
+  modelForm.meta_config.image_options = options;
+}
 
 const modelFormRules = computed<FormRules<Partial<ModelFormData>>>(() => ({
   name: [{ required: true, message: t('model.form.namePlaceholder'), trigger: 'blur' }],
@@ -238,7 +354,7 @@ watch(() => props.visible, (newVal) => {
     } else { // 新增
       modelForm.name = '';
       modelForm.modelId = '';
-      modelForm.model_type = 'chat';
+      modelForm.model_type = imageWorkerProvider.value ? 'image' : 'chat';
       modelForm.meta_config = getInitialMetaConfig();
     }
   }
@@ -272,17 +388,36 @@ function getSanitizedMetaConfig(): AIModelMetaConfig {
         output_modalities: config.output_modalities || [],
         embedding_dimension: null,
       };
-    } else {
-      // Embedding 模型清除不相关的 Chat 配置
+    }
+
+    if (isImageModel.value) {
+      const imageOptions = Object.fromEntries(
+        Object.entries((config.image_options || {}) as Record<string, unknown>)
+          .filter(([, value]) => value !== null && value !== undefined && value !== '')
+      );
       return {
         ...baseConfig,
-        embedding_dimension: config.embedding_dimension || null,
+        context_length: null,
+        supported_parameters: [],
+        input_modalities: ['text', 'image'],
+        output_modalities: ['image'],
+        image_options: imageOptions,
+        image_capabilities: config.image_capabilities || null,
+        embedding_dimension: null,
         max_output_tokens: null,
         tokenizer: null,
-        input_modalities: [],
-        output_modalities: [],
       };
     }
+
+    // Embedding 模型清除不相关的 Chat 配置
+    return {
+      ...baseConfig,
+      embedding_dimension: config.embedding_dimension || null,
+      max_output_tokens: null,
+      tokenizer: null,
+      input_modalities: [],
+      output_modalities: [],
+    };
 }
 
 async function submitForm() {
@@ -342,4 +477,5 @@ async function submitForm() {
   background: var(--el-color-primary-light-9);
 }
 .label-icon { margin-left: 4px; color: var(--el-text-color-secondary); cursor: help; }
+.form-hint { width: 100%; font-size: 12px; line-height: 1.5; color: var(--el-text-color-secondary); margin-top: 4px; }
 </style>

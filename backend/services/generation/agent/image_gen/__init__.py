@@ -1,5 +1,6 @@
-"""生图工具:标准框架 + MCP 实现 + 中间件。"""
+"""生图工具:标准框架 + MCP / 模型 / 纯生图接口实现 + 中间件。"""
 
+from .api_standard import ImageApiImageGenStandard
 from .mcp_standard import McpImageGenStandard
 from .middleware import ImageGenMiddleware, build_image_gen_middleware
 from .standard import (
@@ -64,6 +65,7 @@ __all__ = [
     "DownloadOutcome",
     "ImageBlob",
     "ImageDownloadArgs",
+    "ImageApiImageGenStandard",
     "ImageGenerateArgs",
     "ImageGenerateShowArgs",
     "ImageGenMiddleware",

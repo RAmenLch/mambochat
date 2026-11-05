@@ -1,7 +1,13 @@
 // frontend/mambo/src/api/types/providerTypes.ts
 
-export type ProviderWorkerType = 'openai' | 'google' | 'deepseek' | 'anthropic'
-export type ModelType = 'chat' | 'embedding'
+export type ProviderWorkerType =
+  | 'openai'
+  | 'google'
+  | 'deepseek'
+  | 'anthropic'
+  | 'openai_images'
+  | 'openrouter_images'
+export type ModelType = 'chat' | 'embedding' | 'image'
 
 export interface AIModelMetaConfig {
   context_length?: number | null
@@ -13,6 +19,8 @@ export interface AIModelMetaConfig {
   supported_parameters?: string[] | null
   max_retries?: number | null
   timeout?: number | null
+  image_options?: Record<string, unknown> | null
+  image_capabilities?: Record<string, unknown> | null
 }
 
 export interface AIModelBase {

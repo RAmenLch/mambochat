@@ -1,6 +1,6 @@
 // frontend/mambo/src/api/types/imageGenTypes.ts
 
-export type ImageGenBackendType = 'mcp' | 'model'
+export type ImageGenBackendType = 'mcp' | 'model' | 'image_api'
 
 export interface ImageGenConfig {
   id: string;
@@ -63,6 +63,8 @@ export interface ImageGenToolCheckResult {
   found_tools: string[];
   missing_tools: string[];
   supports_reference_images?: boolean | null;
+  executor?: string | null;
+  capabilities?: Record<string, unknown> | null;
   message: string;
   error: string | null;
 }

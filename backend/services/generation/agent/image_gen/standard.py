@@ -557,6 +557,19 @@ class ImageGenStandard(ABC):
         """是否支持参考图；不支持时工具 schema 里不会出现该参数。"""
         return self._supports_reference_images
 
+    @property
+    def reference_required(self) -> bool:
+        """该后端是否**必须**带参考图（如某些编辑类模型 ``input_references.min >= 1``）。"""
+        return False
+
+    def describe_extra_options(self) -> str:
+        """拼进工具描述末尾的「额外参数」提示；默认空串（保持既有描述逐字节不变）。
+
+        实现方必须保证**确定性**：同一份配置快照渲染出同一段文本，且渲染时不得发起
+        网络请求或读取运行时状态 —— 否则会打散会话的 KV cache。
+        """
+        return ""
+
     @abstractmethod
     async def submit(
         self,

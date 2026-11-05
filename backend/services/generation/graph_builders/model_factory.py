@@ -9,6 +9,7 @@ from langchain_core.language_models import BaseChatModel
 from backend.schemas.enums import ProviderWorkerType
 from backend.services.generation.core.llm_io import ModelConfig, RunTimeConfig
 from backend.services.generation.agent.log_callback import RawPayloadLoggingCallback
+from backend.services.generation.image_executors import is_image_worker
 
 
 class ModelFactory:
@@ -102,6 +103,11 @@ class ModelFactory:
             )
         params_copy = model_config.parameters.copy()
         worker_type = params_copy.pop("_worker_type", ProviderWorkerType.OPENAI.value)
+        if is_image_worker(worker_type):
+            raise ValueError(
+                f"服务商后端类型 {worker_type!r} 是生图执行器，不能用于会话模型；"
+                "请把该模型改为生图模型（model_type=image），或把它挂到对话服务商下。"
+            )
         stream = params_copy.pop("stream", True)
         max_retries = model_config.max_retries or ModelFactory.DEFAULT_MAX_RETRIES
 
