@@ -28,6 +28,32 @@
             </p>
           </div>
 
+          <!-- AI 安全审核结论（与待审工具同页展示） -->
+          <div
+            v-if="securityReviewByMsgId.get(msg.id)"
+            class="security-review-card"
+            :class="{ 'is-failed': !securityReviewByMsgId.get(msg.id)!.passed }"
+          >
+            <div class="security-review-head">
+              <span class="security-review-title">🛡️ {{ t('chat.message.mcp.securityReview') }}</span>
+              <el-tag
+                :type="securityReviewByMsgId.get(msg.id)!.passed ? 'success' : 'danger'"
+                size="small"
+                effect="light"
+              >
+                {{ securityReviewByMsgId.get(msg.id)!.passed ? $t('agent.securityReviewPassed') : $t('agent.securityReviewFailed') }}
+              </el-tag>
+              <el-tag
+                :type="riskTagType(securityReviewByMsgId.get(msg.id)!.risk_level)"
+                size="small"
+                effect="plain"
+              >
+                {{ t('chat.message.mcp.riskLevel') }}: {{ securityReviewByMsgId.get(msg.id)!.risk_level.toUpperCase() }}
+              </el-tag>
+            </div>
+            <div class="security-review-reason">{{ securityReviewByMsgId.get(msg.id)!.reason }}</div>
+          </div>
+
           <div class="tool-arguments">
             <h4>{{ t('chat.message.mcp.arguments') }}</h4>
 
@@ -175,44 +201,6 @@
         </div>
         <div v-else class="parse-error">
           {{ t('chat.message.mcp.parseError') }}
-        </div>
-      </el-tab-pane>
-
-      <!-- AI 安全审核 Tab（仅 McpTool + 有对应 SecurityReview 时显示） -->
-      <el-tab-pane
-        v-if="activeSecurityReviewContent"
-        :key="'security_review_' + activeSecurityReviewContent.tool_call_id"
-        :label="'🛡️ ' + $t('agent.securityReviewPassed')"
-        :name="securityReviewTabName"
-      >
-        <div class="tool-detail-container">
-          <div class="tool-header">
-            <h3>{{ activeSecurityReviewContent.tool_name }}</h3>
-            <el-tag
-              :type="activeSecurityReviewContent.passed ? 'success' : 'danger'"
-              size="default"
-              effect="light"
-              class="security-review-status-tag"
-            >
-              {{ activeSecurityReviewContent.passed ? $t('agent.securityReviewPassed') : $t('agent.securityReviewFailed') }}
-            </el-tag>
-            <p class="tool-desc">{{ activeSecurityReviewContent.passed ? $t('agent.securityReviewDesc') : $t('agent.securityReviewFailedDesc') }}</p>
-          </div>
-
-          <el-descriptions :column="1" border size="default" class="security-review-descriptions">
-            <el-descriptions-item :label="$t('agent.securityReviewRiskLevel')">
-              <el-tag
-                :type="riskLevelTagType"
-                size="small"
-                effect="plain"
-              >
-                {{ activeSecurityReviewContent.risk_level.toUpperCase() }}
-              </el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item :label="$t('agent.securityReviewReason')">
-              <div class="security-review-reason">{{ activeSecurityReviewContent.reason }}</div>
-            </el-descriptions-item>
-          </el-descriptions>
         </div>
       </el-tab-pane>
 
@@ -380,34 +368,23 @@ const isTaskRunning = computed(() => {
   });
 });
 
-/** 当前工具对应 SecurityReview 内容（从 toolMessages 的所有 tool_call_id 推导）*/
-const activeSecurityReviewContent = computed(() => {
-  if (props.mode === 'review_all') return null;
+/** 子消息 id → 该工具自己的 AI 审核记录（按 tool_call_id 精确匹配，不区分弹窗模式） */
+const securityReviewByMsgId = computed(() => {
+  const map = new Map<string, SecurityReviewContent>();
   for (const msg of toolMessages.value) {
     if (msg.type !== 'McpTool' && msg.type !== 'ReviewTool') continue;
     try {
-      let toolCallId: string | undefined;
-      if (msg.type === 'McpTool') {
-        toolCallId = (getParsedContent(msg) as McpToolContent | null)?.tool_call_id;
-      } else {
-        toolCallId = (getParsedContent(msg) as ReviewToolContent | null)?.tool_call_id;
-      }
-      if (toolCallId) {
-        const sr = securityReviewMap.value.get(toolCallId);
-        if (sr) return sr;
-      }
+      const toolCallId = (getParsedContent(msg) as McpToolContent | ReviewToolContent | null)?.tool_call_id;
+      if (!toolCallId) continue;
+      const sr = securityReviewMap.value.get(toolCallId);
+      if (sr) map.set(msg.id, sr);
     } catch { /* ignore */ }
   }
-  return null;
+  return map;
 });
 
-const securityReviewTabName = computed(() =>
-  activeSecurityReviewContent.value ? `__security_review__` : ''
-);
-
 /** 风险等级对应的 el-tag type */
-const riskLevelTagType = computed(() => {
-  const level = activeSecurityReviewContent.value?.risk_level;
+function riskTagType(level?: string): 'success' | 'warning' | 'danger' | 'info' {
   switch (level) {
     case 'low': return 'success';
     case 'medium': return 'warning';
@@ -415,7 +392,7 @@ const riskLevelTagType = computed(() => {
     case 'critical': return 'danger';
     default: return 'info';
   }
-});
+}
 
 /** parentMessage 中所有 SecurityReview 子消息的 tool_call_id → content 映射 */
 const securityReviewMap = computed(() => {
@@ -1002,18 +979,36 @@ h4 {
   color: var(--el-color-error);
 }
 
-.security-review-status-tag {
-  margin-bottom: 8px;
+.security-review-card {
+  margin: 0 0 16px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--el-color-success-light-5);
+  border-radius: 6px;
+  background-color: var(--el-color-success-light-9);
 }
-
-.security-review-descriptions {
-  margin-top: 12px;
+.security-review-card.is-failed {
+  border-color: var(--el-color-danger-light-5);
+  background-color: var(--el-color-danger-light-9);
 }
-
+.security-review-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.security-review-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
 .security-review-reason {
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.6;
   font-size: 13px;
+  color: var(--el-text-color-regular);
+  max-height: 220px;
+  overflow-y: auto;
 }
 </style>
