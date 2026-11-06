@@ -76,6 +76,12 @@ REFERENCE_MIME_WHITELIST: Tuple[str, ...] = (
     "image/bmp",
 )
 
+# 生图工具选择参数名：一个 Agent 可挂多个生图配置，LLM 用它按**配置名称**选择。
+# 缺省（None / 空串）时使用该工具候选配置里的第一个。
+GENERATOR_ARG = "image_generator"
+MAX_GENERATOR_DESC_CHARS = 120
+MAX_GENERATOR_EXTRA_CHARS = 200
+
 # 分辨率参数名（契约字段，形如 1024x1024）
 RESOLUTION_ARG = "resolution"
 DEFAULT_RESOLUTION = "1024x1024"
@@ -127,6 +133,13 @@ class ImageGenerateArgs(BaseModel):
     """``image_generate`` 的参数（锁定，不随 server 上报的 schema 变化）。"""
 
     prompt: str = Field(description="正向提示词，描述期望生成的画面内容")
+    image_generator: Optional[str] = Field(
+        default=None,
+        description=(
+            "要使用的生图工具名称，必须与本工具描述中列出的某个名称完全一致；"
+            "不传则使用默认（列表中的第一个）"
+        ),
+    )
     resolution: str = Field(
         default=DEFAULT_RESOLUTION,
         description=(
@@ -202,6 +215,13 @@ class ImageGenerateShowArgs(BaseModel):
     """``image_generate_show`` 的参数（一条龙：生成 + 落盘 + 展示）。"""
 
     prompt: str = Field(description="正向提示词，描述期望生成的画面内容")
+    image_generator: Optional[str] = Field(
+        default=None,
+        description=(
+            "要使用的生图工具名称，必须与本工具描述中列出的某个名称完全一致；"
+            "不传则使用默认（列表中的第一个）"
+        ),
+    )
     resolution: str = Field(
         default=DEFAULT_RESOLUTION,
         description=(
@@ -523,6 +543,9 @@ class ImageGenStandard(ABC):
     supports_reference_images:
         该实现是否支持参考图（``reference_images``）。为 False 时该参数不会
         出现在工具 schema 里，LLM 无从传入。
+    generator_name:
+        该实现对应的生图配置名称（即 LLM 通过 ``image_generator`` 传入的选择键）。
+        异步流程把它写进 pending 结果，后台轮询器据此还原同一份配置。
 
     注：图片落地目录完全由 LLM 通过 ``image_download.path`` 指定，
     缺失或越界一律报错，框架不做任何回退。
@@ -536,16 +559,23 @@ class ImageGenStandard(ABC):
         default_resolution: str = DEFAULT_RESOLUTION,
         default_wait_timeout: int = DEFAULT_WAIT_TIMEOUT,
         supports_reference_images: bool = False,
+        generator_name: Optional[str] = None,
     ) -> None:
         self._default_count = max(1, min(int(default_count or DEFAULT_COUNT), MAX_COUNT))
         self._default_sync = bool(default_sync)
         self._default_resolution = self._normalize_resolution(default_resolution)
         self._default_wait_timeout = self._clamp_wait_timeout(default_wait_timeout)
         self._supports_reference_images = bool(supports_reference_images)
+        self._generator_name = (generator_name or "").strip() or None
 
     # ------------------------------------------------------------------
     # 子类原语
     # ------------------------------------------------------------------
+
+    @property
+    def generator_name(self) -> Optional[str]:
+        """该实现对应的生图配置名称（LLM 的 ``image_generator`` 选择键）。"""
+        return self._generator_name
 
     @property
     def default_sync(self) -> bool:
@@ -852,6 +882,7 @@ class ImageGenStandard(ABC):
             RESOLUTION_ARG,
             REFERENCE_ARG,
             # 平台侧参数：仅用于落盘与展示，不该下发给服务
+            GENERATOR_ARG,
             "mode",
             "path",
             "prefix",
@@ -988,7 +1019,8 @@ class ImageGenStandard(ABC):
         """异步模式的结果：给出全部确定路径，交给平台后台下载并在就绪后展示。
 
         ``paths`` 里的每个条目都会被前端登记成一条待生成文件；``task_id`` /
-        ``prefix`` / ``count`` 让后台轮询器能还原同一套确定性命名去取图。
+        ``prefix`` / ``count`` 让后台轮询器能还原同一套确定性命名去取图；
+        ``image_generator`` 让轮询器在多配置时用**同一个**配置去下载。
         """
         predicted = plan.predict(count)
         return {
@@ -1001,6 +1033,7 @@ class ImageGenStandard(ABC):
             "resolution": resolution,
             "timeout": timeout,
             "mode": args.mode,
+            "image_generator": self._generator_name,
             "note": (
                 f"图片已提交生成（任务 {task_id}），保存与展示由平台在后台完成，"
                 f"最多等待 {timeout} 秒；无需再次调用本工具，也不必调用 "

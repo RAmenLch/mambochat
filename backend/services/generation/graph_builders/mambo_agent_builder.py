@@ -654,8 +654,8 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
 
         # --- Image generation middleware (opt-in, requires agent image gen config) ---
         _image_gen_middleware = None
-        _image_gen_standard = getattr(agent_config, 'image_gen_standard', None)
-        if _image_gen_standard is not None:
+        _image_gen_entries = list(getattr(agent_config, 'image_gen_standards', None) or [])
+        if _image_gen_entries:
             from backend.services.generation.agent.image_gen.middleware import (
                 build_image_gen_middleware,
             )
@@ -669,7 +669,7 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
                 _image_gen_tools = list(IMAGE_TOOL_NAMES)
             _with_generate_show = IMAGE_TOOL_GENERATE_SHOW in _image_gen_tools
             _image_gen_middleware = build_image_gen_middleware(
-                _image_gen_standard,
+                _image_gen_entries,
                 backend,
                 session_factory=(
                     _make_session_factory() if _with_generate_show else None

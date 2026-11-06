@@ -188,6 +188,7 @@ class ChatModelImageGenStandard(ImageGenStandard):
         default_resolution: str = "",
         default_wait_timeout: int = DEFAULT_WAIT_TIMEOUT,
         supports_reference_images: bool = True,
+        generator_name: Optional[str] = None,
     ) -> None:
         super().__init__(
             default_count=default_count,
@@ -195,6 +196,7 @@ class ChatModelImageGenStandard(ImageGenStandard):
             default_resolution=default_resolution,
             default_wait_timeout=default_wait_timeout,
             supports_reference_images=supports_reference_images,
+            generator_name=generator_name,
         )
 
         self._model_id = (model_id or "").strip()

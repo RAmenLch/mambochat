@@ -113,8 +113,9 @@
       destroy-on-close
     >
       <el-form :model="form" label-width="100px" v-loading="saving" class="image-gen-form">
-        <el-form-item :label="t('settings.imageGen.form.name')" required>
+        <el-form-item :label="t('settings.imageGen.form.name')" required class="has-hint">
           <el-input v-model="form.name" maxlength="100" />
+          <div class="form-hint">{{ t('settings.imageGen.form.nameHint') }}</div>
         </el-form-item>
 
         <el-form-item :label="t('settings.imageGen.form.description')">

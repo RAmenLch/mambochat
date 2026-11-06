@@ -919,11 +919,15 @@
 
           <el-row v-if="form.mambo_image_gen_enabled" :gutter="32" class="settings-row">
             <el-col :span="12">
-              <el-form-item :label="$t('agent.imageGenConfig')">
+              <el-form-item :label="$t('agent.imageGenConfigs')">
                 <el-select
-                  v-model="form.mambo_image_gen_config_id"
+                  v-model="form.mambo_image_gen_config_ids"
                   :placeholder="$t('agent.imageGenConfigPlaceholder')"
                   style="width: 100%"
+                  multiple
+                  collapse-tags
+                  collapse-tags-tooltip
+                  :multiple-limit="8"
                   clearable
                 >
                   <el-option
@@ -933,7 +937,7 @@
                     :value="cfg.id"
                   />
                 </el-select>
-                <div class="goal-loop-field-desc">{{ $t('agent.imageGenConfigDesc') }}</div>
+                <div class="goal-loop-field-desc">{{ $t('agent.imageGenConfigsDesc') }}</div>
               </el-form-item>
             </el-col>
           </el-row>
@@ -1419,7 +1423,7 @@ const form = reactive({
 
   // Mambo 生图工具
   mambo_image_gen_enabled: false,
-  mambo_image_gen_config_id: null as string | null,
+  mambo_image_gen_config_ids: [] as string[],
 });
 
 // --- Backend 挂载逻辑 [新增] ---
@@ -1662,7 +1666,11 @@ watch(agentData, async (newVal) => {
     // 生图工具配置还原
     const igCfg = mamboParams.image_gen;
     form.mambo_image_gen_enabled = igCfg?.enabled ?? false;
-    form.mambo_image_gen_config_id = igCfg?.configId ?? null;
+    form.mambo_image_gen_config_ids = igCfg
+      ? [...(igCfg.configIds ?? []), ...(igCfg.configId ? [igCfg.configId] : [])].filter(
+          (id, index, arr) => id && arr.indexOf(id) === index,
+        )
+      : [];
 
     // 加载 HITL 可审核工具列表
     fetchHitlTools(newVal.id);
@@ -1995,7 +2003,7 @@ function buildMamboAgentParameters(): MamboAgentParameters | null {
     tail_tool: form.mambo_tail_tool_enabled ? buildTailToolConfig() : null,
     image_gen: form.mambo_image_gen_enabled ? {
       enabled: true,
-      configId: form.mambo_image_gen_config_id || null,
+      configIds: form.mambo_image_gen_config_ids.filter(Boolean),
     } : null,
     mcp_direct_tool_threshold: form.mambo_mcp_threshold,
   };

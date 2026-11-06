@@ -564,9 +564,13 @@
         <p class="field-hint">{{ $t('agent.imageGenEnableDesc') }}</p>
 
         <div v-if="form.mambo_image_gen_enabled" class="field-item">
-          <label class="field-label">{{ $t('agent.imageGenConfig') }}</label>
+          <label class="field-label">{{ $t('agent.imageGenConfigs') }}</label>
           <el-select
-            v-model="form.mambo_image_gen_config_id"
+            v-model="form.mambo_image_gen_config_ids"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            :multiple-limit="8"
             clearable
             :placeholder="$t('agent.imageGenConfigPlaceholder')"
             style="width: 100%"
@@ -574,7 +578,7 @@
           >
             <el-option v-for="cfg in imageGenStore.enabledConfigs" :key="cfg.id" :label="cfg.name" :value="cfg.id" />
           </el-select>
-          <span class="field-hint">{{ $t('agent.imageGenConfigDesc') }}</span>
+          <span class="field-hint">{{ $t('agent.imageGenConfigsDesc') }}</span>
         </div>
 
         <div class="section-divider"></div>
@@ -1103,7 +1107,7 @@ const form = reactive({
 
   // 生图 / 多模态描述器 / 尾部工具
   mambo_image_gen_enabled: false,
-  mambo_image_gen_config_id: null as string | null,
+  mambo_image_gen_config_ids: [] as string[],
   mambo_multimodal_enabled: false,
   mambo_multimodal_image_model_id: null as string | null,
   mambo_multimodal_audio_model_id: null as string | null,
@@ -1243,7 +1247,11 @@ watch(agentData, async (newVal) => {
     // 生图能力
     const igCfg = mamboParams.image_gen;
     form.mambo_image_gen_enabled = !!(igCfg && igCfg.enabled);
-    form.mambo_image_gen_config_id = igCfg?.configId ?? null;
+    form.mambo_image_gen_config_ids = igCfg
+      ? [...(igCfg.configIds ?? []), ...(igCfg.configId ? [igCfg.configId] : [])].filter(
+          (id, index, arr) => id && arr.indexOf(id) === index,
+        )
+      : [];
 
     // 多模态描述器
     const mmCfg = mamboParams.multimodal_describer;
@@ -1468,7 +1476,7 @@ function buildMamboAgentParameters(): MamboAgentParameters | null {
     goal_loop: form.mambo_goal_loop_enabled ? buildGoalLoopConfig() : null,
     mcp_direct_tool_threshold: form.mambo_mcp_threshold,
     image_gen: form.mambo_image_gen_enabled
-      ? { enabled: true, configId: form.mambo_image_gen_config_id }
+      ? { enabled: true, configIds: form.mambo_image_gen_config_ids.filter(Boolean) }
       : null,
     multimodal_describer: form.mambo_multimodal_enabled
       ? {

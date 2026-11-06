@@ -80,6 +80,7 @@
               <div class="field-item">
                 <label class="field-label">{{ t('settings.imageGen.form.name') }} *</label>
                 <input v-model="form.name" class="native-input" maxlength="100" />
+                <span class="field-hint">{{ t('settings.imageGen.form.nameHint') }}</span>
               </div>
 
               <div class="field-item">

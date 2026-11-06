@@ -148,6 +148,7 @@ class SubMessageConfig(BaseModel):
     pending_image_task_id: Optional[str] = Field(None, description="【仅用于File类型】待下载的生图任务 ID；非空时平台后台轮询器会先驱动一次下载，再判定文件是否就绪")
     pending_image_prefix: Optional[str] = Field(None, description="【仅用于File类型】生图确定性命名的文件名前缀，用于后台还原落盘路径")
     pending_image_count: Optional[int] = Field(None, description="【仅用于File类型】本次生图总数，用于还原多图下标后缀")
+    pending_image_generator: Optional[str] = Field(None, description="【仅用于File类型】产出该图的生图配置名称；多配置时后台轮询器据此用同一个配置下载")
     pending_image_downloaded: Optional[bool] = Field(None, description="【仅用于File类型】图片是否已下载落盘；用于避免轮询器重启后重复下载与重复入库")
     pending_failed_reason: Optional[str] = Field(None, description="【仅用于File类型】待生成文件失败原因：timeout / task_failed / no_backend / download_failed；非空时前端展示失败卡片并允许手动获取文件")
     show_tool_mode: Optional[str] = Field(None, description="【仅用于File类型】show 工具的 mode 参数透传：Normal / Mini_Avatar / Gal_Avatar / Group")

@@ -724,6 +724,7 @@ class TailToolMiddleware(AgentMiddleware):
                         pending_image_task_id=data.get("task_id"),
                         pending_image_prefix=data.get("prefix"),
                         pending_image_count=data.get("count"),
+                        pending_image_generator=data.get("image_generator"),
                         image_run_id=tool_call_id,
                         image_run_args=run_args,
                     ),

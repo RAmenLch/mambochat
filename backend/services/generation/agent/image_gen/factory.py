@@ -27,6 +27,7 @@ from backend.services.generation.tools.mambo_mcp_tool_provider import MamboMCPTo
 from .api_standard import ImageApiImageGenStandard
 from .mcp_standard import McpImageGenStandard
 from .model_standard import PROTOCOL_CHAT, PROTOCOL_GOOGLE, ChatModelImageGenStandard
+from .registry import ImageGenEntry, normalize_generator_name
 from .standard import (
     DEFAULT_RESOLUTION,
     DEFAULT_WAIT_TIMEOUT,
@@ -156,6 +157,7 @@ async def build_mcp_image_standard(
         default_resolution=getattr(config, "defaultResolution", "") or DEFAULT_RESOLUTION,
         default_wait_timeout=getattr(config, "defaultWaitTimeout", 0) or DEFAULT_WAIT_TIMEOUT,
         supports_reference_images=await resolve_reference_support(db, config),
+        generator_name=config.name,
     )
 
 
@@ -259,6 +261,7 @@ async def build_model_image_standard(
                 getattr(config, "defaultWaitTimeout", 0) or DEFAULT_WAIT_TIMEOUT
             ),
             supports_reference_images=True if declared is None else bool(declared),
+            generator_name=config.name,
         )
     except ImageGenToolError as exc:
         raise ImageGenConfigError(str(exc)) from exc
@@ -329,6 +332,7 @@ async def build_image_api_standard(
                 getattr(config, "defaultWaitTimeout", 0) or DEFAULT_WAIT_TIMEOUT
             ),
             supports_reference_images=supports_reference,
+            generator_name=config.name,
         )
     except ImageGenToolError as exc:
         raise ImageGenConfigError(str(exc)) from exc
@@ -351,14 +355,80 @@ async def build_image_standard(
     return await build_mcp_image_standard(db, config)
 
 
+def resolve_config_tools(ig_config: Any) -> List[str]:
+    """按生图配置的两个开关解析该配置启用的工具名。
+
+    ``enableStandardTools`` 控制契约三件套，``enableGenerateShow`` 控制平台侧
+    一条龙工具；两者都关闭属于非法配置，这里兜底为三件套，避免 Agent
+    挂着一个生图配置却没有任何生图工具。
+    """
+    from .standard import IMAGE_TOOL_GENERATE_SHOW, IMAGE_TOOL_NAMES
+
+    standard_tools = bool(getattr(ig_config, "enableStandardTools", True))
+    generate_show = bool(getattr(ig_config, "enableGenerateShow", False))
+    if not standard_tools and not generate_show:
+        logger.warning(
+            "生图配置 %s 未启用任何工具集，回退为契约三件套",
+            getattr(ig_config, "id", "?"),
+        )
+        standard_tools = True
+
+    names: List[str] = list(IMAGE_TOOL_NAMES) if standard_tools else []
+    if generate_show:
+        names.append(IMAGE_TOOL_GENERATE_SHOW)
+    return names
+
+
+async def build_image_gen_entries(
+    db: AsyncSession, config_ids: Optional[List[str]]
+) -> List[ImageGenEntry]:
+    """按 Agent 配置顺序构建多个生图实现。
+
+    顺序即优先级（第一个为各工具的默认配置）。不可用（未启用 / 绑定失效 /
+    构建失败）的配置**跳过**并记日志，不让一个坏配置拖垮整个 Agent 的生图能力；
+    名称重复时保留先出现的那个。
+    """
+    from backend.crud import image_gen_crud
+
+    entries: List[ImageGenEntry] = []
+    seen: set[str] = set()
+    for config_id in config_ids or []:
+        config_id = str(config_id or "").strip()
+        if not config_id or config_id in seen:
+            continue
+        seen.add(config_id)
+
+        config = await image_gen_crud.get_image_gen_config(db, config_id)
+        if not config or not config.isEnabled:
+            logger.warning("生图配置 %s 不存在或已停用，跳过", config_id)
+            continue
+        try:
+            standard = await build_image_standard(db, config)
+        except ImageGenConfigError as exc:
+            logger.warning("生图配置 %s 不可用，跳过: %s", config_id, exc)
+            continue
+        entries.append(
+            ImageGenEntry(
+                name=config.name,
+                standard=standard,
+                description=getattr(config, "description", None),
+                tools=tuple(resolve_config_tools(config)),
+            )
+        )
+    return entries
+
+
 async def build_image_gen_standard_from_chat_id(
-    db: AsyncSession, chat_id: str
+    db: AsyncSession, chat_id: str, generator: Optional[str] = None
 ) -> Optional[ImageGenStandard]:
     """按会话所属 Agent 的生图配置重建标准实现。
 
     供 pending file 轮询器这类「独立于生成任务生命周期」的场景使用：同步模式
     由工具自己完成下载，异步模式则需要在 Agent 跑完之后由平台后台把图取回。
-    会话未配置生图 / 未启用 / 服务不可用时返回 ``None``（调用方按原逻辑兜底）。
+
+    ``generator`` 为生图配置名称（异步 pending 里登记的那个）；为空或已不可用时
+    回退到 Agent 配置的第一个。会话未配置生图 / 未启用 / 服务不可用时返回
+    ``None``（调用方按原逻辑兜底）。
     """
     from backend.crud import chat_crud, agent_crud, image_gen_crud
 
@@ -371,19 +441,54 @@ async def build_image_gen_standard_from_chat_id(
             return None
 
         ig = (agent.agentParameters or {}).get("image_gen") or {}
-        if not ig.get("enabled") or not ig.get("configId"):
+        config_ids = _config_ids_from_agent_params(ig)
+        if not ig.get("enabled") or not config_ids:
             return None
 
-        config = await image_gen_crud.get_image_gen_config(db, ig["configId"])
-        if not config or not config.isEnabled:
-            return None
-        return await build_image_standard(db, config)
+        wanted = normalize_generator_name(generator)
+        ordered = list(config_ids)
+        if wanted:
+            target = await _find_config_by_name(db, image_gen_crud, config_ids, wanted)
+            if target is not None:
+                ordered.remove(target)
+                ordered.insert(0, target)
+            else:
+                logger.warning(
+                    "异步生图下载：生图配置 %r 已不可用，回退默认配置", wanted
+                )
+
+        entries = await build_image_gen_entries(db, ordered)
+        return entries[0].standard if entries else None
     except ImageGenConfigError as exc:
         logger.warning("异步生图下载：生图配置不可用: %s", exc)
         return None
     except Exception as exc:  # noqa: BLE001 - 后台轮询不应因配置解析失败中断
         logger.warning("异步生图下载：解析会话生图配置失败: %s", exc)
         return None
+
+
+def _config_ids_from_agent_params(ig: Any) -> List[str]:
+    """从 Agent 的 ``image_gen`` 参数取配置 ID 列表（兼容旧的单 ``configId``）。"""
+    ids: List[str] = []
+    for raw in list((ig or {}).get("configIds") or []) + [
+        (ig or {}).get("configId")
+    ]:
+        text = str(raw or "").strip()
+        if text and text not in ids:
+            ids.append(text)
+    return ids
+
+
+async def _find_config_by_name(
+    db: AsyncSession, image_gen_crud: Any, config_ids: List[str], wanted: str
+) -> Optional[str]:
+    """在给定 ID 列表里按名称（忽略大小写/空白）找配置 ID。"""
+    key = wanted.casefold()
+    for config_id in config_ids:
+        config = await image_gen_crud.get_image_gen_config(db, config_id)
+        if config and normalize_generator_name(config.name).casefold() == key:
+            return config_id
+    return None
 
 
 async def check_mcp_image_service(
@@ -559,6 +664,7 @@ __all__ = [
     "PROTOCOL_GOOGLE",
     "ImageGenConfigError",
     "build_image_api_standard",
+    "build_image_gen_entries",
     "build_image_gen_standard_from_chat_id",
     "build_image_standard",
     "build_mcp_image_standard",
@@ -569,6 +675,7 @@ __all__ = [
     "model_supports_image_output",
     "probe_image_endpoint",
     "probe_mcp_reference_support",
+    "resolve_config_tools",
     "resolve_model_executor",
     "resolve_reference_support",
 ]

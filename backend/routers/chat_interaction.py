@@ -380,8 +380,10 @@ async def _scan_chat_pending_sub_messages(
 ) -> dict[str, dict]:
     """扫描会话下所有等待中的文件子消息。
 
-    返回 ``{sub_message_id: {path, timeout, deadline, downloaded, task_id, prefix, count}}``。
+    返回 ``{sub_message_id: {path, timeout, deadline, downloaded, task_id, prefix,
+    count, generator}}``。
     ``task_id`` 非空表示这是异步生图产出：文件还没出现时由轮询器先驱动下载。
+    ``generator`` 是产出该图的生图配置名称，多配置时用它还原同一份实现。
     ``deadline`` 是落库的绝对截止时间（epoch 秒），``downloaded`` 表示图已落盘。
     """
     pending: dict[str, dict] = {}
@@ -413,6 +415,7 @@ async def _scan_chat_pending_sub_messages(
                 "task_id": raw_cfg.get("pending_image_task_id"),
                 "prefix": raw_cfg.get("pending_image_prefix"),
                 "count": raw_cfg.get("pending_image_count"),
+                "generator": raw_cfg.get("pending_image_generator"),
             }
     return pending
 
@@ -486,7 +489,7 @@ async def _drive_task_download(
 
 
 async def _drive_pending_image_downloads(
-    standard,
+    resolve_standard,
     backend,
     db_pending: dict[str, dict],
     state: dict[str, dict],
@@ -496,6 +499,9 @@ async def _drive_pending_image_downloads(
     同一个 ``task_id`` 在一次轮询里只驱动一次，并以 ``state`` 跨轮节流；
     已下载过（config 里 ``pending_image_downloaded``）的子消息只要文件仍在
     就跳过下载，避免轮询器重连后重复下载、重复入库。
+
+    ``resolve_standard`` 按子消息登记的配置名称返回实现（多配置时一个会话
+    可能有多份），返回 ``None`` 表示该配置当前不可用，本轮跳过。
     返回 ``{task_id: 失败原因}``，交给调用方把对应子消息标记为失败。
     """
     failed: dict[str, str] = {}
@@ -518,6 +524,10 @@ async def _drive_pending_image_downloads(
         if now - cursor["last"] < IMAGE_DOWNLOAD_RETRY_INTERVAL:
             continue
         cursor["last"] = now
+
+        standard = await resolve_standard(info.get("generator"))
+        if standard is None:
+            continue
 
         outcome, error = await _drive_task_download(standard, backend, info)
         if outcome == "completed":
@@ -559,7 +569,21 @@ async def _poll_chat_pending_files(chat_id: str) -> None:
         pending: dict[str, dict] = {}
         # task_id -> {last, done, errors}：异步生图下载的节流状态
         image_state: dict[str, dict] = {}
-        image_standard = None
+        # 生图配置名称 -> 实现：一个会话可能同时挂了多个生图配置
+        image_standards: dict = {}
+
+        async def _resolve_image_standard(generator=None):
+            """按配置名称取实现；不可用时返回 None（下一轮会重试）。"""
+            key = generator or None
+            if key in image_standards:
+                return image_standards[key]
+            async with AsyncSessionLocal() as db:
+                standard = await build_image_gen_standard_from_chat_id(
+                    db, chat_id, generator=key
+                )
+            if standard is not None:
+                image_standards[key] = standard
+            return standard
 
         while True:
             # 1. 与 DB 同步 pending 集合（新文件自动纳入，已终态移除）
@@ -587,21 +611,15 @@ async def _poll_chat_pending_files(chat_id: str) -> None:
 
             # 2. 异步生图：任务收敛后先把图下载到确定路径（文件出现由下一步接管）
             if any(item["task_id"] for item in db_pending.values()):
-                if image_standard is None:
-                    async with AsyncSessionLocal() as db:
-                        image_standard = await build_image_gen_standard_from_chat_id(
-                            db, chat_id
-                        )
-                if image_standard is not None:
-                    failed_tasks = await _drive_pending_image_downloads(
-                        image_standard, backend, db_pending, image_state
-                    )
-                    for item in pending.values():
-                        reason = failed_tasks.get(item["task_id"])
-                        if reason is not None:
-                            item["deadline"] = 0.0
-                            item["fail_reason"] = PENDING_FAIL_REASON_TASK_FAILED
-                            item["fail_error"] = reason
+                failed_tasks = await _drive_pending_image_downloads(
+                    _resolve_image_standard, backend, db_pending, image_state
+                )
+                for item in pending.values():
+                    reason = failed_tasks.get(item["task_id"])
+                    if reason is not None:
+                        item["deadline"] = 0.0
+                        item["fail_reason"] = PENDING_FAIL_REASON_TASK_FAILED
+                        item["fail_error"] = reason
 
             # 3. 逐个处理：先判文件是否就绪，未就绪再判是否超时
             for sub_id, item in list(pending.items()):
@@ -1031,6 +1049,7 @@ async def fetch_pending_file(sub_message_id: str):
         "path": path,
         "prefix": config.get("pending_image_prefix"),
         "count": config.get("pending_image_count"),
+        "generator": config.get("pending_image_generator"),
     }
 
     _fetch_inflight.add(sub_message_id)
@@ -1048,7 +1067,9 @@ async def fetch_pending_file(sub_message_id: str):
 
         if task_id:
             async with AsyncSessionLocal() as db:
-                standard = await build_image_gen_standard_from_chat_id(db, chat_id)
+                standard = await build_image_gen_standard_from_chat_id(
+                    db, chat_id, generator=task_info.get("generator")
+                )
             if standard is None:
                 await _mark_pending_failed(
                     chat_id, sub_message_id, path, PENDING_FAIL_REASON_NO_BACKEND

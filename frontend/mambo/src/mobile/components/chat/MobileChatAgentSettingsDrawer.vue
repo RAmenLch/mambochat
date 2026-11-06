@@ -337,8 +337,8 @@
           </div>
           <div class="info-grid" v-if="imageGenPreview.enabled">
             <div class="info-item">
-              <span class="info-label">{{ $t('agent.imageGenConfig') }}:</span>
-              <span class="info-value">{{ imageGenConfigName || $t('common.none') }}</span>
+              <span class="info-label">{{ $t('agent.imageGenConfigs') }}:</span>
+              <span class="info-value">{{ imageGenConfigNames || $t('common.none') }}</span>
             </div>
           </div>
         </div>
@@ -556,13 +556,15 @@ const tailToolFailModeLabel = computed(() => {
 const imageGenPreview = computed<ImageGenConfigRef | null>(() => {
   const params = mamboParams.value;
   if (!params) return null;
-  return params.image_gen ?? { enabled: false, configId: null };
+  return params.image_gen ?? { enabled: false, configIds: [] };
 });
 
-const imageGenConfigName = computed(() => {
-  const configId = imageGenPreview.value?.configId;
-  if (!configId) return '';
-  return imageGenStore.configs.find(c => c.id === configId)?.name ?? '';
+const imageGenConfigNames = computed(() => {
+  const ids = imageGenPreview.value?.configIds ?? [];
+  return ids
+    .map(id => imageGenStore.configs.find(c => c.id === id)?.name)
+    .filter(Boolean)
+    .join(' / ');
 });
 
 const multimodalPreview = computed<MultimodalDescriberConfig | null>(() => {

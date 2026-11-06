@@ -14,6 +14,7 @@ from langchain_core.tools import StructuredTool
 from mambo_agents.backends.protocol import BackendProtocol
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .registry import ImageGenEntry, build_generator_catalog, pick_generator
 from .standard import (
     DEFAULT_ONESHOT_WAIT_TIMEOUT,
     DEFAULT_OUTPUT_DIR,
@@ -28,13 +29,15 @@ from .standard import (
     MAX_REFERENCE_IMAGES,
     MAX_REFERENCE_TOTAL_BYTES,
     ImageDownloadArgs,
-    ImageGenStandard,
     ImageStatusArgs,
     generate_args_model,
     generate_show_args_model,
 )
 
 logger = logging.getLogger(__name__)
+
+# 任务归属表上限：超过即整体清空（单次运行的任务数远小于此值）
+_MAX_TRACKED_TASKS = 256
 
 
 _GENERATE_DESCRIPTION = (
@@ -108,20 +111,15 @@ _ONESHOT_HINT = (
     "prefer it over this multi-step flow."
 )
 
-# 异步模式下追加的说明：调用立即返回，后续交给平台
-_ASYNC_ONESHOT_HINT = (
-    " NOTE: this deployment generates images asynchronously — the call returns "
-    "immediately with status=pending plus the target file paths, and the platform "
-    "saves and displays the images in the background. Do NOT call show or "
-    "image_download afterwards; use image_task_status only if you need progress."
-)
-
 
 class ImageGenMiddleware(AgentMiddleware):
     """Registers the image generation tools and owns the backend/file sink.
 
     Parameters
     ----------
+    entries:
+        该 Agent 挂载的生图配置（顺序 = 前端配置顺序，第一个为该工具的默认）。
+        每次工具调用按 LLM 传入的 ``image_generator`` 名称选择其一。
     enable_standard_tools:
         是否注册契约三件套（``image_generate`` / ``image_task_status`` /
         ``image_download``）。
@@ -131,7 +129,7 @@ class ImageGenMiddleware(AgentMiddleware):
 
     def __init__(
         self,
-        standard: ImageGenStandard,
+        entries: List[ImageGenEntry],
         backend: Optional[BackendProtocol],
         *,
         session_factory: Optional[Callable[[], AsyncSession]] = None,
@@ -139,26 +137,31 @@ class ImageGenMiddleware(AgentMiddleware):
         enable_generate_show: bool = False,
     ) -> None:
         super().__init__()
-        self._standard = standard
+        self._entries = [entry for entry in entries if entry.standard is not None]
         self._backend = backend
         self._session_factory = session_factory
+        # task_id → 创建它的配置名：状态/下载工具没有 image_generator 参数，
+        # 靠这张表在同一次运行内还原「这个任务是谁提交的」。
+        self._task_owner: Dict[str, str] = {}
 
-        # 后端不支持参考图时，该参数不出现在 schema / 描述里
-        self._with_reference = standard.supports_reference_images
+        # 任一配置支持参考图就暴露该参数；选中不支持的配置由标准实现报错说明
+        self._with_reference = any(
+            entry.standard.supports_reference_images for entry in self._entries
+        )
         ref_hint = _REFERENCE_HINT if self._with_reference else ""
-        # 额外参数提示：必须由实现类按「配置快照」确定性渲染，避免打散 KV cache
-        extra_hint = standard.describe_extra_options()
         self._generate_args_cls = generate_args_model(self._with_reference)
         self._generate_show_args_cls = generate_show_args_model(self._with_reference)
 
         tools = []
         if enable_standard_tools:
             hint = _ONESHOT_HINT if enable_generate_show else ""
+            # 可用配置清单（名称 + 说明 + 该配置的额外参数）按配置快照确定性渲染
+            catalog = build_generator_catalog(self._entries, IMAGE_TOOL_GENERATE)
             tools.extend(
                 [
                     StructuredTool.from_function(
                         name=IMAGE_TOOL_GENERATE,
-                        description=_GENERATE_DESCRIPTION + ref_hint + hint + extra_hint,
+                        description=_GENERATE_DESCRIPTION + ref_hint + hint + catalog,
                         coroutine=self._agenerate,
                         args_schema=self._generate_args_cls,
                         infer_schema=False,
@@ -180,9 +183,11 @@ class ImageGenMiddleware(AgentMiddleware):
                 ]
             )
         if enable_generate_show:
-            description = _GENERATE_SHOW_DESCRIPTION + ref_hint + extra_hint
-            if not standard.default_sync:
-                description += _ASYNC_ONESHOT_HINT
+            description = (
+                _GENERATE_SHOW_DESCRIPTION
+                + ref_hint
+                + build_generator_catalog(self._entries, IMAGE_TOOL_GENERATE_SHOW)
+            )
             tools.append(
                 StructuredTool.from_function(
                     name=IMAGE_TOOL_GENERATE_SHOW,
@@ -207,31 +212,39 @@ class ImageGenMiddleware(AgentMiddleware):
         sync: Optional[bool] = None,
         extra: Optional[Dict[str, Any]] = None,
         reference_images: Optional[List[str]] = None,
+        image_generator: Optional[str] = None,
     ) -> str:
         return await self._safe(
             IMAGE_TOOL_GENERATE,
-            lambda: self._standard.run_generate(
-                self._backend,
-                self._generate_args_cls(
-                    **self._generate_args(
-                        prompt=prompt,
-                        resolution=resolution,
-                        negative_prompt=negative_prompt,
-                        count=count,
-                        sync=sync,
-                        extra=extra,
-                        reference_images=reference_images,
-                    )
-                )
+            lambda: self._do_generate(
+                image_generator=image_generator,
+                prompt=prompt,
+                resolution=resolution,
+                negative_prompt=negative_prompt,
+                count=count,
+                sync=sync,
+                extra=extra,
+                reference_images=reference_images,
             ),
         )
+
+    async def _do_generate(
+        self, *, image_generator: Optional[str] = None, **fields: Any
+    ) -> str:
+        entry = pick_generator(self._entries, image_generator, IMAGE_TOOL_GENERATE)
+        raw = await entry.standard.run_generate(
+            self._backend,
+            self._generate_args_cls(**self._generate_args(**fields)),
+        )
+        self._remember_task(raw, entry)
+        return raw
 
     async def _astatus(
         self, task_id: str, wait_timeout: int = DEFAULT_WAIT_TIMEOUT
     ) -> str:
         return await self._safe(
             IMAGE_TOOL_STATUS,
-            lambda: self._standard.run_status(
+            lambda: self._entry_for_task(task_id).standard.run_status(
                 ImageStatusArgs(task_id=task_id, wait_timeout=wait_timeout)
             ),
         )
@@ -246,7 +259,7 @@ class ImageGenMiddleware(AgentMiddleware):
     ) -> str:
         return await self._safe(
             IMAGE_TOOL_DOWNLOAD,
-            lambda: self._standard.run_download(
+            lambda: self._entry_for_task(task_id).standard.run_download(
                 self._backend,
                 ImageDownloadArgs(
                     task_id=task_id,
@@ -269,27 +282,37 @@ class ImageGenMiddleware(AgentMiddleware):
         path: Optional[str] = None,
         timeout: Optional[int] = None,
         reference_images: Optional[List[str]] = None,
+        image_generator: Optional[str] = None,
     ) -> str:
         return await self._safe(
             IMAGE_TOOL_GENERATE_SHOW,
-            lambda: self._standard.run_generate_show(
-                self._backend,
-                self._session_factory,
-                self._generate_show_args_cls(
-                    **self._generate_show_args(
-                        prompt=prompt,
-                        resolution=resolution,
-                        negative_prompt=negative_prompt,
-                        count=count,
-                        extra=extra,
-                        mode=mode,
-                        path=path,
-                        timeout=timeout,
-                        reference_images=reference_images,
-                    )
-                ),
+            lambda: self._do_generate_show(
+                image_generator=image_generator,
+                prompt=prompt,
+                resolution=resolution,
+                negative_prompt=negative_prompt,
+                count=count,
+                extra=extra,
+                mode=mode,
+                path=path,
+                timeout=timeout,
+                reference_images=reference_images,
             ),
         )
+
+    async def _do_generate_show(
+        self, *, image_generator: Optional[str] = None, **fields: Any
+    ) -> str:
+        entry = pick_generator(
+            self._entries, image_generator, IMAGE_TOOL_GENERATE_SHOW
+        )
+        raw = await entry.standard.run_generate_show(
+            self._backend,
+            self._session_factory,
+            self._generate_show_args_cls(**self._generate_show_args(**fields)),
+        )
+        self._remember_task(raw, entry)
+        return raw
 
     def _generate_args(self, *, reference_images: Optional[List[str]], **fields: Any) -> Dict[str, Any]:
         """后端不支持参考图时不把该键塞进 args（避免被 pydantic 静默丢弃）。"""
@@ -309,6 +332,28 @@ class ImageGenMiddleware(AgentMiddleware):
         return payload
 
     # ------------------------------------------------------------------
+    # 任务归属（多配置下状态/下载工具靠它选回同一份实现）
+    # ------------------------------------------------------------------
+
+    def _remember_task(self, raw: str, entry: ImageGenEntry) -> None:
+        """记住某个 task_id 由哪个配置提交（结果解析失败则跳过）。"""
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return
+        task_id = data.get("task_id") if isinstance(data, dict) else None
+        if not task_id:
+            return
+        if len(self._task_owner) >= _MAX_TRACKED_TASKS:
+            self._task_owner.clear()
+        self._task_owner[str(task_id)] = entry.name
+
+    def _entry_for_task(self, task_id: Optional[str]) -> ImageGenEntry:
+        """该任务对应的配置；查不到（如进程重启）时回退默认配置。"""
+        owner = self._task_owner.get(str(task_id or ""))
+        return pick_generator(self._entries, owner, IMAGE_TOOL_GENERATE)
+
+    # ------------------------------------------------------------------
     # 异常安全
     # ------------------------------------------------------------------
 
@@ -326,7 +371,7 @@ class ImageGenMiddleware(AgentMiddleware):
 
 
 def build_image_gen_middleware(
-    standard: ImageGenStandard,
+    entries: List[ImageGenEntry],
     backend: Optional[BackendProtocol],
     *,
     session_factory: Optional[Callable[[], AsyncSession]] = None,
@@ -335,7 +380,7 @@ def build_image_gen_middleware(
 ) -> ImageGenMiddleware:
     """便捷构造器。"""
     return ImageGenMiddleware(
-        standard=standard,
+        entries=entries,
         backend=backend,
         session_factory=session_factory,
         enable_standard_tools=enable_standard_tools,

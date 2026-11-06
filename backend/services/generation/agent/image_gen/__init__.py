@@ -3,6 +3,14 @@
 from .api_standard import ImageApiImageGenStandard
 from .mcp_standard import McpImageGenStandard
 from .middleware import ImageGenMiddleware, build_image_gen_middleware
+from .registry import (
+    ImageGenEntry,
+    build_generator_catalog,
+    default_entry,
+    entries_for_tool,
+    normalize_generator_name,
+    pick_generator,
+)
 from .standard import (
     DEFAULT_COUNT,
     DEFAULT_ONESHOT_WAIT_TIMEOUT,
@@ -11,6 +19,7 @@ from .standard import (
     DEFAULT_RESOLUTION,
     DEFAULT_WAIT_TIMEOUT,
     FILE_OUTPUT_TOOLS,
+    GENERATOR_ARG,
     IMAGE_TOOL_DOWNLOAD,
     IMAGE_TOOL_GENERATE,
     IMAGE_TOOL_GENERATE_SHOW,
@@ -49,6 +58,7 @@ __all__ = [
     "DEFAULT_RESOLUTION",
     "DEFAULT_WAIT_TIMEOUT",
     "FILE_OUTPUT_TOOLS",
+    "GENERATOR_ARG",
     "IMAGE_TOOL_DOWNLOAD",
     "IMAGE_TOOL_GENERATE",
     "IMAGE_TOOL_GENERATE_SHOW",
@@ -68,6 +78,7 @@ __all__ = [
     "ImageApiImageGenStandard",
     "ImageGenerateArgs",
     "ImageGenerateShowArgs",
+    "ImageGenEntry",
     "ImageGenMiddleware",
     "ImageGenStandard",
     "ImageGenToolError",
@@ -76,9 +87,14 @@ __all__ = [
     "McpImageGenStandard",
     "RefImage",
     "TargetPlan",
+    "build_generator_catalog",
     "build_image_gen_middleware",
+    "default_entry",
+    "entries_for_tool",
     "format_resolution",
     "generate_args_model",
     "generate_show_args_model",
+    "normalize_generator_name",
     "parse_resolution",
+    "pick_generator",
 ]

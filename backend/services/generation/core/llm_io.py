@@ -251,14 +251,15 @@ class AgentConfig(BaseModel):
         default=True,
         description="是否启用 show 工具（展示文件/图片给用户，仅 Mambo Agent 有效）"
     )
-    image_gen_standard: Optional[Any] = Field(
+    image_gen_standards: Optional[List[Any]] = Field(
         default=None,
-        description="生图标准实现（ImageGenStandard 实例）。由 initializer 依据生图配置构建，"
-                    "builder 消费以注册生图工具中间件。为 None 时不启用"
+        description="生图标准实现列表（ImageGenEntry，按 Agent 配置顺序，第一个为该工具的默认）。"
+                    "由 initializer 依据生图配置构建，builder 消费以注册生图工具中间件。"
+                    "为空时不启用"
     )
     image_gen_tools: Optional[List[str]] = Field(
         default=None,
-        description="本次要注册的生图工具名集合（由生图配置的两个开关决定）。"
+        description="本次要注册的生图工具名集合（由各生图配置的两个开关取并集决定）。"
                     "None 时按契约三件套兜底"
     )
     memory_resource_roots: Optional[Dict[str, str]] = Field(

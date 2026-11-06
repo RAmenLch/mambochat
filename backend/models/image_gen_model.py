@@ -9,8 +9,9 @@ from backend.config.timezone_config import get_configured_now
 class ImageGenConfig(Base):
     """生图工具配置。
 
-    一条配置绑定一个符合生图标准（三个固定工具名）的 MCP 服务，
-    并提供默认参数。Agent 通过 agentParameters.image_gen.configId 引用。
+    一条配置绑定一个符合生图标准（三个固定工具名）的 MCP 服务 / 模型，
+    并提供默认参数。Agent 通过 agentParameters.image_gen.configIds 引用（可多个，
+    顺序即优先级），LLM 通过工具参数 image_generator 按配置名称选择。
     """
 
     __tablename__ = "ImageGenConfig"

@@ -136,6 +136,7 @@ async def _execute(
 
     args = generate_show_args_model(True)(
         prompt=merged["prompt"],
+        image_generator=merged.get("image_generator") or None,
         negative_prompt=merged.get("negative_prompt"),
         resolution=merged.get("resolution") or None,
         count=int(merged.get("count") or 1),
@@ -277,7 +278,9 @@ async def _submit(
 ) -> Dict[str, Any]:
     """只提交生成任务，返回「待生成」描述（``task_id`` + 全部确定路径）。"""
     async with AsyncSessionLocal() as db:
-        standard = await build_image_gen_standard_from_chat_id(db, chat_id)
+        standard = await build_image_gen_standard_from_chat_id(
+            db, chat_id, generator=getattr(args, "image_generator", None)
+        )
     if standard is None:
         raise ImageRunError("当前会话未启用生图工具或生图服务不可用")
 
@@ -599,6 +602,7 @@ async def _append_pending_file_sub_messages(
                         pending_image_task_id=pending.get("task_id"),
                         pending_image_prefix=pending.get("prefix"),
                         pending_image_count=pending.get("count"),
+                        pending_image_generator=pending.get("image_generator"),
                     ),
                 ),
                 sub_message_id=sub_id,

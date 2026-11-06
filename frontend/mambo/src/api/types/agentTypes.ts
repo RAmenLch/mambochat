@@ -68,7 +68,10 @@ export interface TailToolConfig {
 
 export interface ImageGenConfigRef {
   enabled: boolean
-  configId: string | null
+  /** 引用的生图配置 ID 列表（顺序即优先级，第一个为默认） */
+  configIds: string[]
+  /** @deprecated 旧的单配置字段，仅用于读取历史数据 */
+  configId?: string | null
 }
 
 export interface MamboAgentParameters {

@@ -305,6 +305,7 @@ export default {
     },
     form: {
       name: '配置名称',
+      nameHint: '名称是 LLM 选择生图工具（image_generator 参数）时用的标识，不可重复；建议简短且能体现后端特点',
       description: '说明',
       backend: '后端类型',
       backendHint: 'MCP 服务需实现生图标准三件套；对话出图模型指能输出图片的 Chat 模型（如 Gemini 生图模型）；生图模型指 model_type=image 的模型，走服务商执行器的纯生图接口（/images…），生成规则与参数都与对话无关',

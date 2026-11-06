@@ -308,6 +308,7 @@ export default {
     },
     form: {
       name: 'Config Name',
+      nameHint: 'The name is the identifier the LLM uses to pick this generator (image_generator parameter) and must be unique; keep it short but descriptive of the backend',
       description: 'Description',
       backend: 'Backend type',
       backendHint: 'MCP service must implement the standard trio; Chat Image Model means a configured chat model that outputs images (e.g. Gemini image models); Image Model means a model with model_type=image served through the provider executor (pure image API /images…)',

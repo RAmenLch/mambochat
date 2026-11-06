@@ -114,7 +114,34 @@ class TailToolConfigSchema(BaseModel):
 class ImageGenConfigRefSchema(BaseModel):
     """生图工具挂载配置（引用 ImageGenConfig 记录）"""
     enabled: bool = Field(False, description="是否为该 Agent 启用生图工具")
-    configId: Optional[str] = Field(None, description="引用的生图配置 ID")
+    configIds: List[str] = Field(
+        default_factory=list,
+        description="引用的生图配置 ID 列表（顺序即优先级，第一个为各工具的默认配置）",
+    )
+    configId: Optional[str] = Field(
+        None, description="【已废弃】旧的单配置字段，仅用于读取兼容；请改用 configIds"
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_single_config(cls, data: Any) -> Any:
+        """把历史数据里的单 ``configId`` 归一化进 ``configIds``。"""
+        if not isinstance(data, dict):
+            return data
+        raw_ids = data.get("configIds")
+        ids: List[str] = []
+        for item in list(raw_ids or []) + [data.get("configId")]:
+            text = str(item or "").strip()
+            if text and text not in ids:
+                ids.append(text)
+        data = dict(data)
+        data["configIds"] = ids
+        return data
+
+    @property
+    def config_id_list(self) -> List[str]:
+        """可用的配置 ID 列表（去空、去重、保序）。"""
+        return [str(item).strip() for item in self.configIds if str(item or "").strip()]
 
 
 class MamboAgentParametersSchema(BaseModel):

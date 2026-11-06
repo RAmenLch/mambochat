@@ -35,33 +35,6 @@ from backend.services.file_service import FileService
 
 logger = logging.getLogger(__name__)
 
-
-def _resolve_image_gen_tools(ig_config: Any) -> List[str]:
-    """按生图配置的两个开关解析本次要注册的工具名。
-
-    ``enableStandardTools`` 控制契约三件套，``enableGenerateShow`` 控制平台侧
-    一条龙工具；两者都关闭属于非法配置，这里兜底为三件套，避免 Agent
-    挂着一个生图配置却没有任何生图工具。
-    """
-    from backend.services.generation.agent.image_gen.standard import (
-        IMAGE_TOOL_GENERATE_SHOW,
-        IMAGE_TOOL_NAMES,
-    )
-
-    standard_tools = bool(getattr(ig_config, "enableStandardTools", True))
-    generate_show = bool(getattr(ig_config, "enableGenerateShow", False))
-    if not standard_tools and not generate_show:
-        logger.warning(
-            "生图配置 %s 未启用任何工具集，回退为契约三件套", getattr(ig_config, "id", "?")
-        )
-        standard_tools = True
-
-    names: List[str] = list(IMAGE_TOOL_NAMES) if standard_tools else []
-    if generate_show:
-        names.append(IMAGE_TOOL_GENERATE_SHOW)
-    return names
-
-
 class MamboAgentInitializer(AbstractAgentInitializer):
     """Mambo Agent 初始化器。
 
@@ -391,29 +364,27 @@ class MamboAgentInitializer(AbstractAgentInitializer):
         enable_show = mambo_params.enable_show
         memory_resource_ids = mambo_params.memory_resource_ids
 
-        # --- 生图工具（标准 MCP 实现）---
-        image_gen_standard = None
+        # --- 生图工具（标准实现，可挂多个配置）---
+        image_gen_standards: List[Any] = []
         image_gen_tools: Optional[List[str]] = None
         ig = mambo_params.image_gen
-        if self.enable_tools and ig is not None and ig.enabled and ig.configId:
-            from backend.crud import image_gen_crud
+        if self.enable_tools and ig is not None and ig.enabled and ig.config_id_list:
             from backend.services.generation.agent.image_gen.factory import (
-                ImageGenConfigError,
-                build_image_standard,
+                build_image_gen_entries,
             )
 
-            ig_config = await image_gen_crud.get_image_gen_config(self.db, ig.configId)
-            if not ig_config or not ig_config.isEnabled:
-                logger.warning("生图配置 %s 不存在或已停用，跳过生图工具", ig.configId)
+            image_gen_standards = await build_image_gen_entries(
+                self.db, ig.config_id_list
+            )
+            if not image_gen_standards:
+                logger.warning("生图配置全部不可用，跳过生图工具")
             else:
-                try:
-                    image_gen_standard = await build_image_standard(self.db, ig_config)
-                except ImageGenConfigError as exc:
-                    logger.warning("生图工具未启用: %s", exc)
-                else:
-                    image_gen_tools = _resolve_image_gen_tools(ig_config)
-                    for tool_name in image_gen_tools:
-                        builtin_provider.register_tool(tool_name)
+                # 工具集取并集：某个配置没开一条龙时，它不会出现在该工具的候选清单里
+                image_gen_tools = sorted(
+                    {name for entry in image_gen_standards for name in entry.tools}
+                )
+                for tool_name in image_gen_tools:
+                    builtin_provider.register_tool(tool_name)
 
         # 尾部工具调用：注册 tail_tool 的追踪 provider（正文误调用时落库，避免其后内容缓存失效）
         if enable_suggest or (mambo_params.tail_tool is not None and mambo_params.tail_tool.enabled):
@@ -605,7 +576,7 @@ class MamboAgentInitializer(AbstractAgentInitializer):
             summarization_config=sum_config.model_dump() if (enable_sum and sum_config) else None,
             enable_planning=enable_planning,
             enable_show=enable_show,
-            image_gen_standard=image_gen_standard,
+            image_gen_standards=image_gen_standards or None,
             image_gen_tools=image_gen_tools,
             memory_resource_roots=memory_roots if memory_roots else None,
             security_review_config=security_review_config,
