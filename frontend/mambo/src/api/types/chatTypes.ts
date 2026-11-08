@@ -35,6 +35,8 @@ export interface SubMessageConfig {
   /** 待生成文件的失败原因：timeout / task_failed / no_backend / download_failed */
   pending_failed_reason?: string | null
   show_tool_mode?: string | null
+  /** show / image_generate_show 产出该文件时它在工作区中的路径（展示区显示，便于辨识） */
+  show_file_path?: string | null
   /** get_goal MCP_TOOL 轮次边界标志（GoalLoopMiddleware 注入），前端据此渲染轮次分隔线 */
   is_goal_loop_round?: boolean | null
   /**

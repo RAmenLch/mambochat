@@ -139,6 +139,10 @@
           <el-icon><Download /></el-icon>
         </a>
       </div>
+
+      <div v-if="showFilePath" class="file-source-path" :title="showFilePath">
+        {{ showFilePath }}
+      </div>
     </div>
 
     <div v-else-if="isPendingFile && showToolMode !== 'Mini_Avatar' && showToolMode !== 'Gal_Avatar'" class="file-pending-container">
@@ -149,6 +153,9 @@
         <div class="file-pending-info">
           <div class="file-pending-name">{{ pendingFileName }}</div>
           <div class="file-pending-status">{{ pendingStatusText }}</div>
+          <div v-if="showFilePath" class="file-source-path" :title="showFilePath">
+            {{ showFilePath }}
+          </div>
         </div>
       </div>
     </div>
@@ -165,6 +172,9 @@
         <div class="file-pending-info">
           <div class="file-pending-name">{{ pendingFileName }}</div>
           <div class="file-pending-status">{{ pendingFailedText }}</div>
+          <div v-if="showFilePath" class="file-source-path" :title="showFilePath">
+            {{ showFilePath }}
+          </div>
         </div>
         <el-button size="small" :loading="fetchingFile" @click="handleFetchFile">
           {{ fetchingFile ? t('chat.attachment.loadingFile') : t('chat.attachment.loadFile') }}
@@ -471,6 +481,11 @@ const showToolMode = computed(() =>
   props.subMessage.config.show_tool_mode || 'Normal'
 )
 
+/** show / image_generate_show 产出的文件在工作区中的路径；待生成阶段回退到 pending_file_path */
+const showFilePath = computed(() =>
+  props.subMessage.config.show_file_path || props.subMessage.config.pending_file_path || ''
+)
+
 function getLanguageFromFilename(filename: string): string {
   const ext = filename.split('.').pop()?.toLowerCase() || ''
   const map: Record<string, string> = {
@@ -706,6 +721,20 @@ onBeforeUnmount(() => {
 
 .file-display-container {
   width: 100%;
+}
+
+/* show / image_generate_show 产出的文件路径：单行省略，悬停看全文 */
+.file-source-path {
+  margin-top: 6px;
+  max-width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: text;
 }
 
 .file-placeholder {

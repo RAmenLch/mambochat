@@ -162,6 +162,30 @@ def collect_file_ids(payload: Any) -> List[str]:
     ]
 
 
+def collect_file_paths(payload: Any) -> Dict[str, str]:
+    """从工具结果里收集 ``file_id → 工作区路径`` 映射。
+
+    只有 ``image_generate_show`` 的 ``files`` 元素带 ``path``；``show`` 的结果
+    不含路径，其路径即调用参数 ``path``，由调用处自行兜底。
+    """
+    if not isinstance(payload, dict):
+        return {}
+
+    files = payload.get("files")
+    if not isinstance(files, list):
+        return {}
+
+    mapping: Dict[str, str] = {}
+    for item in files:
+        if not isinstance(item, dict):
+            continue
+        file_id = item.get("file_id")
+        path = item.get("path")
+        if isinstance(file_id, str) and file_id and isinstance(path, str) and path:
+            mapping[file_id] = path
+    return mapping
+
+
 async def persist_uploaded(
     session_factory: SessionFactory,
     items: Iterable[Tuple[Any, bytes]],
@@ -203,4 +227,5 @@ __all__ = [
     "persist_path",
     "persist_uploaded",
     "collect_file_ids",
+    "collect_file_paths",
 ]

@@ -597,6 +597,7 @@ async def _append_pending_file_sub_messages(
                         image_slot_id=slot_id,
                         image_run_args=args,
                         pending_file_path=path,
+                        show_file_path=path,
                         pending_file_timeout=timeout,
                         pending_file_deadline=time.time() + float(timeout or 300),
                         pending_image_task_id=pending.get("task_id"),

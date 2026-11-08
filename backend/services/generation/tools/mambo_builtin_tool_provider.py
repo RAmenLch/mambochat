@@ -19,7 +19,7 @@ from backend.schemas import enums as schemas_enums
 from backend.schemas.message import McpToolContent, MultimodalMedia, SubMessageConfig
 from backend.models.base_model import generate_uuid
 from backend.services.generation.agent.image_gen.standard import FILE_OUTPUT_TOOLS
-from backend.services.generation.agent.image_gen.sink import collect_file_ids
+from backend.services.generation.agent.image_gen.sink import collect_file_ids, collect_file_paths
 
 
 class MamboAgentBuiltinToolProvider(BaseToolProvider):
@@ -156,6 +156,7 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
                             config=SubMessageConfig(
                                 context_participation_length=0,
                                 pending_file_path=path,
+                                show_file_path=path,
                                 pending_file_timeout=data.get("timeout", 300),
                                 pending_file_deadline=time.time()
                                 + float(data.get("timeout") or 300),
@@ -173,6 +174,11 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
                     #   show → {"file_id": ...}
                     #   image_generate_show → {"files": [{"file_id": ..., "path": ...}, ...]}
                     file_ids = self._collect_file_ids(data)
+                    run_args = cached_content.get_argument_dict()
+                    # show 的结果不含路径，其路径即调用参数 path
+                    arg_path = run_args.get("path")
+                    arg_path = arg_path if isinstance(arg_path, str) and arg_path else None
+                    paths_by_file = collect_file_paths(data)
                     for file_id in file_ids:
                         yield CreateSubMessage(
                             sub_message_id=generate_uuid(),
@@ -183,8 +189,9 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
                             config=SubMessageConfig(
                                 context_participation_length=0,
                                 show_tool_mode=data.get("mode", "Normal"),
+                                show_file_path=paths_by_file.get(file_id) or arg_path,
                                 image_run_id=tool_call_id,
-                                image_run_args=cached_content.get_argument_dict(),
+                                image_run_args=run_args,
                             ),
                         )
             except (json.JSONDecodeError, KeyError, TypeError):
