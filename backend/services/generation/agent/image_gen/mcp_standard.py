@@ -15,6 +15,7 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .standard import (
     DEFAULT_WAIT_TIMEOUT,
+    EXTRA_ARG,
     IMAGE_TOOL_DOWNLOAD,
     IMAGE_TOOL_GENERATE,
     IMAGE_TOOL_STATUS,
@@ -155,7 +156,9 @@ class McpImageGenStandard(ImageGenStandard):
         if reference_images:
             # B 方案：arguments 内嵌 MCP ImageContent 结构
             arguments[REFERENCE_ARG] = [img.to_content() for img in reference_images]
-        arguments.update(extra or {})
+        # 契约要求 extra 是嵌套对象参数，摊平到顶层会被服务端按未知字段丢弃
+        if extra:
+            arguments[EXTRA_ARG] = dict(extra)
 
         result = await self._call(IMAGE_TOOL_GENERATE, arguments)
         return self._extract_payload(result)

@@ -84,6 +84,7 @@ MAX_GENERATOR_EXTRA_CHARS = 200
 
 # 分辨率参数名（契约字段，形如 1024x1024）
 RESOLUTION_ARG = "resolution"
+EXTRA_ARG = "extra"
 DEFAULT_RESOLUTION = "1024x1024"
 MIN_RESOLUTION = 64
 MAX_RESOLUTION = 4096
@@ -164,7 +165,7 @@ class ImageGenerateArgs(BaseModel):
         default=None,
         description=(
             "透传给生图后端的额外参数（如 width/height/steps/seed/model 等）。"
-            "平台会原样扁平传入，与标准参数同名的键会被忽略"
+            "平台会原样透传给生图后端，与标准参数同名的键会被忽略"
         ),
     )
 
@@ -239,7 +240,7 @@ class ImageGenerateShowArgs(BaseModel):
         default=None,
         description=(
             "透传给生图后端的额外参数（如 width/height/steps/seed/model 等）。"
-            "平台会原样扁平传入，与标准参数同名的键会被忽略"
+            "平台会原样透传给生图后端，与标准参数同名的键会被忽略"
         ),
     )
     mode: Literal["Normal", "Mini_Avatar", "Gal_Avatar", "Group", "Spark"] = Field(
@@ -877,7 +878,7 @@ class ImageGenStandard(ABC):
             "count",
             "sync",
             "task_id",
-            "extra",
+            EXTRA_ARG,
             "wait_timeout",
             RESOLUTION_ARG,
             REFERENCE_ARG,
