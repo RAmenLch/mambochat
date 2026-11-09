@@ -42,6 +42,8 @@ export interface ImageRun {
   canRerun: boolean
   /** run 状态：completed / pending（等待落盘）/ failed（超时或失败） */
   status: 'completed' | 'pending' | 'failed'
+  /** 按槽位顺序（创建时间）合并的展示单元：已落盘 / 生成中 / 失败 */
+  cells: ImageRunCell[]
   /** 可作为重跑 / 获取文件来源的子消息 id（图片优先，其次失败的待生成文件） */
   sourceSubId: string | null
   createdAt: number
@@ -54,6 +56,16 @@ export interface ImageRunSlot {
   pinnedRunId: string
   /** 承载 `image_pinned_run_id` 的图片子消息 id（插槽内最早的一条） */
   pinnedHostId: string | null
+}
+
+/** run 内的一个槽位：已落盘 / 生成中 / 超时失败都各占一格 */
+export interface ImageRunCell {
+  kind: 'file' | 'waiting' | 'failed'
+  sub: SubMessage
+  /** 1-based 序号（同一 run 内的第几张，与 count 对齐） */
+  index: number
+  /** 该 run 的槽位总数 */
+  total: number
 }
 
 interface ToolIndexEntry {
@@ -81,6 +93,24 @@ function parseJson<T = any>(raw: unknown): T | null {
 function timestampOf(sub: SubMessage): number {
   const value = Date.parse(sub.createdAt ?? '')
   return Number.isNaN(value) ? 0 : value
+}
+
+/** 槽位形态：已落盘图片 / 待生成 / 已失败 */
+function cellKindOf(sub: SubMessage): ImageRunCell['kind'] {
+  if (sub.file_info?.mime_type?.startsWith('image/')) return 'file'
+  return sub.status === 'failed' ? 'failed' : 'waiting'
+}
+
+/** 按创建时间合并已完成与未落盘的子消息：创建顺序即槽位下标顺序 */
+function buildCells(files: SubMessage[], pendingFiles: SubMessage[]): ImageRunCell[] {
+  const merged = [...files, ...pendingFiles].sort((a, b) => timestampOf(a) - timestampOf(b))
+  const total = merged.length
+  return merged.map((sub, idx) => ({
+    kind: cellKindOf(sub),
+    sub,
+    index: idx + 1,
+    total,
+  }))
 }
 
 function collectFileIds(content: any): Set<string> {
@@ -205,6 +235,7 @@ function analyze(message: Message | null | undefined): ImageRunsAnalysis {
       toolName: tool?.name || '',
       canRerun: Boolean(record) || tool?.name === IMAGE_TOOL_NAME,
       status: resolveRunStatus(pendingFiles, String(record?.status ?? '')),
+      cells: buildCells(files, pendingFiles),
       sourceSubId: files[0]?.id ?? pendingFiles[0]?.id ?? null,
       createdAt: timestampOf(files[0] ?? pendingFiles[0]),
     }
@@ -232,6 +263,7 @@ function analyze(message: Message | null | undefined): ImageRunsAnalysis {
       toolName: IMAGE_TOOL_NAME,
       canRerun: true,
       status: 'failed',
+      cells: [],
       sourceSubId: null,
       createdAt: timestampOf(record),
     })

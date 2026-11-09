@@ -32,7 +32,7 @@ export interface SubMessageConfig {
   task_group_id?: string | null
   pending_file_path?: string | null
   pending_file_timeout?: number | null
-  /** 待生成文件的失败原因：timeout / task_failed / no_backend / download_failed */
+  /** 待生成文件的失败原因：timeout / task_failed / no_backend / download_failed / not_produced */
   pending_failed_reason?: string | null
   show_tool_mode?: string | null
   /** show / image_generate_show 产出该文件时它在工作区中的路径（展示区显示，便于辨识） */
@@ -113,6 +113,24 @@ export interface PendingFileFetchResponse {
   file_id?: string | null
   file_info?: FileResponse | null
   error?: string | null
+}
+
+/** 批量获取待生成文件：单条结果 */
+export interface PendingFileFetchItem {
+  sub_message_id: string
+  /** completed=已入库；running=任务仍在生成；failed=任务失败或下载失败 */
+  status: 'completed' | 'running' | 'failed'
+  file_id?: string | null
+  file_info?: FileResponse | null
+  error?: string | null
+}
+
+/** 批量获取待生成文件：整体结果（items 与入参顺序一致） */
+export interface PendingFileFetchBatchResponse {
+  items: PendingFileFetchItem[]
+  completed: number
+  running: number
+  failed: number
 }
 
 // --- Message Types ---

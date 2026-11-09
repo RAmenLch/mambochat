@@ -26,6 +26,7 @@ import type {
   ImageRunRerunRequest,
   ImageRunRerunResponse,
   PendingFileFetchResponse,
+  PendingFileFetchBatchResponse,
 } from './types';
 
 /**
@@ -178,6 +179,18 @@ export const fetchPendingFile = (
   subMessageId: string,
 ): Promise<PendingFileFetchResponse> => {
   return apiClient.post(`/pending-files/${subMessageId}/fetch`)
+};
+
+/**
+ * 批量获取等待超时 / 尚未落盘的待生成文件（查任务 → 下载 → 逐条入库）。
+ * 同一次生图的多个槽位一次传完，服务端只驱动一次下载，逐条返回结果；
+ * 任务仍在生成时对应条目返回 status='running'，不会改变子消息状态。
+ * @param subMessageIds 待生成文件子消息ID列表
+ */
+export const fetchPendingFiles = (
+  subMessageIds: string[],
+): Promise<PendingFileFetchBatchResponse> => {
+  return apiClient.post('/pending-files/fetch', { sub_message_ids: subMessageIds })
 };
 
 /**

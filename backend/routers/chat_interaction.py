@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 import time
-from pathlib import PurePosixPath
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status, BackgroundTasks, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,32 +24,30 @@ from backend.database import get_db, AsyncSessionLocal
 from backend.routers.chat_management import _apply_default_model_to_chat_object
 from backend.exceptions import AppHTTPException
 from backend.schemas import SubMessageType, MessageStatus
-from backend.schemas.message import ToolApprovalRequest, SubMessageConfig, SubMessageUpdate
-from backend.schemas.enums import FileManagementType, GroupTaskKind
+from backend.schemas.message import ToolApprovalRequest, SubMessageUpdate
+from backend.schemas.enums import GroupTaskKind
+
+# 待生成文件的定位 / 入库 / 批量获取统一在 service 层实现，这里只保留
+# 轮询器与 SSE 端点所需的入口（保留私有别名，避免与路由内其它命名混淆）。
+from backend.services import pending_file_service
+from backend.services.pending_file_service import (
+    PENDING_FAIL_REASON_TASK_FAILED,
+    PENDING_FAIL_REASON_TIMEOUT,
+    broadcast_chat_event as _broadcast_chat_event,
+    chat_subscribers as _chat_subscribers,
+    drive_pending_image_downloads as _drive_pending_image_downloads,
+    fetch_inflight as _fetch_inflight,
+    locate_pending_file as _locate_pending_file,
+    mark_pending_failed as _mark_pending_failed,
+    persist_pending_deadline as _persist_pending_deadline,
+    process_pending_file as _process_pending_file,
+    scan_chat_pending_sub_messages as _scan_chat_pending_sub_messages,
+)
 
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-# 异步生图：同一任务两次驱动下载之间的最小间隔（秒）与最大连续失败次数
-IMAGE_DOWNLOAD_RETRY_INTERVAL = 5.0
-IMAGE_DOWNLOAD_MAX_ERRORS = 3
-
-# 单次 MCP 状态查询的等待上限（秒）：生图服务的 status 可能长时间阻塞，
-# 不设上限会让轮询节流与超时判定彻底失效。
-IMAGE_STATUS_CALL_TIMEOUT = 20.0
-
-# 手动「获取文件」接口的整体等待上限（秒）
-PENDING_FETCH_TIMEOUT = 30.0
-
-# 正在被手动拉取的子消息（防止重复点击并发执行）
-_fetch_inflight: set[str] = set()
-
-# 待生成文件失败原因（写入 config.pending_failed_reason）
-PENDING_FAIL_REASON_TIMEOUT = "timeout"
-PENDING_FAIL_REASON_TASK_FAILED = "task_failed"
-PENDING_FAIL_REASON_NO_BACKEND = "no_backend"
-PENDING_FAIL_REASON_DOWNLOAD_FAILED = "download_failed"
 
 class TaskStatusRequest(BaseModel):
     task_ids: List[str]
@@ -94,6 +91,31 @@ class PendingFileFetchResponse(BaseModel):
     error: Optional[str] = None
 
 
+class PendingFileFetchRequest(BaseModel):
+    """批量获取待生成文件的入参：同一 run 的所有槽位一次性传完。"""
+
+    sub_message_ids: List[str] = []
+
+
+class PendingFileFetchItem(BaseModel):
+    """批量获取结果里的单条状态。"""
+
+    sub_message_id: str
+    status: str
+    file_id: Optional[str] = None
+    file_info: Optional[dict] = None
+    error: Optional[str] = None
+
+
+class PendingFileFetchBatchResponse(BaseModel):
+    """批量获取结果：``items`` 与入参顺序一致，另附状态计数。"""
+
+    items: List[PendingFileFetchItem] = []
+    completed: int = 0
+    running: int = 0
+    failed: int = 0
+
+
 # ----------------------------------------------------------------------
 # Pending file (show wait) — 按会话聚合
 # 同一会话的所有待生成文件共享一个轮询任务与一个 backend 实例。
@@ -102,453 +124,6 @@ class PendingFileFetchResponse(BaseModel):
 # ----------------------------------------------------------------------
 
 _chat_pending_tasks: dict[str, asyncio.Task] = {}
-_chat_subscribers: dict[str, set[asyncio.Queue]] = {}
-
-
-async def _broadcast_chat_event(chat_id: str, event: dict) -> None:
-    queues = _chat_subscribers.get(chat_id)
-    if not queues:
-        return
-    for queue in list(queues):
-        try:
-            queue.put_nowait(event)
-        except Exception:
-            pass
-
-
-def _config_to_dict(raw) -> dict:
-    """把子消息 config 统一成 dict（兼容 ORM 存字符串 / dict / Pydantic 三种形态）。"""
-    if raw is None:
-        return {}
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
-            return {}
-    if isinstance(raw, dict):
-        return dict(raw)
-    if hasattr(raw, "model_dump"):
-        try:
-            return raw.model_dump(exclude_none=True)
-        except Exception:  # noqa: BLE001 - 兜底，config 解析失败不应中断流程
-            return {}
-    return {}
-
-
-async def _mark_pending_failed(
-    chat_id: str,
-    sub_message_id: str,
-    path: str,
-    reason: str,
-) -> None:
-    """把待生成文件标记为失败并写入原因。
-
-    ``pending_file_path`` / ``pending_image_task_id`` / 参数快照一律保留，
-    前端据此展示失败卡片并提供「获取文件」。
-    """
-    async with AsyncSessionLocal() as db:
-        existing = await message_crud.get_sub_message(db, sub_message_id)
-        if existing is not None:
-            config = _config_to_dict(existing.config)
-            config["pending_failed_reason"] = reason
-            await message_crud.update_sub_message(
-                db,
-                sub_message_id,
-                SubMessageUpdate(
-                    status=MessageStatus.FAILED,
-                    config=SubMessageConfig(**config),
-                ),
-            )
-    await _broadcast_chat_event(chat_id, {
-        "type": "file_timeout",
-        "sub_message_id": sub_message_id,
-        "path": path,
-        "reason": reason,
-    })
-
-
-async def _process_pending_file(
-    backend,
-    sub_message_id: str,
-    path: str,
-) -> dict:
-    """下载 → 稳定性校验 → 入库 → 更新子消息。
-
-    ``path`` 必须是**文件真实存在的路径**（发现扩展名漂移时由
-    :func:`_locate_pending_file` 定位后传入），否则会一直判定为未就绪。
-
-    返回 {"type": "file_ready", "file_id", "file_info"}、
-         {"type": "already_ready", "file_id", "file_info"}（已入库过，幂等）、或
-         {"type": "still_writing"}（文件未写完，等待下一轮）。
-    """
-    # 延迟导入：mambo_agents.backends 依赖较重，仅在处理挂起文件时加载
-    from mambo_agents.backends.schemas import VirtualPath
-    from mambo_agents.backends.protocol import _get_mime_type
-
-    # 幂等：并发/重试场景下该子消息可能已经入库，直接返回既有结果，
-    # 避免同一张图被重复写成多条文件记录。
-    async with AsyncSessionLocal() as db:
-        existing_sub = await message_crud.get_sub_message(db, sub_message_id)
-        if (
-            existing_sub is not None
-            and existing_sub.status == MessageStatus.COMPLETED.value
-            and existing_sub.content
-        ):
-            fs = FileService(db)
-            record = await fs.get_file(existing_sub.content)
-            return {
-                "type": "already_ready",
-                "file_id": existing_sub.content,
-                "file_info": (
-                    fs.convert_to_schema(record).model_dump(mode="json")
-                    if record
-                    else None
-                ),
-            }
-
-    r1 = await backend.adownload_files([VirtualPath(path)])
-    size1 = len(r1[0].content) if r1 and r1[0].content else 0
-    if size1 == 0:
-        return {"type": "still_writing"}
-
-    await asyncio.sleep(2)
-    r2 = await backend.adownload_files([VirtualPath(path)])
-    size2 = len(r2[0].content) if r2 and r2[0].content else 0
-    if size1 != size2:
-        return {"type": "still_writing"}
-
-    content = r2[0].content
-    filename = PurePosixPath(path).name
-    from backend.services.generation.agent.image_gen.sink import resolve_mime
-
-    mime = resolve_mime(filename, _get_mime_type(path), content)
-
-    async with AsyncSessionLocal() as db:
-        fs = FileService(db)
-        db_file = await fs.save_file_from_bytes(
-            data=content or b"",
-            filename=filename,
-            mime_type=mime,
-            management_type=[FileManagementType.SUB_MESSAGE.value],
-            sub_path="chat_attachments",
-        )
-
-        # 用「读旧 config → 合并」的方式更新，避免 image_slot_id /
-        # image_pinned_run_id 等编组字段被覆盖丢失
-        existing_sub = await message_crud.get_sub_message(db, sub_message_id)
-        config = _config_to_dict(existing_sub.config if existing_sub else None)
-        config["context_participation_length"] = 0
-        for key in (
-            "pending_file_path",
-            "pending_file_timeout",
-            "pending_failed_reason",
-            "pending_file_deadline",
-            "pending_image_downloaded",
-            "pending_image_task_id",
-            "pending_image_prefix",
-            "pending_image_count",
-        ):
-            config.pop(key, None)
-
-        await message_crud.update_sub_message(
-            db,
-            sub_message_id,
-            SubMessageUpdate(
-                content=db_file.id,
-                status=MessageStatus.COMPLETED,
-                config=SubMessageConfig(**config),
-            ),
-        )
-
-        file_schema = fs.convert_to_schema(db_file)
-        file_info = file_schema.model_dump(mode='json')
-
-    return {
-        "type": "file_ready",
-        "file_id": db_file.id,
-        "file_info": file_info,
-    }
-
-
-async def _glob_pending_files(backend, pattern: str, directory) -> list[str]:
-    """在 ``directory`` 下按 pattern 匹配文件，返回虚拟路径字符串列表。"""
-    try:
-        result = await backend.aglob(pattern, directory)
-    except Exception as exc:  # noqa: BLE001 - 列目录失败按「未就绪」处理
-        logger.debug("aglob(%s) 失败: %s", pattern, exc)
-        return []
-    if result is None or result.error is not None:
-        return []
-    paths: list[str] = []
-    for info in result.matches or []:
-        if getattr(info, "is_dir", False):
-            continue
-        try:
-            paths.append(info.path.value)
-        except AttributeError:  # 兼容直接给字符串的后端
-            paths.append(str(info))
-    return paths
-
-
-async def _locate_pending_file(
-    backend, path: str, *, loose: bool = True
-) -> Optional[str]:
-    """定位待生成文件的实际落盘路径。
-
-    先按登记的精确文件名匹配；未命中且 ``loose=True`` 时再按
-    「同目录 + 文件名主干 + ``*``」通配。通配只在**异步生图**（``task_id`` 非空）
-    时启用：扩展名可能与服务实际产出的格式不一致（登记 ``x.png`` 却写出
-    ``x.jpg``），或服务返回张数与预测不同而多了下标后缀——这两种情况文件
-    其实已就绪，只认精确名就会一路等到超时。
-
-    普通 ``show`` 等待（无 ``task_id``）不做通配：那里等的是 LLM 自己产出的
-    任意文件，按主干匹配容易误吞同前缀的其它文件。
-    """
-    from mambo_agents.backends.schemas import VirtualPath
-
-    pp = PurePosixPath(path)
-    try:
-        directory = VirtualPath(str(pp.parent))
-    except Exception:  # noqa: BLE001 - 路径异常时只在工作区根搜
-        directory = VirtualPath("/workspace")
-
-    exact = await _glob_pending_files(backend, pp.name, directory)
-    if exact:
-        return exact[0]
-
-    if not loose:
-        return None
-
-    stem = pp.stem or pp.name
-    if not stem or stem == pp.name:
-        return None
-    hits = await _glob_pending_files(backend, f"{stem}*", directory)
-    if not hits:
-        return None
-    # 多图时优先取下标最小的那张（文件名排序即可）
-    hits.sort()
-    logger.info("待生成文件 %s 未见，改用通配命中 %s", path, hits[0])
-    return hits[0]
-
-
-async def _persist_pending_deadline(sub_message_id: str, deadline: float) -> None:
-    """把待生成文件的绝对截止时间写进 config。
-
-    轮询器每次重连都会重建内存状态，若截止时间只存在内存里，「60 秒超时」
-    会被无限顺延（并且每次都重新下载一遍）。落库后跨实例稳定。
-    """
-    try:
-        async with AsyncSessionLocal() as db:
-            existing = await message_crud.get_sub_message(db, sub_message_id)
-            if existing is None:
-                return
-            config = _config_to_dict(existing.config)
-            if config.get("pending_file_deadline"):
-                return
-            config["pending_file_deadline"] = float(deadline)
-            await message_crud.update_sub_message(
-                db,
-                sub_message_id,
-                SubMessageUpdate(config=SubMessageConfig(**config)),
-            )
-    except Exception as exc:  # noqa: BLE001 - 落库失败只影响重启后的超时精度
-        logger.debug("写入待生成文件截止时间失败(sub=%s): %s", sub_message_id, exc)
-
-
-async def _mark_pending_downloaded(sub_message_id: str) -> None:
-    """标记「本子消息的图片已下载落盘」，避免轮询器重启后重复下载、重复入库。"""
-    try:
-        async with AsyncSessionLocal() as db:
-            existing = await message_crud.get_sub_message(db, sub_message_id)
-            if existing is None:
-                return
-            config = _config_to_dict(existing.config)
-            if config.get("pending_image_downloaded"):
-                return
-            config["pending_image_downloaded"] = True
-            await message_crud.update_sub_message(
-                db,
-                sub_message_id,
-                SubMessageUpdate(config=SubMessageConfig(**config)),
-            )
-    except Exception as exc:  # noqa: BLE001 - 落库失败只影响跨实例去重
-        logger.debug("写入已下载标记失败(sub=%s): %s", sub_message_id, exc)
-
-
-async def _scan_chat_pending_sub_messages(
-    db: AsyncSession, chat_id: str,
-) -> dict[str, dict]:
-    """扫描会话下所有等待中的文件子消息。
-
-    返回 ``{sub_message_id: {path, timeout, deadline, downloaded, task_id, prefix,
-    count, generator}}``。
-    ``task_id`` 非空表示这是异步生图产出：文件还没出现时由轮询器先驱动下载。
-    ``generator`` 是产出该图的生图配置名称，多配置时用它还原同一份实现。
-    ``deadline`` 是落库的绝对截止时间（epoch 秒），``downloaded`` 表示图已落盘。
-    """
-    pending: dict[str, dict] = {}
-    msgs = await message_crud.get_messages_by_chat(db, chat_id=chat_id)
-    for msg in msgs:
-        for sub in msg.sub_messages:
-            if sub.type != SubMessageType.FILE.value or sub.status != MessageStatus.WAITING.value:
-                continue
-            raw_cfg = sub.config
-            if isinstance(raw_cfg, str):
-                try:
-                    raw_cfg = json.loads(raw_cfg)
-                except json.JSONDecodeError:
-                    continue
-            if not isinstance(raw_cfg, dict):
-                continue
-            path = raw_cfg.get("pending_file_path")
-            if not path:
-                continue
-            try:
-                deadline = float(raw_cfg.get("pending_file_deadline") or 0) or None
-            except (TypeError, ValueError):
-                deadline = None
-            pending[sub.id] = {
-                "path": path,
-                "timeout": int(raw_cfg.get("pending_file_timeout") or 300),
-                "deadline": deadline,
-                "downloaded": bool(raw_cfg.get("pending_image_downloaded")),
-                "task_id": raw_cfg.get("pending_image_task_id"),
-                "prefix": raw_cfg.get("pending_image_prefix"),
-                "count": raw_cfg.get("pending_image_count"),
-                "generator": raw_cfg.get("pending_image_generator"),
-            }
-    return pending
-
-
-async def _drive_task_download(
-    standard,
-    backend,
-    info: dict,
-    *,
-    wait_timeout: int = 0,
-) -> tuple[str, Optional[str]]:
-    """驱动一次「查状态 → 下载落盘」。
-
-    返回 ``("completed"|"running"|"failed", error)``：
-
-    - ``completed``：图片已下载到登记的确定路径；
-    - ``running``：任务尚未收敛（``error`` 为空）或查询/下载暂时失败（``error`` 非空）；
-    - ``failed``：任务失败 / 过期 / 无法下载，``error`` 为原因。
-    """
-    from backend.services.generation.agent.image_gen.standard import (
-        NAMING_TASK,
-        ext_from_path,
-        is_settled,
-    )
-
-    task_id = info.get("task_id")
-    if not task_id:
-        return "running", None
-
-    try:
-        payload = await asyncio.wait_for(
-            standard.status(task_id, wait_timeout), timeout=IMAGE_STATUS_CALL_TIMEOUT
-        )
-    except Exception as exc:  # noqa: BLE001 - 服务暂时不可用，稍后重试
-        logger.warning("异步生图查询状态失败(task=%s): %s", task_id, exc)
-        return "running", str(exc)
-
-    status = str((payload or {}).get("status") or "").strip().lower()
-    if status in ("failed", "expired", "error"):
-        return "failed", str(
-            (payload or {}).get("error") or f"生成任务 {task_id} 状态为 {status}"
-        )
-    if not is_settled(payload):
-        return "running", None
-
-    raw_path = str(info.get("path") or "")
-    try:
-        from mambo_agents.backends.schemas import VirtualPath
-
-        parent = str(PurePosixPath(VirtualPath(raw_path).normalized).parent)
-    except Exception:  # noqa: BLE001 - 路径异常时退回字符串截取
-        parent = str(PurePosixPath(raw_path).parent)
-
-    try:
-        plan = standard.plan_targets(
-            task_id=task_id,
-            path=parent.rstrip("/") + "/",
-            prefix=info.get("prefix"),
-            naming=NAMING_TASK,
-            multi=bool((info.get("count") or 1) > 1),
-            # 必须沿用登记路径的扩展名，否则会写出另一个文件名，
-            # 登记路径永远等不到文件（异步流程的核心约束）。
-            ext=ext_from_path(raw_path),
-        )
-        await standard.download_to(backend, task_id, plan)
-    except Exception as exc:  # noqa: BLE001 - 下载失败下一轮重试
-        logger.warning("异步生图下载失败(task=%s): %s", task_id, exc)
-        return "running", str(exc)
-
-    return "completed", None
-
-
-async def _drive_pending_image_downloads(
-    resolve_standard,
-    backend,
-    db_pending: dict[str, dict],
-    state: dict[str, dict],
-) -> dict[str, str]:
-    """异步生图：任务收敛后由平台把图片下载到已登记的确定路径。
-
-    同一个 ``task_id`` 在一次轮询里只驱动一次，并以 ``state`` 跨轮节流；
-    已下载过（config 里 ``pending_image_downloaded``）的子消息只要文件仍在
-    就跳过下载，避免轮询器重连后重复下载、重复入库。
-
-    ``resolve_standard`` 按子消息登记的配置名称返回实现（多配置时一个会话
-    可能有多份），返回 ``None`` 表示该配置当前不可用，本轮跳过。
-    返回 ``{task_id: 失败原因}``，交给调用方把对应子消息标记为失败。
-    """
-    failed: dict[str, str] = {}
-    for info in db_pending.values():
-        task_id = info.get("task_id")
-        if not task_id:
-            continue
-
-        cursor = state.setdefault(task_id, {"last": 0.0, "done": False, "errors": 0})
-        if cursor["done"]:
-            continue
-
-        # 已落盘过：文件还在就直接收工，不再重复下载；文件没了则重新取图
-        if info.get("downloaded"):
-            if await _locate_pending_file(backend, info.get("path") or ""):
-                cursor["done"] = True
-                continue
-
-        now = time.monotonic()
-        if now - cursor["last"] < IMAGE_DOWNLOAD_RETRY_INTERVAL:
-            continue
-        cursor["last"] = now
-
-        standard = await resolve_standard(info.get("generator"))
-        if standard is None:
-            continue
-
-        outcome, error = await _drive_task_download(standard, backend, info)
-        if outcome == "completed":
-            cursor["done"] = True
-            # 同一个 task_id 可能对应多条子消息（一次生成多张），全部打上已下载标记
-            for other_id, other in db_pending.items():
-                if other.get("task_id") == task_id:
-                    await _mark_pending_downloaded(other_id)
-            continue
-        if outcome == "failed":
-            cursor["done"] = True
-            failed[task_id] = error or "生成任务失败"
-            continue
-        if error is None:
-            # 任务还在生成中，正常等待下一轮
-            continue
-        cursor["errors"] += 1
-        if cursor["errors"] >= IMAGE_DOWNLOAD_MAX_ERRORS:
-            cursor["done"] = True
-
-    return failed
 
 
 async def _poll_chat_pending_files(chat_id: str) -> None:
@@ -982,167 +557,78 @@ async def rerun_image_run(sub_message_id: str, request: ImageRunRerunRequest):
 
 
 @router.post(
+    "/pending-files/fetch",
+    response_model=PendingFileFetchBatchResponse,
+    summary="批量获取（下载并入库）多条等待超时的待生成文件",
+)
+async def fetch_pending_files_api(request: PendingFileFetchRequest):
+    """批量补录待生成文件：同一生图任务只驱动一次下载，再逐张入库。
+
+    超时是正常结果，本接口只负责「超时之后如何把已经生成好的图取回来」。
+    入参可以是同一次生图的多个 ``waiting`` / ``failed`` 槽位，一次调用即可把
+    ``count=N`` 的全部图片补录完成。逐条返回结果：
+
+    - ``completed``：已入库，附 ``file_id`` / ``file_info``；
+    - ``running``：任务仍在生成或文件尚未写完，稍后可再次点击；
+    - ``failed``：原因见 ``error``（``not_produced`` 表示服务实际出图少于请求张数）。
+    """
+    ids = [
+        i for i in dict.fromkeys(request.sub_message_ids) if isinstance(i, str) and i
+    ]
+    if not ids:
+        raise AppHTTPException(
+            status_code=400,
+            error_code="PENDING_FILE_IDS_REQUIRED",
+            detail="请提供至少一个待生成文件子消息 ID",
+        )
+
+    items = await pending_file_service.fetch_pending_files(ids)
+    if not items:
+        raise AppHTTPException(
+            status_code=404,
+            error_code="PENDING_FILE_NOT_FOUND",
+            detail="找不到待生成文件子消息",
+        )
+
+    payload = [
+        PendingFileFetchItem(
+            sub_message_id=item.sub_message_id,
+            status=item.status,
+            file_id=item.file_id,
+            file_info=item.file_info,
+            error=item.error,
+        )
+        for item in items
+    ]
+    return PendingFileFetchBatchResponse(
+        items=payload,
+        completed=sum(1 for i in payload if i.status == "completed"),
+        running=sum(1 for i in payload if i.status == "running"),
+        failed=sum(1 for i in payload if i.status == "failed"),
+    )
+
+
+@router.post(
     "/pending-files/{sub_message_id}/fetch",
     response_model=PendingFileFetchResponse,
     summary="手动获取（下载并入库）一条等待超时的待生成文件",
 )
 async def fetch_pending_file(sub_message_id: str):
-    """手动触发一次「查任务 → 下载 → 入库 → 展示」。
-
-    只在文件卡片处于失败态时由前端调用；不会把子消息改回等待态，
-    任务仍在生成时直接返回 ``running``，由用户稍后再次点击。
-    """
-    from backend.services.generation.agent.backend_factory import (
-        build_backend_from_chat_id,
-    )
-    from backend.services.generation.agent.image_gen.factory import (
-        build_image_gen_standard_from_chat_id,
-    )
-
-    if sub_message_id in _fetch_inflight:
+    """单条获取（旧入口），内部复用批量实现。"""
+    items = await pending_file_service.fetch_pending_files([sub_message_id])
+    if not items:
         raise AppHTTPException(
-            status_code=409,
-            error_code="PENDING_FETCH_IN_PROGRESS",
-            detail="该文件正在获取中，请稍候",
+            status_code=404,
+            error_code="PENDING_FILE_NOT_FOUND",
+            detail="找不到该文件子消息",
         )
-
-    async with AsyncSessionLocal() as db:
-        sub = await message_crud.get_sub_message(db, sub_message_id)
-        if sub is None or sub.type != SubMessageType.FILE.value:
-            raise AppHTTPException(
-                status_code=404,
-                error_code="PENDING_FILE_NOT_FOUND",
-                detail="找不到该文件子消息",
-            )
-
-        config = _config_to_dict(sub.config)
-        path = config.get("pending_file_path")
-        if not path:
-            raise AppHTTPException(
-                status_code=400,
-                error_code="PENDING_FILE_NOT_FOUND",
-                detail="该子消息不是待生成文件",
-            )
-
-        # 幂等：已经就绪直接返回
-        if sub.status == MessageStatus.COMPLETED.value and sub.content:
-            fs = FileService(db)
-            record = await fs.get_file(sub.content)
-            file_info = (
-                fs.convert_to_schema(record).model_dump(mode="json") if record else None
-            )
-            return PendingFileFetchResponse(
-                status="completed", file_id=sub.content, file_info=file_info
-            )
-
-        db_message = await message_crud.get_message(db, message_id=sub.messageId)
-        chat_id = db_message.chatId if db_message else None
-
-    if not chat_id:
-        raise AppHTTPException(
-            status_code=404, error_code="PENDING_FILE_NOT_FOUND", detail="找不到所属会话"
-        )
-
-    task_id = config.get("pending_image_task_id")
-    task_info = {
-        "task_id": task_id,
-        "path": path,
-        "prefix": config.get("pending_image_prefix"),
-        "count": config.get("pending_image_count"),
-        "generator": config.get("pending_image_generator"),
-    }
-
-    _fetch_inflight.add(sub_message_id)
-    backend = None
-    try:
-        async with AsyncSessionLocal() as db:
-            backend = await build_backend_from_chat_id(db, chat_id)
-        if backend is None:
-            await _mark_pending_failed(
-                chat_id, sub_message_id, path, PENDING_FAIL_REASON_NO_BACKEND
-            )
-            return PendingFileFetchResponse(
-                status="failed", error="当前会话没有可用的 backend，无法获取文件"
-            )
-
-        if task_id:
-            async with AsyncSessionLocal() as db:
-                standard = await build_image_gen_standard_from_chat_id(
-                    db, chat_id, generator=task_info.get("generator")
-                )
-            if standard is None:
-                await _mark_pending_failed(
-                    chat_id, sub_message_id, path, PENDING_FAIL_REASON_NO_BACKEND
-                )
-                return PendingFileFetchResponse(
-                    status="failed", error="生图配置不可用，无法获取文件"
-                )
-
-            outcome, error = await asyncio.wait_for(
-                _drive_task_download(standard, backend, task_info),
-                timeout=PENDING_FETCH_TIMEOUT,
-            )
-            if outcome == "failed":
-                await _mark_pending_failed(
-                    chat_id, sub_message_id, path, PENDING_FAIL_REASON_TASK_FAILED
-                )
-                return PendingFileFetchResponse(status="failed", error=error)
-            if outcome == "running":
-                return PendingFileFetchResponse(
-                    status="running",
-                    error=error or "文件仍在生成中，请稍后再试",
-                )
-
-        result = await asyncio.wait_for(
-            _process_pending_file(
-                backend,
-                sub_message_id,
-                await _locate_pending_file(backend, path, loose=bool(task_id)) or path,
-            ),
-            timeout=PENDING_FETCH_TIMEOUT,
-        )
-        if result["type"] == "already_ready":
-            return PendingFileFetchResponse(
-                status="completed",
-                file_id=result["file_id"],
-                file_info=result["file_info"],
-            )
-        if result["type"] != "file_ready":
-            return PendingFileFetchResponse(
-                status="running", error="文件尚未写完，请稍后再试"
-            )
-
-        await _broadcast_chat_event(chat_id, {
-            "type": "file_ready",
-            "sub_message_id": sub_message_id,
-            "file_id": result["file_id"],
-            "file_info": result["file_info"],
-        })
-        return PendingFileFetchResponse(
-            status="completed",
-            file_id=result["file_id"],
-            file_info=result["file_info"],
-        )
-    except asyncio.TimeoutError:
-        await _mark_pending_failed(
-            chat_id, sub_message_id, path, PENDING_FAIL_REASON_DOWNLOAD_FAILED
-        )
-        return PendingFileFetchResponse(
-            status="failed", error="获取文件超时，请稍后重试"
-        )
-    except Exception as exc:  # noqa: BLE001 - 统一转成失败态，不抛 500
-        logger.warning("手动获取文件失败(sub=%s): %s", sub_message_id, exc, exc_info=True)
-        await _mark_pending_failed(
-            chat_id, sub_message_id, path, PENDING_FAIL_REASON_DOWNLOAD_FAILED
-        )
-        return PendingFileFetchResponse(status="failed", error=str(exc) or "获取文件失败")
-    finally:
-        _fetch_inflight.discard(sub_message_id)
-        if backend is not None and hasattr(backend, "aclose"):
-            try:
-                await backend.aclose()
-            except Exception:
-                pass
+    item = items[0]
+    return PendingFileFetchResponse(
+        status=item.status,
+        file_id=item.file_id,
+        file_info=item.file_info,
+        error=item.error,
+    )
 
 
 @router.post("/messages/{message_id}/stop", status_code=status.HTTP_202_ACCEPTED, summary="请求停止AI生成")

@@ -13,37 +13,49 @@
       <span class="run-summary">{{ summary }}</span>
     </div>
 
-    <!-- 图片主体 -->
+    <!-- 图片主体：本次 run 的所有槽位全部铺开（已落盘 / 生成中 / 超时失败） -->
     <div class="gallery-body">
-      <template v-if="activeRun && activeRun.files.length > 0">
-        <SubMessageItem
-          v-if="mainFile"
-          :sub-message="mainFile"
-          :parent-message="parentMessage"
-          :show-header="false"
-          :is-inline="false"
-          :preview-src-list="previewList"
-          :preview-index="previewIndex"
-          @edit-file="(file) => $emit('edit-file', file)"
-        />
-        <div v-if="activeRun.files.length > 1" class="run-thumbs">
-          <img
-            v-for="file in activeRun.files"
-            :key="file.id"
-            :src="file.file_info?.url"
-            :class="{ 'is-active': file.id === pinnedFileId }"
-            alt=""
-            @click="pinnedFileId = file.id"
+      <div v-if="activeRun && activeRun.cells.length > 0" class="run-grid">
+        <template v-for="cell in activeRun.cells" :key="cell.sub.id">
+          <SubMessageItem
+            v-if="cell.kind === 'file'"
+            :sub-message="cell.sub"
+            :parent-message="parentMessage"
+            :show-header="false"
+            :is-inline="false"
+            :preview-src-list="previewList"
+            :preview-index="previewIndexOf(cell.sub.id)"
+            @edit-file="(file) => $emit('edit-file', file)"
           />
-        </div>
-      </template>
+          <div v-else-if="cell.kind === 'failed'" class="run-slot is-failed">
+            <div class="run-slot-head">
+              <el-icon :size="14"><Warning /></el-icon>
+              <span class="run-slot-title" :title="slotFilePath(cell.sub)">
+                {{ slotFileName(cell.sub) }}
+              </span>
+            </div>
+            <div class="run-slot-reason">{{ slotReasonText(cell.sub) }}</div>
+            <button
+              class="mini-btn primary"
+              :disabled="isFetching"
+              @click="fetchMissingFiles([cell.sub.id])"
+            >
+              {{ t('chat.imageRun.fetchFile') }}
+            </button>
+          </div>
+          <div v-else class="run-slot is-waiting">
+            <el-icon class="is-loading" :size="14"><Loading /></el-icon>
+            <span class="run-slot-title" :title="slotFilePath(cell.sub)">
+              {{ slotFileName(cell.sub) }}
+            </span>
+            <div class="run-slot-reason">{{ t('chat.imageRun.waitingSlot') }}</div>
+          </div>
+        </template>
+      </div>
 
       <div v-else-if="activeRun && activeRun.status === 'failed'" class="run-failed">
         <el-icon><Warning /></el-icon>
         <span class="run-failed-text">{{ failureText }}</span>
-        <button v-if="fetchableSubId" class="mini-btn" :disabled="isFetching" @click="fetchFile">
-          {{ t('chat.imageRun.fetchFile') }}
-        </button>
       </div>
 
       <div v-else class="run-pending">
@@ -54,6 +66,18 @@
 
     <!-- 底部操作 -->
     <div class="gallery-actions">
+      <button
+        v-if="retryableSubIds.length > 0"
+        class="mini-btn primary"
+        :disabled="isFetching"
+        @click="fetchMissingFiles()"
+      >
+        {{
+          retryableSubIds.length > 1
+            ? t('chat.imageRun.fetchAll', { n: retryableSubIds.length })
+            : t('chat.imageRun.fetchFile')
+        }}
+      </button>
       <button v-if="detailSubId" class="mini-btn" @click="$emit('open-tool-dialog', detailSubId)">
         <el-icon :size="14"><Document /></el-icon>
         {{ t('chat.imageRun.params') }}
@@ -142,8 +166,8 @@ import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, ArrowRight, Warning, Loading, Document, RefreshRight } from '@element-plus/icons-vue'
-import type { FileResponse, Message, SubMessage } from '@/api/types'
-import { rerunImageRun, updateSubMessage, fetchPendingFile } from '@/api/chatService'
+import type { FileResponse, Message, PendingFileFetchBatchResponse, SubMessage } from '@/api/types'
+import { rerunImageRun, updateSubMessage, fetchPendingFiles } from '@/api/chatService'
 import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { describeRunArgs, type ImageRunSlot } from '@/composables/useImageRuns'
 import SubMessageItem from '../SubMessageItem.vue'
@@ -164,7 +188,6 @@ const sessionStore = useChatSessionStore()
 const modeOptions = ['Normal', 'Group', 'Mini_Avatar', 'Gal_Avatar', 'Spark']
 
 const activeRunId = ref<string>(props.slot.pinnedRunId)
-const pinnedFileId = ref<string | null>(null)
 const isRerunning = ref(false)
 const isFetching = ref(false)
 const sheetVisible = ref(false)
@@ -195,30 +218,28 @@ const summary = computed(() => describeRunArgs(activeRun.value?.args ?? null))
 
 const detailSubId = computed(() => activeRun.value?.recordId || activeRun.value?.toolSubId || null)
 
-const mainFile = computed<SubMessage | null>(() => {
-  const files = activeRun.value?.files ?? []
-  if (files.length === 0) return null
-  return files.find(file => file.id === pinnedFileId.value) || files[0]
-})
-
-const previewList = computed(() =>
-  props.slot.runs.flatMap(run => run.files.map(file => file.file_info?.url || '')).filter(Boolean),
+/** 预览列表：本次 run 内已落盘的图片（顺序与网格一致） */
+const completedFiles = computed(() =>
+  (activeRun.value?.cells ?? []).filter(cell => cell.kind === 'file').map(cell => cell.sub),
 )
 
-const previewIndex = computed(() => {
-  const target = mainFile.value
-  if (!target) return 0
-  const all = props.slot.runs.flatMap(run => run.files)
-  return Math.max(all.findIndex(file => file.id === target.id), 0)
-})
+const previewList = computed(() =>
+  completedFiles.value.map(file => file.file_info?.url || '').filter(Boolean),
+)
 
-/** 可用于「获取文件」的子消息：本次 run 里失败或未落盘的图片子消息 */
-const fetchableSubId = computed(() => {
-  const run = activeRun.value
-  if (!run || run.pendingFiles.length === 0) return null
-  const target = run.pendingFiles.find(sm => sm.status === 'failed') || run.pendingFiles[0]
-  return target?.id ?? null
-})
+function previewIndexOf(subMessageId: string): number {
+  return Math.max(
+    completedFiles.value.findIndex(file => file.id === subMessageId),
+    0,
+  )
+}
+
+/** 可补录的槽位：失败或尚未落盘、且仍登记着工作区路径 */
+const retryableSubIds = computed(() =>
+  (activeRun.value?.cells ?? [])
+    .filter(cell => cell.kind !== 'file' && !!cell.sub.config?.pending_file_path)
+    .map(cell => cell.sub.id),
+)
 
 const failureText = computed(() => {
   const run = activeRun.value
@@ -237,6 +258,80 @@ const failureText = computed(() => {
   return reason ? t('chat.imageRun.failedWithReason', { reason }) : t('chat.imageRun.failed')
 })
 
+/** 槽位的工作区路径：待生成阶段回退到 pending_file_path */
+function slotFilePath(sub: SubMessage): string {
+  return sub.config?.show_file_path || sub.config?.pending_file_path || ''
+}
+
+function slotFileName(sub: SubMessage): string {
+  const path = slotFilePath(sub)
+  if (!path) return t('chat.imageRun.waitingSlot')
+  return path.split('/').filter(Boolean).pop() || path
+}
+
+/** 失败原因文案：与服务端写入的 pending_failed_reason 对应 */
+function slotReasonText(sub: SubMessage): string {
+  switch (sub.config?.pending_failed_reason) {
+    case 'timeout':
+      return t('chat.imageRun.reasonTimeout')
+    case 'task_failed':
+      return t('chat.imageRun.reasonTaskFailed')
+    case 'not_produced':
+      return t('chat.imageRun.reasonNotProduced')
+    case 'no_backend':
+      return t('chat.imageRun.reasonNoBackend')
+    default:
+      return t('chat.imageRun.reasonDownloadFailed')
+  }
+}
+
+/** 把批量获取结果直接写回子消息（不依赖 SSE 连接是否还在） */
+function applyFetchResult(result: PendingFileFetchBatchResponse) {
+  for (const item of result.items) {
+    const sub = props.parentMessage.sub_messages.find(sm => sm.id === item.sub_message_id)
+    if (!sub) continue
+    if (item.status === 'completed') {
+      if (item.file_id) sub.content = item.file_id
+      sub.status = 'completed'
+      if (item.file_info) sub.file_info = item.file_info
+      sub.config = {
+        ...sub.config,
+        pending_file_path: undefined,
+        pending_file_timeout: undefined,
+        pending_failed_reason: undefined,
+      }
+    } else if (item.status === 'failed') {
+      sub.status = 'failed'
+      sub.config = { ...sub.config, pending_failed_reason: item.error || 'download_failed' }
+    }
+  }
+}
+
+async function fetchMissingFiles(subMessageIds?: string[]) {
+  const targets = (subMessageIds && subMessageIds.length ? subMessageIds : retryableSubIds.value).filter(
+    Boolean,
+  )
+  if (targets.length === 0 || isFetching.value) return
+  isFetching.value = true
+  try {
+    const result = await fetchPendingFiles(targets)
+    applyFetchResult(result)
+    if (result.completed > 0 && result.failed > 0) {
+      ElMessage.warning(t('chat.imageRun.fetchPartial', { n: result.completed, m: result.failed }))
+    } else if (result.completed > 0) {
+      ElMessage.success(t('chat.imageRun.fetchOk', { n: result.completed }))
+    } else if (result.running > 0) {
+      ElMessage.info(t('chat.imageRun.fetchRunning'))
+    } else {
+      ElMessage.error(t('chat.imageRun.fetchFailed'))
+    }
+  } catch {
+    ElMessage.error(t('chat.imageRun.fetchFailed'))
+  } finally {
+    isFetching.value = false
+  }
+}
+
 watch(
   () => props.slot.pinnedRunId,
   value => {
@@ -251,10 +346,6 @@ watch(
     if (latest) activeRunId.value = latest.runId
   },
 )
-
-watch(activeRun, () => {
-  pinnedFileId.value = null
-})
 
 function selectRun(runId: string) {
   activeRunId.value = runId
@@ -350,37 +441,6 @@ async function submitRerun() {
     isRerunning.value = false
   }
 }
-
-/** 手动获取文件：查任务 → 下载 → 入库；成功后把子消息就地更新为完成态 */
-async function fetchFile() {
-  const targetId = fetchableSubId.value
-  if (!targetId) return
-  isFetching.value = true
-  try {
-    const res = await fetchPendingFile(targetId)
-    if (res.status === 'completed') {
-      const target = props.parentMessage.sub_messages.find(sm => sm.id === targetId)
-      if (target) {
-        target.content = res.file_id || ''
-        target.status = 'completed'
-        if (res.file_info) target.file_info = res.file_info
-        const config = { ...(target.config ?? {}) } as Record<string, any>
-        delete config.pending_file_path
-        delete config.pending_file_timeout
-        delete config.pending_failed_reason
-        target.config = config as any
-      }
-    } else if (res.status === 'running') {
-      ElMessage.info(t('chat.attachment.stillGenerating'))
-    } else {
-      ElMessage.error(res.error || t('chat.imageRun.failed'))
-    }
-  } catch (error: any) {
-    ElMessage.error(error?.message || t('chat.imageRun.failed'))
-  } finally {
-    isFetching.value = false
-  }
-}
 </script>
 
 <style scoped>
@@ -439,24 +499,51 @@ async function fetchFile() {
   gap: 6px;
 }
 
-.run-thumbs {
-  display: flex;
+/* 本次 run 的所有槽位全部铺开：小屏固定两列 */
+.run-grid {
+  display: grid;
   gap: 6px;
-  overflow-x: auto;
-  padding-bottom: 2px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
 }
 
-.run-thumbs img {
-  width: 48px;
-  height: 48px;
-  object-fit: cover;
-  border-radius: 6px;
-  border: 2px solid transparent;
-  flex-shrink: 0;
+.run-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 96px;
+  padding: 8px;
+  border: 1px dashed var(--el-border-color);
+  border-radius: 8px;
+  background: var(--el-fill-color-lighter);
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
-.run-thumbs img.is-active {
-  border-color: var(--el-color-primary);
+.run-slot.is-failed {
+  border-color: var(--el-color-danger-light-5);
+  color: var(--el-color-danger);
+}
+
+.run-slot-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.run-slot-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--el-text-color-regular);
+}
+
+.run-slot-reason {
+  line-height: 1.5;
 }
 
 .run-failed,
