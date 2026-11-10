@@ -120,6 +120,8 @@ export default {
     searchPlaceholder: 'Search name, description or content...',
     regexTooltip: 'Enable Regex Search',
     multiSelect: 'Multi-select',
+    recent: 'Recent',
+    recentClear: 'Clear',
     kbModeTip:
       'Find KB chunks via semantic vector search. Selected content will be injected into input.',
     previewHeader: 'Preview: {name}',
@@ -145,6 +147,7 @@ export default {
   msg: {
     typeMismatch: 'Only resources of type {type} can be selected',
     searchFailed: 'Search failed, please try again later',
+    recentMissing: 'This resource no longer exists and was removed from recent',
   },
   deletedTooltip: 'This resource has been deleted. Click X to remove',
   deletedNameWithId: '[Deleted] {id}',

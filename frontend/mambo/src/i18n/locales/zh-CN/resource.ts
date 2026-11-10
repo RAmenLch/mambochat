@@ -118,6 +118,8 @@ export default {
     searchPlaceholder: '搜索资源名称、描述或内容...',
     regexTooltip: '启用正则表达式搜索',
     multiSelect: '多选模式',
+    recent: '最近使用',
+    recentClear: '清空',
     kbModeTip: '通过语义向量检索查找知识库切片，选中后内容将注入输入框',
     previewHeader: '预览: {name}',
     noDesc: '暂无描述',
@@ -142,6 +144,7 @@ export default {
   msg: {
     typeMismatch: '只能选择类型为 {type} 的资源',
     searchFailed: '搜索失败，请稍后重试',
+    recentMissing: '该资源已不存在，已从最近使用中移除',
   },
   deletedTooltip: '此资源已被删除，请点击 X 取消选择',
   deletedNameWithId: '[已删除] {id}',

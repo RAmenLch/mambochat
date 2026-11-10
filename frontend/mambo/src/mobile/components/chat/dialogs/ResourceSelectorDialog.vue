@@ -75,6 +75,7 @@
                   :props="treeProps"
                   :expand-on-click-node="false"
                   :highlight-current="!isMultiSelectMode"
+                  :default-expanded-keys="defaultExpandedKeys"
                   @node-click="handleNodeClick"
                   @node-expand="handleNodeExpand"
                   @node-collapse="handleNodeCollapse"
@@ -88,7 +89,8 @@
                       }"
                     >
                       <el-icon :size="18">
-                        <Reading v-if="data.resourceType === 'skill'" />
+                        <Clock v-if="data.id === RECENT_FOLDER_ID" />
+                        <Reading v-else-if="data.resourceType === 'skill'" />
                         <Collection v-else-if="data.resourceType === 'knowledge_base'" />
                         <Folder v-else-if="data.itemType === 'folder'" />
                         <Memo v-else-if="data.resourceType === 'submessage_template'" />
@@ -98,6 +100,11 @@
                       <el-tag v-if="data.itemType === 'resource' && data.resourceType" size="small" type="info" class="rs-type-tag">
                         {{ getReadableResourceType(data.resourceType) }}
                       </el-tag>
+                      <button
+                        v-if="data.id === RECENT_FOLDER_ID"
+                        class="rs-recent-clear"
+                        @click.stop="clearRecentResources"
+                      >{{ t('resource.selector.recentClear') }}</button>
                       <el-icon v-if="loadingFolders.has(data.id)" class="is-loading"><Loading /></el-icon>
                       <el-icon v-else-if="isResourceSelected(data.id)" class="rs-check"><Select /></el-icon>
                     </div>
@@ -143,11 +150,12 @@
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { ElTree, ElMessage } from 'element-plus'
 import type { TreeNodeData } from 'element-plus/es/components/tree/src/tree.type'
-import { Folder, Document, Memo, Loading, Search, Select, Collection, Reading, Close } from '@element-plus/icons-vue'
+import { Folder, Document, Memo, Loading, Search, Select, Collection, Reading, Close, Clock } from '@element-plus/icons-vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useResourceStore } from '@/stores/resourceStore'
 import { searchResources } from '@/api/resourceService'
+import { useRecentResources } from '@/composables/useRecentResources'
 import type {
   Resource,
   ResourceNode,
@@ -156,6 +164,8 @@ import type {
   KBSearchResultItem,
 } from '@/api/types'
 import MobileKnowledgeBaseSearchDialog from './KnowledgeBaseSearchDialog.vue'
+
+const RECENT_FOLDER_ID = '__recent_resources__'
 
 const props = defineProps<{
   visible: boolean;
@@ -179,7 +189,8 @@ const treeRef = ref<InstanceType<typeof ElTree>>()
 const selectedResources = ref<Resource[]>([])
 const isMultiSelectMode = ref(false)
 const selectionType = ref<ResourceType | null>(null)
-const expandedKeys = ref<Set<string>>(new Set())
+const expandedKeys = ref<Set<string>>(new Set([RECENT_FOLDER_ID]))
+const defaultExpandedKeys = [RECENT_FOLDER_ID]
 const STORAGE_KEY = 'resource_selector_multi_select_mode'
 
 const isSearching = ref(false)
@@ -238,12 +249,62 @@ const contextConfig = computed(() => {
   }
 });
 
+const { recentResources, recordRecentResource, removeRecentResource, clearRecentResources } =
+  useRecentResources(10)
+
+const recentResourceNodes = computed<ResourceNode[]>(() =>
+  recentResources.value
+    .filter((item) => !!item.resourceType && contextConfig.value.allowedTypes.includes(item.resourceType))
+    .map((item, index): ResourceNode => {
+      const loaded = resources.value.find((r) => r.id === item.id)
+      if (loaded) return loaded as ResourceNode
+      return {
+        id: item.id,
+        name: item.name,
+        description: null,
+        itemType: 'resource',
+        resourceType: item.resourceType as ResourceType,
+        parentId: RECENT_FOLDER_ID,
+        sortOrder: index,
+        createdAt: '',
+        updatedAt: '',
+        latest_version: null,
+        kb_id: null,
+        kb_config: null,
+      }
+    })
+)
+
+const recentFolderNode = computed<ResourceNode>(() => ({
+  id: RECENT_FOLDER_ID,
+  name: t('resource.selector.recent'),
+  description: null,
+  itemType: 'folder',
+  resourceType: null,
+  parentId: null,
+  sortOrder: -1,
+  createdAt: '',
+  updatedAt: '',
+  latest_version: null,
+  kb_id: null,
+  kb_config: null,
+  children: recentResourceNodes.value,
+}))
+
+/**
+ * 虚拟"最近使用"文件夹：置顶展示最近选择/查看的资源，默认展开。
+ */
+const treeDataWithRecent = (nodes: ResourceNode[]): ResourceNode[] => {
+  if (recentResourceNodes.value.length === 0) return nodes
+  return [recentFolderNode.value, ...nodes]
+}
+
 onMounted(() => {
   const persistedMode = localStorage.getItem(STORAGE_KEY)
   isMultiSelectMode.value = persistedMode === 'true'
 })
 
-const filteredTreeData = computed(() => filterTreeByType(resourceTree.value))
+const filteredTreeData = computed(() => treeDataWithRecent(filterTreeByType(resourceTree.value)))
 
 const treeProps = {
   label: 'name',
@@ -468,6 +529,17 @@ const selectResourceById = async (
       ElMessage.error(t('common.error.loadingFailed'))
     }
   }
+
+  if (selectedResources.value.some((r) => r.id === resourceId)) {
+    const recordedResource = resources.value.find((r) => r.id === resourceId) || targetResource
+    if (recordedResource) {
+      recordRecentResource({
+        id: recordedResource.id,
+        name: recordedResource.name,
+        resourceType: recordedResource.resourceType as string | null,
+      })
+    }
+  }
 }
 
 const handleSearchResultClick = (item: ResourceSearchResultItem) => {
@@ -487,8 +559,33 @@ const handleSearchResultClick = (item: ResourceSearchResultItem) => {
   })
 }
 
+const isRecentResourceNode = (id: string) => recentResourceNodes.value.some((n) => n.id === id)
+
+const handleRecentNodeClick = async (data: ResourceNode) => {
+  let targetResource: Resource | undefined = resources.value.find((r) => r.id === data.id)
+  if (!targetResource) {
+    await resourceStore.fetchResourceDetails(data.id)
+    targetResource = resources.value.find((r) => r.id === data.id)
+  }
+  if (!targetResource) {
+    removeRecentResource(data.id)
+    ElMessage.warning(t('resource.msg.recentMissing'))
+    return
+  }
+  await selectResourceById(targetResource.id, targetResource.resourceType, targetResource)
+}
+
 const handleNodeClick = async (data: TreeNodeData) => {
   const resource = data as ResourceNode
+  if (resource.id === RECENT_FOLDER_ID) {
+    const node = treeRef.value?.getNode(RECENT_FOLDER_ID)
+    if (node) node.expanded ? node.collapse() : node.expand()
+    return
+  }
+  if (isRecentResourceNode(resource.id)) {
+    await handleRecentNodeClick(resource)
+    return
+  }
   const isSelectable =
     resource.itemType === 'resource' ||
     (resource.itemType === 'folder' && (resource.resourceType === 'knowledge_base' || resource.resourceType === 'skill'))
@@ -499,6 +596,7 @@ const handleNodeClick = async (data: TreeNodeData) => {
 
 const handleNodeExpand = (data: ResourceNode) => {
   expandedKeys.value.add(data.id)
+  if (data.id === RECENT_FOLDER_ID) return
   if (data.itemType === 'folder') {
     resourceStore.fetchResourceChildren(data.id)
   }
@@ -758,6 +856,18 @@ function handleDialogClose() {
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+}
+
+.rs-recent-clear {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--el-color-primary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
 }
 
 .rs-list {

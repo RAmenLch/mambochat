@@ -75,6 +75,7 @@
           node-key="id"
           :props="treeProps"
           :expand-on-click-node="false"
+          :default-expanded-keys="defaultExpandedKeys"
           @node-click="handleNodeClick"
           @node-expand="handleNodeExpand"
           @node-collapse="handleNodeCollapse"
@@ -83,7 +84,8 @@
             <span class="custom-tree-node" :class="{ 'is-selected': isResourceSelected(data.id), 'is-disabled': isNodeDisabled(data) }">
               <span class="node-content">
                 <el-icon>
-                  <Reading v-if="data.resourceType === 'skill'" />
+                  <Clock v-if="data.id === RECENT_FOLDER_ID" />
+                  <Reading v-else-if="data.resourceType === 'skill'" />
                   <Collection v-else-if="data.resourceType === 'knowledge_base'" />
                   <Folder v-else-if="data.itemType === 'folder'" />
                   <Memo v-else-if="data.resourceType === 'submessage_template'" />
@@ -92,7 +94,16 @@
                 <span class="node-label">{{ data.name }}</span>
                 <el-icon v-if="loadingFolders.has(data.id)" class="is-loading loading-icon"><Loading /></el-icon>
               </span>
-              <el-tag v-if="data.itemType === 'resource' && data.resourceType" size="small" type="info" class="resource-type-tag">
+              <el-button
+                v-if="data.id === RECENT_FOLDER_ID"
+                link
+                size="small"
+                class="recent-clear-btn"
+                @click.stop="clearRecentResources"
+              >
+                {{ $t('resource.selector.recentClear') }}
+              </el-button>
+              <el-tag v-else-if="data.itemType === 'resource' && data.resourceType" size="small" type="info" class="resource-type-tag">
                 {{ getReadableResourceType(data.resourceType) }}
               </el-tag>
               <el-tag v-else-if="data.itemType === 'folder' && data.resourceType === 'knowledge_base'" size="small" type="primary" class="resource-type-tag">
@@ -113,12 +124,15 @@
 import { ref, computed, watch, onMounted, nextTick } from 'vue';
 import { ElTree, ElMessage } from 'element-plus';
 import type { TreeNodeData } from 'element-plus/es/components/tree/src/tree.type';
-import { Folder, Document, Memo, Loading, Collection, Reading } from '@element-plus/icons-vue';
+import { Folder, Document, Memo, Loading, Collection, Reading, Clock } from '@element-plus/icons-vue';
 import { storeToRefs } from 'pinia';
 import { useI18n } from 'vue-i18n';
 import { useResourceStore } from '@/stores/resourceStore';
 import { searchResources } from '@/api/resourceService';
+import { useRecentResources } from '@/composables/useRecentResources';
 import type { Resource, ResourceNode, ResourceType, ResourceSearchResultItem } from '@/api/types';
+
+const RECENT_FOLDER_ID = '__recent_resources__';
 
 const props = defineProps<{
   selectedResources: Resource[];
@@ -142,7 +156,8 @@ const treeRef = ref<InstanceType<typeof ElTree>>();
 const isMultiSelectMode = ref(false);
 const selectionType = ref<ResourceType | null>(null);
 const STORAGE_KEY = 'resource_selector_multi_select_mode';
-const expandedKeys = ref<Set<string>>(new Set());
+const expandedKeys = ref<Set<string>>(new Set([RECENT_FOLDER_ID]));
+const defaultExpandedKeys = [RECENT_FOLDER_ID];
 
 const isSearching = ref(false);
 const enableRegex = ref(false);
@@ -151,13 +166,62 @@ const searchPage = ref(1);
 const searchTotal = ref(0);
 const searchDebounceTimer = ref<number | undefined>(undefined);
 
+const { recentResources, recordRecentResource, removeRecentResource, clearRecentResources } = useRecentResources(10);
+
+const recentResourceNodes = computed<ResourceNode[]>(() =>
+  recentResources.value
+    .filter((item) => !!item.resourceType && props.contextConfig.allowedTypes.includes(item.resourceType))
+    .map((item, index): ResourceNode => {
+      const loaded = resources.value.find((r) => r.id === item.id);
+      if (loaded) return loaded as ResourceNode;
+      return {
+        id: item.id,
+        name: item.name,
+        description: null,
+        itemType: 'resource',
+        resourceType: item.resourceType as ResourceType,
+        parentId: RECENT_FOLDER_ID,
+        sortOrder: index,
+        createdAt: '',
+        updatedAt: '',
+        latest_version: null,
+        kb_id: null,
+        kb_config: null,
+      };
+    })
+);
+
+const recentFolderNode = computed<ResourceNode>(() => ({
+  id: RECENT_FOLDER_ID,
+  name: t('resource.selector.recent'),
+  description: null,
+  itemType: 'folder',
+  resourceType: null,
+  parentId: null,
+  sortOrder: -1,
+  createdAt: '',
+  updatedAt: '',
+  latest_version: null,
+  kb_id: null,
+  kb_config: null,
+  children: recentResourceNodes.value,
+}));
+
+/**
+ * 虚拟"最近使用"文件夹：置顶展示最近选择/查看的资源，默认展开。
+ */
+const treeDataWithRecent = (nodes: ResourceNode[]): ResourceNode[] => {
+  if (recentResourceNodes.value.length === 0) return nodes;
+  return [recentFolderNode.value, ...nodes];
+};
+
 onMounted(() => {
   const persistedMode = localStorage.getItem(STORAGE_KEY);
   isMultiSelectMode.value = persistedMode === 'true';
   resourceStore.initializeList();
 });
 
-const filteredTreeData = computed(() => filterTreeByType(resourceTree.value));
+const filteredTreeData = computed(() => treeDataWithRecent(filterTreeByType(resourceTree.value)));
 const hasMore = computed(() => searchResult.value.length < searchTotal.value);
 
 const treeProps = {
@@ -322,8 +386,25 @@ const handleSearchResultClick = (item: ResourceSearchResultItem) => {
   selectResourceById(item.resource_id, null, { id: item.resource_id, name: item.resource_name, description: null, itemType: 'resource', resourceType: null, parentId: null, sortOrder: 0, createdAt: item.updated_at, updatedAt: item.updated_at, latest_version: null, kb_id: null, kb_config: null });
 };
 
+const isRecentResourceNode = (id: string) => recentResourceNodes.value.some((n) => n.id === id);
+
+const handleRecentNodeClick = async (data: ResourceNode) => {
+  let targetResource = resources.value.find(r => r.id === data.id);
+  if (!targetResource) {
+    await resourceStore.fetchResourceDetails(data.id);
+    targetResource = resources.value.find(r => r.id === data.id);
+  }
+  if (!targetResource) {
+    removeRecentResource(data.id);
+    ElMessage.warning(t('resource.msg.recentMissing'));
+    return;
+  }
+  await selectResourceById(targetResource.id, targetResource.resourceType, targetResource);
+};
+
 const handleNodeExpand = (data: ResourceNode) => {
   expandedKeys.value.add(data.id);
+  if (data.id === RECENT_FOLDER_ID) return;
   if (data.itemType === 'folder') resourceStore.fetchResourceChildren(data.id);
 };
 
@@ -331,6 +412,15 @@ const handleNodeCollapse = (data: ResourceNode) => { expandedKeys.value.delete(d
 
 const handleNodeClick = async (data: TreeNodeData) => {
   const resource = data as ResourceNode;
+  if (resource.id === RECENT_FOLDER_ID) {
+    const node = treeRef.value?.getNode(RECENT_FOLDER_ID);
+    if (node) node.expanded ? node.collapse() : node.expand();
+    return;
+  }
+  if (isRecentResourceNode(resource.id)) {
+    await handleRecentNodeClick(resource);
+    return;
+  }
   const isSelectable = resource.itemType === 'resource' || (resource.itemType === 'folder' && (resource.resourceType === 'knowledge_base' || resource.resourceType === 'skill'));
   if (!isSelectable || isNodeDisabled(resource)) return;
   selectResourceById(resource.id, resource.resourceType, resource);
@@ -342,6 +432,11 @@ async function loadResourcePreview(resourceId: string, currentSelection: Resourc
     await resourceStore.fetchResourceDetails(resourceId);
     const updatedResource = resources.value.find(r => r.id === resourceId);
     if (!updatedResource) return;
+    recordRecentResource({
+      id: updatedResource.id,
+      name: updatedResource.name,
+      resourceType: updatedResource.resourceType as string | null
+    });
     // 详情加载期间该资源可能已被取消选择，避免回填已取消的项
     if (!props.selectedResources.some(r => r.id === resourceId)) return;
 
@@ -411,6 +506,12 @@ const handleScroll = ({ scrollTop, scrollHeight, clientHeight }: any) => {
 .is-active-regex {
   color: var(--el-color-primary);
   font-weight: bold;
+}
+
+.recent-clear-btn {
+  flex: none;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 .resource-tree-aside {

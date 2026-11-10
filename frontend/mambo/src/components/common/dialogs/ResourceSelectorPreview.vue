@@ -6,7 +6,7 @@
     <!-- 单选预览 -->
     <div v-else-if="selectedResources.length === 1" class="preview-card">
       <div class="preview-header">
-        <strong>{{ $t('resource.selector.previewHeader', { name: selectedResources[0].name }) }}</strong>
+        <strong class="preview-path" :title="pathOf(selectedResources[0])">{{ pathOf(selectedResources[0]) }}</strong>
       </div>
 
       <el-scrollbar class="preview-scrollbar" v-loading="isPreviewLoading">
@@ -108,7 +108,7 @@
 
       <el-scrollbar class="preview-scrollbar" v-loading="isPreviewLoading">
         <div v-for="(res, index) in selectedResources" :key="res.id" class="multi-preview-item">
-          <div class="multi-preview-label">#{{ index + 1 }} {{ res.name }}</div>
+          <div class="multi-preview-label">#{{ index + 1 }} {{ pathOf(res) }}</div>
 
           <template v-if="res.resourceType === 'knowledge_base'">
             <div class="mini-empty">{{ $t('resource.selector.kbContainer') }}</div>
@@ -159,15 +159,55 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import { storeToRefs } from 'pinia';
 import { Document, Picture, Collection, Reading, Loading } from '@element-plus/icons-vue';
 import type { FileResponse, Resource } from '@/api/types';
 import { getFileContent } from '@/api/fileService';
 import { useImageAspectBox } from '@/composables/useImageAspectBox';
+import { useResourceStore } from '@/stores/resourceStore';
+import { buildResourcePath } from '@/utils/resourcePath';
 
 const props = defineProps<{
   selectedResources: Resource[];
   isPreviewLoading: boolean;
 }>();
+
+const resourceStore = useResourceStore();
+const { resources } = storeToRefs(resourceStore);
+
+const lookupResource = (id: string) => resources.value.find(r => r.id === id);
+
+const pathOf = (resource: Resource): string => buildResourcePath(resource, lookupResource);
+
+/**
+ * 懒加载模式下祖先文件夹可能尚未载入，逐级补齐以保证路径完整。
+ */
+async function ensureAncestorsLoaded(resource: Resource) {
+  const visited = new Set<string>([resource.id]);
+  let parentId = resource.parentId;
+
+  while (parentId && parentId !== 'root' && !visited.has(parentId)) {
+    visited.add(parentId);
+    const parent = lookupResource(parentId);
+    if (parent) {
+      parentId = parent.parentId;
+      continue;
+    }
+    await resourceStore.fetchResourceDetails(parentId);
+    const fetched = lookupResource(parentId);
+    if (!fetched) break;
+    parentId = fetched.parentId;
+  }
+}
+
+watch(
+  () => props.selectedResources.map(r => `${r.id}:${r.parentId ?? ''}`).join('|'),
+  () => {
+    props.selectedResources.forEach(r => { ensureAncestorsLoaded(r); });
+  },
+  { immediate: true }
+);
+
 
 const currentFileInfo = computed(() => props.selectedResources[0]?.latest_version?.file_info || null);
 const isImage = computed(() => {
@@ -281,6 +321,14 @@ const formatFileSize = (bytes: number): string => {
   background-color: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(8px);
   z-index: 10;
+  overflow: hidden;
+}
+
+.preview-path {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .preview-scrollbar {
@@ -497,6 +545,7 @@ const formatFileSize = (bytes: number): string => {
   font-weight: 600;
   display: flex;
   align-items: center;
+  word-break: break-all;
 }
 
 .multi-preview-label::before {
