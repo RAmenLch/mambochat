@@ -240,6 +240,35 @@ async def glob_pending_files(backend, pattern: str, directory) -> list[str]:
     return paths
 
 
+def _seed_by_path(files: list[dict]) -> dict[str, int]:
+    """把下载结果整理成「落盘路径 / 文件名主干 → 种子」的查找表。
+
+    大小双键是有意为之：异步流程登记的是**预测**路径，服务实际写出的扩展名
+    可能不同（``x.png`` vs ``x.jpg``），此时按主干仍能对上。
+    """
+    mapping: dict[str, int] = {}
+    for item in files or []:
+        if not isinstance(item, dict) or item.get("seed") is None:
+            continue
+        path = str(item.get("path") or "")
+        if not path:
+            continue
+        seed = int(item["seed"])
+        mapping[path] = seed
+        mapping.setdefault(PurePosixPath(path).stem, seed)
+    return mapping
+
+
+def _seed_of(mapping: dict[str, int], info: dict) -> Optional[int]:
+    """取某条待生成文件对应的实际种子（精确路径 → 主干，都没有则 ``None``）。"""
+    path = str(info.get("path") or "")
+    if not path:
+        return None
+    if path in mapping:
+        return mapping[path]
+    return mapping.get(PurePosixPath(path).stem)
+
+
 async def locate_pending_file(
     backend, path: str, *, loose: bool = True
 ) -> Optional[str]:
@@ -305,17 +334,26 @@ async def persist_pending_deadline(sub_message_id: str, deadline: float) -> None
         logger.debug("写入待生成文件截止时间失败(sub=%s): %s", sub_message_id, exc)
 
 
-async def mark_pending_downloaded(sub_message_id: str) -> None:
-    """标记「本子消息的图片已下载落盘」，避免轮询器重启后重复下载、重复入库。"""
+async def mark_pending_downloaded(sub_message_id: str, seed: Optional[int] = None) -> None:
+    """标记「本子消息的图片已下载落盘」，避免轮询器重启后重复下载、重复入库。
+
+    ``seed`` 非空时顺带把这张图实际生效的种子写进 config（随机种子存档）。
+    """
     try:
         async with AsyncSessionLocal() as db:
             existing = await message_crud.get_sub_message(db, sub_message_id)
             if existing is None:
                 return
             config = config_to_dict(existing.config)
-            if config.get("pending_image_downloaded"):
+            changed = False
+            if not config.get("pending_image_downloaded"):
+                config["pending_image_downloaded"] = True
+                changed = True
+            if seed is not None and config.get("pending_image_seed") != int(seed):
+                config["pending_image_seed"] = int(seed)
+                changed = True
+            if not changed:
                 return
-            config["pending_image_downloaded"] = True
             await message_crud.update_sub_message(
                 db,
                 sub_message_id,
@@ -323,6 +361,28 @@ async def mark_pending_downloaded(sub_message_id: str) -> None:
             )
     except Exception as exc:  # noqa: BLE001 - 落库失败只影响跨实例去重
         logger.debug("写入已下载标记失败(sub=%s): %s", sub_message_id, exc)
+
+
+async def mark_pending_seed(sub_message_id: str, seed: Optional[int]) -> None:
+    """写入这张图实际生效的种子（未知时跳过），供前端与重跑复用。"""
+    if seed is None:
+        return
+    try:
+        async with AsyncSessionLocal() as db:
+            existing = await message_crud.get_sub_message(db, sub_message_id)
+            if existing is None:
+                return
+            config = config_to_dict(existing.config)
+            if config.get("pending_image_seed") == int(seed):
+                return
+            config["pending_image_seed"] = int(seed)
+            await message_crud.update_sub_message(
+                db,
+                sub_message_id,
+                SubMessageUpdate(config=SubMessageConfig(**config)),
+            )
+    except Exception as exc:  # noqa: BLE001 - 落库失败不影响图片本身
+        logger.debug("写入图片种子失败(sub=%s): %s", sub_message_id, exc)
 
 
 async def scan_chat_pending_sub_messages(
@@ -366,6 +426,7 @@ async def scan_chat_pending_sub_messages(
                 "prefix": raw_cfg.get("pending_image_prefix"),
                 "count": raw_cfg.get("pending_image_count"),
                 "generator": raw_cfg.get("pending_image_generator"),
+                "seed": raw_cfg.get("pending_image_seed"),
             }
     return pending
 
@@ -376,12 +437,13 @@ async def drive_task_download(
     info: dict,
     *,
     wait_timeout: int = 0,
-) -> tuple[str, Optional[str]]:
+) -> tuple[str, Optional[str], list[dict]]:
     """驱动一次「查状态 → 下载落盘」。
 
-    返回 ``("completed"|"running"|"failed", error)``：
+    返回 ``("completed"|"running"|"failed", error, files)``：
 
-    - ``completed``：图片已下载到登记的确定路径；
+    - ``completed``：图片已下载到登记的确定路径，``files`` 是本次落盘的元信息
+      （每条带 ``index`` / ``path`` / ``seed``，用于把种子回填到对应子消息）；
     - ``running``：任务尚未收敛（``error`` 为空）或查询/下载暂时失败（``error`` 非空）；
     - ``failed``：任务失败 / 过期 / 无法下载，``error`` 为原因。
     """
@@ -389,11 +451,13 @@ async def drive_task_download(
         NAMING_TASK,
         ext_from_path,
         is_settled,
+        seeds_by_index,
+        parse_seeds,
     )
 
     task_id = info.get("task_id")
     if not task_id:
-        return "running", None
+        return "running", None, []
 
     try:
         payload = await asyncio.wait_for(
@@ -401,15 +465,17 @@ async def drive_task_download(
         )
     except Exception as exc:  # noqa: BLE001 - 服务暂时不可用，稍后重试
         logger.warning("异步生图查询状态失败(task=%s): %s", task_id, exc)
-        return "running", str(exc)
+        return "running", str(exc), []
 
     status = str((payload or {}).get("status") or "").strip().lower()
     if status in ("failed", "expired", "error"):
-        return "failed", str(
-            (payload or {}).get("error") or f"生成任务 {task_id} 状态为 {status}"
+        return (
+            "failed",
+            str((payload or {}).get("error") or f"生成任务 {task_id} 状态为 {status}"),
+            [],
         )
     if not is_settled(payload):
-        return "running", None
+        return "running", None, []
 
     raw_path = str(info.get("path") or "")
     try:
@@ -430,12 +496,17 @@ async def drive_task_download(
             # 登记路径永远等不到文件（异步流程的核心约束）。
             ext=ext_from_path(raw_path),
         )
-        await standard.download_to(backend, task_id, plan)
+        outcome = await standard.download_to(
+            backend,
+            task_id,
+            plan,
+            seeds=seeds_by_index(parse_seeds(payload)),
+        )
     except Exception as exc:  # noqa: BLE001 - 下载失败下一轮重试
         logger.warning("异步生图下载失败(task=%s): %s", task_id, exc)
-        return "running", str(exc)
+        return "running", str(exc), []
 
-    return "completed", None
+    return "completed", None, list(outcome.files or [])
 
 
 async def drive_pending_image_downloads(
@@ -479,13 +550,16 @@ async def drive_pending_image_downloads(
         if standard is None:
             continue
 
-        outcome, error = await drive_task_download(standard, backend, info)
+        outcome, error, files = await drive_task_download(standard, backend, info)
         if outcome == "completed":
             cursor["done"] = True
+            seed_by_path = _seed_by_path(files)
             # 同一个 task_id 可能对应多条子消息（一次生成多张），全部打上已下载标记
             for other_id, other in db_pending.items():
                 if other.get("task_id") == task_id:
-                    await mark_pending_downloaded(other_id)
+                    await mark_pending_downloaded(
+                        other_id, seed=_seed_of(seed_by_path, other)
+                    )
             continue
         if outcome == "failed":
             cursor["done"] = True
@@ -702,6 +776,7 @@ async def _fetch_task_group(
 ) -> None:
     """同一 task 下的多个槽位：驱动一次下载，再逐条入库。"""
     info = group[0].task_info()
+    seed_by_path: dict[str, int] = {}
     async with _task_lock(str(info["task_id"])):
         located: Dict[str, str] = {}
         for slot in group:
@@ -723,10 +798,11 @@ async def _fetch_task_group(
                 missing = []
             else:
                 try:
-                    outcome, error = await asyncio.wait_for(
+                    outcome, error, files = await asyncio.wait_for(
                         drive_task_download(standard, backend, info),
                         timeout=PENDING_FETCH_TIMEOUT,
                     )
+                    seed_by_path = _seed_by_path(files)
                 except asyncio.TimeoutError:
                     outcome, error = "running", "获取文件超时，请稍后重试"
 
@@ -773,6 +849,11 @@ async def _fetch_task_group(
         for slot in group:
             path = located.get(slot.sub_id)
             if path:
+                await mark_pending_seed(
+                    slot.sub_id, _seed_of(seed_by_path, {"path": path}) or _seed_of(
+                        seed_by_path, {"path": slot.path}
+                    )
+                )
                 await _persist_slot(chat_id, backend, slot, path, items)
 
 

@@ -3,10 +3,10 @@
 实现了 MamboChat 生图工具标准 v2 的三个固定工具::
 
     image_generate     prompt / resolution / negative_prompt / count / sync /
-                       extra / reference_images
-                       -> {task_id, status, count, resolution, reference_count}
+                       extra / reference_images / seeds
+                       -> {task_id, status, count, resolution, reference_count, seeds}
     image_task_status  task_id / wait_timeout
-                       -> {task_id, status, progress, count, error}
+                       -> {task_id, status, progress, count, error, seeds}
     image_download     task_id / index -> ImageContent(...)
 
 特点：
@@ -17,6 +17,9 @@
 - 支持 ``resolution`` 分辨率（如 ``1024x1024``），优先级低于显式 ``width`` / ``height``。
 - 支持参考图 ``reference_images``（MCP ``ImageContent`` 列表）：数量 / 格式 / 体积
   严格校验，超限或非法直接报错；占位色按首张参考图的摘要微调，证明图确实被消费。
+- 支持种子 ``seeds``（``int[]``，长度 = count，第 i 项对应 index=i 的图）：
+  按种子微调占位色并在 ``image_generate`` / ``image_task_status`` 里回传
+  ``[{"index": 0, "seed": 123}]``，证明种子确实被消费且可复现。
 - ``image_task_status`` 支持 ``wait_timeout``：阻塞轮询、状态收敛即提前返回。
 
 启动方式（stdio，供 MCP 服务配置使用）::
@@ -70,6 +73,45 @@ def _parse_resolution(value: Any) -> Optional[tuple[int, int]]:
     if not (MIN_RESOLUTION <= height <= MAX_RESOLUTION):
         return None
     return width, height
+
+
+# ---------------------------------------------------------------------------
+# 种子
+# ---------------------------------------------------------------------------
+
+MAX_SEED = 2**31 - 1
+
+
+def _random_seed() -> int:
+    return int.from_bytes(os.urandom(4), "big") % (MAX_SEED + 1)
+
+
+def _normalize_seeds(seeds: Optional[List[int]], count: int) -> List[int]:
+    """把入参种子收敛成「长度 = count」的整数数组。
+
+    平台已做过归一化（长度 = count、-1 已解析），这里仍做一次防御：
+    多则截断、少则补随机，非法值报错。
+    """
+    raw = list(seeds or [])
+    resolved: List[int] = []
+    for item in raw[:count]:
+        if isinstance(item, bool) or not isinstance(item, int):
+            raise ValueError(f"种子必须是整数，收到: {item!r}")
+        if item < 0 or item > MAX_SEED:
+            raise ValueError(f"种子取值必须是 0~{MAX_SEED}，收到: {item}")
+        resolved.append(item)
+    while len(resolved) < count:
+        resolved.append(_random_seed())
+    return resolved
+
+
+def _shift_color(color: tuple[int, int, int], seed: int) -> tuple[int, int, int]:
+    """按种子确定性地微调占位色：同种子 → 同图（证明种子被真正消费）。"""
+    return (
+        (color[0] + seed * 3) % 256,
+        (color[1] + seed * 7) % 256,
+        (color[2] + seed * 11) % 256,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +235,7 @@ def image_generate(
     sync: bool = True,
     extra: Optional[Dict[str, Any]] = None,
     reference_images: Optional[List[ImageContent]] = None,
+    seeds: Optional[List[int]] = None,
 ) -> Dict[str, Any]:
     """Generate placeholder images from a prompt.
 
@@ -200,7 +243,10 @@ def image_generate(
     ``reference_images`` accepts MCP ImageContent items
     ({"type": "image", "data": "<base64>", "mimeType": "image/png"}); this
     demo tints the placeholder with the first reference image's digest.
-    Returns {"task_id": ..., "status": "completed"|"queued", "count": N, "resolution": "WxH"}.
+    ``seeds`` is an integer list whose length equals ``count``; item i seeds the
+    image with index i and the same seed always yields the same placeholder.
+    Returns {"task_id": ..., "status": "completed"|"queued", "count": N,
+    "resolution": "WxH", "seeds": [{"index": 0, "seed": 123}]}.
     Extra keys are forwarded verbatim; unknown keys are ignored.
     """
     if not prompt or not str(prompt).strip():
@@ -227,14 +273,22 @@ def image_generate(
 
     total = max(1, min(int(count or 1), MAX_COUNT))
     task_id = f"task_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+    resolved_seeds = _normalize_seeds(seeds, total)
 
     _ensure_dirs()
     files: List[str] = []
     for index in range(total):
         path = os.path.join(IMAGES_DIR, f"{task_id}_{index}.png")
+        # 种子参与成像：同样的种子的确得到同样的图
+        tinted = _shift_color(color, resolved_seeds[index])
         with open(path, "wb") as f:
-            f.write(_make_png(width, height, color))
+            f.write(_make_png(width, height, tinted))
         files.append(path)
+
+    seeds_payload = [
+        {"index": index, "seed": seed}
+        for index, seed in enumerate(resolved_seeds)
+    ]
 
     tasks = _load_tasks()
     failed = bool(opts.get("fail"))
@@ -249,6 +303,7 @@ def image_generate(
         "negative_prompt": negative_prompt,
         "reference_count": len(references),
         "references": references,
+        "seeds": seeds_payload,
         "error": "extra.fail=true，演示失败返回" if failed else None,
         "created_at": time.time(),
     }
@@ -260,6 +315,7 @@ def image_generate(
         "count": total,
         "resolution": tasks[task_id]["resolution"],
         "reference_count": len(references),
+        "seeds": seeds_payload,
     }
 
 
@@ -280,7 +336,8 @@ def image_task_status(task_id: str, wait_timeout: int = 0) -> Dict[str, Any]:
 
     ``wait_timeout`` (seconds) blocks up to that long, returning early as soon as
     the task settles (completed / failed / expired / progress 100).
-    Returns {"task_id", "status", "progress", "count", "error"}.
+    Returns {"task_id", "status", "progress", "count", "error", "seeds"}.
+    ``seeds`` is [{index, seed}] so an image and its seed stay paired;
     progress may be null when unknown.
     """
     try:
@@ -309,6 +366,8 @@ def image_task_status(task_id: str, wait_timeout: int = 0) -> Dict[str, Any]:
         "progress": task.get("progress"),
         "count": task.get("count"),
         "error": task.get("error"),
+        # 逐图种子：[{"index": 0, "seed": 123}]，与图片下标的关联显式给出
+        "seeds": task.get("seeds") or None,
     }
 
 

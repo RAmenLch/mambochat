@@ -708,16 +708,19 @@ class TailToolMiddleware(AgentMiddleware):
 
         mode = data.get("mode", "Normal")
         if data.get("status") == "pending":
-            paths = data.get("paths") or ([data["path"]] if data.get("path") else [])
-            for path in paths:
+            from backend.services.generation.agent.image_gen.standard import (
+                pending_file_entries,
+            )
+
+            for entry in pending_file_entries(data):
                 await self._append_file_sub_message(
                     content="",
                     status=schemas_enums.MessageStatus.WAITING,
                     config=SubMessageConfig(
                         context_participation_length=0,
                         is_tail_tool=True,
-                        pending_file_path=path,
-                        show_file_path=path,
+                        pending_file_path=entry["path"],
+                        show_file_path=entry["path"],
                         pending_file_timeout=data.get("timeout", 300),
                         pending_file_deadline=time.time()
                         + float(data.get("timeout") or 300),
@@ -726,6 +729,7 @@ class TailToolMiddleware(AgentMiddleware):
                         pending_image_prefix=data.get("prefix"),
                         pending_image_count=data.get("count"),
                         pending_image_generator=data.get("image_generator"),
+                        pending_image_seed=entry.get("seed"),
                         image_run_id=tool_call_id,
                         image_run_args=run_args,
                     ),
@@ -736,6 +740,9 @@ class TailToolMiddleware(AgentMiddleware):
         arg_path = (run_args or {}).get("path")
         arg_path = arg_path if isinstance(arg_path, str) and arg_path else None
         paths_by_file = collect_file_paths(data)
+        from backend.services.generation.agent.image_gen.standard import file_seeds
+
+        seeds_by_file = file_seeds(data)
         for file_id in collect_file_ids(data):
             await self._append_file_sub_message(
                 content=file_id,
@@ -745,6 +752,7 @@ class TailToolMiddleware(AgentMiddleware):
                     is_tail_tool=True,
                     show_tool_mode=mode,
                     show_file_path=paths_by_file.get(file_id) or arg_path,
+                    pending_image_seed=seeds_by_file.get(file_id),
                     image_run_id=tool_call_id,
                     image_run_args=run_args,
                 ),

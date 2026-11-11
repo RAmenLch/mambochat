@@ -16,9 +16,11 @@ import httpx
 from .base import (
     ExecutorContext,
     ExecutorError,
+    GeneratedImage,
     ImageApiExecutor,
     decode_base64,
     format_size,
+    resolve_seed,
     sniff_mime,
 )
 
@@ -49,7 +51,7 @@ class OpenAIImagesExecutor(ImageApiExecutor):
 
     async def generate(
         self, client: httpx.AsyncClient, ctx: ExecutorContext
-    ) -> Tuple[bytes, str]:
+    ) -> GeneratedImage:
         size = format_size(ctx.size_or_default())
         options = dict(ctx.options or {})
         if ctx.has_references:
@@ -127,7 +129,7 @@ class OpenAIImagesExecutor(ImageApiExecutor):
 
     async def _pick_image(
         self, client: httpx.AsyncClient, payload: Dict[str, Any]
-    ) -> Tuple[bytes, str]:
+    ) -> GeneratedImage:
         items = payload.get("data")
         if not isinstance(items, list) or not items:
             raise ExecutorError(_no_image_message(payload))
@@ -136,11 +138,20 @@ class OpenAIImagesExecutor(ImageApiExecutor):
         encoded = first.get("b64_json")
         if encoded:
             data = decode_base64(encoded)
-            return data, sniff_mime(data) or "image/png"
+            return GeneratedImage(
+                data=data,
+                mime_type=sniff_mime(data) or "image/png",
+                seed=resolve_seed(first.get("seed"), None),
+            )
 
         url = first.get("url")
         if url:
-            return await self.fetch_url(client, str(url))
+            data, mime = await self.fetch_url(client, str(url))
+            return GeneratedImage(
+                data=data,
+                mime_type=mime,
+                seed=resolve_seed(first.get("seed"), None),
+            )
 
         raise ExecutorError(_no_image_message(payload))
 

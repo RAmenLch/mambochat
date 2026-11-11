@@ -7,7 +7,7 @@
 
 import json
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.tools import StructuredTool
@@ -64,9 +64,19 @@ _REFERENCE_HINT = (
     "gif / bmp only. A missing file, unsupported format or exceeded limit is an error."
 )
 
+# 种子参数说明（两个生成工具共用）
+_SEEDS_HINT = (
+    " 'seeds' (optional) is a number or a list of numbers controlling the random "
+    "seed, used to reproduce an image. -1 means random (the platform resolves it to "
+    "a concrete integer). The number of images always follows 'count': extra seeds "
+    "are ignored and missing ones are filled with random values. Results report "
+    "'seeds' as [{index, seed}], so the association between an image and its seed "
+    "never relies on list order."
+)
+
 _STATUS_DESCRIPTION = (
     "Check the progress of an image generation task. Returns "
-    "{task_id, status, progress, count, error}. status is one of "
+    "{task_id, status, progress, count, error, seeds}. status is one of "
     "queued / running / completed / failed / expired; progress may be null "
     "when the backend does not report it. 'wait_timeout' is a number of seconds "
     "to block (default 0 = return immediately); the call returns early as soon as "
@@ -76,7 +86,9 @@ _STATUS_DESCRIPTION = (
 _DOWNLOAD_DESCRIPTION = (
     "Download the finished images of a task into the agent workspace and return "
     "their file paths. Images are written to disk only — the image data is NOT "
-    "returned to you (saves tokens). If the user should see an image, call the "
+    "returned to you (saves tokens). Each entry reports {index, path, mime, bytes, seed} "
+    "so an image and the seed that produced it stay paired. "
+    "If the user should see an image, call the "
     "`show` tool with the returned path afterwards. 'path' is REQUIRED: the "
     "target directory as a virtual path under /workspace and it MUST end with '/' "
     "(e.g. /workspace/images/); a missing, non-directory or out-of-workspace path "
@@ -89,7 +101,7 @@ _DOWNLOAD_DESCRIPTION = (
 _GENERATE_SHOW_DESCRIPTION = (
     "One-shot image generation AND presentation: generate from a text prompt, "
     "wait for the image, save it into the workspace, and display it to the human "
-    "user in one call. Returns {files:[{index, path, file_id, mime}], mode}. "
+    "user in one call. Returns {files:[{index, path, file_id, mime, seed}], mode}. "
     "Prefer this tool whenever the user wants to see the generated image. "
     "'resolution' is 'WIDTHxHEIGHT' in pixels (e.g. '1024x1024', '768x1344'); "
     "omit it to use the configured default. 'mode' picks the display mode "
@@ -161,7 +173,11 @@ class ImageGenMiddleware(AgentMiddleware):
                 [
                     StructuredTool.from_function(
                         name=IMAGE_TOOL_GENERATE,
-                        description=_GENERATE_DESCRIPTION + ref_hint + hint + catalog,
+                        description=_GENERATE_DESCRIPTION
+                        + _SEEDS_HINT
+                        + ref_hint
+                        + hint
+                        + catalog,
                         coroutine=self._agenerate,
                         args_schema=self._generate_args_cls,
                         infer_schema=False,
@@ -185,6 +201,7 @@ class ImageGenMiddleware(AgentMiddleware):
         if enable_generate_show:
             description = (
                 _GENERATE_SHOW_DESCRIPTION
+                + _SEEDS_HINT
                 + ref_hint
                 + build_generator_catalog(self._entries, IMAGE_TOOL_GENERATE_SHOW)
             )
@@ -209,6 +226,7 @@ class ImageGenMiddleware(AgentMiddleware):
         resolution: str = DEFAULT_RESOLUTION,
         negative_prompt: Optional[str] = None,
         count: int = 1,
+        seeds: Optional[Union[int, List[int]]] = None,
         sync: Optional[bool] = None,
         extra: Optional[Dict[str, Any]] = None,
         reference_images: Optional[List[str]] = None,
@@ -222,6 +240,7 @@ class ImageGenMiddleware(AgentMiddleware):
                 resolution=resolution,
                 negative_prompt=negative_prompt,
                 count=count,
+                seeds=seeds,
                 sync=sync,
                 extra=extra,
                 reference_images=reference_images,
@@ -277,6 +296,7 @@ class ImageGenMiddleware(AgentMiddleware):
         resolution: str = DEFAULT_RESOLUTION,
         negative_prompt: Optional[str] = None,
         count: int = 1,
+        seeds: Optional[Union[int, List[int]]] = None,
         extra: Optional[Dict[str, Any]] = None,
         mode: str = "Normal",
         path: Optional[str] = None,
@@ -292,6 +312,7 @@ class ImageGenMiddleware(AgentMiddleware):
                 resolution=resolution,
                 negative_prompt=negative_prompt,
                 count=count,
+                seeds=seeds,
                 extra=extra,
                 mode=mode,
                 path=path,

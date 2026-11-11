@@ -18,12 +18,14 @@ from .base import (
     DEFAULT_RESOLUTION,
     ExecutorContext,
     ExecutorError,
+    GeneratedImage,
     ImageApiExecutor,
     ImageRef,
     aspect_ratio_for,
     decode_base64,
     format_size,
     resolution_tier,
+    resolve_seed,
     sniff_mime,
 )
 from .openai_images import OpenAIImagesExecutor
@@ -103,6 +105,7 @@ __all__ = [
     "IMAGE_WORKERS",
     "ExecutorContext",
     "ExecutorError",
+    "GeneratedImage",
     "ImageApiExecutor",
     "ImageRef",
     "aspect_ratio_for",
@@ -112,5 +115,6 @@ __all__ = [
     "is_image_worker",
     "resolution_tier",
     "resolve_executor",
+    "resolve_seed",
     "sniff_mime",
 ]

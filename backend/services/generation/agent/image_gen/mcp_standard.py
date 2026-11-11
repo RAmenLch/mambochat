@@ -21,10 +21,12 @@ from .standard import (
     IMAGE_TOOL_STATUS,
     REFERENCE_ARG,
     RESOLUTION_ARG,
+    SEEDS_ARG,
     ImageBlob,
     ImageGenStandard,
     ImageGenToolError,
     RefImage,
+    parse_seeds,
 )
 
 logger = logging.getLogger(__name__)
@@ -143,6 +145,7 @@ class McpImageGenStandard(ImageGenStandard):
         extra: Dict[str, Any],
         resolution: Optional[str] = None,
         reference_images: Optional[List[RefImage]] = None,
+        seeds: Optional[List[int]] = None,
     ) -> Dict[str, Any]:
         arguments: Dict[str, Any] = {
             "prompt": prompt,
@@ -160,8 +163,29 @@ class McpImageGenStandard(ImageGenStandard):
         if extra:
             arguments[EXTRA_ARG] = dict(extra)
 
-        result = await self._call(IMAGE_TOOL_GENERATE, arguments)
-        return self._extract_payload(result)
+        dispatched = [{"index": i, "seed": int(s)} for i, s in enumerate(seeds or [])]
+        if dispatched:
+            # 下发形态固定为「长度 = count 的整数数组」，-1 已由平台解析成具体值
+            arguments[SEEDS_ARG] = [item["seed"] for item in dispatched]
+
+        try:
+            result = await self._call(IMAGE_TOOL_GENERATE, arguments)
+        except ImageGenToolError as exc:
+            # 服务不认这个参数时按「不支持就忽略」处理：去掉后重试一次
+            if SEEDS_ARG not in arguments or "seed" not in str(exc).lower():
+                raise
+            logger.info(
+                "生图服务不接受 seeds 参数，已降级为不下发（%s）", self.server_name
+            )
+            arguments.pop(SEEDS_ARG, None)
+            dispatched = []
+            result = await self._call(IMAGE_TOOL_GENERATE, arguments)
+
+        payload = self._extract_payload(result)
+        if dispatched and not parse_seeds(payload):
+            # 服务收到却未回报种子：按透传语义视为已生效，回填下发的值
+            payload[SEEDS_ARG] = dispatched
+        return payload
 
     async def status(
         self, task_id: str, wait_timeout: int = DEFAULT_WAIT_TIMEOUT

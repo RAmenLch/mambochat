@@ -136,6 +136,8 @@ export default {
     mode: '展示方式',
     seed: '随机种子',
     randomSeed: '随机',
+    seedsPlaceholder: '-1 随机 / 12345，多颗用逗号分隔',
+    seedsInvalid: '种子必须是逗号分隔的整数（-1 表示随机）',
     referenceImages: '参考图',
     referenceImagesPlaceholder: '/.mambo/chat_user_file/xxx.png（每行一个）',
     referenceImagesHint: '填写工作区内的图片路径，每行一个，最多 8 张；后端不支持参考图时会报错',

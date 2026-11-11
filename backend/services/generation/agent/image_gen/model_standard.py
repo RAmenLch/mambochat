@@ -33,11 +33,14 @@ import httpx
 
 from .standard import (
     DEFAULT_WAIT_TIMEOUT,
+    SEEDS_ARG,
     ImageBlob,
     ImageGenStandard,
     ImageGenToolError,
     RefImage,
     parse_resolution,
+    seeds_by_index,
+    seeds_payload,
 )
 
 logger = logging.getLogger(__name__)
@@ -112,6 +115,31 @@ def _lock_for(task_id: str) -> asyncio.Lock:
 
 def _mime_ext(mime: str) -> str:
     return _MIME_EXT.get((mime or "").split(";")[0].strip().lower(), ".png")
+
+
+def _merge_seed(
+    current: Any, index: int, seed: int
+) -> List[Dict[str, int]]:
+    """把某张图实际生效的种子写进 ``[{index, seed}]`` 列表（按 index 覆盖）。"""
+    items: List[Dict[str, int]] = []
+    for item in current or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            item_index = int(item.get("index"))
+            item_seed = int(item.get("seed"))
+        except (TypeError, ValueError):
+            continue
+        items.append({"index": item_index, "seed": item_seed})
+    replaced = False
+    for item in items:
+        if item["index"] == int(index):
+            item["seed"] = int(seed)
+            replaced = True
+            break
+    if not replaced:
+        items.append({"index": int(index), "seed": int(seed)})
+    return sorted(items, key=lambda item: item["index"])
 
 
 def _aspect_ratio_for(resolution: Optional[str]) -> Optional[str]:
@@ -216,6 +244,14 @@ class ChatModelImageGenStandard(ImageGenStandard):
     # 原语实现
     # ------------------------------------------------------------------
 
+    def _seed_supported(self) -> bool:
+        """该协议能否真正下发种子。
+
+        chat/completions 没有 seed 字段；Google 的 ``generationConfig.seed`` 可以。
+        子类（纯生图接口）按执行器能力覆盖。
+        """
+        return self._protocol == PROTOCOL_GOOGLE
+
     async def submit(
         self,
         prompt: str,
@@ -225,12 +261,16 @@ class ChatModelImageGenStandard(ImageGenStandard):
         extra: Dict[str, Any],
         resolution: Optional[str] = None,
         reference_images: Optional[List[RefImage]] = None,
+        seeds: Optional[List[int]] = None,
     ) -> Dict[str, Any]:
         task_id = f"task_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+        # 协议不支持种子时不要假装下发了：既不下发、也不在结果里回报
+        applied_seeds = list(seeds or []) if self._seed_supported() else []
         await self._create_task(
             task_id=task_id,
             count=count,
             resolution=resolution or "",
+            seeds=applied_seeds,
         )
 
         runner = asyncio.create_task(
@@ -242,6 +282,7 @@ class ChatModelImageGenStandard(ImageGenStandard):
                 resolution=resolution,
                 extra=dict(extra or {}),
                 reference_images=list(reference_images or []),
+                seeds=applied_seeds,
             )
         )
         _RUNNERS[task_id] = runner
@@ -257,13 +298,15 @@ class ChatModelImageGenStandard(ImageGenStandard):
                     "chat 生图 %s 未在 %ss 内完成，回落为异步", task_id, self._sync_wait()
                 )
 
-        task = await self._read_task(task_id)
+        task = await self._read_task(task_id) or {}
         return {
             "task_id": task_id,
-            "status": (task or {}).get("status") or ("completed" if sync else "queued"),
+            "status": task.get("status") or ("completed" if sync else "queued"),
             "count": count,
             "resolution": resolution,
-            "error": (task or {}).get("error"),
+            # 只有真正下发了种子的协议才有值（chat 协议无 seed 字段 → null）
+            SEEDS_ARG: task.get("seeds") or None,
+            "error": task.get("error"),
         }
 
     async def status(
@@ -309,6 +352,7 @@ class ChatModelImageGenStandard(ImageGenStandard):
             )
 
         blobs: List[ImageBlob] = []
+        seed_map = seeds_by_index(task.get(SEEDS_ARG))
         for out_index, item in enumerate(indexes):
             data = await self._read_image(task_id, item)
             if data is None:
@@ -319,6 +363,7 @@ class ChatModelImageGenStandard(ImageGenStandard):
                     index=out_index if index is None else int(index),
                     mime_type=mime,
                     base64_data=base64.b64encode(data).decode("ascii"),
+                    seed=seed_map.get(int(item)),
                 )
             )
 
@@ -357,13 +402,15 @@ class ChatModelImageGenStandard(ImageGenStandard):
             async with semaphore:
                 if task_id not in _RUNNERS:  # 防御：任务已被清理
                     return
+                seed = seeds[index] if index < len(seeds) else None
                 try:
-                    data, mime = await self._generate_one(
+                    data, mime, applied = await self._generate_one(
                         prompt=prompt,
                         negative_prompt=negative_prompt,
                         resolution=resolution,
                         extra=extra,
                         reference_images=reference_images,
+                        seed=seed,
                     )
                 except Exception as exc:  # noqa: BLE001 - 单张失败不影响其余
                     errors.append(f"第 {index + 1} 张: {exc}")
@@ -376,7 +423,12 @@ class ChatModelImageGenStandard(ImageGenStandard):
                     errors.append(f"第 {index + 1} 张写入失败: {exc}")
                     return
 
-                await self._update_task(task_id, add_index=index, mime=mime)
+                await self._update_task(
+                    task_id,
+                    add_index=index,
+                    mime=mime,
+                    seed=(index, applied) if applied is not None else None,
+                )
 
         await asyncio.gather(*(one(i) for i in range(total)))
 
@@ -406,11 +458,21 @@ class ChatModelImageGenStandard(ImageGenStandard):
         resolution: Optional[str],
         extra: Dict[str, Any],
         reference_images: List[RefImage],
-    ) -> Tuple[bytes, str]:
+        seed: Optional[int] = None,
+    ) -> Tuple[bytes, str, Optional[int]]:
+        """生成一张图，返回 ``(图片字节, mime, 实际生效的种子)``。
+
+        ``seed`` 为 ``None`` 表示本次没有种子，实现若无法下发必须返回 ``None``
+        而不是假装生效（否则返回值会误导「可复现」）。
+        """
         text = self._compose_prompt(prompt, negative_prompt)
         if self._protocol == PROTOCOL_GOOGLE:
-            return await self._generate_google(text, resolution, extra, reference_images)
-        return await self._generate_chat(text, resolution, extra, reference_images)
+            return await self._generate_google(
+                text, resolution, extra, reference_images, seed
+            )
+        return await self._generate_chat(
+            text, resolution, extra, reference_images, seed
+        )
 
     # ------------------------------------------------------------------
     # 协议：OpenAI 兼容 chat/completions
@@ -422,7 +484,9 @@ class ChatModelImageGenStandard(ImageGenStandard):
         resolution: Optional[str],
         extra: Dict[str, Any],
         reference_images: List[RefImage],
-    ) -> Tuple[bytes, str]:
+        seed: Optional[int] = None,
+    ) -> Tuple[bytes, str, Optional[int]]:
+        """chat/completions 协议没有 seed 字段：种子只能忽略，返回 ``None``。"""
         content: List[Dict[str, Any]] = [{"type": "text", "text": text}]
         for image in reference_images:
             content.append(
@@ -448,7 +512,8 @@ class ChatModelImageGenStandard(ImageGenStandard):
             raise ImageGenToolError(
                 "模型没有返回图片: " + self._message_text(data)
             )
-        return await self._fetch_image(url)
+        image_data, mime = await self._fetch_image(url)
+        return image_data, mime, None
 
     @staticmethod
     def _extract_image_url(data: Dict[str, Any]) -> Optional[str]:
@@ -510,7 +575,8 @@ class ChatModelImageGenStandard(ImageGenStandard):
         resolution: Optional[str],
         extra: Dict[str, Any],
         reference_images: List[RefImage],
-    ) -> Tuple[bytes, str]:
+        seed: Optional[int] = None,
+    ) -> Tuple[bytes, str, Optional[int]]:
         parts: List[Dict[str, Any]] = [{"text": text}]
         for image in reference_images:
             parts.append(
@@ -528,6 +594,9 @@ class ChatModelImageGenStandard(ImageGenStandard):
         aspect = _aspect_ratio_for(resolution)
         if aspect:
             generation_config["imageConfig"] = {"aspectRatio": aspect}
+        if seed is not None:
+            # Gemini 的 generationConfig.seed 是合法字段，可以真正锁种子
+            generation_config["seed"] = int(seed)
         for key, value in self._passthrough_extra(extra).items():
             generation_config.setdefault(key, value)
 
@@ -540,11 +609,15 @@ class ChatModelImageGenStandard(ImageGenStandard):
 
         parts = self._first_candidate_parts(data)
         texts: List[str] = []
+        applied = seed if "seed" in generation_config else None
         for part in parts:
             inline = part.get("inlineData") or part.get("inline_data")
             if isinstance(inline, dict) and inline.get("data"):
                 mime = str(inline.get("mimeType") or inline.get("mime_type") or "image/png")
-                return self._decode_base64(str(inline["data"]), mime)
+                image_data, resolved_mime = self._decode_base64(
+                    str(inline["data"]), mime
+                )
+                return image_data, resolved_mime, applied
             if isinstance(part.get("text"), str):
                 texts.append(part["text"])
 
@@ -735,7 +808,12 @@ class ChatModelImageGenStandard(ImageGenStandard):
         return self._task_dir(task_id).joinpath("task.json")
 
     async def _create_task(
-        self, *, task_id: str, count: int, resolution: str
+        self,
+        *,
+        task_id: str,
+        count: int,
+        resolution: str,
+        seeds: Optional[List[int]] = None,
     ) -> None:
         now = time.time()
         task = {
@@ -749,6 +827,9 @@ class ChatModelImageGenStandard(ImageGenStandard):
             "error": None,
             "protocol": self._protocol,
             "model": self._model_id,
+            # 逐张种子（index → seed）。协议不支持种子时这里保持为空，
+            # status / download 据此返回 seeds: null，不会假装可复现。
+            SEEDS_ARG: seeds_payload(seeds) or [],
             "created_at": now,
             "updated_at": now,
         }
@@ -764,9 +845,14 @@ class ChatModelImageGenStandard(ImageGenStandard):
         *,
         add_index: Optional[int] = None,
         mime: Optional[str] = None,
+        seed: Optional[Tuple[int, int]] = None,
         **fields: Any,
     ) -> None:
-        """读-改-写任务状态；同一任务串行化，避免并发落图互相覆盖。"""
+        """读-改-写任务状态；同一任务串行化，避免并发落图互相覆盖。
+
+        ``seed=(index, value)`` 用于把某张图**实际生效**的种子写成权威值
+        （服务商回读值可能与下发值不同）。
+        """
         async with _lock_for(task_id):
             task = self._read_task_file(task_id) or {"task_id": task_id}
             if add_index is not None:
@@ -778,6 +864,8 @@ class ChatModelImageGenStandard(ImageGenStandard):
                 fields["progress"] = int(len(done) / total * 100)
             if mime:
                 task["mime"] = mime
+            if seed is not None:
+                task[SEEDS_ARG] = _merge_seed(task.get(SEEDS_ARG), seed[0], seed[1])
             task.update(fields)
             task["updated_at"] = time.time()
             await asyncio.to_thread(self._write_task_file, task_id, task)
@@ -878,6 +966,7 @@ class ChatModelImageGenStandard(ImageGenStandard):
             "count": task.get("count"),
             "error": task.get("error"),
             "resolution": task.get("resolution"),
+            SEEDS_ARG: task.get(SEEDS_ARG) or None,
             "updated_at": datetime.fromtimestamp(
                 float(task.get("updated_at") or 0)
             ).isoformat(timespec="seconds"),

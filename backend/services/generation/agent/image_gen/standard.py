@@ -14,11 +14,12 @@ import binascii
 import json
 import logging
 import re
+import secrets
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 
 from pydantic import BaseModel, Field, create_model
 
@@ -89,6 +90,19 @@ DEFAULT_RESOLUTION = "1024x1024"
 MIN_RESOLUTION = 64
 MAX_RESOLUTION = 4096
 
+# 种子参数名（契约字段）
+#   LLM 侧接受 int 或 int[]，`-1` 表示随机；平台归一化为「长度 = count 的数组」再下发，
+#   第 i 项对应 index=i 的那张图。数量与 count 不一致时以 count 为准（多则截断、
+#   少则补随机），但类型 / 值域错误一律报错。
+SEEDS_ARG = "seeds"
+SEED_RANDOM = -1
+MAX_SEED = 2**31 - 1
+_SEEDS_FIELD_DESC = (
+    "种子：数字或数字数组，用于复现同一张图。-1 表示随机（平台会解析成具体整数）。"
+    "生成张数以 count 为准：seeds 多则忽略多余的、少则补随机。"
+    "第 i 个种子对应返回结果里 index=i 的那张图"
+)
+
 # 状态工具阻塞等待（秒）
 DEFAULT_WAIT_TIMEOUT = 0
 MAX_WAIT_TIMEOUT = 300
@@ -153,6 +167,9 @@ class ImageGenerateArgs(BaseModel):
     )
     count: int = Field(
         default=DEFAULT_COUNT, description=f"生成数量，1~{MAX_COUNT}"
+    )
+    seeds: Optional[Union[int, List[int]]] = Field(
+        default=None, description=_SEEDS_FIELD_DESC
     )
     sync: Optional[bool] = Field(
         default=None,
@@ -235,6 +252,9 @@ class ImageGenerateShowArgs(BaseModel):
     )
     count: int = Field(
         default=DEFAULT_COUNT, description=f"生成数量，1~{MAX_COUNT}"
+    )
+    seeds: Optional[Union[int, List[int]]] = Field(
+        default=None, description=_SEEDS_FIELD_DESC
     )
     extra: Optional[Dict[str, Any]] = Field(
         default=None,
@@ -346,17 +366,215 @@ def format_resolution(width: int, height: int) -> str:
 
 
 # ---------------------------------------------------------------------------
+# 种子解析与归一化
+# ---------------------------------------------------------------------------
+
+
+def random_seed() -> int:
+    """生成一个跨后端通用的随机种子（0 ~ MAX_SEED）。"""
+    return secrets.randbelow(MAX_SEED + 1)
+
+
+def parse_seed(value: Any) -> int:
+    """把单个种子收敛为整数；类型 / 值域不合法直接报错。
+
+    ``-1`` 表示随机，交给 :func:`normalize_seeds` 解析成具体整数。
+    """
+    if isinstance(value, bool):
+        raise ImageGenToolError(f"种子必须是整数，收到布尔值: {value!r}")
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            raise ImageGenToolError("种子不能是空字符串")
+        try:
+            value = int(text)
+        except ValueError as exc:
+            raise ImageGenToolError(f"种子必须是整数，收到: {value!r}") from exc
+    if isinstance(value, float):
+        if not value.is_integer():
+            raise ImageGenToolError(f"种子必须是整数，收到: {value!r}")
+        value = int(value)
+    if not isinstance(value, int):
+        raise ImageGenToolError(f"种子必须是整数，收到: {type(value).__name__}")
+    if value == SEED_RANDOM:
+        return SEED_RANDOM
+    if not (0 <= value <= MAX_SEED):
+        raise ImageGenToolError(
+            f"种子取值必须是 -1（随机）或 0~{MAX_SEED}，收到: {value}"
+        )
+    return value
+
+
+def normalize_seeds(value: Any, count: int) -> Optional[List[int]]:
+    """把 LLM 传入的 ``seeds`` 归一化为「长度 = count」的整数数组。
+
+    返回 ``None`` 表示调用方没传种子（此时不下发、也不在结果里回填）。
+    数量与 ``count`` 不一致时**以 count 为准**：多则截断，少则补随机；
+    但类型 / 值域错误一律报错（不静默纠正）。
+    """
+    if value is None:
+        return None
+
+    raw_items = list(value) if isinstance(value, (list, tuple)) else [value]
+    parsed = [parse_seed(item) for item in raw_items if item is not None]
+    if not parsed:
+        return None
+
+    total = max(1, int(count))
+    resolved = [
+        random_seed() if seed == SEED_RANDOM else seed for seed in parsed[:total]
+    ]
+    while len(resolved) < total:
+        resolved.append(random_seed())
+    return resolved
+
+
+def seeds_payload(seeds: Optional[List[int]]) -> Optional[List[Dict[str, int]]]:
+    """把种子数组转成「图片 ↔ 种子」显式关联的返回结构。"""
+    if not seeds:
+        return None
+    return [{"index": index, "seed": int(seed)} for index, seed in enumerate(seeds)]
+
+
+def parse_seeds(payload: Any, count: Optional[int] = None) -> Optional[List[Dict[str, int]]]:
+    """从后端 payload 里读出种子，并统一成 ``[{index, seed}]``。
+
+    兼容两种形状：``[{"index": 0, "seed": 1}]`` 与裸数组 ``[1, 2]``（按下标隐式对应）。
+    无法识别时返回 ``None``（后端不支持种子）。
+    """
+    if not isinstance(payload, dict):
+        return None
+    raw = payload.get(SEEDS_ARG)
+    if raw is None:
+        return None
+    if isinstance(raw, int) and not isinstance(raw, bool):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple)):
+        return None
+
+    items: List[Dict[str, int]] = []
+    for position, item in enumerate(raw):
+        if isinstance(item, dict):
+            index = item.get("index", position)
+            seed = item.get("seed")
+        else:
+            index, seed = position, item
+        if isinstance(seed, bool) or seed is None:
+            continue
+        try:
+            seed_value = int(seed)
+            index_value = int(index)
+        except (TypeError, ValueError):
+            continue
+        items.append({"index": index_value, "seed": seed_value})
+
+    if not items:
+        return None
+    if count is not None:
+        items = [item for item in items if 0 <= item["index"] < int(count)]
+    return items or None
+
+
+def seeds_by_index(seeds: Optional[List[Dict[str, int]]]) -> Dict[int, int]:
+    """把 ``[{index, seed}]`` 转成 ``index → seed`` 映射，便于按图取种子。"""
+    return {int(item["index"]): int(item["seed"]) for item in seeds or []}
+
+
+def attach_file_seeds(
+    files: List[Dict[str, Any]],
+    seed_map: Optional[Dict[int, int]],
+) -> List[Dict[str, Any]]:
+    """给 ``files`` 的每一条按 ``index`` 回填 ``seed``（未知时为 ``None``）。
+
+    关联靠 ``index`` 而不是列表顺序：即使部分图片落盘失败、顺序被打乱，
+    「这张图用的是哪颗种子」也不会错位。
+    """
+    seeds = dict(seed_map or {})
+    enriched: List[Dict[str, Any]] = []
+    for item in files:
+        entry = dict(item)
+        try:
+            index: Optional[int] = int(entry.get("index"))
+        except (TypeError, ValueError):
+            index = None
+        entry["seed"] = seeds.get(index) if index is not None else None
+        enriched.append(entry)
+    return enriched
+
+
+def pending_file_entries(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """从一条龙的 ``pending`` 结果里取出待生成文件清单。
+
+    每项形如 ``{"index": 0, "path": "/workspace/images/a_0.png", "seed": 123}``：
+    平台据此为每张图登记一条待生成文件子消息，并把随机种子一并存档。
+    兼容只有 ``paths`` 的旧结果（此时 ``index`` 即 ``paths`` 的下标）。
+    """
+    files = payload.get("files")
+    if isinstance(files, list) and files:
+        entries: List[Dict[str, Any]] = []
+        for position, item in enumerate(files):
+            if not isinstance(item, dict) or not item.get("path"):
+                continue
+            try:
+                index = int(item.get("index", position))
+            except (TypeError, ValueError):
+                index = position
+            entries.append(
+                {"index": index, "path": str(item["path"]), "seed": item.get("seed")}
+            )
+        if entries:
+            return entries
+
+    seeds = seeds_by_index(parse_seeds(payload))
+    raw_paths = payload.get("paths") or (
+        [payload["path"]] if payload.get("path") else []
+    )
+    return [
+        {"index": position, "path": str(path), "seed": seeds.get(position)}
+        for position, path in enumerate(raw_paths)
+        if path
+    ]
+
+
+def file_seeds(payload: Dict[str, Any]) -> Dict[str, int]:
+    """从一条龙 ``completed`` 结果的 ``files`` 里取 ``file_id → seed``。
+
+    同步模式下图片已经落盘入库，前端要显示「这张图用的哪颗种子」，
+    关联同样按 ``file_id`` 显式给出，不依赖列表顺序。
+    """
+    mapping: Dict[str, int] = {}
+    for item in payload.get("files") or []:
+        if not isinstance(item, dict):
+            continue
+        file_id = item.get("file_id")
+        seed = item.get("seed")
+        if not isinstance(file_id, str) or not file_id or seed is None:
+            continue
+        try:
+            mapping[file_id] = int(seed)
+        except (TypeError, ValueError):
+            continue
+    return mapping
+
+
+
+# ---------------------------------------------------------------------------
 # 数据结构
 # ---------------------------------------------------------------------------
 
 
 @dataclass
 class ImageBlob:
-    """一张待落盘的图片数据。"""
+    """一张待落盘的图片数据。
+
+    ``seed`` 为该图实际使用的种子（后端回报或平台下发值），未知时为 ``None``；
+    它随 ``files`` 一起返回，用于把「图 ↔ 种子」的关联直接带出去。
+    """
 
     index: int
     mime_type: str
     base64_data: str
+    seed: Optional[int] = None
 
     @property
     def extension(self) -> str:
@@ -611,11 +829,17 @@ class ImageGenStandard(ABC):
         extra: Dict[str, Any],
         resolution: Optional[str] = None,
         reference_images: Optional[List[RefImage]] = None,
+        seeds: Optional[List[int]] = None,
     ) -> Dict[str, Any]:
         """提交生成任务，返回至少包含 ``task_id`` 的字典。
 
         ``resolution`` 已归一化为 ``宽x高`` 形式（缺省时由框架填入默认值）；
         ``reference_images`` 已由框架读取为 base64，实现类只需按协议下发。
+
+        ``seeds`` 已归一化为「长度 = count」的整数数组（`-1` 已解析成具体值），
+        第 i 项对应 index=i 的那张图。实现类若真正下发了种子，**必须在返回
+        字典里带回 ``seeds``**（``[{index, seed}]`` 或裸数组均可），否则平台会认为
+        该后端不支持种子并返回 ``seeds: null``；状态接口同理。
         """
 
     @abstractmethod
@@ -641,7 +865,8 @@ class ImageGenStandard(ABC):
     ) -> str:
         count = self._clamp_count(args.count)
         resolution = self._normalize_resolution(args.resolution)
-        extra = self._merge_extra(args.extra, resolution)
+        seeds = normalize_seeds(getattr(args, SEEDS_ARG, None), count)
+        extra = self._merge_extra(args.extra, resolution, has_seeds=seeds is not None)
         sync = self._default_sync if args.sync is None else bool(args.sync)
         reference_images = await self._load_reference_images(
             backend, getattr(args, REFERENCE_ARG, None)
@@ -654,6 +879,7 @@ class ImageGenStandard(ABC):
             extra=extra,
             resolution=resolution,
             reference_images=reference_images,
+            seeds=seeds,
         )
         task_id = self._require_task_id(payload)
         result: Dict[str, Any] = {
@@ -662,6 +888,8 @@ class ImageGenStandard(ABC):
             "count": count,
             "resolution": resolution,
         }
+        # 后端回报的种子优先；未回报说明该后端没有真正使用种子（不支持则忽略）
+        result[SEEDS_ARG] = parse_seeds(payload, count)
         if reference_images:
             result["reference_count"] = len(reference_images)
         if payload.get("error"):
@@ -677,6 +905,7 @@ class ImageGenStandard(ABC):
             "progress": self._normalize_progress(payload.get("progress")),
             "count": payload.get("count"),
             "error": payload.get("error"),
+            "seeds": parse_seeds(payload),
         }
         return self._dumps(result)
 
@@ -691,7 +920,7 @@ class ImageGenStandard(ABC):
                 f"（例如 {DEFAULT_OUTPUT_DIR}），收到: {args.path!r}"
             )
 
-        await self._status_until_settled(
+        settled = await self._status_until_settled(
             args.task_id, self._clamp_wait_timeout(args.wait_timeout)
         )
 
@@ -701,7 +930,13 @@ class ImageGenStandard(ABC):
             prefix=args.prefix,
             naming=NAMING_STAMP,
         )
-        outcome = await self.download_to(backend, args.task_id, plan, index=args.index)
+        outcome = await self.download_to(
+            backend,
+            args.task_id,
+            plan,
+            index=args.index,
+            seeds=seeds_by_index(parse_seeds(settled)),
+        )
         if not outcome.files:
             raise ImageGenToolError(
                 "图片保存失败: "
@@ -733,7 +968,8 @@ class ImageGenStandard(ABC):
 
         count = self._clamp_count(args.count)
         resolution = self._normalize_resolution(args.resolution)
-        extra = self._merge_extra(args.extra, resolution)
+        seeds = normalize_seeds(getattr(args, SEEDS_ARG, None), count)
+        extra = self._merge_extra(args.extra, resolution, has_seeds=seeds is not None)
         reference_images = await self._load_reference_images(
             backend, getattr(args, REFERENCE_ARG, None)
         )
@@ -746,6 +982,7 @@ class ImageGenStandard(ABC):
             extra=extra,
             resolution=resolution,
             reference_images=reference_images,
+            seeds=seeds,
         )
         task_id = self._require_task_id(payload)
         timeout = self._resolve_oneshot_timeout(args.timeout)
@@ -758,7 +995,15 @@ class ImageGenStandard(ABC):
 
         if not self._default_sync:
             return self._dumps(
-                self._pending_result(task_id, plan, count, resolution, timeout, args)
+                self._pending_result(
+                    task_id,
+                    plan,
+                    count,
+                    resolution,
+                    timeout,
+                    args,
+                    parse_seeds(payload, count),
+                )
             )
 
         settled = await self._status_until_settled(task_id, timeout)
@@ -778,6 +1023,7 @@ class ImageGenStandard(ABC):
                     "resolution": resolution,
                     "files": [],
                     "mode": args.mode,
+                    "seeds": parse_seeds(settled, count),
                     "note": (
                         f"生成未在 {timeout} 秒内完成，图片尚未就绪。"
                         "请稍后用 image_task_status(wait_timeout=30) 查询进度，"
@@ -786,7 +1032,10 @@ class ImageGenStandard(ABC):
                 }
             )
 
-        outcome = await self.download_to(backend, task_id, plan)
+        seed_map = seeds_by_index(parse_seeds(settled, count))
+        outcome = await self.download_to(
+            backend, task_id, plan, seeds=seed_map or None
+        )
         if not outcome.items:
             raise ImageGenToolError(
                 "图片保存失败: "
@@ -806,7 +1055,9 @@ class ImageGenStandard(ABC):
             "count": count,
             "resolution": resolution,
             "mode": args.mode,
-            "files": files,
+            "files": attach_file_seeds(
+                files, seeds_by_index(parse_seeds(settled, count))
+            ),
         }
         errors = outcome.errors + persist_errors
         if errors:
@@ -826,7 +1077,8 @@ class ImageGenStandard(ABC):
         """
         count = self._clamp_count(args.count)
         resolution = self._normalize_resolution(args.resolution)
-        extra = self._merge_extra(args.extra, resolution)
+        seeds = normalize_seeds(getattr(args, SEEDS_ARG, None), count)
+        extra = self._merge_extra(args.extra, resolution, has_seeds=seeds is not None)
         timeout = self._resolve_oneshot_timeout(args.timeout)
         reference_images = await self._load_reference_images(
             backend, getattr(args, REFERENCE_ARG, None)
@@ -840,6 +1092,7 @@ class ImageGenStandard(ABC):
             extra=extra,
             resolution=resolution,
             reference_images=reference_images,
+            seeds=seeds,
         )
         task_id = self._require_task_id(payload)
         plan = self.plan_targets(
@@ -849,7 +1102,15 @@ class ImageGenStandard(ABC):
             multi=count > 1,
         )
         return self._dumps(
-            self._pending_result(task_id, plan, count, resolution, timeout, args)
+            self._pending_result(
+                task_id,
+                plan,
+                count,
+                resolution,
+                timeout,
+                args,
+                parse_seeds(payload, count),
+            )
         )
 
     # ------------------------------------------------------------------
@@ -866,11 +1127,17 @@ class ImageGenStandard(ABC):
         return max(1, min(value, MAX_COUNT))
 
     def _merge_extra(
-        self, extra: Optional[Dict[str, Any]], resolution: Optional[str] = None
+        self,
+        extra: Optional[Dict[str, Any]],
+        resolution: Optional[str] = None,
+        *,
+        has_seeds: bool = False,
     ) -> Dict[str, Any]:
         """过滤掉与标准参数同名的键，并把分辨率解析为 width/height 合并进去。
 
         ``extra`` 中显式给出的 ``width`` / ``height`` 优先级高于 ``resolution``。
+        调用方已用 ``seeds`` 指定种子时，``extra.seed`` 被丢弃，避免同一颗种子
+        从两条通道下发（契约字段优先）。
         """
         reserved = {
             "prompt",
@@ -882,6 +1149,7 @@ class ImageGenStandard(ABC):
             "wait_timeout",
             RESOLUTION_ARG,
             REFERENCE_ARG,
+            SEEDS_ARG,
             # 平台侧参数：仅用于落盘与展示，不该下发给服务
             GENERATOR_ARG,
             "mode",
@@ -889,6 +1157,8 @@ class ImageGenStandard(ABC):
             "prefix",
         }
         merged = {k: v for k, v in (extra or {}).items() if k not in reserved}
+        if has_seeds:
+            merged.pop("seed", None)
 
         size = parse_resolution(resolution)
         if size is not None:
@@ -1016,24 +1286,39 @@ class ImageGenStandard(ABC):
         resolution: str,
         timeout: int,
         args: ImageGenerateShowArgs,
+        seeds: Optional[List[Dict[str, int]]] = None,
     ) -> Dict[str, Any]:
         """异步模式的结果：给出全部确定路径，交给平台后台下载并在就绪后展示。
 
         ``paths`` 里的每个条目都会被前端登记成一条待生成文件；``task_id`` /
         ``prefix`` / ``count`` 让后台轮询器能还原同一套确定性命名去取图；
         ``image_generator`` 让轮询器在多配置时用**同一个**配置去下载。
+
+        ``seeds`` 是「index → 种子」的显式关联，写进每条待生成文件子消息，
+        这样随机种子在异步落盘、重连、手动补录之后都不会丢。
         """
         predicted = plan.predict(count)
+        seed_map = seeds_by_index(seeds)
         return {
             "status": "pending",
             "task_id": task_id,
             "path": predicted[0].path.value,
             "paths": [target.path.value for target in predicted],
+            # 显式的「下标 → 路径 → 种子」三元组：登记待生成文件时不依赖列表顺序
+            "files": [
+                {
+                    "index": target.index,
+                    "path": target.path.value,
+                    "seed": seed_map.get(int(target.index)),
+                }
+                for target in predicted
+            ],
             "count": count,
             "prefix": plan.prefix,
             "resolution": resolution,
             "timeout": timeout,
             "mode": args.mode,
+            "seeds": seeds,
             "image_generator": self._generator_name,
             "note": (
                 f"图片已提交生成（任务 {task_id}），保存与展示由平台在后台完成，"
@@ -1221,8 +1506,13 @@ class ImageGenStandard(ABC):
         plan: TargetPlan,
         *,
         index: Optional[int] = None,
+        seeds: Optional[Dict[int, int]] = None,
     ) -> DownloadOutcome:
-        """按已规划的路径下载并落盘，返回含元信息与原始字节的结果。"""
+        """按已规划的路径下载并落盘，返回含元信息与原始字节的结果。
+
+        ``seeds`` 是 ``index → 种子`` 映射（来自后端回报），会随每张图一起写进
+        ``files``，因此「图 ↔ 种子」的关联不依赖调用方按顺序对齐。
+        """
         backend = self._require_backend(backend)
 
         blobs = await self.download(task_id, index)
@@ -1235,6 +1525,13 @@ class ImageGenStandard(ABC):
         results = await backend.aupload_files(
             [(target.path, data) for target, data in payloads]
         )
+
+        seed_map: Dict[int, int] = dict(seeds or {})
+        for blob in blobs:
+            # blob 上带的种子来自实现类的权威记录（任务里逐张存的），优先于状态快照：
+            # 中间某张失败时下标会顺移，状态快照里的 index 会错位
+            if blob.seed is not None:
+                seed_map[int(blob.index)] = int(blob.seed)
 
         files: List[Dict[str, Any]] = []
         errors: List[str] = []
@@ -1250,6 +1547,7 @@ class ImageGenStandard(ABC):
                     "path": target.path.value,
                     "mime": target.mime_type,
                     "bytes": len(data),
+                    "seed": seed_map.get(int(target.index)),
                 }
             )
             items.append((target, data))

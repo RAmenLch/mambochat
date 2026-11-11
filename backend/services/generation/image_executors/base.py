@@ -65,6 +65,19 @@ class ImageRef:
         }.get(mime, "png")
 
 
+@dataclass(frozen=True)
+class GeneratedImage:
+    """一次生成的产物。
+
+    ``seed`` 是**实际生效**的种子：能从响应里回读就用回读值，否则用下发值；
+    执行器不支持种子时为 ``None``（不要用下发值充数，否则返回值会误导「可复现」）。
+    """
+
+    data: bytes
+    mime_type: str
+    seed: Optional[int] = None
+
+
 @dataclass
 class ExecutorContext:
     """一次生成请求的入参（平台侧已归一化）。"""
@@ -91,6 +104,18 @@ def format_size(resolution: Optional[Tuple[int, int]]) -> str:
     """``(1024, 768)`` → ``"1024x768"``。"""
     width, height = resolution or DEFAULT_RESOLUTION
     return f"{max(1, int(width))}x{max(1, int(height))}"
+
+
+def resolve_seed(echoed: Any, requested: Any) -> Optional[int]:
+    """确定「实际生效」的种子：响应回读值优先，其次下发值，都没有则 ``None``。"""
+    for candidate in (echoed, requested):
+        if candidate is None or isinstance(candidate, bool):
+            continue
+        try:
+            return int(candidate)
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
 def aspect_ratio_for(
@@ -214,8 +239,8 @@ class ImageApiExecutor(ABC):
     @abstractmethod
     async def generate(
         self, client: httpx.AsyncClient, ctx: ExecutorContext
-    ) -> Tuple[bytes, str]:
-        """发起一次生成，返回 ``(图片字节, mime)``。"""
+    ) -> GeneratedImage:
+        """发起一次生成，返回 :class:`GeneratedImage`（图片字节 + mime + 实际种子）。"""
 
     # ------------------------------------------------------------------
     # 公共工具

@@ -25,6 +25,7 @@ from backend.services.generation.image_executors import (
     ImageRef,
     get_executor,
 )
+from backend.services.generation.image_executors.base import resolve_seed
 
 from .model_standard import ChatModelImageGenStandard
 from .standard import (
@@ -102,6 +103,10 @@ class ImageApiImageGenStandard(ChatModelImageGenStandard):
     def _resolve_protocol(self, protocol: Optional[str] = None) -> str:
         return self._executor.key
 
+    def _seed_supported(self) -> bool:
+        """执行器白名单里有 ``seed`` 且模型声明了该能力时才真正下发。"""
+        return "seed" in self._allowed_options
+
     @property
     def executor(self) -> ImageApiExecutor:
         return self._executor
@@ -127,7 +132,8 @@ class ImageApiImageGenStandard(ChatModelImageGenStandard):
         resolution: Optional[str],
         extra: Dict[str, Any],
         reference_images: List[RefImage],
-    ) -> Tuple[bytes, str]:
+        seed: Optional[int] = None,
+    ) -> Tuple[bytes, str, Optional[int]]:
         if self.reference_required and not reference_images:
             minimum = self._min_references() or 1
             raise ImageGenToolError(
@@ -136,6 +142,7 @@ class ImageApiImageGenStandard(ChatModelImageGenStandard):
             )
 
         text = self._compose_prompt(prompt, negative_prompt)
+        options = self._merge_options(extra, seed=seed)
         ctx = ExecutorContext(
             model_id=self._model_id,
             prompt=text,
@@ -143,29 +150,43 @@ class ImageApiImageGenStandard(ChatModelImageGenStandard):
             api_key=self._api_key,
             timeout=self._timeout,
             resolution=parse_resolution(resolution),
-            options=self._merge_options(extra),
+            options=options,
             references=self._to_refs(reference_images),
         )
 
         client = await self._client()
         try:
-            return await self._executor.generate(client, ctx)
+            result = await self._executor.generate(client, ctx)
         except ExecutorError as exc:
             raise ImageGenToolError(str(exc)) from exc
         finally:
             await client.aclose()
 
+        # 下发了 seed 但服务端没回读时，用下发值作为「实际生效」值
+        applied = resolve_seed(result.seed, options.get("seed"))
+        return result.data, result.mime_type, applied
+
     # ------------------------------------------------------------------
     # 参数与参考图
     # ------------------------------------------------------------------
 
-    def _merge_options(self, extra: Dict[str, Any]) -> Dict[str, Any]:
-        """模型级默认参数 ← 调用方 ``extra``，再按执行器能力裁剪。"""
+    def _merge_options(
+        self, extra: Dict[str, Any], *, seed: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """模型级默认参数 ← 调用方 ``extra``，再按执行器能力裁剪。
+
+        ``seed`` 是**逐张**下发的种子：``extra`` / 模型默认里的 ``seed`` 一律被它
+        覆盖，保证同一批图里每张用的是自己的种子。
+        """
         merged: Dict[str, Any] = dict(self._image_options)
         for key, value in (extra or {}).items():
             if value is None:
                 continue
             merged[key] = value
+        if seed is not None:
+            merged["seed"] = int(seed)
+        else:
+            merged.pop("seed", None)
         return {
             key: value
             for key, value in merged.items()

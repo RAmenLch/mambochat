@@ -37,6 +37,7 @@ from backend.services.generation.agent.image_gen.factory import (
 from backend.services.generation.agent.image_gen.standard import (
     DEFAULT_OUTPUT_DIR,
     generate_show_args_model,
+    pending_file_entries,
 )
 from backend.services.stream_manager_service import stream_manager
 
@@ -140,6 +141,7 @@ async def _execute(
         negative_prompt=merged.get("negative_prompt"),
         resolution=merged.get("resolution") or None,
         count=int(merged.get("count") or 1),
+        seeds=merged.get("seeds"),
         extra=merged.get("extra") or None,
         mode=mode,
         path=merged.get("path") or None,
@@ -235,6 +237,7 @@ async def _submit_and_record(
             "resolution": pending.get("resolution") or args.resolution,
             "mode": mode,
             "timeout": timeout,
+            "seeds": pending.get("seeds"),
             "files": [],
         },
     )
@@ -576,10 +579,9 @@ async def _append_pending_file_sub_messages(
     驱动下载，就绪后把子消息就地改成完成态，超时则写 ``pending_failed_reason``
     并提供「获取文件」。子消息一律 ``context_participation_length=0``，不进入上下文。
     """
-    paths = pending.get("paths") or ([pending["path"]] if pending.get("path") else [])
     payloads: List[Dict[str, Any]] = []
     async with AsyncSessionLocal() as db:
-        for path in paths:
+        for entry in pending_file_entries(pending):
             sub_id = generate_uuid()
             db_sub = await message_crud.create_sub_message(
                 db,
@@ -596,14 +598,15 @@ async def _append_pending_file_sub_messages(
                         image_run_id=run_id,
                         image_slot_id=slot_id,
                         image_run_args=args,
-                        pending_file_path=path,
-                        show_file_path=path,
+                        pending_file_path=entry["path"],
+                        show_file_path=entry["path"],
                         pending_file_timeout=timeout,
                         pending_file_deadline=time.time() + float(timeout or 300),
                         pending_image_task_id=pending.get("task_id"),
                         pending_image_prefix=pending.get("prefix"),
                         pending_image_count=pending.get("count"),
                         pending_image_generator=pending.get("image_generator"),
+                        pending_image_seed=entry.get("seed"),
                     ),
                 ),
                 sub_message_id=sub_id,

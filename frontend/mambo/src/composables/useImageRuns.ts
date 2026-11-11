@@ -318,5 +318,11 @@ export function describeRunArgs(args: Record<string, any> | null): string {
   if (Array.isArray(args.reference_images) && args.reference_images.length > 0) {
     parts.push(`ref×${args.reference_images.length}`)
   }
+  const seeds = args.seeds ?? args.extra?.seed
+  if (Array.isArray(seeds)) {
+    if (seeds.length > 0) parts.push(`seed×${seeds.length}`)
+  } else if (seeds !== undefined && seeds !== null && seeds !== '') {
+    parts.push(`seed ${seeds}`)
+  }
   return parts.join(' · ')
 }

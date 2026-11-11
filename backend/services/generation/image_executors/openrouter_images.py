@@ -16,10 +16,12 @@ import httpx
 from .base import (
     ExecutorContext,
     ExecutorError,
+    GeneratedImage,
     ImageApiExecutor,
     aspect_ratio_for,
     decode_base64,
     resolution_tier,
+    resolve_seed,
     sniff_mime,
 )
 
@@ -51,7 +53,7 @@ class OpenRouterImagesExecutor(ImageApiExecutor):
 
     async def generate(
         self, client: httpx.AsyncClient, ctx: ExecutorContext
-    ) -> Tuple[bytes, str]:
+    ) -> GeneratedImage:
         options = dict(ctx.options or {})
         body: Dict[str, Any] = {
             "model": ctx.model_id,
@@ -81,10 +83,10 @@ class OpenRouterImagesExecutor(ImageApiExecutor):
             headers=self.headers(ctx.api_key),
             json_body=body,
         )
-        return self._pick_image(payload)
+        return self._pick_image(payload, requested_seed=options.get("seed"))
 
     @staticmethod
-    def _pick_image(payload: Dict[str, Any]) -> Tuple[bytes, str]:
+    def _pick_image(payload: Dict[str, Any], requested_seed: Any = None) -> GeneratedImage:
         items = payload.get("data")
         if not isinstance(items, list) or not items:
             raise ExecutorError(_no_image_message(payload))
@@ -97,7 +99,11 @@ class OpenRouterImagesExecutor(ImageApiExecutor):
         data = decode_base64(encoded)
         media_type = str(first.get("media_type") or "").strip().lower()
         mime = sniff_mime(data) or (media_type if media_type.startswith("image/") else "")
-        return data, mime or "image/png"
+        return GeneratedImage(
+            data=data,
+            mime_type=mime or "image/png",
+            seed=resolve_seed(first.get("seed"), requested_seed),
+        )
 
     def describe(self) -> Dict[str, Any]:
         info = super().describe()

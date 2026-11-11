@@ -136,6 +136,8 @@ export default {
     mode: 'Display mode',
     seed: 'Seed',
     randomSeed: 'Random',
+    seedsPlaceholder: '-1 for random / 12345; separate multiple seeds with commas',
+    seedsInvalid: 'Seeds must be comma-separated integers (-1 means random)',
     referenceImages: 'Reference images',
     referenceImagesPlaceholder: '/.mambo/chat_user_file/xxx.png (one per line)',
     referenceImagesHint: 'Workspace image paths, one per line, up to 8; an unsupported backend will return an error',

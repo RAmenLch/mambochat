@@ -8,7 +8,7 @@ import time
 from fastapi import APIRouter, Body, Depends, HTTPException, status, BackgroundTasks, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.responses import StreamingResponse
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from backend.services import generation_service
 from backend.services import chat_status_service
@@ -75,6 +75,8 @@ class ImageRunRerunRequest(BaseModel):
     timeout: Optional[int] = None
     # 参考图：workspace 虚拟路径列表；后端不支持参考图时会明确报错
     reference_images: Optional[List[str]] = None
+    # 种子：数字或数字数组，-1 随机；生成张数以 count 为准
+    seeds: Optional[Union[int, List[int]]] = None
 
 
 class PendingFileFetchResponse(BaseModel):

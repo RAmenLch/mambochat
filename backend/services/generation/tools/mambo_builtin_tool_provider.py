@@ -145,8 +145,11 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
                 if data.get("status") == "pending":
                     # show 等待单个文件；异步一条龙会给出多个确定路径，
                     # 每条路径登记一个待生成文件，并由 task_id 驱动后台下载。
-                    paths = data.get("paths") or ([data["path"]] if data.get("path") else [])
-                    for path in paths:
+                    from backend.services.generation.agent.image_gen.standard import (
+                        pending_file_entries,
+                    )
+
+                    for entry in pending_file_entries(data):
                         yield CreateSubMessage(
                             sub_message_id=generate_uuid(),
                             type=schemas_enums.SubMessageType.FILE.value,
@@ -155,8 +158,8 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
                             initial_content="",
                             config=SubMessageConfig(
                                 context_participation_length=0,
-                                pending_file_path=path,
-                                show_file_path=path,
+                                pending_file_path=entry["path"],
+                                show_file_path=entry["path"],
                                 pending_file_timeout=data.get("timeout", 300),
                                 pending_file_deadline=time.time()
                                 + float(data.get("timeout") or 300),
@@ -165,6 +168,7 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
                                 pending_image_prefix=data.get("prefix"),
                                 pending_image_count=data.get("count"),
                                 pending_image_generator=data.get("image_generator"),
+                                pending_image_seed=entry.get("seed"),
                                 image_run_id=tool_call_id,
                                 image_run_args=cached_content.get_argument_dict(),
                             ),
@@ -179,6 +183,11 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
                     arg_path = run_args.get("path")
                     arg_path = arg_path if isinstance(arg_path, str) and arg_path else None
                     paths_by_file = collect_file_paths(data)
+                    from backend.services.generation.agent.image_gen.standard import (
+                        file_seeds,
+                    )
+
+                    seeds_by_file = file_seeds(data)
                     for file_id in file_ids:
                         yield CreateSubMessage(
                             sub_message_id=generate_uuid(),
@@ -190,6 +199,7 @@ class MamboAgentBuiltinToolProvider(BaseToolProvider):
                                 context_participation_length=0,
                                 show_tool_mode=data.get("mode", "Normal"),
                                 show_file_path=paths_by_file.get(file_id) or arg_path,
+                                pending_image_seed=seeds_by_file.get(file_id),
                                 image_run_id=tool_call_id,
                                 image_run_args=run_args,
                             ),

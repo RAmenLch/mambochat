@@ -50,6 +50,8 @@ export interface SubMessageConfig {
   image_slot_id?: string | null
   /** 本次生成下发的参数快照 */
   image_run_args?: Record<string, any> | null
+  /** 这张图实际使用的随机种子（随机种子存档；与图片一一对应，不依赖顺序） */
+  pending_image_seed?: number | null
   /** 用户当前置顶的 run（只写在插槽内最早的一条 File 子消息上） */
   image_pinned_run_id?: string | null
   /** 是否为"图片重跑生成记录"子消息（McpTool 类型，不参与上下文，只在图片区域展示） */
@@ -93,6 +95,8 @@ export interface ImageRunRerunRequest {
   path?: string
   timeout?: number
   reference_images?: string[]
+  /** 种子：数字或数字数组，-1 随机；生成张数以 count 为准 */
+  seeds?: number | number[]
 }
 
 /** 图片重跑结果：record 为本次生成记录，files 为本次产出的图片子消息

@@ -150,8 +150,8 @@
         </el-form-item>
         <el-form-item :label="t('chat.imageRun.seed')">
           <div class="seed-row">
-            <el-input v-model="form.seed" placeholder="-1 / 12345" />
-            <el-button text size="small" @click="form.seed = randomSeed()">
+            <el-input v-model="form.seeds" :placeholder="t('chat.imageRun.seedsPlaceholder')" />
+            <el-button text size="small" @click="form.seeds = randomSeed()">
               {{ t('chat.imageRun.randomSeed') }}
             </el-button>
           </div>
@@ -213,7 +213,7 @@ const form = reactive({
   resolution: '',
   count: 1,
   mode: 'Normal',
-  seed: '',
+  seeds: '',
   referenceImages: '',
 })
 
@@ -399,6 +399,26 @@ function randomSeed(): string {
   return String(Math.floor(Math.random() * 1_000_000_000))
 }
 
+/** 参数快照 → 输入框文本：优先 seeds，回落旧字段 extra.seed；多颗用逗号分隔 */
+function seedsToInput(seeds: unknown, fallback: unknown): string {
+  const source = seeds ?? fallback
+  if (Array.isArray(source)) return source.filter(item => item !== null && item !== undefined).join(', ')
+  if (source === null || source === undefined || source === '') return ''
+  return String(source)
+}
+
+/** 输入框文本 → seeds 入参：单颗发数字，多颗发数组；非数字直接提示错误 */
+function parseSeeds(raw: string): number | number[] | undefined {
+  const items = raw
+    .split(/[,，\s]+/)
+    .map(item => item.trim())
+    .filter(Boolean)
+  if (items.length === 0) return undefined
+  const values = items.map(item => Number(item))
+  if (values.some(value => Number.isNaN(value))) throw new Error('seed')
+  return values.length === 1 ? values[0] : values
+}
+
 function openRerunDialog() {
   const args = activeRun.value?.args ?? {}
   form.prompt = typeof args.prompt === 'string' ? args.prompt : ''
@@ -407,7 +427,7 @@ function openRerunDialog() {
   form.count = Number(args.count) > 0 ? Number(args.count) : 1
   form.mode = typeof args.mode === 'string' ? args.mode : activeRun.value?.mode || 'Normal'
   const extra = args.extra && typeof args.extra === 'object' ? args.extra : {}
-  form.seed = extra.seed === undefined || extra.seed === null ? '' : String(extra.seed)
+  form.seeds = seedsToInput(args.seeds, extra.seed)
   form.referenceImages = Array.isArray(args.reference_images)
     ? (args.reference_images as string[]).join('\n')
     : ''
@@ -426,10 +446,12 @@ async function submitRerun() {
     return
   }
 
-  const extra: Record<string, any> = {}
-  if (form.seed.trim()) {
-    const seed = Number(form.seed)
-    if (!Number.isNaN(seed)) extra.seed = seed
+  let seeds: number | number[] | undefined
+  try {
+    seeds = parseSeeds(form.seeds)
+  } catch {
+    ElMessage.error(t('chat.imageRun.seedsInvalid'))
+    return
   }
 
   const referenceImages = form.referenceImages
@@ -445,7 +467,7 @@ async function submitRerun() {
       resolution: form.resolution.trim() || undefined,
       count: form.count,
       mode: form.mode,
-      extra: Object.keys(extra).length > 0 ? extra : undefined,
+      seeds,
       reference_images: referenceImages.length > 0 ? referenceImages : undefined,
     })
 
