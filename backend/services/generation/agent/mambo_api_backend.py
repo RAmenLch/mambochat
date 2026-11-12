@@ -73,11 +73,13 @@ class MamboAPIBackend(BackendProtocol):
         execute_timeout: int = 180,
         max_read_chars: int = 100_000,
         max_grep_matches: int = 1000,
+        max_grep_match_chars: int = 500,
         multimodal_describer: MultimodalDescriber | None = None,
     ) -> None:
         super().__init__(
             max_read_chars=max_read_chars,
             max_grep_matches=max_grep_matches,
+            max_grep_match_chars=max_grep_match_chars,
             multimodal_describer=multimodal_describer,
         )
         self.backend_id = backend_id
@@ -628,13 +630,25 @@ class MamboAPIBackend(BackendProtocol):
         offset: int = 0,
         limit: int | None = None,
     ) -> GrepResult:
+        if offset < 0:
+            return GrepResult(error=BackendError(
+                code=ErrorCode.INVALID, path=path,
+                message=f"offset 不得为负数，当前为 {offset}",
+            ))
+        if limit is not None and limit < 1:
+            return GrepResult(error=BackendError(
+                code=ErrorCode.INVALID, path=path,
+                message=f"limit 必须为正数，当前为 {limit}",
+            ))
         search_path = self._normalize_path(path) if path else "/"
+        # 永远下发具体条数：旧版客户端仅在 limit 非 None 时才做条数截断
+        effective_limit = self._max_grep_matches if limit is None else min(limit, self._max_grep_matches)
         result = await self._run_ws_call(
             "grep",
             self._call,
             "grep_files",
             {"pattern": pattern, "path": search_path, "glob": glob, "regex": regex,
-             "offset": offset, "limit": limit, "ignore_dirs": self.ignore_dirs},
+             "offset": offset, "limit": effective_limit, "ignore_dirs": self.ignore_dirs},
         )
         if result is None:
             return GrepResult(error=BackendError(
@@ -643,8 +657,8 @@ class MamboAPIBackend(BackendProtocol):
         if isinstance(result, dict) and result.get("error"):
             return GrepResult(error=self._map_error(result))
         data = result.get("matches", [])
-        truncated = result.get("truncated", False) if isinstance(result, dict) else False
-        total_matches = result.get("total", len(data)) if isinstance(result, dict) else 0
+        remote_truncated = result.get("truncated", False) if isinstance(result, dict) else False
+        remote_total = result.get("total", len(data)) if isinstance(result, dict) else 0
         matches: list[GrepMatch] = []
         for m in data:
             matches.append(
@@ -654,7 +668,21 @@ class MamboAPIBackend(BackendProtocol):
                     text=m.get("text", ""),
                 )
             )
-        return GrepResult(matches=matches, truncated=truncated, total_matches=total_matches)
+        # 服务端兜底：条数上限 + 单行字符上限。
+        # offset 传 0 —— 分页已在远端完成，此处只做封顶与单行开窗截断。
+        limited = self._apply_grep_limit(matches, 0, effective_limit, pattern=pattern, regex=regex)
+        limited_matches = limited.matches or []
+        total_matches = remote_total if isinstance(remote_total, int) else len(matches)
+        logger.info(
+            "[API_BACKEND] agrep: pattern=%s raw=%d returned=%d chars=%d",
+            pattern, len(matches), len(limited_matches),
+            sum(len(m.text or "") for m in limited_matches),
+        )
+        return GrepResult(
+            matches=limited_matches,
+            truncated=bool(remote_truncated) or limited.truncated,
+            total_matches=max(total_matches, len(matches)),
+        )
 
     def glob(self, pattern: str, path: VirtualPath = VirtualPath("/workspace")) -> GlobResult:
         try:

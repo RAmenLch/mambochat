@@ -37,6 +37,12 @@ const DEFAULT_IGNORE_DIRS = [
 /** Hard cap on files visited by a single recursive scan (anti-freeze guard). */
 const MAX_WALK_FILES = 100000
 
+/** Hard cap on matches returned by a single grep call (aligned with the Python backends). */
+const MAX_GREP_MATCHES = 200
+
+/** Hard cap on the returned text of one matched line; longer lines are windowed on the match. */
+const MAX_GREP_MATCH_CHARS = 500
+
 /** Convert http:// to ws:// and https:// to wss:// */
 function httpToWs(url: string): string {
   const clean = url.replace(/\/+$/, '')
@@ -64,6 +70,13 @@ interface ClientCommand {
   request_id: string
   method: string
   params: Record<string, unknown>
+}
+
+/** One grep match, mirroring mambo_agents.backends.protocol.GrepMatch. */
+interface GrepMatch {
+  path: string
+  line: number
+  text: string
 }
 
 // ---------------------------------------------------------------------------
@@ -819,6 +832,13 @@ class ApiClientConnection {
       return { error: `路径不能是根目录 '/'；请使用子目录如 '/workspace'`, error_code: 'PATH_IS_ROOT' }
     }
 
+    if (offset < 0) {
+      return { error: `offset 不得为负数，当前为 ${offset}`, error_code: 'INVALID' }
+    }
+    if (limit !== undefined && limit < 1) {
+      return { error: `limit 必须为正数，当前为 ${limit}`, error_code: 'INVALID' }
+    }
+
     const base = this.resolvePath(vpath)
 
     // Path does not exist
@@ -841,16 +861,15 @@ class ApiClientConnection {
     log.info(`[ApiClient] handleGrepFiles: vpath=${vpath} physical=${base} pattern=${pattern} regex=${regex} glob=${glob}`)
 
     const isDir = fs.existsSync(base) && fs.statSync(base).isDirectory()
-    const MAX_GREP_MATCHES = 200
 
     // 1) Try ripgrep (fast native search)
     const rgMatches = await this._ripgrepGrep(pattern, base, isDir ? glob : undefined, regex, mergedIgnore)
     if (rgMatches !== null) {
       // Post-filter rg output: --glob uses gitignore semantics (not POSIX),
       // and ignore_dirs must be applied uniformly across both search paths.
-      const filtered: object[] = []
+      const filtered: GrepMatch[] = []
       for (const m of rgMatches) {
-        const mpath = (m as { path: string }).path
+        const mpath = m.path
         // ignore_dirs: parent-segment check (mirrors the backends' _in_ignored_dir)
         if (mergedIgnore.length > 0) {
           const rel = mpath.startsWith('/workspace/')
@@ -868,26 +887,11 @@ class ApiClientConnection {
         }
         filtered.push(m)
       }
-      // Sort by (path, line) — mirrors local.py's
-      // matches.sort(key=lambda m: (str(m.path), m.line))
-      filtered.sort((a, b) => {
-        const pa = (a as { path: string }).path
-        const pb = (b as { path: string }).path
-        if (pa !== pb) return pa < pb ? -1 : 1
-        return (a as { line: number }).line - (b as { line: number }).line
-      })
-      const effectiveLimit = limit !== undefined ? Math.min(limit, MAX_GREP_MATCHES) : MAX_GREP_MATCHES
-      const sliced = offset > 0 ? filtered.slice(offset) : filtered
-      const limited = limit !== undefined ? sliced.slice(0, limit) : sliced
-      return {
-        matches: limited,
-        truncated: (offset + effectiveLimit) < filtered.length,
-        total: filtered.length,
-      }
+      return this._finalizeGrep(filtered, pattern, regex, offset, limit)
     }
 
-    // 2) Node.js fallback
-    const matches: object[] = []
+    // 2) Node.js fallback — collect at most MAX_GREP_MATCHES (mirrors local.py)
+    const matches: GrepMatch[] = []
     const maxFileSize = 10 * 1024 * 1024
     let scannedCount = 0
 
@@ -932,12 +936,62 @@ class ApiClientConnection {
     }
 
     log.info(`[ApiClient] handleGrepFiles: found ${matches.length} matches`)
-    const total = matches.length
+    return this._finalizeGrep(matches, pattern, regex, offset, limit)
+  }
+
+  /** Apply the shared grep caps: offset/limit paging, MAX_GREP_MATCHES and
+   *  MAX_GREP_MATCH_CHARS. Mirrors mambo_agents.backends.protocol._apply_grep_limit
+   *  so the client and the server agree on the returned shape and semantics.
+   */
+  private _finalizeGrep(
+    matches: GrepMatch[],
+    pattern: string,
+    regex: boolean,
+    offset: number,
+    limit: number | undefined,
+  ): Record<string, unknown> {
+    // Sort by (path, line) — mirrors local.py's
+    // matches.sort(key=lambda m: (str(m.path), m.line))
+    const sorted = [...matches].sort((a, b) => {
+      if (a.path !== b.path) return a.path < b.path ? -1 : 1
+      return a.line - b.line
+    })
+    const total = sorted.length
+    if (total > 0 && offset >= total) {
+      return { error: `偏移量 ${offset} 超过匹配总数 (${total} 条)`, error_code: 'INVALID' }
+    }
     const effectiveLimit = limit !== undefined ? Math.min(limit, MAX_GREP_MATCHES) : MAX_GREP_MATCHES
-    const sliced = offset > 0 ? matches.slice(offset) : matches
-    const limited = limit !== undefined ? sliced.slice(0, limit) : sliced
-    const truncated = (offset + effectiveLimit) < total || total >= MAX_GREP_MATCHES
-    return { matches: limited, truncated, total }
+    const page = sorted.slice(offset, offset + effectiveLimit)
+    return {
+      matches: page.map(m => ({ ...m, text: this._truncateGrepLine(m.text, pattern, regex) })),
+      truncated: (offset + effectiveLimit) < total,
+      total,
+    }
+  }
+
+  /** Truncate one matched line to MAX_GREP_MATCH_CHARS, centering the window on the
+   *  match so the reason the line was returned stays visible
+   *  (mirrors protocol.py::_truncate_grep_line).
+   */
+  private _truncateGrepLine(text: string, pattern: string, regex: boolean): string {
+    if (text.length <= MAX_GREP_MATCH_CHARS) return text
+    try {
+      const source = regex ? pattern : pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const m = new RegExp(source).exec(text)
+      if (m) {
+        const surrounding = MAX_GREP_MATCH_CHARS - m[0].length - 2  // reserve for the "…" markers
+        if (surrounding > 0) {
+          const half = Math.floor(surrounding / 2)
+          let windowStart = Math.max(0, m.index - half)
+          const windowEnd = Math.min(text.length, windowStart + MAX_GREP_MATCH_CHARS - 2)
+          windowStart = Math.max(0, windowEnd - (MAX_GREP_MATCH_CHARS - 2))
+          return (windowStart > 0 ? '…' : '') +
+            text.slice(windowStart, windowEnd) +
+            (windowEnd < text.length ? '…' : '')
+        }
+      }
+    } catch { /* fall back to head truncation */ }
+    return text.slice(0, MAX_GREP_MATCH_CHARS - 1) + '…'
   }
 
   private async handleGlobFiles(params: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -1377,7 +1431,7 @@ class ApiClientConnection {
     glob: string | undefined,
     regex: boolean,
     ignoreDirs?: string[],
-  ): Promise<object[] | null> {
+  ): Promise<GrepMatch[] | null> {
     try {
       const args: string[] = ['--json', '--no-heading', '--hidden', '--no-ignore']
       if (!regex) args.push('-F')
@@ -1394,7 +1448,7 @@ class ApiClientConnection {
         encoding: 'utf-8',
       })
 
-      const matches: object[] = []
+      const matches: GrepMatch[] = []
       for (const line of stdout.split('\n')) {
         if (!line.trim()) continue
         try {

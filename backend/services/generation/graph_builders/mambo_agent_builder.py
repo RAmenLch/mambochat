@@ -52,6 +52,8 @@ from backend.schemas.enums import BackendType
 # 缓存友好：限制单次 read / grep 的注入量，避免大工具结果拖垮缓存命中率
 _READ_CHARS = 10_000
 _GREP_MATCHES = 200
+# 单条 grep 匹配的最大字符数（超出部分围绕匹配位置开窗截断）
+_GREP_MATCH_CHARS = 500
 
 # 缓存友好：工具结果（execute/tree 等）估算 token 超过此值即落盘（eviction），
 # 仅返回预览+文件路径给模型，避免大工具结果拖垮缓存命中率
@@ -357,6 +359,7 @@ def _build_any_backend(
             enable_execute=execute_enabled,
             max_read_chars=_READ_CHARS,
             max_grep_matches=_GREP_MATCHES,
+            max_grep_match_chars=_GREP_MATCH_CHARS,
             multimodal_describer=multimodal_describer,
         )
 
