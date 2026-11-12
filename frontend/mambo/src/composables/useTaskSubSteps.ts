@@ -260,7 +260,9 @@ export function buildSubAgentVirtualMessage(
     if (stepData.display_type !== 'tool_call') continue // tool_result 已合并到 tool_call
 
     // 匹配 tool_result（全数组搜索，step_order 可能交叉）
+    // 结果文本与多模态引用都取自 tool_result 步骤
     let resultText: string | null = null
+    let resultMedia: TaskSubStepContent['media'] = null
     for (let j = 0; j < steps.length; j++) {
       if (j === i) continue
       try {
@@ -268,11 +270,13 @@ export function buildSubAgentVirtualMessage(
         if (next.display_type !== 'tool_result') continue
         if (stepData.sub_tool_call_id && next.sub_tool_call_id === stepData.sub_tool_call_id) {
           resultText = next.content
+          resultMedia = next.media ?? null
           break
         }
         // 降级兜底：无 sub_tool_call_id 时用 tool_name 匹配
         if (!stepData.sub_tool_call_id && !next.sub_tool_call_id && next.tool_name === stepData.tool_name) {
           resultText = next.content
+          resultMedia = next.media ?? null
           break
         }
       } catch { /* skip */ }
@@ -290,7 +294,7 @@ export function buildSubAgentVirtualMessage(
           : JSON.stringify(stepData.tool_args || {}),
         result: resultText,
         is_error: false,
-        media: stepData.media ?? null,
+        media: resultMedia,
       }),
       config: { is_collapsed: false },
     } as SubMessage)

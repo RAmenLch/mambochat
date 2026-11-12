@@ -1,5 +1,4 @@
 import json
-import mimetypes
 import traceback
 from typing import AsyncGenerator, List, Dict, Any, Optional
 from langchain_core.messages import AIMessage, ToolMessage
@@ -8,7 +7,7 @@ from backend.models.base_model import generate_uuid
 from backend.schemas import enums as schemas_enums
 from backend.schemas.message import (
     ErrorContent, ReviewToolContent, AskUserContent, TaskSubStepContent,
-    SecurityReviewContent, SubMessageConfig, MultimodalMedia,
+    SecurityReviewContent, SubMessageConfig,
 )
 from backend.services.generation.core.instructions import (
     BaseInstruction, CreateSubMessage, AppendToSubMessage,
@@ -17,6 +16,9 @@ from backend.services.generation.core.instructions import (
 )
 from backend.services.generation.managers.stream_handlers.base_handler import BaseStreamHandler, StreamContext
 from backend.services.generation.managers.stream_handlers.finish_reason_monitor_handler import FinishReasonMonitorHandler
+from backend.services.generation.tools.media_utils import (
+    build_media_summary, persist_media_blocks, pick_media_path,
+)
 from backend.services.generation.worker.decode import (
     content_blocks_to_text, split_tool_message_content,
 )
@@ -324,14 +326,6 @@ class SubAgentEventHandler(BaseStreamHandler):
         "security_review_failed",
     })
 
-    # 媒体块 file_type → 允许的文件扩展名（与主代理内置工具保持一致）
-    _MEDIA_EXTENSIONS: Dict[str, frozenset[str]] = {
-        "image": frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".heif"}),
-        "audio": frozenset({".wav", ".mp3", ".aiff", ".aac", ".ogg", ".flac"}),
-        "video": frozenset({".mp4", ".mpeg", ".mov", ".avi", ".flv", ".webm", ".wmv"}),
-        "file": frozenset({".pdf", ".ppt", ".pptx"}),
-    }
-
     def __init__(self) -> None:
         # 子代理内部工具调用的目标路径提示，key=sub_tool_call_id
         # 仅保存 file_path/path 字符串（不保存完整参数，write 等工具的正文可能很大），
@@ -430,7 +424,7 @@ class SubAgentEventHandler(BaseStreamHandler):
                     args_dict = args if isinstance(args, dict) else {}
                     tc_id = tc.get("id")
                     if tc_id:
-                        path_hint = self._extract_path_hint(args_dict)
+                        path_hint = pick_media_path(args_dict)
                         if path_hint:
                             self._sub_tool_paths[tc_id] = path_hint
                     step = TaskSubStepContent(
@@ -452,20 +446,17 @@ class SubAgentEventHandler(BaseStreamHandler):
                 idx += 1
                 sub_tool_call_id = getattr(msg, "tool_call_id", None)
                 # 多模态工具结果（如 read 读取图片）：文本与媒体块分开处理，
-                # 媒体块落盘为 File 记录并写入 media 引用，供前端气泡/弹窗展示
+                # 媒体块落盘为 File 记录并写入 media 引用，供前端气泡/弹窗展示。
+                # 落盘/命名/摘要复用主代理同一套实现（media_utils），保证两处表现一致
                 result_text, media_blocks = split_tool_message_content(msg.content)
-                # read 工具的结果消息自带 read_file_path / read_file_media_type，
-                # 优先用它们派生文件名与 mime（不依赖 tool_call 事件是否成对出现）
-                extra = getattr(msg, "additional_kwargs", None) or {}
-                path_hint = extra.get("read_file_path") or self._sub_tool_paths.get(
-                    sub_tool_call_id or "", ""
+                # 文件名优先取工具调用参数（与主代理一致），
+                # 缺失时回退到 read 结果自带的 read_file_path（VirtualPath，路径在 value）
+                path_value = self._sub_tool_paths.get(sub_tool_call_id or "") or (
+                    (getattr(msg, "additional_kwargs", None) or {}).get("read_file_path")
                 )
-                mime_hint = extra.get("read_file_media_type")
-                media_refs, save_instructions = self._persist_step_media(
-                    media_blocks, path_hint, mime_hint
-                )
+                media_refs, save_instructions = persist_media_blocks(media_blocks, path_value)
                 if not result_text and media_refs:
-                    result_text = self._build_media_summary(media_refs)
+                    result_text = build_media_summary(media_refs)
                 elif not result_text and not media_refs and isinstance(msg.content, list):
                     # 降级：预上传引用块无法还原（暂存被淘汰/进程重启）时保留原始内容，
                     # 避免整条工具结果显示为空
@@ -484,102 +475,6 @@ class SubAgentEventHandler(BaseStreamHandler):
                 instructions.append(self._make_create(step.to_json_string(), idx, tool_call_id))
 
         return instructions, idx
-
-    def _persist_step_media(
-        self,
-        media_blocks: List[Dict[str, Any]],
-        path_hint: str,
-        mime_hint: Optional[str] = None,
-    ) -> tuple[List[MultimodalMedia], List[SaveAndPersistFile]]:
-        """把工具结果媒体块保存为文件，返回（media 引用, 保存指令）。
-
-        与主代理内置工具的落盘逻辑一致：base64 落盘、生成 file_id，
-        content 中只保留 media 引用，避免 base64 直接写进子消息 content。
-        """
-        media_refs: List[MultimodalMedia] = []
-        save_instructions: List[SaveAndPersistFile] = []
-        for pos, blk in enumerate(media_blocks):
-            if not isinstance(blk, dict) or not blk.get("base64"):
-                continue
-            base64_data = str(blk["base64"])
-            file_type = str(blk.get("type") or "file")
-            mime_type = str(blk.get("mime_type") or mime_hint or "application/octet-stream")
-            filename = self._make_media_filename(path_hint, file_type, mime_type, pos)
-            file_id = generate_uuid()
-            save_instructions.append(SaveAndPersistFile(
-                file_id=file_id,
-                filename=filename,
-                base64_data=base64_data,
-                mime_type=mime_type,
-            ))
-            media_refs.append(MultimodalMedia(
-                file_type=file_type,
-                mime_type=mime_type,
-                file_id=file_id,
-                filename=filename,
-                size_bytes=int(len(base64_data) * 3 / 4),
-            ))
-        return media_refs, save_instructions
-
-    @staticmethod
-    def _extract_path_hint(path_or_args: Any) -> str:
-        """取路径末段：字符串按路径处理，字典则依次取 file_path / path。"""
-        raw: Any = path_or_args
-        if not isinstance(raw, str):
-            raw = ""
-            if isinstance(path_or_args, dict):
-                for key in ("file_path", "path"):
-                    value = path_or_args.get(key)
-                    if isinstance(value, str) and value.strip():
-                        raw = value
-                        break
-        if not isinstance(raw, str) or not raw.strip():
-            return ""
-        return raw.replace("\\", "/").rstrip("/").split("/")[-1]
-
-    def _make_media_filename(
-        self, path_hint: str, file_type: str, mime_type: str, idx: int
-    ) -> str:
-        """由工具目标路径派生可读文件名，并保证扩展名合法。"""
-        base = self._extract_path_hint(path_hint) or f"tool_{file_type}{mimetypes.guess_extension(mime_type) or ''}"
-
-        allowed = self._MEDIA_EXTENSIONS.get(file_type, frozenset())
-        lower = base.lower()
-        if allowed and not any(lower.endswith(ext) for ext in allowed):
-            default_ext = ".png" if file_type == "image" else (
-                ".mp3" if file_type == "audio" else (
-                    ".mp4" if file_type == "video" else ".bin"
-                )
-            )
-            base = f"{base}{default_ext}"
-
-        if idx > 0:
-            if "." in base:
-                stem, ext = base.rsplit(".", 1)
-                base = f"{stem}_{idx}.{ext}"
-            else:
-                base = f"{base}_{idx}"
-        return base
-
-    @staticmethod
-    def _build_media_summary(media_refs: List[MultimodalMedia]) -> str:
-        """多模态工具结果的文本摘要（结果无文本时用于气泡/弹窗展示）。"""
-        labels = {"image": "图片", "audio": "音频", "video": "视频", "file": "文档"}
-        parts = []
-        for ref in media_refs:
-            label = labels.get(ref.file_type, "文件")
-            file_label = f"{label} {ref.filename}" if ref.filename else label
-            size = ref.size_bytes or 0
-            if size >= 1024 * 1024:
-                size_str = f"{size / (1024 * 1024):.1f} MB"
-            elif size >= 1024:
-                size_str = f"{size / 1024:.1f} KB"
-            elif size:
-                size_str = f"{size} B"
-            else:
-                size_str = ""
-            parts.append(f"{file_label}（{size_str}）" if size_str else file_label)
-        return "读取到" + "、".join(parts)
 
     @staticmethod
     def _make_create(
