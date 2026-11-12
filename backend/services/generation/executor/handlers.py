@@ -43,13 +43,20 @@ async def handle_create_sub_message(
 
     stream_data = schemas.message.SubMessage.model_validate(db_sub_message).model_dump(mode='json')
 
+    file_service = FileService(db)
+
     # 对于 File 类型的子消息，主动填充 file_info，以便前端在 SSE 流中立即加载图片
     if instruction.type == 'File' and db_sub_message.content:
-        file_service = FileService(db)
         file_record = await file_service.get_file(db_sub_message.content)
         if file_record:
             file_schema = file_service.convert_to_schema(file_record)
             stream_data['file_info'] = file_schema.model_dump(mode='json')
+
+    # 多模态工具结果（主代理 McpTool / 子代理 TaskSubStep）：推送前补全 media 下载 url
+    if instruction.type == 'McpTool' and instruction.initial_content:
+        stream_data['content'] = await file_service.hydrate_media_content(instruction.initial_content)
+    elif instruction.type == 'TaskSubStep' and instruction.initial_content:
+        stream_data['content'] = await file_service.hydrate_task_substep_content(instruction.initial_content)
 
     await stream_manager.publish(
         assistant_message_id,

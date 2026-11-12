@@ -290,6 +290,7 @@ export function buildSubAgentVirtualMessage(
           : JSON.stringify(stepData.tool_args || {}),
         result: resultText,
         is_error: false,
+        media: stepData.media ?? null,
       }),
       config: { is_collapsed: false },
     } as SubMessage)

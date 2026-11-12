@@ -490,7 +490,15 @@ async def get_message_task_substeps(
         raise HTTPException(status_code=404, detail="Message not found")
 
     subs = await message_crud.get_task_substeps(db, message_id, task_group_id)
-    return [schemas.SubMessage.model_validate(s) for s in subs]
+    file_service = FileService(db)
+    result = []
+    for sub in subs:
+        sub_schema = schemas.SubMessage.model_validate(sub)
+        if sub_schema.content:
+            # 展示层补全 media 下载 url（子代理 read 等工具读取的图片），不落库
+            sub_schema.content = await file_service.hydrate_task_substep_content(sub_schema.content)
+        result.append(sub_schema)
+    return result
 
 
 @router.delete(

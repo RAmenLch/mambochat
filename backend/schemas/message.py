@@ -431,6 +431,9 @@ class TaskSubStepContent(BaseModel):
     step_order: int = Field(0, description="同组内的序号，前端排序用")
     description: Optional[str] = Field(None, description="task 描述（仅首条 step 携带）")
     sub_tool_call_id: Optional[str] = Field(None, description="子代理内部工具调用的 tool_call_id，用于绑定 AI 审核/中断审核事件")
+    media: Optional[List[MultimodalMedia]] = Field(
+        None, description="多模态工具结果引用（tool_result 时，如 read 读取图片/音视频/文档），供前端气泡与弹窗渲染媒体"
+    )
 
     def to_json_string(self) -> str:
         """序列化为存储在 DB content 字段的 JSON 字符串"""

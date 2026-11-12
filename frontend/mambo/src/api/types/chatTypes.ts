@@ -400,6 +400,8 @@ export interface TaskSubStepContent {
   description?: string | null
   /** 子代理内部工具调用的 tool_call_id，用于绑定 AI 审核 / 中断审核事件 */
   sub_tool_call_id?: string | null
+  /** 多模态工具结果引用（read 读取图片/音视频/文档时由后端填充，url 由组装层补齐） */
+  media?: MultimodalMedia[] | null
 }
 
 // --- Search Types (Chat) ---

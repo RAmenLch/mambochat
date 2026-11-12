@@ -4,7 +4,7 @@ import hashlib
 import os
 import urllib.parse
 from email.utils import formatdate
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 from fastapi import UploadFile, HTTPException, status, Response, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -359,13 +359,35 @@ class FileService:
             return content
         if not obj.is_multimodal:
             return content
-        for m in obj.media or []:
+        await self._fill_media_urls(obj.media)
+        return obj.to_json_string()
+
+    async def hydrate_task_substep_content(self, content: str) -> str:
+        """为 TaskSubStep（子代理追踪步骤）content 中的多模态 media 填充下载 url。
+
+        与 :meth:`hydrate_media_content` 同款展示层补全：只改内存对象、不落库。
+        仅当 content 含 media 引用（文本 / 推理等普通步骤直接原样返回）时才改写。
+        """
+        from backend.schemas.message import TaskSubStepContent
+
+        if not content or '"media"' not in content:
+            return content
+        try:
+            obj = TaskSubStepContent.from_json_string(content)
+        except (ValueError, TypeError):
+            return content
+        if not obj.media:
+            return content
+        await self._fill_media_urls(obj.media)
+        return obj.to_json_string()
+
+    async def _fill_media_urls(self, media: Optional[List[Any]]) -> None:
+        for m in media or []:
             if not m or not m.file_id:
                 continue
             record = await self.get_file(m.file_id)
             if record and record.storage_path:
                 m.url = self.get_url(record.storage_path)
-        return obj.to_json_string()
 
     async def update_management_type(self, file_id: str, new_type: str, merge: bool = True) -> Optional[File]:
         return await file_crud.update_file_management_type(self.db, file_id, new_type, merge)

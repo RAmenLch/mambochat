@@ -48,6 +48,43 @@ def _content_blocks_to_text(content: Any) -> str:
     return "".join(parts)
 
 
+def content_blocks_to_text(content: Any) -> str:
+    """把消息 content 归一化为纯文本串（供子代理步骤等展示层复用）。"""
+    return _content_blocks_to_text(content)
+
+
+def split_tool_message_content(content: Any) -> tuple[str, List[Dict[str, Any]]]:
+    """把 ``ToolMessage.content`` 拆分为 (纯文本, 媒体块列表)。
+
+    文本块（含 ``text`` / ``text-plain``）拼接为字符串；其余块中带 ``base64`` 的
+    （图片 / 音频 / 视频 / 文档）作为媒体块返回；预上传的 file_id 引用块先还原为
+    内联媒体块。媒体块由落库层保存为 File 记录并生成 ``media`` 引用，
+    主代理与子代理步骤（TaskSubStep）共用同一套拆解规则。
+    """
+    if not isinstance(content, list):
+        return (content if isinstance(content, str) else str(content or "")), []
+
+    text_blocks: List[str] = []
+    media_blocks: List[Dict[str, Any]] = []
+    for blk in content:
+        if isinstance(blk, str):
+            text_blocks.append(blk)
+            continue
+        if not isinstance(blk, dict):
+            continue
+        btype = blk.get("type")
+        if btype == "text" and isinstance(blk.get("text"), str):
+            text_blocks.append(blk["text"])
+        elif btype != "text" and blk.get("base64"):
+            media_blocks.append(blk)
+        elif btype != "text":
+            # 预上传引用块（file_id）：还原为内联媒体块后仍走 media 管道
+            restored = _restore_uploaded_media_block(blk)
+            if restored:
+                media_blocks.append(restored)
+    return "".join(text_blocks), media_blocks
+
+
 def _content_blocks_to_reasoning(content: Any) -> str:
     """从内容块列表中提取推理文本。
 
@@ -140,25 +177,10 @@ class DefaultLangChainDecode(BaseDecode):
         if mode == "updates" and isinstance(message, ToolMessage):
             content = message.content
             if isinstance(content, list):
-                text_blocks: List[str] = []
-                media_blocks: List[Dict[str, Any]] = []
-                for blk in content:
-                    if isinstance(blk, str):
-                        text_blocks.append(blk)
-                    elif isinstance(blk, dict):
-                        btype = blk.get("type")
-                        if btype == "text" and isinstance(blk.get("text"), str):
-                            text_blocks.append(blk["text"])
-                        elif btype not in ("text",) and blk.get("base64"):
-                            media_blocks.append(blk)
-                        elif btype not in ("text",):
-                            # 预上传引用块（file_id）：还原为内联媒体块后仍走 media 管道
-                            restored = _restore_uploaded_media_block(blk)
-                            if restored:
-                                media_blocks.append(restored)
+                text, media_blocks = split_tool_message_content(content)
                 result: Dict[str, Any] = {
                     "id": message.tool_call_id,
-                    "text": "".join(text_blocks),
+                    "text": text,
                 }
                 if media_blocks:
                     # 多模态结果：透传给 provider 落库，避免 str(message.text) 丢弃 base64 内容

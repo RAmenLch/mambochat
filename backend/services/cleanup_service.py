@@ -96,10 +96,11 @@ async def _cleanup_temporary_files(db: AsyncSession):
 
 
 def _extract_mcp_media_file_ids(content: str) -> Set[str]:
-    """从 McpTool 子消息 content(JSON) 中提取多模态 media 的 file_id。
+    """从 McpTool / TaskSubStep 子消息 content(JSON) 中提取多模态 media 的 file_id。
 
     工具（read 等）读取图片/音视频/文档时会生成 File 记录，并被 McpTool 子消息的
-    ``media[].file_id`` 引用（而**不是** ``File`` 型子消息）。这类引用同样属于“活跃引用”，
+    ``media[].file_id`` 引用（而**不是** ``File`` 型子消息）。子代理内部工具调用的结果
+    存放在 TaskSubStep 的 ``media[].file_id`` 中，规则相同。这类引用同样属于“活跃引用”，
     否则会被孤儿清理误删，导致前端工具图片不显示（hydrate 找不到 File -> 无下载 url）。
     """
     if not content:
@@ -130,10 +131,11 @@ async def _cleanup_sub_message_files(db: AsyncSession):
     result_active = await db.execute(stmt_active)
     active_file_ids = {row[0] for row in result_active}
 
-    #    (b) McpTool 型子消息：多模态工具结果通过 media[].file_id 引用文件
-    #        （如 read 工具读取的图片/音视频/文档）。遗漏这里会把工具媒体误判为孤儿删除。
+    #    (b) McpTool / TaskSubStep 型子消息：多模态工具结果通过 media[].file_id 引用文件
+    #        （如 read 工具读取的图片/音视频/文档，含子代理内部工具调用）。遗漏这里会把
+    #        工具媒体误判为孤儿删除。
     stmt_mcp_media = select(chat_model.SubMessage.content).where(
-        chat_model.SubMessage.type == 'McpTool',
+        chat_model.SubMessage.type.in_(('McpTool', 'TaskSubStep')),
         chat_model.SubMessage.content.contains('"file_id"'),
     )
     result_mcp_media = await db.execute(stmt_mcp_media)
