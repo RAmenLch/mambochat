@@ -345,6 +345,11 @@ export function useResourceEditor(props: {
           if (newSelection.kb_id !== oldSelection?.kb_id) {
             viewMode.value = 'editor'
           }
+          // 详情刷新后（如删除版本），正在查看的版本可能已不存在，需回退到活跃版本
+          const viewingVersion = loadedVersionInEditor.value
+          if (viewingVersion && !newSelection.versions?.some((v) => v.id === viewingVersion.id)) {
+            loadedVersionInEditor.value = null
+          }
           if (!loadedVersionInEditor.value) {
             resetForm()
           }
