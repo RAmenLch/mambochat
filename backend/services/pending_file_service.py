@@ -130,6 +130,10 @@ async def process_pending_file(
     返回 {"type": "file_ready", "file_id", "file_info"}、
          {"type": "already_ready", "file_id", "file_info"}（已入库过，幂等）、或
          {"type": "still_writing"}（文件未写完，等待下一轮）。
+
+    异步生图槽位（config 带 ``pending_image_task_id``）额外校验内容文件头：
+    扩展名是平台按 ``.png`` 兜底拼出来的，不能证明内容就是图片，命中同主干
+    的 sidecar 文本时按「未就绪」处理，避免把 JSON 当图片入库展示。
     """
     # 延迟导入：mambo_agents.backends 依赖较重，仅在处理挂起文件时加载
     from mambo_agents.backends.schemas import VirtualPath
@@ -156,6 +160,10 @@ async def process_pending_file(
                 ),
             }
 
+    pending_task_id = config_to_dict(
+        existing_sub.config if existing_sub else None
+    ).get("pending_image_task_id")
+
     r1 = await backend.adownload_files([VirtualPath(path)])
     size1 = len(r1[0].content) if r1 and r1[0].content else 0
     if size1 == 0:
@@ -169,9 +177,18 @@ async def process_pending_file(
 
     content = r2[0].content
     filename = PurePosixPath(path).name
-    from backend.services.generation.agent.image_gen.sink import resolve_mime
+    from backend.services.generation.agent.image_gen.sink import (
+        is_image_bytes,
+        resolve_mime,
+    )
 
     mime = resolve_mime(filename, _get_mime_type(path), content)
+
+    if pending_task_id and not is_image_bytes(content):
+        logger.warning(
+            "待生成文件 %s 的内容不是图片(疑似 %s)，按未就绪处理", path, mime
+        )
+        return {"type": "still_writing"}
 
     async with AsyncSessionLocal() as db:
         fs = FileService(db)
@@ -282,8 +299,16 @@ async def locate_pending_file(
 
     普通 ``show`` 等待（无 ``task_id``）不做通配：那里等的是 LLM 自己产出的
     任意文件，按主干匹配容易误吞同前缀的其它文件。
+
+    通配额外受两条**图片类型**约束，防止同主干的 sidecar 文本（生图技能会写出
+    与图片同名的 ``.json`` 说明）抢占槽位：
+
+    1. 登记路径必须是图片后缀（``standard._IMAGE_EXT_WHITELIST``），否则不兜底；
+    2. 命中项同样必须是图片后缀，非图片候选一律丢弃。
     """
     from mambo_agents.backends.schemas import VirtualPath
+
+    from backend.services.generation.agent.image_gen.standard import ext_from_path
 
     pp = PurePosixPath(path)
     try:
@@ -299,15 +324,25 @@ async def locate_pending_file(
         return None
 
     stem = pp.stem or pp.name
-    if not stem or stem == pp.name:
+    if not stem or stem == pp.name or ext_from_path(pp.name) is None:
         return None
+
     hits = await glob_pending_files(backend, f"{stem}*", directory)
     if not hits:
         return None
+
+    images = [hit for hit in hits if ext_from_path(hit) is not None]
+    if not images:
+        logger.debug(
+            "待生成文件 %s 的通配候选均非图片，忽略: %s",
+            path,
+            ", ".join(PurePosixPath(hit).name for hit in hits[:5]),
+        )
+        return None
     # 多图时优先取下标最小的那张（文件名排序即可）
-    hits.sort()
-    logger.info("待生成文件 %s 未见，改用通配命中 %s", path, hits[0])
-    return hits[0]
+    images.sort()
+    logger.info("待生成文件 %s 未见，改用通配命中 %s", path, images[0])
+    return images[0]
 
 
 async def persist_pending_deadline(sub_message_id: str, deadline: float) -> None:

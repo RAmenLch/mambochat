@@ -63,6 +63,25 @@ def _sniff_image_mime(data: Optional[bytes]) -> Optional[str]:
     return None
 
 
+def is_image_bytes(data: Optional[bytes]) -> bool:
+    """内容里是否含可识别的图片文件头。
+
+    异步生图按 ``.png`` 兜底命名，同目录下可能同时存在同名 sidecar 文本
+    （如与图片同主干的 ``.json`` 说明文件）。本函数用于把这类内容挡在入库
+    之前，与 :func:`resolve_mime` 共用同一套文件头定义，不依赖扩展名。
+    """
+    if not data:
+        return False
+    head = data[:16]
+    if any(head.startswith(magic) for magic, _ in _IMAGE_MAGIC):
+        return True
+    if len(data) >= 12 and head[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return True
+    if head[4:8] == b"ftyp":  # avif / heif
+        return True
+    return head[:4] in (b"II*\x00", b"MM\x00*")  # tiff
+
+
 def resolve_mime(filename: str, mime: Optional[str], data: Optional[bytes]) -> str:
     """确定文件 mime。
 
