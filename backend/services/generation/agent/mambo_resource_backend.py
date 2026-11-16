@@ -36,6 +36,8 @@ its version ID (UUID).
 Safety invariants
 =================
 * Never write content into a FOLDER node
+* Only FOLDER nodes act as containers: no path below an ``itemType=RESOURCE``
+  node resolves, and nothing can be created under one
 * Workspace boundary enforced on every path
 * Path traversal (``..``) rejected
 * Edit whitelist/blacklist gate all writes
@@ -437,6 +439,9 @@ class MamboResourceBackend(BackendProtocol):
         if not clean_segments:
             return None
 
+        if v_idx >= 0 and len(segments) > v_idx + 2:
+            return None
+
         # --- first segment: shortcut or root child ---
         first_seg = clean_segments[0]
         current_res: resource_model.Resource | None = None
@@ -456,6 +461,8 @@ class MamboResourceBackend(BackendProtocol):
 
         # --- walk remaining clean segments ---
         for seg in clean_segments[1:]:
+            if current_res.itemType != ResourceItemType.FOLDER.value:
+                return None
             child = await resource_crud.get_resource_by_name_and_parent_with_version(
                 db, seg, current_res.id,
             )
@@ -523,9 +530,12 @@ class MamboResourceBackend(BackendProtocol):
         parent_map: dict[str, str | None] = {a.id: a.parentId for a in ancestors}
         parent_map[root_id] = None
         name_map: dict[str, str] = {a.id: a.name for a in ancestors}
+        type_map: dict[str, str] = {a.id: a.itemType for a in ancestors}
 
         result: list[tuple[str, resource_model.Resource]] = []
         for d in descendants:
+            if _is_under_file_node(d.id, parent_map, type_map, root_id=root_id):
+                continue
             vpath = _build_virtual_path(
                 d.id, d.name, parent_map, name_map,
                 root_id=root_id, base_vpath=base_vpath,
@@ -912,6 +922,16 @@ class MamboResourceBackend(BackendProtocol):
             parent_node = await self._resolve_resource(db, parent_path)
             is_parent_version_folder = parent_node is not None and parent_node.is_version_dir
 
+            if (
+                parent_node is not None
+                and not parent_node.is_dir
+                and not parent_node.is_version_dir
+            ):
+                return WriteResult(error=BackendError(
+                    code=ErrorCode.NOT_DIR, path=file_path,
+                    message=f"父路径 '{parent_path}' 是资源文件，无法在其下创建文件。",
+                ))
+
             if not is_target_version_node and not is_parent_version_folder:
                 if not self._check_edit_allowed(norm):
                     return WriteResult(error=BackendError(
@@ -1110,6 +1130,11 @@ class MamboResourceBackend(BackendProtocol):
         for seg in remaining:
             existing = await resource_crud.get_resource_by_name_and_parent(db, seg, current_id)
             if existing:
+                if existing.itemType != ResourceItemType.FOLDER.value:
+                    raise ValueError(
+                        f"'{seg}' 是资源文件（itemType={existing.itemType}），"
+                        f"不能在文件型资源下创建子项。"
+                    )
                 current_id = existing.id
                 continue
 
@@ -1243,6 +1268,11 @@ class MamboResourceBackend(BackendProtocol):
                 return UploadFileResult(path=path, error=BackendError(
                     code=ErrorCode.INVALID, path=path,
                     message="版本文件夹不支持上传",
+                ))
+            if parent_node is not None and not parent_node.is_dir:
+                return UploadFileResult(path=path, error=BackendError(
+                    code=ErrorCode.NOT_DIR, path=path,
+                    message=f"父路径 '{parent_path}' 是资源文件，无法在其下创建文件。",
                 ))
 
             if not self._check_edit_allowed(norm):
@@ -1680,6 +1710,22 @@ class MamboResourceBackend(BackendProtocol):
 # ==================================================================
 # Helpers
 # ==================================================================
+
+
+def _is_under_file_node(
+    res_id: str,
+    parent_map: dict[str, str | None],
+    type_map: dict[str, str],
+    *,
+    root_id: str,
+) -> bool:
+    """Return True if a strict ancestor below *root_id* is not a FOLDER node."""
+    current = parent_map.get(res_id)
+    while current and current != root_id:
+        if type_map.get(current) != ResourceItemType.FOLDER.value:
+            return True
+        current = parent_map.get(current)
+    return False
 
 
 def _build_virtual_path(

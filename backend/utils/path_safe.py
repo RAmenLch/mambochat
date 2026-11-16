@@ -25,6 +25,12 @@ RESERVED_PATH_NAMES: FrozenSet[str] = frozenset({
 })
 
 
+# 系统保留后缀 — 命中即视为与内部虚拟目录约定冲突
+RESERVED_PATH_SUFFIXES: FrozenSet[str] = frozenset({
+    "$v",  # ResourceBackend 的版本目录标记（`<resource>$v/`）
+})
+
+
 def validate_path_safe_name(v: str, label: str = "名称") -> str:
     """校验 name 是否可作为虚拟路径片段安全使用（黑名单策略）。
 
@@ -33,6 +39,7 @@ def validate_path_safe_name(v: str, label: str = "名称") -> str:
     - 控制字符 (\\x00-\\x1f, \\x7f)
     - 恰好为 `.` 或 `..`
     - 系统保留字
+    - 以系统保留后缀结尾（如 `$v`）
     - 空字符串或纯空白
     """
     if not v or not v.strip():
@@ -52,5 +59,9 @@ def validate_path_safe_name(v: str, label: str = "名称") -> str:
             f"{label} 不能使用系统保留字: "
             f"{', '.join(sorted(RESERVED_PATH_NAMES))}"
         )
+
+    for suffix in RESERVED_PATH_SUFFIXES:
+        if v.endswith(suffix):
+            raise ValueError(f"{label} 不能以系统保留后缀 '{suffix}' 结尾")
 
     return v

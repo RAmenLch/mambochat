@@ -100,6 +100,14 @@ async def validate_move_operation(db: AsyncSession, move_request: schemas.Resour
     target_parent_id = None
     if move_request.action == MoveAction.INSIDE:
         if move_request.reference_id != "root":
+            ref_resource = await resource_crud.get_resource(db, move_request.reference_id)
+            if not ref_resource:
+                raise HTTPException(status_code=404, detail="Reference resource not found.")
+            if ref_resource.itemType != ResourceItemType.FOLDER.value:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot move: target reference must be a folder.",
+                )
             target_parent_id = move_request.reference_id
     else:
         # Before / After
