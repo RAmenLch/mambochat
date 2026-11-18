@@ -5,6 +5,20 @@ import type { SubMessage, MessageStatus } from '@/api/types';
 import { resolveApiUrl } from './electronUrl';
 
 /**
+ * SSE 断线重连的退避序列（毫秒）：用尽后固定使用最后一个间隔。
+ *
+ * `fetchEventSource` 默认在 `onerror` 未指定间隔时按 1s 无限重连。
+ * 移动端锁屏/切后台/弱网时，一次断流会持续数秒到数分钟，
+ * 1s 一轮的重连会在网络恢复前反复失败。这里改为逐步退避：
+ * 重连本身只是一次 GET，不触发任何业务请求，代价可控且能自愈。
+ */
+const RETRY_DELAYS = [1000, 2000, 3000, 5000, 8000, 13000, 20000, 30000];
+
+function nextRetryDelay(attempt: number): number {
+  return RETRY_DELAYS[Math.min(attempt, RETRY_DELAYS.length - 1)];
+}
+
+/**
  * 定义了从 SSE 流接收到的各类事件数据块的类型结构。
  * 'replace': 用全新的子消息数组和聚合状态完全替换现有内容，通常用于初次连接。
  * 'create': 指示在前端创建一个新的子消息。
@@ -32,7 +46,10 @@ export interface SseSubscriptionParams {
   onMessage: (data: StreamedChunk) => void;
   /** 当 SSE 连接正常关闭时调用的回调函数。 */
   onClose: () => void;
-  /** 当发生错误 (非手动中止) 时调用的回调函数。 */
+  /**
+   * 当收到无法解析的事件、或连接被彻底终止时调用。
+   * 可重连的断线不会回调此函数（由内部按退避序列重连），调用方无需在此做数据拉取。
+   */
   onError: (error: unknown) => void;
 }
 
@@ -48,13 +65,16 @@ export function subscribeToMessageStream(params: SseSubscriptionParams): AbortCo
 
   const controller = new AbortController();
   const url = resolveApiUrl(`/api/chats/${chatId}/stream-response/${assistantMessageId}`);
+  // 连续失败次数：收到任意事件即视为连接健康并归零
+  let attempt = 0;
 
-  fetchEventSource(url, {
+  const stream = fetchEventSource(url, {
     method: 'GET',
     signal: controller.signal,
     openWhenHidden: true,
 
     onmessage(event) {
+      attempt = 0;
       try {
         const data: StreamedChunk = JSON.parse(event.data);
         onMessage(data);
@@ -69,10 +89,22 @@ export function subscribeToMessageStream(params: SseSubscriptionParams): AbortCo
     },
 
     onerror(err) {
-      if (err.name !== 'AbortError') {
-        onError(err);
-      }
+      // 主动 abort 后不再重连（库内部已拦截，此处仅兜底）
+      if (controller.signal.aborted) throw err;
+      const delay = nextRetryDelay(attempt);
+      attempt += 1;
+      console.warn(`SSE stream for message ${assistantMessageId} interrupted, retry in ${delay}ms:`, err);
+      // 返回间隔交给库自行重连：重连成功后服务端首帧是全量 replace，可自愈
+      return delay;
     },
+  });
+
+  // 库仅在 onerror 抛出等极端情况下 reject，兜底避免未处理拒绝
+  stream.catch((err) => {
+    if (!controller.signal.aborted) {
+      console.error(`SSE stream for message ${assistantMessageId} terminated:`, err);
+      onError(err);
+    }
   });
 
   return controller;
@@ -100,13 +132,15 @@ export function subscribeToPendingFiles(
 ): AbortController {
   const controller = new AbortController()
   const url = resolveApiUrl(`/api/chats/${chatId}/wait-for-files`)
+  let attempt = 0
 
-  fetchEventSource(url, {
+  const stream = fetchEventSource(url, {
     method: 'GET',
     signal: controller.signal,
     openWhenHidden: true,
 
     onmessage(event) {
+      attempt = 0
       try {
         const data = JSON.parse(event.data)
         if (data.type === 'file_ready' || data.type === 'file_timeout') {
@@ -123,10 +157,19 @@ export function subscribeToPendingFiles(
     },
 
     onerror(err) {
-      if (err.name !== 'AbortError') {
-        callbacks.onError(err)
-      }
+      if (controller.signal.aborted) throw err
+      const delay = nextRetryDelay(attempt)
+      attempt += 1
+      console.warn(`Pending files SSE stream for chat ${chatId} interrupted, retry in ${delay}ms:`, err)
+      return delay
     },
+  })
+
+  stream.catch((err) => {
+    if (!controller.signal.aborted) {
+      console.error(`Pending files SSE stream for chat ${chatId} terminated:`, err)
+      callbacks.onError(err)
+    }
   })
 
   return controller

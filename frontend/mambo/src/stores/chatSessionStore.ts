@@ -387,6 +387,45 @@ export const useChatSessionStore = defineStore('chatSession', () => {
     searchTargetSubMessageId.value = subMessageId;
   }
 
+  // --- 前台 / 网络恢复后的订阅校准 ---
+  //
+  // 锁屏、切后台、浏览器进程被回收时，TCP 连接往往不会有 RST 通知，
+  // SSE 读请求会一直挂着：既没有 onClose 也没有 onError，界面会永远停在"生成中"。
+  // 回到前台或网络恢复时主动重建生成中的订阅：
+  // 服务端首帧即全量 replace，重建等价于一次无副作用的状态对齐。
+  const RESUME_QUIET_PERIOD = 2000;
+  const RECONCILE_MIN_INTERVAL = 3000;
+  let hiddenAt = 0;
+  let lastReconcileAt = 0;
+
+  function reconcileGeneratingStreams() {
+    if (!currentChatId.value) return;
+    const now = Date.now();
+    if (now - lastReconcileAt < RECONCILE_MIN_INTERVAL) return;
+
+    const generatingMessages = currentChatMessages.value.filter(msg => msg.status === 'generating');
+    if (generatingMessages.length === 0) return;
+
+    lastReconcileAt = now;
+    const interactionStore = useChatInteractionStore();
+    generatingMessages.forEach(msg => interactionStore._subscribeToMessageStream(msg));
+  }
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenAt = Date.now();
+        return;
+      }
+      // 短暂切换（输入法、切一下 tab）不值得重建连接
+      if (hiddenAt && Date.now() - hiddenAt < RESUME_QUIET_PERIOD) return;
+      reconcileGeneratingStreams();
+    });
+  }
+  if (typeof window !== 'undefined') {
+    window.addEventListener('online', () => reconcileGeneratingStreams());
+  }
+
   // --- Internal Methods (供 chatInteractionStore 调用) ---
 
   /**

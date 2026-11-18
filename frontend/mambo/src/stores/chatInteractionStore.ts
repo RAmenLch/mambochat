@@ -43,14 +43,21 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     if (!chatId) return;
 
     const assistantMessageId = assistantMessage.id;
-    if (sessionStore.activeSubscriptions.has(assistantMessageId)) {
-      sessionStore.activeSubscriptions.get(assistantMessageId)?.abort();
-    }
+    const previous = sessionStore.activeSubscriptions.get(assistantMessageId);
+    if (previous) previous.abort();
+
+    let controller: AbortController | null = null;
+    /** 仅当前登记在册的订阅才有权落地终态，避免被替换掉的旧流迟到回调覆盖新流 */
+    const isCurrentSubscription = () =>
+      controller !== null && sessionStore.activeSubscriptions.get(assistantMessageId) === controller;
 
     const finalize = async () => {
+      if (!isCurrentSubscription()) return;
       sessionStore.activeSubscriptions.delete(assistantMessageId);
       try {
         const chatWithMessages = await getChatWithMessages(chatId);
+        // 拉取期间已切换会话：丢弃过期结果，避免覆盖新会话内容
+        if (sessionStore.currentChatId !== chatId) return;
         sessionStore.currentChatMessages = chatWithMessages.messages.sort((a, b) => a.sortOrder - b.sortOrder);
 
         const finalMessage = sessionStore.currentChatMessages.find(m => m.id === assistantMessageId);
@@ -70,14 +77,16 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
       }
     };
 
-    const controller = subscribeToMessageStream({
+    controller = subscribeToMessageStream({
       chatId,
       assistantMessageId,
       onMessage: (data) => sessionStore._processStreamChunk(assistantMessageId, data),
       onClose: finalize,
       onError: (err) => {
-        console.error(`SSE stream error for msg ${assistantMessageId}:`, err);
-        finalize();
+        // 断线由 sseService 按退避序列重连（重连成功后首帧是全量 replace），
+        // 这里不发起任何拉取：否则弱网下每失败一次就会放大成一整轮请求。
+        if (!isCurrentSubscription()) return;
+        console.warn(`SSE stream unavailable for msg ${assistantMessageId}:`, err);
       }
     });
     sessionStore.activeSubscriptions.set(assistantMessageId, controller);
