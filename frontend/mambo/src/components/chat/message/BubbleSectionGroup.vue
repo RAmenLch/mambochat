@@ -49,7 +49,7 @@
               v-for="(fileMsg, idx) in group.fileSubMessages"
               :key="'bg-' + fileMsg.id"
               class="group-mode-stack-bg"
-              :class="{ 'is-hidden': pinnedFileId === fileMsg.id }"
+              :class="{ 'is-hidden': effectivePinnedId === fileMsg.id }"
               :style="bgLayerStyle(idx)"
             >
               <img
@@ -252,9 +252,16 @@ const isGroupMode = computed(() => {
 /** 当前置顶的文件 ID（默认第一张） */
 const pinnedFileId = ref<string | null>(null)
 
+/** 有效置顶文件 ID：未手动置顶或指向失效项时回退到第一张 */
+const effectivePinnedId = computed(() => {
+  const list = props.group.fileSubMessages ?? []
+  if (pinnedFileId.value && list.some(sm => sm.id === pinnedFileId.value)) return pinnedFileId.value
+  return list[0]?.id ?? null
+})
+
 /** 置顶的 File 子消息 */
 const pinnedFileMsg = computed(() => {
-  const targetId = pinnedFileId.value || props.group.fileSubMessages?.[0]?.id || null
+  const targetId = effectivePinnedId.value
   return props.group.fileSubMessages?.find(sm => sm.id === targetId) || null
 })
 
@@ -294,9 +301,8 @@ function pinPrev() {
 function bgLayerStyle(idx: number) {
   if (!props.group.fileSubMessages) return {}
   const total = props.group.fileSubMessages.length
-  const isActive = pinnedFileId.value === props.group.fileSubMessages[idx].id
   return {
-    zIndex: isActive ? total + 1 : total - idx,
+    zIndex: Math.min(total - idx, 9),
   }
 }
 
@@ -630,11 +636,13 @@ function fileGroupPreviewIndex(fileIdx: number): number {
   cursor: pointer;
   z-index: 20;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.2s;
   font-size: 14px;
 }
 .group-mode-main:hover .group-mode-arrow {
   opacity: 1;
+  pointer-events: auto;
 }
 .group-mode-arrow:hover {
   background: rgba(0, 0, 0, 0.65);
@@ -661,6 +669,7 @@ function fileGroupPreviewIndex(fileIdx: number): number {
   background: var(--el-fill-color);
   opacity: 0.5;
   transition: transform 0.25s ease;
+  pointer-events: none;
 }
 .group-mode-stack-bg.is-hidden {
   opacity: 0;
