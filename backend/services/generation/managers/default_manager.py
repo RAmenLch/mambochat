@@ -396,7 +396,8 @@ class DefaultGenerateManager(AbstractGenerateManager):
             elif isinstance(exception, asyncio.CancelledError):
                 error_message = "生成被用户取消。"
             else:
-                error_message = f"发生未处理的异常: {str(exception)}"
+                detail = str(exception) or repr(exception)
+                error_message = f"发生未处理的异常: {type(exception).__name__}: {detail}"
             error_stack = traceback.format_exc()
 
         # 统一将所有 GENERATING 状态的子消息批量标记为 FAILED（含 reasoning 折叠处理）

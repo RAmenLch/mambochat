@@ -133,13 +133,32 @@ class ModelFactory:
         elif worker_type == ProviderWorkerType.GOOGLE.value:
             from langchain_google_genai import ChatGoogleGenerativeAI
             include_thoughts = params_copy.pop("include_thoughts", True)
+            temperature = params_copy.pop("temperature", None)
+            top_p = params_copy.pop("top_p", None)
+            top_k = params_copy.pop("top_k", None)
+            frequency_penalty = params_copy.pop("frequency_penalty", None)
+            presence_penalty = params_copy.pop("presence_penalty", None)
+            max_output_tokens = params_copy.pop("max_tokens", None)
+            stop = params_copy.pop("stop", None)
+            reasoning_effort = params_copy.pop("reasoning_effort", None)
+            client_args = (
+                {"proxy": model_config.proxy_url} if model_config.proxy_url else None
+            )
             model = ChatGoogleGenerativeAI(
                 model=model_config.model_id,
                 api_key=model_config.api_key,
+                base_url=model_config.api_host.removesuffix("/v1beta").rstrip("/"),
                 include_thoughts=include_thoughts,
-                base_url=model_config.api_host.rstrip("/").rstrip("/v1beta"),
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                frequency_penalty=frequency_penalty,
+                presence_penalty=presence_penalty,
+                max_output_tokens=max_output_tokens,
+                stop=stop,
+                reasoning_effort=reasoning_effort,
+                client_args=client_args,
                 model_kwargs=params_copy,
-                openai_proxy=model_config.proxy_url,
                 timeout=model_config.timeout,
                 streaming=stream,
                 callbacks=callbacks,
@@ -187,6 +206,9 @@ class ModelFactory:
                 timeout=model_config.timeout,
                 streaming=stream,
                 stream_usage=True,
+                # OpenAI 兼容服务商（OpenRouter / 硅基流动等）只实现 chat/completions，
+                # 显式关闭 Responses API 以规避新版 langchain-openai 的自动推断。
+                use_responses_api=False,
                 default_headers={
                     "HTTP-Referer": "https://github.com/RAmenLch/mambochat",
                     "X-Title": "MamboChat",
