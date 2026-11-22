@@ -213,9 +213,13 @@ SUPPORTED_LLM_PARAMETERS: List[LLMParameter] = [
         key="gemini::reasoning_effort",
         label="Reasoning Effort (Gemini)",
         path=["reasoning_effort"],
-        description="控制 Gemini 模型的推理努力级别。值越高，推理越深入但响应越慢。",
+        description=(
+            "控制 Gemini 模型的推理努力级别。值越高，推理越深入但响应越慢。"
+            "Gemini 4 系列：Argon/Carbon 支持 low/medium/high（默认 medium），"
+            "Hydrogen/Neon 额外支持 xhigh（默认 high）；四者均拒绝 minimal（HTTP 400）。"
+        ),
         type="string",
-        limit=["minimal","low","medium","high"],
+        limit=["minimal","low","medium","high","xhigh"],
         default_value="medium",
         default_activate=False
     ),

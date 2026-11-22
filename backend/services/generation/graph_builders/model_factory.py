@@ -1,6 +1,7 @@
 # backend/services/generation/graph_builders/model_factory.py
 
 import inspect
+import re
 from functools import lru_cache
 from typing import Optional, Tuple
 
@@ -10,6 +11,27 @@ from backend.schemas.enums import ProviderWorkerType
 from backend.services.generation.core.llm_io import ModelConfig, RunTimeConfig
 from backend.services.generation.agent.log_callback import RawPayloadLoggingCallback
 from backend.services.generation.image_executors import is_image_worker
+
+
+#: Gemini 4 及更新一代的主版本号正则（``gemini-4-hydrogen`` / ``gemini-5-xxx`` 等）。
+_GEMINI_FIXED_THINKING_RE = re.compile(r"gemini-(\d+(?:\.\d+)?)", re.IGNORECASE)
+
+
+def _rejects_minimal_thinking_level(model_id: Optional[str]) -> bool:
+    """Gemini 4+ 不接受 ``thinking_level=minimal``（官方返回 HTTP 400）。
+
+    Argon / Carbon / Hydrogen / Neon 均只支持 low / medium / high（Hydrogen、Neon
+    另有 xhigh），传 minimal 或旧版 thinking_budget 会校验失败。
+    """
+    if not model_id:
+        return False
+    match = _GEMINI_FIXED_THINKING_RE.search(model_id)
+    if not match:
+        return False
+    try:
+        return float(match.group(1)) >= 4
+    except ValueError:
+        return False
 
 
 class ModelFactory:
@@ -141,6 +163,11 @@ class ModelFactory:
             max_output_tokens = params_copy.pop("max_tokens", None)
             stop = params_copy.pop("stop", None)
             reasoning_effort = params_copy.pop("reasoning_effort", None)
+            if (
+                reasoning_effort == "minimal"
+                and _rejects_minimal_thinking_level(model_config.model_id)
+            ):
+                reasoning_effort = "low"
             client_args = (
                 {"proxy": model_config.proxy_url} if model_config.proxy_url else None
             )

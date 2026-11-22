@@ -398,5 +398,7 @@ async def fetch_models_from_provider_google(
                     meta_config=meta_config_obj
                 )
             )
-        return processed_models
+        # Google 的 ListModels 只给 token 上限，不含多模态与可用参数，
+        # 交由预置注册表补全（API 已返回的字段保持不变）。
+        return _enrich_with_presets(processed_models, api_host)
 

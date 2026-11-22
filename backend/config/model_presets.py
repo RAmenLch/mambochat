@@ -271,11 +271,74 @@ _GLM_BIGMODEL_ONLY_MODELS: list[ModelPreset] = [
 ]
 
 # ============================================================
+# Gemini 参数分组
+# ============================================================
+
+# Gemini 4 系列（Argon / Carbon / Hydrogen / Neon，均 GA）
+#
+# 依据官方模型页（2026-11 核对）：
+#   - 采样参数由官方固定，自定义值被忽略：temperature 1.0 / topP 0.95 / topK 64、
+#     candidateCount 1；presence/frequency penalty 不接受。故不开放这些参数。
+#   - 思考档位：Argon / Carbon 为 low / medium / high（默认 medium）；
+#     Hydrogen / Neon 额外支持 xhigh（默认 high）。四者均拒绝 minimal 与
+#     thinking_budget（HTTP 400），minimal 由 model_factory 统一降级为 low。
+#   - 统一 1,048,576 上下文：输入 + 思考 + 输出共享；单段前台输出上限
+#     streaming 65,536 / 非 streaming 32,768。输出上限设得过小时思考会吃光预算，
+#     表现为"200 + 空正文 + finishReason=MAX_TOKENS"，故保留 max_tokens 可调。
+#   - 仅支持隐式缓存，显式 cachedContent 不支持；不支持 Live API。
+_GEMINI4_PARAMS = [
+    "max_tokens",
+    "stop",
+    "gemini::includeThoughts",
+    "gemini::reasoning_effort",
+]
+
+_GEMINI4_MODALITIES = ["text", "image", "audio", "video", "file"]
+
+# ============================================================
 # 模型预置注册表
 # key = api_host 域名（去除协议和路径），如 "api.deepseek.com"
 # ============================================================
 
 MODEL_PRESETS: dict[str, list[ModelPreset]] = {
+    "generativelanguage.googleapis.com": [
+        # --- Gemini 4 Argon：复杂长程任务旗舰，默认 thinking medium ---
+        ModelPreset(
+            modelId="models/gemini-4-argon",
+            name="Gemini 4 Argon",
+            context_length=1_048_576,
+            max_output_tokens=65_536,
+            input_modalities=_GEMINI4_MODALITIES,
+            supported_parameters=_GEMINI4_PARAMS,
+        ),
+        # --- Gemini 4 Carbon：长程 Agent / 编码，额外支持 Office / OpenDocument 文档 ---
+        ModelPreset(
+            modelId="models/gemini-4-carbon",
+            name="Gemini 4 Carbon",
+            context_length=1_048_576,
+            max_output_tokens=65_536,
+            input_modalities=_GEMINI4_MODALITIES,
+            supported_parameters=_GEMINI4_PARAMS,
+        ),
+        # --- Gemini 4 Hydrogen：日常编码/Agent，默认 thinking high，支持 xhigh ---
+        ModelPreset(
+            modelId="models/gemini-4-hydrogen",
+            name="Gemini 4 Hydrogen",
+            context_length=1_048_576,
+            max_output_tokens=65_536,
+            input_modalities=_GEMINI4_MODALITIES,
+            supported_parameters=_GEMINI4_PARAMS,
+        ),
+        # --- Gemini 4 Neon：低延迟编码/多步推理，默认 thinking high，支持 xhigh ---
+        ModelPreset(
+            modelId="models/gemini-4-neon",
+            name="Gemini 4 Neon",
+            context_length=1_048_576,
+            max_output_tokens=65_536,
+            input_modalities=_GEMINI4_MODALITIES,
+            supported_parameters=_GEMINI4_PARAMS,
+        ),
+    ],
     "api.deepseek.com": [
         # --- DeepSeek V4.1 系列（最新） ---
         # deepseek-flash：DeepSeek-V4.1-Flash-1017，支持文本+图像输入，默认思考模式
