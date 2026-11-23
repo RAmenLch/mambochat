@@ -11,6 +11,7 @@ from backend.crud import provider_crud
 from backend import schemas
 from backend.database import get_db
 from backend.exceptions import AppHTTPException
+from backend.utils.google_vertex import is_vertex_api_host
 
 router = APIRouter()
 
@@ -29,7 +30,7 @@ async def _fetch_models_and_handle_errors(
     ``worker_type`` 是生图执行器时走纯生图端点，返回 ``model_type=image`` 的模型。
     """
     try:
-        if api_host == "https://generativelanguage.googleapis.com/v1beta":
+        if is_vertex_api_host(api_host) or api_host.rstrip("/") == "https://generativelanguage.googleapis.com/v1beta":
             return await provider_service.fetch_models_from_provider_google(
                 db, api_host, api_key, use_proxy
             )
@@ -41,6 +42,12 @@ async def _fetch_models_and_handle_errors(
             status_code=status.HTTP_400_BAD_REQUEST,
             error_code="MODEL_FETCH_INVALID_JSON",
             detail=f"获取模型失败: 服务器返回的不是有效的JSON格式。请检查{source_description}是否正确。"
+        )
+    except ValueError as e:
+        raise AppHTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            error_code="MODEL_FETCH_INVALID_HOST",
+            detail=f"获取模型失败: {e}"
         )
     except httpx.HTTPStatusError as e:
         status_code = e.response.status_code

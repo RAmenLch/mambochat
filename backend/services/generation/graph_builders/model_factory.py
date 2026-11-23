@@ -154,6 +154,11 @@ class ModelFactory:
 
         elif worker_type == ProviderWorkerType.GOOGLE.value:
             from langchain_google_genai import ChatGoogleGenerativeAI
+            from backend.utils.google_vertex import build_vertex_client, parse_vertex_api_host
+
+            # Agent Platform（原 Vertex AI）与 Gemini Developer API 共用 google worker：
+            # apiHost 里带 projects/.../locations/... 即按平台侧处理。
+            vertex_endpoint = parse_vertex_api_host(model_config.api_host)
             include_thoughts = params_copy.pop("include_thoughts", True)
             temperature = params_copy.pop("temperature", None)
             top_p = params_copy.pop("top_p", None)
@@ -171,10 +176,7 @@ class ModelFactory:
             client_args = (
                 {"proxy": model_config.proxy_url} if model_config.proxy_url else None
             )
-            model = ChatGoogleGenerativeAI(
-                model=model_config.model_id,
-                api_key=model_config.api_key,
-                base_url=model_config.api_host.removesuffix("/v1beta").rstrip("/"),
+            common_kwargs = dict(
                 include_thoughts=include_thoughts,
                 temperature=temperature,
                 top_p=top_p,
@@ -184,13 +186,35 @@ class ModelFactory:
                 max_output_tokens=max_output_tokens,
                 stop=stop,
                 reasoning_effort=reasoning_effort,
-                client_args=client_args,
                 model_kwargs=params_copy,
                 timeout=model_config.timeout,
                 streaming=stream,
                 callbacks=callbacks,
-                max_retries=max_retries
+                max_retries=max_retries,
             )
+            if vertex_endpoint is not None:
+                # 平台侧的模型名不带 models/ 前缀；SDK 不允许 api_key 与
+                # project/location 同时传入，故把项目路径固化进 base_url
+                # （ResourceScope.COLLECTION），API key 由 Client 自行加头。
+                model = ChatGoogleGenerativeAI(
+                    model=model_config.model_id.removeprefix("models/"),
+                    api_key=model_config.api_key,
+                    vertexai=True,
+                    **common_kwargs,
+                )
+                model.client = build_vertex_client(
+                    vertex_endpoint,
+                    model_config.api_key,
+                    proxy_url=model_config.proxy_url,
+                )
+            else:
+                model = ChatGoogleGenerativeAI(
+                    model=model_config.model_id,
+                    api_key=model_config.api_key,
+                    base_url=model_config.api_host.removesuffix("/v1beta").rstrip("/"),
+                    client_args=client_args,
+                    **common_kwargs,
+                )
 
         elif worker_type == ProviderWorkerType.DEEPSEEK.value:
             from backend.services.generation.worker.deepseek_chat_model import ChatDeepSeek

@@ -11,6 +11,23 @@ from backend.crud import setting_crud
 from backend.config.llm_parameters import SUPPORTED_LLM_PARAMETERS
 from backend.config.model_presets import MODEL_PRESETS, ModelPreset
 from backend.schemas.enums import ModelType
+from backend.utils.google_vertex import (
+    build_vertex_client,
+    is_vertex_api_host,
+    parse_vertex_api_host,
+)
+
+
+async def _resolve_proxy_url(db: AsyncSession, use_proxy_flag: bool = False) -> Optional[str]:
+    """按需读取全局代理配置。"""
+    if not use_proxy_flag:
+        return None
+    proxy_enabled_setting = await setting_crud.get_setting(db, "proxy_enabled")
+    if proxy_enabled_setting and proxy_enabled_setting.value == 'True':
+        proxy_url_setting = await setting_crud.get_setting(db, "proxy_url")
+        if proxy_url_setting and proxy_url_setting.value:
+            return proxy_url_setting.value
+    return None
 
 
 async def _get_http_client_with_proxy(
@@ -21,14 +38,7 @@ async def _get_http_client_with_proxy(
     """
     根据需要创建一个配置了代理的 httpx.AsyncClient 实例。
     """
-    proxy_url = None
-    if use_proxy_flag:
-        proxy_enabled_setting = await setting_crud.get_setting(db, "proxy_enabled")
-        if proxy_enabled_setting and proxy_enabled_setting.value == 'True':
-            proxy_url_setting = await setting_crud.get_setting(db, "proxy_url")
-            if proxy_url_setting and proxy_url_setting.value:
-                proxy_url = proxy_url_setting.value
-
+    proxy_url = await _resolve_proxy_url(db, use_proxy_flag)
     return httpx.AsyncClient(proxy=proxy_url, timeout=timeout)
 
 
@@ -76,7 +86,9 @@ async def test_connection_to_provider(
     ``worker_type`` 是生图执行器时改走纯生图端点探测。
     """
     try:
-        if api_host == "https://generativelanguage.googleapis.com/v1beta":
+        if is_vertex_api_host(api_host):
+            return await _test_vertex_connection(db, api_host, api_key, use_proxy)
+        if api_host.rstrip("/") == "https://generativelanguage.googleapis.com/v1beta":
             await fetch_models_from_provider_google(db, api_host, api_key, use_proxy)
         else:
             await fetch_models_from_provider(
@@ -106,6 +118,63 @@ async def test_connection_to_provider(
     except Exception as e:
         print(f"Unhandled exception during connection test: {e}")
         return schemas.ConnectionTestResponse(status="error", message=f"发生未知错误。", code="CONNECTION_UNKNOWN")
+
+
+async def _test_vertex_connection(
+        db: AsyncSession,
+        api_host: str,
+        api_key: str,
+        use_proxy: bool,
+) -> schemas.ConnectionTestResponse:
+    """Agent Platform 的连通性探测。
+
+    平台侧的模型列表接口（ModelGardenService.ListPublisherModels）只接受 OAuth，
+    用 API key 必然 401，因此这里改发一次最小推理请求来验证鉴权与项目权限。
+    """
+    try:
+        endpoint = parse_vertex_api_host(api_host)
+    except ValueError as e:
+        return schemas.ConnectionTestResponse(
+            status="error", code="CONNECTION_INVALID_HOST", message=f"连接失败: {e}"
+        )
+
+    proxy_url = await _resolve_proxy_url(db, use_proxy)
+    client = build_vertex_client(endpoint, api_key, proxy_url=proxy_url)
+    presets = _models_from_presets(api_host)
+    probe_model = presets[0].modelId if presets else "gemini-4-neon"
+
+    try:
+        await client.aio.models.generate_content(
+            model=probe_model,
+            contents="hi",
+            config={"max_output_tokens": 16},
+        )
+        return schemas.ConnectionTestResponse(status="success", message="连接成功！", code="CONNECTION_OK")
+    except Exception as e:
+        status_code = getattr(e, "code", None)
+        detail = getattr(e, "message", None) or str(e)
+        if status_code == 404:
+            return schemas.ConnectionTestResponse(
+                status="success",
+                code="CONNECTION_OK",
+                message=f"连接成功，但当前项目未开通 {probe_model}，请改选已开通的模型。",
+            )
+        if status_code in (401, 403):
+            return schemas.ConnectionTestResponse(
+                status="error",
+                code="CONNECTION_HTTP_ERROR",
+                message=f"连接失败: 鉴权或权限不足 ({status_code})。{detail[:200]}",
+            )
+        return schemas.ConnectionTestResponse(
+            status="error",
+            code="CONNECTION_UNKNOWN",
+            message=f"连接失败: {detail[:200]}",
+        )
+    finally:
+        try:
+            await client.aio.aclose()
+        except Exception:
+            pass
 
 
 def _extract_host_from_url(url: str) -> str:
@@ -172,6 +241,39 @@ def _enrich_with_presets(
             )
         )
     return enriched
+
+
+def _models_from_presets(api_host: str) -> List[schemas.AIModelBase]:
+    """按域名取出预置模型。
+
+    用于无法从 API 拉取列表的服务商：Agent Platform 的模型列表接口只接受 OAuth，
+    用 API key 必然 401，所以直接给出可手选的候选集。
+    """
+    presets = MODEL_PRESETS.get(_extract_host_from_url(api_host))
+    if not presets:
+        return []
+
+    valid_parameter_keys = {param.key for param in SUPPORTED_LLM_PARAMETERS}
+    models: List[schemas.AIModelBase] = []
+    for preset in presets:
+        meta = schemas.AIModelMetaConfig(
+            context_length=preset.context_length,
+            max_output_tokens=preset.max_output_tokens,
+            tokenizer=preset.tokenizer,
+            input_modalities=preset.input_modalities,
+            output_modalities=preset.output_modalities,
+            supported_parameters=[
+                key for key in preset.supported_parameters if key in valid_parameter_keys
+            ] or None,
+        )
+        models.append(
+            schemas.AIModelBase(
+                modelId=preset.modelId,
+                name=preset.name,
+                meta_config=meta,
+            )
+        )
+    return models
 
 
 async def fetch_models_from_provider(
@@ -342,6 +444,10 @@ async def fetch_models_from_provider_google(
     """
     调用外部LLM服务商的API以获取其提供的模型列表，并解析元数据。
     """
+    if is_vertex_api_host(api_host):
+        # 平台侧的模型列表接口只接受 OAuth（API key 会 401），直接返回预置表。
+        return _models_from_presets(api_host)
+
     headers = {
         "Content-Type": "application/json",
     }
