@@ -62,7 +62,8 @@ dependencies = [
     "lxml>=5.2.0",
 
     # Remote execution
-    "paramiko>=4.0.0",
+    # mambo-agents 声明 paramiko<5，这里显式对齐，避免解析到 5.x 后再被降级
+    "paramiko>=4.0.0,<5",
 
     # Config / Scheduler / IO
     "PyYAML>=6.0.3",
@@ -78,7 +79,7 @@ dependencies = [
     # Production server
     "gunicorn==23.0.0",
 
-    "mambo-agents==0.4.2b6",
+    "mambo-agents==0.4.2b8",
 ]
 
 [project.scripts]

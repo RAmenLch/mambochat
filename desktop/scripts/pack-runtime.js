@@ -4,7 +4,10 @@
  *
  * Works on a TEMPORARY COPY of runtime/python so the development runtime is
  * never mutated. The copy is sanitized before packing:
- *  - removes __pycache__, .pyc, .pyi, tests/, .chm, dist-info/RECORD, etc.
+ *  - removes __pycache__, .pyc, .pyi, tests/, .chm, etc.
+ *  - keeps dist-info/RECORD (pip needs it to uninstall a package; deleting it
+ *    makes every later upgrade fail with `uninstall-no-record-file`), pruning
+ *    only the entries that point at files removed above
  *  - removes console-script launchers (*.exe + shebang text scripts) whose
  *    embedded shebang hard-codes the build machine's absolute Python path
  *  - removes editable-install artifacts (__editable__*.pth / *_finder.py /
@@ -42,7 +45,6 @@ const EXCLUDE_FILE = [
   /\.pyo$/,
   /\.pyi$/,
   /\.chm$/,
-  /RECORD$/,         // dist-info/RECORD (pip install manifest, not needed at runtime)
   /conftest\.py$/,
   /test_.*\.py$/,
   /.*_test\.py$/,
@@ -133,6 +135,51 @@ function removeEditableArtifacts(sitePackagesDir) {
   return removed
 }
 
+/**
+ * Keep dist-info/RECORD manifests consistent with the pruned tree.
+ *
+ * pip requires RECORD to uninstall a package: without it, any later
+ * `pip install` that needs to replace the package aborts with
+ * `error: uninstall-no-record-file`. Entries for files removed by the cleanup
+ * steps above are dropped so the manifest matches what actually ships;
+ * everything else (hashes/sizes) is preserved verbatim.
+ */
+function rewriteRecords(sitePackagesDir) {
+  if (!fs.existsSync(sitePackagesDir)) return { files: 0, dropped: 0 }
+
+  let files = 0
+  let dropped = 0
+  for (const name of fs.readdirSync(sitePackagesDir)) {
+    if (!name.endsWith('.dist-info')) continue
+    const recordPath = path.join(sitePackagesDir, name, 'RECORD')
+    if (!fs.existsSync(recordPath)) continue
+
+    const kept = []
+    let hasSelfEntry = false
+    for (const line of fs.readFileSync(recordPath, 'utf8').split(/\r?\n/)) {
+      if (!line.trim()) continue
+      const relPath = line.split(',', 1)[0]
+      if (!relPath) continue
+      if (relPath === `${name}/RECORD`) {
+        hasSelfEntry = true
+        kept.push(line)
+        continue
+      }
+      const target = path.join(sitePackagesDir, ...relPath.split('/'))
+      if (fs.existsSync(target)) {
+        kept.push(line)
+      } else {
+        dropped++
+      }
+    }
+    if (!hasSelfEntry) kept.push(`${name}/RECORD,,`)
+
+    fs.writeFileSync(recordPath, `${kept.join('\n')}\n`, 'utf8')
+    files++
+  }
+  return { files, dropped }
+}
+
 function main() {
   if (!fs.existsSync(pythonDir)) {
     console.error('Error: runtime/python not found at', pythonDir)
@@ -145,7 +192,7 @@ function main() {
   fs.cpSync(pythonDir, stagingDir, { recursive: true })
 
   // Step 1: Clean unnecessary files
-  console.log('[pack-runtime] Cleaning unnecessary files (.pyc, .pyi, tests/, .chm, RECORD, ...)...')
+  console.log('[pack-runtime] Cleaning unnecessary files (.pyc, .pyi, tests/, .chm, ...)...')
   const { removedDirs, removedFiles } = cleanPythonDir(stagingDir)
   console.log(`[pack-runtime] Removed ${removedDirs} dirs, ${removedFiles} files`)
 
@@ -154,6 +201,11 @@ function main() {
   const sitePackagesDir = path.join(stagingDir, 'Lib', 'site-packages')
   const removedEditable = removeEditableArtifacts(sitePackagesDir)
   console.log(`[pack-runtime] Removed ${removedLaunchers} launchers, ${removedEditable} editable artifacts`)
+
+  const { files: records, dropped: staleEntries } = rewriteRecords(sitePackagesDir)
+  console.log(
+    `[pack-runtime] Pruned ${staleEntries} stale entries in ${records} dist-info RECORD manifests`,
+  )
 
   // Step 3: Self-contained mambo CLI
   // - mambo-backend.pth: relative path (site-packages -> 4 levels up = resources/)
