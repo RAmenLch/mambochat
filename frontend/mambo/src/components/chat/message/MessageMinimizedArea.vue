@@ -32,6 +32,10 @@
               v-else-if="getMinimizedMcpInfo(subMessage).status === 'success'"
               style="color: var(--el-color-success)"
             />
+            <Warning
+              v-else-if="getMinimizedMcpInfo(subMessage).status === 'interrupted'"
+              style="color: var(--el-color-warning)"
+            />
             <CircleClose v-else style="color: var(--el-color-error)" />
           </el-icon>
           <span class="minimized-item-title">
@@ -58,6 +62,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SubMessage, McpToolContent, ReviewToolContent, AskUserContent } from '@/api/types'
 import { unpackMcpToolCall } from '@/utils/mcpToolUnpack'
+import { getToolVisualState } from '@/utils/toolVisualState'
 import { Warning, Loading, CircleCheck, CircleClose, Document, QuestionFilled } from '@element-plus/icons-vue'
 
 const props = defineProps<{
@@ -160,6 +165,9 @@ function getPartitionTitleForMinimized(subMessage: SubMessage): string {
 }
 
 function getMinimizedMcpInfo(subMessage: SubMessage) {
+  if (subMessage.type === 'McpTool') {
+    return { status: getToolVisualState(subMessage) }
+  }
   if (subMessage.status === 'generating') return { status: 'generating' }
   try {
     const content = JSON.parse(subMessage.content)

@@ -10,8 +10,9 @@
           <div class="tool-header">
             <div class="tool-status-icon">
               <el-icon v-if="isReviewType && !currentDecision" color="var(--el-color-warning)" :size="22"><Warning /></el-icon>
-              <el-icon v-else-if="isGenerating" class="is-loading" :size="22"><Loading /></el-icon>
-              <el-icon v-else-if="mcpTool?.is_error" color="var(--el-color-danger)" :size="22"><CircleClose /></el-icon>
+              <el-icon v-else-if="toolVisualState === 'generating'" class="is-loading" :size="22"><Loading /></el-icon>
+              <el-icon v-else-if="toolVisualState === 'error'" color="var(--el-color-danger)" :size="22"><CircleClose /></el-icon>
+              <el-icon v-else-if="toolVisualState === 'interrupted'" color="var(--el-color-warning)" :size="22"><Warning /></el-icon>
               <el-icon v-else color="var(--el-color-success)" :size="22"><CircleCheck /></el-icon>
             </div>
             <div class="tool-title-area">
@@ -210,6 +211,7 @@ import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { useMcpStore } from '@/stores/mcpStore'
 import { useTaskSubSteps, useTaskDuration, collectSecurityReviewMap, collectReviewToolMap } from '@/composables/useTaskSubSteps'
 import { unpackMcpToolCall } from '@/utils/mcpToolUnpack'
+import { getToolVisualState } from '@/utils/toolVisualState'
 import { resolveFileUrl } from '@/services/electronUrl'
 import { ElMessage } from 'element-plus'
 import { Warning, Loading, CircleClose, CircleCheck, Close, Edit, Select, ArrowUp, ArrowDown, ArrowRight } from '@element-plus/icons-vue'
@@ -379,7 +381,10 @@ const currentDecision = computed(() => {
 })
 
 const isReviewType = computed(() => activeMsg.value?.type === 'ReviewTool')
-const isGenerating = computed(() => activeMsg.value?.status === 'generating')
+/** 工具气泡统一视觉状态（生成中 / 错误 / 已中断 / 成功） */
+const toolVisualState = computed(() =>
+  activeMsg.value ? getToolVisualState(activeMsg.value) : 'success',
+)
 
 const securityReview = computed((): SecurityReviewContent | null => {
   if (!parentMessage.value || !activeMsg.value) return null

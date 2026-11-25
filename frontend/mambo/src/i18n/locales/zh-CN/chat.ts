@@ -213,6 +213,8 @@ export default {
       searchFailed: '使用 {tool} 搜索: "{query}" 时失败',
       searched: '使用 {tool} 搜索: "{query}"',
       executionError: '工具执行出错。',
+      interrupted: '工具执行被中断，未返回结果。',
+      interruptedShort: '已中断',
       parseError: '无法解析工具调用内容',
       toolCallTitle: '工具调用: {name}',
       mcpTool: 'MCP',

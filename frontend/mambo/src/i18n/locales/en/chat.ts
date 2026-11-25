@@ -214,6 +214,8 @@ export default {
       searchFailed: 'Failed to search with {tool}: "{query}"',
       searched: 'Searched with {tool}: "{query}"',
       executionError: 'Tool execution error.',
+      interrupted: 'Tool execution was interrupted before returning a result.',
+      interruptedShort: 'Interrupted',
       parseError: 'Failed to parse tool call content',
       toolCallTitle: 'Tool Call: {name}',
       mcpTool: 'MCP',

@@ -213,8 +213,9 @@
           <div class="mcp-tool-summary">
             <div class="mcp-tool-status-icon">
               <el-icon v-if="subMessage.type === 'ReviewTool' && !isReviewDecided" color="var(--el-color-warning)"><Warning /></el-icon>
-              <el-icon v-else-if="isGenerating" class="is-loading"><Loading /></el-icon>
-              <el-icon v-else-if="mcpToolContent && mcpToolContent.is_error" color="var(--el-color-error)"><CircleClose /></el-icon>
+              <el-icon v-else-if="toolVisualState === 'generating'" class="is-loading"><Loading /></el-icon>
+              <el-icon v-else-if="toolVisualState === 'error'" color="var(--el-color-error)"><CircleClose /></el-icon>
+              <el-icon v-else-if="toolVisualState === 'interrupted'" color="var(--el-color-warning)"><Warning /></el-icon>
               <el-icon v-else color="var(--el-color-success)"><CircleCheck /></el-icon>
             </div>
             <span :class="{'text-warning': subMessage.type === 'ReviewTool' && !isReviewDecided}">{{ toolSummaryText }}</span>
@@ -242,6 +243,9 @@
                 <WebSearchResultList :parsed="mobileWebSearchParsed" :raw-result="mcpToolContent.result" />
               </template>
               <template v-else>{{ mcpToolContent.result }}</template>
+          </div>
+          <div v-if="isToolInterrupted" class="mcp-tool-interrupted-message">
+            {{ t('chat.message.mcp.interrupted') }}
           </div>
         </div>
 
@@ -321,6 +325,7 @@ import WebSearchResultList from '@/components/chat/WebSearchResultList.vue'
 import { copyToClipboard } from '@/utils/clipboard'
 import { parseMarkdown, type ParsedBlock } from '@/utils/markdownParser'
 import { getIconForMimeType } from '@/utils/fileIcons'
+import { getToolVisualState } from '@/utils/toolVisualState'
 
 const { t } = useI18n()
 
@@ -361,6 +366,9 @@ const sessionStore = useChatSessionStore()
 const pendingFileStore = usePendingFileStore()
 const isCollapsed = ref(props.subMessage.config.is_collapsed || false)
 const isGenerating = computed(() => props.subMessage.status === 'generating')
+/** 工具气泡统一视觉状态（生成中 / 错误 / 已中断 / 成功） */
+const toolVisualState = computed(() => getToolVisualState(props.subMessage))
+const isToolInterrupted = computed(() => toolVisualState.value === 'interrupted')
 const rootRef = ref<HTMLElement | null>(null)
 const pendingFailed = ref(false)
 
@@ -1114,6 +1122,12 @@ onBeforeUnmount(() => {
   gap: 6px;
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+
+.mcp-tool-interrupted-message {
+  color: var(--el-color-warning);
+  font-size: 12px;
+  margin-top: 4px;
 }
 
 .mcp-tool-result {

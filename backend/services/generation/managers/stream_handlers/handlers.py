@@ -331,6 +331,9 @@ class SubAgentEventHandler(BaseStreamHandler):
         # 仅保存 file_path/path 字符串（不保存完整参数，write 等工具的正文可能很大），
         # 用于给工具结果里的媒体文件派生可读文件名（tool_call 与 tool_result 可能跨事件）
         self._sub_tool_paths: Dict[str, str] = {}
+        # 尚未拿到结果的工具调用步骤：sub_tool_call_id -> tool_call 步骤的 sub_message_id
+        # 用于在 tool_result 到达时把该步骤从 GENERATING 闭合为 COMPLETED / FAILED
+        self._pending_step_map: Dict[str, str] = {}
 
     async def handle(self, context: StreamContext) -> AsyncGenerator[BaseInstruction, None]:
         if context.mode != "subagent_event":
@@ -437,7 +440,19 @@ class SubAgentEventHandler(BaseStreamHandler):
                         step_order=idx,
                         sub_tool_call_id=tc_id,
                     )
-                    instructions.append(self._make_create(step.to_json_string(), idx, tool_call_id))
+                    # 能配对到 tool_result 的调用以 GENERATING 创建，结果到达时再闭合；
+                    # 无法配对（无 tc_id / 重复事件）保持 COMPLETED，避免永久转圈
+                    can_track = bool(tc_id) and tc_id not in self._pending_step_map
+                    create_inst = self._make_create(
+                        step.to_json_string(), idx, tool_call_id,
+                        status=(
+                            schemas_enums.MessageStatus.GENERATING
+                            if can_track else schemas_enums.MessageStatus.COMPLETED
+                        ),
+                    )
+                    if can_track:
+                        self._pending_step_map[tc_id] = create_inst.sub_message_id
+                    instructions.append(create_inst)
 
         if "tools" in chunk:
             for msg in chunk["tools"].get("messages", []):
@@ -445,6 +460,7 @@ class SubAgentEventHandler(BaseStreamHandler):
                     continue
                 idx += 1
                 sub_tool_call_id = getattr(msg, "tool_call_id", None)
+                is_error = getattr(msg, "status", None) == "error"
                 # 多模态工具结果（如 read 读取图片）：文本与媒体块分开处理，
                 # 媒体块落盘为 File 记录并写入 media 引用，供前端气泡/弹窗展示。
                 # 落盘/命名/摘要复用主代理同一套实现（media_utils），保证两处表现一致
@@ -469,10 +485,29 @@ class SubAgentEventHandler(BaseStreamHandler):
                     tool_name=msg.name or "",
                     step_order=idx,
                     sub_tool_call_id=sub_tool_call_id,
+                    is_error=is_error,
                     media=media_refs or None,
                 )
                 instructions.extend(save_instructions)
-                instructions.append(self._make_create(step.to_json_string(), idx, tool_call_id))
+                instructions.append(self._make_create(
+                    step.to_json_string(), idx, tool_call_id,
+                    status=(
+                        schemas_enums.MessageStatus.FAILED
+                        if is_error else schemas_enums.MessageStatus.COMPLETED
+                    ),
+                ))
+                target_step_id = (
+                    self._pending_step_map.pop(sub_tool_call_id, None)
+                    if sub_tool_call_id else None
+                )
+                if target_step_id:
+                    instructions.append(UpdateSubMessageStatus(
+                        sub_message_id=target_step_id,
+                        status=(
+                            schemas_enums.MessageStatus.FAILED
+                            if is_error else schemas_enums.MessageStatus.COMPLETED
+                        ),
+                    ))
 
         return instructions, idx
 
@@ -482,6 +517,7 @@ class SubAgentEventHandler(BaseStreamHandler):
         sort_order: int,
         task_group_id: str,
         config_extra: dict | None = None,
+        status: schemas_enums.MessageStatus = schemas_enums.MessageStatus.COMPLETED,
     ) -> CreateSubMessage:
         config: Dict[str, Any] = {
             "task_group_id": task_group_id,
@@ -493,10 +529,26 @@ class SubAgentEventHandler(BaseStreamHandler):
             sub_message_id=generate_uuid(),
             type=schemas_enums.SubMessageType.TASK_SUBSTEP.value,
             sortOrder=3,
-            status=schemas_enums.MessageStatus.COMPLETED,
+            status=status,
             initial_content=content,
             config=config,
         )
+
+    def finalize_instructions(self) -> List[BaseInstruction]:
+        """收尾：把仍未拿到结果的工具调用步骤标记为失败。
+
+        子代理异常退出时不会再有 tool_result 事件，若不收口，前端气泡会永久转圈。
+        用户中断路径由 FailSubMessagesByMessage 统一处理，不依赖这里。
+        """
+        instructions: List[BaseInstruction] = [
+            UpdateSubMessageStatus(
+                sub_message_id=sub_id,
+                status=schemas_enums.MessageStatus.FAILED,
+            )
+            for sub_id in self._pending_step_map.values()
+        ]
+        self._pending_step_map.clear()
+        return instructions
 
 
 class SecurityReviewHandler(BaseStreamHandler):

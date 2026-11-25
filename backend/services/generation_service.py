@@ -6,7 +6,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import AsyncGenerator, Tuple, Optional, Type, Dict
+from typing import AsyncGenerator, Tuple, Optional, Type, Dict, Set
 
 from backend.services.stream_manager_service import stream_manager
 from backend.services import chat_status_service
@@ -328,6 +328,10 @@ async def run_group_member_generation(chat_id: str, assistant_message_id: str, r
         try:
             await _ensure_chat_model_configured(db, chat_id)
 
+            if recover_from_error:
+                # 群成员重试不走 _run_retry_generation_task，这里补齐 task 步骤清理
+                await _cleanup_retried_task_steps(db, assistant_message_id)
+
             worker = await _get_worker_for_chat(db, chat_id)
             manager = DefaultGenerateManager(db_session=db, recover_from_error=recover_from_error)
             executor = InstructionDispatcher(db_session=db)
@@ -363,6 +367,11 @@ async def run_group_member_generation(chat_id: str, assistant_message_id: str, r
                 print(f"Failed to create an error message for {assistant_message_id}: {inner_e}")
             return GenerationOutcome.FAILED
         finally:
+            if recover_from_error:
+                try:
+                    await _finalize_retry_tool_statuses(db, assistant_message_id)
+                except Exception as finalize_error:
+                    print(f"[Retry Finalize] failed for message '{assistant_message_id}': {finalize_error}")
             await stream_manager.mark_task_completed(assistant_message_id)
             await stream_manager.close_stream(assistant_message_id)
             await stream_manager.release_generation_lock(chat_id)
@@ -382,6 +391,97 @@ async def maybe_schedule_title_generation(chat_id: str) -> None:
         if not chat or chat.name != DEFAULT_CHAT_TITLE_KEY:
             return
     asyncio.create_task(run_title_generation_task(chat_id, only_if_default=True))
+
+
+async def _cleanup_retried_task_steps(db: AsyncSession, assistant_message_id: str) -> None:
+    """重试前清理「将被重跑」的 task 工具留下的子代理步骤与内部审核记录。
+
+    判定条件（对目标 assistant 消息）：
+      1. G = 该消息下所有 TaskSubStep 的 config.task_group_id；
+      2. R = type=McpTool 且 status ∈ {failed, generating} 的 tool_call_id；
+      3. 待清理组 C = G ∩ R。
+
+    只清理“有步骤”且“父工具没有产出结果”的组：一旦工具产出了结果，
+    provider 会把 MCP_TOOL 置为 COMPLETED（即使 content.is_error=true），
+    这类组不会在重试时重跑，必须保留其历史步骤。
+    """
+    from backend.schemas.message import McpToolContent
+
+    group_ids = await message_crud.get_task_substeps_group_ids(db, assistant_message_id)
+    if not group_ids:
+        return
+
+    db_message = await message_crud.get_message(db, message_id=assistant_message_id)
+    if not db_message:
+        return
+
+    pending_call_ids: Set[str] = set()
+    for sub in db_message.sub_messages:
+        if sub.type != SubMessageType.MCP_TOOL.value:
+            continue
+        if sub.status not in (MessageStatus.FAILED.value, MessageStatus.GENERATING.value):
+            continue
+        try:
+            content = McpToolContent.from_json_string(sub.content)
+        except (ValueError, TypeError):
+            continue
+        if content.tool_call_id:
+            pending_call_ids.add(content.tool_call_id)
+
+    targets = group_ids & pending_call_ids
+    if not targets:
+        return
+
+    removed = await message_crud.delete_sub_messages_by_task_groups(
+        db, assistant_message_id, targets
+    )
+    print(
+        f"[Retry Cleanup] message={assistant_message_id} "
+        f"groups={sorted(targets)} removed={removed}"
+    )
+
+
+async def _reset_retry_tool_statuses(db: AsyncSession, assistant_message_id: str) -> None:
+    """重试开始前把「将被重跑」的工具子消息恢复为 GENERATING。
+
+    仅重置 FAILED 的 MCP_TOOL：它们都是「没有产出结果就结束」的调用，恢复执行时
+    LangGraph 会重跑 tools 节点，并通过 restore_state 复用同一个 sub_message_id 回写结果。
+    这样前端点击“从错误中恢复”后立即显示生成中，而不是一直保持“已中断”。
+    """
+    db_message = await message_crud.get_message(db, message_id=assistant_message_id)
+    if not db_message:
+        return
+
+    reset_ids = [
+        sub.id for sub in db_message.sub_messages
+        if sub.type == SubMessageType.MCP_TOOL.value
+        and sub.status == MessageStatus.FAILED.value
+    ]
+    for sub_id in reset_ids:
+        await message_crud.update_sub_message_status(db, sub_id, MessageStatus.GENERATING)
+    if reset_ids:
+        print(f"[Retry Reset] message={assistant_message_id} tools={len(reset_ids)}")
+
+
+async def _finalize_retry_tool_statuses(db: AsyncSession, assistant_message_id: str) -> None:
+    """重试任务结束时，把仍未产出结果的工具子消息回退为 FAILED。
+
+    走到这里只剩两种可能：重试在 tools 节点执行前就失败/取消，或恢复的 checkpoint
+    已无可执行任务。两种情况都不会再产生工具结果，必须收口，避免永久停留在“生成中”。
+    """
+    db_message = await message_crud.get_message(db, message_id=assistant_message_id)
+    if not db_message:
+        return
+
+    reset_ids = [
+        sub.id for sub in db_message.sub_messages
+        if sub.type == SubMessageType.MCP_TOOL.value
+        and sub.status == MessageStatus.GENERATING.value
+    ]
+    for sub_id in reset_ids:
+        await message_crud.update_sub_message_status(db, sub_id, MessageStatus.FAILED)
+    if reset_ids:
+        print(f"[Retry Finalize] message={assistant_message_id} tools={len(reset_ids)}")
 
 
 async def _run_retry_generation_task(chat_id: str, assistant_message_id: str):
@@ -409,6 +509,9 @@ async def _run_retry_generation_task(chat_id: str, assistant_message_id: str):
                         if sub:
                             await db.delete(sub)
                     await db.commit()
+
+            # 清理“将被重跑”的 task 步骤（MCP_TOOL 本身由 restore_state 复用，不能删）
+            await _cleanup_retried_task_steps(db, assistant_message_id)
 
             # 延迟导入：managers / dispatcher 连带加载 langchain_anthropic 等重依赖
             from backend.services.generation.managers.default_manager import DefaultGenerateManager
@@ -452,6 +555,10 @@ async def _run_retry_generation_task(chat_id: str, assistant_message_id: str):
                 print(f"Failed to even create an error message for {assistant_message_id}: {inner_e}")
 
         finally:
+            try:
+                await _finalize_retry_tool_statuses(db, assistant_message_id)
+            except Exception as finalize_error:
+                print(f"[Retry Finalize] failed for message '{assistant_message_id}': {finalize_error}")
             await stream_manager.mark_task_completed(assistant_message_id)
             await stream_manager.close_stream(assistant_message_id)
             await stream_manager.release_generation_lock(chat_id)

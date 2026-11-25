@@ -105,8 +105,9 @@
           <el-icon>
             <Warning v-if="tool.type === 'ReviewTool' && tool.status === 'pending_review'" style="color: var(--el-color-warning)" />
             <QuestionFilled v-else-if="tool.type === 'AskUser' && tool.status === 'pending_review'" style="color: var(--el-color-primary)" />
-            <Loading v-else-if="tool.status === 'generating'" class="is-loading" />
-            <CircleClose v-else-if="isToolError(tool)" style="color: var(--el-color-error)" />
+            <Loading v-else-if="toolVisual(tool) === 'generating'" class="is-loading" />
+            <CircleClose v-else-if="toolVisual(tool) === 'error'" style="color: var(--el-color-error)" />
+            <Warning v-else-if="toolVisual(tool) === 'interrupted'" style="color: var(--el-color-warning)" />
             <CircleCheck v-else style="color: var(--el-color-success)" />
           </el-icon>
           <span class="tool-chip-title" :class="{ 'is-pending': isPendingTool(tool) }">{{ getToolBubbleText(tool) }}</span>
@@ -131,6 +132,7 @@ import type { Message, SubMessage, McpToolContent, ReviewToolContent, SecurityRe
 import SubMessageItem from '../SubMessageItem.vue'
 import type { BubbleSectionGroup } from '@/composables/useAssistantTimeline'
 import { unpackMcpToolCall, getToolArgsSummary, parseGoalLoopRound } from '@/utils/mcpToolUnpack'
+import { getToolVisualState } from '@/utils/toolVisualState'
 import { Warning, Loading, CircleClose, CircleCheck, ArrowLeft, ArrowRight, QuestionFilled } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
@@ -203,7 +205,16 @@ function getToolBubbleText(tool: SubMessage): string {
   }
   const name = getToolName(tool)
   const args = getToolArgsSummaryText(tool)
-  return args ? `${name} ${args}` : name
+  const base = args ? `${name} ${args}` : name
+  if (tool.type === 'McpTool' && getToolVisualState(tool) === 'interrupted') {
+    return `${base} · ${t('chat.message.mcp.interruptedShort')}`
+  }
+  return base
+}
+
+/** 工具气泡统一视觉状态（生成中 / 错误 / 已中断 / 成功） */
+function toolVisual(tool: SubMessage) {
+  return getToolVisualState(tool)
 }
 
 /** tool_call_id → SecurityReviewContent 映射 */
@@ -232,12 +243,6 @@ function getSecurityReviewForTool(tool: SubMessage): SecurityReviewContent | und
     }
   } catch { /* ignore */ }
   return undefined;
-}
-
-function isToolError(tool: SubMessage): boolean {
-  if (tool.type !== 'McpTool') return false
-  const content = getParsedContent(tool) as McpToolContent | null
-  return content?.is_error || false
 }
 
 /** 是否为 GoalLoopMiddleware 注入的轮次边界 get_goal（config.is_goal_loop_round 标志） */

@@ -20,9 +20,6 @@ import type {
 } from '@/api/types'
 import { getMessageTaskSubSteps } from '@/api/chatService'
 
-/** 拉取结果缓存：key = `${messageId}:${taskGroupId}` */
-const stepCache = new Map<string, SubMessage[]>()
-
 function timestampOf(sub: SubMessage): number {
   const value = Date.parse(sub.createdAt ?? '')
   return Number.isNaN(value) ? 0 : value
@@ -65,6 +62,8 @@ export function useTaskSubSteps(
   const remoteSteps = ref<SubMessage[]>([])
   const isLoading = ref(false)
   let requestSeq = 0
+  /** 刷新触发器：父消息状态变化（如重试开始 / 生成结束）时重新拉取 */
+  const refreshTick = ref(0)
 
   /** store 中实时推送的步骤 */
   const storeSteps = computed<SubMessage[]>(() => {
@@ -81,17 +80,11 @@ export function useTaskSubSteps(
       taskGroupId,
       () => message.value?.id,
       () => (enabled ? enabled.value !== false : true),
+      refreshTick,
     ],
     async ([groupId, messageId, active]) => {
       if (!active || !groupId || !messageId) {
         remoteSteps.value = []
-        return
-      }
-
-      const cacheKey = `${messageId}:${groupId}`
-      const cached = stepCache.get(cacheKey)
-      if (cached) {
-        remoteSteps.value = cached
         return
       }
 
@@ -100,7 +93,6 @@ export function useTaskSubSteps(
       try {
         const fetched = await getMessageTaskSubSteps(messageId, groupId)
         if (seq !== requestSeq) return
-        stepCache.set(cacheKey, fetched)
         remoteSteps.value = fetched
       } catch (error) {
         if (seq === requestSeq) remoteSteps.value = []
@@ -110,6 +102,21 @@ export function useTaskSubSteps(
       }
     },
     { immediate: true },
+  )
+
+  // 父消息状态变化（failed → generating 的重试开始、generating → 终态的生成结束）
+  // 都意味着 DB 中的步骤集合可能已变化，需要重新拉取；不做缓存以保证确定性。
+  watch(
+    () => message.value?.status,
+    (next, prev) => {
+      if (prev === next) return
+      // 重试开始：后端已清理「将被重跑」的旧步骤，先丢弃本地快照，
+      // 避免旧步骤与新步骤按 step_order 交错展示。
+      if (prev === 'failed' && next === 'generating') {
+        remoteSteps.value = []
+      }
+      refreshTick.value += 1
+    },
   )
 
   const steps = computed(() => mergeTaskSubSteps(remoteSteps.value, storeSteps.value))
@@ -260,9 +267,10 @@ export function buildSubAgentVirtualMessage(
     if (stepData.display_type !== 'tool_call') continue // tool_result 已合并到 tool_call
 
     // 匹配 tool_result（全数组搜索，step_order 可能交叉）
-    // 结果文本与多模态引用都取自 tool_result 步骤
+    // 结果文本、错误标志与多模态引用都取自 tool_result 步骤
     let resultText: string | null = null
     let resultMedia: TaskSubStepContent['media'] = null
+    let resultIsError = false
     for (let j = 0; j < steps.length; j++) {
       if (j === i) continue
       try {
@@ -271,12 +279,14 @@ export function buildSubAgentVirtualMessage(
         if (stepData.sub_tool_call_id && next.sub_tool_call_id === stepData.sub_tool_call_id) {
           resultText = next.content
           resultMedia = next.media ?? null
+          resultIsError = next.is_error === true
           break
         }
         // 降级兜底：无 sub_tool_call_id 时用 tool_name 匹配
         if (!stepData.sub_tool_call_id && !next.sub_tool_call_id && next.tool_name === stepData.tool_name) {
           resultText = next.content
           resultMedia = next.media ?? null
+          resultIsError = next.is_error === true
           break
         }
       } catch { /* skip */ }
@@ -293,9 +303,13 @@ export function buildSubAgentVirtualMessage(
           ? stepData.tool_args
           : JSON.stringify(stepData.tool_args || {}),
         result: resultText,
-        is_error: false,
+        is_error: resultIsError,
         media: resultMedia,
       }),
+      // 已拿到结果时以结果为准（覆盖可能滞后的步骤状态：如中断挂起后恢复执行）
+      status: resultText !== null
+        ? (resultIsError ? 'failed' : 'completed')
+        : sm.status,
       config: { is_collapsed: false },
     } as SubMessage)
 

@@ -57,3 +57,11 @@ class BaseStreamHandler(ABC):
         """
         if False:
             yield
+
+    def finalize_instructions(self) -> List[BaseInstruction]:
+        """生成正常收尾时，Handler 需要补发的指令（默认无）。
+
+        用于关闭那些「事件流已结束但自身仍未闭合」的追踪记录，
+        例如子代理仍在生成中的工具调用步骤。
+        """
+        return []

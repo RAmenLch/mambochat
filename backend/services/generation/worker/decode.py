@@ -176,17 +176,21 @@ class DefaultLangChainDecode(BaseDecode):
     def get_toolcall_result(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         if mode == "updates" and isinstance(message, ToolMessage):
             content = message.content
+            # ToolNode 在工具异常 / 后端错误时产出 status="error" 的 ToolMessage，
+            # 该标志必须透传到 McpToolContent.is_error，否则前端只能显示为成功。
+            is_error = getattr(message, "status", None) == "error"
             if isinstance(content, list):
                 text, media_blocks = split_tool_message_content(content)
                 result: Dict[str, Any] = {
                     "id": message.tool_call_id,
                     "text": text,
+                    "is_error": is_error,
                 }
                 if media_blocks:
                     # 多模态结果：透传给 provider 落库，避免 str(message.text) 丢弃 base64 内容
                     result["media"] = media_blocks
                 return result
-            return {"id": message.tool_call_id, "text": str(message.text)}
+            return {"id": message.tool_call_id, "text": str(message.text), "is_error": is_error}
         return None
 
     def get_usage(self, mode: str, message: Union[BaseMessage, Dict[str, Any]]) -> Optional[Dict[str, Any]]:

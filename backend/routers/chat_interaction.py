@@ -788,6 +788,14 @@ async def retry_failed_generation(
         raise AppHTTPException(status_code=409, error_code="GENERATION_IN_PROGRESS", detail="该会话已有正在进行的生成任务，请等待完成后再试。")
 
     try:
+        # 1) 清理将被重跑的 task 步骤。必须在启动生成前完成：前端收到重试响应后会
+        #    立即按状态变化重新拉取步骤，若后台再清理，前端会拿到清理前的旧快照。
+        await generation_service._cleanup_retried_task_steps(db, message_id)
+
+        # 2) 恢复执行的工具不会重新发 create_call_instruction，这里把已中断的工具气泡
+        #    复位为 GENERATING，让接口响应/首帧 SSE 立即显示“生成中”。
+        await generation_service._reset_retry_tool_statuses(db, message_id)
+
         await _start_generation_task(background_tasks, db_message.chatId, message_id, is_retry=True, db=db)
 
         active_msgs = await message_crud.get_messages_by_chat(db, chat_id=db_message.chatId)
@@ -799,6 +807,11 @@ async def retry_failed_generation(
 
         return response_message
     except Exception:
+        # 启动失败时把已复位的工具状态回退，避免残留“生成中”
+        try:
+            await generation_service._finalize_retry_tool_statuses(db, message_id)
+        except Exception:
+            pass
         await stream_manager.release_generation_lock(db_message.chatId)
         raise
 

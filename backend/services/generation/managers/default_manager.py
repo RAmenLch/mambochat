@@ -332,6 +332,10 @@ class DefaultGenerateManager(AbstractGenerateManager):
             yield instruction
 
     async def _finalize_generation(self, is_interrupted: bool = False) -> AsyncGenerator[BaseInstruction, None]:
+        for handler in self._handlers:
+            for instruction in handler.finalize_instructions():
+                yield instruction
+
         for sub_id in list(self._created_stream_ids):
             if sub_id.endswith('-R'):
                 yield UpdateSubMessageConfig(sub_message_id=sub_id, config=SubMessageConfig(is_minimal=True))

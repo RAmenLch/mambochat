@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload, with_loader_criteria
 from sqlalchemy import update, delete as sa_delete, and_, func
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Set, Tuple
 import json
 from datetime import datetime, timezone
 
@@ -671,6 +671,50 @@ async def get_task_substeps(
         subs = [s for s in subs if _parse_config_dict(s.config).get("task_group_id") == task_group_id]
 
     return list(subs)
+
+
+async def get_task_substeps_group_ids(db: AsyncSession, message_id: str) -> Set[str]:
+    """返回指定消息下所有 TaskSubStep 的 config.task_group_id 集合（解析失败跳过）。"""
+    subs = await get_task_substeps(db, message_id)
+    group_ids: Set[str] = set()
+    for sub in subs:
+        group_id = _parse_config_dict(sub.config).get("task_group_id")
+        if group_id:
+            group_ids.add(str(group_id))
+    return group_ids
+
+
+async def delete_sub_messages_by_task_groups(
+    db: AsyncSession,
+    message_id: str,
+    task_group_ids: Set[str],
+    types: Tuple[str, ...] = (
+        SubMessageType.TASK_SUBSTEP.value,
+        SubMessageType.SECURITY_REVIEW.value,
+    ),
+) -> int:
+    """删除指定消息下归属于指定 task 组（config.task_group_id ∈ task_group_ids）的子消息。
+
+    仅用于重试前清理“将被重跑”的 task 工具留下的子代理步骤与内部审核记录：
+    判断依据由调用方给出，本函数只做按组删除。
+    """
+    if not task_group_ids:
+        return 0
+    result = await db.execute(
+        select(chat_model.SubMessage).filter(
+            chat_model.SubMessage.messageId == message_id,
+            chat_model.SubMessage.type.in_(types),
+        )
+    )
+    targets = [
+        sub for sub in result.scalars().all()
+        if _parse_config_dict(sub.config).get("task_group_id") in task_group_ids
+    ]
+    for sub in targets:
+        await db.delete(sub)
+    if targets:
+        await db.commit()
+    return len(targets)
 
 
 async def get_task_substeps_by_message_ids(

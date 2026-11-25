@@ -228,9 +228,12 @@
       <div v-if="showHeader || subMessage.type === 'McpTool'" class="sub-message-header">
         <div v-if="subMessage.type === 'McpTool' && isCollapsed" class="mcp-collapsed-summary">
           <div class="mcp-tool-status-icon">
-            <el-icon v-if="isGenerating" class="is-loading"><Loading /></el-icon>
-            <el-icon v-else-if="mcpContent && mcpContent.is_error" color="var(--el-color-error)"
+            <el-icon v-if="toolVisualState === 'generating'" class="is-loading"><Loading /></el-icon>
+            <el-icon v-else-if="toolVisualState === 'error'" color="var(--el-color-error)"
               ><CircleClose
+            /></el-icon>
+            <el-icon v-else-if="toolVisualState === 'interrupted'" color="var(--el-color-warning)"
+              ><Warning
             /></el-icon>
             <el-icon v-else color="var(--el-color-success)"><CircleCheck /></el-icon>
           </div>
@@ -302,9 +305,12 @@
         <div v-if="mcpContent" class="mcp-tool-body">
           <div class="mcp-tool-summary">
             <div class="mcp-tool-status-icon">
-              <el-icon v-if="isGenerating" class="is-loading"><Loading /></el-icon>
-              <el-icon v-else-if="mcpContent.is_error" color="var(--el-color-error)"
+              <el-icon v-if="toolVisualState === 'generating'" class="is-loading"><Loading /></el-icon>
+              <el-icon v-else-if="toolVisualState === 'error'" color="var(--el-color-error)"
                 ><CircleClose
+              /></el-icon>
+              <el-icon v-else-if="toolVisualState === 'interrupted'" color="var(--el-color-warning)"
+                ><Warning
               /></el-icon>
               <el-icon v-else color="var(--el-color-success)"><CircleCheck /></el-icon>
             </div>
@@ -359,6 +365,9 @@
           </div>
           <div v-if="!isGenerating && mcpContent.is_error" class="mcp-tool-error-message">
             {{ t('chat.message.mcp.executionError') }}
+          </div>
+          <div v-else-if="isToolInterrupted" class="mcp-tool-interrupted-message">
+            {{ t('chat.message.mcp.interrupted') }}
           </div>
         </div>
         <div v-else class="mcp-tool-body">
@@ -450,6 +459,7 @@ import WebSearchResultList from './WebSearchResultList.vue'
 import { copyToClipboard } from '@/utils/clipboard'
 import { parseMarkdown, type ParsedBlock } from '@/utils/markdownParser'
 import { getIconForMimeType } from '@/utils/fileIcons'
+import { getToolVisualState } from '@/utils/toolVisualState'
 
 const { t } = useI18n()
 
@@ -494,6 +504,9 @@ const sessionStore = useChatSessionStore()
 const pendingFileStore = usePendingFileStore()
 const isCollapsed = ref(props.subMessage.config.is_collapsed || false)
 const isGenerating = computed(() => props.subMessage.status === 'generating')
+/** 工具气泡统一视觉状态（生成中 / 错误 / 已中断 / 成功） */
+const toolVisualState = computed(() => getToolVisualState(props.subMessage))
+const isToolInterrupted = computed(() => toolVisualState.value === 'interrupted')
 const rootRef = ref<HTMLElement | null>(null)
 const contentRef = ref<HTMLElement | null>(null)
 const showBackToTop = ref(false)
@@ -1231,6 +1244,10 @@ function scrollToTop() {
 }
 .mcp-tool-error-message {
   color: var(--el-color-error);
+  font-size: 14px;
+}
+.mcp-tool-interrupted-message {
+  color: var(--el-color-warning);
   font-size: 14px;
 }
 .mcp-tool-media {

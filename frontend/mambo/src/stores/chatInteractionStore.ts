@@ -253,7 +253,9 @@ export const useChatInteractionStore = defineStore('chatInteraction', () => {
     if (msg && msg.status === 'generating') {
       msg.status = 'completed';
       msg.sub_messages.forEach(sm => {
-        if (sm.status === 'generating') sm.status = 'completed';
+        // 中断后子消息不会产出结果：按 failed 收口，避免显示成“成功”。
+        // 终态仍由后端 FailSubMessagesByMessage / finalize 全量刷新校正。
+        if (sm.status === 'generating') sm.status = 'failed';
       });
     }
   }
