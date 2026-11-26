@@ -216,6 +216,8 @@ def _add_agent_parameter_args(parser) -> None:
                 help=f"agentParameters.{field}（缺省不修改）")
     add_arg(parser, "--mcp-tool-threshold", dest="mcp_tool_threshold", type=int, metavar="N",
             help="agentParameters.mcp_direct_tool_threshold: MCP 工具直接暴露阈值")
+    add_arg(parser, "--max-continue-attempts", dest="max_continue_attempts", type=int, metavar="N",
+            help="agentParameters.max_continue_attempts: task 断点续连上限（默认 3）")
     add_arg(parser, "--review-enabled", dest="review_enabled", metavar="true|false",
             help="AI 安全审核: security_review.enabled 是否启用")
     add_arg(parser, "--review-model", dest="review_model", metavar="M",
@@ -269,6 +271,8 @@ def _build_agent_parameters(args) -> dict:
             params[field] = _parse_bool_flag(flag, value)
     if args.mcp_tool_threshold is not None:
         params["mcp_direct_tool_threshold"] = args.mcp_tool_threshold
+    if getattr(args, "max_continue_attempts", None) is not None:
+        params["max_continue_attempts"] = args.max_continue_attempts
     summary = {}
     for _flag, field, _choices in _SUMMARY_PARAMS:
         value = getattr(args, field, None)

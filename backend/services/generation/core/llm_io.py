@@ -220,6 +220,10 @@ class AgentConfig(BaseModel):
         default=False,
         description="是否启用 general-purpose 子代理（仅 Mambo Agent 有效）"
     )
+    max_continue_attempts: int = Field(
+        default=3,
+        description="task 断点续连的最大链深度（1 次初始执行 + N 次续连，仅 Mambo Agent 有效）"
+    )
     enable_summarization: bool = Field(
         default=False,
         description="是否启用对话摘要/压缩（仅 Mambo Agent 有效）"

@@ -93,6 +93,7 @@
   "modelParameters": { /* 原样导出 */ },
   "agentParameters": {
     "include_general_purpose": false,
+    "max_continue_attempts": 3,
     "enable_planning": true,
     "enable_memory": false,
     "enable_summarization": false,
@@ -519,6 +520,7 @@ Agent 闭包内所有 Agent 的 `backendIds` 中 `backendType == "resource" | "l
       "modelParameters": { "temperature": 0.7 },
       "agentParameters": {
         "include_general_purpose": false,
+        "max_continue_attempts": 3,
         "enable_planning": true,
         "enable_memory": false,
         "enable_summarization": false,

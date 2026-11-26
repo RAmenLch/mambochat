@@ -395,6 +395,28 @@
             </el-col>
           </el-row>
 
+          <!-- task 断点续连上限 -->
+          <el-row :gutter="32" class="settings-row">
+            <el-col :span="24">
+              <el-form-item>
+                <template #label>
+                  <span>{{ $t('agent.maxContinueAttempts') }}</span>
+                  <el-tooltip effect="dark" :content="$t('agent.maxContinueAttemptsDesc')" placement="top">
+                    <el-icon class="label-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-input-number
+                  v-model="form.mambo_max_continue_attempts"
+                  :min="1"
+                  :max="20"
+                  :step="1"
+                  controls-position="right"
+                  style="width: 120px"
+                />
+              </el-form-item>
+            </el-col>
+          </el-row>
+
           <!-- 计划任务清单 -->
           <el-row :gutter="32" class="settings-row">
             <el-col :span="24">
@@ -1375,6 +1397,7 @@ const form = reactive({
 
   // Mambo 专属配置
   mambo_general_purpose: false,
+  mambo_max_continue_attempts: 3,
   mambo_planning_enabled: true,
   mambo_show_enabled: true,
   mambo_memory_enabled: false,
@@ -1566,6 +1589,7 @@ watch(agentData, async (newVal) => {
       mcp_direct_tool_threshold: 15,
     };
     form.mambo_general_purpose = mamboParams.include_general_purpose ?? false;
+    form.mambo_max_continue_attempts = mamboParams.max_continue_attempts ?? 3;
     form.mambo_planning_enabled = mamboParams.enable_planning ?? true;
     form.mambo_show_enabled = mamboParams.enable_show ?? true;
     form.mambo_memory_enabled = mamboParams.enable_memory ?? false;
@@ -1961,6 +1985,7 @@ async function handleDeleteAvatar() {
 function buildMamboAgentParameters(): MamboAgentParameters | null {
   const params = {
     include_general_purpose: form.mambo_general_purpose,
+    max_continue_attempts: form.mambo_max_continue_attempts,
     enable_planning: form.mambo_planning_enabled,
     enable_show: form.mambo_show_enabled,
     enable_memory: form.mambo_memory_enabled,

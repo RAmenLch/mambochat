@@ -59,6 +59,11 @@ _GREP_MATCH_CHARS = 500
 # 仅返回预览+文件路径给模型，避免大工具结果拖垮缓存命中率
 _EVICT_TOKENS = 8_000
 
+# task 断点续连：同一个断点（continue_id）最多允许发起多少条续连分支。
+# mambo-agents 默认仅 2，主代理在断点上反复尝试时会误判"分支已满"（branched_out），
+# 这里放宽到 50；真正的链长上限仍由 agentParameters.max_continue_attempts 控制。
+_SUBAGENT_MAX_CHILDREN = 50
+
 
 def _make_session_factory() -> Callable[[], AsyncSession]:
     """创建异步 session 工厂，用于 MamboResourceBackend 的数据库访问。"""
@@ -549,6 +554,13 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
         # --- General Purpose (opt-in) ---
         include_general_purpose = getattr(agent_config, 'include_general_purpose', False)
 
+        # --- task 断点续连上限（1 次初始执行 + N 次续连；默认 3）---
+        try:
+            max_continue_attempts = int(getattr(agent_config, 'max_continue_attempts', 3) or 3)
+        except (TypeError, ValueError):
+            max_continue_attempts = 3
+        max_continue_attempts = max(1, max_continue_attempts)
+
         # --- Summarization (opt-in) ---
         summarization = None
         if getattr(agent_config, 'enable_summarization', False) and agent_config.summarization_config:
@@ -727,6 +739,18 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
         if mcp_middleware is not None:
             _middlewares.insert(0, mcp_middleware)
 
+        # --- 子代理参数：用 SubAgentConfig 承载 max_continue_attempts ---
+        # 纯 list 形态无法传递续连上限，故统一包一层；include_general_purpose 仍走下方
+        # 独立参数（SubAgentConfig 内该字段保持 None 以回落到入参）。
+        subagents_arg: Any = compiled_subagents if compiled_subagents else None
+        if compiled_subagents or include_general_purpose:
+            from mambo_agents.middleware.subagents import SubAgentConfig
+            subagents_arg = SubAgentConfig(
+                subagents=compiled_subagents or None,
+                max_continue_attempts=max_continue_attempts,
+                max_children=_SUBAGENT_MAX_CHILDREN,
+            )
+
         return create_mambo_agent(
             name=agent_config.name,
             model=model,
@@ -737,7 +761,7 @@ class MamboAgentGraphBuilder(BaseGraphBuilder):
                 if agent_config.system_prompt
                 else None
             ),
-            subagents=compiled_subagents if compiled_subagents else None,
+            subagents=subagents_arg,
             include_general_purpose=include_general_purpose,
             summarization=summarization,
             tools=tools if tools else None,

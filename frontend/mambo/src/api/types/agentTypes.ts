@@ -76,6 +76,8 @@ export interface ImageGenConfigRef {
 
 export interface MamboAgentParameters {
   include_general_purpose: boolean
+  /** task 断点续连的最大链深度（1 次初始执行 + N 次续连），默认 3 */
+  max_continue_attempts?: number
   enable_planning: boolean
   enable_memory: boolean
   enable_summarization: boolean

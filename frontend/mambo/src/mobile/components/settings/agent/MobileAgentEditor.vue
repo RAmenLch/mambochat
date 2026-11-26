@@ -301,6 +301,18 @@
           <el-switch v-model="form.mambo_general_purpose" size="small" />
         </div>
 
+        <div class="field-item">
+          <label class="field-label">{{ $t('agent.maxContinueAttempts') }}</label>
+          <el-input-number
+            v-model="form.mambo_max_continue_attempts"
+            :min="1"
+            :max="20"
+            :step="1"
+            controls-position="right"
+            style="width: 130px"
+          />
+        </div>
+
         <div class="field-row">
           <div class="field-label">
             <span>{{ $t('agent.mamboPlanning') }}</span>
@@ -1082,6 +1094,7 @@ const form = reactive({
 
   // Mambo 专属配置
   mambo_general_purpose: false,
+  mambo_max_continue_attempts: 3,
   mambo_planning_enabled: true,
   mambo_show_enabled: true,
   mambo_memory_enabled: false,
@@ -1192,6 +1205,7 @@ watch(agentData, async (newVal) => {
       mcp_direct_tool_threshold: 15,
     };
     form.mambo_general_purpose = mamboParams.include_general_purpose ?? false;
+    form.mambo_max_continue_attempts = mamboParams.max_continue_attempts ?? 3;
     form.mambo_planning_enabled = mamboParams.enable_planning ?? true;
     form.mambo_show_enabled = mamboParams.enable_show ?? true;
     form.mambo_memory_enabled = mamboParams.enable_memory ?? false;
@@ -1454,6 +1468,7 @@ async function fetchGoalLoopTools(agentId: string) {
 function buildMamboAgentParameters(): MamboAgentParameters | null {
   const built: MamboAgentParameters = {
     include_general_purpose: form.mambo_general_purpose,
+    max_continue_attempts: form.mambo_max_continue_attempts,
     enable_planning: form.mambo_planning_enabled,
     enable_show: form.mambo_show_enabled,
     enable_memory: form.mambo_memory_enabled,

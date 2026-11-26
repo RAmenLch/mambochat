@@ -65,6 +65,8 @@ export default {
   mamboConfig: 'Mambo Agent Configuration',
   generalPurpose: 'General Purpose Subagent',
   generalPurposeDesc: 'Auto-create a general-purpose subagent that shares the main agent\'s model and file system tools',
+  maxContinueAttempts: 'Max Continuation Attempts',
+  maxContinueAttemptsDesc: 'Maximum number of continue_id continuations allowed after a task fails (default 3 = 1 initial run + 3 continuations). Once exhausted, the main agent can only start a new task',
   mamboPlanning: 'Task Planning',
   mamboPlanningDesc: 'Enable the write_plans tool — agent can create and manage structured task lists to track progress',
   mamboShow: 'Show Tool',

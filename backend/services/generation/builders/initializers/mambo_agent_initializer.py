@@ -572,6 +572,7 @@ class MamboAgentInitializer(AbstractAgentInitializer):
             default_backend_id=self.agent.defaultBackendId,
             skill_resource_roots=skill_resource_roots if skill_resource_roots else None,
             include_general_purpose=include_gp,
+            max_continue_attempts=mambo_params.max_continue_attempts,
             enable_summarization=enable_sum,
             summarization_config=sum_config.model_dump() if (enable_sum and sum_config) else None,
             enable_planning=enable_planning,

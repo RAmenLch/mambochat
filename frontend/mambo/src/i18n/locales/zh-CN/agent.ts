@@ -65,6 +65,8 @@ export default {
   mamboConfig: 'Mambo Agent 专属配置',
   generalPurpose: '通用目的子代理',
   generalPurposeDesc: '自动创建一个通用子代理，共享主代理的模型和文件系统工具',
+  maxContinueAttempts: '断点续连上限',
+  maxContinueAttemptsDesc: '单个 task 失败后允许主代理用 continue_id 续连的最大次数（默认 3，即 1 次初始执行 + 3 次续连）；达到上限后只能重新发起 task',
   mamboPlanning: '计划任务清单',
   mamboPlanningDesc: '启用 write_plans 工具，Agent 可以创建和管理结构化任务列表来跟踪进度',
   mamboShow: '文件展示工具',

@@ -147,6 +147,12 @@ class ImageGenConfigRefSchema(BaseModel):
 class MamboAgentParametersSchema(BaseModel):
     """Mambo Agent 专属参数（持久化到 Agent.agentParameters JSON 列）"""
     include_general_purpose: bool = Field(False, description="是否启用通用子代理")
+    max_continue_attempts: int = Field(
+        3,
+        ge=1,
+        le=20,
+        description="task 断点续连的最大链深度（1 次初始执行 + N 次续连）",
+    )
     enable_planning: bool = Field(True, description="是否启用计划中间件")
     enable_memory: bool = Field(False, description="是否启用长期记忆")
     enable_summarization: bool = Field(False, description="是否启用对话摘要")
