@@ -586,6 +586,37 @@ class ImageGenToolError(Exception):
     """生图后端返回的业务错误（可直接展示给 LLM）。"""
 
 
+def format_exception_detail(exc: BaseException) -> str:
+    """把异常（含 ``BaseExceptionGroup``）展平成「类名: 消息」的可读文本。
+
+    anyio / asyncio 的 TaskGroup 把真实原因包进 ``ExceptionGroup``，而它的
+    ``str()`` 只有 ``unhandled errors in a TaskGroup (1 sub-exception)``：
+    直接透出等于丢掉唯一的定位信息，因此这里递归取叶子异常。
+    """
+    leaves: List[str] = []
+    _collect_exception_leaves(exc, leaves, set())
+    return "; ".join(leaves) or "未知错误"
+
+
+def _collect_exception_leaves(
+    exc: BaseException, out: List[str], seen: set[int]
+) -> None:
+    if id(exc) in seen:
+        return
+    seen.add(id(exc))
+    if isinstance(exc, BaseExceptionGroup):
+        for sub in exc.exceptions:
+            _collect_exception_leaves(sub, out, seen)
+        return
+    detail = type(exc).__name__
+    text = str(exc).strip()
+    if text:
+        detail = f"{detail}: {text}"
+    out.append(detail)
+    if exc.__cause__ is not None:
+        _collect_exception_leaves(exc.__cause__, out, seen)
+
+
 @dataclass
 class RefImage:
     """一张参考图（已读取并 base64 编码，协议无关）。
@@ -920,9 +951,14 @@ class ImageGenStandard(ABC):
                 f"（例如 {DEFAULT_OUTPUT_DIR}），收到: {args.path!r}"
             )
 
-        settled = await self._status_until_settled(
-            args.task_id, self._clamp_wait_timeout(args.wait_timeout)
-        )
+        try:
+            settled = await self._status_until_settled(
+                args.task_id, self._clamp_wait_timeout(args.wait_timeout)
+            )
+        except ImageGenToolError as exc:
+            raise ImageGenToolError(
+                f"image_download 无法确认任务状态，取图未执行: {exc}"
+            ) from exc
 
         plan = self.plan_targets(
             task_id=args.task_id,

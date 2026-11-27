@@ -384,7 +384,9 @@ class ImageGenMiddleware(AgentMiddleware):
         try:
             return await call()
         except Exception as exc:  # noqa: BLE001 - 需要兜底所有后端异常
-            logger.warning("image gen tool '%s' failed: %s", tool_name, exc)
+            logger.warning(
+                "image gen tool '%s' failed: %s", tool_name, exc, exc_info=True
+            )
             return json.dumps(
                 {"is_error": True, "error": f"{type(exc).__name__}: {exc}"},
                 ensure_ascii=False,

@@ -7,6 +7,7 @@
 
 import json
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -26,6 +27,7 @@ from .standard import (
     ImageGenStandard,
     ImageGenToolError,
     RefImage,
+    format_exception_detail,
     parse_seeds,
 )
 
@@ -71,11 +73,23 @@ class McpImageGenStandard(ImageGenStandard):
     def server_name(self) -> str:
         return self._server_config.name
 
+    @property
+    def target_desc(self) -> str:
+        """服务标识：传输方式 + 地址，用于把「连不上谁」写进错误文本。"""
+        config = self._server_config
+        if config.url:
+            return f"{config.name} ({config.transport} {config.url})"
+        command = " ".join([config.command or "", *config.args]).strip()
+        if command:
+            return f"{config.name} ({config.transport} {command})"
+        return f"{config.name} ({config.transport})"
+
     # ------------------------------------------------------------------
     # 协议调用
     # ------------------------------------------------------------------
 
     async def _call(self, tool_name: str, arguments: Dict[str, Any]) -> CallToolResult:
+        started = time.monotonic()
         try:
             async with self._client.session(self._server_config.name) as session:
                 result = await session.call_tool(tool_name, arguments)
@@ -83,22 +97,23 @@ class McpImageGenStandard(ImageGenStandard):
             raise
         except Exception as exc:
             raise ImageGenToolError(
-                f"调用生图服务工具 {tool_name} 失败: {type(exc).__name__}: {exc}"
+                f"调用生图服务 {self.target_desc} 的工具 {tool_name} 失败"
+                f"（耗时 {time.monotonic() - started:.1f}s）: "
+                f"{format_exception_detail(exc)}"
             ) from exc
 
         if getattr(result, "isError", False):
             raise ImageGenToolError(self._error_text(result, tool_name))
         return result
 
-    @staticmethod
-    def _error_text(result: CallToolResult, tool_name: str) -> str:
+    def _error_text(self, result: CallToolResult, tool_name: str) -> str:
         parts = [
             block.text
             for block in result.content or []
             if isinstance(block, TextContent) and block.text
         ]
         detail = "\n".join(parts).strip() or "服务未给出错误详情"
-        return f"生图服务工具 {tool_name} 返回错误: {detail}"
+        return f"生图服务 {self.target_desc} 的工具 {tool_name} 返回错误: {detail}"
 
     @staticmethod
     def _extract_payload(result: CallToolResult) -> Dict[str, Any]:
